@@ -1190,9 +1190,15 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     subscriptionService.clearRemovals();
     transactionService.startNewBlock();
     for (Transaction transaction : block.getTransactions()) {
+      logger.warn("Call transactionService.applyUnconfirmed(transaction) from accept\n");
+      logger.warn("Block height: " + block.getHeight() + "\n");
+      //logger.warn("Calculate applyUconfirmed(transaction): " + transactionService.applyUnconfirmed(transaction) + "\n");
       if (!transactionService.applyUnconfirmed(transaction)) {
         throw new TransactionNotAcceptedException(
-          "Transaction not accepted: " + transaction.getStringId(), transaction);
+          "Block height: " + block.getHeight() + "\n" +
+            "Remaining Amount: " + remainingAmount + "\n" +
+            "Remaining Fee: " + remainingFee + "\n" +
+            "Transaction not accepted: " + transaction.getStringId(), transaction);
       }
     }
 

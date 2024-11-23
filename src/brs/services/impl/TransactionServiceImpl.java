@@ -5,12 +5,15 @@ import java.util.HashMap;
 import brs.*;
 import brs.services.AccountService;
 import brs.services.TransactionService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class TransactionServiceImpl implements TransactionService {
 
   private final AccountService accountService;
   private final Blockchain blockchain;
   private final HashMap<Long, Transaction> accountCommitmentRemovals = new HashMap<>();
+  private final Logger logger = LoggerFactory.getLogger(TransactionServiceImpl.class);
 
   public TransactionServiceImpl(AccountService accountService, Blockchain blockchain) {
     this.accountService = accountService;
@@ -40,21 +43,55 @@ public class TransactionServiceImpl implements TransactionService {
           transaction.getFeeNqt(), minimumFeeNQT, blockchain.getHeight()));
     }
   }
-  
+
   @Override
   public void startNewBlock() {
     accountCommitmentRemovals.clear();
   }
 
   @Override
+  // this should be call only once per transaction
   public boolean applyUnconfirmed(Transaction transaction) {
+    logger.warn("applyUnconfirmed: " + transaction.getStringId());
     if(transaction.getType() == TransactionType.SignaMining.COMMITMENT_REMOVE) {
       // we only accept one removal per account per block
-      if(accountCommitmentRemovals.get(transaction.getSenderId()) != null)
+      logger.warn("COMMITMENT_REMOVE: " + transaction.getStringId());
+      if(accountCommitmentRemovals.get(transaction.getSenderId()) != null) {
+        logger.warn("accountCommitmentRemovals: " + transaction.getStringId());
         return false;
+      }
       accountCommitmentRemovals.put(transaction.getSenderId(), transaction);
     }
     Account senderAccount = accountService.getAccount(transaction.getSenderId());
+
+    if(senderAccount == null) {
+      logger.warn("Sender Account is null");
+    }
+    else {
+      logger.warn("Sender Account is not null");
+    }
+/*
+    if(transaction.getType().applyUnconfirmed(transaction, senderAccount)) {
+      logger.warn("Transection Apply Unconfirmed: true");
+    }
+    else {
+      logger.warn("Transection Apply Unconfirmed: false");
+    }
+
+    if(senderAccount != null && transaction.getType().applyUnconfirmed(transaction, senderAccount)){
+      logger.warn("return true");
+    }
+    else {
+      logger.warn("return false");
+    }
+
+    if(senderAccount != null && transaction.getType().applyUnconfirmed(transaction, senderAccount)){
+      logger.warn("return2 true");
+    }
+    else {
+      logger.warn("return2 false");
+    }
+*/
     return senderAccount != null && transaction.getType().applyUnconfirmed(transaction, senderAccount);
   }
 
