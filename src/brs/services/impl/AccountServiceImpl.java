@@ -20,6 +20,8 @@ import brs.util.CollectionWithIndex;
 import brs.util.Convert;
 import brs.util.Listener;
 import brs.util.Listeners;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -37,6 +39,7 @@ public class AccountServiceImpl implements AccountService {
   private final LinkKeyFactory<AccountAsset> accountAssetKeyFactory;
   private final VersionedEntityTable<RewardRecipientAssignment> rewardRecipientAssignmentTable;
   private final LongKeyFactory<RewardRecipientAssignment> rewardRecipientAssignmentKeyFactory;
+  private final Logger logger = LoggerFactory.getLogger(TransactionServiceImpl.class);
 
   private final AssetTransferStore assetTransferStore;
 
@@ -264,14 +267,20 @@ public class AccountServiceImpl implements AccountService {
 
   @Override
   public void addToUnconfirmedBalanceNQT(Account account, long amountNQT) {
+    logger.warn("addToUnconfirmedBalanceNQT(Account account: " + account.id + ", long amountNQT: " + amountNQT +")\n");
     if (amountNQT == 0) {
+      logger.warn("if (amountNQT == 0) -> addToUnconfirmedBalanceNQT -> return\n");
       return;
     }
     Account.Balance accountBalance = getAccountBalance(account.getId());
 
     accountBalance.setUnconfirmedBalanceNqt(Convert.safeAdd(accountBalance.getUnconfirmedBalanceNqt(), amountNQT));
+    logger.warn("accountBalance.checkBalance() called\n");
     accountBalance.checkBalance();
+
+    logger.warn("accountBalanceTable.insert({});\n", accountBalance);
     accountBalanceTable.insert(accountBalance);
+    logger.warn("listeners.notify({}}, Event.UNCONFIRMED_BALANCE);\n", account);
     listeners.notify(account, Event.UNCONFIRMED_BALANCE);
   }
 

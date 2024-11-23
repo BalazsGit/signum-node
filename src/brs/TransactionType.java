@@ -248,20 +248,31 @@ public abstract class TransactionType {
   // return false if double spending
   public final boolean applyUnconfirmed(Transaction transaction, Account senderAccount) {
     long totalAmountNQT = calculateTransactionAmountNQT(transaction);
+    /*
     if (logger.isTraceEnabled()) {
       logger.trace("applyUnconfirmed: {} < totalamount: {} = false", senderAccount.getUnconfirmedBalanceNqt(), totalAmountNQT);
     }
+    */
+
+    logger.warn("applyUnconfirmed: {} < totalamount: {} = false", senderAccount.getUnconfirmedBalanceNqt(), totalAmountNQT);
     if (senderAccount.getUnconfirmedBalanceNqt() < totalAmountNQT) {
+      logger.warn("if (senderAccount.getUnconfirmedBalanceNqt(): " + senderAccount.getUnconfirmedBalanceNqt() +
+        "< totalAmountNQT: " + totalAmountNQT + ") -> applyUnconfirmed -> return false\n");
       return false;
     }
     accountService.addToUnconfirmedBalanceNQT(senderAccount, -totalAmountNQT);
     if (!applyAttachmentUnconfirmed(transaction, senderAccount)) {
+      /*
       if (logger.isDebugEnabled()) {
         logger.debug("!applyAttachmentUnconfirmed({}, {})", transaction, senderAccount.getId());
       }
+      */
+      logger.warn("!applyAttachmentUnconfirmed({}, {})\n", transaction, senderAccount.getId());
       accountService.addToUnconfirmedBalanceNQT(senderAccount, totalAmountNQT);
+      logger.warn("applyUnconfirmed -> Return false\n");
       return false;
     }
+    logger.warn("applyUnconfirmed -> Return true\n");
     return true;
   }
 
@@ -736,7 +747,7 @@ public abstract class TransactionType {
       public String getDescription() {
         return "TLD Assignment";
       }
-      
+
       @Override
       public boolean isSigned() {
         return super.isSigned();
@@ -781,7 +792,7 @@ public abstract class TransactionType {
         if (tld != null) {
           throw new SignumException.NotCurrentlyValidException("TLD already registered by another account: " + attachment.getTldName());
         }
-        
+
         if(transaction.getRecipientId() != 0L
                 || transaction.getAmountNqt() < BASELINE_TLD_ASSIGNMENT_FACTOR * fluxCapacitor.getValue(FluxValues.FEE_QUANT, blockchain.getLastBlock().getHeight())) {
           throw new SignumException.NotCurrentlyValidException("Invalid TLD assignment: " + attachment.getTldName());
@@ -1518,7 +1529,7 @@ public abstract class TransactionType {
           throw new SignumException.NotCurrentlyValidException("Asset " + Convert.toUnsignedLong(assetCreationTransaction.getId()) +
               " does not exist yet");
         }
-        
+
         if(asset.getAccountId()!= transaction.getSenderId() || !Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
           throw new SignumException.NotValidException("Invalid add treasury account transaction");
         }

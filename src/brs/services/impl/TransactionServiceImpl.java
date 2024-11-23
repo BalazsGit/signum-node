@@ -52,24 +52,25 @@ public class TransactionServiceImpl implements TransactionService {
   @Override
   // this should be call only once per transaction
   public boolean applyUnconfirmed(Transaction transaction) {
-    logger.warn("applyUnconfirmed: " + transaction.getStringId());
+    logger.warn("applyUnconfirmed -> transaction.getStringId(): " + transaction.getStringId() + "\n");
     if(transaction.getType() == TransactionType.SignaMining.COMMITMENT_REMOVE) {
       // we only accept one removal per account per block
-      logger.warn("COMMITMENT_REMOVE: " + transaction.getStringId());
+      logger.warn("transaction.getType() == COMMITMENT_REMOVE\n");
       if(accountCommitmentRemovals.get(transaction.getSenderId()) != null) {
-        logger.warn("accountCommitmentRemovals: " + transaction.getStringId());
+        logger.warn("accountCommitmentRemovals.get(transaction.getSenderId()): " + accountCommitmentRemovals.get(transaction.getSenderId()) + "\n");
         return false;
       }
       accountCommitmentRemovals.put(transaction.getSenderId(), transaction);
     }
     Account senderAccount = accountService.getAccount(transaction.getSenderId());
-
+/*
     if(senderAccount == null) {
       logger.warn("Sender Account is null");
     }
     else {
       logger.warn("Sender Account is not null");
     }
+*/
 /*
     if(transaction.getType().applyUnconfirmed(transaction, senderAccount)) {
       logger.warn("Transection Apply Unconfirmed: true");
@@ -92,6 +93,8 @@ public class TransactionServiceImpl implements TransactionService {
       logger.warn("return2 false");
     }
 */
+    logger.warn("senderAccount: " + senderAccount + "\n");
+    logger.warn("transaction.getType().applyUnconfirmed(transaction, senderAccount): " + transaction.getType().applyUnconfirmed(transaction, senderAccount) + "\n");
     return senderAccount != null && transaction.getType().applyUnconfirmed(transaction, senderAccount);
   }
 
