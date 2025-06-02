@@ -172,7 +172,7 @@ tasks.register('dist', Zip) {
     into('html') { from "html" }
     from "LICENSE.txt"
     from "README.md"
-    archiveFileName = "${baseNodeFileName}.zip"
+    archiveFileName = "${baseNodeFileName}-${project.version}.zip"
 }
 
 def appName = "SignumNode"
@@ -299,7 +299,7 @@ tasks.register('zipWinExe', Zip) {
     from "README.md"
     into('jre') { from "build/distributions/jre" }
 
-    archiveFileName = "${baseNodeFileName}-win_x64.zip"
+    archiveFileName = "${baseNodeFileName}-${project.version}-win_x64.zip"
     destinationDirectory = file("$buildDir/distributions")
 }
 
@@ -307,9 +307,10 @@ import org.gradle.crypto.checksum.Checksum
 
 tasks.register('release', Checksum) {
     dependsOn test, dist, zipWinExe
+    def versionString = project.version.toString() // Ensure project.version is evaluated
     files = files([
-        "build/distributions/${baseNodeFileName}.zip",
-        "build/distributions/${baseNodeFileName}-win_x64.zip",
+        "build/distributions/${baseNodeFileName}-${versionString}.zip",
+        "build/distributions/${baseNodeFileName}-${versionString}-win_x64.zip",
     ])
 }
 dist.mustRunAfter(buildOpenApi)
