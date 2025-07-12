@@ -34,6 +34,8 @@ public final class Db {
   private static Flyway flyway;
   private static DatabaseInstance databaseInstance;
 
+  private static int originalIsolationLevel = -1;
+
   public static void init(PropertyService propertyService, DBCacheManagerImpl dbCacheManager) {
     try {
       Db.dbCacheManager = dbCacheManager;
@@ -77,7 +79,7 @@ public final class Db {
 
   public static void shutdown() {
     if(databaseInstance != null){
-        databaseInstance.onShutdown();
+      databaseInstance.onShutdown();
     }
   }
 
@@ -173,6 +175,24 @@ public final class Db {
     }
   }
 
+  public static Connection beginTransactionWithIsolationLevel(int isolationLevel) {
+    if (localConnection.get() != null) {
+      throw new IllegalStateException("Transaction already in progress");
+    }
+    try {
+      Connection con = databaseInstance.getDataSource().getConnection();
+      con.setAutoCommit(false);
+      Db.originalIsolationLevel = con.getTransactionIsolation();
+      con.setTransactionIsolation(isolationLevel);
+      localConnection.set(con);
+      transactionCaches.set(new HashMap<>());
+      transactionBatches.set(new HashMap<>());
+      return con;
+    } catch (Exception e) {
+      throw new RuntimeException(e.toString(), e);
+    }
+  }
+
   public static void commitTransaction() {
     Connection con = localConnection.get();
     if (con == null) {
@@ -204,6 +224,14 @@ public final class Db {
     Connection con = localConnection.get();
     if (con == null) {
       throw new IllegalStateException("Not in transaction");
+    }
+    try {
+      int actualIsolationLevel = con.getTransactionIsolation();
+      if (Db.originalIsolationLevel != -1 && actualIsolationLevel != Db.originalIsolationLevel) {
+        con.setTransactionIsolation(Db.originalIsolationLevel);
+      }
+    } catch (SQLException e) {
+      logger.error("Failed to reset transaction isolation level", e);
     }
     localConnection.remove();
     transactionCaches.get().clear();

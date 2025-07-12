@@ -25,7 +25,7 @@ public class Stores {
   private final IndirectIncomingStore indirectIncomingStore;
 
   public Stores(DerivedTableManager derivedTableManager, DBCacheManagerImpl dbCacheManager, TimeService timeService, PropertyService propertyService, TransactionDb transactionDb,
-      NetworkParameters params) {
+                NetworkParameters params) {
     this.accountStore                = new SqlAccountStore(derivedTableManager, dbCacheManager);
     this.aliasStore                  = new SqlAliasStore(derivedTableManager);
     this.assetStore                  = new SqlAssetStore(derivedTableManager);
@@ -71,6 +71,10 @@ public class Stores {
 
   public void beginTransaction() {
     Db.beginTransaction();
+  }
+
+  public void beginTransactionWithIsolationLevel(int isolationLevel) {
+    Db.beginTransactionWithIsolationLevel(isolationLevel);
   }
 
   public void commitTransaction() {

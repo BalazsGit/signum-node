@@ -63,6 +63,7 @@ import java.util.function.Function;
 import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.sql.Connection;
 
 import org.bouncycastle.util.encoders.Hex;
 import org.slf4j.Logger;
@@ -986,7 +987,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
   private void pushBlock(final Block block) throws BlockNotAcceptedException {
     synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
-      stores.beginTransaction();
+      stores.beginTransactionWithIsolationLevel(Connection.TRANSACTION_READ_COMMITTED);
       int curTime = timeService.getEpochTime();
 
       Block previousLastBlock = null;
