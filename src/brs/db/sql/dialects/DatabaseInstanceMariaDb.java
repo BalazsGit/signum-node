@@ -27,7 +27,11 @@ public class DatabaseInstanceMariaDb extends DatabaseInstanceBaseImpl {
     config.addDataSourceProperty("rewriteBatchedStatements", "true");
     config.addDataSourceProperty("maintainTimeStats", "false");
     config.addDataSourceProperty("useUnbufferedIO", "false");
-    config.addDataSourceProperty("useReadAheadInput", "false");
+    // The default isolation level for InnoDB is REPEATABLE READ. In this mode, a transaction sees a snapshot of the
+    // database as it was when the transaction started. During a fast sync, this can cause foreign key constraint
+    // violations because a transaction for a new block might not see its parent block if that parent was committed
+    // after the new transaction started. Setting it to READ_COMMITTED solves this issue.
+    config.setTransactionIsolation("TRANSACTION_READ_COMMITTED");
     config.setConnectionInitSql("SET NAMES utf8mb4;");
     return config;
   }
