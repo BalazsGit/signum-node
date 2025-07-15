@@ -7,6 +7,8 @@ import org.jooq.DSLContext;
 
 public interface BlockDb extends Table {
   Block findBlock(long blockId);
+  
+  Block findBlock(long blockId, boolean forUpdate);
 
   boolean hasBlock(long blockId);
 

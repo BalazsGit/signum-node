@@ -93,7 +93,8 @@ public class BlockchainImpl implements Blockchain {
 
     @Override
     public boolean hasBlock(long blockId) {
-        return getLastBlock().getId() == blockId || blockDb.hasBlock(blockId);
+    Block lastBlock = getLastBlock();
+    return (lastBlock != null && lastBlock.getId() == blockId) || blockDb.hasBlock(blockId);
     }
 
     @Override

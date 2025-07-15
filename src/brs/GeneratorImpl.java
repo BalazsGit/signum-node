@@ -53,7 +53,11 @@ public class GeneratorImpl implements Generator {
         return;
       }
       try {
-        long currentBlock = blockchain.getLastBlock().getHeight();
+        Block lastBlock = blockchain.getLastBlock();
+        if (lastBlock == null) {
+          return; // Blockchain not ready yet
+        }
+        long currentBlock = lastBlock.getHeight();
         Iterator<Entry<Long, GeneratorStateImpl>> it = generators.entrySet().iterator();
         while (it.hasNext() && !Thread.currentThread().isInterrupted() && ThreadPool.running.get()) {
           Entry<Long, GeneratorStateImpl> generator = it.next();

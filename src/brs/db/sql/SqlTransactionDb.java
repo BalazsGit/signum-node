@@ -144,56 +144,66 @@ public class SqlTransactionDb implements TransactionDb {
     }
   }
 
-  public void saveTransactions(List<Transaction> transactions) {
-    if (!transactions.isEmpty()) {
-      Db.useDSLContext(ctx -> {
-        BatchBindStep insertBatch = ctx.batch(
-            ctx.insertInto(TRANSACTION, TRANSACTION.ID, TRANSACTION.DEADLINE,
-                TRANSACTION.SENDER_PUBLIC_KEY, TRANSACTION.RECIPIENT_ID, TRANSACTION.AMOUNT,
-                TRANSACTION.FEE, TRANSACTION.REFERENCED_TRANSACTION_FULLHASH, TRANSACTION.HEIGHT,
-                TRANSACTION.BLOCK_ID, TRANSACTION.SIGNATURE, TRANSACTION.TIMESTAMP,
-                TRANSACTION.TYPE,
-                TRANSACTION.SUBTYPE, TRANSACTION.SENDER_ID, TRANSACTION.ATTACHMENT_BYTES,
-                TRANSACTION.BLOCK_TIMESTAMP, TRANSACTION.FULL_HASH, TRANSACTION.VERSION,
-                TRANSACTION.HAS_MESSAGE, TRANSACTION.HAS_ENCRYPTED_MESSAGE,
-                TRANSACTION.HAS_PUBLIC_KEY_ANNOUNCEMENT, TRANSACTION.HAS_ENCRYPTTOSELF_MESSAGE,
-                TRANSACTION.EC_BLOCK_HEIGHT, TRANSACTION.EC_BLOCK_ID, TRANSACTION.CASH_BACK_ID)
-                .values((Long) null, null, null, null, null, null, null, null, null, null, null,
-                    null, null,
-                    null, null, null, null, null, null, null, null, null, null, null, null));
-        for (Transaction transaction : transactions) {
-          insertBatch.bind(
-              transaction.getId(),
-              transaction.getDeadline(),
-              transaction.getSenderPublicKey(),
-              (transaction.getRecipientId() == 0 ? null : transaction.getRecipientId()),
-              transaction.getAmountNqt(),
-              transaction.getFeeNqt(),
-              Convert.parseHexString(transaction.getReferencedTransactionFullHash()),
-              transaction.getHeight(),
-              transaction.getBlockId(),
-              transaction.getSignature(),
-              transaction.getTimestamp(),
-              transaction.getType().getType(),
-              transaction.getType().getSubtype(),
-              transaction.getSenderId(),
-              getAttachmentBytes(transaction),
-              transaction.getBlockTimestamp(),
-              Convert.parseHexString(transaction.getFullHash()),
-              transaction.getVersion(),
-              transaction.getMessage() != null,
-              transaction.getEncryptedMessage() != null,
-              transaction.getPublicKeyAnnouncement() != null,
-              transaction.getEncryptToSelfMessage() != null,
-              transaction.getEcBlockHeight(),
-              (transaction.getEcBlockId() != 0 ? transaction.getEcBlockId() : null),
-              transaction.getCashBackId()
-          );
+    public void saveTransactions(List<Transaction> transactions) {
+        if (transactions.isEmpty()) {
+            return;
         }
-        insertBatch.execute();
-      });
+
+        final int BATCH_CHUNK_SIZE = 100;
+
+        Db.useDSLContext(ctx -> {
+            for (int i = 0; i < transactions.size(); i += BATCH_CHUNK_SIZE) { // )
+                List<Transaction> chunk = transactions.subList(i, Math.min(i + BATCH_CHUNK_SIZE, transactions.size()));
+
+                // Create a new batch for each chunk
+                BatchBindStep insertBatch = ctx.batch(
+                        ctx.insertInto(TRANSACTION, TRANSACTION.ID, TRANSACTION.DEADLINE,
+                                TRANSACTION.SENDER_PUBLIC_KEY, TRANSACTION.RECIPIENT_ID, TRANSACTION.AMOUNT,
+                                TRANSACTION.FEE, TRANSACTION.REFERENCED_TRANSACTION_FULLHASH, TRANSACTION.HEIGHT,
+                                TRANSACTION.BLOCK_ID, TRANSACTION.SIGNATURE, TRANSACTION.TIMESTAMP,
+                                TRANSACTION.TYPE,
+                                TRANSACTION.SUBTYPE, TRANSACTION.SENDER_ID, TRANSACTION.ATTACHMENT_BYTES,
+                                TRANSACTION.BLOCK_TIMESTAMP, TRANSACTION.FULL_HASH, TRANSACTION.VERSION,
+                                TRANSACTION.HAS_MESSAGE, TRANSACTION.HAS_ENCRYPTED_MESSAGE,
+                                TRANSACTION.HAS_PUBLIC_KEY_ANNOUNCEMENT, TRANSACTION.HAS_ENCRYPTTOSELF_MESSAGE,
+                                TRANSACTION.EC_BLOCK_HEIGHT, TRANSACTION.EC_BLOCK_ID, TRANSACTION.CASH_BACK_ID)
+                                .values((Long) null, null, null, null, null, null, null, null, null, null, null,
+                                        null, null, null, null, null, null, null, null, null, null, null, null, null, null)
+                );
+
+                for (Transaction transaction : chunk) {
+                    insertBatch.bind(
+                            transaction.getId(),
+                            transaction.getDeadline(),
+                            transaction.getSenderPublicKey(),
+                            (transaction.getRecipientId() == 0 ? null : transaction.getRecipientId()),
+                            transaction.getAmountNqt(),
+                            transaction.getFeeNqt(),
+                            Convert.parseHexString(transaction.getReferencedTransactionFullHash()),
+                            transaction.getHeight(),
+                            transaction.getBlockId(),
+                            transaction.getSignature(),
+                            transaction.getTimestamp(),
+                            transaction.getType().getType(),
+                            transaction.getType().getSubtype(),
+                            transaction.getSenderId(),
+                            getAttachmentBytes(transaction),
+                            transaction.getBlockTimestamp(),
+                            Convert.parseHexString(transaction.getFullHash()),
+                            transaction.getVersion(),
+                            transaction.getMessage() != null,
+                            transaction.getEncryptedMessage() != null,
+                            transaction.getPublicKeyAnnouncement() != null,
+                            transaction.getEncryptToSelfMessage() != null,
+                            transaction.getEcBlockHeight(),
+                            (transaction.getEcBlockId() != 0 ? transaction.getEcBlockId() : null),
+                            transaction.getCashBackId()
+                    );
+                }
+                insertBatch.execute();
+            }
+        });
     }
-  }
 
   @Override
   public void optimize() {

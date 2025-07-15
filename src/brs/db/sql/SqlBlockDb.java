@@ -20,10 +20,17 @@ public class SqlBlockDb implements BlockDb {
 
   private static final Logger logger = LoggerFactory.getLogger(BlockDb.class);
 
+  @Override
   public Block findBlock(long blockId) {
+    return findBlock(blockId, false);
+  }
+
+  @Override
+  public Block findBlock(long blockId, boolean forUpdate) {
     return Db.useDSLContext(ctx -> {
       try {
-        BlockRecord r = ctx.selectFrom(BLOCK).where(BLOCK.ID.eq(blockId)).fetchAny();
+        SelectConditionStep<BlockRecord> select = ctx.selectFrom(BLOCK).where(BLOCK.ID.eq(blockId));
+        BlockRecord r = (forUpdate ? select.forUpdate() : select).fetchAny();
         return r == null ? null : loadBlock(r);
       } catch (SignumException.ValidationException e) {
         throw new RuntimeException("Block already in database, id = " + blockId + ", does not pass validation!", e);

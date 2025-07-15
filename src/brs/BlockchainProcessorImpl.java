@@ -238,13 +238,26 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
               if (!getMoreBlocks.get()) {
                 return;
               }
-
-              if (downloadCache.isFull()) {
-                return;
+              // int cacheHeight = downloadCache.getLastBlock().getHeight();
+              Block lastBlockInCache = downloadCache.getLastBlock();
+              if (lastBlockInCache == null) {
+                // Try to get the last block from the database if cache is empty
+                Block dbLastBlock = blockDb.findLastBlock();
+                if (dbLastBlock != null) {
+                  logger.info("Cache is empty, using last block from DB: height {} id {}", dbLastBlock.getHeight(), dbLastBlock.getId());
+                  // Optionally, add the block to the cache if needed
+                  downloadCache.addBlock(dbLastBlock);
+                  lastBlockInCache = dbLastBlock;
+                } else {
+                  logger.warn("No block found in cache or database, waiting before next getMoreBlocks iteration.");
+                  Thread.sleep(1000); // Wait 1 second before retrying
+                  continue; // Continue to the next iteration
+                }
+                if (downloadCache.isFull()) {
+                    return;
+                }
               }
-
-              // Keep the download cache below the rollback limit
-              int cacheHeight = downloadCache.getLastBlock().getHeight();
+              int cacheHeight = lastBlockInCache.getHeight();
               if (Signum.getFluxCapacitor().getValue(FluxValues.POC_PLUS, cacheHeight)
                 && cacheHeight - blockchain.getHeight() > Constants.MAX_ROLLBACK / 2) {
                 logger.debug("GetMoreBlocks, skip download, wait for other threads to catch up");
@@ -675,6 +688,15 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
       while (!Thread.interrupted() && ThreadPool.running.get() && downloadCache.size() > 0) {
         try {
           Block lastBlock = blockchain.getLastBlock();
+          if (lastBlock == null) {
+            logger.warn("Blockchain has no last block, waiting for pop-off or sync to complete...");
+            try {
+                Thread.sleep(1000); // Wait a bit for the state to recover
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            continue; // Retry getting the last block
+          }
           Long lastId = lastBlock.getId();
           Block currentBlock = downloadCache.getNextBlock(lastId); /*
            * this should fetch first block in cache
@@ -992,6 +1014,18 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
       Block previousLastBlock = null;
       try {
 
+        if (block.getPreviousBlockId() != 0) {
+          // Lock the parent block row to ensure it's committed and visible
+          // before we proceed. This prevents foreign key constraint violations
+          // under high load.
+          Block previousBlock = blockDb.findBlock(block.getPreviousBlockId(), true);
+          if (previousBlock == null) {
+            // If it's still null after waiting for the lock, then it's a
+            // genuine problem (e.g. an orphan block).
+            throw new BlockNotAcceptedException("Previous block " + Convert.toUnsignedLong(block.getPreviousBlockId()) + " not found in database");
+          }
+        }
+
         previousLastBlock = blockchain.getLastBlock();
 
         if (previousLastBlock.getId() != block.getPreviousBlockId()) {
@@ -1168,12 +1202,23 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
               getMinRollbackHeight());
           }
         }
-      } catch (BlockNotAcceptedException | ArithmeticException e) {
+      } catch (BlockNotAcceptedException | ArithmeticException e) { // Catch expected validation exceptions
         stores.rollbackTransaction();
         blockchain.setLastBlock(previousLastBlock);
-        downloadCache.resetCache();
+        if (previousLastBlock != null) {
+          downloadCache.resetCache();
+        }
         atProcessorCache.reset();
         throw e;
+      } catch (RuntimeException e) { // Catch unexpected exceptions like DataAccessException
+        logger.error("Unexpected exception during pushBlock, rolling back", e);
+        stores.rollbackTransaction();
+        blockchain.setLastBlock(previousLastBlock);
+        if (previousLastBlock != null) {
+            downloadCache.resetCache();
+        }
+        atProcessorCache.reset();
+        throw new BlockNotAcceptedException(e.getMessage());
       } finally {
         stores.endTransaction();
       }
@@ -1323,6 +1368,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
       throw new RuntimeException("Cannot pop off genesis block");
     }
     Block previousBlock = blockDb.findBlock(block.getPreviousBlockId());
+    if (previousBlock == null) {
+        throw new IllegalStateException("Previous block " + Convert.toUnsignedLong(block.getPreviousBlockId()) 
+            + " not found during popOff. Blockchain is in an inconsistent state and cannot be rolled back further automatically.");
+    }
     List<Transaction> txs = block.getTransactions();
     blockchain.setLastBlock(block, previousBlock);
     txs.forEach(Transaction::unsetBlock);
