@@ -113,16 +113,21 @@ public final class Peers {
 
   private static final Collection<Peer> allPeers = Collections.unmodifiableCollection(peers.values());
 
-  private static final ExecutorService sendBlocksToPeersService = Executors.newCachedThreadPool();
-  private static final ExecutorService blocksSendingService = Executors.newFixedThreadPool(10);
+  private ExecutorService sendBlocksToPeersService;
+  private ExecutorService blocksSendingService;
 
   private static TimeService timeService;
   private static PropertyService propertyService;
+  private ThreadPool threadPool;
 
-  public static void init(TimeService timeService, AccountService accountService, Blockchain blockchain, TransactionProcessor transactionProcessor,
+  public void init(TimeService timeService, AccountService accountService, Blockchain blockchain, TransactionProcessor transactionProcessor,
                           BlockchainProcessor blockchainProcessor, PropertyService propertyService, ThreadPool threadPool) {
     Peers.timeService = timeService;
     Peers.propertyService = propertyService;
+    this.threadPool = threadPool;
+
+    sendBlocksToPeersService = Executors.newCachedThreadPool();
+    blocksSendingService = Executors.newFixedThreadPool(10);
 
     myPlatform = propertyService.getString(Props.P2P_MY_PLATFORM);
     if ( propertyService.getString(Props.P2P_MY_ADDRESS) != null
@@ -222,71 +227,77 @@ public final class Peers {
     getMorePeersThreshold = propertyService.getInt(Props.P2P_GET_MORE_PEERS_THRESHOLD);
     dumpPeersVersion = propertyService.getString(Props.DEV_DUMP_PEERS_VERSION);
 
-    final List<Future<String>> unresolvedPeers = Collections.synchronizedList(new ArrayList<>());
-
-    threadPool.runBeforeStart(new Runnable() {
-
-      private void loadPeers(Collection<String> addresses) {
-        for (final String address : addresses) {
-          Future<String> unresolvedAddress = sendBlocksToPeersService.submit(() -> {
-            Peer peer = Peers.addPeer(address);
-            return peer == null ? address : null;
-          });
-          unresolvedPeers.add(unresolvedAddress);
-        }
-      }
-
-      @Override
-      public void run() {
-        if (! wellKnownPeers.isEmpty()) {
-          loadPeers(wellKnownPeers);
-        }
-        if (usePeersDb) {
-          logger.debug("Loading known peers from the database...");
-          loadPeers(Signum.getDbs().getPeerDb().loadPeers());
-        }
-        lastSavedPeers= peers.size();
-      }
-    }, false);
-
-    threadPool.runAfterStart(() -> {
-      for (Future<String> unresolvedPeer : unresolvedPeers) {
-        try {
-          String badAddress = unresolvedPeer.get(5, TimeUnit.SECONDS);
-          if (badAddress != null) {
-            logger.debug("Failed to resolve peer address: {}", badAddress);
-          }
-        } catch (InterruptedException e) {
-          Thread.currentThread().interrupt();
-        } catch (ExecutionException e) {
-          logger.debug("Failed to add peer", e);
-        } catch (TimeoutException ignored) {
-        }
-      }
-      if (logger.isDebugEnabled()) {
-        logger.debug("Known peers: {}", peers.size());
-      }
-    });
-
-    Init.init(timeService, accountService, blockchain, transactionProcessor, blockchainProcessor, propertyService, threadPool);
-
-    if (! Signum.getPropertyService().getBoolean(Props.DEV_OFFLINE)) {
-      threadPool.scheduleThread("PeerConnecting", Peers.peerConnectingThread, 5);
-      threadPool.scheduleThread("PeerUnBlacklisting", Peers.peerUnBlacklistingThread, 1);
-      if (Peers.getMorePeers) {
-        threadPool.scheduleThread("GetMorePeers", Peers.getMorePeersThread, 5);
-      }
-    }
-
   }
 
-  private static class Init {
+    public void start(TimeService timeService, AccountService accountService, Blockchain blockchain,
+                      TransactionProcessor transactionProcessor, BlockchainProcessor blockchainProcessor,
+                      PropertyService propertyService, ThreadPool threadPool) {
+
+        final List<Future<String>> unresolvedPeers = Collections.synchronizedList(new ArrayList<>());
+        threadPool.runBeforeStart(new Runnable() {
+
+            private void loadPeers(Collection<String> addresses) {
+                for (final String address : addresses) {
+                    Future<String> unresolvedAddress = sendBlocksToPeersService.submit(() -> {
+                        Peer peer = Peers.addPeer(address);
+                        return peer == null ? address : null;
+                    });
+                    unresolvedPeers.add(unresolvedAddress);
+                }
+            }
+
+            @Override
+            public void run() {
+                if (!wellKnownPeers.isEmpty()) {
+                    loadPeers(wellKnownPeers);
+                }
+                if (usePeersDb) {
+                    logger.debug("Loading known peers from the database...");
+                    loadPeers(Signum.getDbs().getPeerDb().loadPeers());
+                }
+                lastSavedPeers = peers.size();
+            }
+        }, false);
+
+        threadPool.runAfterStart(() -> {
+            for (Future<String> unresolvedPeer : unresolvedPeers) {
+                try {
+                String badAddress = unresolvedPeer.get(5, TimeUnit.SECONDS);
+                if (badAddress != null) {
+                    logger.debug("Failed to resolve peer address: {}", badAddress);
+                }
+                } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                } catch (ExecutionException e) {
+                logger.debug("Failed to add peer", e);
+                } catch (TimeoutException ignored) {
+                }
+            }
+            if (logger.isDebugEnabled()) {
+                logger.debug("Known peers: {}", peers.size());
+            }
+        });
+
+        Init init = new Init();
+        init.init(timeService, accountService, blockchain, transactionProcessor, blockchainProcessor, propertyService, threadPool);
+
+        if (! Signum.getPropertyService().getBoolean(Props.DEV_OFFLINE)) {
+            threadPool.scheduleThread("PeerConnecting", peerConnectingThread, 5);
+            threadPool.scheduleThread("PeerUnBlacklisting", Peers.peerUnBlacklistingThread, 1);
+            if (Peers.getMorePeers) {
+                threadPool.scheduleThread("GetMorePeers", getMorePeersThread, 5);
+            }
+        }
+    }
+
+
+  public class Init {
 
     private static Server peerServer;
     private static GatewayDevice gateway;
     private static Integer port;
 
-    static void init(TimeService timeService, AccountService accountService, Blockchain blockchain, TransactionProcessor transactionProcessor,
+    void init(TimeService timeService, AccountService accountService, Blockchain blockchain, TransactionProcessor transactionProcessor,
                      BlockchainProcessor blockchainProcessor, PropertyService propertyService, ThreadPool threadPool) {
       if (Peers.shareMyAddress) {
         port = Peers.myPeerServerPort;
@@ -412,7 +423,7 @@ public final class Peers {
     }
   };
 
-  private static final Runnable peerConnectingThread = new Runnable() {
+  private final Runnable peerConnectingThread = new Runnable() {
     private int getNumberOfConnectedPublicPeers() {
       int numberOfConnectedPeers = 0;
       for (Peer peer : peers.values()) {
@@ -514,7 +525,7 @@ public final class Peers {
 
   };
 
-  private static final Runnable getMorePeersThread = new Runnable() {
+  private final Runnable getMorePeersThread = new Runnable() {
 
     private final JsonElement getPeersRequest;
     {
@@ -593,7 +604,7 @@ public final class Peers {
     }
   };
 
-  public static void shutdown(ThreadPool threadPool) {
+  public void shutdown() {
     if (Init.peerServer != null) {
       try {
         Init.peerServer.stop();
@@ -625,6 +636,15 @@ public final class Peers {
     }
 
     threadPool.shutdownExecutor(sendBlocksToPeersService);
+    threadPool.shutdownExecutor(blocksSendingService);
+
+    // Clear static state to allow for clean restart
+    peers.clear();
+    announcedAddresses.clear();
+    listeners.clear();
+    connectWellKnownFinished = (connectWellKnownFirst == 0);
+    Init.peerServer = null;
+    Init.gateway = null;
   }
 
   public static boolean removeListener(Listener<Peer> listener, Event eventType) {
@@ -739,7 +759,7 @@ public final class Peers {
     }
   }
 
-  public static void sendToSomePeers(Block block) {
+  public void sendToSomePeers(Block block) {
     JsonObject request = block.getJsonObject();
     request.addProperty("requestType", "processBlock");
 
@@ -786,7 +806,7 @@ public final class Peers {
 
   private static final ExecutorService utReceivingService = Executors.newCachedThreadPool();
 
-  public static CompletableFuture<JsonObject> readUnconfirmedTransactionsNonBlocking(Peer peer) {
+  public CompletableFuture<JsonObject> readUnconfirmedTransactionsNonBlocking(Peer peer) {
     return CompletableFuture.supplyAsync(() -> peer.send(getUnconfirmedTransactionsRequest), utReceivingService);
   }
 
@@ -795,7 +815,7 @@ public final class Peers {
   private static final List<Peer> processingQueue = new ArrayList<>();
   private static final List<Peer> beingProcessed = new ArrayList<>();
 
-  public static synchronized void feedingTime(Peer peer, Function<Peer, List<Transaction>> foodDispenser, BiConsumer<Peer, List<Transaction>> doneFeedingLog) {
+  public synchronized void feedingTime(Peer peer, Function<Peer, List<Transaction>> foodDispenser, BiConsumer<Peer, List<Transaction>> doneFeedingLog) {
     if(! beingProcessed.contains(peer)) {
       beingProcessed.add(peer);
       CompletableFuture.runAsync(() -> feedPeer(peer, foodDispenser, doneFeedingLog), utSendingService);
@@ -853,7 +873,7 @@ public final class Peers {
             && peer.getAnnouncedAddress() != null;
   }
 
-  public static Peer getAnyPeer(Peer.State state) {
+  public Peer getAnyPeer(Peer.State state) {
     if(!connectWellKnownFinished) {
       int wellKnownConnected = 0;
       for(Peer peer : peers.values()) {
@@ -889,7 +909,7 @@ public final class Peers {
     return null;
   }
 
-  public static List<Peer> getAllActivePriorityPlusSomeExtraPeers() {
+  public List<Peer> getAllActivePriorityPlusSomeExtraPeers() {
     final List<Peer> peersActivePriorityPlusSomeExtraPeers = new ArrayList<>();
     int amountExtrasLeft = propertyService.getInt(P2P_SEND_TO_LIMIT);
 
@@ -929,6 +949,8 @@ public final class Peers {
     }
   }
 
-  private Peers() {} // never
+  public Peers() {
+    
+  }
 
 }

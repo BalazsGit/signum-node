@@ -21,7 +21,7 @@ public final class ThreadPool {
 
   private static final Logger logger = LoggerFactory.getLogger(ThreadPool.class);
 
-  private static ScheduledExecutorService scheduledThreadPool;
+  public ScheduledExecutorService scheduledThreadPool = null;
   private final  Map<Runnable,Long> backgroundJobs = new HashMap<>();
   private final Map<Runnable,Long> backgroundJobsCores = new HashMap<>();
   private final List<Runnable> beforeStartJobs = new ArrayList<>();
@@ -79,6 +79,7 @@ public final class ThreadPool {
     if (scheduledThreadPool != null) {
       throw new IllegalStateException("Executor service already started");
     }
+    running.set(true);
 
     logger.debug("Running {} tasks...", beforeStartJobs.size());
     runAll(beforeStartJobs);

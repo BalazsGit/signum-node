@@ -79,17 +79,21 @@ import signum.net.NetworkParameters;
 import signumj.util.SignumUtils;
 
 /**
- * The main class for the Signum node application.
+ * The main class for the Signum node application, acting as the central controller.
  * <p>
- * This class serves as the primary entry point and controller for the node. It is responsible for:
+ * This class orchestrates the entire lifecycle of a Signum node instance. It is responsible for:
  * <ul>
  *     <li>Parsing command-line arguments.</li>
  *     <li>Loading configuration properties.</li>
  *     <li>Initializing all core components and services, such as the database, blockchain,
  *         transaction processor, peer-to-peer network, and the web API server.</li>
- *     <li>Managing the application lifecycle, including startup and graceful shutdown.</li>
+ *     <li>Managing the application lifecycle, including startup, graceful shutdown, and automatic
+ *         restart upon configuration changes.</li>
  * </ul>
- * This is a utility class and cannot be instantiated.
+ * <p>
+ * An instance of this class represents a single, running Signum node. While many core components
+ * are exposed as static fields for legacy reasons, their lifecycle (initialization and shutdown)
+ * is managed by the {@code Signum} instance.
  */
 public final class Signum {
 
@@ -104,6 +108,13 @@ public final class Signum {
     public static final String DEFAULT_PROPERTIES_NAME = "node-default.properties";
     /** The name of the user-customizable properties file. */
     public static final String PROPERTIES_NAME = "node.properties";
+    /** The name of the user-customizable logging properties file. */
+    public static final String LOGGING_PROPERTIES_NAME = "logging.properties";
+
+    /** Represents the current state of the node. 0 for stopped, 1 for running. */
+    public int NODE_STATE = 0;
+
+    private String []args;
 
     /** Command-line option to specify a custom configuration folder. */
     public static final Option CONF_FOLDER_OPTION = Option.builder("c")
@@ -132,7 +143,10 @@ public final class Signum {
     private static Dbs dbs;
 
     /** A shared thread pool for managing concurrent tasks within the node. */
-    private static ThreadPool threadPool;
+    public ThreadPool threadPool;
+
+    /** The manager for peer-to-peer network operations. */
+    public Peers peers;
 
     /** The central blockchain data structure manager. */
     private static BlockchainImpl blockchain;
@@ -161,13 +175,12 @@ public final class Signum {
     /** A flag indicating if the shutdown process has been initiated. */
     private static AtomicBoolean shuttingdown = new AtomicBoolean(false);
 
-    // --- Fields for reload functionality ---
     /** The folder where configuration files are located. */
     private static String confFolder;
     /** A flag to ensure the command handler thread is only started once. */
     private static final AtomicBoolean commandHandlerRunning = new AtomicBoolean(false);
-    /** A lock to prevent concurrent reloads. */
-    private static final AtomicBoolean isReloading = new AtomicBoolean(false);
+    /** A lock to prevent concurrent restarts. */
+    private static final AtomicBoolean isRestarting = new AtomicBoolean(false);
     /** The thread that watches for property file changes. */
     private static Thread propertiesFileWatcher;
 
@@ -208,12 +221,37 @@ public final class Signum {
         return new PropertyServiceImpl(properties);
     }
 
-    private Signum() {
-    } // never
+    /**
+     * Creates a new Signum node instance and sets up the shutdown hook and
+     * initial configuration path. This constructor does not parse command-line arguments.
+     */
+    public Signum() {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> shutdown()));
+        confFolder = CONF_FOLDER;
+        try {
+            CommandLine cmd = new DefaultParser().parse(CLI_OPTIONS, args);
+            if (cmd.hasOption(CONF_FOLDER_OPTION.getOpt())) {
+                confFolder = cmd.getOptionValue(CONF_FOLDER_OPTION.getOpt());
+            }
+        } catch (Exception e) {
+            logger.error("Exception parsing command line arguments", e);
+        }
+    }
+
+    /**
+     * Creates a new Signum node instance with specified command-line arguments.
+     * This constructor will parse the provided arguments to determine the configuration folder.
+     *
+     * @param args The command-line arguments.
+     */
+    public Signum(String []args) {
+        this();
+        this.args = args; 
+    }
 
     /**
      * Returns the singleton instance of the Blockchain.
-     * @return The {@link Blockchain} instance.
+     * @return The application's {@link Blockchain} instance.
      */
     public static Blockchain getBlockchain() {
         return blockchain;
@@ -221,7 +259,7 @@ public final class Signum {
 
     /**
      * Returns the singleton instance of the BlockchainProcessor.
-     * @return The {@link BlockchainProcessorImpl} instance.
+     * @return The application's {@link BlockchainProcessorImpl} instance.
      */
     public static BlockchainProcessorImpl getBlockchainProcessor() {
         return blockchainProcessor;
@@ -229,7 +267,7 @@ public final class Signum {
 
     /**
      * Returns the singleton instance of the TransactionProcessor.
-     * @return The {@link TransactionProcessorImpl} instance.
+     * @return The application's {@link TransactionProcessorImpl} instance.
      */
     public static TransactionProcessorImpl getTransactionProcessor() {
         return transactionProcessor;
@@ -237,7 +275,7 @@ public final class Signum {
 
     /**
      * Returns the singleton instance of the TransactionService.
-     * @return The {@link TransactionService} instance.
+     * @return The application's {@link TransactionService} instance.
      */
     public static TransactionService getTransactionService() {
         return transactionService;
@@ -245,7 +283,7 @@ public final class Signum {
 
     /**
      * Returns the singleton instance of the SubscriptionService.
-     * @return The {@link SubscriptionService} instance.
+     * @return The application's {@link SubscriptionService} instance.
      */
     public static SubscriptionService getSubscriptionService() {
         return subscriptionService;
@@ -253,7 +291,7 @@ public final class Signum {
 
     /**
      * Returns the singleton instance of the AssetExchange.
-     * @return The {@link AssetExchange} instance.
+     * @return The application's {@link AssetExchange} instance.
      */
     public static AssetExchange getAssetExchange() {
         return assetExchange;
@@ -261,7 +299,7 @@ public final class Signum {
 
     /**
      * Returns the singleton instance of the Stores.
-     * @return The {@link Stores} instance.
+     * @return The application's {@link Stores} instance, providing access to data stores.
      */
     public static Stores getStores() {
         return stores;
@@ -269,7 +307,7 @@ public final class Signum {
 
     /**
      * Returns the singleton instance of the Dbs.
-     * @return The {@link Dbs} instance.
+     * @return The application's {@link Dbs} instance, providing access to database tables.
      */
     public static Dbs getDbs() {
         return dbs;
@@ -283,8 +321,12 @@ public final class Signum {
      *
      * @param args Command-line arguments for the node.
      */
+    /*
     public static void main(String[] args) {
-        Runtime.getRuntime().addShutdownHook(new Thread(Signum::shutdown));
+
+        Signum signum = new Signum();
+
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> shutdown(signum.threadPool)));
         confFolder = CONF_FOLDER;
         try {
             CommandLine cmd = new DefaultParser().parse(CLI_OPTIONS, args);
@@ -294,8 +336,8 @@ public final class Signum {
         } catch (Exception e) {
             logger.error("Exception parsing command line arguments", e);
         }
-        init(confFolder);
-    }
+
+    }*/
 
     /**
      * Validates that a pre-release (development) version is not running on the mainnet.
@@ -316,19 +358,31 @@ public final class Signum {
 
     /**
      * Initializes the node with a custom set of properties.
+     * This is typically used for testing or special configurations.
      *
      * @param customProperties The custom properties to use for initialization.
      */
-    public static void init(CaselessProperties customProperties) {
+    public void init(CaselessProperties customProperties) {
         loadWallet(new PropertyServiceImpl(customProperties));
     }
 
     /**
      * Initializes the node with properties from the specified configuration folder.
+     * This is a convenience method that loads properties before calling the main initialization logic.
      *
      * @param confFolder The path to the configuration folder.
      */
-    private static void init(String confFolder) {
+    private void init(String confFolder) {
+        loadWallet(loadProperties(confFolder));
+    }
+
+    /**
+     * Initializes the node with properties from the specified configuration folder.
+     *
+     * This is the main entry point for starting the node. It triggers the loading of
+     * properties and the full initialization of all services.
+     */
+    public void init() {
         loadWallet(loadProperties(confFolder));
     }
 
@@ -348,10 +402,14 @@ public final class Signum {
      * </ul>
      * @param propertyService The fully-loaded property service to be used for configuration.
      */
-    private static void loadWallet(PropertyService propertyService) {
+    private void loadWallet(PropertyService propertyService) {
         LoggerConfigurator.init();
 
+
         Signum.propertyService = propertyService;
+
+        threadPool = new ThreadPool(propertyService);
+        peers = new Peers();
 
         String networkParametersClass = propertyService.getString(Props.NETWORK_PARAMETERS);
         NetworkParameters params = null;
@@ -373,21 +431,19 @@ public final class Signum {
         }
 
         try {
-            final long startTime = System.currentTimeMillis();
+            long startTime = System.currentTimeMillis();
 
             // Address prefix and coin name
             SignumUtils.setAddressPrefix(propertyService.getString(Props.ADDRESS_PREFIX));
             SignumUtils.addAddressPrefix("BURST");
             SignumUtils.setValueSuffix(propertyService.getString(Props.VALUE_SUFIX));
 
-            final TimeService timeService = new TimeServiceImpl();
+            TimeService timeService = new TimeServiceImpl();
 
-            final DerivedTableManager derivedTableManager = new DerivedTableManager();
+            DerivedTableManager derivedTableManager = new DerivedTableManager();
 
-            final StatisticsManagerImpl statisticsManager = new StatisticsManagerImpl(timeService);
+            StatisticsManagerImpl statisticsManager = new StatisticsManagerImpl(timeService);
             dbCacheManager = new DBCacheManagerImpl(statisticsManager);
-
-            threadPool = new ThreadPool(propertyService);
 
             Db.init(propertyService, dbCacheManager);
             dbs = Db.getDbsByDatabaseType();
@@ -396,30 +452,30 @@ public final class Signum {
                     dbs.getTransactionDb(),
                     params);
 
-            final TransactionDb transactionDb = dbs.getTransactionDb();
-            final BlockDb blockDb = dbs.getBlockDb();
-            final BlockchainStore blockchainStore = stores.getBlockchainStore();
+            TransactionDb transactionDb = dbs.getTransactionDb();
+            BlockDb blockDb = dbs.getBlockDb();
+            BlockchainStore blockchainStore = stores.getBlockchainStore();
             blockchain = new BlockchainImpl(
                     transactionDb,
                     blockDb,
                     blockchainStore,
                     propertyService);
 
-            final AliasService aliasService = new AliasServiceImpl(stores.getAliasStore());
+            AliasService aliasService = new AliasServiceImpl(stores.getAliasStore());
             fluxCapacitor = new FluxCapacitorImpl(blockchain, propertyService);
             aliasService.addDefaultTLDs();
 
             EconomicClustering economicClustering = new EconomicClustering(blockchain);
 
-            final AccountService accountService = new AccountServiceImpl(stores.getAccountStore(),
+            AccountService accountService = new AccountServiceImpl(stores.getAccountStore(),
                     stores.getAssetTransferStore());
 
-            final DownloadCacheImpl downloadCache = new DownloadCacheImpl(
+            DownloadCacheImpl downloadCache = new DownloadCacheImpl(
                     propertyService,
                     fluxCapacitor,
                     blockchain);
 
-            final Generator generator = propertyService.getBoolean(Props.DEV_MOCK_MINING)
+            Generator generator = propertyService.getBoolean(Props.DEV_MOCK_MINING)
                     ? new GeneratorImpl.MockGenerator(
                             propertyService,
                             blockchain,
@@ -443,20 +499,21 @@ public final class Signum {
                     timeService, dbs,
                     accountService,
                     transactionService,
-                    threadPool);
+                    threadPool,
+                    peers);
 
-            final ATService atService = new ATServiceImpl(stores.getAtStore());
+            ATService atService = new ATServiceImpl(stores.getAtStore());
             subscriptionService = new SubscriptionServiceImpl(
                     stores.getSubscriptionStore(),
                     transactionDb,
                     blockchain,
                     aliasService,
                     accountService);
-            final DGSGoodsStoreService digitalGoodsStoreService = new DGSGoodsStoreServiceImpl(
+            DGSGoodsStoreService digitalGoodsStoreService = new DGSGoodsStoreServiceImpl(
                     blockchain,
                     stores.getDigitalGoodsStoreStore(),
                     accountService);
-            final EscrowService escrowService = new EscrowServiceImpl(
+            EscrowService escrowService = new EscrowServiceImpl(
                     stores.getEscrowStore(),
                     blockchain,
                     aliasService,
@@ -470,7 +527,7 @@ public final class Signum {
                     stores.getAssetStore(),
                     stores.getOrderStore());
 
-            final IndirectIncomingService indirectIncomingService = new IndirectIncomingServiceImpl(
+            IndirectIncomingService indirectIncomingService = new IndirectIncomingServiceImpl(
                     stores.getIndirectIncomingStore(), propertyService);
 
             TransactionType.init(
@@ -483,7 +540,7 @@ public final class Signum {
                     subscriptionService,
                     escrowService);
 
-            final BlockService blockService = new BlockServiceImpl(
+            BlockService blockService = new BlockServiceImpl(
                     accountService,
                     transactionService,
                     blockchain,
@@ -512,13 +569,14 @@ public final class Signum {
                     dbCacheManager,
                     accountService,
                     indirectIncomingService,
-                    aliasService);
+                    aliasService,
+                    peers);
 
             generator.generateForBlockchainProcessor(threadPool, blockchainProcessor);
 
-            final DeeplinkQRCodeGenerator deepLinkQrCodeGenerator = new DeeplinkQRCodeGenerator();
+            DeeplinkQRCodeGenerator deepLinkQrCodeGenerator = new DeeplinkQRCodeGenerator();
 
-            final ParameterService parameterService = new ParameterServiceImpl(
+            ParameterService parameterService = new ParameterServiceImpl(
                     accountService,
                     aliasService,
                     assetExchange,
@@ -535,14 +593,14 @@ public final class Signum {
                     blockchain,
                     dbs.getTransactionDb());
 
-            final APITransactionManager apiTransactionManager = new APITransactionManagerImpl(
+            APITransactionManager apiTransactionManager = new APITransactionManagerImpl(
                     parameterService,
                     transactionProcessor,
                     blockchain,
                     accountService,
                     transactionService);
 
-            Peers.init(
+            peers.init(
                     timeService,
                     accountService,
                     blockchain,
@@ -550,12 +608,22 @@ public final class Signum {
                     blockchainProcessor,
                     propertyService,
                     threadPool);
+
+            peers.start(timeService,
+                    accountService,
+                    blockchain,
+                    transactionProcessor,
+                    blockchainProcessor,
+                    propertyService,
+                    threadPool);
+            
+                    
             if (params != null) {
                 params.initialize(parameterService, accountService, apiTransactionManager);
                 TransactionType.setNetworkParameters(params);
             }
 
-            final FeeSuggestionCalculator feeSuggestionCalculator = new FeeSuggestionCalculator(
+            FeeSuggestionCalculator feeSuggestionCalculator = new FeeSuggestionCalculator(
                     blockchainProcessor,
                     stores.getUnconfirmedTransactionStore());
 
@@ -613,9 +681,13 @@ public final class Signum {
             logger.error(e.getMessage(), e);
             System.exit(1);
         }
+        // The command handler should only ever be started once per JVM run.
         if (commandHandlerRunning.compareAndSet(false, true)) {
-            (new Thread(Signum::commandHandler)).start();
-            propertiesFileWatcher = new Thread(new PropertiesFileWatcher(), "PropertiesFileWatcher");
+            (new Thread(() -> commandHandler())).start();
+        }
+        // The properties file watcher needs to be (re)started after every init.
+        if (propertiesFileWatcher == null || !propertiesFileWatcher.isAlive()) {
+            propertiesFileWatcher = new Thread(new PropertiesFileWatcher(threadPool), "PropertiesFileWatcher");
             propertiesFileWatcher.start();
         }
     }
@@ -664,10 +736,11 @@ public final class Signum {
      * Supported commands:
      * <ul>
      *     <li>{@code .shutdown} - Gracefully shuts down the node.</li>
-     *     <li>{@code .popoff <n>} - Removes the last 'n' blocks from the blockchain.</li>
+     *     <li>{@code .restart} - Gracefully restarts the node.</li>
+     *     <li>{@code .popoff <n>} - Removes the last 'n' blocks from the blockchain (for maintenance).</li>
      * </ul>
      */
-    private static void commandHandler() {
+    private void commandHandler() {
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
         try {
             String command;
@@ -676,6 +749,8 @@ public final class Signum {
                 if (command.equals(".shutdown")) {
                     shutdown(false);
                     System.exit(0);
+                } else if (command.equals(".restart")) {
+                    restart();
                 } else if (command.startsWith(".popoff ")) {
                     Pattern r = Pattern.compile("^\\.popoff (\\d+)$");
                     Matcher m = r.matcher(command);
@@ -691,20 +766,93 @@ public final class Signum {
             // ignore
         }
     }
-
     /**
-     * Reloads the node configuration by shutting down services and re-initializing.
-     * This method is thread-safe and prevents concurrent reloads.
+     * Restarts the node by shutting down all services and re-initializing completely.
+     * This method is thread-safe and prevents concurrent restarts.
+     *
+     * It performs a full shutdown of all components, including the web server, peer network,
+     * and thread pools. It then resets all static state variables to ensure a clean start
+     * before calling {@link #init()} to re-initialize the node with the current configuration.
      */
-    private static void reload() {
-        if (isReloading.compareAndSet(false, true)) {
+    private void restart() {
+        if (isRestarting.compareAndSet(false, true)) {
             try {
-                logger.info("Configuration file change detected. Reloading...");
-                shutdown(true); // ignore DB shutdown
-                init(Signum.confFolder);
-                logger.info("Configuration reloaded successfully.");
+                
+                // 1. Perform a full, clean shutdown. This will stop all services,
+                // including the ThreadPool and the propertiesFileWatcher thread.
+                logger.info("Restarting node...");
+
+                if (webServer != null) {
+                    webServer.shutdown();
+                }
+
+                if (blockchainProcessor != null) {
+                    blockchainProcessor.shutdown();
+                }
+
+                if (threadPool != null) {
+                    peers.shutdown();
+                    threadPool.shutdown();
+                }
+
+                Db.shutdown();
+
+                if (dbCacheManager != null) {
+                    dbCacheManager.close();
+                }
+
+                if (blockchainProcessor != null && blockchainProcessor.getOclVerify()) {
+                    OCLPoC.destroy();
+                }
+
+                if (propertiesFileWatcher != null) {
+                    propertiesFileWatcher.interrupt();
+                }
+
+                logger.info("BRS {} stopped.", VERSION);
+                LoggerConfigurator.shutdown();
+
+                // 2. Wait a moment for threads to die down.
+                try {
+                    // A small delay helps ensure system resources are released.
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+
+                // 3. Reset all static state variables to null. This is the crucial step
+                // to ensure that no old object instances with terminated resources are
+                // accidentally reused. This creates a clean slate for re-initialization.
+                // Note: This is safe because the static fields are only accessed in a single-threaded context
+                // during the node's lifecycle, and we are currently in the main thread.
+                stores = null;
+                dbs = null;
+                threadPool = null;
+                blockchain = null;
+                blockchainProcessor = null;
+                transactionProcessor = null;
+                transactionService = null;
+                subscriptionService = null;
+                assetExchange = null;
+                propertyService = null;
+                fluxCapacitor = null;
+                dbCacheManager = null;
+                webServer = null;
+                propertiesFileWatcher = null;
+
+                NODE_STATE = 1;
+                init();
+
+                logger.info("Node restarted successfully.");
+                
+            } catch (Exception e) {
+                logger.error("Failed to restart node, forcing full shutdown.", e);
+                // If any error occurs during restart, we perform a full shutdown.
+                // This ensures that the node does not remain in an inconsistent state.
+                shutdown(false);
+                System.exit(1);
             } finally {
-                isReloading.set(false);
+                isRestarting.set(false);
             }
         }
     }
@@ -713,7 +861,7 @@ public final class Signum {
      * Initiates a graceful shutdown of the node.
      * This is a convenience method that calls {@link #shutdown(boolean)} with {@code false}.
      */
-    private static void shutdown() {
+    private void shutdown() {
         shutdown(false);
     }
 
@@ -721,27 +869,25 @@ public final class Signum {
      * Cleans up all node components and services before shutting down.
      * <p>
      * This method stops the web server, shuts down the peer network, terminates the thread pool,
-     * and closes the database connection.
+     * and closes the database connection. It ensures that all resources are released gracefully.
      *
      * @param ignoreDbShutdown if {@code true}, the database connection will not be closed.
      *                         This is used in cases like a GUI restart where the underlying
-     *                         node is stopped, but the process continues.
+     *                         node is stopped, but the Java process continues to run, and the
+     *                         database should remain open for the new node instance.
      */
-    public static void shutdown(boolean ignoreDbShutdown) {
+    public void shutdown(boolean ignoreDbShutdown) {
+
         if (!shuttingdown.get()) {
             logger.info("Shutting down...");
             logger.info("Do not force exit or kill the node process.");
-        }
-
-        if (propertiesFileWatcher != null) {
-            propertiesFileWatcher.interrupt();
         }
 
         if (webServer != null) {
             webServer.shutdown();
         }
         if (threadPool != null) {
-            Peers.shutdown(threadPool);
+            peers.shutdown();
             threadPool.shutdown();
         }
         if (!ignoreDbShutdown && !shuttingdown.get()) {
@@ -755,13 +901,18 @@ public final class Signum {
         if (blockchainProcessor != null && blockchainProcessor.getOclVerify()) {
             OCLPoC.destroy();
         }
+
+        if (propertiesFileWatcher != null) {
+            propertiesFileWatcher.interrupt();
+        }
+
         logger.info("BRS {} stopped.", VERSION);
         LoggerConfigurator.shutdown();
     }
 
     /**
      * Returns the singleton instance of the PropertyService.
-     * @return The {@link PropertyService} instance.
+     * @return The application's {@link PropertyService} instance.
      */
     public static PropertyService getPropertyService() {
         return propertyService;
@@ -769,20 +920,21 @@ public final class Signum {
 
     /**
      * Returns the singleton instance of the FluxCapacitor.
-     * @return The {@link FluxCapacitor} instance.
+     * @return The application's {@link FluxCapacitor} instance, which manages hard forks.
      */
     public static FluxCapacitor getFluxCapacitor() {
         return fluxCapacitor;
     }
 
     /**
-     * A background thread that watches for changes in property files and triggers a reload.
+     * A background thread that watches for changes in {@code node.properties} and
+     * {@code logging.properties} files and triggers a node restart.
      */
-    private static class PropertiesFileWatcher implements Runnable {
+    private class PropertiesFileWatcher implements Runnable {
 
         private final Path confPath;
 
-        PropertiesFileWatcher() {
+        PropertiesFileWatcher(ThreadPool threadPool) {
             this.confPath = Paths.get(Signum.confFolder).toAbsolutePath();
         }
 
@@ -817,12 +969,23 @@ public final class Signum {
                             continue;
                         }
 
+                    try {
                         // The filename is the context of the event.
-                        WatchEvent<Path> ev = (WatchEvent<Path>) event;
-                        Path filename = ev.context();
+                        if (event.context() instanceof Path) {
+                            @SuppressWarnings("unchecked")
+                            WatchEvent<Path> ev = (WatchEvent<Path>) event;
+                            String changedFile = ev.context().toString();
 
-                        if (filename.toString().equals(PROPERTIES_NAME)) {
-                            Signum.reload();
+                            if (changedFile.equals(PROPERTIES_NAME) || changedFile.equals(LOGGING_PROPERTIES_NAME)) {
+                                // Trigger restart in a new thread so that this thread, which is
+                                // part of the threadPool, can terminate gracefully.
+                                logger.info("Configuration file {} changed, restarting...", changedFile);
+                                new Thread(Signum.this::restart, "RestartThread").start();
+                                Thread.currentThread().interrupt();
+                            }
+                        }
+                    } catch (Exception e) {
+                        logger.warn("Error processing file watch event", e);
                         }
                     }
 

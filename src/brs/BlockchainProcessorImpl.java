@@ -99,6 +99,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
   private final DBCacheManagerImpl dbCacheManager;
   private final IndirectIncomingService indirectIncomingService;
   private final long genesisBlockId;
+  private final Peers peers;
 
   private static final int MAX_TIMESTAMP_DIFFERENCE = 15;
   private boolean oclVerify;
@@ -131,6 +132,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     return oclVerify;
   }
 
+  public void shutdown() {
+    logger.info("Shutting down blockchain processor...");
+    blockListeners.clear();
+  }
+
   public BlockchainProcessorImpl(ThreadPool threadPool,
                                  BlockService blockService,
                                  TransactionProcessorImpl transactionProcessor,
@@ -152,7 +158,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                  DBCacheManagerImpl dbCacheManager,
                                  AccountService accountService,
                                  IndirectIncomingService indirectIncomingService,
-                                 AliasService aliasService) {
+                                 AliasService aliasService,
+                                 Peers peers) {
     this.blockService = blockService;
     this.transactionProcessor = transactionProcessor;
     this.timeService = timeService;
@@ -173,6 +180,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     this.accountService = accountService;
     this.indirectIncomingService = indirectIncomingService;
     this.propertyService = propertyService;
+    this.peers = peers;
 
     autoPopOffEnabled = propertyService.getBoolean(Props.AUTO_POP_OFF_ENABLED);
 
@@ -257,7 +265,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
               Peer peer = null;
               do {
-                peer = Peers.getAnyPeer(Peer.State.CONNECTED);
+                peer = peers.getAnyPeer(Peer.State.CONNECTED);
                 if (peer == null) {
                   logger.debug("No peer connected.");
                   return;
@@ -1181,7 +1189,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
       statisticsManager.blockAdded();
       blockListeners.notify(block, Event.BLOCK_PUSHED);
       if (block.getTimestamp() >= timeService.getEpochTime() - MAX_TIMESTAMP_DIFFERENCE) {
-        Peers.sendToSomePeers(block);
+        peers.sendToSomePeers(block);
       }
       if (block.getHeight() >= autoPopOffLastStuckHeight) {
         autoPopOffNumberOfBlocks = 0;

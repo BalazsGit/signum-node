@@ -51,8 +51,10 @@ public final class LoggerConfigurator {
             loggingProperties.load(is);
             foundProperties = true;
           }
+        } catch (IOException e) {
+            // ignore, default file is not required
         }
-        try (InputStream is = new FileInputStream(new File(Signum.CONF_FOLDER, "logging.properties"))) {
+        try (InputStream is = new FileInputStream(new File(Signum.CONF_FOLDER, Signum.LOGGING_PROPERTIES_NAME))) {
           if (is != null) {
             loggingProperties.load(is);
             foundProperties = true;

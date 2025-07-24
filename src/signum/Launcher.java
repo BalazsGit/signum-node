@@ -12,8 +12,9 @@ import brs.Signum;
 import java.awt.*;
 import java.lang.reflect.InvocationTargetException;
 
+// TODO: remove this class when SignumLauncher is fully implemented
 public class Launcher {
-  public static void main(String[] args) {
+/*  public static void main(String[] args) {
     Logger logger = LoggerFactory.getLogger(Launcher.class);
     boolean canRunGui = true;
 
@@ -51,5 +52,5 @@ public class Launcher {
     } else {
       Signum.main(args);
     }
-  }
+  }*/
 }

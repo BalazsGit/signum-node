@@ -9,7 +9,6 @@ import brs.peer.ProcessBlock;
 import brs.props.CaselessProperties;
 import brs.props.Props;
 import com.google.gson.JsonObject;
-import java.util.Properties;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.runner.RunWith;
@@ -28,6 +27,7 @@ import org.powermock.modules.junit4.PowerMockRunner;
 public abstract class AbstractIT {
 
     private ProcessBlock processBlock;
+    private Signum signum;
 
     protected APISender apiSender = new APISender();
 
@@ -36,14 +36,15 @@ public abstract class AbstractIT {
     @Before
     public void setUp() {
         mockStatic(Peers.class);
-        Signum.init(testProperties());
+        signum = new Signum();
+        signum.init(testProperties());
 
         processBlock = new ProcessBlock(Signum.getBlockchain(), Signum.getBlockchainProcessor());
     }
 
     @After
     public void shutdown() {
-        Signum.shutdown(true);
+        signum.shutdown(true);
     }
 
     private CaselessProperties testProperties() {

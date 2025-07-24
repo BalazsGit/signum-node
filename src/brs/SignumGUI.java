@@ -60,7 +60,6 @@ public class SignumGUI extends JFrame {
     private static final int OUTPUT_MAX_LINES = 500;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SignumGUI.class);
-    private static String []args;
 
     private boolean userClosed = false;
     private String iconLocation;
@@ -71,20 +70,24 @@ public class SignumGUI extends JFrame {
 	private JScrollPane textScrollPane = null;
     private String programName = null;
     private String version = null;
+    private Signum signum = null;
     Color iconColor = Color.BLACK;
 
+/*
     public static void main(String []args) {
         new SignumGUI("Signum Node", Props.ICON_LOCATION.getDefaultValue(), Signum.VERSION.toString(), args);
     }
-
-    public SignumGUI(String programName, String iconLocation, String version, String []args) {
+*/
+    public SignumGUI(String programName, String iconLocation, String version, Signum signum) {
+        this.signum = signum;
+        
         try {
             System.setSecurityManager(new SignaGUISecurityManager());
         } catch (UnsupportedOperationException e) {
             // Java 17+ / 21+: Setting a SecurityManager is not supported anymore
             System.err.println("SecurityManager not supported, skipping setup");
         }
-        SignumGUI.args = args;
+        // SignumGUI.args = args;
         this.programName = programName;
         this.version = version;
         setTitle(programName + " " + version);
@@ -213,16 +216,13 @@ public class SignumGUI extends JFrame {
 				// do nothing on error here
 			}
         }).start();
-
-        // Start BRS
-        new Thread(this::runBrs).start();
     }
 
     private void shutdown() {
         userClosed = true;
 
         new Thread(() -> {
-          Signum.shutdown(false);
+          signum.shutdown(false);
 
           if (trayIcon != null && SystemTray.isSupported()) {
               SystemTray.getSystemTray().remove(trayIcon);
@@ -363,9 +363,10 @@ public class SignumGUI extends JFrame {
         }
     }
 
-    private void runBrs() {
+    public void startSignumWithGUI() {
         try {
-            Signum.main(args);
+            signum.init();
+            
             try {
             	SwingUtilities.invokeLater(() -> showTrayIcon());
 

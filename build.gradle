@@ -120,7 +120,7 @@ test {
 }
 
 application {
-    mainClass.set('signum.Launcher')
+    mainClass.set('brs.SignumLauncher')
 }
 
 sourceSets {
