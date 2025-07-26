@@ -9,8 +9,7 @@
     "java.import.projectSelection": "automatic",
     "workbench.colorTheme": "Default Dark Modern",
     "java.server.launchMode": "Standard",
-    "java.configuration.updateBuildConfiguration": "interactive"
-    ,"[java]": {
+    "[java]": {
         "editor.formatOnSave": true
     }
 }
