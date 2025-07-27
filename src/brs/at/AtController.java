@@ -525,27 +525,34 @@ public abstract class AtController {
         // Start with the transactions as provided
         List<AtTransaction> ordered = new ArrayList<>(at.getTransactions());
 
-        // If a transfer is found before a mint of the same asset, swap them so
-        // the mint happens first
-        for (int i = 0; i < ordered.size(); i++) {
-            AtTransaction tx = ordered.get(i);
-            if (tx.getType() != TransactionType.ColoredCoins.ASSET_MINT) {
-                continue;
+        /**
+         * This comparator sorts transactions such that:
+         * ASSET_MINT transactions come before ASSET_TRANSFER transactions for the same asset.
+         * If two transactions are of different types (one is mint and the other is transfer),
+         * they are ordered based on their type.
+         * If both transactions are of the same type (both mint or both transfer),
+         * they maintain their original order.
+         * This ensures that all mint transactions for a specific asset
+         * are processed before any transfer transactions for that asset,
+         * which is essential to prevent
+         * transferring tokens that have not yet been minted within the same block.
+         * Ensure that ASSET_MINT transactions for a specific asset appear before any
+         * ASSET_TRANSFER transactions of the same asset. This is crucial to prevent
+         * attempts to transfer tokens that have not yet been minted within the same block.
+         * A custom comparator provides a clean and efficient (O(n log n)) solution.
+         */
+        ordered.sort((tx1, tx2) -> {
+            if (tx1.getAssetId() != tx2.getAssetId()) {
+                return 0; // Not the same asset, preserve original order.
             }
-
-            long assetId = tx.getAssetId();
-            for (int j = 0; j < i; j++) {
-                AtTransaction other = ordered.get(j);
-                if (other.getType() == TransactionType.ColoredCoins.ASSET_TRANSFER
-                        && other.getAssetId() == assetId) {
-                    Collections.swap(ordered, j, i);
-                    i = j; // continue checking in case there are more transfers before
-                    break;
-                }
-            }
-        }
-
-
+            boolean tx1isMint = tx1.getType() == TransactionType.ColoredCoins.ASSET_MINT;
+            boolean tx2isMint = tx2.getType() == TransactionType.ColoredCoins.ASSET_MINT;
+            boolean tx1isTransfer = tx1.getType() == TransactionType.ColoredCoins.ASSET_TRANSFER;
+            boolean tx2isTransfer = tx2.getType() == TransactionType.ColoredCoins.ASSET_TRANSFER;
+            if (tx1isMint && tx2isTransfer) return -1;
+            if (tx2isMint && tx1isTransfer) return 1;
+            return 0;
+        });
         if (!Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_4, at.getHeight())) {
             for (AtTransaction tx : ordered) {
                 if (AT.findPendingTransaction(tx.getRecipientId(), blockHeight, generatorId)) {
