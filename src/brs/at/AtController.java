@@ -6,6 +6,7 @@ import brs.crypto.Crypto;
 import brs.fluxcapacitor.FluxValues;
 import brs.props.Props;
 import brs.util.Convert;
+import brs.TransactionType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.helpers.NOPLogger;
@@ -15,6 +16,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.security.MessageDigest;
 import java.util.*;
+
 
 public abstract class AtController {
   private AtController() {
@@ -517,35 +519,65 @@ public abstract class AtController {
 
   //platform based implementations
   //platform based
-  private static long makeTransactions(AT at, int blockHeight, long generatorId) throws AtException {
-    long totalAmount = 0;
-    if (!Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_4, at.getHeight())) {
-      for (AtTransaction tx : at.getTransactions()) {
-        if (AT.findPendingTransaction(tx.getRecipientId(), blockHeight, generatorId)) {
-          throw new AtException("Conflicting transaction found");
+    private static long makeTransactions(AT at, int blockHeight, long generatorId) throws AtException {
+        long totalAmount = 0;
+
+        // Start with the transactions as provided
+        List<AtTransaction> ordered = new ArrayList<>(at.getTransactions());
+
+        // If a transfer is found before a mint of the same asset, swap them so
+        // the mint happens first
+        for (int i = 0; i < ordered.size(); i++) {
+            AtTransaction tx = ordered.get(i);
+            if (tx.getType() != TransactionType.ColoredCoins.ASSET_MINT) {
+                continue;
+            }
+
+            long assetId = tx.getAssetId();
+            for (int j = 0; j < i; j++) {
+                AtTransaction other = ordered.get(j);
+                if (other.getType() == TransactionType.ColoredCoins.ASSET_TRANSFER
+                        && other.getAssetId() == assetId) {
+                    Collections.swap(ordered, j, i);
+                    i = j; // continue checking in case there are more transfers before
+                    break;
+                }
+            }
         }
-      }
+
+
+        if (!Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_4, at.getHeight())) {
+            for (AtTransaction tx : ordered) {
+                if (AT.findPendingTransaction(tx.getRecipientId(), blockHeight, generatorId)) {
+                    throw new AtException("Conflicting transaction found");
+                }
+            }
+        }
+
+        for (AtTransaction tx : ordered) {
+            totalAmount += tx.getAmount();
+            AT.addPendingTransaction(tx, blockHeight, generatorId);
+            if (logger.isDebugEnabled()) {
+                logger.debug(
+                    "Transaction to {}, amount {}",
+                    tx.getRecipientId() == null ? 0L : Convert.toUnsignedLong(AtApiHelper.getLong(tx.getRecipientId())),
+                    tx.getAmount()
+                );
+            }
+        }
+
+        AT.addMapUpdates(at.getMapUpdates(), blockHeight, generatorId);
+
+        return totalAmount;
     }
-    for (AtTransaction tx : at.getTransactions()) {
-      totalAmount += tx.getAmount();
-      AT.addPendingTransaction(tx, blockHeight, generatorId);
-      if (logger.isDebugEnabled()) {
-        logger.debug("Transaction to {}, amount {}", tx.getRecipientId() == null ? 0L : Convert.toUnsignedLong(AtApiHelper.getLong(tx.getRecipientId())), tx.getAmount());
-      }
-    }
-    AT.addMapUpdates(at.getMapUpdates(), blockHeight, generatorId);
 
-    return totalAmount;
-  }
-
-  //platform based
-  private static long getATAccountBalance(Long id) {
-    Account.Balance atAccount = Account.getAccountBalance(id);
-
-    if (atAccount != null) {
-      return atAccount.getBalanceNqt();
+    // platform based
+    private static long getATAccountBalance(Long id) {
+        Account.Balance atAccount = Account.getAccountBalance(id);
+        if (atAccount != null) {
+            return atAccount.getBalanceNqt();
+        }
+        return 0;
     }
 
-    return 0;
-  }
 }
