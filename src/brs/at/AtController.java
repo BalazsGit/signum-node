@@ -3,9 +3,9 @@ package brs.at;
 import brs.Account;
 import brs.Signum;
 import brs.crypto.Crypto;
-import brs.fluxcapacitor.FluxValues;
 import brs.props.Props;
 import brs.util.Convert;
+import brs.TransactionType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.helpers.NOPLogger;
@@ -223,6 +223,9 @@ public abstract class AtController {
     long totalFee = 0;
     long totalAmount = 0;
 
+    List<AtTransaction> allIncomingTxs = new ArrayList<>();
+    List<AtTransaction> allOutgoingTxs = new ArrayList<>();
+
     while (payload <= freePayload - costOfOneAT && keys.hasNext()) {
       Long id = keys.next();
       AT at = AT.getAT(id);
@@ -253,11 +256,17 @@ public abstract class AtController {
           }
           at.setpBalance(at.getgBalance());
 
-          long amount = makeTransactions(at, blockHeight, generatorId);
-          if (!Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_4, blockHeight)) {
-            totalAmount = amount;
-          } else {
-            totalAmount += amount;
+          /**
+           * Collect transactions from the AT and categorize them into incoming and outgoing.
+           * This is done to ensure that all incoming transactions are processed first,
+           * followed by outgoing transactions, maintaining the correct order of execution.
+           */
+          for (AtTransaction tx : at.getTransactions()) {
+            if (getExecutionPriority(tx.getType()) < 50) {
+                allIncomingTxs.add(tx);
+            } else {
+                allOutgoingTxs.add(tx);
+            }
           }
 
           totalFee += fee;
@@ -271,6 +280,11 @@ public abstract class AtController {
         }
       }
     }
+
+    // Process all incoming transactions first, then all outgoing transactions
+    totalAmount += processAtTransactions(allIncomingTxs, blockHeight, generatorId);
+    totalAmount += processAtTransactions(allOutgoingTxs, blockHeight, generatorId);
+
 
     byte[] bytesForBlock;
 
@@ -298,6 +312,9 @@ public abstract class AtController {
     MessageDigest digest = Crypto.md5();
     byte[] md5;
     long totalAmount = 0;
+
+    List<AtTransaction> allIncomingTxs = new ArrayList<>();
+    List<AtTransaction> allOutgoingTxs = new ArrayList<>();
 
     for (Map.Entry<Long, byte[]> entry : ats.entrySet()) {
       long atIdLong = entry.getKey();
@@ -336,10 +353,17 @@ public abstract class AtController {
         }
         at.setpBalance(at.getgBalance());
 
-        if (!Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_4, blockHeight)) {
-          totalAmount = makeTransactions(at, blockHeight, generatorId);
-        } else {
-          totalAmount += makeTransactions(at, blockHeight, generatorId);
+        /**
+         * Collect transactions from the AT and categorize them into incoming and outgoing.
+         * This is done to ensure that all incoming transactions are processed first,
+         * followed by outgoing transactions, maintaining the correct order of execution.
+         */
+        for (AtTransaction tx : at.getTransactions()) {
+            if (getExecutionPriority(tx.getType()) < 50) {
+                allIncomingTxs.add(tx);
+            } else {
+                allOutgoingTxs.add(tx);
+            }
         }
 
         totalFee += fee;
@@ -358,6 +382,10 @@ public abstract class AtController {
       }
       logger.debug("Finished running AT {}", Convert.toUnsignedLong(atIdLong));
     }
+
+    // Process all incoming transactions first, then all outgoing transactions
+    totalAmount += processAtTransactions(allIncomingTxs, blockHeight, generatorId);
+    totalAmount += processAtTransactions(allOutgoingTxs, blockHeight, generatorId);
 
     for (AT at : processedATs) {
       at.saveState();
@@ -378,6 +406,9 @@ public abstract class AtController {
     MessageDigest digest = Crypto.md5();
     byte[] md5;
     long totalAmount = 0;
+
+    List<AtTransaction> allIncomingTxs = new ArrayList<>();
+    List<AtTransaction> allOutgoingTxs = new ArrayList<>();
 
     for(Long atIdLong: atProcessorCache.getCurrentBlockAtIds() ){
       ATProcessorCache.ATContext atContext = atProcessorCache.getATContext(atIdLong);
@@ -421,10 +452,17 @@ public abstract class AtController {
         }
         at.setpBalance(at.getgBalance());
 
-        if (!Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_4, blockHeight)) {
-          totalAmount = makeTransactions(at, blockHeight, generatorId);
-        } else {
-          totalAmount += makeTransactions(at, blockHeight, generatorId);
+        /**
+         * Collect transactions from the AT and categorize them into incoming and outgoing.
+         * This is done to ensure that all incoming transactions are processed first,
+         * followed by outgoing transactions, maintaining the correct order of execution.
+         */
+        for (AtTransaction tx : at.getTransactions()) {
+            if (getExecutionPriority(tx.getType()) < 50) {
+                allIncomingTxs.add(tx);
+            } else {
+                allOutgoingTxs.add(tx);
+            }
         }
 
         totalFee += fee;
@@ -443,6 +481,10 @@ public abstract class AtController {
       }
       logger.debug("Finished running AT {}", Convert.toUnsignedLong(atIdLong));
     }
+
+    // Process all incoming transactions first, then all outgoing transactions
+    totalAmount += processAtTransactions(allIncomingTxs, blockHeight, generatorId);
+    totalAmount += processAtTransactions(allOutgoingTxs, blockHeight, generatorId);
 
     processedATs.forEach(AT::saveState);
     AT.saveMapUpdates(blockHeight, generatorId);
@@ -517,35 +559,66 @@ public abstract class AtController {
 
   //platform based implementations
   //platform based
-  private static long makeTransactions(AT at, int blockHeight, long generatorId) throws AtException {
-    long totalAmount = 0;
-    if (!Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_4, at.getHeight())) {
-      for (AtTransaction tx : at.getTransactions()) {
-        if (AT.findPendingTransaction(tx.getRecipientId(), blockHeight, generatorId)) {
-          throw new AtException("Conflicting transaction found");
+    private static long processAtTransactions(List<AtTransaction> transactions, int blockHeight, long generatorId) {
+        long totalAmount = 0;
+
+        for (AtTransaction tx : transactions) {
+            totalAmount += tx.getAmount();
+            AT.addPendingTransaction(tx, blockHeight, generatorId);
+            if (logger.isDebugEnabled()) {
+                logger.debug(
+                    "Transaction to {}, amount {}",
+                    tx.getRecipientId() == null ? 0L : Convert.toUnsignedLong(AtApiHelper.getLong(tx.getRecipientId())),
+                    tx.getAmount()
+                );
+            }
         }
-      }
-    }
-    for (AtTransaction tx : at.getTransactions()) {
-      totalAmount += tx.getAmount();
-      AT.addPendingTransaction(tx, blockHeight, generatorId);
-      if (logger.isDebugEnabled()) {
-        logger.debug("Transaction to {}, amount {}", tx.getRecipientId() == null ? 0L : Convert.toUnsignedLong(AtApiHelper.getLong(tx.getRecipientId())), tx.getAmount());
-      }
-    }
-    AT.addMapUpdates(at.getMapUpdates(), blockHeight, generatorId);
 
-    return totalAmount;
-  }
-
-  //platform based
-  private static long getATAccountBalance(Long id) {
-    Account.Balance atAccount = Account.getAccountBalance(id);
-
-    if (atAccount != null) {
-      return atAccount.getBalanceNqt();
+        return totalAmount;
     }
 
-    return 0;
-  }
+    // platform based
+    private static long getATAccountBalance(Long id) {
+        Account.Balance atAccount = Account.getAccountBalance(id);
+        if (atAccount != null) {
+            return atAccount.getBalanceNqt();
+        }
+        return 0;
+    }
+
+    private static int getExecutionPriority(TransactionType type) {
+        // --- INCOMING / CREATION (Highest Priority, executed first) ---
+        // These transactions provide assets/coins to the AT.
+        // They must be executed before any spending transactions.
+        // A priority < 50 is considered INCOMING.
+        if (type == TransactionType.ColoredCoins.ASSET_ISSUANCE) return 10;
+        if (type == TransactionType.ColoredCoins.ASSET_MINT) return 20;
+
+        // --- OUTGOING / SPENDING (Lower Priority) ---
+        // These transactions spend assets/coins from the AT.
+        // A priority >= 50 is considered OUTGOING.
+        if (type == TransactionType.ColoredCoins.ASSET_TRANSFER) return 50;
+        if (type == TransactionType.ColoredCoins.ASSET_MULTI_TRANSFER) return 51;
+        if (type == TransactionType.ColoredCoins.ASSET_DISTRIBUTE_TO_HOLDERS) return 55;
+        if (type == TransactionType.Payment.ORDINARY ||
+            type == TransactionType.Payment.MULTI_OUT ||
+            type == TransactionType.Payment.MULTI_SAME_OUT) {
+            return 60;
+        }
+
+        // --- OTHER OPERATIONS (Lowest Priority) ---
+        // These are other state changes or market operations that should happen
+        // after all fund movements are settled for the block.
+        if (type == TransactionType.ColoredCoins.ASSET_TRANSFER_OWNERSHIP) return 80;
+        if (type == TransactionType.ColoredCoins.ASSET_ADD_TREASURY_ACCOUNT) return 81;
+        if (type == TransactionType.ColoredCoins.ASK_ORDER_PLACEMENT ||
+            type == TransactionType.ColoredCoins.BID_ORDER_PLACEMENT ||
+            type == TransactionType.ColoredCoins.ASK_ORDER_CANCELLATION ||
+            type == TransactionType.ColoredCoins.BID_ORDER_CANCELLATION) {
+            return 90;
+        }
+
+        // Default for any other type
+        return 100;
+    }
 }
