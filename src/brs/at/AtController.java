@@ -542,17 +542,18 @@ public abstract class AtController {
          * A custom comparator provides a clean and efficient (O(n log n)) solution.
          */
         ordered.sort((tx1, tx2) -> {
-            if (tx1.getAssetId() != tx2.getAssetId()) {
-                return 0; // Not the same asset, preserve original order.
+            if (tx1.getAssetId() == tx2.getAssetId()) {
+                boolean tx1isMint = tx1.getType() == TransactionType.ColoredCoins.ASSET_MINT;
+                boolean tx2isMint = tx2.getType() == TransactionType.ColoredCoins.ASSET_MINT;
+                boolean tx1isTransfer = tx1.getType() == TransactionType.ColoredCoins.ASSET_TRANSFER;
+                boolean tx2isTransfer = tx2.getType() == TransactionType.ColoredCoins.ASSET_TRANSFER;
+
+                if (tx1isMint && tx2isTransfer) return -1;
+                if (tx1isTransfer && tx2isMint) return 1;
             }
-            boolean tx1isMint = tx1.getType() == TransactionType.ColoredCoins.ASSET_MINT;
-            boolean tx2isMint = tx2.getType() == TransactionType.ColoredCoins.ASSET_MINT;
-            boolean tx1isTransfer = tx1.getType() == TransactionType.ColoredCoins.ASSET_TRANSFER;
-            boolean tx2isTransfer = tx2.getType() == TransactionType.ColoredCoins.ASSET_TRANSFER;
-            if (tx1isMint && tx2isTransfer) return -1;
-            if (tx2isMint && tx1isTransfer) return 1;
             return 0;
         });
+        
         if (!Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_4, at.getHeight())) {
             for (AtTransaction tx : ordered) {
                 if (AT.findPendingTransaction(tx.getRecipientId(), blockHeight, generatorId)) {
