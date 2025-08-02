@@ -359,6 +359,10 @@ final class OCLPoC {
                 clReleaseKernel(getKernel);
                 getKernel = null;
             }
+            if (getKernel2 != null) {
+                clReleaseKernel(getKernel2);
+                getKernel2 = null;
+            }
             if (queue != null) {
                 try {
                     clFinish(queue);
