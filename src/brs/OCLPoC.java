@@ -19,14 +19,14 @@ import java.util.Locale;
 
 import static org.jocl.CL.*;
 
-final class OCLPoC {
+class OCLPoC {
     private OCLPoC() {
     }
 
-    private static final Logger logger = LoggerFactory.getLogger(OCLPoC.class);
+    private static Logger logger = LoggerFactory.getLogger(OCLPoC.class);
 
-    private static final int HASHES_PER_ENQUEUE;
-    private static final int MEM_PERCENT;
+    private static int HASHES_PER_ENQUEUE;
+    private static int MEM_PERCENT;
 
     private static cl_context ctx;
     private static cl_command_queue queue;
@@ -38,16 +38,16 @@ final class OCLPoC {
     private static long maxItems;
     private static long MAX_GROUP_ITEMS;
 
-    private static final Object oclLock = new Object();
+    private static Object oclLock = new Object();
 
-    private static final long BUFFER_PER_ITEM = (long) MiningPlot.PLOT_SIZE + 16;
-    private static final long MEM_PER_ITEM = 8 // id
+    private static long BUFFER_PER_ITEM = (long) MiningPlot.PLOT_SIZE + 16;
+    private static long MEM_PER_ITEM = 8 // id
             + 8 // nonce
             + BUFFER_PER_ITEM // buffer
             + 4 // scoop num
             + MiningPlot.SCOOP_SIZE; // output scoop
 
-    static { // Initialize final fields that do not depend on the OCL context
+    static { // Initialize fields that do not depend on the OCL context
         PropertyService propertyService = Signum.getPropertyService();
         HASHES_PER_ENQUEUE = propertyService.getInt(Props.GPU_HASHES_PER_BATCH);
         MEM_PERCENT = propertyService.getInt(Props.GPU_MEM_PERCENT);
@@ -489,8 +489,8 @@ final class OCLPoC {
     }
 
     private static class AutoChooseResult {
-        final int platform;
-        final int device;
+        int platform;
+        int device;
 
         AutoChooseResult(int platform, int device) {
             this.platform = platform;
@@ -517,7 +517,7 @@ final class OCLPoC {
     }
 
     public static class PreValidateFailException extends RuntimeException {
-        transient final Block block;
+        transient Block block;
 
         PreValidateFailException(String message, Throwable cause, Block block) {
             super(message, cause);
