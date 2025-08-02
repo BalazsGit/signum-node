@@ -33,10 +33,10 @@ final class OCLPoC {
     private static cl_program program;
     private static cl_kernel genKernel;
     private static cl_kernel getKernel;
-    private static final cl_kernel getKernel2;
+    private static cl_kernel getKernel2;
 
     private static long maxItems;
-    private static final long MAX_GROUP_ITEMS;
+    private static long MAX_GROUP_ITEMS;
 
     private static final Object oclLock = new Object();
 
@@ -47,10 +47,29 @@ final class OCLPoC {
             + 4 // scoop num
             + MiningPlot.SCOOP_SIZE; // output scoop
 
-    static {
+    static { // Initialize final fields that do not depend on the OCL context
         PropertyService propertyService = Signum.getPropertyService();
         HASHES_PER_ENQUEUE = propertyService.getInt(Props.GPU_HASHES_PER_BATCH);
         MEM_PERCENT = propertyService.getInt(Props.GPU_MEM_PERCENT);
+    }
+
+    /**
+     * Initializes the OpenCL context, command queue, and kernels.
+     * This method is synchronized to prevent race conditions during initialization.
+     * It is designed to be idempotent; if the context is already initialized, it
+     * does nothing.
+     * If initialization fails, it cleans up any partially created resources and
+     * throws an exception.
+     */
+    public static synchronized void init() {
+        if (ctx != null) {
+            return; // Already initialized
+        }
+
+        PropertyService propertyService = Signum.getPropertyService();
+        if (!propertyService.getBoolean(Props.GPU_ACCELERATION)) {
+            return; // Do not initialize if GPU acceleration is disabled
+        }
 
         try {
             boolean autoChoose = propertyService.getBoolean(Props.GPU_AUTODETECT);
@@ -169,10 +188,13 @@ final class OCLPoC {
     }
 
     public static long getMaxItems() {
+        init(); // Ensure OCL is initialized before use
         return maxItems;
     }
 
     public static void validatePoC(HashMap<Block, Block> blocks, int pocVersion, BlockService blockService) {
+        init(); // Ensure OCL is initialized before use
+
         try {
             if (logger.isDebugEnabled()) {
                 logger.debug("starting ocl verify for: {}", blocks.size());
