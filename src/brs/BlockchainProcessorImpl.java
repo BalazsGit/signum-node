@@ -738,7 +738,12 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 if (unVerified > queueThreshold) { // Is there anything to verify
                     if (unVerified >= oclUnverifiedQueue && oclVerify) { // should we use Ocl?
                         verifyWithOcl = true;
-                        if (!gpuUsage.tryAcquire()) { // is Ocl ready ?
+                        try {
+                            if (!gpuUsage.tryAcquire(100, TimeUnit.MILLISECONDS)) { // is Ocl ready ?
+                                verifyWithOcl = false;
+                            }
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
                             logger.debug("already max locked");
                             verifyWithOcl = false;
                         }
