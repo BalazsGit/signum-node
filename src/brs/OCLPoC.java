@@ -360,6 +360,11 @@ final class OCLPoC {
                 getKernel = null;
             }
             if (queue != null) {
+                try {
+                    clFinish(queue);
+                } catch (CLException e) {
+                    logger.warn("Failed to finish OCL command queue before destroying", e);
+                }
                 clReleaseCommandQueue(queue);
                 queue = null;
             }
