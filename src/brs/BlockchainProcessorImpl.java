@@ -1386,6 +1386,15 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             long totalFeeBurntNqt = 0;
             int indirectsCount = 0;
 
+            /**
+             * This map is used to track the provisional unconfirmed balances of accounts
+             * during block generation.
+             * It allows us to simulate the state of accounts without modifying the actual
+             * unconfirmed balances
+             * in the database.
+             */
+            final Map<Long, Long> provisionalUnconfirmedBalances = new HashMap<>();
+
             final Block previousBlock = blockchain.getLastBlock();
             final int blockTimestamp = timeService.getEpochTime();
             final int blockHeight = previousBlock.getHeight() + 1;
@@ -1393,11 +1402,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             // this is just an validation. which collects all valid transactions, which fit
             // into the block
             // finally all stuff is reverted so nothing is written to the db
-            // the block itself with all transactions we found is pushed using pushBlock
-            // which calls
-            // accept (so it's going the same way like a received/synced block)
             try {
-                stores.beginTransaction();
 
                 final TransactionDuplicatesCheckerImpl transactionDuplicatesChecker = new TransactionDuplicatesCheckerImpl();
 
@@ -1506,7 +1511,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
                 int maxIndirects = Signum.getPropertyService().getInt(Props.MAX_INDIRECTS_PER_BLOCK);
                 long feeQuant = Signum.getFluxCapacitor().getValue(FluxValues.FEE_QUANT);
-                transactionService.startNewBlock();
                 for (Map.Entry<Long, Transaction> entry : transactionsToBeIncluded.entrySet()) {
                     Transaction transaction = entry.getValue();
 
@@ -1531,9 +1535,39 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         slotFee = feeQuant;
                     }
                     if (transaction.getFeeNqt() >= slotFee) {
-                        if (transactionService.applyUnconfirmed(transaction)) {
+
+                        // --- IMMUTABLE LOGIC START ---
+                        /**
+                         * Validate the transaction attachment.
+                         * This is where we check if the transaction is valid and can be included in the
+                         * block
+                         * without modifying the actual unconfirmed balances.
+                         * If the transaction is valid, we simulate the state change by updating the
+                         * provisionalUnconfirmedBalances map.
+                         * If the transaction is not valid, we simply skip it.
+                         */
+                        long senderId = transaction.getSenderId();
+                        Account senderAccount = accountService.getAccount(senderId);
+
+                        if (senderAccount == null) {
+                            continue; // Should not happen if unconfirmed tx is valid
+                        }
+
+                        long currentUnconfirmedBalance = provisionalUnconfirmedBalances.getOrDefault(senderId,
+                                senderAccount.getUnconfirmedBalanceNqt());
+                        long totalAmountNQT = Convert.safeAdd(transaction.getAmountNqt(), transaction.getFeeNqt());
+
+                        if (currentUnconfirmedBalance >= totalAmountNQT) {
                             try {
-                                transactionService.validate(transaction);
+                                // Validate the transaction attachment.
+                                // This will throw an exception if the transaction is not valid.
+                                transaction.getType().validateAttachment(transaction);
+
+                                // Successful validation, we update the provisional unconfirmed balance.
+                                provisionalUnconfirmedBalances.put(senderId,
+                                        currentUnconfirmedBalance - totalAmountNQT);
+
+                                // Add the transaction to the ordered block transactions
                                 payloadSize -= transaction.getSize();
                                 totalAmountNqt += transaction.getAmountNqt();
                                 totalFeeNqt += transaction.getFeeNqt();
@@ -1543,16 +1577,14 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                 }
                                 orderedBlockTransactions.add(transaction);
                                 blockSize--;
-                            } catch (SignumException.NotCurrentlyValidException e) {
-                                transactionService.undoUnconfirmed(transaction);
                             } catch (SignumException.ValidationException e) {
+                                // If the transaction is not valid, we simply skip it.
+                                logger.debug("Transaction {} is not valid: {}", transaction.getStringId(),
+                                        e.getMessage());
                                 unconfirmedTransactionStore.remove(transaction);
-                                transactionService.undoUnconfirmed(transaction);
                             }
-                        } else {
-                            // Drop duplicates and transactions that cannot be applied
-                            unconfirmedTransactionStore.remove(transaction);
                         }
+                        // --- IMMUTABLE LOGIC END ---
                     }
                 }
 
