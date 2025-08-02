@@ -1411,6 +1411,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             // finally all stuff is reverted so nothing is written to the db
             try {
 
+                stores.beginTransaction();
+
                 final TransactionDuplicatesCheckerImpl transactionDuplicatesChecker = new TransactionDuplicatesCheckerImpl();
 
                 ToLongFunction<Transaction> priorityCalculator = transaction -> {
