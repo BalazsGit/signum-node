@@ -786,17 +786,24 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                             gpuUsage.release();
                         }
                     } else { // verify using java
-                        try {
-                            Block block = downloadCache.getFirstUnverifiedBlock();
-                            Block prevBlock = downloadCache.getBlock(block.getPreviousBlockId());
-                            if (prevBlock == null) {
-                                prevBlock = blockchain.getBlock(block.getPreviousBlockId());
+                        // Synchronize on the downloadCache to prevent a race condition where multiple
+                        // CPU-verification threads could pick up the same block from the queue before
+                        // it's marked as verified by the first thread.
+                        synchronized (downloadCache) {
+                            try {
+                                Block block = downloadCache.getFirstUnverifiedBlock();
+                                if (block != null) {
+                                    Block prevBlock = downloadCache.getBlock(block.getPreviousBlockId());
+                                    if (prevBlock == null) {
+                                        prevBlock = blockchain.getBlock(block.getPreviousBlockId());
+                                    }
+                                    blockService.preVerify(block, prevBlock);
+                                }
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                            } catch (BlockNotAcceptedException e) {
+                                logger.error("Block failed to preverify: ", e);
                             }
-                            blockService.preVerify(block, prevBlock);
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                        } catch (BlockNotAcceptedException e) {
-                            logger.error("Block failed to preverify: ", e);
                         }
                     }
                 } else {
