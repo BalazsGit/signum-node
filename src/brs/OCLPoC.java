@@ -8,11 +8,12 @@ import org.jocl.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.file.Files;
-import java.nio.file.Paths;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Locale;
 
@@ -117,9 +118,10 @@ final class OCLPoC {
             queue = clCreateCommandQueueWithProperties(ctx, device, new cl_queue_properties(), null);
 
             String source;
-            try {
-                source = new String(Files.readAllBytes(Paths.get("genscoop.cl")));
-            } catch (IOException e) {
+            try (InputStream is = OCLPoC.class.getResourceAsStream("/genscoop.cl");
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                source = reader.lines().collect(java.util.stream.Collectors.joining("\n"));
+            } catch (Exception e) {
                 throw new OCLCheckerException("Cannot read ocl file", e);
             }
 
