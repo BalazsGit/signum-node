@@ -1,12 +1,13 @@
 package brs;
 
+import brs.util.LoggerConfigurator;
 import javax.swing.SwingUtilities;
 
 import brs.props.Props;
 
 public class SignumLauncher {
 
-    public static String []args;
+    public static String[] args;
 
     /**
      * The main entry point for the Signum node application (headless mode).
@@ -16,8 +17,11 @@ public class SignumLauncher {
      *
      * @param args Command-line arguments for the node.
      */
-    
+
     public static void main(String[] args) {
+
+        // Initialize the logger configuration at the very beginning.
+        LoggerConfigurator.init();
 
         SignumLauncher.args = args;
         Signum signum = new Signum(args);
@@ -28,12 +32,10 @@ public class SignumLauncher {
 
         for (String arg : args) {
             if (arg.equals("-l") || arg.equals("--headless")) {
-                startMode = 0;  // Headless mode// GUI mode
-            }
-            else if (arg.equals("-g") || arg.equals("--gui")) {
+                startMode = 0; // Headless mode// GUI mode
+            } else if (arg.equals("-g") || arg.equals("--gui")) {
                 startMode = 1; // GUI mode
-            }
-            else if (arg.equals("-c") || arg.equals("--cli")) {
+            } else if (arg.equals("-c") || arg.equals("--cli")) {
                 startMode = 2; // CLI mode
             }
         }
@@ -46,11 +48,14 @@ public class SignumLauncher {
 
         // Start Signum node with GUI
         if (startMode == 1) {
-            SignumGUI signumGUI = new SignumGUI("Signum Node", Props.ICON_LOCATION.getDefaultValue(), Signum.VERSION.toString(), signum);
-            new Thread(() -> signumGUI.startSignumWithGUI()).start();
+            SwingUtilities.invokeLater(() -> {
+                SignumGUI signumGUI = new SignumGUI("Signum Node", Props.ICON_LOCATION.getDefaultValue(),
+                        Signum.VERSION.toString(), signum);
+                new Thread(signumGUI::startSignumWithGUI, "Signum-Init-Thread").start();
+            });
             return;
         }
 
     }
-        
+
 }

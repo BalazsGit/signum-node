@@ -49,6 +49,11 @@ import brs.util.ThreadPool;
 import brs.util.Time;
 import brs.web.api.http.common.APITransactionManager;
 import brs.web.api.http.common.APITransactionManagerImpl;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import brs.web.server.WebServer;
 import brs.web.server.WebServerContext;
 import brs.web.server.WebServerImpl;
@@ -73,6 +78,10 @@ import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
+
+import javax.swing.SwingUtilities;
+
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.Option;
@@ -107,7 +116,7 @@ import signumj.util.SignumUtils;
 public final class Signum {
 
     /** The current version of the Signum node software. */
-    public static final Version VERSION = Version.parse("v3.9.3");
+    public static final Version VERSION = Version.parse("v3.9.4");
     /** The application identifier used in peer-to-peer communication. */
     public static final String APPLICATION = "BRS";
     /** The default path for the configuration folder. */
@@ -143,6 +152,9 @@ public final class Signum {
                     .build());
 
     private static final Logger logger = LoggerFactory.getLogger(Signum.class);
+
+    /** The single, volatile context that holds all node services. */
+    private static volatile NodeContext context;
 
     /** The manager for all data repositories for various blockchain entities. */
     private static Stores stores;
@@ -345,6 +357,19 @@ public final class Signum {
     private static final AtomicBoolean commandHandlerRunning = new AtomicBoolean(false);
     /** A lock to prevent concurrent restarts. */
     private static final AtomicBoolean isRestarting = new AtomicBoolean(false);
+    private static SignumGUI signumGUI;
+
+    /**
+     * Sets the singleton GUI instance for the application.
+     * This allows other parts of the application, like the restart logic,
+     * to communicate with the GUI.
+     * 
+     * @param gui The SignumGUI instance.
+     */
+    public static void setSignumGUI(SignumGUI gui) {
+        signumGUI = gui;
+    }
+
     /** The thread that watches for property file changes. */
     private static Thread propertiesFileWatcher;
     /** The class name for custom network parameters, if specified. */
@@ -365,7 +390,6 @@ public final class Signum {
      * @throws RuntimeException if the default properties file cannot be loaded.
      */
     private static PropertyService loadProperties(String confFolder) {
-        logger.info("Initializing Signum Node version {}", VERSION);
 
         logger.info("Configurations from folder {}", confFolder);
 
@@ -401,6 +425,7 @@ public final class Signum {
      */
     public Signum(String[] args) {
         this.args = args;
+
         Runtime.getRuntime().addShutdownHook(new Thread(() -> shutdown()));
         confFolder = CONF_FOLDER;
         try {
@@ -487,6 +512,10 @@ public final class Signum {
         return dbs;
     }
 
+    public static NodeContext getContext() {
+        return context;
+    }
+
     /**
      * Validates that a pre-release (development) version is not running on the
      * mainnet.
@@ -513,6 +542,9 @@ public final class Signum {
      * @param customProperties The custom properties to use for initialization.
      */
     public void init(CaselessProperties customProperties) {
+        // Initialize the logger configuration.
+        LoggerConfigurator.init();
+        logger.info("Initializing Signum Node version {}", VERSION);
         initNode(new PropertyServiceImpl(customProperties));
     }
 
@@ -524,6 +556,9 @@ public final class Signum {
      * @param confFolder The path to the configuration folder.
      */
     private void init(String confFolder) {
+        // Initialize the logger configuration.
+        LoggerConfigurator.init();
+        logger.info("Initializing Signum Node version {}", VERSION);
         initNode(loadProperties(confFolder));
     }
 
@@ -535,6 +570,9 @@ public final class Signum {
      * properties and the full initialization of all services.
      */
     public void init() {
+        // Initialize the logger configuration.
+        LoggerConfigurator.init();
+        logger.info("Initializing Signum Node version {}", VERSION);
         initNode(loadProperties(confFolder));
     }
 
@@ -559,8 +597,6 @@ public final class Signum {
      *                        configuration.
      */
     private void initNode(PropertyService propertyService) {
-        // Initialize the logger configuration.
-        LoggerConfigurator.init();
 
         // Set the property service as a static field for global access.
         Signum.propertyService = propertyService;
@@ -599,7 +635,7 @@ public final class Signum {
             // Address prefix and coin name
             // TODO: check
             SignumUtils.setAddressPrefix(propertyService.getString(Props.ADDRESS_PREFIX));
-            SignumUtils.addAddressPrefix("BURST");
+            SignumUtils.addAddressPrefix("BURST"); // For legacy compatibility
             SignumUtils.setValueSuffix(propertyService.getString(Props.VALUE_SUFIX));
 
             timeService = new TimeServiceImpl();
@@ -924,6 +960,24 @@ public final class Signum {
             // Start the web server.
             webServer.start();
 
+            // Create and set the new NodeContext.
+            // This makes the switch to the new set of services atomic.
+            Signum.context = new NodeContext(
+                    propertyService,
+                    threadPool,
+                    dbs,
+                    stores,
+                    dbCacheManager,
+                    blockchain,
+                    blockchainProcessor,
+                    transactionProcessor,
+                    transactionService,
+                    subscriptionService,
+                    assetExchange,
+                    fluxCapacitor,
+                    webServer,
+                    peers);
+
             // Initialize the properties file watcher to monitor changes in the
             // configuration properties file.
             if (propertyService.getBoolean(Props.BRS_DEBUG_TRACE_ENABLED)) {
@@ -1099,45 +1153,38 @@ public final class Signum {
      * before calling {@link #init()} to re-initialize the node with the current
      * configuration.
      */
-    private void restart() {
+    // This method is thread-safe and prevents concurrent restarts.
+    // It uses an AtomicBoolean to ensure that only one restart can be in progress
+    // at
+    // a time.
+    // If a restart is already in progress, it will not start another one.
+    // This is important to avoid issues with multiple threads trying to restart the
+    // node simultaneously, which could lead to inconsistent state or resource
+    // leaks.
+    // The restart process involves:
+    // 1. Shutting down all services in the current NodeContext.
+    // 2. Interrupting the properties file watcher thread to stop monitoring for
+    // changes.
+    // 3. Waiting for a short period to allow all threads to finish gracefully.
+    // 4. Re-initializing the node by calling the init() method, which will create a
+    // new NodeContext and re-initialize all services.
+    public void restart() {
         if (isRestarting.compareAndSet(false, true)) {
             try {
-
-                // Perform a full, clean shutdown. This will stop all services,
-                // including the ThreadPool and the propertiesFileWatcher thread.
                 logger.info("Restarting node...");
 
-                if (webServer != null) {
-                    webServer.shutdown();
+                // 1. Get the current context before it's replaced.
+                NodeContext oldContext = context;
+
+                // 2. Shut down all services in the old context.
+                if (oldContext != null) {
+                    oldContext.shutdown();
                 }
 
-                if (blockchainProcessor != null) {
-                    blockchainProcessor.shutdown();
-                }
-
-                if (threadPool != null) {
-                    peers.shutdown();
-                    threadPool.shutdown();
-                }
-
-                Db.shutdown();
-
-                if (dbCacheManager != null) {
-                    dbCacheManager.close();
-                }
-
-                if (blockchainProcessor != null && blockchainProcessor.getOclVerify()) {
-                    // If OpenCL Proof of Capacity is enabled, destroy the OCLPoC instance.
-                    // This is necessary to release any OpenCL resources before re-initialization.
-                    logger.info("Destroying OCLPoC instance for restart.");
-                    OCLPoC.destroy();
-                }
-
+                // 3. Interrupt the old file watcher thread.
                 if (propertiesFileWatcher != null) {
                     propertiesFileWatcher.interrupt();
                 }
-
-                logger.info("BRS {} stopped.", VERSION);
                 LoggerConfigurator.shutdown();
 
                 // Wait for all threads to finish gracefully.
@@ -1148,29 +1195,14 @@ public final class Signum {
                     Thread.currentThread().interrupt();
                 }
 
-                // Reset all static state variables to null. This is the crucial step
-                // to ensure that no old object instances with terminated resources are
-                // accidentally reused. This creates a clean slate for re-initialization.
-                // Note: This is safe because the static fields are only accessed in a
-                // single-threaded context
-                // during the node's lifecycle, and we are currently in the main thread.
-                stores = null;
-                dbs = null;
-                threadPool = null;
-                blockchain = null;
-                blockchainProcessor = null;
-                transactionProcessor = null;
-                transactionService = null;
-                subscriptionService = null;
-                assetExchange = null;
-                propertyService = null;
-                fluxCapacitor = null;
-                dbCacheManager = null;
-                webServer = null;
-                propertiesFileWatcher = null;
-
+                // 4. Re-initialize. This will create a new NodeContext and assign it
+                // to the static volatile 'context' field.
                 NODE_STATE = 1;
                 init();
+
+                if (signumGUI != null) {
+                    SwingUtilities.invokeLater(signumGUI::reinitOnRestart);
+                }
 
                 logger.info("Node restarted successfully.");
 
@@ -1213,37 +1245,26 @@ public final class Signum {
      *                         instance.
      */
     public void shutdown(boolean ignoreDbShutdown) {
-
-        if (!shuttingdown.get()) {
+        // Use compareAndSet to ensure shutdown logic runs only once.
+        if (shuttingdown.compareAndSet(false, true)) {
             logger.info("Shutting down...");
             logger.info("Do not force exit or kill the node process.");
-        }
 
-        if (webServer != null) {
-            webServer.shutdown();
-        }
-        if (threadPool != null) {
-            peers.shutdown();
-            threadPool.shutdown();
-        }
-        if (!ignoreDbShutdown && !shuttingdown.get()) {
-            shuttingdown.set(true);
-            Db.shutdown();
-        }
+            // Get the current context and shut it down.
+            // The NodeContext's shutdown method handles the correct order for its services.
+            NodeContext currentContext = context;
+            if (currentContext != null) {
+                currentContext.shutdown(ignoreDbShutdown);
+            }
 
-        if (dbCacheManager != null) {
-            dbCacheManager.close();
-        }
-        if (blockchainProcessor != null && blockchainProcessor.getOclVerify()) {
-            OCLPoC.destroy();
-        }
+            if (propertiesFileWatcher != null) {
+                propertiesFileWatcher.interrupt();
+            }
 
-        if (propertiesFileWatcher != null) {
-            propertiesFileWatcher.interrupt();
-        }
+            logger.info("BRS {} stopped.", VERSION);
+            LoggerConfigurator.shutdown();
 
-        logger.info("BRS {} stopped.", VERSION);
-        LoggerConfigurator.shutdown();
+        }
     }
 
     /**

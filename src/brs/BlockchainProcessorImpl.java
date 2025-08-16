@@ -120,21 +120,173 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private final AtomicBoolean isConsistent = new AtomicBoolean(false);
 
     private final boolean autoPopOffEnabled;
+
+    private final List<PeerCountListener> peerCountListeners = new ArrayList<>();
+
+    private final List<NetVolumeListener> netVolumeListeners = new ArrayList<>();
+
+    private final List<ProcessorListener> processorListeners = new ArrayList<>();
+
+    private int lastKnownPeerCount = -1;
+    private int lastKnownConnectedPeerCount = -1;
+    private String lastProcessor = "init";
+
     private int autoPopOffLastStuckHeight = 0;
     private int autoPopOffNumberOfBlocks = 0;
     private ATProcessorCache atProcessorCache = ATProcessorCache.getInstance();
+
+    private int lastTotalSize = 0;
+    private int lastUnverifiedQueueSize = 0;
+
+    private int unverifiedQueueSize = 0;
+
+    private final Listener<Peer> peerListener = peer -> updateAndFirePeerCount();
+
+    private final Listener<Peer> netVolumeListener = peer -> updateAndFireNetVolume();
 
     public final void setOclVerify(Boolean b) {
         oclVerify = b;
     }
 
-    public final Boolean getOclVerify() {
+    public Boolean getOclVerify() {
         return oclVerify;
     }
 
     public void shutdown() {
         logger.info("Shutting down blockchain processor...");
         blockListeners.clear();
+        queueStatusListeners.clear();
+        peerCountListeners.clear();
+        processorListeners.clear();
+        performanceListeners.clear();
+        for (Peers.Event event : Peers.Event.values()) {
+            Peers.removeListener(peerListener, event);
+        }
+        if (getOclVerify()) {
+            logger.info("Destroying OCLPoC instance from BlockchainProcessor.");
+            OCLPoC.destroy();
+        }
+    }
+
+    /**
+     * Listener interface for changes in the verified queue size.
+     * This interface allows components to be notified when the size of the
+     * verified (but not yet pushed) queue changes.
+     */
+    public interface QueueStatusListener {
+        void onQueueStatusChanged(int downloadCacheUnverifiedSize,
+                int downloadCacheVerifiedSize,
+                int downloadCacheTotalSize);
+    }
+
+    private final List<QueueStatusListener> queueStatusListeners = new ArrayList<>();
+
+    public void addQueueStatusListener(QueueStatusListener listener) {
+        queueStatusListeners.add(listener);
+    }
+
+    public void removeQueueStatusListener(QueueStatusListener listener) {
+        queueStatusListeners.remove(listener);
+    }
+
+    private void fireQueueStatusChanged(int downloadCacheUnverifiedSize,
+            int downloadCacheVerifiedSize,
+            int downloadCacheTotalSize) {
+        for (QueueStatusListener listener : queueStatusListeners) {
+            listener.onQueueStatusChanged(downloadCacheUnverifiedSize, downloadCacheVerifiedSize,
+                    downloadCacheTotalSize);
+        }
+    }
+
+    /**
+     * Listener for performance statistics related to block processing.
+     */
+    public interface PerformanceListener {
+        /**
+         * Called when new performance statistics are available after a block is pushed.
+         * 
+         * @param totalTimeMs The total time taken to execute the pushBlock method in
+         *                    milliseconds.
+         * @param dbTimeMs    The time spent within the database transaction in
+         *                    milliseconds.
+         * @param txCount     The number of transactions in the processed block.
+         * @param blockHeight The height of the processed block.
+         */
+        void onPerformanceStatsUpdated(long totalTimeMs, long dbTimeMs, int txCount, int blockHeight);
+    }
+
+    private final List<PerformanceListener> performanceListeners = new ArrayList<>();
+
+    public void addPerformanceListener(PerformanceListener listener) {
+        performanceListeners.add(listener);
+    }
+
+    public void removePerformanceListener(PerformanceListener listener) {
+        performanceListeners.remove(listener);
+    }
+
+    private void firePerformanceStatsUpdated(long totalTimeMs, long dbTimeMs, int txCount, int blockHeight) {
+        performanceListeners
+                .forEach(listener -> listener.onPerformanceStatsUpdated(totalTimeMs, dbTimeMs, txCount, blockHeight));
+    }
+
+    /**
+     * Listener interface for changes in the peer count.
+     * This interface allows components to be notified when the number of peers
+     * changes.
+     */
+    public interface PeerCountListener {
+        void onPeerCountChanged(int newCount, int newConnectedCount);
+    }
+
+    public void addPeerCountListener(PeerCountListener listener) {
+        peerCountListeners.add(listener);
+    }
+
+    public void removePeerCountListener(PeerCountListener listener) {
+        peerCountListeners.remove(listener);
+    }
+
+    private void firePeerCountChanged(int newCount, int newConnectedCount) {
+        for (PeerCountListener listener : peerCountListeners) {
+            listener.onPeerCountChanged(newCount, newConnectedCount);
+        }
+    }
+
+    public interface NetVolumeListener {
+        void onNetVolumeChanged(long uploadedVolume, long downloadedVolume);
+    }
+
+    public void addNetVolumeListener(NetVolumeListener listener) {
+        netVolumeListeners.add(listener);
+    }
+
+    public void removeNetVolumeListener(NetVolumeListener listener) {
+        netVolumeListeners.remove(listener);
+    }
+
+    private void fireNetVolumeChanged(long uploadedVolume, long downloadedVolume) {
+        for (NetVolumeListener listener : netVolumeListeners) {
+            listener.onNetVolumeChanged(uploadedVolume, downloadedVolume);
+        }
+    }
+
+    public interface ProcessorListener {
+        void onProcessorListenerChanged(String newProcessor);
+    }
+
+    public void addProcessorListener(ProcessorListener listener) {
+        processorListeners.add(listener);
+    }
+
+    public void removeProcessorListener(ProcessorListener listener) {
+        processorListeners.remove(listener);
+    }
+
+    private void fireProcessorListenerChanged(String newProcessor) {
+        for (ProcessorListener listener : processorListeners) {
+            listener.onProcessorListenerChanged(newProcessor);
+        }
     }
 
     public BlockchainProcessorImpl(ThreadPool threadPool,
@@ -181,6 +333,13 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         this.indirectIncomingService = indirectIncomingService;
         this.propertyService = propertyService;
         this.peers = peers;
+
+        for (Peers.Event event : Peers.Event.values()) {
+            Peers.listeners.addListener(peerListener, event);
+        }
+
+        Peers.listeners.addListener(netVolumeListener, Peers.Event.UPLOADED_VOLUME);
+        Peers.listeners.addListener(netVolumeListener, Peers.Event.DOWNLOADED_VOLUME);
 
         autoPopOffEnabled = propertyService.getBoolean(Props.AUTO_POP_OFF_ENABLED);
 
@@ -291,7 +450,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                 }
 
                                 /* Cache now contains Cumulative Difficulty */
-
                                 String peerCumulativeDifficulty = JSON
                                         .getAsString(response.get("cumulativeDifficulty"));
                                 if (peerCumulativeDifficulty == null) {
@@ -331,7 +489,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                              * where in chain this common block is fitting and return true if it is worth to
                              * continue.
                              */
-
                             boolean saveInCache = true;
                             if (commonBlockId != cacheLastBlockId) {
                                 if (downloadCache.canBeFork(commonBlockId)) {
@@ -703,6 +860,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                             logger.debug("block was not preverified");
                         }
                         pushBlock(currentBlock); // pushblock removes the block from cache.
+                        updateAndFireQueueStatus();
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     } catch (BlockNotAcceptedException e) {
@@ -725,6 +883,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         threadPool.scheduleThread("ImportBlocks", blockImporterThread,
                 propertyService.getInt(Props.BLOCK_PROCESS_THREAD_DELAY),
                 TimeUnit.MILLISECONDS);
+
         // Is there anything to verify
         // should we use Ocl?
         // is Ocl ready ?
@@ -734,9 +893,12 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             int queueThreshold = oclVerify ? oclUnverifiedQueue : 0;
 
             while (!Thread.interrupted() && ThreadPool.running.get()) {
-                int unVerified = downloadCache.getUnverifiedSize();
-                if (unVerified > queueThreshold) { // Is there anything to verify
-                    if (unVerified >= oclUnverifiedQueue && oclVerify) { // should we use Ocl?
+
+                updateAndFireQueueStatus();
+                int unverifiedQueueSize = downloadCache.getUnverifiedSize();
+
+                if (unverifiedQueueSize > queueThreshold) { // Is there anything to verify
+                    if (unverifiedQueueSize >= oclUnverifiedQueue && oclVerify) { // should we use Ocl?
                         verifyWithOcl = true;
                         try {
                             if (!gpuUsage.tryAcquire(100, TimeUnit.MILLISECONDS)) { // is Ocl ready ?
@@ -773,10 +935,21 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         try {
                             OCLPoC.validatePoC(blocks, pocVersion, blockService);
                             downloadCache.removeUnverifiedBatch(blocks.keySet());
+                            updateAndFireQueueStatus();
+                            /**
+                             * If we are using GPU verification, we switch the processor to GPU
+                             * to indicate that GPU verification is in use.
+                             */
+                            if (!lastProcessor.equals("GPU")) {
+                                lastProcessor = "GPU";
+                                fireProcessorListenerChanged(lastProcessor);
+                                logger.debug("Switched to GPU verification");
+                            }
                         } catch (OCLPoC.PreValidateFailException e) {
                             logger.info(e.toString(), e);
                             blacklistClean(e.getBlock(), e,
                                     "found invalid pull/push data during processing the pocVerification");
+                            updateAndFireQueueStatus();
                         } catch (OCLPoC.OCLCheckerException e) {
                             logger.info("Open CL error. slow verify will occur for the next " + oclUnverifiedQueue
                                     + " Blocks", e);
@@ -785,19 +958,35 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         } finally {
                             gpuUsage.release();
                         }
-                    } else { // verify using java
+                    } else {
+
+                        // verify using java
                         // Synchronize on the downloadCache to prevent a race condition where multiple
                         // CPU-verification threads could pick up the same block from the queue before
                         // it's marked as verified by the first thread.
                         synchronized (downloadCache) {
                             try {
                                 Block block = downloadCache.getFirstUnverifiedBlock();
-                                if (block != null) {
+                                if (block != null && !block.isVerified()) {
+                                    final long cpuStartTime = System.nanoTime();
                                     Block prevBlock = downloadCache.getBlock(block.getPreviousBlockId());
                                     if (prevBlock == null) {
                                         prevBlock = blockchain.getBlock(block.getPreviousBlockId());
                                     }
                                     blockService.preVerify(block, prevBlock);
+                                    updateAndFireQueueStatus();
+                                    /**
+                                     * If we are using CPU verification, we switch the processor to CPU
+                                     * to indicate that CPU verification is in use.
+                                     */
+                                    if (!lastProcessor.equals("CPU")) {
+                                        lastProcessor = "CPU";
+                                        fireProcessorListenerChanged(lastProcessor);
+                                        logger.debug("Switched to CPU verification");
+                                    }
+                                    final long cpuEndTime = System.nanoTime();
+                                    logger.debug("Finished CPU PoC validation for block {}. CPU time: {} ms.",
+                                            block.getId(), (cpuEndTime - cpuStartTime) / 1_000_000.0);
                                 }
                             } catch (InterruptedException e) {
                                 Thread.currentThread().interrupt();
@@ -825,6 +1014,39 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         }
     }
 
+    private void updateAndFireQueueStatus() {
+        int totalSize = downloadCache.size();
+        int unverifiedSize = downloadCache.getUnverifiedSize();
+        int verifiedSize = totalSize - unverifiedSize;
+
+        if (totalSize != lastTotalSize || unverifiedSize != lastUnverifiedQueueSize) {
+            lastUnverifiedQueueSize = unverifiedSize;
+            lastTotalSize = totalSize;
+            fireQueueStatusChanged(unverifiedSize, verifiedSize, totalSize);
+        }
+    }
+
+    private void updateAndFirePeerCount() {
+        int newPeerCount = Peers.getAllPeers().size();
+        int newConnectedPeerCount = Peers.getActivePeers().size();
+        if (newPeerCount != lastKnownPeerCount || newConnectedPeerCount != lastKnownConnectedPeerCount) {
+            lastKnownPeerCount = newPeerCount;
+            lastKnownConnectedPeerCount = newConnectedPeerCount;
+            firePeerCountChanged(newPeerCount, newConnectedPeerCount);
+        }
+    }
+
+    private void updateAndFireNetVolume() {
+        List<Peer> peersList = Peers.getActivePeers();
+        long sumUploadedVolume = 0;
+        long sumDownloadedVolume = 0;
+        for (Peer peer : peersList) {
+            sumUploadedVolume += peer.getUploadedVolume();
+            sumDownloadedVolume += peer.getDownloadedVolume();
+        }
+        fireNetVolumeChanged(sumUploadedVolume, sumDownloadedVolume);
+    }
+
     private void blacklistClean(Block block, Exception e, String description) {
         logger.debug("Blacklisting peer and cleaning cache queue");
         if (block == null) {
@@ -835,6 +1057,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             peer.blacklist(e, description);
         }
         downloadCache.resetCache();
+        updateAndFireQueueStatus();
         logger.debug("Blacklisted peer and cleaned queue");
     }
 
@@ -1010,12 +1233,18 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     }
 
     private void pushBlock(final Block block) throws BlockNotAcceptedException {
+        long totalStartTime = System.nanoTime();
+        long dbStartTime = 0;
+        long dbEndTime = 0;
+
         synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
             stores.beginTransaction();
             int curTime = timeService.getEpochTime();
 
             Block previousLastBlock = null;
             try {
+
+                dbStartTime = System.nanoTime();
 
                 previousLastBlock = blockchain.getLastBlock();
 
@@ -1176,6 +1405,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 long remainingAmount = Convert.safeSubtract(block.getTotalAmountNqt(), calculatedTotalAmount);
                 long remainingFee = Convert.safeSubtract(block.getTotalFeeNqt(), calculatedTotalFee);
 
+                dbEndTime = System.nanoTime();
                 accept(block, remainingAmount, remainingFee);
                 derivedTableManager.getDerivedTables().forEach(DerivedTable::finish);
                 stores.commitTransaction();
@@ -1202,6 +1432,12 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             } finally {
                 stores.endTransaction();
             }
+
+            long totalEndTime = System.nanoTime();
+            long totalTimeMs = TimeUnit.NANOSECONDS.toMillis(totalEndTime - totalStartTime);
+            long dbTimeMs = dbStartTime > 0 ? TimeUnit.NANOSECONDS.toMillis(dbEndTime - dbStartTime) : 0;
+            firePerformanceStatsUpdated(totalTimeMs, dbTimeMs, block.getTransactions().size(), block.getHeight());
+
             logger.debug("Successfully pushed {} (height {})", block.getId(), block.getHeight());
             statisticsManager.blockAdded();
             blockListeners.notify(block, Event.BLOCK_PUSHED);
@@ -1395,10 +1631,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
             /**
              * This map is used to track the provisional unconfirmed balances of accounts
-             * during block generation.
-             * It allows us to simulate the state of accounts without modifying the actual
-             * unconfirmed balances
-             * in the database.
+             * during block generation. It allows us to simulate the state of accounts
+             * without modifying the actual unconfirmed balances in the database,
+             * thus preventing double-spending within the same block.
              */
             final Map<Long, Long> provisionalUnconfirmedBalances = new HashMap<>();
 

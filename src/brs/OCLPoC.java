@@ -14,6 +14,7 @@ import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.HashMap;
 import java.util.Locale;
 
@@ -25,7 +26,8 @@ class OCLPoC {
 
     private static Logger logger = LoggerFactory.getLogger(OCLPoC.class);
 
-    private static int HASHES_PER_ENQUEUE;
+    private static int maxConfiguredHashesPerEnqueue;
+    private static final AtomicInteger dynamicHashesPerEnqueue = new AtomicInteger();
     private static int MEM_PERCENT;
 
     private static cl_context ctx;
@@ -49,7 +51,8 @@ class OCLPoC {
 
     static { // Initialize fields that do not depend on the OCL context
         PropertyService propertyService = Signum.getPropertyService();
-        HASHES_PER_ENQUEUE = propertyService.getInt(Props.GPU_HASHES_PER_BATCH);
+        maxConfiguredHashesPerEnqueue = propertyService.getInt(Props.GPU_HASHES_PER_BATCH);
+        dynamicHashesPerEnqueue.set(maxConfiguredHashesPerEnqueue);
         MEM_PERCENT = propertyService.getInt(Props.GPU_MEM_PERCENT);
     }
 
@@ -192,13 +195,36 @@ class OCLPoC {
         return maxItems;
     }
 
+    /**
+     * Validates a batch of blocks' Proof-of-Capacity using OpenCL for GPU
+     * acceleration.
+     * <p>
+     * This method implements a retry mechanism with dynamic batch sizing. If a
+     * CLException occurs
+     * (often due to the GPU being overwhelmed), it reduces the number of hashes
+     * processed per enqueue
+     * and retries the operation. This makes the validation process more resilient
+     * to different
+     * GPU hardware and driver capabilities without requiring manual configuration.
+     * <p>
+     * All OpenCL memory objects are managed within a try-finally block to ensure
+     * they are
+     * released, preventing resource leaks.
+     *
+     * @param blocks       A map of blocks to their previous blocks, needed for
+     *                     scoop number calculation.
+     * @param pocVersion   The Proof-of-Capacity version to use for validation.
+     * @param blockService The service used to calculate scoop numbers.
+     * @throws OCLCheckerException      if a fatal, non-recoverable OpenCL error
+     *                                  occurs.
+     * @throws PreValidateFailException if a block fails the PoC validation.
+     */
     public static void validatePoC(HashMap<Block, Block> blocks, int pocVersion, BlockService blockService) {
-        init(); // Ensure OCL is initialized before use
+        init();
+
+        final long startTime = System.nanoTime();
 
         try {
-            if (logger.isDebugEnabled()) {
-                logger.debug("starting ocl verify for: {}", blocks.size());
-            }
             byte[] scoopsOut = new byte[MiningPlot.SCOOP_SIZE * blocks.size()];
 
             long jobSize = blocks.size();
@@ -228,15 +254,13 @@ class OCLPoC {
                 scoopNums[i] = blockService.getScoopNum(block);
                 i++;
             }
-            if (logger.isDebugEnabled()) {
-                logger.debug("finished preprocessing: {}", blocks.size());
-            }
 
-            synchronized (oclLock) {
-                if (ctx == null) {
-                    throw new OCLCheckerException("OCL context no longer exists");
-                }
-
+            int initialStepSize = dynamicHashesPerEnqueue.get();
+            int currentStepSize = initialStepSize;
+            boolean success = false;
+            while (!success && currentStepSize >= 1) {
+                // Retry loop for GPU computation with dynamic step size adjustment.
+                final long oclStartTime = System.nanoTime();
                 cl_mem idMem = null;
                 cl_mem nonceMem = null;
                 cl_mem bufferMem = null;
@@ -244,81 +268,112 @@ class OCLPoC {
                 cl_mem scoopOutMem = null;
 
                 try {
-                    idMem = clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 8L * blocks.size(),
-                            Pointer.to(ids), null);
-                    nonceMem = clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                            8L * blocks.size(), Pointer.to(nonces), null);
-                    bufferMem = clCreateBuffer(ctx, CL_MEM_READ_WRITE,
-                            (long) (MiningPlot.PLOT_SIZE + 16) * blocks.size(), null, null);
-                    scoopNumMem = clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                            4L * blocks.size(), Pointer.to(scoopNums), null);
-                    scoopOutMem = clCreateBuffer(ctx, CL_MEM_READ_WRITE,
-                            (long) MiningPlot.SCOOP_SIZE * blocks.size(), null, null);
-
-                    int[] totalSize = new int[] { blocks.size() };
-
-                    clSetKernelArg(genKernel, 0, Sizeof.cl_mem, Pointer.to(idMem));
-                    clSetKernelArg(genKernel, 1, Sizeof.cl_mem, Pointer.to(nonceMem));
-                    clSetKernelArg(genKernel, 2, Sizeof.cl_mem, Pointer.to(bufferMem));
-                    clSetKernelArg(genKernel, 5, Sizeof.cl_int, Pointer.to(totalSize));
-
-                    int c = 0;
-                    int step = HASHES_PER_ENQUEUE;
-                    int[] cur = new int[1];
-                    int[] st = new int[1];
-                    while (c < 8192) {
-                        cur[0] = c;
-                        st[0] = (c + step) > 8192 ? 8192 - c : step;
-                        clSetKernelArg(genKernel, 3, Sizeof.cl_int, Pointer.to(cur));
-                        clSetKernelArg(genKernel, 4, Sizeof.cl_int, Pointer.to(st));
-                        clEnqueueNDRangeKernel(queue, genKernel, 1, null, new long[] { jobSize },
-                                new long[] { MAX_GROUP_ITEMS }, 0, null, null);
-
-                        c += st[0];
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("Starting OCL PoC validation for {} blocks with step size {}...", blocks.size(),
+                                currentStepSize);
                     }
 
-                    if (pocVersion == 2) {
-                        clSetKernelArg(getKernel2, 0, Sizeof.cl_mem, Pointer.to(scoopNumMem));
-                        clSetKernelArg(getKernel2, 1, Sizeof.cl_mem, Pointer.to(bufferMem));
-                        clSetKernelArg(getKernel2, 2, Sizeof.cl_mem, Pointer.to(scoopOutMem));
-                        clSetKernelArg(getKernel2, 3, Sizeof.cl_int, Pointer.to(totalSize));
-                        clEnqueueNDRangeKernel(queue, getKernel2, 1, null, new long[] { jobSize },
-                                new long[] { MAX_GROUP_ITEMS }, 0, null, null);
-                    } else {
-                        clSetKernelArg(getKernel, 0, Sizeof.cl_mem, Pointer.to(scoopNumMem));
-                        clSetKernelArg(getKernel, 1, Sizeof.cl_mem, Pointer.to(bufferMem));
-                        clSetKernelArg(getKernel, 2, Sizeof.cl_mem, Pointer.to(scoopOutMem));
-                        clSetKernelArg(getKernel, 3, Sizeof.cl_int, Pointer.to(totalSize));
-                        clEnqueueNDRangeKernel(queue, getKernel, 1, null, new long[] { jobSize },
-                                new long[] { MAX_GROUP_ITEMS }, 0, null, null);
-                    }
+                    synchronized (oclLock) {
+                        if (ctx == null) {
+                            throw new OCLCheckerException("OCL context no longer exists");
+                        }
 
-                    clEnqueueReadBuffer(queue, scoopOutMem, true, 0,
-                            (long) MiningPlot.SCOOP_SIZE * blocks.size(), Pointer.to(scoopsOut), 0, null, null);
-                } catch (Exception e) {
-                    logger.info("GPU error. Try to set a lower value on GPU.HashesPerBatch in properties.");
-                    return;
+                        idMem = clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 8L * blocks.size(),
+                                Pointer.to(ids), null);
+                        nonceMem = clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                                8L * blocks.size(), Pointer.to(nonces), null);
+                        bufferMem = clCreateBuffer(ctx, CL_MEM_READ_WRITE,
+                                (long) (MiningPlot.PLOT_SIZE + 16) * blocks.size(), null, null);
+                        scoopNumMem = clCreateBuffer(ctx, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                                4L * blocks.size(), Pointer.to(scoopNums), null);
+                        scoopOutMem = clCreateBuffer(ctx, CL_MEM_READ_WRITE,
+                                (long) MiningPlot.SCOOP_SIZE * blocks.size(), null, null);
+
+                        int[] totalSize = new int[] { blocks.size() };
+
+                        clSetKernelArg(genKernel, 0, Sizeof.cl_mem, Pointer.to(idMem));
+                        clSetKernelArg(genKernel, 1, Sizeof.cl_mem, Pointer.to(nonceMem));
+                        clSetKernelArg(genKernel, 2, Sizeof.cl_mem, Pointer.to(bufferMem));
+                        clSetKernelArg(genKernel, 5, Sizeof.cl_int, Pointer.to(totalSize));
+
+                        int c = 0;
+                        int[] cur = new int[1];
+                        int[] st = new int[1];
+                        while (c < 8192) {
+                            cur[0] = c;
+                            st[0] = (c + currentStepSize) > 8192 ? 8192 - c : currentStepSize;
+                            clSetKernelArg(genKernel, 3, Sizeof.cl_int, Pointer.to(cur));
+                            clSetKernelArg(genKernel, 4, Sizeof.cl_int, Pointer.to(st));
+                            clEnqueueNDRangeKernel(queue, genKernel, 1, null, new long[] { jobSize },
+                                    new long[] { MAX_GROUP_ITEMS }, 0, null, null);
+
+                            c += st[0];
+                        }
+
+                        if (pocVersion == 2) {
+                            clSetKernelArg(getKernel2, 0, Sizeof.cl_mem, Pointer.to(scoopNumMem));
+                            clSetKernelArg(getKernel2, 1, Sizeof.cl_mem, Pointer.to(bufferMem));
+                            clSetKernelArg(getKernel2, 2, Sizeof.cl_mem, Pointer.to(scoopOutMem));
+                            clSetKernelArg(getKernel2, 3, Sizeof.cl_int, Pointer.to(totalSize));
+                            clEnqueueNDRangeKernel(queue, getKernel2, 1, null, new long[] { jobSize },
+                                    new long[] { MAX_GROUP_ITEMS }, 0, null, null);
+                        } else {
+                            clSetKernelArg(getKernel, 0, Sizeof.cl_mem, Pointer.to(scoopNumMem));
+                            clSetKernelArg(getKernel, 1, Sizeof.cl_mem, Pointer.to(bufferMem));
+                            clSetKernelArg(getKernel, 2, Sizeof.cl_mem, Pointer.to(scoopOutMem));
+                            clSetKernelArg(getKernel, 3, Sizeof.cl_int, Pointer.to(totalSize));
+                            clEnqueueNDRangeKernel(queue, getKernel, 1, null, new long[] { jobSize },
+                                    new long[] { MAX_GROUP_ITEMS }, 0, null, null);
+                        }
+
+                        clEnqueueReadBuffer(queue, scoopOutMem, true, 0,
+                                (long) MiningPlot.SCOOP_SIZE * blocks.size(), Pointer.to(scoopsOut), 0, null, null);
+                    }
+                    success = true; // If we reach here, the computation was successful.
+                    final long oclEndTime = System.nanoTime();
+                    logger.debug("Finished OCL computation for {} blocks with step size {}. GPU time: {} ms.",
+                            blocks.size(), currentStepSize, (oclEndTime - oclStartTime) / 1_000_000.0);
+                } catch (CLException e) {
+                    logger.warn("GPU error occurred with step size {}. Halving and retrying. Error: {}",
+                            currentStepSize, e.getMessage());
+                    currentStepSize /= 2;
+                    if (currentStepSize == 0) {
+                        dynamicHashesPerEnqueue.set(1);
+                        throw new OCLCheckerException(
+                                "GPU computation failed even with minimal step size. Check GPU/drivers.", e);
+                    }
                 } finally {
-                    if (idMem != null) {
+                    // Ensure all OpenCL memory objects are released, even if an error occurs.
+                    if (idMem != null)
                         clReleaseMemObject(idMem);
-                    }
-                    if (nonceMem != null) {
+                    if (nonceMem != null)
                         clReleaseMemObject(nonceMem);
-                    }
-                    if (bufferMem != null) {
+                    if (bufferMem != null)
                         clReleaseMemObject(bufferMem);
-                    }
-                    if (scoopNumMem != null) {
+                    if (scoopNumMem != null)
                         clReleaseMemObject(scoopNumMem);
-                    }
-                    if (scoopOutMem != null) {
+                    if (scoopOutMem != null)
                         clReleaseMemObject(scoopOutMem);
-                    }
                 }
             }
 
-            if (logger.isDebugEnabled()) {
-                logger.debug("finished ocl, doing rest: {}", blocks.size());
+            // Auto-tuning logic after the loop
+            if (success) {
+                if (currentStepSize < initialStepSize) {
+                    // We had to decrease the step size to succeed. Let's save this new, safer
+                    // value.
+                    dynamicHashesPerEnqueue.set(currentStepSize);
+                    logger.info("GPU batch size dynamically adjusted down to {} for stability.", currentStepSize);
+                } else {
+                    // Succeeded with the initial step size. Let's try to increase it for next time.
+                    // Increase by 12.5% (i.e., divide by 8), but ensure it's at least 1.
+                    int increase = Math.max(1, currentStepSize / 8);
+                    int nextStepSize = Math.min(maxConfiguredHashesPerEnqueue, currentStepSize + increase);
+                    if (dynamicHashesPerEnqueue.compareAndSet(currentStepSize, nextStepSize)
+                            && nextStepSize > currentStepSize) {
+                        logger.info("GPU batch size dynamically adjusted up to {} for performance.", nextStepSize);
+                    }
+                }
             }
 
             ByteBuffer scoopsBuffer = ByteBuffer.wrap(scoopsOut);
@@ -334,8 +389,10 @@ class OCLPoC {
                     throw new PreValidateFailException("Block failed to prevalidate", e, block);
                 }
             });
+            final long endTime = System.nanoTime();
             if (logger.isDebugEnabled()) {
-                logger.debug("finished rest: {}", blocks.size());
+                logger.debug("Finished full PoC validation for {} blocks. Total time: {} ms.", blocks.size(),
+                        (endTime - startTime) / 1_000_000.0);
             }
         } catch (CLException e) {
             // intentionally leave out of unverified cache. It won't slow it that much on
