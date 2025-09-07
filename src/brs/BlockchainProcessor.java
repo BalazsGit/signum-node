@@ -1,5 +1,7 @@
 package brs;
 
+import brs.BlockchainProcessor.PerformanceStats;
+import brs.BlockchainProcessor.QueueStatus;
 import brs.peer.Peer;
 import brs.util.JSON;
 import brs.util.Observable;
@@ -44,16 +46,32 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
      */
     class PerformanceStats {
         public final long totalTimeMs;
-        public final long dbTimeMs;
+        public final long validationTimeMs;
+        public final long txLoopTimeMs;
+        public final long housekeepingTimeMs;
+        public final long txApplyTimeMs;
         public final long atTimeMs;
+        public final long subscriptionTimeMs;
+        public final long blockApplyTimeMs;
+        public final long commitTimeMs;
         public final Block block;
 
-        public PerformanceStats(long totalTimeMs, long dbTimeMs, long atTimeMs, Block block) {
+        public PerformanceStats(long totalTimeMs, long validationTimeMs, long txLoopTimeMs,
+                long housekeepingTimeMs, long txApplyTimeMs, long atTimeMs,
+                long subscriptionTimeMs, long blockApplyTimeMs, long commitTimeMs,
+                Block block) {
             this.totalTimeMs = totalTimeMs;
-            this.dbTimeMs = dbTimeMs;
+            this.validationTimeMs = validationTimeMs;
+            this.txLoopTimeMs = txLoopTimeMs;
+            this.housekeepingTimeMs = housekeepingTimeMs;
+            this.txApplyTimeMs = txApplyTimeMs;
             this.atTimeMs = atTimeMs;
+            this.subscriptionTimeMs = subscriptionTimeMs;
+            this.blockApplyTimeMs = blockApplyTimeMs;
+            this.commitTimeMs = commitTimeMs;
             this.block = block;
         }
+
     }
 
     enum Event {

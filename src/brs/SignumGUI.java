@@ -12,10 +12,9 @@ import java.io.OutputStream;
 import java.io.PrintStream;
 import java.net.URI;
 import java.text.SimpleDateFormat;
-import java.util.LinkedList;
 import java.util.Date;
-import java.util.HashMap;
-import java.util.Hashtable;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.text.SimpleDateFormat;
 
 import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
@@ -33,28 +32,13 @@ import javax.swing.JScrollPane;
 import javax.swing.JSeparator;
 import javax.swing.JTextArea;
 import javax.swing.LookAndFeel;
-import javax.swing.JSlider;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.UIManager;
 
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.jfree.chart.ChartFactory;
-import org.jfree.chart.ChartPanel;
-import org.jfree.chart.JFreeChart;
-import org.jfree.chart.axis.NumberAxis;
-import org.jfree.chart.plot.XYPlot;
-import org.jfree.chart.ui.RectangleInsets;
-import org.jfree.chart.renderer.xy.XYBarRenderer;
-import org.jfree.chart.renderer.xy.XYStepAreaRenderer;
-import org.jfree.chart.renderer.xy.StandardXYBarPainter;
-import org.jfree.data.xy.XYSeries;
-import org.jfree.data.xy.XYSeriesCollection;
-import brs.at.AtController;
 
 import brs.fluxcapacitor.FluxValues;
 import brs.props.PropertyService;
@@ -62,10 +46,6 @@ import brs.props.Props;
 import brs.util.Convert;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
-
-import java.awt.font.TextAttribute;
-import java.util.Map;
-import java.util.function.Consumer;
 
 @SuppressWarnings("serial")
 public class SignumGUI extends JFrame {
@@ -75,7 +55,6 @@ public class SignumGUI extends JFrame {
     public static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("HH:mm:ss yyyy-MM-dd");
 
     private static final int OUTPUT_MAX_LINES = 500;
-    private static final int MAX_SPEED_BPS = 10 * 1024 * 1024; // 10 MB/s
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SignumGUI.class);
     private static String[] args;
@@ -89,70 +68,12 @@ public class SignumGUI extends JFrame {
     private JScrollPane textScrollPane = null;
     private String programName = null;
     private String version = null;
-    Color iconColor = Color.BLACK;
+    private final Color iconColor;
 
-    private JProgressBar syncProgressBarDownloadedBlocks;
-    private JProgressBar syncProgressBarUnverifiedBlocks;
-
-    // New fields for performance chart
-    private static final int CHART_HISTORY_SIZE = 1000;
-    private final LinkedList<Long> blockTimestamps = new LinkedList<>();
-    private final LinkedList<Integer> transactionCounts = new LinkedList<>();
-    private final LinkedList<Long> pushTimes = new LinkedList<>();
-    private final LinkedList<Long> dbTimes = new LinkedList<>();
-    private final LinkedList<Long> atTimes = new LinkedList<>();
-    private final LinkedList<Long> calculationTimes = new LinkedList<>();
-    private final LinkedList<Double> blocksPerSecondHistory = new LinkedList<>();
-    private final LinkedList<Double> transactionsPerSecondHistory = new LinkedList<>();
-    private int movingAverageWindow = 100; // Default value
-    private XYSeries blocksPerSecondSeries;
-    private XYSeries transactionsPerSecondSeries;
-    private XYSeries transactionsPerBlockSeries;
-    private XYSeries pushTimePerBlockSeries;
-    private XYSeries uploadSpeedSeries;
-    private XYSeries downloadSpeedSeries;
-    private XYSeries dbTimePerBlockSeries;
-    private XYSeries calculationTimePerBlockSeries;
-    private XYSeries atTimePerBlockSeries;
-
-    private JProgressBar blocksPerSecondProgressBar;
-    private JProgressBar transactionsPerSecondProgressBar;
-    private JProgressBar transactionsPerBlockProgressBar;
-    private int oclUnverifiedQueueThreshold;
-    private JSlider movingAverageSlider;
-    private JLabel peersLabel;
     private JLabel connectedPeersLabel;
     private JLabel peersCountLabel;
-    private JLabel uploadSpeedLabel;
-    private JLabel downloadSpeedLabel;
     private JLabel uploadVolumeLabel;
-    private JLabel metricsUploadVolumeLabel;
-    private JLabel metricsDownloadVolumeLabel;
     private JLabel downloadVolumeLabel;
-    private String tooltip;
-
-    private long lastNetVolumeUpdateTime = 0;
-    private long lastUploadedVolume = 0;
-    private long lastDownloadedVolume = 0;
-
-    long lastNetVolumeUpdateTimeChart = 0;
-    long lastUploadedVolumeChart = 0;
-    long lastDownloadedVolumeChart = 0;
-
-    private JLabel pushTimeLabel;
-    private JLabel dbTimeLabel;
-    private JLabel calculationTimeLabel;
-    private JLabel atTimeLabel;
-    private JProgressBar pushTimeProgressBar;
-    private JProgressBar dbTimeProgressBar;
-    private JProgressBar calculationTimeProgressBar;
-    private JProgressBar atTimeProgressBar;
-    private JProgressBar uploadSpeedProgressBar;
-    private JProgressBar downloadSpeedProgressBar;
-
-    private ChartPanel performanceChartPanel;
-    private ChartPanel timingChartPanel;
-    private ChartPanel netSpeedChartPanel;
     private JCheckBox showPopOffCheckbox;
     private JCheckBox showMetricsCheckbox;
     private boolean showMetrics = false; // Default: metrics shown
@@ -167,25 +88,20 @@ public class SignumGUI extends JFrame {
     private JButton shutdownButton;
     private JButton restartButton;
 
-    private final LinkedList<Double> uploadSpeedHistory = new LinkedList<>();
-    private final LinkedList<Double> downloadSpeedHistory = new LinkedList<>();
+    private MetricsPanel metricsPanel;
 
-    private XYSeries uploadVolumeSeries;
-    private XYSeries downloadVolumeSeries;
-    private static final int SPEED_HISTORY_SIZE = 1000;
-
-    private JPanel checkboxPanel = null;
-
-    private long uploadedVolume = 0;
-    private long downloadedVolume = 0;
-
-    private JPanel metricsPanel;
+    private final JPanel checkboxPanel;
     private JLabel measurementLabel;
     private JLabel experimentalLabel;
     private JSeparator measurementSeparator;
     private JSeparator experimentalSeparator;
     private JPanel measurementPanel;
     private JPanel experimentalPanel;
+
+    private Dimension progressBarSize2 = new Dimension(150, 20);
+
+    private Insets labelInsets = new Insets(2, 5, 2, 0);
+    private Insets barInsets = new Insets(2, 5, 2, 5);
 
     /**
      * Panel to hold the time tracking labels. Only visible when experimental
@@ -225,20 +141,7 @@ public class SignumGUI extends JFrame {
      * Timer to update the GUI time labels every second.
      */
     private Timer guiTimer;
-    private boolean guiTimerStarted = false;
-
-    private final ExecutorService chartUpdateExecutor = Executors.newSingleThreadExecutor();
-
-    private JProgressBar createProgressBar(int min, int max, Color color, String initialString, Dimension size) {
-        JProgressBar bar = new JProgressBar(min, max);
-        bar.setBackground(color);
-        bar.setPreferredSize(size);
-        bar.setMinimumSize(size);
-        bar.setStringPainted(true);
-        bar.setString(initialString);
-        bar.setValue(min);
-        return bar;
-    }
+    private final AtomicBoolean guiTimerStarted = new AtomicBoolean(false);
 
     private JLabel createLabel(String text, Color color, String tooltip) {
         JLabel label = new JLabel(text);
@@ -268,20 +171,6 @@ public class SignumGUI extends JFrame {
                 }
             }
         });
-    }
-
-    private void addComponent(JPanel panel, Component comp, int x, int y, int gridwidth, int weightx, int weighty,
-            int anchor, int fill, Insets insets) {
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridx = x;
-        gbc.gridy = y;
-        gbc.gridwidth = gridwidth;
-        gbc.weightx = weightx;
-        gbc.weighty = weighty;
-        gbc.anchor = anchor;
-        gbc.fill = fill;
-        gbc.insets = insets;
-        panel.add(comp, gbc);
     }
 
     public static void main(String[] args) {
@@ -331,7 +220,6 @@ public class SignumGUI extends JFrame {
             }
         }
         IconFontSwing.register(FontAwesome.getIconFont());
-
         JTextArea textArea = new JTextArea() {
             @Override
             public void append(String str) {
@@ -364,263 +252,22 @@ public class SignumGUI extends JFrame {
 
         syncProgressBar = new JProgressBar(0, 100);
         syncProgressBar.setStringPainted(true);
-        infoLable = new JLabel("Latest block info");
-
-        // === Metrics Panel ===
-        metricsPanel = new JPanel(new GridBagLayout());
-        metricsPanel.setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
-        GridBagConstraints mainGbc = new GridBagConstraints();
-        mainGbc.gridy = 0;
-        mainGbc.insets = new Insets(0, 5, 0, 5);
-
-        // --- Common sizes ---
-        Dimension progressBarSize = new Dimension(200, 20);
-        Insets labelInsets = new Insets(2, 5, 2, 0);
-        Insets barInsets = new Insets(2, 5, 2, 5);
-
-        // === Performance Metrics Panel ===
-        JPanel performanceMetricsPanel = new JPanel(new GridBagLayout());
-
-        // Download Panel (Progress Bars)
-        JPanel downloadPanel = new JPanel(new GridBagLayout());
-
-        // Verified/Total Blocks
-        tooltip = "Shows the number of blocks verified against the total number of blocks in the queue. A high number of unverified blocks may indicate a slow verification process.";
-        JLabel verifLabel = createLabel("Verified/Total Blocks:", null, tooltip);
-        syncProgressBarDownloadedBlocks = createProgressBar(0, 100, Color.GREEN, "0 / 0 - 0%", progressBarSize);
-        addComponent(downloadPanel, verifLabel, 0, 0, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
-                labelInsets);
-        addComponent(downloadPanel, syncProgressBarDownloadedBlocks, 1, 0, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
-
-        // Unverified Blocks
-        tooltip = "The number of blocks in the download queue that are waiting for PoC (Proof-of-Capacity) verification. A persistently high number might indicate that the CPU or GPU is unable to keep up with the network.";
-        JLabel unVerifLabel = createLabel("Unverified Blocks:", null, tooltip);
-        syncProgressBarUnverifiedBlocks = createProgressBar(0, 2000, Color.GREEN, "0", progressBarSize);
-        addComponent(downloadPanel, unVerifLabel, 0, 1, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
-                labelInsets);
-        addComponent(downloadPanel, syncProgressBarUnverifiedBlocks, 1, 1, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
-
-        // Separator
-        JSeparator separator1 = new JSeparator(SwingConstants.HORIZONTAL);
-        addComponent(downloadPanel, separator1, 0, 2, 2, 1, 0, GridBagConstraints.CENTER, GridBagConstraints.HORIZONTAL,
-                barInsets);
-
-        // Blocks/Second (Moving Average)
-        tooltip = "The moving average of blocks processed per second. This indicates the speed at which your node is catching up with the blockchain.";
-        JLabel blocksPerSecondLabel = createLabel("Blocks/Sec (MA):", Color.CYAN, tooltip);
-        blocksPerSecondProgressBar = createProgressBar(0, 200, null, "0", progressBarSize);
-        addComponent(downloadPanel, blocksPerSecondLabel, 0, 3, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(downloadPanel, blocksPerSecondProgressBar, 1, 3, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
-
-        // Transactions/Second (Moving Average)
-        tooltip = "The moving average of transactions processed per second. This metric reflects the current transactional throughput of the network as seen by your node.";
-        JLabel txPerSecondLabel = createLabel("Transactions/Sec (MA):", Color.GREEN, tooltip);
-        transactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0", progressBarSize);
-        addComponent(downloadPanel, txPerSecondLabel, 0, 4, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(downloadPanel, transactionsPerSecondProgressBar, 1, 4, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
-
-        // Transactions/Block (Moving Average)
-        tooltip = "The moving average of the number of transactions included in each block. This provides insight into how full blocks are on average.";
-        JLabel txPerBlockLabel = createLabel("Transactions/Block (MA):", new Color(255, 165, 0), tooltip);
-        transactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0", progressBarSize);
-        addComponent(downloadPanel, txPerBlockLabel, 0, 5, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(downloadPanel, transactionsPerBlockProgressBar, 1, 5, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
-
-        // Moving Average Slider
-        tooltip = "The number of recent blocks used to calculate the moving average for performance metrics. A larger window provides a smoother but less responsive trend, while a smaller window is more reactive to recent changes.";
-        JLabel maWindowLabel = createLabel("MA Window (Blocks):", null, tooltip);
-
-        // Define the discrete values for the slider
-        final int[] maWindowValues = { 10, 100, 200, 300, 400, 500 };
-        // Find the initial index for the default movingAverageWindow
-        int initialIndex = -1;
-        for (int i = 0; i < maWindowValues.length; i++) {
-            if (maWindowValues[i] == movingAverageWindow) {
-                initialIndex = i;
-                break;
-            }
-        }
-        if (initialIndex == -1) { // If default is not in our list, use a sane default
-            initialIndex = 1; // 100
-            movingAverageWindow = maWindowValues[initialIndex];
-        }
-
-        movingAverageSlider = new JSlider(JSlider.HORIZONTAL, 0, maWindowValues.length - 1, initialIndex);
-        movingAverageSlider.setSnapToTicks(true);
-        movingAverageSlider.setMajorTickSpacing(1);
-        movingAverageSlider.setPaintTicks(true);
-        movingAverageSlider.setPaintLabels(true);
-        movingAverageSlider.setPreferredSize(new Dimension(150, 45));
-
-        Hashtable<Integer, JLabel> labelTable = new Hashtable<>();
-        for (int i = 0; i < maWindowValues.length; i++) {
-            labelTable.put(i, new JLabel(String.valueOf(maWindowValues[i])));
-        }
-
-        movingAverageSlider.setLabelTable(labelTable);
-
-        movingAverageSlider.addChangeListener(e -> {
-            JSlider source = (JSlider) e.getSource();
-            if (!source.getValueIsAdjusting()) {
-                movingAverageWindow = maWindowValues[source.getValue()];
+        String syncTooltipText = "Shows the synchronization progress of the blockchain. It compares your current block height to the estimated highest block height in the network.";
+        syncProgressBar.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (SwingUtilities.isRightMouseButton(e)) {
+                    String title = "Synchronization Progress";
+                    String htmlText = "<html><body><p style='width: 300px;'>" + syncTooltipText.replace("\n", "<br>")
+                            + "</p></body></html>";
+                    JOptionPane.showMessageDialog(SignumGUI.this, htmlText, title, JOptionPane.PLAIN_MESSAGE);
+                }
             }
         });
+        infoLable = new JLabel("Latest block info");
+        addInfoTooltip(infoLable, "Displays the height and timestamp of the latest block your node has processed.");
 
-        addComponent(downloadPanel, maWindowLabel, 0, 6, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
-                labelInsets);
-        addComponent(downloadPanel, movingAverageSlider, 1, 6, 2, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
-
-        // Add downloadPanel to performanceMetricsPanel
-        addComponent(performanceMetricsPanel, downloadPanel, 0, 0, 1, 0, 0, GridBagConstraints.NORTHWEST,
-                GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
-
-        // Performance chart
-        performanceChartPanel = createPerformanceChartPanel();
-        JPanel performanceChartContainer = new JPanel();
-        performanceChartContainer.setLayout(new BoxLayout(performanceChartContainer, BoxLayout.Y_AXIS));
-        performanceChartContainer.add(performanceChartPanel);
-        // TODO: change insets
-        addComponent(performanceMetricsPanel, performanceChartContainer, 1, 0, 1, 0, 0, GridBagConstraints.NORTHWEST,
-                GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
-
-        addToggleListener(blocksPerSecondLabel, performanceChartPanel, 0, 0);
-        addToggleListener(txPerSecondLabel, performanceChartPanel, 0, 1);
-
-        // Add to main metrics panel
-        addComponent(metricsPanel, performanceMetricsPanel, 0, 0, 1, 0, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
-
-        // Create the net speed chart panel early so its listeners can be attached
-        netSpeedChartPanel = createNetSpeedChartPanel();
-
-        // === Timing Metrics Panel ===
-        JPanel timingMetricsPanel = new JPanel(new GridBagLayout());
-
-        // Timing Info Panel (Progress Bars + Labels)
-        JPanel timingInfoPanel = new JPanel(new GridBagLayout());
-
-        // --- Push Time ---
-        tooltip = "The moving average of the total time taken to process and push a new block to the blockchain, including all validations and database operations.";
-        pushTimeLabel = createLabel("Push Time/Block (MA):", Color.BLUE, tooltip);
-        pushTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize);
-        addComponent(timingInfoPanel, pushTimeLabel, 0, 1, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(timingInfoPanel, pushTimeProgressBar, 1, 1, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
-
-        // --- DB Time ---
-        tooltip = "The moving average of the time spent on database operations for each block. High values may indicate a slow disk or database contention.";
-        dbTimeLabel = createLabel("DB Time/Block (MA):", Color.YELLOW, tooltip);
-        dbTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize);
-        addComponent(timingInfoPanel, dbTimeLabel, 0, 2, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
-                labelInsets);
-        addComponent(timingInfoPanel, dbTimeProgressBar, 1, 2, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
-
-        // --- AT Time ---
-        tooltip = "The moving average of the time spent processing Automated Transactions (ATs) within each block. This metric is relevant for assessing the performance impact of smart contracts on the network.";
-        atTimeLabel = createLabel("AT Time/Block (MA):", new Color(153, 0, 76), tooltip);
-        atTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize);
-        addComponent(timingInfoPanel, atTimeLabel, 0, 3, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
-                labelInsets);
-        addComponent(timingInfoPanel, atTimeProgressBar, 1, 3, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
-
-        // --- Calculation Time ---
-        tooltip = "The moving average of the CPU time spent on calculations for each block, excluding database and Automated Transaction (AT) processing time. This includes signature verifications and other cryptographic operations.";
-        calculationTimeLabel = createLabel("Calc Time/Block (MA):", new Color(128, 0, 128),
-                "Moving average CPU calculation time per block.");
-        calculationTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize);
-        addComponent(timingInfoPanel, calculationTimeLabel, 0, 4, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(timingInfoPanel, calculationTimeProgressBar, 1, 4, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
-
-        // --- Separator ---
-        JSeparator separator2 = new JSeparator(SwingConstants.HORIZONTAL);
-        addComponent(timingInfoPanel, separator2, 0, 5, 2, 1, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.HORIZONTAL, barInsets);
-
-        // --- Upload Speed ---
-        tooltip = "The current data upload speed to other peers in the network. This reflects how much blockchain data your node is sharing.";
-        uploadSpeedLabel = createLabel("Upload Speed (MA):", new Color(128, 0, 0), tooltip);
-        uploadSpeedProgressBar = createProgressBar(0, MAX_SPEED_BPS, null, "0 B/s", progressBarSize);
-        addComponent(timingInfoPanel, uploadSpeedLabel, 0, 6, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(timingInfoPanel, uploadSpeedProgressBar, 1, 6, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
-
-        // --- Download Speed ---
-        tooltip = "The current data download speed from other peers in the network. This indicates how quickly your node is receiving blockchain data.";
-        downloadSpeedLabel = createLabel("Download Speed (MA):", new Color(0, 100, 0), tooltip);
-        downloadSpeedProgressBar = createProgressBar(0, MAX_SPEED_BPS, null, "0 B/s", progressBarSize);
-        addComponent(timingInfoPanel, downloadSpeedLabel, 0, 7, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(timingInfoPanel, downloadSpeedProgressBar, 1, 7, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
-
-        // --- Combined Volume ---
-        JPanel combinedVolumePanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
-        combinedVolumePanel.setOpaque(false);
-        tooltip = "The total amount of data uploaded to and downloaded from the network during this session. The format is Uploaded / Downloaded.";
-        JLabel volumeTitleLabel = createLabel("Volume:", null, tooltip);
-        tooltip = "The total amount of data uploaded to the network during this session.";
-        metricsUploadVolumeLabel = createLabel("", new Color(233, 150, 122), tooltip);
-        tooltip = "The total amount of data downloaded from the network during this session.";
-        metricsDownloadVolumeLabel = createLabel("", new Color(50, 205, 50), tooltip);
-        combinedVolumePanel.add(volumeTitleLabel);
-        combinedVolumePanel.add(metricsUploadVolumeLabel);
-        combinedVolumePanel.add(new JLabel("/"));
-        combinedVolumePanel.add(metricsDownloadVolumeLabel);
-        addComponent(timingInfoPanel, combinedVolumePanel, 0, 8, 2, 1, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, barInsets);
-
-        // Add timingInfoPanel to timingMetricsPanel
-        addComponent(timingMetricsPanel, timingInfoPanel, 0, 0, 1, 0, 0, GridBagConstraints.NORTHWEST,
-                GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
-
-        // --- Timing Chart Panel ---
-        timingChartPanel = createTimingChartPanel();
-        JPanel timingChartContainer = new JPanel();
-        timingChartContainer.setLayout(new BoxLayout(timingChartContainer, BoxLayout.Y_AXIS));
-        timingChartContainer.add(timingChartPanel);
-        addComponent(timingMetricsPanel, timingChartContainer, 1, 0, 1, 0, 0, GridBagConstraints.NORTHWEST,
-                GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
-
-        // --- Net Speed Chart Panel ---
-        netSpeedChartPanel = createNetSpeedChartPanel();
-        JPanel netSpeedChartContainer = new JPanel();
-        netSpeedChartContainer.setLayout(new BoxLayout(netSpeedChartContainer, BoxLayout.Y_AXIS));
-        netSpeedChartContainer.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 0));
-        netSpeedChartContainer.add(netSpeedChartPanel);
-        addComponent(timingMetricsPanel, netSpeedChartContainer, 2, 0, 1, 0, 0, GridBagConstraints.NORTHWEST,
-                GridBagConstraints.NONE, new Insets(0, 0, 0, 5));
-
-        // Add the timing metrics group to the main metrics panel
-        addComponent(metricsPanel, timingMetricsPanel, 1, 0, 1, 0, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
-
-        addDualChartToggleListener(txPerBlockLabel, performanceChartPanel, 1, 0, timingChartPanel, 1, 0);
-        addToggleListener(pushTimeLabel, timingChartPanel, 0, 0);
-        addToggleListener(dbTimeLabel, timingChartPanel, 0, 1);
-        addToggleListener(calculationTimeLabel, timingChartPanel, 0, 2);
-        addToggleListener(atTimeLabel, timingChartPanel, 0, 3);
-        addToggleListener(uploadSpeedLabel, netSpeedChartPanel, 0, 0);
-        addToggleListener(downloadSpeedLabel, netSpeedChartPanel, 0, 1);
-
-        Color uploadVolumeColor = new Color(233, 150, 122, 128); // Red
-        Color downloadVolumeColor = new Color(50, 205, 50, 128); // Green
-        addPaintToggleListener(metricsUploadVolumeLabel, netSpeedChartPanel, 1, 1, uploadVolumeColor);
-        addPaintToggleListener(metricsDownloadVolumeLabel, netSpeedChartPanel, 1, 0, downloadVolumeColor);
+        metricsPanel = new MetricsPanel(this);
 
         // === Add checkboxes to toolBar ===
         checkboxPanel = new JPanel();
@@ -659,13 +306,14 @@ public class SignumGUI extends JFrame {
         infoPanel.setLayout(new BoxLayout(infoPanel, BoxLayout.X_AXIS));
 
         // --- Time Labels ---
+        String tooltip;
         timePanel = new JPanel();
         timePanel.setLayout(new BoxLayout(timePanel, BoxLayout.X_AXIS));
         timePanel.setOpaque(false);
-        tooltip = "Displays the total elapsed time since the node application was started.";
-        totalTimeLabel = createLabel("0s", null, tooltip);
-        tooltip = "Displays the total time the node has spent in synchronization mode. The timer is active only when the blockchain is more than 10 blocks behind the network.";
-        syncInProgressTimeLabel = createLabel("0s", null, tooltip);
+        String timeTooltip = "Displays the total elapsed time since the node application was started.";
+        totalTimeLabel = createLabel("0s", null, timeTooltip);
+        String syncTimeTooltip = "Displays the total time the node has spent in synchronization mode. The timer is active only when the blockchain is more than 10 blocks behind the network.";
+        syncInProgressTimeLabel = createLabel("0s", null, syncTimeTooltip);
 
         timeSeparator = new JSeparator(SwingConstants.VERTICAL);
         timeSeparatorLabel = new JLabel(" / ");
@@ -681,9 +329,9 @@ public class SignumGUI extends JFrame {
         // --- Peers ---
         JPanel peersPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         tooltip = "The number of peers your node is currently connected to.";
-        connectedPeersLabel = createLabel("000", null, tooltip);
+        connectedPeersLabel = createLabel("0", null, tooltip);
         tooltip = "The total number of peers discovered by your node.";
-        peersCountLabel = createLabel("000", null, tooltip);
+        peersCountLabel = createLabel("0", null, tooltip);
 
         peersPanel.add(new JLabel("Peers: "));
         peersPanel.add(connectedPeersLabel);
@@ -695,11 +343,11 @@ public class SignumGUI extends JFrame {
 
         // Upload
         tooltip = "The total amount of data your node has uploaded to other peers since the application started.";
-        uploadVolumeLabel = createLabel("▲ 000 MB", null, tooltip);
+        uploadVolumeLabel = createLabel("▲ 0 MB", null, tooltip);
 
         // Download
         tooltip = "The total amount of data your node has downloaded from other peers since the application started.";
-        downloadVolumeLabel = createLabel("▼ 000 MB", null, tooltip);
+        downloadVolumeLabel = createLabel("▼ 0 MB", null, tooltip);
 
         volumePanel.add(uploadVolumeLabel);
         volumePanel.add(new JLabel(" / "));
@@ -721,10 +369,10 @@ public class SignumGUI extends JFrame {
         measurementPanel.setLayout(new BoxLayout(measurementPanel, BoxLayout.X_AXIS));
         measurementPanel.setOpaque(false);
         measurementSeparator = new JSeparator(SwingConstants.VERTICAL);
-        tooltip = "Performance measurement is active. \n"
-                + "Detailed syncronization datas are collecting for each blocks and being saved to \n"
-                + "measurement/sync_measurement.csv and \n"
-                + "measurement/sync_progress.csv for analysis.";
+        tooltip = "Performance measurement is active.\n"
+                + "Detailed synchronization data is being collected for each block and saved to:\n"
+                + "- measurement/sync_measurement.csv\n"
+                + "- measurement/sync_progress.csv\n" + "for analysis.";
         measurementLabel = createLabel("🔬 MEAS", null, tooltip);
         measurementPanel.setVisible(false);
 
@@ -740,9 +388,8 @@ public class SignumGUI extends JFrame {
         experimentalPanel.setLayout(new BoxLayout(experimentalPanel, BoxLayout.X_AXIS));
         experimentalPanel.setOpaque(false);
         experimentalSeparator = new JSeparator(SwingConstants.VERTICAL);
-        tooltip = "Experimental feature is enabled.\n"
-                + "Symplified datas are collecting and being saved to \n"
-                + "measurement/sync_progress.csv file for analysis.";
+        tooltip = "Experimental feature is enabled.\n" + "Simplified data is being collected and saved to:\n"
+                + "- measurement/sync_progress.csv\n" + "for analysis.";
         experimentalLabel = createLabel("⚗ EXP", null, tooltip);
         experimentalPanel.setVisible(false);
 
@@ -758,9 +405,6 @@ public class SignumGUI extends JFrame {
         bottomPanel.add(infoLable, BorderLayout.CENTER);
         bottomPanel.add(infoPanel, BorderLayout.LINE_END);
 
-        pack();
-        setSize(Math.max(topPanel.getPreferredSize().width, metricsPanel.getPreferredSize().width), 800);
-        setLocationRelativeTo(null);
         try {
             setIconImage(ImageIO.read(getClass().getResourceAsStream(iconLocation)));
         } catch (IOException e) {
@@ -785,99 +429,27 @@ public class SignumGUI extends JFrame {
             }
         });
 
-        // Timer to periodically update the network speed chart so it flows even with no
-        // traffic
-        Timer netSpeedChartUpdater = new Timer(100, e -> {
-            updateNetVolumeAndSpeedChart(uploadedVolume, downloadedVolume);
-        });
-        netSpeedChartUpdater.start();
-
+        pack();
+        setSize(Math.max(topPanel.getPreferredSize().width, metricsPanel.getPreferredSize().width), 800);
+        setLocationRelativeTo(null);
         showWindow();
 
         // Start BRS
         new Thread(this::startSignumWithGUI).start();
     }
 
-    /**
-     * A generic helper method to add a toggle listener to a JLabel.
-     * It handles the common logic of toggling a 'visible' client property,
-     * switching the font between normal and strikethrough, and then executing a
-     * custom action.
-     *
-     * @param label          The label to attach the listener to.
-     * @param onToggleAction The specific action to perform when the label is
-     *                       toggled.
-     *                       It receives the new visibility state as a boolean.
-     */
-    private void addLabelToggleListener(JLabel label, Consumer<Boolean> onToggleAction) {
-        label.putClientProperty("visible", true);
-        final Font originalFont = label.getFont();
-        // Create a strikethrough version of the font to indicate a disabled state
-        final Map<TextAttribute, Object> attributes = new HashMap<>(originalFont.getAttributes());
-        attributes.put(TextAttribute.STRIKETHROUGH, TextAttribute.STRIKETHROUGH_ON);
-        final Font strikethroughFont = originalFont.deriveFont(attributes);
-
-        label.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent evt) {
-                if (SwingUtilities.isLeftMouseButton(evt)) {
-                    // Toggle the visibility state
-                    boolean isVisible = !((boolean) label.getClientProperty("visible"));
-                    label.putClientProperty("visible", isVisible);
-
-                    // Update the label's font to show the state
-                    label.setFont(isVisible ? originalFont : strikethroughFont);
-
-                    // Perform the specific toggle action
-                    onToggleAction.accept(isVisible);
-                }
-            }
-        });
-    }
-
-    private void addToggleListener(JLabel label, ChartPanel chartPanel, int rendererIndex, int seriesIndex) {
-        addLabelToggleListener(label, isVisible -> chartPanel.getChart().getXYPlot().getRenderer(rendererIndex)
-                .setSeriesVisible(seriesIndex, isVisible));
-    }
-
-    private void addPaintToggleListener(JLabel label, ChartPanel chartPanel, int rendererIndex, int seriesIndex,
-            Color originalColor) {
-        final Color transparentColor = new Color(0, 0, 0, 0);
-        addLabelToggleListener(label, isVisible -> {
-            org.jfree.chart.renderer.xy.AbstractXYItemRenderer renderer = (org.jfree.chart.renderer.xy.AbstractXYItemRenderer) chartPanel
-                    .getChart().getXYPlot().getRenderer(rendererIndex);
-
-            renderer.setSeriesVisible(seriesIndex, isVisible);
-            renderer.setSeriesPaint(seriesIndex, isVisible ? originalColor : transparentColor);
-        });
-    }
-
-    private void addDualChartToggleListener(JLabel label,
-            ChartPanel chartPanel1, int rendererIndex1, int seriesIndex1,
-            ChartPanel chartPanel2, int rendererIndex2, int seriesIndex2) {
-        addLabelToggleListener(label, isVisible -> {
-            chartPanel1.getChart().getXYPlot().getRenderer(rendererIndex1).setSeriesVisible(seriesIndex1, isVisible);
-            chartPanel2.getChart().getXYPlot().getRenderer(rendererIndex2).setSeriesVisible(seriesIndex2, isVisible);
-        });
-    }
-
-    public SignumGUI(String programName, String iconLocation, String version, Signum signum) {
-        this.programName = programName;
-        this.version = version;
-    }
-
     private void shutdown() {
         userClosed = true;
 
-        new Thread(() -> {
-            Signum.shutdown(false);
+        Signum.shutdown(false);
 
-            if (trayIcon != null && SystemTray.isSupported()) {
-                SystemTray.getSystemTray().remove(trayIcon);
-            }
-            chartUpdateExecutor.shutdown();
-            System.exit(0);
-        }).start();
+        if (trayIcon != null && SystemTray.isSupported()) {
+            SystemTray.getSystemTray().remove(trayIcon);
+        }
+        if (metricsPanel != null) {
+            metricsPanel.shutdown();
+        }
+        System.exit(0);
     }
 
     private void showTrayIcon() {
@@ -1070,20 +642,9 @@ public class SignumGUI extends JFrame {
 
     private void initListeners() {
         BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
-        blockchainProcessor.addListener(block -> onQueueStatus(), BlockchainProcessor.Event.QUEUE_STATUS_CHANGED);
         blockchainProcessor.addListener(block -> onPeerCountChanged(), BlockchainProcessor.Event.PEER_COUNT_CHANGED);
         blockchainProcessor.addListener(block -> onNetVolumeChanged(), BlockchainProcessor.Event.NET_VOLUME_CHANGED);
-        blockchainProcessor.addListener(this::onPerformanceStatsUpdated,
-                BlockchainProcessor.Event.PERFORMANCE_STATS_UPDATED);
         blockchainProcessor.addListener(this::onBlockPushed, BlockchainProcessor.Event.BLOCK_PUSHED);
-    }
-
-    public void onQueueStatus() {
-        BlockchainProcessor.QueueStatus status = Signum.getBlockchainProcessor().getQueueStatus();
-        if (status != null) {
-            SwingUtilities.invokeLater(
-                    () -> updateQueueStatus(status.unverifiedSize, status.verifiedSize, status.totalSize));
-        }
     }
 
     public void onPeerCountChanged() {
@@ -1096,14 +657,28 @@ public class SignumGUI extends JFrame {
         BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
         long newDownloadedVolume = blockchainProcessor.getDownloadedVolume();
         SwingUtilities.invokeLater(() -> {
-            updateNetVolume(blockchainProcessor.getUploadedVolume(), newDownloadedVolume);
+            uploadVolumeLabel.setText("▲ " + formatDataSize(blockchainProcessor.getUploadedVolume()));
+            downloadVolumeLabel.setText("▼ " + formatDataSize(newDownloadedVolume));
+
+            // Initial check for sync status before any timers start, to ensure the
+            // sync_in_progress timer starts correctly.
+            if (Signum.getBlockchain() != null) {
+                Block lastBlock = Signum.getBlockchain().getLastBlock();
+                if (lastBlock != null) {
+                    Date blockDate = Convert.fromEpochTime(lastBlock.getTimestamp());
+                    Date now = new Date();
+                    long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
+                    int missingBlocks = (int) ((now.getTime() - blockDate.getTime()) / (blockTime * 1000));
+                    isSyncing = missingBlocks > 10;
+                }
+            }
 
             // Start the GUI timer only once, when the first download volume is received,
             // and if experimental features are enabled in the config.
-            if (Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL) && !guiTimerStarted
-                    && newDownloadedVolume > 0) {
+            if (Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL)
+                    && blockchainProcessor.getDownloadedVolume() > 0
+                    && !guiTimerStarted.getAndSet(true)) {
                 startGuiTimer();
-                guiTimerStarted = true;
             }
         });
     }
@@ -1111,50 +686,32 @@ public class SignumGUI extends JFrame {
     private void startGuiTimer() {
         guiTimer = new Timer(1000, e -> {
             if (Signum.getBlockchain() != null && Signum.getBlockchainProcessor() != null) {
-
-                // The timer is started when the first download volume is received, so we
-                // increment total elapsed time.
                 guiAccumulatedSyncTimeMs += 1000;
                 totalTimeLabel.setText("🕒 " + formatDuration(guiAccumulatedSyncTimeMs));
-
-                int height = Signum.getBlockchain().getHeight();
-                int feederHeight = Signum.getBlockchainProcessor().getLastBlockchainFeederHeight();
-                int diff = feederHeight > 0 ? feederHeight - height : 0;
-
-                if (!isSyncing && diff >= 10) {
-                    isSyncing = true;
-                } else if (isSyncing && diff <= 1) {
-                    isSyncing = false;
-                }
 
                 if (isSyncing) {
                     guiAccumulatedSyncInProgressTimeMs += 1000;
                 }
                 syncInProgressTimeLabel
                         .setText("🔄 " + formatDuration(guiAccumulatedSyncInProgressTimeMs));
-
                 updateTimeLabelVisibility();
             }
         });
         guiTimer.start();
     }
 
-    public void onPerformanceStatsUpdated(Block block) {
-        BlockchainProcessor.PerformanceStats stats = Signum.getBlockchainProcessor().getPerformanceStats();
-        if (stats != null && block != null) {
-            chartUpdateExecutor.submit(() -> {
-                updateTimingChart(stats.totalTimeMs, stats.dbTimeMs, stats.atTimeMs, block);
-            });
-        }
-    }
-
     private void onBlockPushed(Block block) {
         if (block == null)
             return;
+        SwingUtilities.invokeLater(() -> {
+            updateLatestBlock(block);
 
-        // Submit the heavy lifting to a background thread
-        chartUpdateExecutor.submit(() -> updatePerformanceChart(block));
-        SwingUtilities.invokeLater(() -> updateLatestBlock(block));
+            // Start the GUI timer only once, when the first block is pushed,
+            // and if experimental features are enabled in the config.
+            if (Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL) && !guiTimerStarted.getAndSet(true)) {
+                startGuiTimer();
+            }
+        });
     }
 
     public void startSignumWithGUI() {
@@ -1163,7 +720,6 @@ public class SignumGUI extends JFrame {
             Signum.main(args);
 
             // Now that properties are loaded, set the correct values for the GUI
-            oclUnverifiedQueueThreshold = Signum.getPropertyService().getInt(Props.GPU_UNVERIFIED_QUEUE);
             showPopOff = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
             showMetrics = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
             boolean measurementActive = Signum.getPropertyService().getBoolean(Props.MEASUREMENT_ACTIVE);
@@ -1171,6 +727,7 @@ public class SignumGUI extends JFrame {
 
             try {
                 SwingUtilities.invokeLater(() -> {
+                    metricsPanel.init();
                     showTrayIcon();
                     // Sync checkbox states with loaded properties
                     showPopOffCheckbox.setSelected(showPopOff);
@@ -1264,6 +821,15 @@ public class SignumGUI extends JFrame {
         long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
 
         int missingBlocks = (int) ((now.getTime() - blockDate.getTime()) / (blockTime * 1000));
+
+        // Start syncing if more than 10 block times behind, stop if 1 or less.
+        // This is more reliable than peer height difference, especially at startup.
+        if (!isSyncing && missingBlocks > 10) {
+            isSyncing = true;
+        } else if (isSyncing && missingBlocks <= 1) {
+            isSyncing = false;
+        }
+
         if (missingBlocks < 0) {
             missingBlocks = 0;
         }
@@ -1279,139 +845,10 @@ public class SignumGUI extends JFrame {
             prog = 100.0f;
         }
         syncProgressBar.setValue((int) prog);
+        syncProgressBar.setPreferredSize(progressBarSize2);
+        syncProgressBar.setMaximumSize(progressBarSize2);
+        syncProgressBar.setMinimumSize(progressBarSize2);
         syncProgressBar.setString(String.format("%.2f %%", prog));
-    }
-
-    private void updateQueueStatus(int downloadCacheUnverifiedSize,
-            int downloadCacheVerifiedSize,
-            int downloadCacheTotalSize) {
-        if (!showMetrics) {
-            return; // Don't update queue status if metrics are not shown
-        }
-
-        syncProgressBarDownloadedBlocks.setStringPainted(true);
-        syncProgressBarUnverifiedBlocks.setStringPainted(true);
-
-        syncProgressBarDownloadedBlocks.setPreferredSize(new java.awt.Dimension(150, 20));
-        syncProgressBarUnverifiedBlocks.setPreferredSize(new java.awt.Dimension(150, 20));
-
-        if (downloadCacheTotalSize != 0) {
-            syncProgressBarDownloadedBlocks.setString(downloadCacheVerifiedSize + " / " + downloadCacheTotalSize + " - "
-                    + 100 * downloadCacheVerifiedSize / downloadCacheTotalSize + "%");
-            syncProgressBarDownloadedBlocks.setValue(100 * downloadCacheVerifiedSize / downloadCacheTotalSize);
-
-        } else {
-            syncProgressBarDownloadedBlocks.setString("0 / 0 - 0%");
-            syncProgressBarDownloadedBlocks.setValue(0);
-        }
-
-        syncProgressBarUnverifiedBlocks.setString(downloadCacheUnverifiedSize + "");
-        syncProgressBarUnverifiedBlocks.setValue(downloadCacheUnverifiedSize);
-
-        if (downloadCacheUnverifiedSize > oclUnverifiedQueueThreshold) {
-            syncProgressBarUnverifiedBlocks.setForeground(Color.RED);
-        } else {
-            syncProgressBarUnverifiedBlocks.setForeground(Color.GREEN);
-        }
-    }
-
-    private void updateNetVolumeAndSpeedChart(long uploadedVolume, long downloadedVolume) {
-        chartUpdateExecutor.submit(() -> {
-            // --- Calculations on background thread ---
-            long currentTime = System.currentTimeMillis();
-            if (lastNetVolumeUpdateTime == 0) {
-                lastNetVolumeUpdateTime = currentTime;
-                lastUploadedVolume = uploadedVolume;
-                lastDownloadedVolume = downloadedVolume;
-                return;
-            }
-
-            long deltaTime = currentTime - lastNetVolumeUpdateTime;
-            if (deltaTime <= 0) {
-                return; // Avoid division by zero or negative time intervals
-            }
-
-            long deltaUploaded = uploadedVolume - lastUploadedVolume;
-            long deltaDownloaded = downloadedVolume - lastDownloadedVolume;
-
-            double currentUploadSpeed = (double) deltaUploaded * 1000 / deltaTime; // bytes per second
-            double currentDownloadSpeed = (double) deltaDownloaded * 1000 / deltaTime; // bytes per second
-
-            // Add current speed to history and maintain size
-            uploadSpeedHistory.add(currentUploadSpeed);
-            if (uploadSpeedHistory.size() > SPEED_HISTORY_SIZE) {
-                uploadSpeedHistory.removeFirst();
-            }
-
-            downloadSpeedHistory.add(currentDownloadSpeed);
-            if (downloadSpeedHistory.size() > SPEED_HISTORY_SIZE) {
-                downloadSpeedHistory.removeFirst();
-            }
-
-            int currentWindowSize = Math.min(uploadSpeedHistory.size(), movingAverageWindow);
-            if (currentWindowSize < 1) {
-                return;
-            }
-
-            double avgUploadSpeed = uploadSpeedHistory.stream()
-                    .skip(Math.max(0, uploadSpeedHistory.size() - currentWindowSize))
-                    .mapToDouble(d -> d)
-                    .average().orElse(0.0);
-
-            double avgDownloadSpeed = downloadSpeedHistory.stream()
-                    .skip(Math.max(0, downloadSpeedHistory.size() - currentWindowSize))
-                    .mapToDouble(d -> d)
-                    .average().orElse(0.0);
-
-            lastNetVolumeUpdateTime = currentTime;
-            lastUploadedVolume = uploadedVolume;
-            lastDownloadedVolume = downloadedVolume;
-
-            // --- UI Updates on EDT ---
-            SwingUtilities.invokeLater(() -> {
-                uploadVolumeLabel.setText("▲ " + formatDataSize(uploadedVolume));
-                downloadVolumeLabel.setText("▼ " + formatDataSize(downloadedVolume));
-
-                if (metricsUploadVolumeLabel != null) {
-                    metricsUploadVolumeLabel.setText("▲ " + formatDataSize(uploadedVolume));
-                }
-                if (metricsDownloadVolumeLabel != null) {
-                    metricsDownloadVolumeLabel.setText("▼ " + formatDataSize(downloadedVolume));
-                }
-
-                uploadSpeedProgressBar.setValue((int) avgUploadSpeed);
-                uploadSpeedProgressBar.setString(formatDataRate(avgUploadSpeed));
-                downloadSpeedProgressBar.setValue((int) avgDownloadSpeed);
-                downloadSpeedProgressBar.setString(formatDataRate(avgDownloadSpeed));
-
-                if (uploadedVolume > 0 || downloadedVolume > 0) {
-                    uploadSpeedSeries.add(currentTime, avgUploadSpeed);
-                    downloadSpeedSeries.add(currentTime, avgDownloadSpeed);
-                    uploadVolumeSeries.add(currentTime, uploadedVolume);
-                    downloadVolumeSeries.add(currentTime, downloadedVolume);
-
-                    while (uploadSpeedSeries.getItemCount() > SPEED_HISTORY_SIZE) {
-                        uploadSpeedSeries.remove(0);
-                    }
-                    while (downloadSpeedSeries.getItemCount() > SPEED_HISTORY_SIZE) {
-                        downloadSpeedSeries.remove(0);
-                    }
-                    while (uploadVolumeSeries.getItemCount() > SPEED_HISTORY_SIZE) {
-                        uploadVolumeSeries.remove(0);
-                    }
-                    while (downloadVolumeSeries.getItemCount() > SPEED_HISTORY_SIZE) {
-                        downloadVolumeSeries.remove(0);
-                    }
-                }
-            });
-        });
-    }
-
-    private void updateNetVolume(long uploadedVolume, long downloadedVolume) {
-
-        this.uploadedVolume = uploadedVolume;
-        this.downloadedVolume = downloadedVolume;
-
     }
 
     private void updatePeerCount(int newConnectedCount, int count) {
@@ -1430,399 +867,6 @@ public class SignumGUI extends JFrame {
             unitIndex++;
         }
         return String.format("%.2f %s", bytes, units[unitIndex]);
-    }
-
-    private String formatDataRate(double bytesPerSecond) {
-        if (bytesPerSecond <= 0) {
-            return "0 B/s";
-        }
-        String[] units = { "B", "KB", "MB", "GB", "TB", "PB", "EB" };
-        int unitIndex = 0;
-        while (bytesPerSecond >= 1024 && unitIndex < units.length - 1) {
-            bytesPerSecond /= 1024;
-            unitIndex++;
-        }
-        return String.format("%.2f %s/s", bytesPerSecond, units[unitIndex]);
-    }
-
-    private void updateTimingChart(long totalTimeMs, long dbTimeMs, long atTimeMs, Block block) {
-
-        if (!showMetrics || block == null) {
-            return;
-        }
-
-        int blockHeight = block.getHeight();
-
-        long calculationTimeMs = Math.max(0, totalTimeMs - dbTimeMs - atTimeMs);
-
-        atTimes.add(atTimeMs);
-        pushTimes.add(totalTimeMs);
-        dbTimes.add(dbTimeMs);
-        calculationTimes.add(calculationTimeMs);
-
-        while (pushTimes.size() > CHART_HISTORY_SIZE) {
-            pushTimes.removeFirst();
-        }
-        while (dbTimes.size() > CHART_HISTORY_SIZE) {
-            dbTimes.removeFirst();
-        }
-        while (atTimes.size() > CHART_HISTORY_SIZE) {
-            atTimes.removeFirst();
-        }
-        while (calculationTimes.size() > CHART_HISTORY_SIZE) {
-            calculationTimes.removeFirst();
-        }
-
-        int currentWindowSize = Math.min(pushTimes.size(), movingAverageWindow);
-        if (currentWindowSize < 1) {
-            return;
-        }
-
-        long maxPushTime = pushTimes.stream().mapToLong(Long::longValue).max().orElse(0);
-        long maxDbTime = dbTimes.stream().mapToLong(Long::longValue).max().orElse(0);
-        long maxAtTime = atTimes.stream().mapToLong(Long::longValue).max().orElse(0);
-        long maxCalculationTime = calculationTimes.stream().mapToLong(Long::longValue).max().orElse(0);
-
-        long displayPushTime = (long) pushTimes.stream()
-                .skip(Math.max(0, pushTimes.size() - currentWindowSize))
-                .mapToLong(Long::longValue)
-                .average().orElse(0.0);
-
-        long displayDbTime = (long) dbTimes.stream()
-                .skip(Math.max(0, dbTimes.size() - currentWindowSize))
-                .mapToLong(Long::longValue)
-                .average().orElse(0.0);
-
-        long displayAtTime = (long) atTimes.stream()
-                .skip(Math.max(0, atTimes.size() - currentWindowSize))
-                .mapToLong(Long::longValue)
-                .average().orElse(0.0);
-
-        long displayCalculationTime = (long) calculationTimes.stream()
-                .skip(Math.max(0, calculationTimes.size() - currentWindowSize))
-                .mapToLong(Long::longValue)
-                .average().orElse(0.0);
-
-        SwingUtilities.invokeLater(() -> {
-            pushTimeProgressBar.setValue((int) displayPushTime);
-            pushTimeProgressBar.setString(String.format("%d ms - max: %d ms", displayPushTime, maxPushTime));
-            dbTimeProgressBar.setValue((int) displayDbTime);
-            dbTimeProgressBar.setString(String.format("%d ms - max: %d ms", displayDbTime, maxDbTime));
-            atTimeProgressBar.setValue((int) displayAtTime);
-            atTimeProgressBar.setString(String.format("%d ms - max: %d ms", displayAtTime, maxAtTime));
-            calculationTimeProgressBar.setValue(Math.max(0, (int) displayCalculationTime));
-            calculationTimeProgressBar
-                    .setString(String.format("%d ms - max: %d ms", Math.max(0, displayCalculationTime),
-                            Math.max(0, maxCalculationTime)));
-            // Update timing chart series
-            pushTimePerBlockSeries.add(blockHeight, displayPushTime);
-            dbTimePerBlockSeries.add(blockHeight, displayDbTime);
-            calculationTimePerBlockSeries.add(blockHeight, Math.max(0, displayCalculationTime));
-            atTimePerBlockSeries.add(blockHeight, displayAtTime);
-
-            // Keep history size for timing chart
-            while (pushTimePerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
-                pushTimePerBlockSeries.remove(0);
-            }
-            while (dbTimePerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
-                dbTimePerBlockSeries.remove(0);
-            }
-            while (calculationTimePerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
-                calculationTimePerBlockSeries.remove(0);
-            }
-            while (atTimePerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
-                atTimePerBlockSeries.remove(0);
-            }
-        });
-    }
-
-    private ChartPanel createPerformanceChartPanel() {
-        blocksPerSecondSeries = new XYSeries("Blocks/Second (MA)");
-        transactionsPerSecondSeries = new XYSeries("Transactions/Second (MA)");
-        transactionsPerBlockSeries = new XYSeries("Transactions/Block (MA)");
-
-        XYSeriesCollection lineDataset = new XYSeriesCollection();
-        lineDataset.addSeries(blocksPerSecondSeries);
-        lineDataset.addSeries(transactionsPerSecondSeries);
-
-        XYSeriesCollection transactionsDataset = new XYSeriesCollection(transactionsPerBlockSeries);
-
-        // Create chart with no title or axis labels to save space
-        JFreeChart chart = ChartFactory.createXYLineChart(
-                null, // No title
-                null, // No X-axis label
-                null, // No Y-axis label
-                lineDataset);
-
-        // Remove the legend to maximize plot area
-        chart.removeLegend();
-        chart.setBorderVisible(false);
-
-        XYPlot plot = chart.getXYPlot();
-        plot.getDomainAxis().setLowerMargin(0.0);
-        plot.getDomainAxis().setUpperMargin(0.0);
-        plot.setBackgroundPaint(Color.DARK_GRAY);
-        plot.setDomainGridlinesVisible(false);
-        plot.setRangeGridlinesVisible(false);
-
-        plot.getRenderer().setSeriesPaint(0, Color.CYAN);
-        plot.getRenderer().setSeriesPaint(1, Color.GREEN);
-
-        // Set line thickness
-        plot.getRenderer().setSeriesStroke(0, new java.awt.BasicStroke(1.2f));
-        plot.getRenderer().setSeriesStroke(1, new java.awt.BasicStroke(1.2f));
-
-        // Hide axis tick labels (the numbers on the axes)
-        plot.getDomainAxis().setTickLabelsVisible(false);
-        plot.getRangeAxis().setTickLabelsVisible(false);
-
-        // Second Y-axis for transaction count
-        NumberAxis transactionAxis = new NumberAxis(null); // No label for the second axis
-        transactionAxis.setTickLabelsVisible(false);
-        plot.setRangeAxis(1, transactionAxis);
-        plot.setDataset(1, transactionsDataset);
-        plot.mapDatasetToRangeAxis(1, 1);
-
-        // Renderer for transaction bars
-        XYBarRenderer transactionRenderer = new XYBarRenderer(0);
-        transactionRenderer.setBarPainter(new StandardXYBarPainter());
-        transactionRenderer.setShadowVisible(false);
-        transactionRenderer.setSeriesPaint(0, new Color(255, 165, 0, 128)); // Orange, semi-transparent
-        plot.setRenderer(1, transactionRenderer);
-
-        // Remove all padding around the plot area
-        plot.setInsets(new RectangleInsets(0, 0, 0, 0));
-        plot.setAxisOffset(new RectangleInsets(0, 0, 0, 0));
-
-        ChartPanel chartPanel = new ChartPanel(chart);
-        // Set a fixed 4:3 aspect ratio size, 2x the previous size
-        Dimension newSize = new Dimension(240, 180);
-        chartPanel.setPreferredSize(newSize);
-        chartPanel.setMinimumSize(newSize);
-        chartPanel.setMaximumSize(newSize);
-        return chartPanel;
-    }
-
-    private ChartPanel createTimingChartPanel() {
-        pushTimePerBlockSeries = new XYSeries("Push Time/Block (MA)");
-        dbTimePerBlockSeries = new XYSeries("DB Time/Block (MA)");
-        calculationTimePerBlockSeries = new XYSeries("Calculation Time/Block (MA)");
-        atTimePerBlockSeries = new XYSeries("AT Time/Block (MA)");
-
-        XYSeriesCollection lineDataset = new XYSeriesCollection();
-        lineDataset.addSeries(pushTimePerBlockSeries);
-        lineDataset.addSeries(dbTimePerBlockSeries);
-        lineDataset.addSeries(calculationTimePerBlockSeries);
-        lineDataset.addSeries(atTimePerBlockSeries);
-
-        XYSeriesCollection transactionsDataset = new XYSeriesCollection(transactionsPerBlockSeries);
-
-        // Create chart with no title or axis labels to save space
-        JFreeChart chart = ChartFactory.createXYLineChart(
-                null, // No title
-                null, // No X-axis label
-                null, // No Y-axis label
-                lineDataset);
-
-        // Remove the legend to maximize plot area
-        chart.removeLegend();
-        chart.setBorderVisible(false);
-
-        XYPlot plot = chart.getXYPlot();
-        plot.getDomainAxis().setLowerMargin(0.0);
-        plot.getDomainAxis().setUpperMargin(0.0);
-        plot.setBackgroundPaint(Color.DARK_GRAY);
-        plot.setDomainGridlinesVisible(false);
-        plot.setRangeGridlinesVisible(false);
-
-        plot.getRenderer().setSeriesPaint(0, Color.BLUE);
-        plot.getRenderer().setSeriesPaint(1, Color.YELLOW);
-        plot.getRenderer().setSeriesPaint(2, new Color(128, 0, 128));
-        plot.getRenderer().setSeriesPaint(3, new Color(153, 0, 76));
-
-        // Set line thickness
-        plot.getRenderer().setSeriesStroke(0, new java.awt.BasicStroke(1.2f));
-        plot.getRenderer().setSeriesStroke(1, new java.awt.BasicStroke(1.2f));
-        plot.getRenderer().setSeriesStroke(2, new java.awt.BasicStroke(1.2f));
-        plot.getRenderer().setSeriesStroke(3, new java.awt.BasicStroke(1.2f));
-
-        // Hide axis tick labels (the numbers on the axes)
-        plot.getDomainAxis().setTickLabelsVisible(false);
-        plot.getRangeAxis().setTickLabelsVisible(false);
-
-        // Second Y-axis for transaction count
-        NumberAxis transactionAxis = new NumberAxis(null); // No label for the second axis
-        transactionAxis.setTickLabelsVisible(false);
-        plot.setRangeAxis(1, transactionAxis);
-        plot.setDataset(1, transactionsDataset);
-        plot.mapDatasetToRangeAxis(1, 1);
-
-        // Renderer for transaction bars
-        XYBarRenderer transactionRenderer = new XYBarRenderer(0);
-        transactionRenderer.setBarPainter(new StandardXYBarPainter());
-        transactionRenderer.setShadowVisible(false);
-        transactionRenderer.setSeriesPaint(0, new Color(255, 165, 0, 128)); // Orange, semi-transparent
-        plot.setRenderer(1, transactionRenderer);
-
-        // Remove all padding around the plot area
-        plot.setInsets(new RectangleInsets(0, 0, 0, 0));
-        plot.setAxisOffset(new RectangleInsets(0, 0, 0, 0));
-
-        ChartPanel chartPanel = new ChartPanel(chart);
-        // Set a fixed 4:3 aspect ratio size, 2x the previous size
-        Dimension newSize = new Dimension(240, 180);
-        chartPanel.setPreferredSize(newSize);
-        chartPanel.setMinimumSize(newSize);
-        chartPanel.setMaximumSize(newSize);
-        return chartPanel;
-    }
-
-    private ChartPanel createNetSpeedChartPanel() {
-        uploadSpeedSeries = new XYSeries("Upload Speed");
-        downloadSpeedSeries = new XYSeries("Download Speed");
-        uploadVolumeSeries = new XYSeries("Upload Volume");
-        downloadVolumeSeries = new XYSeries("Download Volume");
-
-        XYSeriesCollection lineDataset = new XYSeriesCollection();
-        lineDataset.addSeries(uploadSpeedSeries);
-        lineDataset.addSeries(downloadSpeedSeries);
-
-        JFreeChart chart = ChartFactory.createXYLineChart(
-                null, // No title
-                null, // No X-axis label
-                null, // No Y-axis label
-                lineDataset);
-
-        // Remove the legend to maximize plot area
-        chart.removeLegend();
-        chart.setBorderVisible(false);
-
-        XYPlot plot = chart.getXYPlot();
-        plot.getDomainAxis().setLowerMargin(0.0);
-        plot.getDomainAxis().setUpperMargin(0.0);
-        plot.setBackgroundPaint(Color.DARK_GRAY);
-        plot.setDomainGridlinesVisible(false);
-        plot.setRangeGridlinesVisible(false);
-
-        plot.getRenderer().setSeriesPaint(0, new Color(128, 0, 0)); // Upload - Red, semi-transparent
-        plot.getRenderer().setSeriesPaint(1, new Color(0, 100, 0)); // Download - Green, semi-transparent
-
-        // Set line thickness
-        plot.getRenderer().setSeriesStroke(0, new java.awt.BasicStroke(1.2f));
-        plot.getRenderer().setSeriesStroke(1, new java.awt.BasicStroke(1.2f));
-
-        // Hide axis tick labels (the numbers on the axes)
-        plot.getDomainAxis().setTickLabelsVisible(false);
-        plot.getRangeAxis().setTickLabelsVisible(false);
-
-        // Second Y-axis for volume
-        NumberAxis volumeAxis = new NumberAxis(null); // No label for the second axis
-        volumeAxis.setTickLabelsVisible(false);
-        plot.setRangeAxis(1, volumeAxis); // Use axis index 1 for volume
-
-        // A single dataset and renderer for both volume series.
-        XYSeriesCollection volumeDataset = new XYSeriesCollection();
-        volumeDataset.addSeries(downloadVolumeSeries); // Series 0: Download (top layer)
-        volumeDataset.addSeries(uploadVolumeSeries); // Series 1: Upload (bottom layer)
-
-        XYStepAreaRenderer volumeRenderer = new XYStepAreaRenderer();
-        volumeRenderer.setShapesVisible(false);
-        volumeRenderer.setSeriesPaint(0, new Color(50, 205, 50, 128)); // Download - Green
-        volumeRenderer.setSeriesPaint(1, new Color(233, 150, 122, 128)); // Upload - Red
-        plot.setDataset(1, volumeDataset);
-        plot.setRenderer(1, volumeRenderer);
-        plot.mapDatasetToRangeAxis(1, 1);
-
-        // Remove all padding around the plot area
-        plot.setInsets(new RectangleInsets(0, 0, 0, 0));
-        plot.setAxisOffset(new RectangleInsets(0, 0, 0, 0));
-
-        ChartPanel chartPanel = new ChartPanel(chart);
-        // Set a fixed 4:3 aspect ratio
-        Dimension newSize = new Dimension(240, 180);
-        chartPanel.setPreferredSize(newSize);
-        chartPanel.setMinimumSize(newSize);
-        chartPanel.setMaximumSize(newSize);
-        return chartPanel;
-    }
-
-    private void updatePerformanceChart(Block block) {
-
-        if (!showMetrics) {
-            return;
-        }
-
-        blockTimestamps.add(System.currentTimeMillis());
-
-        int totalTxCount = block.getTransactions().size();
-        if (block.getBlockAts() != null) {
-            try {
-                totalTxCount += AtController.getATsFromBlock(block.getBlockAts()).size();
-            } catch (Exception e) {
-                LOGGER.warn("Could not parse ATs from block", e);
-            }
-        }
-        transactionCounts.add(totalTxCount);
-
-        while (blockTimestamps.size() > CHART_HISTORY_SIZE) {
-            blockTimestamps.removeFirst();
-            transactionCounts.removeFirst();
-            if (!blocksPerSecondHistory.isEmpty()) {
-                blocksPerSecondHistory.removeFirst();
-            }
-            if (!transactionsPerSecondHistory.isEmpty()) {
-                transactionsPerSecondHistory.removeFirst();
-            }
-        }
-
-        long timeSpanMs = blockTimestamps.getLast()
-                - blockTimestamps.get(blockTimestamps.size() - Math.min(blockTimestamps.size(), movingAverageWindow));
-        double blocksPerSecond = (timeSpanMs > 0)
-                ? (double) Math.min(blockTimestamps.size(), movingAverageWindow) * 1000.0 / timeSpanMs
-                : 0;
-        blocksPerSecondHistory.add(blocksPerSecond);
-
-        double avgTransactions = transactionCounts.stream()
-                .skip(Math.max(0, transactionCounts.size() - Math.min(transactionCounts.size(), movingAverageWindow)))
-                .mapToInt(Integer::intValue)
-                .average().orElse(0.0);
-
-        double transactionsPerSecond = avgTransactions * blocksPerSecond;
-        transactionsPerSecondHistory.add(transactionsPerSecond);
-
-        double maxBlocksPerSecond = blocksPerSecondHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
-        int maxTransactionsPerBlock = transactionCounts.stream().mapToInt(Integer::intValue).max().orElse(0);
-        double maxTransactionsPerSecond = transactionsPerSecondHistory.stream().mapToDouble(Double::doubleValue).max()
-                .orElse(0.0);
-
-        // Now, schedule only the UI updates on the EDT
-        SwingUtilities.invokeLater(() -> {
-            // Prune series on EDT before adding new data
-            while (blocksPerSecondSeries.getItemCount() >= CHART_HISTORY_SIZE) {
-                blocksPerSecondSeries.remove(0);
-            }
-            while (transactionsPerSecondSeries.getItemCount() >= CHART_HISTORY_SIZE) {
-                transactionsPerSecondSeries.remove(0);
-            }
-            while (transactionsPerBlockSeries.getItemCount() >= CHART_HISTORY_SIZE) {
-                transactionsPerBlockSeries.remove(0);
-            }
-
-            blocksPerSecondSeries.add(block.getHeight(), blocksPerSecond);
-            transactionsPerBlockSeries.add(block.getHeight(), avgTransactions);
-            blocksPerSecondProgressBar.setValue((int) (blocksPerSecond));
-            blocksPerSecondProgressBar
-                    .setString(String.format("%.2f - max: %.2f", blocksPerSecond, maxBlocksPerSecond));
-
-            transactionsPerSecondSeries.add(block.getHeight(), transactionsPerSecond);
-            transactionsPerSecondProgressBar.setValue((int) transactionsPerSecond);
-            transactionsPerSecondProgressBar
-                    .setString(String.format("%.2f - max: %.2f", transactionsPerSecond, maxTransactionsPerSecond));
-
-            transactionsPerBlockProgressBar.setValue((int) avgTransactions);
-            transactionsPerBlockProgressBar
-                    .setString(String.format("%.2f - max: %d", avgTransactions, maxTransactionsPerBlock));
-        });
     }
 
     private void onBrsStopped() {

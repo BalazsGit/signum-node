@@ -44,6 +44,7 @@ import java.io.PrintWriter;
 import java.nio.file.Path;
 import java.math.BigInteger;
 import java.nio.file.Files;
+import java.util.Date;
 import java.nio.file.Paths;
 
 import java.math.BigInteger;
@@ -59,6 +60,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -154,7 +156,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private int autoPopOffLastStuckHeight = 0;
     private int autoPopOffNumberOfBlocks = 0;
     private ATProcessorCache atProcessorCache = ATProcessorCache.getInstance();
-    private Long atTimeNanos;
+    private long txApplyTimeNanos;
+    private long atTimeNanos;
+    private long subscriptionTimeNanos;
+    private long blockApplyTimeNanos;
     private long atTimeMs;
 
     private int lastTotalSize = 0;
@@ -374,12 +379,20 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             if (logSyncProgressToCsv || measurementActive) {
                 long currentTime = System.currentTimeMillis();
                 long deltaTime = currentTime - lastSyncLogTimestamp;
+
+                lastSyncLogTimestamp = currentTime;
                 accumulatedSyncTimeMs += deltaTime;
 
-                int heightDifference = lastBlockchainFeederHeight.get() - blockchain.getHeight();
-                if (!isSyncingForLog.get() && heightDifference >= 10) {
+                // Use time-based check for more reliable sync status detection, especially at
+                // startup.
+                Date now = new Date(currentTime);
+                long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
+                Date blockDate = Convert.fromEpochTime(block.getTimestamp());
+                int missingBlocks = (int) ((now.getTime() - blockDate.getTime()) / (blockTime * 1000));
+
+                if (!isSyncingForLog.get() && missingBlocks > 10) {
                     isSyncingForLog.set(true);
-                } else if (isSyncingForLog.get() && heightDifference <= 1) {
+                } else if (isSyncingForLog.get() && missingBlocks <= 1) {
                     isSyncingForLog.set(false);
                 }
 
@@ -400,15 +413,20 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                             }
                         }
 
-                        String line = String.join(";", String.valueOf(block.getTimestamp()),
-                                block.getCumulativeDifficulty().toString(), String.valueOf(accumulatedSyncTimeMs),
-                                String.valueOf(accumulatedSyncInProgressTimeMs), String.valueOf(stats.totalTimeMs),
-                                String.valueOf(stats.dbTimeMs), String.valueOf(stats.atTimeMs),
-                                String.valueOf(block.getHeight()), String.valueOf(transactionCount));
+                        String line = String.join(";",
+                                String.valueOf(block.getTimestamp()),
+                                block.getCumulativeDifficulty().toString(),
+                                String.valueOf(accumulatedSyncTimeMs),
+                                String.valueOf(accumulatedSyncInProgressTimeMs),
+                                String.valueOf(stats.totalTimeMs), String.valueOf(stats.validationTimeMs),
+                                String.valueOf(stats.txLoopTimeMs), String.valueOf(stats.housekeepingTimeMs),
+                                String.valueOf(stats.txApplyTimeMs), String.valueOf(stats.atTimeMs),
+                                String.valueOf(stats.subscriptionTimeMs), String.valueOf(stats.blockApplyTimeMs),
+                                String.valueOf(stats.commitTimeMs), String.valueOf(block.getHeight()),
+                                String.valueOf(transactionCount));
                         measurementData.add(line);
                     }
                 }
-                lastSyncLogTimestamp = currentTime;
             }
             if (block.getHeight() % 5000 == 0) {
                 logger.info("processed block {}", block.getHeight());
@@ -1136,9 +1154,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         this.accumulatedSyncInProgressTimeMs = Long.parseLong(parts[0].trim()) * 1000;
                         this.accumulatedSyncTimeMs = Long.parseLong(parts[1].trim()) * 1000;
                         logger.info("Reading sync progress from {}:", this.syncProgressLogFilename);
-                        logger.info("  - Accumulated Sync In Progress Time: {}s",
+                        logger.info("Accumulated Sync In Progress Time: {}s",
                                 this.accumulatedSyncInProgressTimeMs / 1000);
-                        logger.info("  - Accumulated Sync Time: {}s", this.accumulatedSyncTimeMs / 1000);
+                        logger.info("Accumulated Sync Time: {}s", this.accumulatedSyncTimeMs / 1000);
                     } else {
                         // Malformed line, treat as new file
                         fileExistsAndHasContent = false;
@@ -1188,14 +1206,21 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                  * Accumulated_sync_in_progress_time[ms] - Time spent in sync mode in
                  * milliseconds
                  * Accumulated_sync_time[ms] - Total time since start of node in milliseconds
-                 * Push_block_time[ms] - Time taken to push the block in milliseconds
-                 * Db_time[ms] - Time taken for database operations in milliseconds
-                 * At_time[ms] - Time taken for account transactions processing in milliseconds
+                 * Push_block_time[ms] - Time taken to push the block in milliseconds.
+                 * Validation_time[ms] - Time for block and signature validation.
+                 * Tx_loop_time[ms] - Time for transaction validation loop.
+                 * Housekeeping_time[ms] - Time for intermediate tasks (re-queue, add block,
+                 * etc.).
+                 * Tx_apply_time[ms] - Time to apply transaction state changes in memory.
+                 * AT_time[ms] - Time taken for Automated Transactions processing.
+                 * Subscription_time[ms] - Time for subscription processing.
+                 * Block_apply_time[ms] - Time for block-level changes (rewards, etc.).
+                 * Commit_time[ms] - Time to commit changes to the database disk.
                  * Block_height - Height of the pushed block
                  * Transaction_count - Number of transactions in the pushed block
                  */
                 writer.println(
-                        "Block_timestamp;Cumulative_difficulty;Accumulated_sync_in_progress_time[ms];Accumulated_sync_time[ms];Push_block_time[ms];Db_time[ms];At_time[ms];Block_height;Transaction_count");
+                        "Block_timestamp;Cumulative_difficulty;Accumulated_sync_in_progress_time[ms];Accumulated_sync_time[ms];Push_block_time[ms];Validation_time[ms];Tx_loop_time[ms];Housekeeping_time[ms];Tx_apply_time[ms];AT_time[ms];Subscription_time[ms];Block_apply_time[ms];Commit_time[ms];Block_height;Transaction_count");
             } catch (IOException e) {
                 logger.error("Failed to create sync measurement log", e);
             }
@@ -1405,17 +1430,19 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
     private void pushBlock(final Block block) throws BlockNotAcceptedException {
         long totalStartTime = System.nanoTime();
-        long dbStartTime = 0;
-        long dbEndTime = 0;
+        long validationTime = 0;
+        long txLoopTime = 0;
+        long housekeepingTime = 0;
+        long commitTime = 0;
+
+        final Map<String, Boolean> referencedTransactionValidityCache = new HashMap<>();
 
         synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
             stores.beginTransaction();
             int curTime = timeService.getEpochTime();
-
             Block previousLastBlock = null;
             try {
-
-                dbStartTime = System.nanoTime();
+                long stepStart = System.nanoTime();
 
                 previousLastBlock = blockchain.getLastBlock();
 
@@ -1455,6 +1482,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     throw new BlockNotAcceptedException(
                             "Block signature verification failed for block " + block.getHeight());
                 }
+
+                validationTime = (System.nanoTime() - stepStart);
+                stepStart = System.nanoTime();
 
                 final TransactionDuplicatesCheckerImpl transactionDuplicatesChecker = new TransactionDuplicatesCheckerImpl();
                 long calculatedTotalAmount = 0;
@@ -1545,6 +1575,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     slotIdx += 1;
                 }
 
+                txLoopTime = System.nanoTime() - stepStart;
+                stepStart = System.nanoTime();
+
                 if (calculatedTotalAmount > block.getTotalAmountNqt()
                         || calculatedTotalFee > block.getTotalFeeNqt()) {
                     throw new BlockNotAcceptedException(
@@ -1566,6 +1599,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     throw new BlockNotAcceptedException("Payload hash doesn't match for block " + block.getHeight());
                 }
 
+                validationTime += (System.nanoTime() - stepStart);
+
+                stepStart = System.nanoTime();
                 blockService.setPrevious(block, previousLastBlock);
                 blockListeners.notify(block, Event.BEFORE_BLOCK_ACCEPT);
                 transactionProcessor.removeForgedTransactions(transactions);
@@ -1573,13 +1609,17 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 accountService.flushAccountTable();
                 addBlock(block);
 
+                housekeepingTime = System.nanoTime() - stepStart;
+
                 long remainingAmount = Convert.safeSubtract(block.getTotalAmountNqt(), calculatedTotalAmount);
                 long remainingFee = Convert.safeSubtract(block.getTotalFeeNqt(), calculatedTotalFee);
-
-                dbEndTime = System.nanoTime();
                 accept(block, remainingAmount, remainingFee);
+
+                long commitStart = System.nanoTime();
                 derivedTableManager.getDerivedTables().forEach(DerivedTable::finish);
                 stores.commitTransaction();
+                commitTime = System.nanoTime() - commitStart;
+
                 // We make sure downloadCache do not have this block anymore, but only after all
                 // DBs have it
                 downloadCache.removeBlock(block);
@@ -1606,9 +1646,18 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
             long totalEndTime = System.nanoTime();
             long totalTimeMs = TimeUnit.NANOSECONDS.toMillis(totalEndTime - totalStartTime);
-            long dbTimeMs = dbStartTime > 0 ? TimeUnit.NANOSECONDS.toMillis(dbEndTime - dbStartTime) : 0;
+            long validationTimeMs = TimeUnit.NANOSECONDS.toMillis(validationTime);
+            long txLoopTimeMs = TimeUnit.NANOSECONDS.toMillis(txLoopTime);
+            long housekeepingTimeMs = TimeUnit.NANOSECONDS.toMillis(housekeepingTime);
+            long commitTimeMs = TimeUnit.NANOSECONDS.toMillis(commitTime);
+            long txApplyTimeMs = TimeUnit.NANOSECONDS.toMillis(txApplyTimeNanos);
             atTimeMs = TimeUnit.NANOSECONDS.toMillis(atTimeNanos);
-            performanceStats.set(new BlockchainProcessor.PerformanceStats(totalTimeMs, dbTimeMs, atTimeMs, block));
+            long subscriptionTimeMs = TimeUnit.NANOSECONDS.toMillis(subscriptionTimeNanos);
+            long blockApplyTimeMs = TimeUnit.NANOSECONDS.toMillis(blockApplyTimeNanos);
+
+            performanceStats.set(new BlockchainProcessor.PerformanceStats(
+                    totalTimeMs, validationTimeMs, txLoopTimeMs, housekeepingTimeMs, txApplyTimeMs, atTimeMs,
+                    subscriptionTimeMs, blockApplyTimeMs, commitTimeMs, block));
             blockListeners.notify(block, Event.PERFORMANCE_STATS_UPDATED);
 
             logger.debug("Successfully pushed {} (height {})", block.getId(), block.getHeight());
@@ -1625,6 +1674,15 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
     private void accept(Block block, Long remainingAmount, Long remainingFee)
             throws BlockNotAcceptedException {
+        long start;
+
+        // Reset timers
+        txApplyTimeNanos = 0L;
+        subscriptionTimeNanos = 0L;
+        blockApplyTimeNanos = 0L;
+        atTimeNanos = 0L;
+
+        start = System.nanoTime();
         subscriptionService.clearRemovals();
         transactionService.startNewBlock();
         for (Transaction transaction : block.getTransactions()) {
@@ -1633,6 +1691,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         "Transaction not accepted: " + transaction.getStringId(), transaction);
             }
         }
+        txApplyTimeNanos = (System.nanoTime() - start);
 
         // ATs
         AtBlock atBlock;
@@ -1647,15 +1706,19 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             throw new BlockNotAcceptedException(
                     "ats are not matching at block height " + blockchain.getHeight() + " (" + e + ")");
         }
+        atTimeNanos = atEndTime > 0 ? atEndTime - atStartTime : 0;
 
         long calculatedRemainingAmount = 0;
         long calculatedRemainingFee = 0;
         calculatedRemainingAmount += atBlock.getTotalAmount();
         calculatedRemainingFee += atBlock.getTotalFees();
-        // ATs
+
+        start = System.nanoTime();
         if (subscriptionService.isEnabled()) {
             calculatedRemainingFee += subscriptionService.applyUnconfirmed(block.getTimestamp(), block.getHeight());
         }
+        subscriptionTimeNanos = (System.nanoTime() - start);
+
         if (remainingAmount != null && remainingAmount != calculatedRemainingAmount) {
             throw new BlockNotAcceptedException(
                     "Calculated remaining amount doesn't add up for block " + block.getHeight());
@@ -1664,9 +1727,17 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             throw new BlockNotAcceptedException(
                     "Calculated remaining fee doesn't add up for block " + block.getHeight());
         }
+
+        start = System.nanoTime();
         blockListeners.notify(block, Event.BEFORE_BLOCK_APPLY);
         blockService.apply(block);
+        blockApplyTimeNanos = (System.nanoTime() - start);
+
+        start = System.nanoTime();
         subscriptionService.applyConfirmed(block, blockchain.getHeight());
+        subscriptionTimeNanos += (System.nanoTime() - start);
+
+        start = System.nanoTime();
         if (escrowService.isEnabled()) {
             escrowService.updateOnBlock(block, blockchain.getHeight());
         }
@@ -1675,7 +1746,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             transactionProcessor.notifyListeners(block.getTransactions(),
                     TransactionProcessor.Event.ADDED_CONFIRMED_TRANSACTIONS);
         }
-        atTimeNanos = atEndTime > 0 ? atEndTime - atStartTime : 0;
+        blockApplyTimeNanos += (System.nanoTime() - start);
     }
 
     @Override
