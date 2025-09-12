@@ -288,7 +288,7 @@ public class MetricsPanel extends JPanel {
 
         // --- Row 1: Push Time / Validation Time ---
         // Push Time (Left)
-        tooltip = "The moving average of the total time taken to process and push a new block. This is the sum of all other timing metrics for a block.\n\nIt includes:\n- Block and signature validation\n- Transaction validation loop\n- Applying state changes\n- Housekeeping tasks\n- Committing to the database";
+        tooltip = "The moving average of the total time taken to process and push a new block. This value is the sum of all individual timing components measured during block processing.\n\nIt includes:\n- Validation Time\n- TX Loop Time\n- Housekeeping Time\n- TX Apply Time\n- AT Time\n- Subscription Time\n- Block Apply Time\n- Commit Time\n- Complementer (miscellaneous) Time";
         pushTimeLabel = createLabel("Push Time/Block (MA):", Color.BLUE, tooltip);
         pushTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
         addComponent(timingInfoPanel, pushTimeLabel, 0, y, 1, 1, 0, GridBagConstraints.CENTER,
@@ -377,7 +377,7 @@ public class MetricsPanel extends JPanel {
                 GridBagConstraints.HORIZONTAL, timerBarInsets);
 
         // Comp Calc Timer (Right)
-        tooltip = "The moving average of the time spent on miscellaneous calculations within the block push process. This value calculated as the difference between the 'Total Push Time' and the sum of all other specific timers (Validation, TX Loop, Housekeeping, TX Apply, AT, Subscription, Block Apply, and Commit). A consistently high value here may indicate performance overhead in parts of the code that are not explicitly timed, such as memory management or other background tasks.";
+        tooltip = "The moving average of the time spent on miscellaneous, 'unaccounted for' calculations during block processing. This value is calculated by subtracting the sum of all explicitly measured components from the 'Total Push Time'. These components are: Validation, TX Loop, Housekeeping, TX Apply, AT, Subscription, Block Apply, and Commit. A consistently high value may indicate performance overhead in parts of the code that are not explicitly timed, such as memory management or other background tasks.";
         complementerCalcTimeLabel = createLabel("Comp Calc Timer (MA):", Color.LIGHT_GRAY, tooltip);
         complementerCalcTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
         addComponent(timingInfoPanel, complementerCalcTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,

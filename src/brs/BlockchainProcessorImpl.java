@@ -1281,9 +1281,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                  * Subscription_time[ms] - Time for subscription processing.
                  * Block_apply_time[ms] - Time for block-level changes (rewards, etc.).
                  * Commit_time[ms] - Time to commit changes to the database disk.
-                 * Complementer_calc_time[ms] - The difference between total push time and sum
-                 * of other timers.
-                 * It's the difference between total push time and the sum of other timers.
+                 * Complementer_calc_time[ms] - The difference between total push time and
+                 * the sum of timing components that are individually and explicitly measured
+                 * in the push block process.
                  * Block_height - Height of the pushed block
                  * Transaction_count - Number of transactions in the pushed block
                  */
