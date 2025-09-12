@@ -163,7 +163,7 @@ public class MetricsPanel extends JPanel {
 
         // Verified/Total Blocks
         tooltip = "Shows the number of blocks in the download queue that have passed PoC verification against the total number of blocks in the queue.\n\n- Verified: PoC signature has been checked (CPU/GPU intensive).\n- Total: All blocks currently in the download queue.\n\nA high number of unverified blocks may indicate a slow verification process.";
-        JLabel verifLabel = createLabel("Verified/Total Blocks:", null, tooltip);
+        JLabel verifLabel = createLabel("Verified/Total Blocks", null, tooltip);
         syncProgressBarDownloadedBlocks = createProgressBar(0, 100, Color.GREEN, "0 / 0 - 0%", progressBarSize1);
         addComponent(SyncPanel, verifLabel, 0, 0, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
                 labelInsets);
@@ -172,7 +172,7 @@ public class MetricsPanel extends JPanel {
 
         // Unverified Blocks
         tooltip = "The number of blocks in the download queue that are waiting for Proof-of-Capacity (PoC) verification.\n\nA persistently high number might indicate that the CPU or GPU is a bottleneck and cannot keep up with the network's block generation rate.";
-        JLabel unVerifLabel = createLabel("Unverified Blocks:", null, tooltip);
+        JLabel unVerifLabel = createLabel("Unverified Blocks", null, tooltip);
         syncProgressBarUnverifiedBlocks = createProgressBar(0, 2000, Color.GREEN, "0", progressBarSize1);
         addComponent(SyncPanel, unVerifLabel, 0, 1, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
                 labelInsets);
@@ -186,7 +186,7 @@ public class MetricsPanel extends JPanel {
 
         // Blocks/Second (Moving Average)
         tooltip = "The moving average of blocks processed per second. This is a key indicator of the node's synchronization speed.\n\nA higher value means the node is rapidly catching up with the current state of the blockchain. This metric is particularly useful during the initial sync or after a period of being offline.";
-        JLabel blocksPerSecondLabel = createLabel("Blocks/Sec (MA):", Color.CYAN, tooltip);
+        JLabel blocksPerSecondLabel = createLabel("Blocks/Sec (MA)", Color.CYAN, tooltip);
         blocksPerSecondProgressBar = createProgressBar(0, 200, null, "0", progressBarSize1);
         addComponent(SyncPanel, blocksPerSecondLabel, 0, 3, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -195,7 +195,7 @@ public class MetricsPanel extends JPanel {
 
         // Transactions/Second (Moving Average)
         tooltip = "The moving average of transactions processed per second. This metric reflects the current transactional throughput of the network as seen by your node.\n\nIt is calculated based on the number of transactions in recent blocks and the time taken to process those blocks. A higher value indicates a busy network with many transactions being confirmed.";
-        JLabel txPerSecondLabel = createLabel("Transactions/Sec (MA):", Color.GREEN, tooltip);
+        JLabel txPerSecondLabel = createLabel("Transactions/Sec (MA)", Color.GREEN, tooltip);
         transactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0", progressBarSize1);
         addComponent(SyncPanel, txPerSecondLabel, 0, 4, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -204,7 +204,7 @@ public class MetricsPanel extends JPanel {
 
         // Transactions/Block (Moving Average)
         tooltip = "The moving average of the number of transactions included in each block. This provides insight into how full blocks are on average.\n\nIt helps to understand the network's capacity utilization. A value close to the maximum block capacity (255 transactions) suggests high demand for block space.";
-        JLabel txPerBlockLabel = createLabel("Transactions/Block (MA):", new Color(255, 165, 0), tooltip);
+        JLabel txPerBlockLabel = createLabel("Transactions/Block (MA)", new Color(255, 165, 0), tooltip);
         transactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0", progressBarSize1);
         addComponent(SyncPanel, txPerBlockLabel, 0, 5, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -218,7 +218,7 @@ public class MetricsPanel extends JPanel {
 
         // Moving Average Slider
         tooltip = "The number of recent blocks used to calculate the moving average for performance metrics. A larger window provides a smoother but less responsive trend, while a smaller window is more reactive to recent changes.";
-        JLabel maWindowLabel = createLabel("MA Window (Blocks):", null, tooltip);
+        JLabel maWindowLabel = createLabel("MA Window (Blocks)", null, tooltip);
 
         // Define the discrete values for the slider
         final int[] maWindowValues = { 10, 100, 200, 300, 400, 500 };
@@ -289,7 +289,7 @@ public class MetricsPanel extends JPanel {
         // --- Row 1: Push Time / Validation Time ---
         // Push Time (Left)
         tooltip = "The moving average of the total time taken to process and push a new block. This value is the sum of all individual timing components measured during block processing.\n\nIt includes:\n- Validation Time\n- TX Loop Time\n- Housekeeping Time\n- TX Apply Time\n- AT Time\n- Subscription Time\n- Block Apply Time\n- Commit Time\n- Complementer (miscellaneous) Time";
-        pushTimeLabel = createLabel("Push Time/Block (MA):", Color.BLUE, tooltip);
+        pushTimeLabel = createLabel("Push Time (MA)", Color.BLUE, tooltip);
         pushTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
         addComponent(timingInfoPanel, pushTimeLabel, 0, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
@@ -298,7 +298,7 @@ public class MetricsPanel extends JPanel {
 
         // Validation Time (Right)
         tooltip = "The moving average of the time spent on block-level validation, excluding the per-transaction validation loop. This is a CPU-intensive task.\n\nMeasured steps include:\n- Verifying block version and timestamp\n- Checking previous block reference\n- Verifying block and generation signatures\n- Validating payload hash and total amounts/fees after transaction processing";
-        validationTimeLabel = createLabel("Validation Time (MA):", Color.YELLOW, tooltip);
+        validationTimeLabel = createLabel("Validation Time (MA)", Color.YELLOW, tooltip);
         validationTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
         addComponent(timingInfoPanel, validationTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
@@ -309,7 +309,7 @@ public class MetricsPanel extends JPanel {
         // --- Row 2: TX Loop / Housekeeping ---
         // TX Loop Time (Left)
         tooltip = "The moving average of the time spent iterating through and validating all transactions within a block. This involves both CPU and database read operations.\n\nFor each transaction, this includes:\n- Checking timestamps and deadlines\n- Verifying signatures and public keys\n- Validating referenced transactions\n- Checking for duplicates\n- Executing transaction-specific business logic";
-        txLoopTimeLabel = createLabel("TX Loop Time (MA):", new Color(128, 0, 128), tooltip);
+        txLoopTimeLabel = createLabel("TX Loop Time (MA)", new Color(128, 0, 128), tooltip);
         txLoopTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
         addComponent(timingInfoPanel, txLoopTimeLabel, 0, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
@@ -318,7 +318,7 @@ public class MetricsPanel extends JPanel {
 
         // Housekeeping Time (Right)
         tooltip = "The moving average of the time spent on various 'housekeeping' tasks during block processing.\n\nThis includes:\n- Re-queuing unconfirmed transactions that were not included in the new block\n- Updating peer states and other miscellaneous tasks";
-        housekeepingTimeLabel = createLabel("Housekeeping Time (MA):", new Color(42, 223, 223), tooltip);
+        housekeepingTimeLabel = createLabel("Housekeeping Time (MA)", new Color(42, 223, 223), tooltip);
         housekeepingTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
         addComponent(timingInfoPanel, housekeepingTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
@@ -329,7 +329,7 @@ public class MetricsPanel extends JPanel {
         // --- Row 3: TX Apply / AT Time ---
         // TX Apply Time (Left)
         tooltip = "The moving average of the time spent applying the effects of each transaction within the block to the in-memory state. This step handles changes to account balances, aliases, assets, etc., based on the transaction type. It is the first major operation within the 'apply' phase.";
-        txApplyTimeLabel = createLabel("TX Apply Time (MA):", new Color(255, 165, 0), tooltip);
+        txApplyTimeLabel = createLabel("TX Apply Time (MA)", new Color(255, 165, 0), tooltip);
         txApplyTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
         addComponent(timingInfoPanel, txApplyTimeLabel, 0, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
@@ -338,7 +338,7 @@ public class MetricsPanel extends JPanel {
 
         // AT Time (Right)
         tooltip = "The moving average of the time spent validating and processing all Automated Transactions (ATs) within the block. This is a separate computational step that occurs after 'TX Apply Time'.";
-        atTimeLabel = createLabel("AT Time/Block (MA):", new Color(153, 0, 76), tooltip);
+        atTimeLabel = createLabel("AT Time (MA)", new Color(153, 0, 76), tooltip);
         atTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
         addComponent(timingInfoPanel, atTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
@@ -349,7 +349,7 @@ public class MetricsPanel extends JPanel {
         // --- Row 4: Subscription / Block Apply ---
         // Subscription Time (Left)
         tooltip = "The moving average of the time spent processing recurring subscription payments for the block. This is a separate step that occurs after AT processing.";
-        subscriptionTimeLabel = createLabel("Subscription Time (MA):", new Color(255, 105, 100), tooltip); // Hot pink
+        subscriptionTimeLabel = createLabel("Subscription Time (MA)", new Color(255, 105, 100), tooltip); // Hot pink
         subscriptionTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
         addComponent(timingInfoPanel, subscriptionTimeLabel, 0, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
@@ -358,7 +358,7 @@ public class MetricsPanel extends JPanel {
 
         // Block Apply Time (Right)
         tooltip = "The moving average of the time spent applying block-level changes. This includes distributing the block reward to the generator, updating escrow services, and notifying listeners about the applied block. This is the final step before the 'Commit' phase.";
-        blockApplyTimeLabel = createLabel("Block Apply Time (MA):", new Color(0, 100, 100), tooltip); // Teal
+        blockApplyTimeLabel = createLabel("Block Apply Time (MA)", new Color(0, 100, 100), tooltip); // Teal
         blockApplyTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
         addComponent(timingInfoPanel, blockApplyTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
@@ -369,7 +369,7 @@ public class MetricsPanel extends JPanel {
         // --- Row 5: Commit / Misc. Time ---
         // Commit Time (Left)
         tooltip = "The moving average of the time spent committing all in-memory state changes to the database on disk. This is a disk I/O-intensive operation.";
-        commitTimeLabel = createLabel("Commit Time (MA):", new Color(150, 0, 200), tooltip);
+        commitTimeLabel = createLabel("Commit Time (MA)", new Color(150, 0, 200), tooltip);
         commitTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
         addComponent(timingInfoPanel, commitTimeLabel, 0, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
@@ -378,7 +378,7 @@ public class MetricsPanel extends JPanel {
 
         // Misc. Time (Right)
         tooltip = "The moving average of the time spent on miscellaneous, 'unaccounted for' calculations during block processing. This value is calculated by subtracting the sum of all explicitly measured components from the 'Total Push Time'. These components are: Validation, TX Loop, Housekeeping, TX Apply, AT, Subscription, Block Apply, and Commit. A consistently high value may indicate performance overhead in parts of the code that are not explicitly timed, such as memory management or other background tasks.";
-        miscTimeLabel = createLabel("Misc. Time (MA):", Color.LIGHT_GRAY, tooltip);
+        miscTimeLabel = createLabel("Misc. Time (MA)", Color.LIGHT_GRAY, tooltip);
         miscTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
         addComponent(timingInfoPanel, miscTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
@@ -415,7 +415,7 @@ public class MetricsPanel extends JPanel {
 
         // --- Upload Speed ---
         tooltip = "The moving average of data upload speed to other peers in the network.\n\nThis reflects how much data your node is sharing, which includes:\n- Blocks\n- Transactions\n- Peer information";
-        uploadSpeedLabel = createLabel("▲ Speed (MA):", new Color(128, 0, 0), tooltip);
+        uploadSpeedLabel = createLabel("▲ Speed (MA)", new Color(128, 0, 0), tooltip);
         uploadSpeedProgressBar = createProgressBar(0, MAX_SPEED_BPS, null, "0 B/s", progressBarSize2);
         addComponent(netSpeedInfoPanel, uploadSpeedLabel, 0, 1, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -424,7 +424,7 @@ public class MetricsPanel extends JPanel {
 
         // --- Download Speed ---
         tooltip = "The moving average of data download speed from other peers in the network.\n\nThis indicates how quickly your node is receiving data, which includes:\n- Blocks\n- Transactions\n- Peer information";
-        downloadSpeedLabel = createLabel("▼ Speed (MA):", new Color(0, 100, 0), tooltip);
+        downloadSpeedLabel = createLabel("▼ Speed (MA)", new Color(0, 100, 0), tooltip);
         downloadSpeedProgressBar = createProgressBar(0, MAX_SPEED_BPS, null, "0 B/s", progressBarSize2);
         addComponent(netSpeedInfoPanel, downloadSpeedLabel, 0, 2, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -435,7 +435,7 @@ public class MetricsPanel extends JPanel {
         JPanel combinedVolumePanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
         combinedVolumePanel.setOpaque(false);
         tooltip = "The total amount of data uploaded to and downloaded from the network during this session. The format is Uploaded / Downloaded.";
-        JLabel volumeTitleLabel = createLabel("Volume:", null, tooltip);
+        JLabel volumeTitleLabel = createLabel("Volume", null, tooltip);
         tooltip = "The total amount of data uploaded to the network during this session.";
         metricsUploadVolumeLabel = createLabel("", new Color(233, 150, 122), tooltip);
         tooltip = "The total amount of data downloaded from the network during this session.";
@@ -1046,16 +1046,16 @@ public class MetricsPanel extends JPanel {
     }
 
     private ChartPanel createTimingChartPanel() {
-        pushTimePerBlockSeries = new XYSeries("Push Time/Block (MA)");
-        validationTimePerBlockSeries = new XYSeries("Validation Time/Block (MA)");
-        txLoopTimePerBlockSeries = new XYSeries("TX Loop Time/Block (MA)");
-        housekeepingTimePerBlockSeries = new XYSeries("Housekeeping Time/Block (MA)");
-        txApplyTimePerBlockSeries = new XYSeries("TX Apply Time/Block (MA)");
-        atTimePerBlockSeries = new XYSeries("AT Time/Block (MA)");
-        subscriptionTimePerBlockSeries = new XYSeries("Subscription Time/Block (MA)");
-        blockApplyTimePerBlockSeries = new XYSeries("Block Apply Time/Block (MA)");
-        commitTimePerBlockSeries = new XYSeries("Commit Time/Block (MA)");
-        miscTimePerBlockSeries = new XYSeries("Misc. Time/Block (MA)");
+        pushTimePerBlockSeries = new XYSeries("Push Time (MA)");
+        validationTimePerBlockSeries = new XYSeries("Validation Time (MA)");
+        txLoopTimePerBlockSeries = new XYSeries("TX Loop Time (MA)");
+        housekeepingTimePerBlockSeries = new XYSeries("Housekeeping Time (MA)");
+        txApplyTimePerBlockSeries = new XYSeries("TX Apply Time (MA)");
+        atTimePerBlockSeries = new XYSeries("AT Time (MA)");
+        subscriptionTimePerBlockSeries = new XYSeries("Subscription Time (MA)");
+        blockApplyTimePerBlockSeries = new XYSeries("Block Apply Time (MA)");
+        commitTimePerBlockSeries = new XYSeries("Commit Time (MA)");
+        miscTimePerBlockSeries = new XYSeries("Misc. Time (MA)");
 
         XYSeriesCollection lineDataset = new XYSeriesCollection();
         lineDataset.addSeries(pushTimePerBlockSeries);
