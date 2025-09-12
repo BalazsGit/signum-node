@@ -49,7 +49,7 @@ public class MetricsPanel extends JPanel {
     private final LinkedList<Long> atTimes = new LinkedList<>();
     private final LinkedList<Long> subscriptionTimes = new LinkedList<>();
     private final LinkedList<Long> blockApplyTimes = new LinkedList<>();
-    private final LinkedList<Long> complementerCalcTimes = new LinkedList<>();
+    private final LinkedList<Long> miscTimes = new LinkedList<>();
     private final LinkedList<Double> blocksPerSecondHistory = new LinkedList<>();
     private final LinkedList<Double> transactionsPerSecondHistory = new LinkedList<>();
     private int movingAverageWindow = 100; // Default value
@@ -68,7 +68,7 @@ public class MetricsPanel extends JPanel {
     private XYSeries txApplyTimePerBlockSeries;
     private XYSeries subscriptionTimePerBlockSeries;
     private XYSeries blockApplyTimePerBlockSeries;
-    private XYSeries complementerCalcTimePerBlockSeries;
+    private XYSeries miscTimePerBlockSeries;
 
     private JProgressBar blocksPerSecondProgressBar;
     private JProgressBar transactionsPerSecondProgressBar;
@@ -103,8 +103,8 @@ public class MetricsPanel extends JPanel {
     private JProgressBar subscriptionTimeProgressBar;
     private JLabel blockApplyTimeLabel;
     private JProgressBar blockApplyTimeProgressBar;
-    private JLabel complementerCalcTimeLabel;
-    private JProgressBar complementerCalcTimeProgressBar;
+    private JLabel miscTimeLabel;
+    private JProgressBar miscTimeProgressBar;
     private JProgressBar uploadSpeedProgressBar;
     private JProgressBar downloadSpeedProgressBar;
 
@@ -366,7 +366,7 @@ public class MetricsPanel extends JPanel {
                 GridBagConstraints.HORIZONTAL, timerBarInsets);
         y += 2;
 
-        // --- Row 5: Commit / Comp Calc ---
+        // --- Row 5: Commit / Misc. Time ---
         // Commit Time (Left)
         tooltip = "The moving average of the time spent committing all in-memory state changes to the database on disk. This is a disk I/O-intensive operation.";
         commitTimeLabel = createLabel("Commit Time (MA):", new Color(150, 0, 200), tooltip);
@@ -376,13 +376,13 @@ public class MetricsPanel extends JPanel {
         addComponent(timingInfoPanel, commitTimeProgressBar, 0, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, timerBarInsets);
 
-        // Comp Calc Timer (Right)
+        // Misc. Time (Right)
         tooltip = "The moving average of the time spent on miscellaneous, 'unaccounted for' calculations during block processing. This value is calculated by subtracting the sum of all explicitly measured components from the 'Total Push Time'. These components are: Validation, TX Loop, Housekeeping, TX Apply, AT, Subscription, Block Apply, and Commit. A consistently high value may indicate performance overhead in parts of the code that are not explicitly timed, such as memory management or other background tasks.";
-        complementerCalcTimeLabel = createLabel("Comp Calc Timer (MA):", Color.LIGHT_GRAY, tooltip);
-        complementerCalcTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
-        addComponent(timingInfoPanel, complementerCalcTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,
+        miscTimeLabel = createLabel("Misc. Time (MA):", Color.LIGHT_GRAY, tooltip);
+        miscTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
+        addComponent(timingInfoPanel, miscTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
-        addComponent(timingInfoPanel, complementerCalcTimeProgressBar, 2, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
+        addComponent(timingInfoPanel, miscTimeProgressBar, 2, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, timerBarInsets);
         y += 2;
 
@@ -475,7 +475,7 @@ public class MetricsPanel extends JPanel {
         addToggleListener(subscriptionTimeLabel, timingChartPanel, 0, 6);
         addToggleListener(blockApplyTimeLabel, timingChartPanel, 0, 7);
         addToggleListener(commitTimeLabel, timingChartPanel, 0, 8);
-        addToggleListener(complementerCalcTimeLabel, timingChartPanel, 0, 9);
+        addToggleListener(miscTimeLabel, timingChartPanel, 0, 9);
         addToggleListener(uploadSpeedLabel, netSpeedChartPanel, 0, 0);
         addToggleListener(downloadSpeedLabel, netSpeedChartPanel, 0, 1);
 
@@ -527,9 +527,8 @@ public class MetricsPanel extends JPanel {
         if (stats != null && block != null) {
             chartUpdateExecutor.submit(() -> {
                 updateTimingChart(stats.totalTimeMs, stats.validationTimeMs, stats.txLoopTimeMs,
-                        stats.housekeepingTimeMs, stats.txApplyTimeMs, stats.atTimeMs,
-                        stats.subscriptionTimeMs, stats.blockApplyTimeMs, stats.commitTimeMs,
-                        stats.complementerCalcTimeMs, block);
+                        stats.housekeepingTimeMs, stats.txApplyTimeMs, stats.atTimeMs, stats.subscriptionTimeMs,
+                        stats.blockApplyTimeMs, stats.commitTimeMs, stats.miscTimeMs, block);
             });
         }
     }
@@ -796,7 +795,7 @@ public class MetricsPanel extends JPanel {
 
     private void updateTimingChart(long totalTimeMs, long validationTimeMs, long txLoopTimeMs, long housekeepingTimeMs,
             long txApplyTimeMs, long atTimeMs, long subscriptionTimeMs, long blockApplyTimeMs, long commitTimeMs,
-            long complementerCalcTimeMs, Block block) {
+            long miscTimeMs, Block block) {
 
         if (block == null) {
             return;
@@ -813,7 +812,7 @@ public class MetricsPanel extends JPanel {
         atTimes.add(atTimeMs);
         subscriptionTimes.add(subscriptionTimeMs);
         blockApplyTimes.add(blockApplyTimeMs);
-        complementerCalcTimes.add(complementerCalcTimeMs);
+        miscTimes.add(miscTimeMs);
 
         while (pushTimes.size() > CHART_HISTORY_SIZE) {
             pushTimes.removeFirst();
@@ -842,8 +841,8 @@ public class MetricsPanel extends JPanel {
         while (blockApplyTimes.size() > CHART_HISTORY_SIZE) {
             blockApplyTimes.removeFirst();
         }
-        while (complementerCalcTimes.size() > CHART_HISTORY_SIZE) {
-            complementerCalcTimes.removeFirst();
+        while (miscTimes.size() > CHART_HISTORY_SIZE) {
+            miscTimes.removeFirst();
         }
 
         int currentWindowSize = Math.min(pushTimes.size(), movingAverageWindow);
@@ -860,7 +859,7 @@ public class MetricsPanel extends JPanel {
         long maxTxApplyTime = txApplyTimes.stream().mapToLong(Long::longValue).max().orElse(0);
         long maxSubscriptionTime = subscriptionTimes.stream().mapToLong(Long::longValue).max().orElse(0);
         long maxBlockApplyTime = blockApplyTimes.stream().mapToLong(Long::longValue).max().orElse(0);
-        long maxComplementerCalcTime = complementerCalcTimes.stream().mapToLong(Long::longValue).max().orElse(0);
+        long maxMiscTime = miscTimes.stream().mapToLong(Long::longValue).max().orElse(0);
 
         long displayPushTime = (long) pushTimes.stream()
                 .skip(Math.max(0, pushTimes.size() - currentWindowSize))
@@ -907,8 +906,8 @@ public class MetricsPanel extends JPanel {
                 .mapToLong(Long::longValue)
                 .average().orElse(0.0);
 
-        long displayComplementerCalcTime = (long) complementerCalcTimes.stream()
-                .skip(Math.max(0, complementerCalcTimes.size() - currentWindowSize))
+        long displayMiscTime = (long) miscTimes.stream()
+                .skip(Math.max(0, miscTimes.size() - currentWindowSize))
                 .mapToLong(Long::longValue)
                 .average().orElse(0.0);
 
@@ -935,10 +934,8 @@ public class MetricsPanel extends JPanel {
             blockApplyTimeProgressBar.setValue((int) displayBlockApplyTime);
             blockApplyTimeProgressBar
                     .setString(String.format("%d ms - max: %d ms", displayBlockApplyTime, maxBlockApplyTime));
-            complementerCalcTimeProgressBar.setValue((int) displayComplementerCalcTime);
-            complementerCalcTimeProgressBar
-                    .setString(String.format("%d ms - max: %d ms", displayComplementerCalcTime,
-                            maxComplementerCalcTime));
+            miscTimeProgressBar.setValue((int) displayMiscTime);
+            miscTimeProgressBar.setString(String.format("%d ms - max: %d ms", displayMiscTime, maxMiscTime));
 
             // Update timing chart series
             pushTimePerBlockSeries.add(blockHeight, displayPushTime);
@@ -949,7 +946,7 @@ public class MetricsPanel extends JPanel {
             atTimePerBlockSeries.add(blockHeight, displayAtTime);
             txApplyTimePerBlockSeries.add(blockHeight, displayTxApplyTime);
             subscriptionTimePerBlockSeries.add(blockHeight, displaySubscriptionTime);
-            complementerCalcTimePerBlockSeries.add(blockHeight, displayComplementerCalcTime);
+            miscTimePerBlockSeries.add(blockHeight, displayMiscTime);
             blockApplyTimePerBlockSeries.add(blockHeight, displayBlockApplyTime);
 
             // Keep history size for timing chart
@@ -980,8 +977,8 @@ public class MetricsPanel extends JPanel {
             while (blockApplyTimePerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
                 blockApplyTimePerBlockSeries.remove(0);
             }
-            while (complementerCalcTimePerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
-                complementerCalcTimePerBlockSeries.remove(0);
+            while (miscTimePerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
+                miscTimePerBlockSeries.remove(0);
             }
         });
     }
@@ -1058,7 +1055,7 @@ public class MetricsPanel extends JPanel {
         subscriptionTimePerBlockSeries = new XYSeries("Subscription Time/Block (MA)");
         blockApplyTimePerBlockSeries = new XYSeries("Block Apply Time/Block (MA)");
         commitTimePerBlockSeries = new XYSeries("Commit Time/Block (MA)");
-        complementerCalcTimePerBlockSeries = new XYSeries("Comp Calc Time/Block (MA)");
+        miscTimePerBlockSeries = new XYSeries("Misc. Time/Block (MA)");
 
         XYSeriesCollection lineDataset = new XYSeriesCollection();
         lineDataset.addSeries(pushTimePerBlockSeries);
@@ -1070,7 +1067,7 @@ public class MetricsPanel extends JPanel {
         lineDataset.addSeries(subscriptionTimePerBlockSeries);
         lineDataset.addSeries(blockApplyTimePerBlockSeries);
         lineDataset.addSeries(commitTimePerBlockSeries);
-        lineDataset.addSeries(complementerCalcTimePerBlockSeries);
+        lineDataset.addSeries(miscTimePerBlockSeries);
 
         // Create chart with no title or axis labels to save space
         JFreeChart chart = ChartFactory.createXYLineChart(
@@ -1099,7 +1096,7 @@ public class MetricsPanel extends JPanel {
         plot.getRenderer().setSeriesPaint(6, new Color(255, 105, 100)); // Hot Pink for Subscription
         plot.getRenderer().setSeriesPaint(7, new Color(0, 100, 100)); // Teal for Block Apply
         plot.getRenderer().setSeriesPaint(8, new Color(150, 0, 200)); // Magenta for Commit
-        plot.getRenderer().setSeriesPaint(9, Color.LIGHT_GRAY); // Light Gray for Complementer
+        plot.getRenderer().setSeriesPaint(9, Color.LIGHT_GRAY); // Light Gray for Misc
 
         // Set line thickness
         plot.getRenderer().setSeriesStroke(0, new java.awt.BasicStroke(1.2f));

@@ -428,7 +428,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                 String.valueOf(stats.txLoopTimeMs), String.valueOf(stats.housekeepingTimeMs),
                                 String.valueOf(stats.txApplyTimeMs), String.valueOf(stats.atTimeMs),
                                 String.valueOf(stats.subscriptionTimeMs), String.valueOf(stats.blockApplyTimeMs),
-                                String.valueOf(stats.commitTimeMs), String.valueOf(stats.complementerCalcTimeMs),
+                                String.valueOf(stats.commitTimeMs), String.valueOf(stats.miscTimeMs),
                                 String.valueOf(block.getHeight()),
                                 String.valueOf(transactionCount));
                         measurementData.add(line);
@@ -1281,14 +1281,14 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                  * Subscription_time[ms] - Time for subscription processing.
                  * Block_apply_time[ms] - Time for block-level changes (rewards, etc.).
                  * Commit_time[ms] - Time to commit changes to the database disk.
-                 * Complementer_calc_time[ms] - The difference between total push time and
+                 * Misc_time[ms] - The difference between total push time and
                  * the sum of timing components that are individually and explicitly measured
                  * in the push block process.
                  * Block_height - Height of the pushed block
                  * Transaction_count - Number of transactions in the pushed block
                  */
                 writer.println(
-                        "Block_timestamp;Cumulative_difficulty;Accumulated_sync_in_progress_time[ms];Accumulated_sync_time[ms];Push_block_time[ms];Validation_time[ms];Tx_loop_time[ms];Housekeeping_time[ms];Tx_apply_time[ms];AT_time[ms];Subscription_time[ms];Block_apply_time[ms];Commit_time[ms];Complementer_calc_time[ms];Block_height;Transaction_count");
+                        "Block_timestamp;Cumulative_difficulty;Accumulated_sync_in_progress_time[ms];Accumulated_sync_time[ms];Push_block_time[ms];Validation_time[ms];Tx_loop_time[ms];Housekeeping_time[ms];Tx_apply_time[ms];AT_time[ms];Subscription_time[ms];Block_apply_time[ms];Commit_time[ms];Misc_time[ms];Block_height;Transaction_count");
             } catch (IOException e) {
                 logger.error("Failed to create sync measurement log", e);
             }
@@ -1722,12 +1722,12 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             atTimeMs = TimeUnit.NANOSECONDS.toMillis(atTimeNanos);
             long subscriptionTimeMs = TimeUnit.NANOSECONDS.toMillis(subscriptionTimeNanos);
             long blockApplyTimeMs = TimeUnit.NANOSECONDS.toMillis(blockApplyTimeNanos);
-            long complementerCalcTimeMs = totalTimeMs - (validationTimeMs + txLoopTimeMs + housekeepingTimeMs
+            long miscTimeMs = totalTimeMs - (validationTimeMs + txLoopTimeMs + housekeepingTimeMs
                     + txApplyTimeMs + atTimeMs + subscriptionTimeMs + blockApplyTimeMs + commitTimeMs);
 
             performanceStats.set(new BlockchainProcessor.PerformanceStats(
                     totalTimeMs, validationTimeMs, txLoopTimeMs, housekeepingTimeMs, txApplyTimeMs, atTimeMs,
-                    subscriptionTimeMs, blockApplyTimeMs, commitTimeMs, complementerCalcTimeMs, block));
+                    subscriptionTimeMs, blockApplyTimeMs, commitTimeMs, miscTimeMs, block));
             blockListeners.notify(block, Event.PERFORMANCE_STATS_UPDATED);
 
             logger.debug("Successfully pushed {} (height {})", block.getId(), block.getHeight());
