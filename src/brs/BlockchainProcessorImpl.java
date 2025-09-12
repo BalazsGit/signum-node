@@ -41,8 +41,13 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.lang.management.ManagementFactory;
 import java.nio.file.Path;
 import java.math.BigInteger;
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.nio.file.Files;
 import java.util.Date;
 import java.nio.file.Paths;
@@ -77,6 +82,7 @@ import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import com.sun.management.OperatingSystemMXBean;
 import org.bouncycastle.util.encoders.Hex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -422,7 +428,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                 String.valueOf(stats.txLoopTimeMs), String.valueOf(stats.housekeepingTimeMs),
                                 String.valueOf(stats.txApplyTimeMs), String.valueOf(stats.atTimeMs),
                                 String.valueOf(stats.subscriptionTimeMs), String.valueOf(stats.blockApplyTimeMs),
-                                String.valueOf(stats.commitTimeMs), String.valueOf(block.getHeight()),
+                                String.valueOf(stats.commitTimeMs), String.valueOf(stats.complementerCalcTimeMs),
+                                String.valueOf(block.getHeight()),
                                 String.valueOf(transactionCount));
                         measurementData.add(line);
                     }
@@ -1141,6 +1148,58 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         }
     }
 
+    private void writeSystemInfo(PrintWriter writer) {
+        try {
+            writer.println("Property;Value");
+            writer.println("Signum Version;" + Signum.VERSION);
+            try {
+                writer.println("Hostname;" + java.net.InetAddress.getLocalHost().getHostName());
+            } catch (java.net.UnknownHostException e) {
+                writer.println("Hostname;Unknown");
+            }
+            writer.println("OS Name;" + System.getProperty("os.name"));
+            writer.println("OS Version;" + System.getProperty("os.version"));
+            writer.println("OS Architecture;" + System.getProperty("os.arch"));
+            writer.println("Java Version;" + System.getProperty("java.version"));
+            writer.println("Available Processors;" + Runtime.getRuntime().availableProcessors());
+            long maxMemoryMb = Runtime.getRuntime().maxMemory() / (1024 * 1024);
+            writer.println("Max Memory (MB);" + maxMemoryMb);
+            try {
+                OperatingSystemMXBean osBean = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
+                long totalMemoryBytes = osBean.getTotalMemorySize();
+                writer.println("Total RAM (MB);" + (totalMemoryBytes / (1024 * 1024)));
+            } catch (Exception e) {
+                writer.println("Total RAM (MB);N/A");
+            }
+
+            String dbUrl = propertyService.getString(Props.DB_URL);
+            String dbType = "unknown";
+            if (dbUrl != null) {
+                if (dbUrl.contains(":sqlite:")) {
+                    dbType = "SQLite";
+                } else if (dbUrl.contains(":mariadb:")) {
+                    dbType = "MariaDB";
+                } else if (dbUrl.contains(":postgresql:")) {
+                    dbType = "PostgreSQL";
+                }
+            }
+            writer.println("Database Type;" + dbType);
+
+            String dbUsername = propertyService.getString(Props.DB_USERNAME);
+            String dbPassword = propertyService.getString(Props.DB_PASSWORD);
+            try (Connection con = DriverManager.getConnection(dbUrl, dbUsername, dbPassword)) {
+                DatabaseMetaData metaData = con.getMetaData();
+                writer.println("Database Version;" + metaData.getDatabaseProductVersion());
+            } catch (SQLException e) {
+                writer.println("Database Version;N/A");
+                logger.warn("Could not get database version", e);
+            }
+            writer.println(";;"); // Separator line
+        } catch (Exception e) {
+            logger.error("Failed to write system info to log", e);
+        }
+    }
+
     private void initSyncProgressLogging() {
         File file = new File(this.syncProgressLogFilename);
         boolean fileExistsAndHasContent = file.exists() && file.length() > 0;
@@ -1171,7 +1230,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         if (!fileExistsAndHasContent) {
             try (PrintWriter writer = new PrintWriter(new FileWriter(file, false))) { // overwrite
                 logger.info("Creating new sync progress log file: {}", this.syncProgressLogFilename);
+                writeSystemInfo(writer);
                 /*
+                 * The file starts with a block of system information (Property;Value).
+                 *
                  * Header:
                  * Accumulated_sync_in_progress_time[s];Accumulated_sync_time[s];Block_height
                  * Accumulated_sync_in_progress_time[s] - Time spent in sync mode
@@ -1195,7 +1257,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         if (!file.exists()) {
             try (PrintWriter writer = new PrintWriter(new FileWriter(file, false))) {
                 logger.info("Creating new sync measurement log file: {}", this.syncMeasurementLogFilename);
+                writeSystemInfo(writer);
                 /*
+                 * The file starts with a block of system information (Property;Value).
+                 *
                  * Header:
                  * Block_timestamp;Cumulative_difficulty;Accumulated_sync_in_progress_time[ms];
                  * Accumulated_sync_time[ms];Push_block_time[ms];Db_time[ms];At_time[ms];
@@ -1216,11 +1281,14 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                  * Subscription_time[ms] - Time for subscription processing.
                  * Block_apply_time[ms] - Time for block-level changes (rewards, etc.).
                  * Commit_time[ms] - Time to commit changes to the database disk.
+                 * Complementer_calc_time[ms] - The difference between total push time and sum
+                 * of other timers.
+                 * It's the difference between total push time and the sum of other timers.
                  * Block_height - Height of the pushed block
                  * Transaction_count - Number of transactions in the pushed block
                  */
                 writer.println(
-                        "Block_timestamp;Cumulative_difficulty;Accumulated_sync_in_progress_time[ms];Accumulated_sync_time[ms];Push_block_time[ms];Validation_time[ms];Tx_loop_time[ms];Housekeeping_time[ms];Tx_apply_time[ms];AT_time[ms];Subscription_time[ms];Block_apply_time[ms];Commit_time[ms];Block_height;Transaction_count");
+                        "Block_timestamp;Cumulative_difficulty;Accumulated_sync_in_progress_time[ms];Accumulated_sync_time[ms];Push_block_time[ms];Validation_time[ms];Tx_loop_time[ms];Housekeeping_time[ms];Tx_apply_time[ms];AT_time[ms];Subscription_time[ms];Block_apply_time[ms];Commit_time[ms];Complementer_calc_time[ms];Block_height;Transaction_count");
             } catch (IOException e) {
                 logger.error("Failed to create sync measurement log", e);
             }
@@ -1654,10 +1722,12 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             atTimeMs = TimeUnit.NANOSECONDS.toMillis(atTimeNanos);
             long subscriptionTimeMs = TimeUnit.NANOSECONDS.toMillis(subscriptionTimeNanos);
             long blockApplyTimeMs = TimeUnit.NANOSECONDS.toMillis(blockApplyTimeNanos);
+            long complementerCalcTimeMs = totalTimeMs - (validationTimeMs + txLoopTimeMs + housekeepingTimeMs
+                    + txApplyTimeMs + atTimeMs + subscriptionTimeMs + blockApplyTimeMs + commitTimeMs);
 
             performanceStats.set(new BlockchainProcessor.PerformanceStats(
                     totalTimeMs, validationTimeMs, txLoopTimeMs, housekeepingTimeMs, txApplyTimeMs, atTimeMs,
-                    subscriptionTimeMs, blockApplyTimeMs, commitTimeMs, block));
+                    subscriptionTimeMs, blockApplyTimeMs, commitTimeMs, complementerCalcTimeMs, block));
             blockListeners.notify(block, Event.PERFORMANCE_STATS_UPDATED);
 
             logger.debug("Successfully pushed {} (height {})", block.getId(), block.getHeight());
