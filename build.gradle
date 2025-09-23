@@ -328,7 +328,7 @@ flyway {
 import nu.studer.gradle.jooq.JooqEdition
 
 jooq {
-    version = '3.20.3'
+    version = '3.20.6'
     edition = JooqEdition.OSS
 
     configurations {
