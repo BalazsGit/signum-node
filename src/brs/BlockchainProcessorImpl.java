@@ -1230,7 +1230,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         if (!fileExistsAndHasContent) {
             try (PrintWriter writer = new PrintWriter(new FileWriter(file, false))) { // overwrite
                 logger.info("Creating new sync progress log file: {}", this.syncProgressLogFilename);
-                writeSystemInfo(writer);
+                try {
+                    writeSystemInfo(writer);
+                } catch (Exception e) {
+                    logger.error("Failed to write system info to sync progress log", e);
+                }
                 /*
                  * The file starts with a block of system information (Property;Value).
                  *
@@ -1257,7 +1261,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         if (!file.exists()) {
             try (PrintWriter writer = new PrintWriter(new FileWriter(file, false))) {
                 logger.info("Creating new sync measurement log file: {}", this.syncMeasurementLogFilename);
-                writeSystemInfo(writer);
+                try {
+                    writeSystemInfo(writer);
+                } catch (Exception e) {
+                    logger.error("Failed to write system info to sync measurement log", e);
+                }
                 /*
                  * The file starts with a block of system information (Property;Value).
                  *
