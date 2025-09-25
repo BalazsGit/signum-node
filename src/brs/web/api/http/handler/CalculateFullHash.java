@@ -7,7 +7,7 @@ import brs.web.api.http.common.LegacyDocTag;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import java.security.MessageDigest;
 
 import static brs.web.api.http.common.JSONResponses.MISSING_SIGNATURE_HASH;

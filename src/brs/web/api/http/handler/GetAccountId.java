@@ -6,7 +6,7 @@ import static brs.web.api.http.common.Parameters.SECRET_PHRASE_PARAMETER;
 import static brs.web.api.http.common.ResultFields.ACCOUNT_RESPONSE;
 import static brs.web.api.http.common.ResultFields.PUBLIC_KEY_RESPONSE;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import brs.web.api.http.ApiServlet;
 import brs.web.api.http.common.JSONData;
