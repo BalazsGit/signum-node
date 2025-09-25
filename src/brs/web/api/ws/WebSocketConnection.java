@@ -1,11 +1,11 @@
 package brs.web.api.ws;
 
-import org.eclipse.jetty.websocket.api.RemoteEndpoint;
+import org.eclipse.jetty.websocket.api.Callback;
 import org.eclipse.jetty.websocket.api.Session;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
+import java.net.SocketAddress;
 
 public class WebSocketConnection {
   private static final Logger logger = LoggerFactory.getLogger(WebSocketConnection.class);
@@ -17,7 +17,8 @@ public class WebSocketConnection {
   }
 
   public String getId() {
-    return session.getRemoteAddress().toString();
+    SocketAddress remoteAddress = session.getRemoteSocketAddress();
+    return remoteAddress != null ? remoteAddress.toString() : "unknown";
   }
 
   public Session getSession() {
@@ -25,15 +26,19 @@ public class WebSocketConnection {
   }
 
   public void sendMessage(String message) {
-    RemoteEndpoint remote = this.getSession().getRemote();
-    try {
-      remote.sendString(message);
-    } catch (IOException e) {
-      logger.warn("Error sending message to {}: {}", remote.getRemoteAddress().toString(), e.getMessage());
+    if (!session.isOpen()) {
+      logger.debug("Skipping message send to {} because session is closed", getId());
+      return;
     }
+
+    SocketAddress remoteAddress = session.getRemoteSocketAddress();
+    session.sendText(message, Callback.from(
+      () -> logger.trace("Sent message to {}", remoteAddress),
+      throwable -> logger.warn("Error sending message to {}: {}", remoteAddress, throwable.getMessage(), throwable)
+    ));
   }
 
   public void close() {
-    this.getSession().close();
+    session.close();
   }
 }

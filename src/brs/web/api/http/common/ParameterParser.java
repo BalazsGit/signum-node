@@ -7,7 +7,7 @@ import brs.fluxcapacitor.FluxValues;
 import brs.util.Convert;
 import signumj.entity.SignumAddress;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import org.bouncycastle.util.encoders.Hex;
 

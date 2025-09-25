@@ -7,13 +7,12 @@ import brs.web.api.http.ApiServlet;
 import brs.web.api.http.LegacyDocsServlet;
 import brs.web.api.ws.BlockchainEventNotifier;
 import org.eclipse.jetty.server.*;
-import org.eclipse.jetty.server.handler.HandlerList;
 import org.eclipse.jetty.server.handler.gzip.GzipHandler;
-import org.eclipse.jetty.servlet.DefaultServlet;
-import org.eclipse.jetty.servlet.FilterHolder;
-import org.eclipse.jetty.servlet.ServletContextHandler;
-import org.eclipse.jetty.servlet.ServletHolder;
-import org.eclipse.jetty.servlets.DoSFilter;
+import org.eclipse.jetty.ee10.servlet.DefaultServlet;
+import org.eclipse.jetty.ee10.servlet.FilterHolder;
+import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
+import org.eclipse.jetty.ee10.servlet.ServletHolder;
+import org.eclipse.jetty.ee10.servlets.DoSFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -59,15 +58,15 @@ public final class WebServerImpl implements WebServer {
     configureWebUI(servletContextHandler);
     configureHttpApi(servletContextHandler);
 
-    HandlerList rootHandler = new HandlerList();
-    rootHandler.addHandler(servletContextHandler);
+    Handler handlerChain = servletContextHandler;
     if (context.getPropertyService().getBoolean(Props.JETTY_API_GZIP_FILTER)) {
       GzipHandler gzipHandler = new GzipHandler();
       gzipHandler.setIncludedMethodList("GET,POST");
       gzipHandler.setMinGzipSize(context.getPropertyService().getInt(Props.JETTY_API_GZIP_FILTER_MIN_GZIP_SIZE));
-      rootHandler.addHandler(gzipHandler);
+      gzipHandler.setHandler(handlerChain);
+      handlerChain = gzipHandler;
     }
-    jettyServer.setHandler(rootHandler);
+    jettyServer.setHandler(handlerChain);
     jettyServer.setStopAtShutdown(true);
     return jettyServer;
   }
