@@ -2,7 +2,7 @@ package brs.web.api.http.handler;
 
 import static brs.web.api.http.common.Parameters.*;
 import static brs.web.api.http.common.ResultFields.*;
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import brs.web.api.http.common.LegacyDocTag;
 import brs.web.api.http.ApiServlet;

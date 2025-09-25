@@ -11,7 +11,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import static brs.web.api.http.common.Parameters.ACCOUNTS_RESPONSE;
 import static brs.web.api.http.common.Parameters.ACCOUNT_PARAMETER;

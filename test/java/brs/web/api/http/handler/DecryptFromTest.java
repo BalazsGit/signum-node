@@ -10,7 +10,7 @@ import brs.util.JSON;
 import org.junit.Before;
 import org.junit.Test;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import static brs.common.TestConstants.TEST_PUBLIC_KEY_BYTES;
 import static brs.common.TestConstants.TEST_SECRET_PHRASE;
