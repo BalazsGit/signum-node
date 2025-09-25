@@ -3,7 +3,7 @@ package brs.web.api.http.handler;
 import static brs.web.api.http.common.Parameters.HEX_STRING_PARAMETER;
 import static brs.web.api.http.common.Parameters.ID_PARAMETER;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import brs.web.api.http.ApiServlet;
 import brs.web.api.http.common.JSONData;

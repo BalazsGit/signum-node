@@ -14,7 +14,7 @@ import org.junit.runner.RunWith;
 import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.powermock.modules.junit4.PowerMockRunner;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import static brs.TransactionType.DigitalGoods.PRICE_CHANGE;
 import static brs.web.api.http.common.JSONResponses.UNKNOWN_GOODS;

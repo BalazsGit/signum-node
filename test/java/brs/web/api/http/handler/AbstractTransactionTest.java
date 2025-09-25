@@ -8,7 +8,7 @@ import brs.web.api.http.common.APITransactionManager;
 import com.google.gson.JsonElement;
 import org.mockito.ArgumentCaptor;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.mock;

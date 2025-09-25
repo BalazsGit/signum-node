@@ -7,7 +7,7 @@ import com.google.gson.JsonObject;
 import org.junit.Before;
 import org.junit.Test;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import static brs.web.api.http.common.ResultFields.TIME_RESPONSE;
 import static org.junit.Assert.assertEquals;

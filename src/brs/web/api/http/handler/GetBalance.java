@@ -8,7 +8,7 @@ import brs.web.api.http.ApiServlet;
 import brs.web.api.http.common.JSONData;
 import com.google.gson.JsonElement;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 public final class GetBalance extends ApiServlet.JsonRequestHandler {
 

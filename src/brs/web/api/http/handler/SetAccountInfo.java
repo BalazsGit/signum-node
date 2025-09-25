@@ -7,7 +7,7 @@ import brs.web.api.http.common.APITransactionManager;
 import brs.web.api.http.common.LegacyDocTag;
 import com.google.gson.JsonElement;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import static brs.web.api.http.common.JSONResponses.INCORRECT_ACCOUNT_DESCRIPTION_LENGTH;
 import static brs.web.api.http.common.JSONResponses.INCORRECT_ACCOUNT_NAME_LENGTH;
