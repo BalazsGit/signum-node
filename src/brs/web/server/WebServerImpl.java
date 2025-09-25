@@ -98,11 +98,13 @@ public final class WebServerImpl implements WebServer {
     } else {
       logger.info("API docs enabled");
       ServletHolder defaultServletHolder = new ServletHolder(new DefaultServlet());
-      defaultServletHolder.setInitParameter("resourceBase", "html");
+      String apiDocsResourceBase = Paths.get("html", "api-doc").toAbsolutePath().toString();
+      defaultServletHolder.setInitParameter("resourceBase", apiDocsResourceBase);
       defaultServletHolder.setInitParameter("dirAllowed", "false");
       defaultServletHolder.setInitParameter("welcomeServlets", "true");
       defaultServletHolder.setInitParameter("redirectWelcome", "true");
       defaultServletHolder.setInitParameter("gzip", "true");
+      servletContextHandler.addServlet(defaultServletHolder, "/api-doc");
       servletContextHandler.addServlet(defaultServletHolder, "/api-doc/*");
       servletContextHandler.setWelcomeFiles(new String[]{"index.html"});
     }
