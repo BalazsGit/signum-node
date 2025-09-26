@@ -13,6 +13,10 @@ import org.eclipse.jetty.ee10.servlet.FilterHolder;
 import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
 import org.eclipse.jetty.ee10.servlet.ServletHolder;
 import org.eclipse.jetty.ee10.servlets.DoSFilter;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -97,6 +101,21 @@ public final class WebServerImpl implements WebServer {
       logger.info("API docs disabled");
     } else {
       logger.info("API docs enabled");
+
+      ServletHolder redirectServletHolder = new ServletHolder(new HttpServlet() {
+        @Override
+        protected void service(HttpServletRequest req, HttpServletResponse resp)
+          throws ServletException, java.io.IOException {
+          StringBuilder redirectTarget = new StringBuilder(req.getContextPath()).append("/api-doc/");
+          String queryString = req.getQueryString();
+          if (queryString != null && !queryString.isEmpty()) {
+            redirectTarget.append('?').append(queryString);
+          }
+          resp.sendRedirect(redirectTarget.toString());
+        }
+      });
+      servletContextHandler.addServlet(redirectServletHolder, "/api-doc");
+
       ServletHolder defaultServletHolder = new ServletHolder(new DefaultServlet());
       String apiDocsResourceBase = Paths.get("html", "api-doc").toAbsolutePath().toString();
       defaultServletHolder.setInitParameter("resourceBase", apiDocsResourceBase);
@@ -104,7 +123,6 @@ public final class WebServerImpl implements WebServer {
       defaultServletHolder.setInitParameter("welcomeServlets", "true");
       defaultServletHolder.setInitParameter("redirectWelcome", "true");
       defaultServletHolder.setInitParameter("gzip", "true");
-      servletContextHandler.addServlet(defaultServletHolder, "/api-doc");
       servletContextHandler.addServlet(defaultServletHolder, "/api-doc/*");
       servletContextHandler.setWelcomeFiles(new String[]{"index.html"});
     }
