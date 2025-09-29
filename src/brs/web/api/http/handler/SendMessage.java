@@ -9,7 +9,7 @@ import brs.web.api.http.common.LegacyDocTag;
 import brs.web.api.http.common.ParameterParser;
 import com.google.gson.JsonElement;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import static brs.web.api.http.common.Parameters.RECIPIENT_PARAMETER;
 

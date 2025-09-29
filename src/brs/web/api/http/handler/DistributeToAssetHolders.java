@@ -7,7 +7,7 @@ import static brs.web.api.http.common.Parameters.ASSET_TO_DISTRIBUTE_PARAMETER;
 import static brs.web.api.http.common.Parameters.QUANTITY_MININUM_QNT_PARAMETER;
 import static brs.web.api.http.common.Parameters.QUANTITY_QNT_PARAMETER;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import brs.web.api.http.common.APITransactionManager;
 import brs.web.api.http.common.JSONResponses;
