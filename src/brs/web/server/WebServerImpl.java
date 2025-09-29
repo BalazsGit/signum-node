@@ -7,7 +7,8 @@ import brs.web.api.http.ApiServlet;
 import brs.web.api.http.LegacyDocsServlet;
 import brs.web.api.ws.BlockchainEventNotifier;
 import org.eclipse.jetty.server.*;
-import org.eclipse.jetty.server.handler.gzip.CompressionHandler;
+import org.eclipse.jetty.compression.server.CompressionHandler;
+import org.eclipse.jetty.compression.server.CompressionConfig;
 import org.eclipse.jetty.ee10.servlet.DefaultServlet;
 import org.eclipse.jetty.ee10.servlet.FilterHolder;
 import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
@@ -49,11 +50,13 @@ public final class WebServerImpl implements WebServer {
     }
 
     private Server createServerInstance() {
-        final Server jettyServer;
-        jettyServer = new Server();
+        final Server jettyServer = new Server();
+
         ServletContextHandler servletContextHandler = new ServletContextHandler();
         ServerConnectorFactory connectorFactory = new ServerConnectorFactory(context, jettyServer);
+
         jettyServer.addConnector(connectorFactory.createHttpConnector());
+
         if (context.getPropertyService().getBoolean(Props.API_WEBSOCKET_ENABLE)) {
             eventNotifier = BlockchainEventNotifier.getInstance(context);
             jettyServer.addConnector(connectorFactory.createWebsocketConnector(servletContextHandler));
@@ -63,23 +66,29 @@ public final class WebServerImpl implements WebServer {
         configureHttpApi(servletContextHandler);
 
         Handler handlerChain = servletContextHandler;
-        if (context.getPropertyService().getBoolean(Props.JETTY_API_GZIP_FILTER)) {
-            CompressionHandler compression = new CompressionHandler();
-            compression.setIncludedMethods("GET", "POST");
-            compression.setIncludedMimeTypes(
-                    "application/json",
-                    "text/plain",
-                    "text/html",
-                    "text/css",
-                    "application/javascript",
-                    "image/svg+xml",
-                    "application/xml");
-            compression.setMinResponseSize(
-                    context.getPropertyService().getInt(Props.JETTY_API_GZIP_FILTER_MIN_GZIP_SIZE));
 
+        if (context.getPropertyService().getBoolean(Props.JETTY_API_GZIP_FILTER)) {
+            CompressionConfig.Builder b = CompressionConfig.builder()
+                    .compressIncludeMethod("GET")
+                    .compressIncludeMethod("POST")
+                    .defaults();
+
+            b.compressIncludeMimeType("application/json")
+                    .compressIncludeMimeType("text/plain")
+                    .compressIncludeMimeType("text/html")
+                    .compressIncludeMimeType("text/css")
+                    .compressIncludeMimeType("application/javascript")
+                    .compressIncludeMimeType("image/svg+xml")
+                    .compressIncludeMimeType("application/xml");
+
+            CompressionConfig cfg = b.build();
+
+            CompressionHandler compression = new CompressionHandler();
+            compression.putConfiguration("/*", cfg);
             compression.setHandler(handlerChain);
             handlerChain = compression;
         }
+
         jettyServer.setHandler(handlerChain);
         jettyServer.setStopAtShutdown(true);
         return jettyServer;
