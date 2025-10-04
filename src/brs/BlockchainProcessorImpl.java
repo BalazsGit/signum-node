@@ -1300,13 +1300,13 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                  * in the push block process.
                  * Block_height - Height of the pushed block
                  * AT_count - Number of Automated Transactions executed in the pushed block
-                 * User_Transaction_Count - Number of user-submitted transactions in the pushed
+                 * User_transaction_count - Number of user-submitted transactions in the pushed
                  * block
-                 * All_Transaction_Count - Total number of all transactions (including
+                 * All_transaction_count - Total number of all transactions (including
                  * system generated) in the pushed block
                  */
                 writer.println(
-                        "Block_timestamp;Cumulative_difficulty;Accumulated_sync_in_progress_time[ms];Accumulated_sync_time[ms];Push_block_time[ms];Validation_time[ms];Tx_loop_time[ms];Housekeeping_time[ms];Tx_apply_time[ms];AT_time[ms];Subscription_time[ms];Block_apply_time[ms];Commit_time[ms];Misc_time[ms];Block_height;AT_count;User_Transaction_Count;All_Transaction_Count");
+                        "Block_timestamp;Cumulative_difficulty;Accumulated_sync_in_progress_time[ms];Accumulated_sync_time[ms];Push_block_time[ms];Validation_time[ms];Tx_loop_time[ms];Housekeeping_time[ms];Tx_apply_time[ms];AT_time[ms];Subscription_time[ms];Block_apply_time[ms];Commit_time[ms];Misc_time[ms];Block_height;AT_count;User_transaction_count;All_transaction_count");
             } catch (IOException e) {
                 logger.error("Failed to create sync measurement log", e);
             }
