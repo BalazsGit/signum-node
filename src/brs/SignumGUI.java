@@ -548,14 +548,15 @@ public class SignumGUI extends JFrame {
 
         shutdownButton.addActionListener(e -> {
             if (JOptionPane.showConfirmDialog(SignumGUI.this,
-                    "This will stop the node. Are you sure?", "Shutdown node",
+                    "This will stop the node. Are you sure?", "Shutdown Node",
                     JOptionPane.YES_NO_OPTION,
                     JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
-                shutdown();
+                new Thread(this::shutdown).start();
             }
         });
         /*
          * restartButton.addActionListener(e -> {
+         * 
          * if (JOptionPane.showConfirmDialog(SignumGUI.this,
          * "This will restart the node. Are you sure?", "Restart node",
          * JOptionPane.YES_NO_OPTION,

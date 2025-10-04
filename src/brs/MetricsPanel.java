@@ -40,6 +40,7 @@ public class MetricsPanel extends JPanel {
 
     private final LinkedList<Long> blockTimestamps = new LinkedList<>();
     private final LinkedList<Integer> transactionCounts = new LinkedList<>();
+    private final LinkedList<Integer> atTransactionCounts = new LinkedList<>();
     private final LinkedList<Long> pushTimes = new LinkedList<>();
     private final LinkedList<Long> validationTimes = new LinkedList<>();
     private final LinkedList<Long> txLoopTimes = new LinkedList<>();
@@ -50,13 +51,16 @@ public class MetricsPanel extends JPanel {
     private final LinkedList<Long> subscriptionTimes = new LinkedList<>();
     private final LinkedList<Long> blockApplyTimes = new LinkedList<>();
     private final LinkedList<Long> miscTimes = new LinkedList<>();
+    private final LinkedList<Integer> atCounts = new LinkedList<>();
     private final LinkedList<Double> blocksPerSecondHistory = new LinkedList<>();
     private final LinkedList<Double> transactionsPerSecondHistory = new LinkedList<>();
+    private final LinkedList<Double> atTransactionsPerSecondHistory = new LinkedList<>();
     private int movingAverageWindow = 100; // Default value
     private XYSeries blocksPerSecondSeries;
-    private XYSeriesCollection transactionsPerBlockDataset;
     private XYSeries transactionsPerSecondSeries;
     private XYSeries transactionsPerBlockSeries;
+    private XYSeries atTransactionsPerBlockSeries;
+    private XYSeries atTransactionsPerSecondSeries;
     private XYSeries pushTimePerBlockSeries;
     private XYSeries uploadSpeedSeries;
     private XYSeries downloadSpeedSeries;
@@ -69,12 +73,12 @@ public class MetricsPanel extends JPanel {
     private XYSeries subscriptionTimePerBlockSeries;
     private XYSeries blockApplyTimePerBlockSeries;
     private XYSeries miscTimePerBlockSeries;
+    private XYSeries atCountPerBlockSeries;
 
     private JProgressBar blocksPerSecondProgressBar;
     private JProgressBar transactionsPerSecondProgressBar;
     private JProgressBar transactionsPerBlockProgressBar;
     private int oclUnverifiedQueueThreshold;
-    private JSlider movingAverageSlider;
     private JLabel uploadSpeedLabel;
     private JLabel downloadSpeedLabel;
     private JLabel metricsUploadVolumeLabel;
@@ -105,6 +109,12 @@ public class MetricsPanel extends JPanel {
     private JProgressBar blockApplyTimeProgressBar;
     private JLabel miscTimeLabel;
     private JProgressBar miscTimeProgressBar;
+    private JLabel atCountLabel;
+    private JProgressBar atCountProgressBar;
+    private JLabel systemTxPerBlockLabel;
+    private JProgressBar atTransactionsPerBlockProgressBar;
+    private JLabel systemTxPerSecondLabel;
+    private JProgressBar systemTransactionsPerSecondProgressBar;
     private JProgressBar uploadSpeedProgressBar;
     private JProgressBar downloadSpeedProgressBar;
 
@@ -139,8 +149,9 @@ public class MetricsPanel extends JPanel {
     public MetricsPanel(JFrame parentFrame) {
         super(new GridBagLayout());
         this.parentFrame = parentFrame;
-        transactionsPerBlockSeries = new XYSeries("Transactions/Block (MA)");
-        transactionsPerBlockDataset = new XYSeriesCollection(transactionsPerBlockSeries);
+        atCountPerBlockSeries = new XYSeries("ATs/Block (MA)");
+        transactionsPerBlockSeries = new XYSeries("All Txs/Block (MA)"); // Orange
+        atTransactionsPerBlockSeries = new XYSeries("System Txs/Block (MA)"); // Blue
         performanceChartPanel = createPerformanceChartPanel();
         timingChartPanel = createTimingChartPanel();
         netSpeedChartPanel = createNetSpeedChartPanel();
@@ -193,73 +204,49 @@ public class MetricsPanel extends JPanel {
         addComponent(SyncPanel, blocksPerSecondProgressBar, 1, 3, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
-        // Transactions/Second (Moving Average)
-        tooltip = "The moving average of transactions processed per second. This metric reflects the current transactional throughput of the network as seen by your node.\n\nIt is calculated based on the number of transactions in recent blocks and the time taken to process those blocks. A higher value indicates a busy network with many transactions being confirmed.";
-        JLabel txPerSecondLabel = createLabel("Transactions/Sec (MA)", Color.GREEN, tooltip);
+        // All Transactions/Second (Moving Average)
+        tooltip = "The moving average of the total number of transactions (user-submitted and AT-generated) processed per second. This metric reflects the total transactional throughput of the network as seen by your node.\n\nIncludes:\n- Payments (Ordinary, Multi-Out, Multi-Same-Out)\n- Messages (Arbitrary, Alias, Account Info, TLD)\n- Assets (Issuance, Transfer, Orders, Minting, Distribution)\n- Digital Goods (Listing, Delisting, Price Change, Quantity Change, Purchase, Delivery, Feedback, Refund)\n- Account Control (Leasing)\n- Mining (Reward Recipient, Commitment)\n- Advanced Payments (Escrow, Subscriptions)\n- Automated Transactions (ATs)";
+        JLabel txPerSecondLabel = createLabel("All Txs/Sec (MA)", Color.GREEN, tooltip);
         transactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0", progressBarSize1);
         addComponent(SyncPanel, txPerSecondLabel, 0, 4, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
         addComponent(SyncPanel, transactionsPerSecondProgressBar, 1, 4, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
-        // Transactions/Block (Moving Average)
-        tooltip = "The moving average of the number of transactions included in each block. This provides insight into how full blocks are on average.\n\nIt helps to understand the network's capacity utilization. A value close to the maximum block capacity (255 transactions) suggests high demand for block space.";
-        JLabel txPerBlockLabel = createLabel("Transactions/Block (MA)", new Color(255, 165, 0), tooltip);
+        // All Transactions/Block (Moving Average)
+        tooltip = "The moving average of the total number of transactions (user-submitted and AT-generated) included in each block. This metric provides insight into the network's activity and block space utilization.\n\nIncludes:\n- Payments (Ordinary, Multi-Out, Multi-Same-Out)\n- Messages (Arbitrary, Alias, Account Info, TLD)\n- Assets (Issuance, Transfer, Orders, Minting, Distribution)\n- Digital Goods (Listing, Delisting, Price Change, Quantity Change, Purchase, Delivery, Feedback, Refund)\n- Account Control (Leasing)\n- Mining (Reward Recipient, Commitment)\n- Advanced Payments (Escrow, Subscriptions)\n- Automated Transactions (ATs)";
+        JLabel txPerBlockLabel = createLabel("All Txs/Block (MA)", new Color(255, 165, 0), tooltip); // Orange
         transactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0", progressBarSize1);
         addComponent(SyncPanel, txPerBlockLabel, 0, 5, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
         addComponent(SyncPanel, transactionsPerBlockProgressBar, 1, 5, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
-        // Separator
-        JSeparator separator2 = new JSeparator(SwingConstants.HORIZONTAL);
-        addComponent(SyncPanel, separator2, 0, 6, 2, 1, 0, GridBagConstraints.CENTER, GridBagConstraints.HORIZONTAL,
-                barInsets);
+        // System Transactions/Second (Moving Average)
+        tooltip = "The moving average of system-generated transactions processed per second. This includes payments from Automated Transactions (ATs), Escrow results, and Subscription payments.";
+        systemTxPerSecondLabel = createLabel("System Txs/Sec (MA)", new Color(135, 206, 250), tooltip); // LightSkyBlue
+        systemTransactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0", progressBarSize1);
+        addComponent(SyncPanel, systemTxPerSecondLabel, 0, 6, 1, 0, 0, GridBagConstraints.LINE_END,
+                GridBagConstraints.NONE, labelInsets);
+        addComponent(SyncPanel, systemTransactionsPerSecondProgressBar, 1, 6, 1, 0, 0, GridBagConstraints.LINE_START,
+                GridBagConstraints.HORIZONTAL, barInsets);
 
-        // Moving Average Slider
-        tooltip = "The number of recent blocks used to calculate the moving average for performance metrics. A larger window provides a smoother but less responsive trend, while a smaller window is more reactive to recent changes.";
-        JLabel maWindowLabel = createLabel("MA Window (Blocks)", null, tooltip);
+        // System Transactions/Block (Moving Average)
+        tooltip = "The moving average of system-generated transactions included in each block. This includes payments from Automated Transactions (ATs), Escrow results, and Subscription payments.";
+        systemTxPerBlockLabel = createLabel("System Txs/Block (MA)", Color.BLUE, tooltip);
+        atTransactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0", progressBarSize1);
+        addComponent(SyncPanel, systemTxPerBlockLabel, 0, 7, 1, 0, 0, GridBagConstraints.LINE_END,
+                GridBagConstraints.NONE, labelInsets);
+        addComponent(SyncPanel, atTransactionsPerBlockProgressBar, 1, 7, 1, 0, 0, GridBagConstraints.LINE_START,
+                GridBagConstraints.HORIZONTAL, barInsets);
 
-        // Define the discrete values for the slider
-        final int[] maWindowValues = { 10, 100, 200, 300, 400, 500 };
-        // Find the initial index for the default movingAverageWindow
-        int initialIndex = -1;
-        for (int i = 0; i < maWindowValues.length; i++) {
-            if (maWindowValues[i] == movingAverageWindow) {
-                initialIndex = i;
-                break;
-            }
-        }
-        if (initialIndex == -1) { // If default is not in our list, use a sane default
-            initialIndex = 1; // 100
-            movingAverageWindow = maWindowValues[initialIndex];
-        }
-
-        movingAverageSlider = new JSlider(JSlider.HORIZONTAL, 0, maWindowValues.length - 1, initialIndex);
-        movingAverageSlider.setSnapToTicks(true);
-        movingAverageSlider.setMajorTickSpacing(1);
-        movingAverageSlider.setPaintTicks(true);
-        movingAverageSlider.setPaintLabels(true);
-        movingAverageSlider.setPreferredSize(new Dimension(150, 45));
-
-        Hashtable<Integer, JLabel> labelTable = new Hashtable<>();
-        for (int i = 0; i < maWindowValues.length; i++) {
-            labelTable.put(i, new JLabel(String.valueOf(maWindowValues[i])));
-        }
-
-        movingAverageSlider.setLabelTable(labelTable);
-
-        movingAverageSlider.addChangeListener(e -> {
-            JSlider source = (JSlider) e.getSource();
-            if (!source.getValueIsAdjusting()) {
-                movingAverageWindow = maWindowValues[source.getValue()];
-            }
-        });
-
-        addComponent(SyncPanel, maWindowLabel, 0, 7, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE,
-                labelInsets);
-        addComponent(SyncPanel, movingAverageSlider, 1, 7, 2, 1, 0, GridBagConstraints.LINE_START,
+        // ATs/Block (Moving Average)
+        tooltip = "The moving average of the number of Automated Transactions (ATs) executed per block. This metric shows the activity level of smart contracts on the network.";
+        atCountLabel = createLabel("ATs/Block (MA)", new Color(153, 0, 76), tooltip); // Deep Pink
+        atCountProgressBar = createProgressBar(0, 100, null, "0", progressBarSize1);
+        addComponent(SyncPanel, atCountLabel, 0, 8, 1, 0, 0, GridBagConstraints.LINE_END,
+                GridBagConstraints.NONE, labelInsets);
+        addComponent(SyncPanel, atCountProgressBar, 1, 8, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // Add SyncPanel to performanceMetricsPanel
@@ -275,6 +262,10 @@ public class MetricsPanel extends JPanel {
 
         addToggleListener(blocksPerSecondLabel, performanceChartPanel, 0, 0);
         addToggleListener(txPerSecondLabel, performanceChartPanel, 0, 1);
+        addToggleListener(systemTxPerSecondLabel, performanceChartPanel, 0, 2);
+        addToggleListener(atCountLabel, performanceChartPanel, 0, 3);
+        addDualChartToggleListener(txPerBlockLabel, performanceChartPanel, 1, 1, timingChartPanel, 1, 1);
+
         // End Performance Metrics Panel
 
         // === Timing Metrics Panel ===
@@ -377,7 +368,7 @@ public class MetricsPanel extends JPanel {
                 GridBagConstraints.HORIZONTAL, timerBarInsets);
 
         // Misc. Time (Right)
-        tooltip = "The moving average of the time spent on miscellaneous, 'unaccounted for' calculations during block processing. This value is calculated by subtracting the sum of all explicitly measured components from the 'Total Push Time'. These components are: Validation, TX Loop, Housekeeping, TX Apply, AT, Subscription, Block Apply, and Commit. A consistently high value may indicate performance overhead in parts of the code that are not explicitly timed, such as memory management or other background tasks.";
+        tooltip = "The moving average of the time spent on miscellaneous operations not explicitly measured in other timing categories. This value is the difference between the 'Total Push Time' and the sum of all other measured components (Validation, TX Loop, Housekeeping, TX Apply, AT, Subscription, Block Apply, and Commit). A consistently high value may indicate performance overhead in parts of the code that are not individually timed, such as memory management or other background tasks.";
         miscTimeLabel = createLabel("Misc. Time (MA)", Color.LIGHT_GRAY, tooltip);
         miscTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
         addComponent(timingInfoPanel, miscTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,
@@ -447,6 +438,29 @@ public class MetricsPanel extends JPanel {
         addComponent(netSpeedInfoPanel, combinedVolumePanel, 0, 3, 2, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, barInsets);
 
+        // --- Moving Average Window ---
+        tooltip = "The number of recent blocks used to calculate the moving average for performance metrics. A larger window provides a smoother but less responsive trend, while a smaller window is more reactive to recent changes.";
+        JLabel maWindowLabel = createLabel("MA Window (Blocks)", null, tooltip);
+
+        // Define the discrete values for the dropdown
+        final Integer[] maWindowValues = { 10, 100, 200, 300, 400, 500 };
+        JComboBox<Integer> movingAverageComboBox = new JComboBox<>(maWindowValues);
+        movingAverageComboBox.setSelectedItem(movingAverageWindow);
+        movingAverageComboBox.setPreferredSize(new Dimension(150, 25));
+
+        movingAverageComboBox.addActionListener(e -> {
+            JComboBox<?> source = (JComboBox<?>) e.getSource();
+            Object selectedItem = source.getSelectedItem();
+            if (selectedItem instanceof Integer) {
+                movingAverageWindow = (Integer) selectedItem;
+            }
+        });
+
+        addComponent(netSpeedInfoPanel, maWindowLabel, 0, 4, 1, 0, 0, GridBagConstraints.LINE_END,
+                GridBagConstraints.NONE, labelInsets);
+        addComponent(netSpeedInfoPanel, movingAverageComboBox, 1, 4, 1, 0, 0, GridBagConstraints.LINE_START,
+                GridBagConstraints.HORIZONTAL, barInsets);
+
         netSpeedChartContainer.add(netSpeedInfoPanel);
         addComponent(this, netSpeedChartContainer, 3, 0, 1, 0, 0, GridBagConstraints.NORTH,
                 GridBagConstraints.NONE, new Insets(0, 0, 0, 5));
@@ -464,8 +478,7 @@ public class MetricsPanel extends JPanel {
         addComponent(this, timingMetricsPanel, 2, 0, 1, 0, 0, GridBagConstraints.NORTH,
                 GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
         // END Metrics Panel
-
-        addDualChartToggleListener(txPerBlockLabel, performanceChartPanel, 1, 0, timingChartPanel, 1, 0);
+        addDualChartToggleListener(systemTxPerBlockLabel, performanceChartPanel, 1, 0, timingChartPanel, 1, 0);
         addToggleListener(pushTimeLabel, timingChartPanel, 0, 0);
         addToggleListener(validationTimeLabel, timingChartPanel, 0, 1);
         addToggleListener(txLoopTimeLabel, timingChartPanel, 0, 2);
@@ -525,29 +538,12 @@ public class MetricsPanel extends JPanel {
     public void onPerformanceStatsUpdated(Block block) {
         BlockchainProcessor.PerformanceStats stats = Signum.getBlockchainProcessor().getPerformanceStats();
         if (stats != null && block != null) {
-            chartUpdateExecutor.submit(() -> {
-                updateTimingChart(stats.totalTimeMs, stats.validationTimeMs, stats.txLoopTimeMs,
-                        stats.housekeepingTimeMs, stats.txApplyTimeMs, stats.atTimeMs, stats.subscriptionTimeMs,
-                        stats.blockApplyTimeMs, stats.commitTimeMs, stats.miscTimeMs, block);
-            });
+            chartUpdateExecutor.submit(() -> updateTimingChart(stats.totalTimeMs, stats.validationTimeMs,
+                    stats.txLoopTimeMs,
+                    stats.housekeepingTimeMs, stats.txApplyTimeMs, stats.atTimeMs,
+                    stats.subscriptionTimeMs, stats.blockApplyTimeMs, stats.commitTimeMs,
+                    stats.miscTimeMs, block));
         }
-    }
-
-    private void onBlockPushed(Block block) {
-        if (block == null)
-            return;
-        chartUpdateExecutor.submit(() -> updatePerformanceChart(block));
-    }
-
-    private JProgressBar createProgressBar(int min, int max, Color color, String initialString, Dimension size) {
-        JProgressBar bar = new JProgressBar(min, max);
-        bar.setBackground(color);
-        bar.setPreferredSize(size);
-        bar.setMinimumSize(size);
-        bar.setStringPainted(true);
-        bar.setString(initialString);
-        bar.setValue(min);
-        return bar;
     }
 
     private JLabel createLabel(String text, Color color, String tooltip) {
@@ -578,6 +574,24 @@ public class MetricsPanel extends JPanel {
                 }
             }
         });
+    }
+
+    private void onBlockPushed(Block block) {
+        if (block == null) {
+            return;
+        }
+        chartUpdateExecutor.submit(() -> updatePerformanceChart(block));
+    }
+
+    private JProgressBar createProgressBar(int min, int max, Color color, String initialString, Dimension size) {
+        JProgressBar bar = new JProgressBar(min, max);
+        bar.setBackground(color);
+        bar.setPreferredSize(size);
+        bar.setMinimumSize(size);
+        bar.setStringPainted(true);
+        bar.setString(initialString);
+        bar.setValue(min);
+        return bar;
     }
 
     private void addComponent(JPanel panel, Component comp, int x, int y, int gridwidth, int weightx, int weighty,
@@ -910,30 +924,39 @@ public class MetricsPanel extends JPanel {
                 .skip(Math.max(0, miscTimes.size() - currentWindowSize))
                 .mapToLong(Long::longValue)
                 .average().orElse(0.0);
-
         SwingUtilities.invokeLater(() -> {
+            pushTimeProgressBar.setMaximum((int) Math.ceil(maxPushTime));
             pushTimeProgressBar.setValue((int) displayPushTime);
             pushTimeProgressBar.setString(String.format("%d ms - max: %d ms", displayPushTime, maxPushTime));
+            validationTimeProgressBar.setMaximum((int) Math.ceil(maxValidationTime));
             validationTimeProgressBar.setValue((int) displayValidationTime);
             validationTimeProgressBar
                     .setString(String.format("%d ms - max: %d ms", displayValidationTime, maxValidationTime));
+            txLoopTimeProgressBar.setMaximum((int) Math.ceil(maxTxLoopTime));
             txLoopTimeProgressBar.setValue((int) displayTxLoopTime);
             txLoopTimeProgressBar.setString(String.format("%d ms - max: %d ms", displayTxLoopTime, maxTxLoopTime));
+            housekeepingTimeProgressBar.setMaximum((int) Math.ceil(maxHousekeepingTime));
             housekeepingTimeProgressBar.setValue((int) displayHousekeepingTime);
             housekeepingTimeProgressBar
                     .setString(String.format("%d ms - max: %d ms", displayHousekeepingTime, maxHousekeepingTime));
+            commitTimeProgressBar.setMaximum((int) Math.ceil(maxCommitTime));
             commitTimeProgressBar.setValue((int) displayCommitTime);
             commitTimeProgressBar.setString(String.format("%d ms - max: %d ms", displayCommitTime, maxCommitTime));
+            atTimeProgressBar.setMaximum((int) Math.ceil(maxAtTime));
             atTimeProgressBar.setValue((int) displayAtTime);
             atTimeProgressBar.setString(String.format("%d ms - max: %d ms", displayAtTime, maxAtTime));
+            txApplyTimeProgressBar.setMaximum((int) Math.ceil(maxTxApplyTime));
             txApplyTimeProgressBar.setValue((int) displayTxApplyTime);
             txApplyTimeProgressBar.setString(String.format("%d ms - max: %d ms", displayTxApplyTime, maxTxApplyTime));
+            subscriptionTimeProgressBar.setMaximum((int) Math.ceil(maxSubscriptionTime));
             subscriptionTimeProgressBar.setValue((int) displaySubscriptionTime);
             subscriptionTimeProgressBar
                     .setString(String.format("%d ms - max: %d ms", displaySubscriptionTime, maxSubscriptionTime));
+            blockApplyTimeProgressBar.setMaximum((int) Math.ceil(maxBlockApplyTime));
             blockApplyTimeProgressBar.setValue((int) displayBlockApplyTime);
             blockApplyTimeProgressBar
                     .setString(String.format("%d ms - max: %d ms", displayBlockApplyTime, maxBlockApplyTime));
+            miscTimeProgressBar.setMaximum((int) Math.ceil(maxMiscTime));
             miscTimeProgressBar.setValue((int) displayMiscTime);
             miscTimeProgressBar.setString(String.format("%d ms - max: %d ms", displayMiscTime, maxMiscTime));
 
@@ -985,11 +1008,13 @@ public class MetricsPanel extends JPanel {
 
     private ChartPanel createPerformanceChartPanel() {
         blocksPerSecondSeries = new XYSeries("Blocks/Second (MA)");
-        transactionsPerSecondSeries = new XYSeries("Transactions/Second (MA)");
+        transactionsPerSecondSeries = new XYSeries("All Txs/Sec (MA)");
+        atTransactionsPerSecondSeries = new XYSeries("User Txs/Sec (MA)");
 
         XYSeriesCollection lineDataset = new XYSeriesCollection();
         lineDataset.addSeries(blocksPerSecondSeries);
         lineDataset.addSeries(transactionsPerSecondSeries);
+        lineDataset.addSeries(atTransactionsPerSecondSeries);
 
         // Create chart with no title or axis labels to save space
         JFreeChart chart = ChartFactory.createXYLineChart(
@@ -1011,28 +1036,37 @@ public class MetricsPanel extends JPanel {
 
         plot.getRenderer().setSeriesPaint(0, Color.CYAN);
         plot.getRenderer().setSeriesPaint(1, Color.GREEN);
+        plot.getRenderer().setSeriesPaint(2, new Color(135, 206, 250));
 
         // Set line thickness
         plot.getRenderer().setSeriesStroke(0, new java.awt.BasicStroke(1.2f));
         plot.getRenderer().setSeriesStroke(1, new java.awt.BasicStroke(1.2f));
+        plot.getRenderer().setSeriesStroke(2, new java.awt.BasicStroke(1.2f));
 
         // Hide axis tick labels (the numbers on the axes)
         plot.getDomainAxis().setTickLabelsVisible(false);
         plot.getRangeAxis().setTickLabelsVisible(false);
 
         // Second Y-axis for transaction count
-        NumberAxis transactionAxis = new NumberAxis(null); // No label for the second axis
+        NumberAxis transactionAxis = new NumberAxis(null);
         transactionAxis.setTickLabelsVisible(false);
+        XYSeriesCollection barDataset = new XYSeriesCollection();
+        barDataset.addSeries(atTransactionsPerBlockSeries);
+        barDataset.addSeries(transactionsPerBlockSeries);
         plot.setRangeAxis(1, transactionAxis);
-        plot.setDataset(1, transactionsPerBlockDataset);
+        plot.setDataset(1, barDataset);
         plot.mapDatasetToRangeAxis(1, 1);
 
         // Renderer for transaction bars
         XYBarRenderer transactionRenderer = new XYBarRenderer(0);
         transactionRenderer.setBarPainter(new StandardXYBarPainter());
         transactionRenderer.setShadowVisible(false);
-        transactionRenderer.setSeriesPaint(0, new Color(255, 165, 0, 128)); // Orange, semi-transparent
+        transactionRenderer.setSeriesPaint(0, new Color(0, 0, 255, 128)); // System Txs/Block
+        transactionRenderer.setSeriesPaint(1, new Color(255, 165, 0, 128)); // All Txs/Block
         plot.setRenderer(1, transactionRenderer);
+
+        lineDataset.addSeries(atCountPerBlockSeries);
+        plot.getRenderer(0).setSeriesPaint(3, new Color(153, 0, 76));
 
         // Remove all padding around the plot area
         plot.setInsets(new RectangleInsets(0, 0, 0, 0));
@@ -1118,14 +1152,18 @@ public class MetricsPanel extends JPanel {
         NumberAxis transactionAxis = new NumberAxis(null); // No label for the second axis
         transactionAxis.setTickLabelsVisible(false);
         plot.setRangeAxis(1, transactionAxis);
-        plot.setDataset(1, transactionsPerBlockDataset);
+        XYSeriesCollection barDataset = new XYSeriesCollection();
+        barDataset.addSeries(atTransactionsPerBlockSeries);
+        barDataset.addSeries(transactionsPerBlockSeries);
+        plot.setDataset(1, barDataset);
         plot.mapDatasetToRangeAxis(1, 1);
 
         // Renderer for transaction bars
         XYBarRenderer transactionRenderer = new XYBarRenderer(0);
         transactionRenderer.setBarPainter(new StandardXYBarPainter());
         transactionRenderer.setShadowVisible(false);
-        transactionRenderer.setSeriesPaint(0, new Color(255, 165, 0, 128)); // Orange, semi-transparent
+        transactionRenderer.setSeriesPaint(0, new Color(0, 0, 255, 128)); // Blue, semi-transparent
+        transactionRenderer.setSeriesPaint(1, new Color(255, 165, 0, 128)); // Orange, semi-transparent
         plot.setRenderer(1, transactionRenderer);
 
         // Remove all padding around the plot area
@@ -1210,24 +1248,33 @@ public class MetricsPanel extends JPanel {
 
         blockTimestamps.add(System.currentTimeMillis());
 
-        int totalTxCount = block.getTransactions().size();
+        int allTxCount = block.getAllTransactions().size();
+        int systemTxCount = block.getAllTransactions().size() - block.getTransactions().size();
+        int atCount = 0;
         if (block.getBlockAts() != null) {
             try {
-                totalTxCount += AtController.getATsFromBlock(block.getBlockAts()).size();
+                atCount = AtController.getATsFromBlock(block.getBlockAts()).size();
             } catch (Exception e) {
                 LOGGER.warn("Could not parse ATs from block", e);
             }
         }
-        transactionCounts.add(totalTxCount);
+        transactionCounts.add(allTxCount);
+        atTransactionCounts.add(systemTxCount);
+        atCounts.add(atCount);
 
         while (blockTimestamps.size() > CHART_HISTORY_SIZE) {
             blockTimestamps.removeFirst();
             transactionCounts.removeFirst();
+            atTransactionCounts.removeFirst();
+            atCounts.removeFirst();
             if (!blocksPerSecondHistory.isEmpty()) {
                 blocksPerSecondHistory.removeFirst();
             }
             if (!transactionsPerSecondHistory.isEmpty()) {
                 transactionsPerSecondHistory.removeFirst();
+            }
+            if (!atTransactionsPerSecondHistory.isEmpty()) {
+                atTransactionsPerSecondHistory.removeFirst();
             }
         }
 
@@ -1243,12 +1290,31 @@ public class MetricsPanel extends JPanel {
                 .mapToInt(Integer::intValue)
                 .average().orElse(0.0);
 
+        double avgAtTransactions = atTransactionCounts.stream()
+                .skip(Math.max(0,
+                        atTransactionCounts.size() - Math.min(atTransactionCounts.size(), movingAverageWindow)))
+                .mapToInt(Integer::intValue)
+                .average().orElse(0.0);
+
+        double avgAtCount = atCounts.stream()
+                .skip(Math.max(0, atCounts.size() - Math.min(atCounts.size(), movingAverageWindow)))
+                .mapToInt(Integer::intValue)
+                .average().orElse(0.0);
+
         double transactionsPerSecond = avgTransactions * blocksPerSecond;
         transactionsPerSecondHistory.add(transactionsPerSecond);
 
+        double atTransactionsPerSecond = avgAtTransactions * blocksPerSecond;
+        atTransactionsPerSecondHistory.add(atTransactionsPerSecond);
+
         double maxBlocksPerSecond = blocksPerSecondHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
         int maxTransactionsPerBlock = transactionCounts.stream().mapToInt(Integer::intValue).max().orElse(0);
+        int maxAtTransactionsPerBlock = atTransactionCounts.stream().mapToInt(Integer::intValue).max().orElse(0);
+        int maxAtCount = atCounts.stream().mapToInt(Integer::intValue).max().orElse(0);
         double maxTransactionsPerSecond = transactionsPerSecondHistory.stream().mapToDouble(Double::doubleValue).max()
+                .orElse(0.0);
+        double maxAtTransactionsPerSecond = atTransactionsPerSecondHistory.stream().mapToDouble(Double::doubleValue)
+                .max()
                 .orElse(0.0);
 
         // Now, schedule only the UI updates on the EDT
@@ -1263,21 +1329,52 @@ public class MetricsPanel extends JPanel {
             while (transactionsPerBlockSeries.getItemCount() >= CHART_HISTORY_SIZE) {
                 transactionsPerBlockSeries.remove(0);
             }
+            while (atTransactionsPerBlockSeries.getItemCount() >= CHART_HISTORY_SIZE) {
+                atTransactionsPerBlockSeries.remove(0);
+            }
+            while (atTransactionsPerSecondSeries.getItemCount() >= CHART_HISTORY_SIZE) {
+                atTransactionsPerSecondSeries.remove(0);
+            }
+            while (atCountPerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
+                atCountPerBlockSeries.remove(0);
+            }
 
             blocksPerSecondSeries.add(block.getHeight(), blocksPerSecond);
             transactionsPerBlockSeries.add(block.getHeight(), avgTransactions);
+            blocksPerSecondProgressBar.setMaximum((int) Math.ceil(maxBlocksPerSecond));
             blocksPerSecondProgressBar.setValue((int) (blocksPerSecond));
             blocksPerSecondProgressBar
                     .setString(String.format("%.2f - max: %.2f", blocksPerSecond, maxBlocksPerSecond));
 
             transactionsPerSecondSeries.add(block.getHeight(), transactionsPerSecond);
+            transactionsPerSecondProgressBar.setMaximum((int) Math.ceil(maxTransactionsPerSecond));
             transactionsPerSecondProgressBar.setValue((int) transactionsPerSecond);
             transactionsPerSecondProgressBar
                     .setString(String.format("%.2f - max: %.2f", transactionsPerSecond, maxTransactionsPerSecond));
 
+            transactionsPerBlockProgressBar.setMaximum(maxTransactionsPerBlock);
             transactionsPerBlockProgressBar.setValue((int) avgTransactions);
             transactionsPerBlockProgressBar
                     .setString(String.format("%.2f - max: %d", avgTransactions, maxTransactionsPerBlock));
+
+            atTransactionsPerBlockSeries.add(block.getHeight(), avgAtTransactions);
+            atTransactionsPerBlockProgressBar.setMaximum(maxAtTransactionsPerBlock);
+            atTransactionsPerBlockProgressBar.setValue((int) avgAtTransactions);
+            atTransactionsPerBlockProgressBar
+                    .setString(String.format("%.2f - max: %d", avgAtTransactions, maxAtTransactionsPerBlock));
+
+            atCountPerBlockSeries.add(block.getHeight(), avgAtCount);
+            atCountProgressBar.setMaximum(maxAtCount);
+            atCountProgressBar.setValue((int) avgAtCount);
+            atCountProgressBar
+                    .setString(String.format("%.2f - max: %d", avgAtCount, maxAtCount));
+
+            systemTransactionsPerSecondProgressBar.setMaximum((int) Math.ceil(maxAtTransactionsPerSecond));
+            atTransactionsPerSecondSeries.add(block.getHeight(), atTransactionsPerSecond);
+            systemTransactionsPerSecondProgressBar.setValue((int) atTransactionsPerSecond);
+            systemTransactionsPerSecondProgressBar
+                    .setString(
+                            String.format("%.2f - max: %.2f", atTransactionsPerSecond, maxAtTransactionsPerSecond));
         });
     }
 }

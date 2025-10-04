@@ -410,10 +410,14 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     PerformanceStats stats = performanceStats.get();
                     // The stats might be null if the block is the very first one (genesis)
                     if (stats != null) {
-                        int transactionCount = block.getTransactions().size();
+
+                        int userTransactionCount = block.getTransactions().size();
+                        int allTransactionCount = block.getAllTransactions().size();
+                        int atCount = 0;
+
                         if (block.getBlockAts() != null) {
                             try {
-                                transactionCount += AtController.getATsFromBlock(block.getBlockAts()).size();
+                                atCount = AtController.getATsFromBlock(block.getBlockAts()).size();
                             } catch (Exception e) {
                                 // ignore, as this is for measurement only
                             }
@@ -430,7 +434,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                 String.valueOf(stats.subscriptionTimeMs), String.valueOf(stats.blockApplyTimeMs),
                                 String.valueOf(stats.commitTimeMs), String.valueOf(stats.miscTimeMs),
                                 String.valueOf(block.getHeight()),
-                                String.valueOf(transactionCount));
+                                String.valueOf(atCount),
+                                String.valueOf(userTransactionCount),
+                                String.valueOf(allTransactionCount));
                         measurementData.add(line);
                     }
                 }
@@ -1293,10 +1299,14 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                  * the sum of timing components that are individually and explicitly measured
                  * in the push block process.
                  * Block_height - Height of the pushed block
-                 * Transaction_count - Number of transactions in the pushed block
+                 * AT_count - Number of Automated Transactions executed in the pushed block
+                 * User_Transaction_Count - Number of user-submitted transactions in the pushed
+                 * block
+                 * All_Transaction_Count - Total number of all transactions (including
+                 * AT-generated) in the pushed block
                  */
                 writer.println(
-                        "Block_timestamp;Cumulative_difficulty;Accumulated_sync_in_progress_time[ms];Accumulated_sync_time[ms];Push_block_time[ms];Validation_time[ms];Tx_loop_time[ms];Housekeeping_time[ms];Tx_apply_time[ms];AT_time[ms];Subscription_time[ms];Block_apply_time[ms];Commit_time[ms];Misc_time[ms];Block_height;Transaction_count");
+                        "Block_timestamp;Cumulative_difficulty;Accumulated_sync_in_progress_time[ms];Accumulated_sync_time[ms];Push_block_time[ms];Validation_time[ms];Tx_loop_time[ms];Housekeeping_time[ms];Tx_apply_time[ms];AT_time[ms];Subscription_time[ms];Block_apply_time[ms];Commit_time[ms];Misc_time[ms];Block_height;AT_count;User_Transaction_Count;All_Transaction_Count");
             } catch (IOException e) {
                 logger.error("Failed to create sync measurement log", e);
             }
