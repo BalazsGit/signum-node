@@ -1276,10 +1276,12 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                  * The file starts with a block of system information (Property;Value).
                  *
                  * Header:
-                 * Block_timestamp;Cumulative_difficulty;Accumulated_sync_in_progress_time[ms];
+                 * Block_timestamp[s];Cumulative_difficulty;Accumulated_sync_in_progress_time[ms
+                 * ];
                  * Accumulated_sync_time[ms];Push_block_time[ms];Db_time[ms];At_time[ms];
                  * Block_height;Transaction_count
-                 * Block_timestamp - Block timestamp of the pushed block (UTC) in seconds since
+                 * Block_timestamp[s] - Block timestamp of the pushed block (UTC) in seconds
+                 * since
                  * epoch (yyyy.mm.dd.) 2014.08.11. 02:00:00 (UTC)
                  * Cumulative_difficulty - Cumulative difficulty of the pushed block
                  * Accumulated_sync_in_progress_time[ms] - Time spent in sync mode in
@@ -1306,7 +1308,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                  * system generated) in the pushed block
                  */
                 writer.println(
-                        "Block_timestamp;Cumulative_difficulty;Accumulated_sync_in_progress_time[ms];Accumulated_sync_time[ms];Push_block_time[ms];Validation_time[ms];Tx_loop_time[ms];Housekeeping_time[ms];Tx_apply_time[ms];AT_time[ms];Subscription_time[ms];Block_apply_time[ms];Commit_time[ms];Misc_time[ms];Block_height;AT_count;User_transaction_count;All_transaction_count");
+                        "Block_timestamp[s];Cumulative_difficulty;Accumulated_sync_in_progress_time[ms];Accumulated_sync_time[ms];Push_block_time[ms];Validation_time[ms];Tx_loop_time[ms];Housekeeping_time[ms];Tx_apply_time[ms];AT_time[ms];Subscription_time[ms];Block_apply_time[ms];Commit_time[ms];Misc_time[ms];Block_height;AT_count;User_transaction_count;All_transaction_count");
             } catch (IOException e) {
                 logger.error("Failed to create sync measurement log", e);
             }
