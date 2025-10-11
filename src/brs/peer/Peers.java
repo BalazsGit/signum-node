@@ -18,16 +18,17 @@ import org.bitlet.weupnp.GatewayDiscover;
 import org.bitlet.weupnp.PortMappingEntry;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.server.handler.gzip.GzipHandler;
-import org.eclipse.jetty.servlet.FilterHolder;
-import org.eclipse.jetty.servlet.FilterMapping;
-import org.eclipse.jetty.servlet.ServletHandler;
-import org.eclipse.jetty.servlet.ServletHolder;
-import org.eclipse.jetty.servlets.DoSFilter;
+import org.eclipse.jetty.compression.server.CompressionHandler;
+import org.eclipse.jetty.compression.server.CompressionConfig;
+import org.eclipse.jetty.ee10.servlet.FilterHolder;
+import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
+import org.eclipse.jetty.ee10.servlet.ServletHolder;
+import org.eclipse.jetty.ee10.servlets.DoSFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xml.sax.SAXException;
 
+import jakarta.servlet.DispatcherType;
 import javax.xml.parsers.ParserConfigurationException;
 import java.io.IOException;
 import java.net.InetAddress;
@@ -348,12 +349,13 @@ public final class Peers {
                 boolean isGzipEnabled = propertyService.getBoolean(Props.JETTY_P2P_GZIP_FILTER);
                 peerServletHolder.setInitParameter("isGzipEnabled", Boolean.toString(isGzipEnabled));
 
-                ServletHandler peerHandler = new ServletHandler();
-                peerHandler.addServletWithMapping(peerServletHolder, "/*");
+                ServletContextHandler peerContext = new ServletContextHandler(ServletContextHandler.NO_SESSIONS);
+                peerContext.setContextPath("/");
+                peerContext.addServlet(peerServletHolder, "/*");
 
                 if (propertyService.getBoolean(Props.JETTY_P2P_DOS_FILTER)) {
-                    FilterHolder dosFilterHolder = peerHandler.addFilterWithMapping(DoSFilter.class, "/*",
-                            FilterMapping.DEFAULT);
+                    FilterHolder dosFilterHolder = peerContext.addFilter(DoSFilter.class, "/*",
+                            EnumSet.of(DispatcherType.REQUEST));
                     dosFilterHolder.setInitParameter("maxRequestsPerSec",
                             propertyService.getString(Props.JETTY_P2P_DOS_FILTER_MAX_REQUESTS_PER_SEC));
                     dosFilterHolder.setInitParameter("throttledRequests",
@@ -382,13 +384,27 @@ public final class Peers {
                 }
 
                 if (isGzipEnabled) {
-                    GzipHandler gzipHandler = new GzipHandler();
-                    gzipHandler.setIncludedMethods("GET,POST");
-                    gzipHandler.setMinGzipSize(propertyService.getInt(Props.JETTY_P2P_GZIP_FILTER_MIN_GZIP_SIZE));
-                    gzipHandler.setHandler(peerHandler);
-                    peerServer.setHandler(gzipHandler);
+                    CompressionConfig.Builder b = CompressionConfig.builder()
+                            .compressIncludeMethod("GET")
+                            .compressIncludeMethod("POST")
+                            .defaults();
+
+                    b.compressIncludeMimeType("application/json")
+                            .compressIncludeMimeType("text/plain")
+                            .compressIncludeMimeType("text/html")
+                            .compressIncludeMimeType("text/css")
+                            .compressIncludeMimeType("application/javascript")
+                            .compressIncludeMimeType("image/svg+xml")
+                            .compressIncludeMimeType("application/xml");
+
+                    CompressionConfig cfg = b.build();
+                    CompressionHandler compression = new CompressionHandler();
+                    compression.putConfiguration("/*", cfg);
+
+                    compression.setHandler(peerContext);
+                    peerServer.setHandler(compression);
                 } else {
-                    peerServer.setHandler(peerHandler);
+                    peerServer.setHandler(peerContext);
                 }
                 peerServer.setStopAtShutdown(true);
                 threadPool.runBeforeStart(() -> {

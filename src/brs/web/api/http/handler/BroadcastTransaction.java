@@ -15,7 +15,7 @@ import brs.web.api.http.common.ParameterException;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 

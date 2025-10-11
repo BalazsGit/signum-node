@@ -5,7 +5,7 @@ import brs.Attachment;
 import brs.SignumException;
 import com.google.gson.JsonElement;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 public interface APITransactionManager {
 

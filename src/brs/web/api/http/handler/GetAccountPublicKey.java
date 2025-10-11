@@ -10,7 +10,7 @@ import brs.web.api.http.common.LegacyDocTag;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import static brs.web.api.http.common.Parameters.ACCOUNT_PARAMETER;
 import static brs.web.api.http.common.ResultFields.PUBLIC_KEY_RESPONSE;

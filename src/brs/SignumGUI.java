@@ -176,6 +176,25 @@ public class SignumGUI extends JFrame {
     }
 
     public SignumGUI(String programName, String iconLocation, String version, String[] args) {
+        try {
+            // SecurityManager removed (Java 17+ deprecation).
+            // Install a simple shutdown hook instead for cleanup if needed.
+            try {
+                Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                    try {
+                        // TODO: add GUI cleanup here if required
+                    } catch (Throwable t) {
+                        t.printStackTrace();
+                    }
+                }));
+            } catch (Throwable t) {
+                // ignore
+            }
+
+        } catch (UnsupportedOperationException e) {
+            // Java 17+ / 21+: Setting a SecurityManager is not supported anymore
+            System.err.println("SecurityManager not supported, skipping setup");
+        }
         SignumGUI.args = args;
         this.programName = programName;
         this.version = version;
@@ -213,8 +232,6 @@ public class SignumGUI extends JFrame {
                 UIManager.setLookAndFeel(laf);
             } catch (Exception e) {
                 e.printStackTrace();
-                IconFontSwing.register(FontAwesome.getIconFont());
-
             }
         }
         IconFontSwing.register(FontAwesome.getIconFont());
@@ -1015,6 +1032,20 @@ public class SignumGUI extends JFrame {
                     SwingUtilities.invokeLater(() -> textArea.append(line));
                 lineBuilder.delete(0, lineBuilder.length());
             }
+        }
+    }
+
+    // Removed deprecated SignaGUISecurityManager (Java 17+)
+
+    /**
+     * Unified exit method replacing SecurityManager-based exit interception.
+     * Use this instead of System.exit() for graceful shutdown from the GUI.
+     */
+    private void safeExit(int status) {
+        try {
+            // Place any confirmation dialogs or cleanup here if needed.
+        } finally {
+            System.exit(status);
         }
     }
 }

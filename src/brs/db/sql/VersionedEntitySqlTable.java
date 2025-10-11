@@ -82,6 +82,7 @@ public abstract class VersionedEntitySqlTable<T> extends EntitySqlTable<T> imple
     // "accounts" is just an example to make it easier to understand what the code does
     // select all accounts with multiple entries where height < trimToHeight[current height - 1440]
     Db.useDSLContext(ctx -> {
+      Field<Boolean> latestField = tableClass.field("latest", Boolean.class);
       SelectQuery<Record> selectMaxHeightQuery = ctx.selectQuery();
       selectMaxHeightQuery.addFrom(tableClass);
       selectMaxHeightQuery.addSelect(DSL.max(heightField).as("max_height"));
@@ -117,6 +118,14 @@ public abstract class VersionedEntitySqlTable<T> extends EntitySqlTable<T> imple
       logger.debug("Trimming {} to height {} by {} elements", tableClass, height, deleteBatch.size());
       if (deleteBatch.size() > 0) {
         deleteBatch.execute();
+      }
+
+      int deletedNotLatest = ctx.deleteFrom(tableClass)
+        .where(heightField.lt(height).and(latestField.isFalse()))
+        .execute();
+      if (deletedNotLatest > 0) {
+        logger.debug("Trimming {} removed {} obsolete non-latest elements below height {}",
+          tableClass, deletedNotLatest, height);
       }
     });
   }

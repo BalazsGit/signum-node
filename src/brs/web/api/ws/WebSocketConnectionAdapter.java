@@ -2,12 +2,12 @@
 package brs.web.api.ws;
 
 import brs.web.server.WebServerContext;
+import org.eclipse.jetty.websocket.api.Callback;
 import org.eclipse.jetty.websocket.api.Session;
-import org.eclipse.jetty.websocket.api.WebSocketAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class WebSocketConnectionAdapter extends WebSocketAdapter {
+public class WebSocketConnectionAdapter extends Session.Listener.Abstract {
   private static final Logger logger = LoggerFactory.getLogger(WebSocketConnectionAdapter.class);
   private WebSocketConnection connection;
   private final BlockchainEventNotifier notifier;
@@ -17,25 +17,33 @@ public class WebSocketConnectionAdapter extends WebSocketAdapter {
   }
 
   @Override
-  public void onWebSocketConnect(Session sess) {
-    super.onWebSocketConnect(sess);
-    logger.debug("Endpoint connected: {}", sess);
-    this.connection = new WebSocketConnection(sess);
+  public void onWebSocketOpen(Session session) {
+    super.onWebSocketOpen(session);
+    logger.debug("Endpoint connected: {}", session);
+    this.connection = new WebSocketConnection(session);
     this.notifier.addConnection(connection);
   }
 
   @Override
   public void onWebSocketClose(int statusCode, String reason) {
-    super.onWebSocketClose(statusCode, reason);
     logger.debug("Socket Closed: [{}] {}", statusCode, reason);
-    this.notifier.removeConnection(this.connection);
+    if (this.connection != null) {
+      this.notifier.removeConnection(this.connection);
+    }
+  }
+
+  @Override
+  public void onWebSocketClose(int statusCode, String reason, Callback callback) {
+    onWebSocketClose(statusCode, reason);
+    callback.succeed();
   }
 
   @Override
   public void onWebSocketError(Throwable cause) {
-    super.onWebSocketError(cause);
-    logger.error("Socket Error: {}", cause.getMessage());
-    this.notifier.removeConnection(this.connection);
+    logger.error("Socket Error: {}", cause.getMessage(), cause);
+    if (this.connection != null) {
+      this.notifier.removeConnection(this.connection);
+    }
   }
 
 }

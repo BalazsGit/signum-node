@@ -6,7 +6,7 @@ import static brs.web.api.http.common.JSONResponses.UNKNOWN_TRANSACTION;
 import static brs.web.api.http.common.Parameters.ACCOUNT_PARAMETER;
 import static brs.web.api.http.common.Parameters.TRANSACTION_PARAMETER;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import brs.web.api.http.ApiServlet;
 import brs.web.api.http.common.JSONData;
