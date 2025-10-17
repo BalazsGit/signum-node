@@ -1,32 +1,26 @@
 package brs;
 
-import java.awt.BorderLayout;
-import java.awt.Color;
-import java.awt.Desktop;
-import java.awt.FlowLayout;
-import java.awt.Image;
-import java.awt.MenuItem;
-import java.awt.PopupMenu;
-import java.awt.SystemTray;
-import java.awt.Toolkit;
-import java.awt.TrayIcon;
+import java.awt.*;
 import java.awt.TrayIcon.MessageType;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.File;
-import java.io.FileDescriptor;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
-import java.net.InetAddress;
 import java.net.URI;
-import java.security.Permission;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -34,8 +28,10 @@ import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
+import javax.swing.JSeparator;
 import javax.swing.JTextArea;
 import javax.swing.LookAndFeel;
+import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.UIManager;
@@ -62,16 +58,118 @@ public class SignumGUI extends JFrame {
     private static final Logger LOGGER = LoggerFactory.getLogger(SignumGUI.class);
     private static String[] args;
 
-    private boolean userClosed = false;
     private String iconLocation;
     private TrayIcon trayIcon = null;
     private JPanel toolBar = null;
-    private JLabel infoLable = null;
+    private JLabel latestBlockHeightLabel = null;
+    private JLabel latestBlockTimestampLabel = null;
+    private JPanel infoPanel;
     private JProgressBar syncProgressBar = null;
     private JScrollPane textScrollPane = null;
     private String programName = null;
     private String version = null;
-    Color iconColor = Color.BLACK;
+    private final Color iconColor;
+
+    private JLabel connectedPeersLabel;
+    private JLabel peersCountLabel;
+    private JLabel uploadVolumeLabel;
+    private JLabel downloadVolumeLabel;
+    private JCheckBox showPopOffCheckbox;
+    private JCheckBox showMetricsCheckbox;
+    private boolean showMetrics = false;
+    private boolean showPopOff = false;
+
+    private JButton openPhoenixButton;
+    private JButton openClassicButton;
+    private JButton openApiButton;
+    private JButton editConfButton;
+    private JButton popOff10Button;
+    private JButton popOff100Button;
+    private JButton shutdownButton;
+    // private JButton restartButton;
+
+    private MetricsPanel metricsPanel;
+
+    private final JPanel checkboxPanel;
+    private JLabel measurementLabel;
+    private JLabel experimentalLabel;
+    private JSeparator measurementSeparator;
+    private JSeparator experimentalSeparator;
+    private JPanel measurementPanel;
+    private JPanel experimentalPanel;
+    private final Dimension verticalSeparatorSize = new Dimension(2, 20);
+
+    private Dimension progressBarSize2 = new Dimension(150, 20);
+
+    /**
+     * Panel to hold the time tracking labels. Only visible when experimental
+     * features are enabled.
+     */
+    private JPanel timePanel;
+
+    private JSeparator timeSeparator;
+
+    /**
+     * Label to display the total elapsed time since the GUI was started.
+     */
+    private JLabel totalTimeLabel;
+    /**
+     * Label to display the accumulated time spent syncing the blockchain.
+     */
+    private JLabel syncInProgressTimeLabel;
+    /**
+     * Stores the total elapsed time in milliseconds, updated by the GUI timer.
+     */
+    private long guiAccumulatedSyncTimeMs = 0;
+    /**
+     * Stores the accumulated time in milliseconds spent actively syncing (when more
+     * than 10 blocks behind).
+     */
+    private long guiAccumulatedSyncInProgressTimeMs = 0;
+    /**
+     * Flag for the hysteresis logic, indicating if the node is currently considered
+     * to be syncing.
+     */
+    private boolean isSyncing = false; // For hysteresis
+    /**
+     * Label for the separator between time labels.
+     */
+    private JLabel timeSeparatorLabel;
+    /**
+     * Timer to update the GUI time labels every second.
+     */
+    private Timer guiTimer;
+    private final AtomicBoolean guiTimerStarted = new AtomicBoolean(false);
+
+    private JLabel createLabel(String text, Color color, String tooltip) {
+        JLabel label = new JLabel(text);
+        if (color != null) {
+            label.setForeground(color);
+        }
+        if (tooltip != null) {
+            addInfoTooltip(label, tooltip);
+        }
+        return label;
+    }
+
+    private void addInfoTooltip(JLabel label, String text) {
+        label.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (SwingUtilities.isRightMouseButton(e)) {
+                    String title = label.getText();
+                    // Remove trailing colon for a cleaner title
+                    if (title.endsWith(":")) {
+                        title = title.substring(0, title.length() - 1);
+                    }
+                    // Wrap the text in HTML to control the width of the dialog.
+                    String htmlText = "<html><body><p style='width: 300px;'>" + text.replace("\n", "<br>")
+                            + "</p></body></html>";
+                    JOptionPane.showMessageDialog(SignumGUI.this, htmlText, title, JOptionPane.PLAIN_MESSAGE);
+                }
+            }
+        });
+    }
 
     public static void main(String[] args) {
         new SignumGUI("Signum Node", Props.ICON_LOCATION.getDefaultValue(), Signum.VERSION.toString(), args);
@@ -137,7 +235,6 @@ public class SignumGUI extends JFrame {
             }
         }
         IconFontSwing.register(FontAwesome.getIconFont());
-
         JTextArea textArea = new JTextArea() {
             @Override
             public void append(String str) {
@@ -156,10 +253,12 @@ public class SignumGUI extends JFrame {
         sendJavaOutputToTextArea(textArea);
         textScrollPane = new JScrollPane(textArea);
         JPanel content = new JPanel(new BorderLayout());
+        content.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
         setContentPane(content);
-        content.add(textScrollPane, BorderLayout.CENTER);
 
-        toolBar = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        toolBar = new JPanel();
+        toolBar.setLayout(new BoxLayout(toolBar, BoxLayout.X_AXIS));
+
         content.add(toolBar, BorderLayout.PAGE_START);
 
         JPanel bottomPanel = new JPanel(new BorderLayout());
@@ -168,14 +267,205 @@ public class SignumGUI extends JFrame {
 
         syncProgressBar = new JProgressBar(0, 100);
         syncProgressBar.setStringPainted(true);
-        infoLable = new JLabel("Latest block info");
+        String syncTooltipText = "Indicates the synchronization progress of the blockchain, displayed as a percentage. This value is calculated by comparing your node's current block height to the estimated highest block height known in the network.\n\nA value of 100% means your node is fully synchronized and has the complete, up-to-date ledger. During synchronization, this bar will gradually fill as the node downloads and processes blocks.";
+        syncProgressBar.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (SwingUtilities.isRightMouseButton(e)) {
+                    String title = "Synchronization Progress";
+                    String htmlText = "<html><body><p style='width: 300px;'>" + syncTooltipText.replace("\n", "<br>")
+                            + "</p></body></html>";
+                    JOptionPane.showMessageDialog(SignumGUI.this, htmlText, title, JOptionPane.PLAIN_MESSAGE);
+                }
+            }
+        });
 
-        bottomPanel.add(infoLable, BorderLayout.CENTER);
-        bottomPanel.add(syncProgressBar, BorderLayout.LINE_END);
+        JPanel latestBlockInfoPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 2));
+        latestBlockHeightLabel = new JLabel("Latest block: -");
+        latestBlockTimestampLabel = new JLabel("Timestamp: -");
+        JSeparator separator = new JSeparator(SwingConstants.VERTICAL);
+        separator.setPreferredSize(verticalSeparatorSize);
 
-        pack();
-        setSize(960, 600);
-        setLocationRelativeTo(null);
+        latestBlockInfoPanel.add(latestBlockHeightLabel);
+        latestBlockInfoPanel.add(separator);
+        latestBlockInfoPanel.add(latestBlockTimestampLabel);
+
+        String blockInfoTooltip = "Displays critical information about the most recent block processed by your node. This includes:\n\n"
+                + "- Latest block: The sequential number of the latest block synchronized by your node.\n"
+                + "- Timestamp: The date and time when the block was generated by a miner.\n\n"
+                + "This information is essential for confirming that your node is connected to the network and processing new blocks as they are created.";
+        addInfoTooltip(latestBlockHeightLabel, blockInfoTooltip);
+        addInfoTooltip(latestBlockTimestampLabel, blockInfoTooltip);
+        metricsPanel = new MetricsPanel(this);
+
+        // === Add checkboxes to toolBar ===
+        checkboxPanel = new JPanel();
+        checkboxPanel.setLayout(new BoxLayout(checkboxPanel, BoxLayout.Y_AXIS));
+
+        showPopOffCheckbox = new JCheckBox("Pop off");
+        // showPopOffCheckbox.setHorizontalTextPosition(SwingConstants.LEFT);
+        showPopOffCheckbox.setSelected(showPopOff);
+        showPopOffCheckbox.addActionListener(e -> {
+            showPopOff = showPopOffCheckbox.isSelected();
+            popOff10Button.setVisible(showPopOff);
+            popOff100Button.setVisible(showPopOff);
+        });
+
+        showMetricsCheckbox = new JCheckBox("Metrics");
+        // showMetricsCheckbox.setHorizontalTextPosition(SwingConstants.LEFT);
+        showMetricsCheckbox.setSelected(showMetrics); // default visible
+        showMetricsCheckbox.addActionListener(e -> {
+            showMetrics = showMetricsCheckbox.isSelected();
+            metricsPanel.setVisible(showMetrics);
+        });
+
+        checkboxPanel.add(showPopOffCheckbox);
+        checkboxPanel.add(showMetricsCheckbox);
+
+        JPanel topPanel = new JPanel();
+        topPanel.setLayout(new BoxLayout(topPanel, BoxLayout.Y_AXIS));
+        topPanel.add(toolBar);
+        topPanel.add(metricsPanel);
+        metricsPanel.setVisible(showMetrics);
+
+        // Use GridBagLayout for infoPanel to allow precise vertical alignment
+        infoPanel = new JPanel(new GridBagLayout());
+
+        content.add(topPanel, BorderLayout.NORTH);
+        content.add(textScrollPane, BorderLayout.CENTER);
+
+        // --- Time Labels ---
+        String tooltip;
+        timePanel = new JPanel();
+        timePanel.setLayout(new BoxLayout(timePanel, BoxLayout.X_AXIS));
+        timePanel.setOpaque(false);
+        String timeTooltip = "Displays the total elapsed time since the node application was started.";
+        totalTimeLabel = createLabel("0s", null, timeTooltip);
+        String syncTimeTooltip = "Displays the total time the node has spent in synchronization mode. The timer is active only when the blockchain is more than 10 blocks behind the network.";
+        syncInProgressTimeLabel = createLabel("0s", null, syncTimeTooltip);
+
+        timeSeparator = new JSeparator(SwingConstants.VERTICAL);
+        timeSeparator.setPreferredSize(verticalSeparatorSize);
+        timeSeparatorLabel = new JLabel(" / ");
+
+        timePanel.add(totalTimeLabel);
+        timePanel.add(timeSeparatorLabel);
+        timePanel.add(syncInProgressTimeLabel);
+        timePanel.add(Box.createHorizontalStrut(5));
+        timePanel.add(timeSeparator);
+        timePanel.add(Box.createHorizontalStrut(5));
+        timePanel.setVisible(false); // Visibility controlled by experimental features
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridy = 0; // All components in the same row
+        gbc.anchor = GridBagConstraints.CENTER; // Vertically center all components
+        gbc.insets = new Insets(0, 0, 0, 0); // Default no padding
+
+        // Add timePanel
+        gbc.gridx = 0;
+        infoPanel.add(timePanel, gbc);
+
+        // --- Peers ---
+        JPanel peersPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        tooltip = "The number of peers (other nodes) your node is currently actively connected to. These are the nodes with which your node is exchanging blockchain data, such as new blocks and transactions.\n\nA healthy number of connected peers is crucial for staying synchronized with the network.";
+        connectedPeersLabel = createLabel("0", null, tooltip);
+        tooltip = "The total number of known peers in the network that your node has discovered. This includes both connected and disconnected peers.\n\nYour node periodically attempts to connect to peers from this list to maintain a stable set of connections.";
+        peersCountLabel = createLabel("0", null, tooltip);
+
+        peersPanel.add(new JLabel("Peers: "));
+        peersPanel.add(connectedPeersLabel);
+        peersPanel.add(new JLabel(" / "));
+        peersPanel.add(peersCountLabel);
+
+        // Add peersPanel
+        gbc.gridx = 1;
+        infoPanel.add(peersPanel, gbc); // No left inset needed, timePanel provides right spacing
+
+        // Add separator after peersPanel
+        gbc.gridx = 2;
+        gbc.insets = new Insets(0, 5, 0, 5); // Spacing around separator
+        JSeparator peersSeparator = new JSeparator(SwingConstants.VERTICAL);
+        peersSeparator.setPreferredSize(verticalSeparatorSize);
+        infoPanel.add(peersSeparator, gbc);
+        gbc.insets = new Insets(0, 0, 0, 0); // Reset insets
+
+        // --- Volume ---
+        JPanel volumePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+
+        // Upload
+        tooltip = "The total amount of data your node has uploaded to other peers since the application started. This data primarily consists of blocks and transactions that you are sharing with the rest of the network, contributing to its health and decentralization.";
+        uploadVolumeLabel = createLabel("▲ 0 MB", null, tooltip);
+
+        // Download
+        tooltip = "The total amount of data your node has downloaded from other peers since the application started. This data includes blocks and transactions required to synchronize your local copy of the blockchain with the network.";
+        downloadVolumeLabel = createLabel("▼ 0 MB", null, tooltip);
+
+        volumePanel.add(uploadVolumeLabel);
+        volumePanel.add(new JLabel(" / "));
+        volumePanel.add(downloadVolumeLabel);
+
+        // Add volumePanel
+        gbc.gridx = 3;
+        infoPanel.add(volumePanel, gbc);
+
+        // Add separator after volumePanel
+        gbc.gridx = 4;
+        gbc.insets = new Insets(0, 5, 0, 5);
+        JSeparator volumeSeparator = new JSeparator(SwingConstants.VERTICAL);
+        volumeSeparator.setPreferredSize(verticalSeparatorSize);
+        infoPanel.add(volumeSeparator, gbc);
+        gbc.insets = new Insets(0, 0, 0, 0);
+
+        // --- Measurement ---
+        measurementPanel = new JPanel();
+        measurementPanel.setLayout(new BoxLayout(measurementPanel, BoxLayout.X_AXIS));
+        measurementPanel.setOpaque(false);
+        measurementSeparator = new JSeparator(SwingConstants.VERTICAL);
+        measurementSeparator.setPreferredSize(verticalSeparatorSize);
+        tooltip = "Performance measurement is active.\n"
+                + "Detailed synchronization data is being collected for each block and saved to:\n"
+                + "- measurement/sync_measurement.csv\n"
+                + "- measurement/sync_progress.csv\n" + "for analysis.";
+        measurementLabel = createLabel("🔬 MEAS", null, tooltip);
+        measurementPanel.setVisible(false);
+
+        measurementPanel.add(measurementLabel);
+        measurementPanel.add(Box.createHorizontalStrut(5));
+        measurementPanel.add(measurementSeparator);
+        measurementPanel.add(Box.createHorizontalStrut(5));
+
+        // Add measurementPanel
+        gbc.gridx = 5;
+        infoPanel.add(measurementPanel, gbc);
+
+        // --- Experimental ---
+        experimentalPanel = new JPanel();
+        experimentalPanel.setLayout(new BoxLayout(experimentalPanel, BoxLayout.X_AXIS));
+        experimentalPanel.setOpaque(false);
+        experimentalSeparator = new JSeparator(SwingConstants.VERTICAL);
+        experimentalSeparator.setPreferredSize(verticalSeparatorSize);
+        tooltip = "Experimental feature is enabled.\n" + "Simplified data is being collected and saved to:\n"
+                + "- measurement/sync_progress.csv\n" + "for analysis.";
+        experimentalLabel = createLabel("⚗ EXP", null, tooltip);
+        experimentalPanel.setVisible(false);
+
+        experimentalPanel.add(experimentalLabel);
+        experimentalPanel.add(Box.createHorizontalStrut(5));
+        experimentalPanel.add(experimentalSeparator);
+        experimentalPanel.add(Box.createHorizontalStrut(5));
+
+        // Add experimentalPanel
+        gbc.gridx = 6;
+        infoPanel.add(experimentalPanel, gbc);
+
+        gbc.gridx = 7;
+        gbc.weightx = 1.0; // Allow progress bar to take up remaining horizontal space
+        gbc.fill = GridBagConstraints.HORIZONTAL; // Fill horizontally
+        infoPanel.add(syncProgressBar, gbc);
+
+        bottomPanel.add(latestBlockInfoPanel, BorderLayout.CENTER);
+        bottomPanel.add(infoPanel, BorderLayout.LINE_END);
+
         try {
             setIconImage(ImageIO.read(getClass().getResourceAsStream(iconLocation)));
         } catch (IOException e) {
@@ -200,46 +490,26 @@ public class SignumGUI extends JFrame {
             }
         });
 
+        pack();
+        setSize(Math.max(topPanel.getPreferredSize().width, metricsPanel.getPreferredSize().width), 800);
+        setLocationRelativeTo(null);
         showWindow();
-        new Timer(5000, e -> {
-            try {
-                Blockchain blockChain = Signum.getBlockchain();
-                if (blockChain != null) {
-                    Block block = blockChain.getLastBlock();
-                    if (block != null) {
-                        Date blockDate = Convert.fromEpochTime(block.getTimestamp());
-                        infoLable.setText("Latest block: " + block.getHeight() +
-                                " Timestamp: " + DATE_FORMAT.format(blockDate));
-
-                        Date now = new Date();
-                        long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
-
-                        int missingBlocks = (int) ((now.getTime() - blockDate.getTime()) / (blockTime * 1000));
-                        int prog = block.getHeight() * 100 / (block.getHeight() + missingBlocks);
-                        syncProgressBar.setValue(prog);
-                        syncProgressBar.setString(prog + " %");
-                    }
-                }
-            } finally {
-                // do nothing on error here
-            }
-        }).start();
 
         // Start BRS
-        new Thread(this::runBrs).start();
+        new Thread(this::startSignumWithGUI).start();
     }
 
     private void shutdown() {
-        userClosed = true;
 
-        new Thread(() -> {
-            Signum.shutdown(false);
+        Signum.shutdown(false);
 
-            if (trayIcon != null && SystemTray.isSupported()) {
-                SystemTray.getSystemTray().remove(trayIcon);
-            }
-            System.exit(0);
-        }).start();
+        if (trayIcon != null && SystemTray.isSupported()) {
+            SystemTray.getSystemTray().remove(trayIcon);
+        }
+        if (metricsPanel != null) {
+            metricsPanel.shutdown();
+        }
+        System.exit(0);
     }
 
     private void showTrayIcon() {
@@ -251,24 +521,32 @@ public class SignumGUI extends JFrame {
     private TrayIcon createTrayIcon() {
         PopupMenu popupMenu = new PopupMenu();
 
+        JPanel leftButtons = new JPanel(new FlowLayout(FlowLayout.LEFT));
+
         MenuItem openPheonixWalletItem = new MenuItem("Phoenix Wallet");
         MenuItem openClassicWalletItem = new MenuItem("Classic Wallet");
         MenuItem openApiItem = new MenuItem("API doc");
         MenuItem showItem = new MenuItem("Show the node window");
         MenuItem shutdownItem = new MenuItem("Shutdown the node");
 
-        JButton openPhoenixButton = new JButton(openPheonixWalletItem.getLabel(),
+        openPhoenixButton = new JButton(openPheonixWalletItem.getLabel(),
                 IconFontSwing.buildIcon(FontAwesome.FIRE, 18, iconColor));
-        JButton openClassicButton = new JButton(openClassicWalletItem.getLabel(),
+        openClassicButton = new JButton(openClassicWalletItem.getLabel(),
                 IconFontSwing.buildIcon(FontAwesome.WINDOW_RESTORE, 18, iconColor));
-        JButton openApiButton = new JButton(openApiItem.getLabel(),
+        openApiButton = new JButton(openApiItem.getLabel(),
                 IconFontSwing.buildIcon(FontAwesome.BOOK, 18, iconColor));
-        JButton editConfButton = new JButton("Edit conf file",
+        editConfButton = new JButton("Edit conf file",
                 IconFontSwing.buildIcon(FontAwesome.PENCIL, 18, iconColor));
-        JButton popOff10Button = new JButton("Pop off 10 blocks",
+        popOff10Button = new JButton("Pop off 10 blocks",
                 IconFontSwing.buildIcon(FontAwesome.STEP_BACKWARD, 18, iconColor));
-        JButton popOff100Button = new JButton("Pop off 100 blocks",
+        popOff100Button = new JButton("Pop off 100 blocks",
                 IconFontSwing.buildIcon(FontAwesome.BACKWARD, 18, iconColor));
+        /*
+         * restartButton = new JButton("Restart",
+         * IconFontSwing.buildIcon(FontAwesome.REFRESH, 18, iconColor));
+         */
+        shutdownButton = new JButton("Shutdown",
+                IconFontSwing.buildIcon(FontAwesome.POWER_OFF, 18, iconColor));
         // TODO: find a way to actually store permanently the max block available to
         // pop-off, otherwise we can break it
         // JButton popOffMaxButton = new JButton("Pop off max",
@@ -284,19 +562,49 @@ public class SignumGUI extends JFrame {
 
         File phoenixIndex = new File("html/ui/phoenix/index.html");
         File classicIndex = new File("html/ui/classic/index.html");
+
+        shutdownButton.addActionListener(e -> {
+            if (JOptionPane.showConfirmDialog(SignumGUI.this,
+                    "This will stop the node. Are you sure?", "Shutdown Node",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
+                new Thread(this::shutdown).start();
+            }
+        });
+        /*
+         * restartButton.addActionListener(e -> {
+         * 
+         * if (JOptionPane.showConfirmDialog(SignumGUI.this,
+         * "This will restart the node. Are you sure?", "Restart node",
+         * JOptionPane.YES_NO_OPTION,
+         * JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
+         * restart();
+         * }
+         * });
+         */
+
         if (phoenixIndex.isFile() && phoenixIndex.exists()) {
-            toolBar.add(openPhoenixButton);
+            leftButtons.add(openPhoenixButton);
         }
         if (classicIndex.isFile() && classicIndex.exists()) {
-            toolBar.add(openClassicButton);
+            leftButtons.add(openClassicButton);
         }
-        toolBar.add(editConfButton);
-        toolBar.add(openApiButton);
-        if (Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL)) {
-            toolBar.add(popOff10Button);
-            toolBar.add(popOff100Button);
-            // toolBar.add(popOffMaxButton);
-        }
+        leftButtons.add(editConfButton);
+        leftButtons.add(openApiButton);
+
+        leftButtons.add(popOff10Button);
+        popOff10Button.setVisible(showPopOff);
+        leftButtons.add(popOff100Button);
+        popOff100Button.setVisible(showPopOff);
+        // leftButtons.add(popOffMaxButton);
+
+        // leftButtons.add(restartButton);
+        leftButtons.add(shutdownButton);
+
+        toolBar.add(leftButtons);
+        toolBar.add(Box.createHorizontalGlue());
+        toolBar.add(checkboxPanel);
+        toolBar.add(Box.createHorizontalStrut(10));
 
         openPheonixWalletItem.addActionListener(e -> openWebUi("/phoenix"));
         openClassicWalletItem.addActionListener(e -> openWebUi("/classic"));
@@ -348,6 +656,11 @@ public class SignumGUI extends JFrame {
                 : Signum.getBlockchainProcessor().getMinRollbackHeight();
         new Thread(() -> Signum.getBlockchainProcessor().popOffTo(height)).start();
     }
+    /*
+     * private void restart() {
+     * new Thread(() -> Signum.restart()).start();
+     * }
+     */
 
     private void editConf() {
         File file = new File(Signum.CONF_FOLDER, Signum.PROPERTIES_NAME);
@@ -388,25 +701,165 @@ public class SignumGUI extends JFrame {
         }
     }
 
-    private void runBrs() {
+    private void initListeners() {
+        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        blockchainProcessor.addListener(block -> onPeerCountChanged(), BlockchainProcessor.Event.PEER_COUNT_CHANGED);
+        blockchainProcessor.addListener(block -> onNetVolumeChanged(), BlockchainProcessor.Event.NET_VOLUME_CHANGED);
+        blockchainProcessor.addListener(this::onBlockPushed, BlockchainProcessor.Event.BLOCK_PUSHED);
+    }
+
+    public void onPeerCountChanged() {
+        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        SwingUtilities.invokeLater(() -> updatePeerCount(blockchainProcessor.getLastKnownConnectedPeerCount(),
+                blockchainProcessor.getLastKnownPeerCount()));
+    }
+
+    public void onNetVolumeChanged() {
+        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        long newDownloadedVolume = blockchainProcessor.getDownloadedVolume();
+        SwingUtilities.invokeLater(() -> {
+            uploadVolumeLabel.setText("▲ " + formatDataSize(blockchainProcessor.getUploadedVolume()));
+            downloadVolumeLabel.setText("▼ " + formatDataSize(newDownloadedVolume));
+
+            // Initial check for sync status before any timers start, to ensure the
+            // sync_in_progress timer starts correctly.
+            if (Signum.getBlockchain() != null) {
+                Block lastBlock = Signum.getBlockchain().getLastBlock();
+                if (lastBlock != null) {
+                    Date blockDate = Convert.fromEpochTime(lastBlock.getTimestamp());
+                    Date now = new Date();
+                    long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
+                    int missingBlocks = (int) ((now.getTime() - blockDate.getTime()) / (blockTime * 1000));
+                    isSyncing = missingBlocks > 10;
+                }
+            }
+
+            // Start the GUI timer only once, when the first download volume is received,
+            // and if experimental features are enabled in the config.
+            if (Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL)
+                    && blockchainProcessor.getDownloadedVolume() > 0
+                    && !guiTimerStarted.getAndSet(true)) {
+                startGuiTimer();
+            }
+        });
+    }
+
+    private void startGuiTimer() {
+        guiTimer = new Timer(1000, e -> {
+            if (Signum.getBlockchain() != null && Signum.getBlockchainProcessor() != null) {
+                guiAccumulatedSyncTimeMs += 1000;
+                totalTimeLabel.setText("🕒 " + formatDuration(guiAccumulatedSyncTimeMs));
+
+                if (isSyncing) {
+                    guiAccumulatedSyncInProgressTimeMs += 1000;
+                }
+                syncInProgressTimeLabel
+                        .setText("🔄 " + formatDuration(guiAccumulatedSyncInProgressTimeMs));
+                updateTimeLabelVisibility();
+            }
+        });
+        guiTimer.start();
+    }
+
+    private void onBlockPushed(Block block) {
+        if (block == null)
+            return;
+        SwingUtilities.invokeLater(() -> {
+            updateLatestBlock(block);
+
+            // Start the GUI timer only once, when the first block is pushed,
+            // and if experimental features are enabled in the config.
+            if (Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL) && !guiTimerStarted.getAndSet(true)) {
+                startGuiTimer();
+            }
+        });
+    }
+
+    public void startSignumWithGUI() {
         try {
+            // signum.init();
             Signum.main(args);
+
+            // Now that properties are loaded, set the correct values for the GUI
+            showPopOff = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
+            showMetrics = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
+            boolean measurementActive = Signum.getPropertyService().getBoolean(Props.MEASUREMENT_ACTIVE);
+            boolean experimentalActive = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
+
             try {
-                SwingUtilities.invokeLater(() -> showTrayIcon());
+                SwingUtilities.invokeLater(() -> {
+                    metricsPanel.init();
+                    showTrayIcon();
+                    // Sync checkbox states with loaded properties
+                    showPopOffCheckbox.setSelected(showPopOff);
+                    showMetricsCheckbox.setSelected(showMetrics);
+                    // Sync panel visibility with loaded properties
+                    metricsPanel.setVisible(showMetrics);
+                    if (measurementActive) {
+                        measurementPanel.setVisible(true);
+                    }
+                    if (experimentalActive) {
+                        experimentalPanel.setVisible(true);
+                        timePanel.setVisible(true);
+                    }
+                });
 
                 updateTitle();
+
+                initListeners();
+                if (Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL)) {
+                    // Initialize timers from the log file.
+                    BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+                    if (blockchainProcessor != null) {
+                        this.guiAccumulatedSyncTimeMs = blockchainProcessor.getAccumulatedSyncTimeMs();
+                        this.guiAccumulatedSyncInProgressTimeMs = blockchainProcessor
+                                .getAccumulatedSyncInProgressTimeMs();
+                    }
+                    // Update labels with initial values from log file
+                    SwingUtilities.invokeLater(() -> {
+                        totalTimeLabel.setText("🕒 " + formatDuration(guiAccumulatedSyncTimeMs));
+                        syncInProgressTimeLabel
+                                .setText("🔄 " + formatDuration(guiAccumulatedSyncInProgressTimeMs));
+                        updateTimeLabelVisibility(); // Initial visibility check
+                    });
+                }
                 if (Signum.getBlockchain() == null)
                     onBrsStopped();
             } catch (Exception t) {
                 LOGGER.error("Could not determine if running in testnet mode", t);
             }
-        } catch (SecurityException ignored) {
         } catch (Exception t) {
             LOGGER.error(FAILED_TO_START_MESSAGE, t);
             showMessage(FAILED_TO_START_MESSAGE);
             onBrsStopped();
         }
+
     }
+
+    private void updateTimeLabelVisibility() {
+        boolean showTotalTime = guiAccumulatedSyncTimeMs != guiAccumulatedSyncInProgressTimeMs;
+        totalTimeLabel.setVisible(showTotalTime);
+        timeSeparatorLabel.setVisible(showTotalTime);
+    }
+
+    /**
+     * This method is called when the Signum service is restarted.
+     * It re-initializes the GUI components and updates the state to reflect the new
+     * service instances.
+     */
+    /*
+     * public void reinitOnRestart() {
+     * // Re-register listeners to the new service instances
+     * initListeners();
+     * 
+     * // Manually update the UI with the current state after restart
+     * updateTitle();
+     * if (Signum.getBlockchain() != null) {
+     * updateLatestBlock(Signum.getBlockchain().getLastBlock());
+     * }
+     * updatePeerCount(Peers.getAllPeers().size(), Peers.getActivePeers().size());
+     * }
+     */
 
     private void updateTitle() {
         String networkName = Signum.getPropertyService().getString(Props.NETWORK_NAME);
@@ -414,6 +867,66 @@ public class SignumGUI extends JFrame {
                 this.programName + " [" + networkName + "] " + this.version));
         if (trayIcon != null)
             trayIcon.setToolTip(trayIcon.getToolTip() + " " + networkName);
+    }
+
+    private void updateLatestBlock(Block block) {
+        if (block == null) {
+            return;
+        }
+        Date blockDate = Convert.fromEpochTime(block.getTimestamp());
+        latestBlockHeightLabel.setText("Latest block: " + block.getHeight());
+        latestBlockTimestampLabel.setText("Timestamp: " + DATE_FORMAT.format(blockDate));
+
+        Date now = new Date();
+        long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
+
+        int missingBlocks = (int) ((now.getTime() - blockDate.getTime()) / (blockTime * 1000));
+
+        // Start syncing if more than 10 block times behind, stop if 1 or less.
+        // This is more reliable than peer height difference, especially at startup.
+        if (!isSyncing && missingBlocks > 10) {
+            isSyncing = true;
+        } else if (isSyncing && missingBlocks <= 1) {
+            isSyncing = false;
+        }
+
+        if (missingBlocks < 0) {
+            missingBlocks = 0;
+        }
+
+        float prog = 0;
+        int totalBlocks = block.getHeight() + missingBlocks;
+        if (totalBlocks > 0) {
+            // Use 100.0f to force floating-point division, preserving decimal places
+            prog = (float) block.getHeight() * 100.0f / totalBlocks;
+        }
+
+        if (prog > 100.0f) {
+            prog = 100.0f;
+        }
+        syncProgressBar.setValue((int) prog);
+        syncProgressBar.setPreferredSize(progressBarSize2);
+        syncProgressBar.setMaximumSize(progressBarSize2);
+        syncProgressBar.setMinimumSize(progressBarSize2);
+        syncProgressBar.setString(String.format("%.2f %%", prog));
+    }
+
+    private void updatePeerCount(int newConnectedCount, int count) {
+        connectedPeersLabel.setText(newConnectedCount + "");
+        peersCountLabel.setText(count + "");
+    }
+
+    private String formatDataSize(double bytes) {
+        if (bytes <= 0) {
+            return "0 B";
+        }
+        String[] units = { "B", "KB", "MB", "GB", "TB", "PB", "EB" };
+        int unitIndex = 0;
+        while (bytes >= 1024 && unitIndex < units.length - 1) {
+            bytes /= 1024;
+            unitIndex++;
+        }
+        return String.format("%.2f %s", bytes, units[unitIndex]);
     }
 
     private void onBrsStopped() {
@@ -432,6 +945,56 @@ public class SignumGUI extends JFrame {
             System.err.println("Showing message: " + message);
             JOptionPane.showMessageDialog(this, message, "Signum Message", JOptionPane.ERROR_MESSAGE);
         });
+    }
+
+    /**
+     * Formats a duration in milliseconds into a human-readable string (e.g.,
+     * "1y:02d:03h:04m:05s").
+     * Omits larger units if they are zero.
+     *
+     * @param millis The duration in milliseconds.
+     * @return A formatted string representing the duration.
+     */
+    private String formatDuration(long millis) {
+        if (millis <= 0) {
+            return "0s";
+        }
+
+        long totalSeconds = millis / 1000;
+
+        final long SEC_PER_MINUTE = 60;
+        final long SEC_PER_HOUR = SEC_PER_MINUTE * 60;
+        final long SEC_PER_DAY = SEC_PER_HOUR * 24;
+        final long SEC_PER_YEAR = SEC_PER_DAY * 365; // Approximation
+
+        long years = totalSeconds / SEC_PER_YEAR;
+        long secondsAfterYears = totalSeconds % SEC_PER_YEAR;
+
+        long days = secondsAfterYears / SEC_PER_DAY;
+        long secondsAfterDays = secondsAfterYears % SEC_PER_DAY;
+
+        long hours = secondsAfterDays / SEC_PER_HOUR;
+        long secondsAfterHours = secondsAfterDays % SEC_PER_HOUR;
+
+        long minutes = secondsAfterHours / SEC_PER_MINUTE;
+        long seconds = secondsAfterHours % SEC_PER_MINUTE;
+
+        StringBuilder sb = new StringBuilder();
+        if (years > 0) {
+            sb.append(years).append("y:");
+        }
+        if (days > 0 || sb.length() > 0) {
+            sb.append(String.format(sb.length() > 0 ? "%02d" : "%d", days)).append("d:");
+        }
+        if (hours > 0 || sb.length() > 0) {
+            sb.append(String.format(sb.length() > 0 ? "%02d" : "%d", hours)).append("h:");
+        }
+        if (minutes > 0 || sb.length() > 0) {
+            sb.append(String.format(sb.length() > 0 ? "%02d" : "%d", minutes)).append("m:");
+        }
+        sb.append(String.format(sb.length() > 0 ? "%02d" : "%d", seconds)).append("s");
+
+        return sb.toString();
     }
 
     private static class TextAreaOutputStream extends OutputStream {

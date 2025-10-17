@@ -107,7 +107,7 @@ public final class Peers {
     static JsonElement myPeerInfoRequest;
     static JsonElement myPeerInfoResponse;
 
-    private static final Listeners<Peer, Event> listeners = new Listeners<>();
+    public static Listeners<Peer, Event> listeners = new Listeners<>();
 
     private static final ConcurrentMap<String, Peer> peers = new ConcurrentHashMap<>();
     private static final ConcurrentMap<String, String> announcedAddresses = new ConcurrentHashMap<>();
