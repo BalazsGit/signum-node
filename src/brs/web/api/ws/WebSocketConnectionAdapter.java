@@ -24,17 +24,13 @@ public class WebSocketConnectionAdapter extends Session.Listener.Abstract {
     this.notifier.addConnection(connection);
   }
 
+
   @Override
-  public void onWebSocketClose(int statusCode, String reason) {
+  public void onWebSocketClose(int statusCode, String reason, Callback callback) {
     logger.debug("Socket Closed: [{}] {}", statusCode, reason);
     if (this.connection != null) {
       this.notifier.removeConnection(this.connection);
     }
-  }
-
-  @Override
-  public void onWebSocketClose(int statusCode, String reason, Callback callback) {
-    onWebSocketClose(statusCode, reason);
     callback.succeed();
   }
 
