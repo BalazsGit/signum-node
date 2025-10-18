@@ -55,12 +55,15 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
         public final long blockApplyTimeMs;
         public final long commitTimeMs;
         public final long miscTimeMs;
+        public final int allTransactionCount;
+        public final int userTransactionCount;
         public final Block block;
 
         public PerformanceStats(long totalTimeMs, long validationTimeMs, long txLoopTimeMs,
                 long housekeepingTimeMs, long txApplyTimeMs, long atTimeMs,
                 long subscriptionTimeMs, long blockApplyTimeMs, long commitTimeMs,
-                long miscTimeMs, Block block) {
+                long miscTimeMs, int allTransactionCount, int userTransactionCount,
+                Block block) {
             this.totalTimeMs = totalTimeMs;
             this.validationTimeMs = validationTimeMs;
             this.txLoopTimeMs = txLoopTimeMs;
@@ -71,6 +74,8 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
             this.blockApplyTimeMs = blockApplyTimeMs;
             this.commitTimeMs = commitTimeMs;
             this.miscTimeMs = miscTimeMs;
+            this.allTransactionCount = allTransactionCount;
+            this.userTransactionCount = userTransactionCount;
             this.block = block;
         }
 

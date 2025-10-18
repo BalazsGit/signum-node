@@ -411,8 +411,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     // The stats might be null if the block is the very first one (genesis)
                     if (stats != null) {
 
-                        int userTransactionCount = block.getTransactions().size();
-                        int allTransactionCount = block.getAllTransactions().size();
+                        int userTransactionCount = stats.userTransactionCount;
+                        int allTransactionCount = stats.allTransactionCount;
                         int atCount = 0;
 
                         if (block.getBlockAts() != null) {
@@ -1745,9 +1745,13 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             long miscTimeMs = totalTimeMs - (validationTimeMs + txLoopTimeMs + housekeepingTimeMs
                     + txApplyTimeMs + atTimeMs + subscriptionTimeMs + blockApplyTimeMs + commitTimeMs);
 
+            int userTransactionCount = block.getTransactions().size();
+            int allTransactionCount = block.getAllTransactions().size();
+
             performanceStats.set(new BlockchainProcessor.PerformanceStats(
                     totalTimeMs, validationTimeMs, txLoopTimeMs, housekeepingTimeMs, txApplyTimeMs, atTimeMs,
-                    subscriptionTimeMs, blockApplyTimeMs, commitTimeMs, miscTimeMs, block));
+                    subscriptionTimeMs, blockApplyTimeMs, commitTimeMs, miscTimeMs,
+                    allTransactionCount, userTransactionCount, block));
             blockListeners.notify(block, Event.PERFORMANCE_STATS_UPDATED);
 
             logger.debug("Successfully pushed {} (height {})", block.getId(), block.getHeight());
