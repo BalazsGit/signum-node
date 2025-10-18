@@ -1732,8 +1732,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 stores.endTransaction();
             }
 
-            long totalEndTime = System.nanoTime();
-            long totalTimeMs = TimeUnit.NANOSECONDS.toMillis(totalEndTime - totalStartTime);
+            int userTransactionCount = block.getTransactions().size();
+            int allTransactionCount = block.getAllTransactions().size();
+
             long validationTimeMs = TimeUnit.NANOSECONDS.toMillis(validationTime);
             long txLoopTimeMs = TimeUnit.NANOSECONDS.toMillis(txLoopTime);
             long housekeepingTimeMs = TimeUnit.NANOSECONDS.toMillis(housekeepingTime);
@@ -1742,11 +1743,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             atTimeMs = TimeUnit.NANOSECONDS.toMillis(atTimeNanos);
             long subscriptionTimeMs = TimeUnit.NANOSECONDS.toMillis(subscriptionTimeNanos);
             long blockApplyTimeMs = TimeUnit.NANOSECONDS.toMillis(blockApplyTimeNanos);
+            long totalEndTime = System.nanoTime();
+            long totalTimeMs = TimeUnit.NANOSECONDS.toMillis(totalEndTime - totalStartTime);
             long miscTimeMs = totalTimeMs - (validationTimeMs + txLoopTimeMs + housekeepingTimeMs
                     + txApplyTimeMs + atTimeMs + subscriptionTimeMs + blockApplyTimeMs + commitTimeMs);
-
-            int userTransactionCount = block.getTransactions().size();
-            int allTransactionCount = block.getAllTransactions().size();
 
             performanceStats.set(new BlockchainProcessor.PerformanceStats(
                     totalTimeMs, validationTimeMs, txLoopTimeMs, housekeepingTimeMs, txApplyTimeMs, atTimeMs,
