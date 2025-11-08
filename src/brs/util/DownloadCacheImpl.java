@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.StampedLock;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
@@ -30,6 +31,8 @@ public final class DownloadCacheImpl {
     private final List<Long> unverified = new LinkedList<>();
 
     private final Logger logger = LoggerFactory.getLogger(DownloadCacheImpl.class);
+
+    private final AtomicBoolean isForkBeingProcessed = new AtomicBoolean(false);
 
     private final Blockchain blockchain;
     private final FluxCapacitor fluxCapacitor;
@@ -103,7 +106,7 @@ public final class DownloadCacheImpl {
         }
     }
 
-    private boolean getLockState() {
+    public boolean isLocked() {
         long stamp = dcsl.tryOptimisticRead();
         boolean retVal = lockedCache;
         if (!dcsl.validate(stamp)) {
@@ -343,7 +346,7 @@ public final class DownloadCacheImpl {
     }
 
     public boolean addBlock(Block block) {
-        if (!getLockState()) {
+        if (!isLocked()) {
             long stamp = dcsl.writeLock();
             try {
                 blockCache.put(block.getId(), block);
@@ -359,6 +362,14 @@ public final class DownloadCacheImpl {
             }
         }
         return false;
+    }
+
+    public boolean isForkBeingProcessed() {
+        return isForkBeingProcessed.get();
+    }
+
+    public boolean setForkBeingProcessed(boolean expectedValue, boolean newValue) {
+        return isForkBeingProcessed.compareAndSet(expectedValue, newValue);
     }
 
     public void addForkBlock(Block block) {

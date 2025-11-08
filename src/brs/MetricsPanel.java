@@ -52,6 +52,7 @@ public class MetricsPanel extends JPanel {
     private final LinkedList<Long> blockApplyTimes = new LinkedList<>();
     private final LinkedList<Long> miscTimes = new LinkedList<>();
     private final LinkedList<Integer> atCounts = new LinkedList<>();
+    private final LinkedList<Integer> payloadFullnessHistory = new LinkedList<>();
     private final LinkedList<Double> blocksPerSecondHistory = new LinkedList<>();
     private final LinkedList<Double> transactionsPerSecondHistory = new LinkedList<>();
     private final LinkedList<Double> atTransactionsPerSecondHistory = new LinkedList<>();
@@ -74,11 +75,12 @@ public class MetricsPanel extends JPanel {
     private XYSeries blockApplyTimePerBlockSeries;
     private XYSeries miscTimePerBlockSeries;
     private XYSeries atCountPerBlockSeries;
+    private XYSeries payloadFullnessSeries;
 
     private JProgressBar blocksPerSecondProgressBar;
     private JProgressBar transactionsPerSecondProgressBar;
     private JProgressBar transactionsPerBlockProgressBar;
-    private int oclUnverifiedQueueThreshold;
+
     private JLabel uploadSpeedLabel;
     private JLabel downloadSpeedLabel;
     private JLabel metricsUploadVolumeLabel;
@@ -115,13 +117,18 @@ public class MetricsPanel extends JPanel {
     private JProgressBar atTransactionsPerBlockProgressBar;
     private JLabel systemTxPerSecondLabel;
     private JProgressBar systemTransactionsPerSecondProgressBar;
+    private JLabel unconfirmedTxsLabel;
+    private JProgressBar unconfirmedTxsProgressBar;
     private JProgressBar uploadSpeedProgressBar;
+    private JLabel payloadFullnessLabel;
+    private JProgressBar payloadFullnessProgressBar;
     private JProgressBar downloadSpeedProgressBar;
 
     private ChartPanel performanceChartPanel;
     private ChartPanel timingChartPanel;
     private ChartPanel netSpeedChartPanel;
 
+    private Timer netSpeedChartUpdater;
     private final LinkedList<Double> uploadSpeedHistory = new LinkedList<>();
     private final LinkedList<Double> downloadSpeedHistory = new LinkedList<>();
 
@@ -131,8 +138,8 @@ public class MetricsPanel extends JPanel {
     private long uploadedVolume = 0;
     private long downloadedVolume = 0;
 
-    private final Dimension chartDimension1 = new Dimension(280, 210);
-    private final Dimension chartDimension2 = new Dimension(280, 105);
+    private final Dimension chartDimension1 = new Dimension(320, 240);
+    private final Dimension chartDimension2 = new Dimension(320, 120);
 
     private final Dimension progressBarSize1 = new Dimension(200, 20);
     private final Dimension progressBarSize2 = new Dimension(150, 20);
@@ -144,12 +151,21 @@ public class MetricsPanel extends JPanel {
 
     private JProgressBar syncProgressBarDownloadedBlocks;
     private JProgressBar syncProgressBarUnverifiedBlocks;
+
+    private JLabel cacheFullnessLabel;
+    private JProgressBar cacheFullnessProgressBar;
+
     private final JFrame parentFrame;
+
+    private int oclUnverifiedQueueThreshold;
+    private int maxUnverifiedQueueSize;
+    private int maxUnconfirmedTxs;
+    private int maxPayloadSize;
 
     public MetricsPanel(JFrame parentFrame) {
         super(new GridBagLayout());
         this.parentFrame = parentFrame;
-        atCountPerBlockSeries = new XYSeries("ATs/Block (MA)");
+        atCountPerBlockSeries = new XYSeries("ATs/Block (MA)"); // Deep Pink
         transactionsPerBlockSeries = new XYSeries("All Txs/Block (MA)"); // Orange
         atTransactionsPerBlockSeries = new XYSeries("System Txs/Block (MA)"); // Blue
         performanceChartPanel = createPerformanceChartPanel();
@@ -160,6 +176,17 @@ public class MetricsPanel extends JPanel {
 
     public void init() {
         oclUnverifiedQueueThreshold = Signum.getPropertyService().getInt(Props.GPU_UNVERIFIED_QUEUE);
+        maxUnverifiedQueueSize = Signum.getPropertyService().getInt(Props.P2P_MAX_BLOCKS);
+        maxUnconfirmedTxs = Signum.getPropertyService().getInt(Props.P2P_MAX_UNCONFIRMED_TRANSACTIONS);
+        maxPayloadSize = (Signum.getFluxCapacitor().getValue(brs.fluxcapacitor.FluxValues.MAX_PAYLOAD_LENGTH,
+                Signum.getBlockchain().getHeight()) / 1024);
+        String dynamicTooltip = "Shows the percentage of the block's data section (payload) that is filled with transactions. This is a measure of block space utilization and network activity.\n\n"
+                + "The maximum payload size is currently "
+                + maxPayloadSize
+                + " KB.\n\nLegend:\n- Moving Average\n- C: Current block fullness\n- min: Minimum value in the window\n- max: Maximum value in the window";
+        addInfoTooltip(payloadFullnessLabel, dynamicTooltip);
+        syncProgressBarUnverifiedBlocks.setMaximum(maxUnverifiedQueueSize);
+        unconfirmedTxsProgressBar.setMaximum(maxUnconfirmedTxs);
         initListeners();
     }
 
@@ -172,81 +199,103 @@ public class MetricsPanel extends JPanel {
         // SyncPanel (Progress Bars)
         JPanel SyncPanel = new JPanel(new GridBagLayout());
 
+        // Cache Fullness
+        tooltip = "The percentage of the allocated download cache memory that is currently in use.\n\nThis indicates how much space is available for downloading new blocks before they are processed and added to the blockchain.";
+        cacheFullnessLabel = createLabel("Download Cache", null, tooltip);
+        cacheFullnessProgressBar = createProgressBar(0, 100, Color.ORANGE, "0%", progressBarSize1);
+        addComponent(SyncPanel, cacheFullnessLabel, 0, 0, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
+                labelInsets);
+        addComponent(SyncPanel, cacheFullnessProgressBar, 1, 0, 1, 1, 0, GridBagConstraints.LINE_START,
+                GridBagConstraints.HORIZONTAL, barInsets);
+
         // Verified/Total Blocks
         tooltip = "Shows the number of blocks in the download queue that have passed PoC verification against the total number of blocks in the queue.\n\n- Verified: PoC signature has been checked (CPU/GPU intensive).\n- Total: All blocks currently in the download queue.\n\nA high number of unverified blocks may indicate a slow verification process.";
-        JLabel verifLabel = createLabel("Verified/Total Blocks", null, tooltip);
-        syncProgressBarDownloadedBlocks = createProgressBar(0, 100, Color.GREEN, "0 / 0 - 0%", progressBarSize1);
-        addComponent(SyncPanel, verifLabel, 0, 0, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
+        JLabel verifLabel = createLabel("Verified / Total Blocks", null, tooltip);
+        syncProgressBarDownloadedBlocks = createProgressBar(0, 100, Color.GREEN, "0 / 0 - 0%",
+                progressBarSize1);
+        addComponent(SyncPanel, verifLabel, 0, 1, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
                 labelInsets);
-        addComponent(SyncPanel, syncProgressBarDownloadedBlocks, 1, 0, 1, 1, 0, GridBagConstraints.LINE_START,
+        addComponent(SyncPanel, syncProgressBarDownloadedBlocks, 1, 1, 1, 1, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // Unverified Blocks
         tooltip = "The number of blocks in the download queue that are waiting for Proof-of-Capacity (PoC) verification.\n\nA persistently high number might indicate that the CPU or GPU is a bottleneck and cannot keep up with the network's block generation rate.";
         JLabel unVerifLabel = createLabel("Unverified Blocks", null, tooltip);
-        syncProgressBarUnverifiedBlocks = createProgressBar(0, 2000, Color.GREEN, "0", progressBarSize1);
-        addComponent(SyncPanel, unVerifLabel, 0, 1, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
+        syncProgressBarUnverifiedBlocks = createProgressBar(0, 100, Color.GREEN, "0",
+                progressBarSize1);
+        addComponent(SyncPanel, unVerifLabel, 0, 2, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
                 labelInsets);
-        addComponent(SyncPanel, syncProgressBarUnverifiedBlocks, 1, 1, 1, 1, 0, GridBagConstraints.LINE_START,
+        addComponent(SyncPanel, syncProgressBarUnverifiedBlocks, 1, 2, 1, 1, 0, GridBagConstraints.LINE_START,
+                GridBagConstraints.HORIZONTAL, barInsets);
+
+        // Unconfirmed Transactions
+        tooltip = "The current number of transactions in the memory pool waiting to be confirmed in a block. This indicates network activity and potential congestion.";
+        unconfirmedTxsLabel = createLabel("Unconfirmed Txs", null, tooltip);
+        unconfirmedTxsProgressBar = createProgressBar(0, 100, null, "0", progressBarSize1);
+        addComponent(SyncPanel, unconfirmedTxsLabel, 0, 3, 1, 0, 0, GridBagConstraints.LINE_END,
+                GridBagConstraints.NONE, labelInsets);
+        addComponent(SyncPanel, unconfirmedTxsProgressBar, 1, 3, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // Separator
         JSeparator separator1 = new JSeparator(SwingConstants.HORIZONTAL);
-        addComponent(SyncPanel, separator1, 0, 2, 2, 1, 0, GridBagConstraints.CENTER, GridBagConstraints.HORIZONTAL,
+        addComponent(SyncPanel, separator1, 0, 4, 2, 1, 0, GridBagConstraints.CENTER, GridBagConstraints.HORIZONTAL,
                 barInsets);
 
         // Blocks/Second (Moving Average)
         tooltip = "The moving average of blocks processed per second. This is a key indicator of the node's synchronization speed.\n\nA higher value means the node is rapidly catching up with the current state of the blockchain. This metric is particularly useful during the initial sync or after a period of being offline.";
         JLabel blocksPerSecondLabel = createLabel("Blocks/Sec (MA)", Color.CYAN, tooltip);
         blocksPerSecondProgressBar = createProgressBar(0, 200, null, "0", progressBarSize1);
-        addComponent(SyncPanel, blocksPerSecondLabel, 0, 3, 1, 0, 0, GridBagConstraints.LINE_END,
+        addComponent(SyncPanel, blocksPerSecondLabel, 0, 5, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, blocksPerSecondProgressBar, 1, 3, 1, 0, 0, GridBagConstraints.LINE_START,
+        addComponent(SyncPanel, blocksPerSecondProgressBar, 1, 5, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // All Transactions/Second (Moving Average)
         tooltip = "The moving average of the total number of transactions (user-submitted and AT-generated) processed per second. This metric reflects the total transactional throughput of the network as seen by your node.\n\nIncludes:\n- Payments (Ordinary, Multi-Out, Multi-Same-Out)\n- Messages (Arbitrary, Alias, Account Info, TLD)\n- Assets (Issuance, Transfer, Orders, Minting, Distribution)\n- Digital Goods (Listing, Delisting, Price Change, Quantity Change, Purchase, Delivery, Feedback, Refund)\n- Account Control (Leasing)\n- Mining (Reward Recipient, Commitment)\n- Advanced Payments (Escrow, Subscriptions)\n- Automated Transactions (ATs)";
         JLabel txPerSecondLabel = createLabel("All Txs/Sec (MA)", Color.GREEN, tooltip);
         transactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0", progressBarSize1);
-        addComponent(SyncPanel, txPerSecondLabel, 0, 4, 1, 0, 0, GridBagConstraints.LINE_END,
+        addComponent(SyncPanel, txPerSecondLabel, 0, 6, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, transactionsPerSecondProgressBar, 1, 4, 1, 0, 0, GridBagConstraints.LINE_START,
+        addComponent(SyncPanel, transactionsPerSecondProgressBar, 1, 6, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // All Transactions/Block (Moving Average)
         tooltip = "The moving average of the total number of transactions (user-submitted and AT-generated) included in each block. This metric provides insight into the network's activity and block space utilization.\n\nIncludes:\n- Payments (Ordinary, Multi-Out, Multi-Same-Out)\n- Messages (Arbitrary, Alias, Account Info, TLD)\n- Assets (Issuance, Transfer, Orders, Minting, Distribution)\n- Digital Goods (Listing, Delisting, Price Change, Quantity Change, Purchase, Delivery, Feedback, Refund)\n- Account Control (Leasing)\n- Mining (Reward Recipient, Commitment)\n- Advanced Payments (Escrow, Subscriptions)\n- Automated Transactions (ATs)";
         JLabel txPerBlockLabel = createLabel("All Txs/Block (MA)", new Color(255, 165, 0), tooltip); // Orange
         transactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0", progressBarSize1);
-        addComponent(SyncPanel, txPerBlockLabel, 0, 5, 1, 0, 0, GridBagConstraints.LINE_END,
+        addComponent(SyncPanel, txPerBlockLabel, 0, 7, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, transactionsPerBlockProgressBar, 1, 5, 1, 0, 0, GridBagConstraints.LINE_START,
+        addComponent(SyncPanel, transactionsPerBlockProgressBar, 1, 7, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // System Transactions/Second (Moving Average)
         tooltip = "The moving average of system-generated transactions processed per second. This includes payments from Automated Transactions (ATs), Escrow results, and Subscription payments.";
         systemTxPerSecondLabel = createLabel("System Txs/Sec (MA)", new Color(135, 206, 250), tooltip); // LightSkyBlue
         systemTransactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0", progressBarSize1);
-        addComponent(SyncPanel, systemTxPerSecondLabel, 0, 6, 1, 0, 0, GridBagConstraints.LINE_END,
+        addComponent(SyncPanel, systemTxPerSecondLabel, 0, 8, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, systemTransactionsPerSecondProgressBar, 1, 6, 1, 0, 0, GridBagConstraints.LINE_START,
+        addComponent(SyncPanel, systemTransactionsPerSecondProgressBar, 1, 8, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // System Transactions/Block (Moving Average)
         tooltip = "The moving average of system-generated transactions included in each block. This includes payments from Automated Transactions (ATs), Escrow results, and Subscription payments.";
         systemTxPerBlockLabel = createLabel("System Txs/Block (MA)", Color.BLUE, tooltip);
         atTransactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0", progressBarSize1);
-        addComponent(SyncPanel, systemTxPerBlockLabel, 0, 7, 1, 0, 0, GridBagConstraints.LINE_END,
+        addComponent(SyncPanel, systemTxPerBlockLabel, 0, 9, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, atTransactionsPerBlockProgressBar, 1, 7, 1, 0, 0, GridBagConstraints.LINE_START,
+        addComponent(SyncPanel, atTransactionsPerBlockProgressBar, 1, 9, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // ATs/Block (Moving Average)
         tooltip = "The moving average of the number of Automated Transactions (ATs) executed per block. This metric shows the activity level of smart contracts on the network.";
         atCountLabel = createLabel("ATs/Block (MA)", new Color(153, 0, 76), tooltip); // Deep Pink
         atCountProgressBar = createProgressBar(0, 100, null, "0", progressBarSize1);
-        addComponent(SyncPanel, atCountLabel, 0, 8, 1, 0, 0, GridBagConstraints.LINE_END,
+        addComponent(SyncPanel, atCountLabel, 0, 10, 1, 0, 0, GridBagConstraints.LINE_END, // This was 9 before, so it's
+                                                                                           // correct
                 GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, atCountProgressBar, 1, 8, 1, 0, 0, GridBagConstraints.LINE_START,
+        addComponent(SyncPanel, atCountProgressBar, 1, 10, 1, 0, 0, GridBagConstraints.LINE_START, // This was 9 before,
+                                                                                                   // so it's correct
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // Add SyncPanel to performanceMetricsPanel
@@ -377,6 +426,16 @@ public class MetricsPanel extends JPanel {
                 GridBagConstraints.HORIZONTAL, timerBarInsets);
         y += 2;
 
+        // --- Row 6: Payload Fullness ---
+        payloadFullnessLabel = createLabel("Payload Fullness (MA)", null, null); // Tooltip is set in init()
+        Dimension wideProgressBarSize = new Dimension(progressBarSize1.width * 2 + 5, progressBarSize1.height);
+        payloadFullnessProgressBar = createProgressBar(0, 100, null,
+                "0% - C: 0% (0 / 0 bytes) - min: 0% - max: 0%", wideProgressBarSize);
+        addComponent(timingInfoPanel, payloadFullnessLabel, 0, y, 3, 1, 0, GridBagConstraints.CENTER,
+                GridBagConstraints.NONE, timerLabelInsets);
+        addComponent(timingInfoPanel, payloadFullnessProgressBar, 0, y + 1, 3, 1, 0, GridBagConstraints.CENTER,
+                GridBagConstraints.HORIZONTAL, timerBarInsets);
+
         // Add timingInfoPanel to timingMetricsPanel
         addComponent(timingMetricsPanel, timingInfoPanel, 0, 0, 1, 0, 0, GridBagConstraints.NORTHWEST,
                 GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
@@ -439,26 +498,41 @@ public class MetricsPanel extends JPanel {
                 GridBagConstraints.NONE, barInsets);
 
         // --- Moving Average Window ---
-        tooltip = "The number of recent blocks used to calculate the moving average for performance metrics. A larger window provides a smoother but less responsive trend, while a smaller window is more reactive to recent changes.";
+        tooltip = "The number of recent blocks used to calculate the moving average for performance metrics. "
+                + "A larger window provides a smoother but less responsive trend, while a smaller window is more reactive to recent changes.";
         JLabel maWindowLabel = createLabel("MA Window (Blocks)", null, tooltip);
 
-        // Define the discrete values for the dropdown
-        final Integer[] maWindowValues = { 10, 100, 200, 300, 400, 500 };
-        JComboBox<Integer> movingAverageComboBox = new JComboBox<>(maWindowValues);
-        movingAverageComboBox.setSelectedItem(movingAverageWindow);
-        movingAverageComboBox.setPreferredSize(new Dimension(150, 25));
-
-        movingAverageComboBox.addActionListener(e -> {
-            JComboBox<?> source = (JComboBox<?>) e.getSource();
-            Object selectedItem = source.getSelectedItem();
-            if (selectedItem instanceof Integer) {
-                movingAverageWindow = (Integer) selectedItem;
+        final int[] maWindowValues = { 10, 100, 200, 300, 400, 500 };
+        int initialSliderValue = 0;
+        for (int i = 0; i < maWindowValues.length; i++) {
+            if (movingAverageWindow == maWindowValues[i]) {
+                initialSliderValue = i;
+                break;
             }
+        }
+
+        JSlider movingAverageSlider = new JSlider(JSlider.HORIZONTAL, 0, maWindowValues.length - 1, initialSliderValue);
+        movingAverageSlider.setMajorTickSpacing(1);
+        movingAverageSlider.setPaintTicks(true);
+        movingAverageSlider.setSnapToTicks(true);
+        movingAverageSlider.setPreferredSize(new Dimension(150, 40));
+
+        Hashtable<Integer, JLabel> labelTable = new Hashtable<>();
+        for (int i = 0; i < maWindowValues.length; i++) {
+            labelTable.put(i, new JLabel(String.valueOf(maWindowValues[i])));
+        }
+        movingAverageSlider.setLabelTable(labelTable);
+        movingAverageSlider.setPaintLabels(true);
+
+        movingAverageSlider.addChangeListener(e -> {
+            JSlider source = (JSlider) e.getSource();
+            movingAverageWindow = maWindowValues[source.getValue()];
         });
 
         addComponent(netSpeedInfoPanel, maWindowLabel, 0, 4, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
-        addComponent(netSpeedInfoPanel, movingAverageComboBox, 1, 4, 1, 0, 0, GridBagConstraints.LINE_START,
+
+        addComponent(netSpeedInfoPanel, movingAverageSlider, 1, 4, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         netSpeedChartContainer.add(netSpeedInfoPanel);
@@ -480,6 +554,8 @@ public class MetricsPanel extends JPanel {
         // END Metrics Panel
         addDualChartToggleListener(systemTxPerBlockLabel, performanceChartPanel, 1, 0, timingChartPanel, 1, 0);
         addToggleListener(pushTimeLabel, timingChartPanel, 0, 0);
+        addToggleListener(payloadFullnessLabel, timingChartPanel, 0, 10);
+
         addToggleListener(validationTimeLabel, timingChartPanel, 0, 1);
         addToggleListener(txLoopTimeLabel, timingChartPanel, 0, 2);
         addToggleListener(housekeepingTimeLabel, timingChartPanel, 0, 3);
@@ -499,7 +575,7 @@ public class MetricsPanel extends JPanel {
 
         // Timer to periodically update the network speed chart so it flows even with no
         // traffic
-        Timer netSpeedChartUpdater = new Timer(100, e -> {
+        netSpeedChartUpdater = new Timer(100, e -> {
             updateNetVolumeAndSpeedChart(uploadedVolume, downloadedVolume);
         });
         netSpeedChartUpdater.start();
@@ -508,27 +584,49 @@ public class MetricsPanel extends JPanel {
     private void initListeners() {
         BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
         if (blockchainProcessor != null) {
-            blockchainProcessor.addListener(this::onQueueStatus, BlockchainProcessor.Event.QUEUE_STATUS_CHANGED);
-            blockchainProcessor.addListener(this::onNetVolumeChanged,
+            blockchainProcessor.addListener(block -> onQueueStatus(), BlockchainProcessor.Event.QUEUE_STATUS_CHANGED);
+            blockchainProcessor.addListener(block -> onNetVolumeChanged(),
                     BlockchainProcessor.Event.NET_VOLUME_CHANGED);
             blockchainProcessor.addListener(this::onPerformanceStatsUpdated,
                     BlockchainProcessor.Event.PERFORMANCE_STATS_UPDATED);
         }
-    }
-
-    public void shutdown() {
-        chartUpdateExecutor.shutdown();
-    }
-
-    public void onQueueStatus(Block block) { // block is not used here, but for consistency with other listeners
-        BlockchainProcessor.QueueStatus status = Signum.getBlockchainProcessor().getQueueStatus();
-        if (status != null) {
-            SwingUtilities.invokeLater(
-                    () -> updateQueueStatus(status.unverifiedSize, status.verifiedSize, status.totalSize));
+        TransactionProcessor transactionProcessor = Signum.getTransactionProcessor();
+        if (transactionProcessor != null) {
+            transactionProcessor.addListener(txs -> updateUnconfirmedTxsCount(),
+                    TransactionProcessor.Event.ADDED_UNCONFIRMED_TRANSACTIONS);
+            transactionProcessor.addListener(txs -> updateUnconfirmedTxsCount(),
+                    TransactionProcessor.Event.REMOVED_UNCONFIRMED_TRANSACTIONS);
+            updateUnconfirmedTxsCount(); // Initial update
         }
     }
 
-    public void onNetVolumeChanged(Block block) { // block is not used here, but for consistency with other listeners
+    public void shutdown() {
+        if (netSpeedChartUpdater != null) {
+            netSpeedChartUpdater.stop();
+        }
+        chartUpdateExecutor.shutdown();
+    }
+
+    public void onQueueStatus() {
+        BlockchainProcessor.QueueStatus status = Signum.getBlockchainProcessor().getQueueStatus();
+        if (status != null) {
+            SwingUtilities.invokeLater(
+                    () -> updateQueueStatus(status));
+        }
+    }
+
+    private void updateUnconfirmedTxsCount() {
+        TransactionProcessor transactionProcessor = Signum.getTransactionProcessor();
+        if (transactionProcessor != null) {
+            int count = transactionProcessor.getAmountUnconfirmedTransactions();
+            SwingUtilities.invokeLater(() -> {
+                unconfirmedTxsProgressBar.setValue(count);
+                unconfirmedTxsProgressBar.setString(String.valueOf(count));
+            });
+        }
+    }
+
+    public void onNetVolumeChanged() {
         BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
         SwingUtilities.invokeLater(() -> updateNetVolume(blockchainProcessor.getUploadedVolume(),
                 blockchainProcessor.getDownloadedVolume()));
@@ -648,27 +746,32 @@ public class MetricsPanel extends JPanel {
         });
     }
 
-    private void updateQueueStatus(int downloadCacheUnverifiedSize,
-            int downloadCacheVerifiedSize,
-            int downloadCacheTotalSize) {
+    private void updateQueueStatus(BlockchainProcessor.QueueStatus status) {
 
         syncProgressBarDownloadedBlocks.setStringPainted(true);
         syncProgressBarUnverifiedBlocks.setStringPainted(true);
 
-        if (downloadCacheTotalSize != 0) {
-            syncProgressBarDownloadedBlocks.setString(downloadCacheVerifiedSize + " / " + downloadCacheTotalSize + " - "
-                    + 100 * downloadCacheVerifiedSize / downloadCacheTotalSize + "%");
-            syncProgressBarDownloadedBlocks.setValue(100 * downloadCacheVerifiedSize / downloadCacheTotalSize);
+        int cacheFullness = status.cacheFullness;
+        cacheFullnessProgressBar.setValue(cacheFullness);
+        cacheFullnessProgressBar.setString(String.format("%d%%", cacheFullness));
 
+        if (status.totalSize != 0) {
+            int verifiedPercentage = (int) (100.0 * status.verifiedSize / status.totalSize);
+            syncProgressBarDownloadedBlocks
+                    .setString(
+                            String.format("%d / %d - %d%%", status.verifiedSize, status.totalSize, verifiedPercentage));
+            syncProgressBarDownloadedBlocks
+                    .setValue(verifiedPercentage);
         } else {
             syncProgressBarDownloadedBlocks.setString("0 / 0 - 0%");
             syncProgressBarDownloadedBlocks.setValue(0);
         }
 
-        syncProgressBarUnverifiedBlocks.setString(downloadCacheUnverifiedSize + "");
-        syncProgressBarUnverifiedBlocks.setValue(downloadCacheUnverifiedSize);
+        syncProgressBarUnverifiedBlocks
+                .setString(String.format("%d", status.unverifiedSize));
+        syncProgressBarUnverifiedBlocks.setValue(status.unverifiedSize);
 
-        if (downloadCacheUnverifiedSize > oclUnverifiedQueueThreshold) {
+        if (status.unverifiedSize > oclUnverifiedQueueThreshold) {
             syncProgressBarUnverifiedBlocks.setForeground(Color.RED);
         } else {
             syncProgressBarUnverifiedBlocks.setForeground(Color.GREEN);
@@ -797,7 +900,49 @@ public class MetricsPanel extends JPanel {
 
     private void updateAllCharts(BlockchainProcessor.PerformanceStats stats) {
         updateTimingChart(stats);
-        updatePerformanceChart(stats.block, stats.allTransactionCount, stats.userTransactionCount);
+        updatePerformanceAndPayloadChart(stats);
+    }
+
+    private void updatePerformanceAndPayloadChart(BlockchainProcessor.PerformanceStats stats) {
+        Block block = stats.block;
+        if (block == null) {
+            return;
+        }
+
+        // Update performance chart
+        updatePerformanceChart(block, stats.allTransactionCount, stats.userTransactionCount);
+
+        // Update payload fullness
+        payloadFullnessHistory.add(stats.payloadFullnessPercent);
+        while (payloadFullnessHistory.size() > CHART_HISTORY_SIZE) {
+            payloadFullnessHistory.removeFirst();
+        }
+
+        int currentWindowSize = Math.min(payloadFullnessHistory.size(), movingAverageWindow);
+        if (currentWindowSize < 1) {
+            return;
+        }
+
+        double movingAverage = payloadFullnessHistory.stream()
+                .skip(Math.max(0, payloadFullnessHistory.size() - currentWindowSize))
+                .mapToInt(Integer::intValue)
+                .average().orElse(0.0);
+
+        int minFullness = payloadFullnessHistory.stream().mapToInt(Integer::intValue).min().orElse(0);
+        int maxFullness = payloadFullnessHistory.stream().mapToInt(Integer::intValue).max().orElse(0);
+
+        SwingUtilities.invokeLater(() -> {
+            payloadFullnessProgressBar.setValue((int) movingAverage);
+            String format = "%06.2f%% - C: %03d%% (%06d / %d bytes) - min: %03d%% - max: %03d%%";
+            payloadFullnessProgressBar.setString(String.format(format, movingAverage, stats.payloadFullnessPercent,
+                    stats.payloadLength, stats.maxPayloadLength,
+                    minFullness, maxFullness));
+
+            payloadFullnessSeries.add(stats.block.getHeight(), movingAverage);
+            while (payloadFullnessSeries.getItemCount() > CHART_HISTORY_SIZE) {
+                payloadFullnessSeries.remove(0);
+            }
+        });
     }
 
     private void updateTimingChart(BlockchainProcessor.PerformanceStats stats) {
@@ -994,6 +1139,9 @@ public class MetricsPanel extends JPanel {
             while (miscTimePerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
                 miscTimePerBlockSeries.remove(0);
             }
+            while (payloadFullnessSeries.getItemCount() > CHART_HISTORY_SIZE) {
+                payloadFullnessSeries.remove(0);
+            }
         });
     }
 
@@ -1081,6 +1229,7 @@ public class MetricsPanel extends JPanel {
         blockApplyTimePerBlockSeries = new XYSeries("Block Apply Time (MA)");
         commitTimePerBlockSeries = new XYSeries("Commit Time (MA)");
         miscTimePerBlockSeries = new XYSeries("Misc. Time (MA)");
+        payloadFullnessSeries = new XYSeries("Payload Fullness (MA)");
 
         XYSeriesCollection lineDataset = new XYSeriesCollection();
         lineDataset.addSeries(pushTimePerBlockSeries);
@@ -1093,6 +1242,7 @@ public class MetricsPanel extends JPanel {
         lineDataset.addSeries(blockApplyTimePerBlockSeries);
         lineDataset.addSeries(commitTimePerBlockSeries);
         lineDataset.addSeries(miscTimePerBlockSeries);
+        lineDataset.addSeries(payloadFullnessSeries);
 
         // Create chart with no title or axis labels to save space
         JFreeChart chart = ChartFactory.createXYLineChart(
@@ -1122,6 +1272,7 @@ public class MetricsPanel extends JPanel {
         plot.getRenderer().setSeriesPaint(7, new Color(0, 100, 100)); // Teal for Block Apply
         plot.getRenderer().setSeriesPaint(8, new Color(150, 0, 200)); // Magenta for Commit
         plot.getRenderer().setSeriesPaint(9, Color.LIGHT_GRAY); // Light Gray for Misc
+        plot.getRenderer().setSeriesPaint(10, Color.WHITE);
 
         // Set line thickness
         plot.getRenderer().setSeriesStroke(0, new java.awt.BasicStroke(1.2f));
@@ -1134,6 +1285,7 @@ public class MetricsPanel extends JPanel {
         plot.getRenderer().setSeriesStroke(7, new java.awt.BasicStroke(1.2f));
         plot.getRenderer().setSeriesStroke(8, new java.awt.BasicStroke(1.2f));
         plot.getRenderer().setSeriesStroke(9, new java.awt.BasicStroke(1.2f));
+        plot.getRenderer().setSeriesStroke(10, new java.awt.BasicStroke(1.2f));
 
         // Hide axis tick labels (the numbers on the axes)
         plot.getDomainAxis().setTickLabelsVisible(false);

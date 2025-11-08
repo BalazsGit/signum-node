@@ -766,6 +766,10 @@ public final class Peers {
         return peer;
     }
 
+    public static List<Peer> getBlacklistedPeers() {
+        return peers.values().stream().filter(Peer::isBlacklisted).collect(Collectors.toList());
+    }
+
     static Peer removePeer(Peer peer) {
         if (peer.getAnnouncedAddress() != null) {
             announcedAddresses.remove(peer.getAnnouncedAddress());

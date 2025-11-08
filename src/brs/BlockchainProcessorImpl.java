@@ -3,12 +3,14 @@ package brs;
 import static brs.Constants.FEE_QUANT_SIP3;
 import static brs.Constants.ONE_SIGNA;
 
+import brs.BlockchainProcessor.BlockNotAcceptedException;
 import brs.at.*;
 import brs.crypto.Crypto;
 import brs.db.BlockDb;
 import brs.db.DerivedTable;
 import brs.db.TransactionDb;
 import brs.db.cache.DBCacheManagerImpl;
+import brs.db.sql.Db;
 import brs.db.store.BlockchainStore;
 import brs.db.store.DerivedTableManager;
 import brs.db.store.Stores;
@@ -59,6 +61,7 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -77,12 +80,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.sun.management.OperatingSystemMXBean;
+
 import org.bouncycastle.util.encoders.Hex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -140,32 +146,57 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private final Semaphore gpuUsage = new Semaphore(2);
 
     private final boolean trimDerivedTables;
+    // The intentional requested trim height calculated
     private final AtomicInteger lastTrimHeight = new AtomicInteger();
+    // The current trim height requested from derived table datas
+    private final AtomicInteger currentTrimHeight = new AtomicInteger();
 
     private final Listeners<Block, Event> blockListeners = new Listeners<>();
     private final AtomicReference<Peer> lastBlockchainFeeder = new AtomicReference<>();
     private final AtomicInteger lastBlockchainFeederHeight = new AtomicInteger();
-    private final AtomicBoolean getMoreBlocks = new AtomicBoolean(true);
+    private final AtomicBoolean getMoreBlocksPause = new AtomicBoolean(false);
+    private final AtomicBoolean blockImporterPause = new AtomicBoolean(false);
 
     private final AtomicBoolean isScanning = new AtomicBoolean(false);
 
     private final AtomicBoolean isConsistent = new AtomicBoolean(false);
 
+    /**
+     * A ReadWriteLock to coordinate access to the blockchain and downloadCache.
+     * Pop-off/fork operations require a write lock, while normal block processing
+     * uses a read lock.
+     */
+    // private final ReadWriteLock getMoreBlocksLock = new ReentrantReadWriteLock();
+    // private final ReadWriteLock blockImporterLock = new ReentrantReadWriteLock();
+    // private final ReadWriteLock popOffLock = new ReentrantReadWriteLock();
+    private final ReadWriteLock blockChainLock = new ReentrantReadWriteLock();
+
+    private final ExecutorService trimExecutor;
+
     private final AtomicReference<QueueStatus> queueStatus = new AtomicReference<>();
     private final AtomicReference<PerformanceStats> performanceStats = new AtomicReference<>();
     private final AtomicLong uploadedVolume = new AtomicLong();
+    private final AtomicLong lastCheckTotalMined = new AtomicLong(0);
+    private final AtomicLong lastCheckTotalEffectiveBalance = new AtomicLong(0);
+    private final AtomicInteger lastCheckHeight = new AtomicInteger(0);
+
+    private final AtomicInteger popOffBlocksCount = new AtomicInteger(0);
     private final AtomicLong downloadedVolume = new AtomicLong();
+    private final Object popOffLock = new Object();
+    private final AtomicReference<String> currentlyTrimmingTable = new AtomicReference<>();
 
-    private int lastKnownPeerCount = -1;
-    private int lastKnownConnectedPeerCount = -1;
-
-    private int autoPopOffLastStuckHeight = 0;
-    private int autoPopOffNumberOfBlocks = 0;
     private ATProcessorCache atProcessorCache = ATProcessorCache.getInstance();
+    // For testing autoPopOff
+    private final AtomicInteger forceExceptionAtHeight = new AtomicInteger(-1);
+    private final AtomicInteger forceExceptionCounter = new AtomicInteger(0);
+    // End testing fields
     private long txApplyTimeNanos;
     private long atTimeNanos;
     private long subscriptionTimeNanos;
     private long blockApplyTimeNanos;
+    private int autoPopOffLastStuckHeight = 0;
+    private int autoPopOffNumberOfBlocks = 0;
+
     private long atTimeMs;
 
     private int lastTotalSize = 0;
@@ -222,6 +253,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             logger.info("Destroying OCLPoC instance from BlockchainProcessor.");
             OCLPoC.destroy();
         }
+        if (trimExecutor != null) {
+            trimExecutor.shutdown();
+            try {
+                if (!trimExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
+                    trimExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                trimExecutor.shutdownNow();
+            }
+        }
     }
 
     public final void setOclVerify(Boolean b) {
@@ -234,12 +275,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
     // --- Firing events ---
 
-    public int getLastKnownPeerCount() {
-        return lastKnownPeerCount;
-    }
-
-    public int getLastKnownConnectedPeerCount() {
-        return lastKnownConnectedPeerCount;
+    @Override
+    public Collection<Peer> getAllPeers() {
+        return Peers.getAllPeers();
     }
 
     public QueueStatus getQueueStatus() {
@@ -311,6 +349,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         this.accountService = accountService;
         this.indirectIncomingService = indirectIncomingService;
         this.propertyService = propertyService;
+        if (propertyService.getBoolean(Props.DB_TRIM_DERIVED_TABLES)) {
+            this.trimExecutor = Executors.newSingleThreadExecutor();
+        } else {
+            this.trimExecutor = null;
+        }
         this.measurementActive = propertyService.getBoolean(Props.MEASUREMENT_ACTIVE);
         this.logSyncProgressToCsv = propertyService.getBoolean(Props.EXPERIMENTAL);
 
@@ -456,32 +499,108 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         blockListeners.addListener(
                 block -> transactionProcessor.revalidateUnconfirmedTransactions(),
                 Event.BLOCK_PUSHED);
+
         if (trimDerivedTables) {
             blockListeners.addListener(block -> {
                 if (block.getHeight() % (Constants.MAX_ROLLBACK * 10) == 0
                         && lastTrimHeight.get() > 0) {
-                    logger.debug("Trimming derived tables...");
-                    this.derivedTableManager.getDerivedTables()
-                            .forEach(table -> table.trim(lastTrimHeight.get()));
+                    // Check the database state before setting the new trim height
+                    if (checkDatabaseState() == 0) {
+                        // Only trim a consistent database, otherwise it would be impossible to fix it
+                        // by roll back
+                        currentTrimHeight.set(getTrimHeight());
+                        lastTrimHeight.set(Math.max(block.getHeight() - Constants.MAX_ROLLBACK, 0));
+                        if (lastTrimHeight.get() <= currentTrimHeight.get()) {
+                            // TODO: change to debug later
+                            logger.info("There is nothing to trim");
+                            return;
+                        }
+                    } else {
+                        lastTrimHeight.set(0);
+                        logger.error(
+                                "Balance mismatch on the database, trim skipped. Please try popping off to block {}",
+                                getMinRollbackHeight());
+                        return; // Do not submit trim job if DB is inconsistent
+                    }
+                    trimExecutor.submit(() -> {
+                        blockChainLock.writeLock().lock();
+                        downloadCache.lockCache();
+                        logger.info("Automatic trimming of derived tables in background from height {} to {}...",
+                                currentTrimHeight.get(), lastTrimHeight.get());
+                        try {
+                            synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
+                                stores.beginTransaction();
+                                long totalStartTime = System.currentTimeMillis();
+                                List<DerivedTable> tablesToTrim = derivedTableManager.getDerivedTables();
+                                logger.info("Trimming {} derived tables...", tablesToTrim.size());
+                                int tableIndex = 1;
+                                for (DerivedTable table : this.derivedTableManager.getDerivedTables()) {
+                                    long tableStartTime = System.currentTimeMillis();
+                                    logger.info("#{} Trimming table: {}", tableIndex++, table.getTable());
+                                    currentlyTrimmingTable.set(table.getTable());
+                                    blockListeners.notify(null, Event.TRIM_PROGRESS_UPDATED);
+                                    table.trim(lastTrimHeight.get());
+                                    long tableEndTime = System.currentTimeMillis();
+                                    logger.info("Table '{}' trimmed in {}", table.getTable(),
+                                            formatDuration(tableEndTime - tableStartTime));
+                                    currentTrimHeight.set(getTrimHeight());
+                                    blockListeners.notify(block, Event.TRIM_HEIGHT_CHANGED);
+                                }
+                                stores.commitTransaction();
+                                long totalEndTime = System.currentTimeMillis();
+                                logger.info("Automatic database trim completed successfully in {}",
+                                        formatDuration(totalEndTime - totalStartTime));
+                            }
+                        } finally {
+                            stores.endTransaction();
+                            currentlyTrimmingTable.set(null);
+                            downloadCache.unlockCache();
+                            blockChainLock.writeLock().unlock();
+                            blockListeners.notify(null, Event.TRIM_PROGRESS_UPDATED);
+                        }
+
+                        if (Boolean.FALSE.equals(propertyService.getBoolean(Props.DB_SKIP_CHECK))
+                                && checkDatabaseState() != 0) {
+                            logger.error("Database is inconsistent, pop-off failed.");
+                        } else {
+                            logger.info("Database is consistent, pop-off completed successfully.");
+                        }
+
+                    });
                 }
-            }, Event.AFTER_BLOCK_APPLY);
+            }, Event.BLOCK_PUSHED);
         }
 
-        blockListeners.addListener(block -> {
+        blockListeners.addListener(block ->
+
+        {
             updateAndFireQueueStatus();
         }, Event.BLOCK_PUSHED);
 
         addGenesisBlock();
 
-        if (logSyncProgressToCsv) {
+        if (logSyncProgressToCsv)
+
+        {
             initSyncProgressLogging();
         }
         if (measurementActive) {
             initMeasurementLogging();
         }
 
-        if (Boolean.FALSE.equals(propertyService.getBoolean(Props.DB_SKIP_CHECK))
-                && checkDatabaseState() != 0) {
+        if (trimDerivedTables) {
+            currentTrimHeight.set(getTrimHeight());
+            if (currentTrimHeight.get() > 0) {
+                lastTrimHeight.set(currentTrimHeight.get());
+                logger.info("Initial trim height set to {}", currentTrimHeight.get());
+            } else {
+                logger.info("No initial trim height found, starting from 0.");
+            }
+        }
+
+        if (Boolean.FALSE.equals(propertyService.getBoolean(Props.DB_SKIP_CHECK)) &&
+
+                checkDatabaseState() != 0) {
             logger.warn("Database is inconsistent,"
                     + "try to pop off to block height {} or sync from empty.",
                     getMinRollbackHeight());
@@ -503,9 +622,18 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     getCumulativeDifficultyRequest = JSON.prepareRequest(request);
                 }
                 while (!Thread.currentThread().isInterrupted() && ThreadPool.running.get()) {
+                    blockChainLock.readLock().lock();
                     try {
                         try {
-                            if (!getMoreBlocks.get()) {
+
+                            // Unlock the cache for writing.
+                            // This must be done before querying where to add blocks.
+                            // The cache is synchronized in the event of a pop-off.
+                            synchronized (BlockchainProcessorImpl.this.downloadCache) {
+                                downloadCache.unlockCache();
+                            }
+
+                            if (getMoreBlocksPause.get()) {
                                 return;
                             }
 
@@ -565,10 +693,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                             logger.trace("Got a better cumulative difficulty {} than current {}.",
                                     betterCumulativeDifficulty, curCumulativeDifficulty);
 
-                            long commonBlockId = genesisBlockId;
-                            long cacheLastBlockId = downloadCache.getLastBlockId();
+                            long commonBlockId = downloadCache.getLastBlockId(); // Start with current cache head
+                            long cacheLastBlockId = commonBlockId;
 
-                            // Now we will find the highest common block between ourself and our peer
+                            // Find the highest common block between this node and the peer.
                             if (cacheLastBlockId != genesisBlockId) {
                                 commonBlockId = getCommonMilestoneBlockId(peer);
                                 if (commonBlockId == 0 || !peerHasMore) {
@@ -577,25 +705,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                 }
                             }
 
-                            // unlocking cache for writing.
-                            // This must be done before we query where to add blocks.
-                            // We sync the cache in event of pop off
-                            synchronized (BlockchainProcessorImpl.this.downloadCache) {
-                                downloadCache.unlockCache();
-                            }
-
                             /*
-                             * if we did not get the last block in chain as common block we will be
-                             * downloading a
-                             * fork. however if it is to far off we cannot process it anyway. canBeFork will
-                             * check
-                             * where in chain this common block is fitting and return true if it is worth to
-                             * continue.
+                             * If the common block is not the last block in the chain, a fork will be
+                             * downloaded. However, if it is too far off, it cannot be processed.
+                             * canBeFork() checks where in the chain this common block fits and returns true
+                             * if it is worth continuing.
                              */
                             boolean saveInCache = true;
                             if (commonBlockId != cacheLastBlockId) {
                                 if (downloadCache.canBeFork(commonBlockId)) {
-                                    // the fork is not that old. Lets see if we can get more precise.
+                                    // The fork is not that old. Lets see if we can get more precise.
                                     commonBlockId = getCommonBlockId(peer, commonBlockId);
                                     if (commonBlockId == 0 || !peerHasMore) {
                                         logger.debug("Trying to get a more precise common block resulted in an error.");
@@ -622,8 +741,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                             // download blocks from peer
                             Block lastBlock = downloadCache.getBlock(commonBlockId);
                             if (lastBlock == null) {
-                                logger.info("Error: lastBlock is null");
-                                return;
+                                logger.warn(
+                                        "Last Block is null in downloadCache, resetting cache to blockchain state.");
+                                downloadCache.resetCache();
+                                continue; // Re-evaluate state in the next loop
                             }
 
                             // loop blocks and make sure they fit in chain
@@ -654,9 +775,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                     blockService.calculateBaseTarget(block, lastBlock);
                                     if (saveInCache) {
                                         if (downloadCache.getLastBlockId() == block.getPreviousBlockId()) {
-                                            // ↑ still maps back? we might have got announced/forged blocks
+                                            // ↑ Still maps back? Might have got announced/forged blocks
                                             if (!downloadCache.addBlock(block)) {
-                                                // we stop the loop since cahce has been locked
+                                                // The loop is stopped since the cache has been locked
                                                 return;
                                             }
                                             if (logger.isDebugEnabled()) {
@@ -695,11 +816,12 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                 logger.trace("Blocks in cache: {}", downloadCache.size());
                                 logger.trace("Bytes in cache: {}", downloadCache.getBlockCacheSize());
                             }
+
                             if (!saveInCache) {
                                 /*
-                                 * Since we cannot rely on peers reported cumulative difficulty we do
-                                 * a final check to see that the CumulativeDifficulty actually is bigger
-                                 * before we do a popOff and switch chain.
+                                 * Since the peer's reported cumulative difficulty cannot be relied upon, a
+                                 * final check is performed to ensure the new chain's cumulative difficulty is
+                                 * actually greater before a pop-off and chain switch occurs.
                                  */
                                 if (lastBlock.getCumulativeDifficulty().compareTo(curCumulativeDifficulty) < 0) {
                                     peer.blacklist(
@@ -707,7 +829,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                     downloadCache.resetForkBlocks();
                                     break;
                                 }
-                                processFork(peer, downloadCache.getForkList(), commonBlockId);
+                                final Peer finalPeer = peer;
+                                final long finalCommonBlockId = commonBlockId;
+                                new Thread(
+                                        () -> processFork(finalPeer, downloadCache.getForkList(), finalCommonBlockId))
+                                        .start();
                             }
 
                         } catch (SignumException.StopException e) {
@@ -720,6 +846,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     } catch (Exception t) {
                         logger.info("CRITICAL ERROR. PLEASE REPORT TO THE DEVELOPERS.\n" + t.toString(), t);
                         System.exit(1);
+                    } finally {
+                        updateAndFireQueueStatus();
+                        blockChainLock.readLock().unlock();
+                        logger.trace("GetMoreBlocks thread released read lock.");
                     } // end first try
                 } // end while
             }
@@ -837,6 +967,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             }
 
             private void processFork(Peer peer, final List<Block> forkBlocks, long forkBlockId) {
+                if (!downloadCache.setForkBeingProcessed(false, true)) {
+                    // Another fork is being processed
+                    return;
+                }
                 logger.debug("A fork is detected. Waiting for cache to be processed.");
                 downloadCache.lockCache(); // dont let anything add to cache!
                 while (!Thread.currentThread().isInterrupted() && ThreadPool.running.get()) {
@@ -849,111 +983,140 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         Thread.currentThread().interrupt();
                     }
                 }
-                synchronized (BlockchainProcessorImpl.this.downloadCache) {
-                    synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
-                        logger.debug("Cache is now processed. Starting to process fork.");
-                        Block forkBlock = blockchain.getBlock(forkBlockId);
+                blockChainLock.writeLock().lock();
+                try {
+                    synchronized (BlockchainProcessorImpl.this.downloadCache) {
+                        synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
+                            logger.debug("Cache is now processed. Starting to process fork.");
+                            final Block forkBlock = blockchain.getBlock(forkBlockId);
+                            if (forkBlock == null) {
+                                logger.warn(
+                                        "Cannot process fork because the common block {} is no longer in the blockchain",
+                                        Convert.toUnsignedLong(forkBlockId));
+                                return;
+                            }
 
-                        // we read the current cumulative difficulty
-                        BigInteger curCumulativeDifficulty = blockchain.getLastBlock().getCumulativeDifficulty();
+                            // Read the current cumulative difficulty
+                            BigInteger curCumulativeDifficulty = blockchain.getLastBlock().getCumulativeDifficulty();
 
-                        // We remove blocks from chain back to where we start our fork
-                        // and save it in a list if we need to restore
-                        List<Block> myPoppedOffBlocks = popOffTo(forkBlock, forkBlocks);
-                        logger.debug("Popped {} blocks", myPoppedOffBlocks.size());
+                            // Remove blocks from chain back to where the fork starts
+                            // and save it in a list if we need to restore
+                            List<Block> myPoppedOffBlocks = popOffTo(forkBlock, forkBlocks);
+                            logger.debug("Popped {} blocks", myPoppedOffBlocks.size());
 
-                        // now we check that our chain is popped off.
-                        // If all seems ok is we try to push fork.
-                        int pushedForkBlocks = 0;
-                        if (blockchain.getLastBlock().getId() == forkBlockId) {
-                            for (Block block : forkBlocks) {
-                                if (blockchain.getLastBlock().getId() == block.getPreviousBlockId()) {
-                                    try {
-                                        blockService.preVerify(block, blockchain.getLastBlock());
+                            // Check that the local chain has been popped off.
+                            // If everything seems ok, try to push the fork.
+                            int pushedForkBlocks = 0;
+                            if (blockchain.getLastBlock().getId() == forkBlockId) {
+                                for (Block block : forkBlocks) {
+                                    if (blockchain.getLastBlock().getId() == block.getPreviousBlockId()) {
+                                        try {
+                                            blockService.preVerify(block, blockchain.getLastBlock());
 
-                                        logger.debug("Pushing block {} generator {} sig {}", block.getHeight(),
-                                                SignumID.fromLong(block.getGeneratorId()),
-                                                Hex.toHexString(block.getBlockSignature()));
-                                        logger.debug("Block timestamp {} base target {} difficulty {} commitment {}",
-                                                block.getTimestamp(), block.getBaseTarget(),
-                                                block.getCumulativeDifficulty(), block.getCommitment());
+                                            logger.debug("Pushing block {} generator {} sig {}", block.getHeight(),
+                                                    SignumID.fromLong(block.getGeneratorId()),
+                                                    Hex.toHexString(block.getBlockSignature()));
+                                            logger.debug(
+                                                    "Block timestamp {} base target {} difficulty {} commitment {}",
+                                                    block.getTimestamp(), block.getBaseTarget(),
+                                                    block.getCumulativeDifficulty(), block.getCommitment());
 
-                                        pushBlock(block);
-                                        pushedForkBlocks += 1;
-                                    } catch (InterruptedException e) {
-                                        Thread.currentThread().interrupt();
-                                    } catch (BlockNotAcceptedException e) {
-                                        peer.blacklist(e, "during processing a fork");
-                                        break;
+                                            pushBlock(block);
+                                            pushedForkBlocks += 1;
+                                        } catch (InterruptedException e) {
+                                            Thread.currentThread().interrupt();
+                                        } catch (BlockNotAcceptedException e) {
+                                            peer.blacklist(e, "during processing a fork");
+                                            break;
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        /*
-                         * we check if we succeeded to push any block. if we did we check against
-                         * cumulative
-                         * difficulty If it is lower we blacklist peer and set chain to be processed
-                         * later.
-                         */
-                        if (pushedForkBlocks > 0 && blockchain.getLastBlock().getCumulativeDifficulty()
-                                .compareTo(curCumulativeDifficulty) < 0) {
-                            logger.warn("Fork was bad and pop off was caused by peer {}, blacklisting",
-                                    peer.getPeerAddress());
-                            peer.blacklist("got a bad fork");
-                            List<Block> peerPoppedOffBlocks = popOffTo(forkBlock, null);
-                            pushedForkBlocks = 0;
-                            peerPoppedOffBlocks
-                                    .forEach(block -> transactionProcessor.processLater(block.getTransactions()));
-                        }
-
-                        // if we did not push any blocks we try to restore chain.
-                        if (pushedForkBlocks == 0) {
-                            for (int i = myPoppedOffBlocks.size() - 1; i >= 0; i--) {
-                                Block block = myPoppedOffBlocks.remove(i);
-                                try {
-                                    blockService.preVerify(block, blockchain.getLastBlock());
-                                    pushBlock(block);
-                                } catch (InterruptedException e) {
-                                    Thread.currentThread().interrupt();
-                                } catch (BlockNotAcceptedException e) {
-                                    logger.warn("Popped off block no longer acceptable: "
-                                            + JSON.toJsonString(block.getJsonObject()), e);
-                                    break;
-                                }
+                            /*
+                             * Check if any block was successfully pushed. If so, check against cumulative
+                             * difficulty. If it is lower, blacklist the peer and set the chain to be
+                             * processed later.
+                             */
+                            if (pushedForkBlocks > 0 && blockchain.getLastBlock().getCumulativeDifficulty()
+                                    .compareTo(curCumulativeDifficulty) < 0) {
+                                logger.warn("Fork was bad and pop off was caused by peer {}, blacklisting",
+                                        peer.getPeerAddress());
+                                peer.blacklist("got a bad fork");
+                                List<Block> peerPoppedOffBlocks = popOffTo(forkBlock, null);
+                                pushedForkBlocks = 0;
+                                peerPoppedOffBlocks
+                                        .forEach(block -> transactionProcessor.processLater(block.getTransactions()));
                             }
-                        } else {
-                            myPoppedOffBlocks
-                                    .forEach(block -> transactionProcessor.processLater(block.getTransactions()));
-                            logger.debug("Successfully switched to better chain.");
+
+                            // If no blocks were pushed, attempt to restore the original chain.
+                            if (pushedForkBlocks == 0) {
+                                for (int i = myPoppedOffBlocks.size() - 1; i >= 0; i--) {
+                                    if (!ThreadPool.running.get()) {
+                                        break;
+                                    }
+                                    Block block = myPoppedOffBlocks.remove(i);
+                                    try {
+                                        blockService.preVerify(block, blockchain.getLastBlock());
+                                        pushBlock(block);
+                                    } catch (InterruptedException e) {
+                                        Thread.currentThread().interrupt();
+                                    } catch (BlockNotAcceptedException e) {
+                                        logger.warn("Popped off block no longer acceptable: "
+                                                + JSON.toJsonString(block.getJsonObject()), e);
+                                        break;
+                                    }
+                                }
+                            } else {
+                                myPoppedOffBlocks
+                                        .forEach(block -> transactionProcessor.processLater(block.getTransactions()));
+                                logger.debug("Successfully switched to better chain.");
+                            }
                         }
-                        logger.info("Forkprocessing complete.");
-                        downloadCache.resetForkBlocks();
-                        downloadCache.resetCache(); // Reset and set cached vars to chaindata.
                     }
+                } catch (Exception e) {
+                    Thread.currentThread().interrupt();
+                    logger.warn("Fork processing was interrupted.", e);
+                } finally {
+                    logger.info("Forkprocessing complete.");
+                    downloadCache.resetForkBlocks();
+                    downloadCache.setForkBeingProcessed(true, false);
+                    downloadCache.resetCache(); // Reset and set cached vars to chaindata.
+                    downloadCache.unlockCache();
+                    blockChainLock.writeLock().lock();
                 }
             }
         };
         threadPool.scheduleThread("GetMoreBlocks", getMoreBlocksThread,
                 propertyService.getInt(Props.BLOCK_PROCESS_THREAD_DELAY),
                 TimeUnit.MILLISECONDS);
-        /* this should fetch first block in cache */
-        // resetting cache because we have blocks that cannot be processed.
-        // pushblock removes the block from cache.
+        // This should fetch the first block in the cache.
+        // Resetting cache because we have blocks that cannot be processed.
+        // Push Block removes the block from cache.
         Runnable blockImporterThread = () -> {
             while (!Thread.interrupted() && ThreadPool.running.get() && downloadCache.size() > 0) {
+                blockChainLock.readLock().lock();
+                logger.trace("Block importer thread acquired read lock.");
                 try {
+
+                    if (blockImporterPause.get()) {
+                        return;
+                    }
+
+                    if (downloadCache.size() == 0) {
+                        return;
+                    }
+
                     Block lastBlock = blockchain.getLastBlock();
                     Long lastId = lastBlock.getId();
-                    Block currentBlock = downloadCache.getNextBlock(lastId); /*
-                                                                              * this should fetch first block in cache
-                                                                              */
+                    Block currentBlock = downloadCache.getNextBlock(lastId);
+                    // If the next block is not the expected one, reset the cache.
                     if (currentBlock == null || currentBlock.getHeight() != (lastBlock.getHeight() + 1)) {
                         if (logger.isDebugEnabled()) {
                             logger.debug("cache is reset due to orphaned block(s). CacheSize: {}",
                                     downloadCache.size());
                         }
-                        downloadCache.resetCache(); // resetting cache because we have blocks that cannot be processed.
+                        downloadCache.resetCache(); // Resetting cache because we have blocks that cannot be processed.
                         break;
                     }
                     try {
@@ -969,16 +1132,24 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         logger.error("Block not accepted", e);
                         blacklistClean(currentBlock, e, "found invalid pull/push data during importing the block");
                         autoPopOff(currentBlock.getHeight());
-                        break;
+                    } catch (Exception e) {
+                        logger.error("Uncaught exception in blockImporterThread, blacklisting and resetting cache",
+                                e);
+                        blacklistClean(currentBlock, e, "uncaught exception during block import");
+                        autoPopOff(currentBlock.getHeight());
                     }
-                } catch (Exception exception) {
-                    if (exception.toString().contains("[SQLITE_BUSY]")
-                            || exception.toString().contains("[SQLITE_BUSY_SNAPSHOT]")) {
+                } catch (Exception e) {
+                    if (e.toString().contains("[SQLITE_BUSY]")
+                            || e.toString().contains("[SQLITE_BUSY_SNAPSHOT]")) {
                         logger.warn("SQLite busy, trying again later...");
                     } else {
-                        exception.printStackTrace();
-                        logger.error("Uncaught exception in blockImporterThread", exception);
+                        e.printStackTrace();
+                        logger.error("Uncaught exception in blockImporterThread", e);
                     }
+                } finally {
+                    updateAndFireQueueStatus();
+                    blockChainLock.readLock().unlock();
+                    logger.trace("Block importer thread released read lock.");
                 }
             }
         };
@@ -986,22 +1157,22 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 propertyService.getInt(Props.BLOCK_PROCESS_THREAD_DELAY),
                 TimeUnit.MILLISECONDS);
 
-        // Is there anything to verify
-        // should we use Ocl?
-        // is Ocl ready ?
-        // verify using java
+        // Check if there is anything to verify.
+        // Determine if OCL should be used.
+        // Check if OCL is ready.
+        // Verify using Java.
         Runnable pocVerificationThread = () -> {
             boolean verifyWithOcl;
             int queueThreshold = oclVerify ? oclUnverifiedQueue : 0;
 
             while (!Thread.interrupted() && ThreadPool.running.get()) {
 
-                updateAndFireQueueStatus();
                 int unVerified = downloadCache.getUnverifiedSize();
-                if (unVerified > queueThreshold) { // Is there anything to verify
-                    if (unVerified >= oclUnverifiedQueue && oclVerify) { // should we use Ocl?
+                // Check if there is anything to verify.
+                if (unVerified > queueThreshold) {
+                    if (unVerified >= oclUnverifiedQueue && oclVerify) {
                         verifyWithOcl = true;
-                        if (!gpuUsage.tryAcquire()) { // is Ocl ready ?
+                        if (!gpuUsage.tryAcquire()) {
                             logger.debug("already max locked");
                             verifyWithOcl = false;
                         }
@@ -1031,21 +1202,20 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         try {
                             OCLPoC.validatePoC(blocks, pocVersion, blockService);
                             downloadCache.removeUnverifiedBatch(blocks.keySet());
-                            updateAndFireQueueStatus();
                         } catch (OCLPoC.PreValidateFailException e) {
                             logger.info(e.toString(), e);
                             blacklistClean(e.getBlock(), e,
                                     "found invalid pull/push data during processing the pocVerification");
-                            updateAndFireQueueStatus();
                         } catch (OCLPoC.OCLCheckerException e) {
                             logger.info("Open CL error. slow verify will occur for the next " + oclUnverifiedQueue
                                     + " Blocks", e);
                         } catch (Exception e) {
                             logger.info("Unspecified Open CL error: ", e);
                         } finally {
+                            updateAndFireQueueStatus();
                             gpuUsage.release();
                         }
-                    } else { // verify using java
+                    } else {
                         try {
                             Block block = downloadCache.getFirstUnverifiedBlock();
                             Block prevBlock = downloadCache.getBlock(block.getPreviousBlockId());
@@ -1053,15 +1223,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                 prevBlock = blockchain.getBlock(block.getPreviousBlockId());
                             }
                             blockService.preVerify(block, prevBlock);
-                            updateAndFireQueueStatus();
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                         } catch (BlockNotAcceptedException e) {
                             logger.error("Block failed to preverify: ", e);
+                        } finally {
+                            updateAndFireQueueStatus();
                         }
                     }
                 } else {
-                    // nothing to verify right now
+                    // Nothing to verify right now
                     return;
                 }
             }
@@ -1069,13 +1240,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         if (propertyService.getBoolean(Props.GPU_ACCELERATION)) {
             logger.debug("Starting preverifier thread in Open CL mode.");
             threadPool.scheduleThread("VerifyPoc", pocVerificationThread,
-                    propertyService.getInt(Props.BLOCK_PROCESS_THREAD_DELAY),
-                    TimeUnit.MILLISECONDS);
+                    propertyService.getInt(Props.BLOCK_PROCESS_THREAD_DELAY), TimeUnit.MILLISECONDS);
         } else {
             logger.debug("Starting preverifier thread in CPU mode.");
             threadPool.scheduleThreadCores(pocVerificationThread,
-                    propertyService.getInt(Props.BLOCK_PROCESS_THREAD_DELAY),
-                    TimeUnit.MILLISECONDS);
+                    propertyService.getInt(Props.BLOCK_PROCESS_THREAD_DELAY), TimeUnit.MILLISECONDS);
         }
     }
 
@@ -1087,21 +1256,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         if (totalSize != lastTotalSize || unverifiedSize != lastUnverifiedQueueSize) {
             lastUnverifiedQueueSize = unverifiedSize;
             lastTotalSize = totalSize;
-            queueStatus.set(new BlockchainProcessor.QueueStatus(unverifiedSize, verifiedSize, totalSize));
+            int cacheFullness = (int) (100.0 * downloadCache.getBlockCacheSize()
+                    / (Signum.getPropertyService().getInt(Props.BRS_BLOCK_CACHE_MB) * 1024L * 1024L));
+            queueStatus
+                    .set(new BlockchainProcessor.QueueStatus(unverifiedSize, verifiedSize, totalSize, cacheFullness));
             blockListeners.notify(null, Event.QUEUE_STATUS_CHANGED);
         }
     }
 
     private void updateAndFirePeerCount() {
-        int newPeerCount = Peers.getAllPeers().size();
-        int newConnectedPeerCount = (int) Peers.getActivePeers().stream()
-                .filter(peer -> peer.getState() == Peer.State.CONNECTED)
-                .count();
-        if (newPeerCount != lastKnownPeerCount || newConnectedPeerCount != lastKnownConnectedPeerCount) {
-            lastKnownPeerCount = newPeerCount;
-            lastKnownConnectedPeerCount = newConnectedPeerCount;
-            blockListeners.notify(null, Event.PEER_COUNT_CHANGED);
-        }
+        blockListeners.notify(null, Event.PEER_COUNT_CHANGED);
     }
 
     private void updateAndFireNetVolume() {
@@ -1127,7 +1291,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             peer.blacklist(e, description);
         }
         downloadCache.resetCache();
-        updateAndFireQueueStatus();
         logger.debug("Blacklisted peer and cleaned queue");
     }
 
@@ -1137,7 +1300,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     "Not automatically popping off as it is disabled via properties. If your node becomes stuck you will need to manually pop off.");
             return;
         }
-        synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
+        new Thread(() -> {
+            // synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
             logger.warn("Auto popping off as failed to push block");
             if (height != autoPopOffLastStuckHeight) {
                 autoPopOffLastStuckHeight = height;
@@ -1151,7 +1315,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 popOffTo(blockchain.getHeight() - autoPopOffNumberOfBlocks);
             }
             autoPopOffNumberOfBlocks++;
-        }
+            // }
+        }).start();
     }
 
     private void writeSystemInfo(PrintWriter writer) {
@@ -1384,6 +1549,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     }
 
     @Override
+    public int getPopOffBlocksCount() {
+        return popOffBlocksCount.get();
+    }
+
+    @Override
     public int getLastBlockchainFeederHeight() {
         return lastBlockchainFeederHeight.get();
     }
@@ -1402,10 +1572,50 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     }
 
     @Override
+    public int getTrimHeight() {
+        if (!trimDerivedTables || derivedTableManager == null || trimDerivedTables == false) {
+            return 0;
+        }
+        return derivedTableManager.getDerivedTables().stream()
+                .mapToInt(table -> {
+                    Integer minHeight = brs.db.sql.Db
+                            .useDSLContext((java.util.function.Function<org.jooq.DSLContext, Integer>) ctx -> ctx
+                                    .select(org.jooq.impl.DSL.min(org.jooq.impl.DSL.field("height", Integer.class)))
+                                    .from(table.getTable()).fetchOne(0, Integer.class));
+                    return minHeight == null ? 0 : minHeight;
+                }).max().orElse(0);
+
+        // TODO: check the latest = 0 flags as well
+        /*
+         * SELECT MIN(height) AS min_latest_zero_height
+         * FROM account_balance
+         * WHERE latest = 0;
+         * 
+         * SELECT MIN(height) AS min_latest_zero_height
+         * FROM account_asset
+         * WHERE latest = 0;
+         */
+    }
+
+    @Override
+    public AtomicInteger getCurrentTrimHeight() {
+        return currentTrimHeight;
+    }
+
+    @Override
+    public AtomicInteger getLastTrimHeight() {
+        return lastTrimHeight;
+    }
+
+    @Override
+    public String getCurrentlyTrimmingTable() {
+        return currentlyTrimmingTable.get();
+    }
+
+    @Override
     public void processPeerBlock(JsonObject request, Peer peer) throws SignumException {
         Block newBlock = Block.parseBlock(request, blockchain.getHeight());
-        // * This process takes care of the blocks that is announced by peers We do not
-        // want to be fed forks.
+        // This process handles blocks announced by peers. Forks are not desired.
         Block chainblock = downloadCache.getLastBlock();
         if (chainblock != null && chainblock.getId() == newBlock.getPreviousBlockId()) {
             newBlock.setHeight(chainblock.getHeight() + 1);
@@ -1434,8 +1644,14 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         downloadCache.resetCache();
     }
 
-    void setGetMoreBlocks(boolean getMoreBlocks) {
-        this.getMoreBlocks.set(getMoreBlocks);
+    @Override
+    public void setGetMoreBlocksPause(boolean getMoreBlocksPause) {
+        this.getMoreBlocksPause.set(getMoreBlocksPause);
+    }
+
+    @Override
+    public void setBlockImporterPause(boolean blockImporterPause) {
+        this.blockImporterPause.set(blockImporterPause);
     }
 
     private void addBlock(Block block) {
@@ -1443,30 +1659,107 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         blockchain.setLastBlock(block);
     }
 
-    private int checkDatabaseState() {
-        logger.debug("Block height {}, checking database state...", blockchain.getHeight());
-        long totalMined = blockchain.getTotalMined();
+    @Override
+    public int checkDatabaseState() {
+        blockChainLock.readLock().lock();
+        dbCacheManager.flushCache();
+        try {
+            synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
+                int height = blockchain.getHeight();
+                lastCheckHeight.set(height);
+                logger.debug("Block height {}, checking database state...", height);
+                long totalMined = blockchain.getTotalMined();
 
+                long totalEffectiveBalance = accountService.getAllAccountsBalance();
+                for (Escrow escrow : escrowService.getAllEscrowTransactions()) {
+                    totalEffectiveBalance += escrow.getAmountNQT();
+                }
+
+                if (totalMined != totalEffectiveBalance) {
+                    logger.warn(
+                            "Block height {}, total mined {}, total effective+burnt {}",
+                            height,
+                            totalMined,
+                            totalEffectiveBalance);
+                }
+
+                isConsistent.set(totalMined == totalEffectiveBalance);
+                lastCheckTotalMined.set(totalMined);
+                lastCheckTotalEffectiveBalance.set(totalEffectiveBalance);
+
+                if (logger.isDebugEnabled()) {
+                    logger.debug("Total mined {}, total effective {}", totalMined, totalEffectiveBalance);
+                    logger.debug("Database is consistent: {}", isConsistent.get());
+                }
+                return Long.compare(totalMined, totalEffectiveBalance);
+            }
+        } finally {
+            blockChainLock.readLock().unlock();
+        }
+
+    }
+
+    public int checkDatabaseStateTest() {
+        try {
+            dbCacheManager.flushCache();
+            int height = blockchain.getHeight();
+            lastCheckHeight.set(height);
+            logger.debug("Block height {}, checking database state...", height);
+            long totalMined = blockchain.getTotalMined();
+
+            long totalEffectiveBalance = accountService.getAllAccountsBalance();
+            for (Escrow escrow : escrowService.getAllEscrowTransactions()) {
+                totalEffectiveBalance += escrow.getAmountNQT();
+            }
+
+            if (totalMined != totalEffectiveBalance) {
+                logger.warn(
+                        "Block height {}, total mined {}, total effective+burnt {}",
+                        height,
+                        totalMined,
+                        totalEffectiveBalance);
+            }
+
+            isConsistent.set(totalMined == totalEffectiveBalance);
+            lastCheckTotalMined.set(totalMined);
+            lastCheckTotalEffectiveBalance.set(totalEffectiveBalance);
+
+            if (logger.isDebugEnabled()) {
+                logger.debug("Total mined {}, total effective {}", totalMined, totalEffectiveBalance);
+                logger.debug("Database is consistent: {}", isConsistent.get());
+            }
+            return Long.compare(totalMined, totalEffectiveBalance);
+        } finally {
+        }
+    }
+
+    @Override
+    public long getTotalMined() {
+        return blockchain.getTotalMined();
+    }
+
+    @Override
+    public long getTotalEffectiveBalance() {
         long totalEffectiveBalance = accountService.getAllAccountsBalance();
         for (Escrow escrow : escrowService.getAllEscrowTransactions()) {
             totalEffectiveBalance += escrow.getAmountNQT();
         }
+        return totalEffectiveBalance;
+    }
 
-        if (totalMined != totalEffectiveBalance) {
-            logger.warn(
-                    "Block height {}, total mined {}, total effective+burnt {}",
-                    blockchain.getHeight(),
-                    totalMined,
-                    totalEffectiveBalance);
-        }
+    @Override
+    public long getLastCheckTotalMined() {
+        return lastCheckTotalMined.get();
+    }
 
-        isConsistent.set(totalMined == totalEffectiveBalance);
+    @Override
+    public long getLastCheckTotalEffectiveBalance() {
+        return lastCheckTotalEffectiveBalance.get();
+    }
 
-        if (logger.isDebugEnabled()) {
-            logger.debug("Total mined {}, total effective {}", totalMined, totalEffectiveBalance);
-            logger.debug("Database is consistent: {}", isConsistent.get());
-        }
-        return Long.compare(totalMined, totalEffectiveBalance);
+    @Override
+    public int getLastCheckHeight() {
+        return lastCheckHeight.get();
     }
 
     private void addGenesisBlock() {
@@ -1708,20 +2001,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 stores.commitTransaction();
                 commitTime = System.nanoTime() - commitStart;
 
-                // We make sure downloadCache do not have this block anymore, but only after all
-                // DBs have it
+                // Make sure downloadCache does not have this block anymore, but only after all
+                // DBs have it.
                 downloadCache.removeBlock(block);
-                if (trimDerivedTables && (block.getHeight() % Constants.MAX_ROLLBACK) == 0) {
-                    if (checkDatabaseState() == 0) {
-                        // Only trim a consistent database, otherwise it would be impossible to fix it
-                        // by roll back
-                        lastTrimHeight.set(Math.max(block.getHeight() - Constants.MAX_ROLLBACK, 0));
-                    } else {
-                        lastTrimHeight.set(0);
-                        logger.error("Balance mismatch on the database, please try popping off to block {}",
-                                getMinRollbackHeight());
-                    }
-                }
             } catch (BlockNotAcceptedException | ArithmeticException e) {
                 stores.rollbackTransaction();
                 blockchain.setLastBlock(previousLastBlock);
@@ -1748,10 +2030,15 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             long miscTimeMs = totalTimeMs - (validationTimeMs + txLoopTimeMs + housekeepingTimeMs
                     + txApplyTimeMs + atTimeMs + subscriptionTimeMs + blockApplyTimeMs + commitTimeMs);
 
+            int maxPayload = Signum.getFluxCapacitor().getValue(FluxValues.MAX_PAYLOAD_LENGTH, block.getHeight());
+            int payloadFullnessPercent = maxPayload > 0 ? (int) (100.0 * block.getPayloadLength() / maxPayload) : 0;
+
             performanceStats.set(new BlockchainProcessor.PerformanceStats(
                     totalTimeMs, validationTimeMs, txLoopTimeMs, housekeepingTimeMs, txApplyTimeMs, atTimeMs,
-                    subscriptionTimeMs, blockApplyTimeMs, commitTimeMs, miscTimeMs,
-                    allTransactionCount, userTransactionCount, block));
+                    subscriptionTimeMs, blockApplyTimeMs, commitTimeMs, miscTimeMs, allTransactionCount,
+                    userTransactionCount, payloadFullnessPercent,
+                    block.getPayloadLength(), maxPayload,
+                    block));
             blockListeners.notify(block, Event.PERFORMANCE_STATS_UPDATED);
 
             logger.debug("Successfully pushed {} (height {})", block.getId(), block.getHeight());
@@ -1844,6 +2131,280 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     }
 
     @Override
+    public void popOff(int blocks) {
+        synchronized (popOffLock) {
+            if (popOffBlocksCount.getAndAdd(blocks) > 0) {
+                logger.info("Request adds {} blocks to pop off.", blocks);
+                return;
+            }
+        }
+        blockChainLock.writeLock().lock();
+        downloadCache.lockCache();
+        int poppedBlocks = 0;
+        try {
+            synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
+                if (popOffBlocksCount.get() == 0) {
+                    logger.info("No blocks to pop off.");
+                    return;
+                }
+                logger.info("Request adds {} blocks to pop off.", blocks);
+                logger.info("Pausing block download.");
+                logger.info("Pop off in progress...");
+                stores.beginTransaction();
+                try {
+                    Block block = blockchain.getLastBlock();
+                    while (popOffBlocksCount.get() > 0) {
+                        if (block == null || block.getId() == genesisBlockId) {
+                            logger.info("Blockchain is empty or at genesis block, nothing more to pop off.");
+                            popOffBlocksCount.set(0);
+                            return;
+                        }
+                        if (currentTrimHeight.get() <= block.getHeight()) {
+                            logger.info("CurrentTrimHeight: {}, Actual Block Heigth: {}", currentTrimHeight.get(),
+                                    block.getHeight());
+                            block = popLastBlock();
+                            poppedBlocks++;
+                        } else {
+                            logger.info("Reached minimum rollback height {}, cannot pop off block at height {}.",
+                                    currentTrimHeight.get(), block.getHeight());
+                            logger.info("Pop-off stopped to prevent exceeding rollback limit.");
+                            logger.info("Derived tabels are not available below height {}.",
+                                    currentTrimHeight.get());
+                            popOffBlocksCount.set(0);
+                            return;
+                        }
+                    }
+                    for (DerivedTable table : derivedTableManager.getDerivedTables()) {
+                        table.rollback(block.getHeight());
+                    }
+                    indirectIncomingService.rollback(block.getHeight());
+                    stores.commitTransaction();
+                    transactionProcessor.requeueAllUnconfirmedTransactions();
+                } catch (Exception e) {
+                    popOffBlocksCount.set(0);
+                    stores.rollbackTransaction();
+                    logger.error("Error during pop-off, transaction rolled back.", e);
+                    throw new RuntimeException("Pop-off failed", e);
+                } catch (Error e) {
+                    popOffBlocksCount.set(0);
+                    stores.rollbackTransaction();
+                    logger.error("Critical error during pop-off, transaction rolled back.", e);
+                    throw e;
+                } finally {
+                    dbCacheManager.flushCache();
+                    downloadCache.resetCache();
+                    atProcessorCache.reset();
+                    stores.endTransaction();
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Unhandled exception during pop-off", e);
+        } finally {
+            logger.info("Blocks popped off: {} ", poppedBlocks);
+            logger.info("Pop-off completed.");
+            logger.info("Resuming block download.");
+            downloadCache.unlockCache();
+            blockChainLock.writeLock().unlock();
+        }
+
+        if (Boolean.FALSE.equals(propertyService.getBoolean(Props.DB_SKIP_CHECK))
+                && checkDatabaseState() != 0) {
+            logger.error("Database is inconsistent, pop-off failed.");
+        } else {
+            logger.info("Database is consistent, pop-off completed successfully.");
+        }
+
+    }
+
+    /*
+     * Test method processForkTest triggers a blockchain fork for
+     * testing purposes. It pops off a specified number of blocks from the current
+     * blockchain, generates a competing fork of a specified length, and then
+     * re-processes the original blocks to trigger fork resolution.
+     */
+    @Override
+    public void processForkTest(int forkDepth, int newForkLength) {
+        logger.info("processForkTest() called. Triggering test fork at height -{} blocks, with a new length of {}.",
+                forkDepth, newForkLength);
+        blockChainLock.writeLock().lock();
+        try {
+            synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
+                List<Block> poppedOffBlocks = popOffTo(blockchain.getHeight() - forkDepth);
+                logger.info("Popped off {} blocks. Now at height {}.", poppedOffBlocks.size(), blockchain.getHeight());
+                // Generate a competing fork of the specified length
+                logger.info("Generating competing fork of {} blocks...", newForkLength);
+                for (int i = 0; i < newForkLength; i++) {
+                    Thread.sleep(2000);
+                    // A different secret phrase is used for each block to ensure uniqueness
+                    String forkSecretPhrase = "this is a test fork secret phrase block " + i;
+                    long nonce = 12345L + i;
+                    generateBlock(forkSecretPhrase, Crypto.getPublicKey(forkSecretPhrase), nonce);
+                    logger.info("Generated and pushed fork block #{} at height {}.", i + 1, blockchain.getHeight());
+                }
+                // Re-process the original blocks to trigger fork resolution
+                logger.info("Re-processing original {} blocks to trigger fork resolution...", poppedOffBlocks.size());
+                poppedOffBlocks.stream()
+                        .sorted(Comparator.comparingInt(Block::getHeight)) // process in correct order
+                        .forEach(block -> downloadCache.addBlock(block));
+            }
+        } catch (Exception e) {
+            logger.error("Failed to trigger test fork", e);
+        } finally {
+            logger.info("Forked blockchain injected successfully.");
+            blockChainLock.writeLock().unlock();
+        }
+    }
+
+    /*
+     * Test method popOffToTest pops off a specified number of blocks
+     * from the blockchain. If the number of blocks to pop off is greater than the
+     * current height of the blockchain, it pops off to the minimum rollback height.
+     */
+    public void popOffToTest(int blocks) {
+        Block lastBlock = blockchain.getLastBlock();
+        int height = lastBlock != null && blocks > 0 ? lastBlock.getHeight() - blocks : getMinRollbackHeight();
+        popOffTo(height);
+    }
+
+    /*
+     * Test method autoPopOffTest sets up automatic pop-off behavior
+     * for testing. It configures the blockchain processor to throw an exception at
+     * a height 500 blocks beyond the current height, for a specified number of
+     * times. This simulates conditions that would trigger an automatic pop-off.
+     */
+    public void autoPopOffTest(int heightOffset, int count) {
+        int height = blockchain.getHeight();
+        forceExceptionAtHeight.set(height + heightOffset);
+        forceExceptionCounter.set(count);
+    }
+
+    private String formatDuration(long millis) {
+        if (millis < 0) {
+            return "N/A";
+        }
+        if (millis == 0) {
+            return "0s";
+        }
+
+        if (millis < 1000) {
+            return millis + "ms";
+        }
+
+        long totalSeconds = millis / 1000;
+
+        final long SEC_PER_MINUTE = 60;
+        final long SEC_PER_HOUR = SEC_PER_MINUTE * 60;
+        final long SEC_PER_DAY = SEC_PER_HOUR * 24;
+        final long SEC_PER_YEAR = SEC_PER_DAY * 365; // Approximation
+
+        long years = totalSeconds / SEC_PER_YEAR;
+        long secondsAfterYears = totalSeconds % SEC_PER_YEAR;
+
+        long days = secondsAfterYears / SEC_PER_DAY;
+        long secondsAfterDays = secondsAfterYears % SEC_PER_DAY;
+
+        long hours = secondsAfterDays / SEC_PER_HOUR;
+        long secondsAfterHours = secondsAfterDays % SEC_PER_HOUR;
+
+        long minutes = secondsAfterHours / SEC_PER_MINUTE;
+        long seconds = secondsAfterHours % SEC_PER_MINUTE;
+
+        StringBuilder sb = new StringBuilder();
+        if (years > 0) {
+            sb.append(years).append("y ");
+        }
+        if (days > 0) {
+            sb.append(days).append("d ");
+        }
+        if (hours > 0) {
+            sb.append(hours).append("h ");
+        }
+        if (minutes > 0) {
+            sb.append(minutes).append("m ");
+        }
+        if (seconds > 0 || sb.length() == 0) {
+            sb.append(seconds).append("s");
+        }
+
+        return sb.toString().trim();
+    }
+
+    /*
+     * Manually triggers the trim process for derived tables.
+     * It calculates the trim height based on the current block height minus
+     * MAX_ROLLBACK
+     * and then executes the trim operation. This is useful for testing and database
+     * maintenance.
+     */
+    @Override
+    public void manualTrim() {
+        if (!trimDerivedTables) {
+            logger.info("Trimming is disabled, manualTrim() will do nothing.");
+            return;
+        }
+        int trimHeight = Math.max(0, blockchain.getHeight() - Constants.MAX_ROLLBACK);
+        lastTrimHeight.set(trimHeight);
+        logger.info("Manually triggering trim from height {} to {}", getTrimHeight(),
+                trimHeight);
+        // Pop-off might have happened before, re-check DB state
+        if (Boolean.FALSE.equals(propertyService.getBoolean(Props.DB_SKIP_CHECK))
+                && checkDatabaseState() != 0) {
+            logger.error("Database is inconsistent, cannot perform trim test.");
+            return;
+        }
+
+        trimExecutor.submit(() -> {
+            blockChainLock.writeLock().lock();
+            downloadCache.lockCache();
+            stores.beginTransaction();
+            long tableStartTime = 0;
+            long tableEndTime = 0;
+            try {
+                synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
+                    long totalStartTime = System.currentTimeMillis();
+                    List<DerivedTable> tablesToTrim = derivedTableManager.getDerivedTables();
+                    logger.info("Trimming {} derived tables...", tablesToTrim.size());
+                    int tableIndex = 1;
+                    for (DerivedTable table : tablesToTrim) {
+                        tableStartTime = System.currentTimeMillis();
+                        logger.info("#{} Trimming table: {}", tableIndex++, table.getTable());
+                        currentlyTrimmingTable.set(table.getTable());
+                        blockListeners.notify(null, Event.TRIM_PROGRESS_UPDATED);
+                        table.trim(trimHeight);
+                        tableEndTime = System.currentTimeMillis();
+                        logger.info("Table '{}' trimmed in {}", table.getTable(),
+                                formatDuration(tableEndTime - tableStartTime));
+                        currentTrimHeight.set(getTrimHeight());
+                        blockListeners.notify(null, Event.TRIM_HEIGHT_CHANGED);
+                    }
+                    stores.commitTransaction();
+                    long totalEndTime = System.currentTimeMillis();
+                    logger.info("Manual database trim completed in {}",
+                            formatDuration(totalEndTime - totalStartTime));
+                }
+            } catch (Exception e) {
+                stores.rollbackTransaction();
+                logger.error("Manual database trim failed", e);
+            } finally {
+                currentlyTrimmingTable.set(null);
+                stores.endTransaction();
+                downloadCache.unlockCache();
+                blockChainLock.writeLock().unlock();
+                blockListeners.notify(null, Event.TRIM_PROGRESS_UPDATED);
+            }
+
+            if (Boolean.FALSE.equals(propertyService.getBoolean(Props.DB_SKIP_CHECK))
+                    && checkDatabaseState() != 0) {
+                logger.error("Database is inconsistent, manual trim failed.");
+                return;
+            } else {
+                logger.info("Database is consistent, manual database trim completed successfully.");
+            }
+
+        });
+    }
+
+    @Override
     public List<Block> popOffTo(int height) {
         List<Block> blocks = popOffTo(blockchain.getBlockAtHeight(height), null);
         if (Boolean.FALSE.equals(propertyService.getBoolean(Props.DB_SKIP_CHECK))
@@ -1857,70 +2418,197 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     }
 
     private List<Block> popOffTo(Block commonBlock, List<Block> forkBlocks) {
-
-        int currentHeight = blockchain.getHeight();
-        if (commonBlock.getHeight() < getMinRollbackHeight()) {
-            throw new IllegalArgumentException("Rollback to height " + commonBlock.getHeight() + " not suppported, "
-                    + "current height " + currentHeight);
-        }
-        if (!blockchain.hasBlock(commonBlock.getId())) {
-            logger.debug("Block {} not found in blockchain, nothing to pop off", commonBlock.getStringId());
-            return Collections.emptyList();
-        }
-        if (commonBlock.getHeight() > currentHeight) {
-            logger.warn("Rollback from {} to {} is non-sense, ignoring pop off", currentHeight,
-                    commonBlock.getHeight());
-            return Collections.emptyList();
-
-        }
         List<Block> poppedOffBlocks = new ArrayList<>();
-        synchronized (downloadCache) {
+        blockChainLock.writeLock().lock();
+        downloadCache.lockCache();
+        currentTrimHeight.set(getTrimHeight());
+        logger.info("Pausing block download.");
+        logger.info("Pop off in progress...");
+        try {
             synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
-                try {
-                    stores.beginTransaction();
-                    Block block = blockchain.getLastBlock();
-                    logger.info("Rollback from {} to {}", block.getHeight(), commonBlock.getHeight());
-                    while (block.getId() != commonBlock.getId() && block.getId() != genesisBlockId) {
-                        if (forkBlocks != null) {
-                            for (Block fb : forkBlocks) {
-                                if (fb.getHeight() == block.getHeight()
-                                        && fb.getGeneratorId() == block.getGeneratorId()) {
-                                    logger.info("Possible rewrite fork, ID {} block being monitored {}",
-                                            block.getGeneratorId(), block.getHeight());
-                                    blockService.watchBlock(block);
-                                }
+                int currentHeight = blockchain.getHeight();
+                if (commonBlock.getHeight() <= currentTrimHeight.get()) {
+                    throw new IllegalArgumentException(
+                            "Rollback to height " + commonBlock.getHeight() + " not suppported, "
+                                    + "current height " + currentHeight);
+                }
+                if (!blockchain.hasBlock(commonBlock.getId())) {
+                    logger.debug("Block {} not found in blockchain, nothing to pop off", commonBlock.getStringId());
+                    return Collections.emptyList();
+                }
+                if (commonBlock.getHeight() > currentHeight) {
+                    logger.warn("Rollback from {} to {} is non-sense, ignoring pop off", currentHeight,
+                            commonBlock.getHeight());
+                    return Collections.emptyList();
+                }
+                // stores.beginTransaction();
+                Block block = blockchain.getLastBlock();
+                popOffBlocksCount.addAndGet(block.getHeight() - commonBlock.getHeight());
+                logger.info("Rollback from {} to {}", block.getHeight(), commonBlock.getHeight());
+                while (block.getId() != commonBlock.getId() && block.getId() != genesisBlockId) {
+                    if (forkBlocks != null) {
+                        for (Block fb : forkBlocks) {
+                            if (fb.getHeight() == block.getHeight()
+                                    && fb.getGeneratorId() == block.getGeneratorId()) {
+                                logger.info("Possible rewrite fork, ID {} block being monitored {}",
+                                        block.getGeneratorId(), block.getHeight());
+                                blockService.watchBlock(block);
                             }
                         }
-                        logger.debug("Popping block {} generator {} sig {}", block.getHeight(),
-                                SignumID.fromLong(block.getGeneratorId()).getID(),
-                                Hex.toHexString(block.getBlockSignature()));
-                        logger.debug("Block timestamp {} base target {} difficulty {} commitment {}",
-                                block.getTimestamp(), block.getBaseTarget(),
-                                block.getCumulativeDifficulty(), block.getCommitment());
+                    }
+                    logger.debug("Popping block {} generator {} sig {}", block.getHeight(),
+                            SignumID.fromLong(block.getGeneratorId()).getID(),
+                            Hex.toHexString(block.getBlockSignature()));
+                    logger.debug("Block timestamp {} base target {} difficulty {} commitment {}",
+                            block.getTimestamp(), block.getBaseTarget(),
+                            block.getCumulativeDifficulty(), block.getCommitment());
+                    if (currentTrimHeight.get() <= block.getHeight()) {
+
+                        // Capture details of the block about to be popped
+                        int poppedBlockHeight = block.getHeight();
+                        long poppedBlockId = block.getId();
+
+                        // Log transactions of the block about to be poppeddbCacheManager.flushCache();
+                        /*
+                         * logger.info(
+                         * "RollBackDebug: Popping block {} (ID: {}) at height {}. Transactions in this block:"
+                         * ,
+                         * poppedBlockHeight, Convert.toUnsignedLong(poppedBlockId), poppedBlockHeight);
+                         * for (Transaction tx : block.getTransactions()) {
+                         * logger.info(
+                         * "RollBackDebug:   - - Tx ID: {}, Type: {}, Sender: {}, Recipient: {}, Amount: {}, Fee: {}"
+                         * ,
+                         * Convert.toUnsignedLong(tx.getId()), tx.getType().getDescription(),
+                         * Convert.toUnsignedLong(tx.getRecipientId()),
+                         * tx.getAmountNqt(), tx.getFeeNqt());
+                         * if (tx.getAttachment() != null) {
+                         * logger.info("RollBackDebug:     Attachment Type: {}",
+                         * tx.getAttachment().getTransactionType().getDescription());
+                         * }
+                         * }
+                         */
+                        stores.beginTransaction();
+                        int checkResult = checkDatabaseStateTest();
+                        if (checkResult != 0) {
+                            logger.info("BEFORE: Database is inconsistent.");
+                        } else {
+                            logger.info("BEFORE: Database is consistent.");
+                        }
+
                         poppedOffBlocks.add(block);
                         block = popLastBlock();
+
+                        rollbackDerivedTables(derivedTableManager, blockchain.getHeight());
+
+                        /*
+                         * for (DerivedTable table : derivedTableManager.getDerivedTables()) {
+                         * logger.debug("Rolling back {}", table.getTable());
+                         * table.rollback(blockchain.getHeight());
+                         * }
+                         */
+
+                        indirectIncomingService.rollback(blockchain.getHeight());
+                        dbCacheManager.flushCache();
+                        stores.commitTransaction();
+                        stores.endTransaction();
+                        // A blokk kipattintása után ellenőrizzük a konzisztenciát
+                        checkResult = checkDatabaseStateTest();
+                        if (checkResult != 0) {
+                            logger.info("AFTER: Database is inconsistent, pop-off failed.");
+                            for (Transaction tx : block.getTransactions()) {
+                                logger.info(
+                                        "RollBackDebug:   - Tx ID: {}, Type: {}, Sender: {}, Recipient: {}, Amount: {}, Fee: {}",
+                                        Convert.toUnsignedLong(tx.getId()), tx.getType().getDescription(),
+                                        Convert.toUnsignedLong(tx.getSenderId()),
+                                        Convert.toUnsignedLong(tx.getRecipientId()),
+                                        tx.getAmountNqt(), tx.getFeeNqt());
+                            }
+                            return poppedOffBlocks;
+                        } else {
+                            logger.info("AFTER: Database is consistent, pop-off completed successfully.");
+                            logger.info("Block Height: {}", blockchain.getHeight());
+                        }
+
+                    } else {
+                        logger.info("Reached minimum rollback height {}, cannot pop off block at height {}.",
+                                getMinRollbackHeight(), block.getHeight());
+                        logger.info("Pop-off stopped to prevent exceeding rollback limit.");
+                        logger.info("Derived tabels are not available below height {}.",
+                                getMinRollbackHeight());
+                        popOffBlocksCount.set(0);
+                        return poppedOffBlocks;
                     }
-                    logger.debug("Rolling back derived tables...");
-                    for (DerivedTable table : derivedTableManager.getDerivedTables()) {
-                        logger.debug("Rolling back {}", table.getTable());
-                        table.rollback(commonBlock.getHeight());
-                    }
-                    indirectIncomingService.rollback(commonBlock.getHeight());
-                    dbCacheManager.flushCache();
-                    stores.commitTransaction();
-                    downloadCache.resetCache();
-                    atProcessorCache.reset();
-                    ;
-                } catch (RuntimeException e) {
-                    stores.rollbackTransaction();
-                    logger.debug("Error popping off to {}", commonBlock.getHeight(), e);
-                    throw e;
-                } finally {
-                    stores.endTransaction();
                 }
+
+                logger.info("Rollback successful. New blockchain height is {}", block.getHeight());
+
+                // Popped off the correct number of blocks as requested
+                while (popOffBlocksCount.get() > 0) {
+                    if (block == null || block.getId() == genesisBlockId) {
+                        logger.info("Blockchain is empty or at genesis block, nothing more to pop off.");
+                        popOffBlocksCount.set(0);
+                        return poppedOffBlocks;
+                    }
+                    if (currentTrimHeight.get() < block.getHeight()) {
+                        poppedOffBlocks.add(block);
+                        block = popLastBlock();
+                    } else {
+                        logger.info("Reached minimum rollback height {}, cannot pop off block at height {}.",
+                                currentTrimHeight.get(), block.getHeight());
+                        logger.info("Pop-off stopped to prevent exceeding rollback limit.");
+                        logger.info("Derived tabels are not available below height {}.",
+                                currentTrimHeight.get());
+                        popOffBlocksCount.set(0);
+                        return poppedOffBlocks;
+                    }
+                }
+
+                logger.debug("Rolling back derived tables...");
+                for (DerivedTable table : derivedTableManager.getDerivedTables()) {
+                    logger.debug("Rolling back {}", table.getTable());
+                    table.rollback(commonBlock.getHeight());
+                }
+                // original code
+                // indirectIncomingService.rollback(commonBlock.getHeight());
+                // dbCacheManager.flushCache();
+                // stores.commitTransaction();
+
             }
+        } catch (RuntimeException e) {
+            popOffBlocksCount.set(0);
+            stores.rollbackTransaction();
+            logger.debug("Error popping off to {}", commonBlock.getHeight(), e);
+            throw e;
+        } catch (Exception e) {
+            popOffBlocksCount.set(0);
+            stores.rollbackTransaction();
+            logger.error("Error popping off to {}", commonBlock.getHeight(), e);
+            throw new RuntimeException(e.toString(), e);
+        } catch (Error e) {
+            popOffBlocksCount.set(0);
+            stores.rollbackTransaction();
+            logger.error("Critical error during pop-off, transaction rolled back.", e);
+            throw e;
+        } finally {
+            // stores.endTransaction();
+            logger.info("Blocks popped off: {}", poppedOffBlocks.size());
+            logger.info("Pop-off completed.");
+            logger.info("Block processing is now resumed.");
+            downloadCache.resetCache();
+            atProcessorCache.reset();
+            downloadCache.unlockCache();
+            blockChainLock.writeLock().unlock();
         }
+
+        if (Boolean.FALSE.equals(propertyService.getBoolean(Props.DB_SKIP_CHECK))
+                && checkDatabaseState() != 0) {
+            logger.error("Database is inconsistent, pop-off failed.");
+        } else {
+            logger.info("Database is consistent, pop-off completed successfully.");
+        }
+
         return poppedOffBlocks;
+
     }
 
     private Block popLastBlock() {
@@ -1928,11 +2616,39 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         if (block.getId() == genesisBlockId) {
             throw new RuntimeException("Cannot pop off genesis block");
         }
+        // --- START RollBackDebug Logging for Balances ---
+        for (Transaction transaction : block.getTransactions()) {
+            Account sender = accountService.getAccount(transaction.getSenderId());
+            Account recipient = accountService.getAccount(transaction.getRecipientId());
+            if (sender != null) {
+                logger.info("RollBackDebug: BEFORE undo for tx {}, Sender {} balance: {}", transaction.getStringId(),
+                        sender.getId(), sender.getBalanceNqt());
+            }
+            if (recipient != null) {
+                logger.info("RollBackDebug: BEFORE undo for tx {}, Recipient {} balance: {}", transaction.getStringId(),
+                        recipient.getId(), recipient.getBalanceNqt());
+            }
+        }
         Block previousBlock = blockDb.findBlock(block.getPreviousBlockId());
         List<Transaction> txs = block.getTransactions();
-        blockchain.setLastBlock(block, previousBlock);
-        txs.forEach(Transaction::unsetBlock);
         blockDb.deleteBlocksFrom(block.getId());
+        blockchain.setLastBlock(previousBlock);
+        txs.forEach(Transaction::unsetBlock);
+        popOffBlocksCount.decrementAndGet();
+        // --- START RollBackDebug Logging for Balances ---
+        for (Transaction transaction : block.getTransactions()) {
+            Account sender = accountService.getAccount(transaction.getSenderId());
+            Account recipient = accountService.getAccount(transaction.getRecipientId());
+            if (sender != null) {
+                logger.info("RollBackDebug: AFTER undo for tx {}, Sender {} balance: {}", transaction.getStringId(),
+                        sender.getId(), sender.getBalanceNqt());
+            }
+            if (recipient != null) {
+                logger.info("RollBackDebug: AFTER undo for tx {}, Recipient {} balance: {}", transaction.getStringId(),
+                        recipient.getId(), recipient.getBalanceNqt());
+            }
+        }
+        // --- END RollBackDebug Logging for Balances ---
         blockListeners.notify(block, Event.BLOCK_POPPED);
         return previousBlock;
     }
@@ -1976,12 +2692,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             final int blockTimestamp = timeService.getEpochTime();
             final int blockHeight = previousBlock.getHeight() + 1;
 
-            // this is just an validation. which collects all valid transactions, which fit
-            // into the block
-            // finally all stuff is reverted so nothing is written to the db
-            // the block itself with all transactions we found is pushed using pushBlock
-            // which calls
-            // accept (so it's going the same way like a received/synced block)
+            // This is a validation step that collects all valid transactions fitting into
+            // the block.
+            // Finally, all changes are reverted, so nothing is written to the DB.
+            // The block itself, with all found transactions, is pushed using pushBlock,
+            // which calls accept (so it's going the same way like a received/synced block)
             try {
                 stores.beginTransaction();
 
@@ -2037,7 +2752,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                     utxInSlot = new TreeMap<>(Collections.reverseOrder());
                                     unconfirmedTransactionsOrderedBySlotThenPriority.put(slot, utxInSlot);
                                 }
-                                // if we already have this identical priority, make sure they are unique
+                                // Make sure no two transactions have the same priority key
                                 while (utxInSlot.get(priority) != null) {
                                     priority--;
                                 }
@@ -2050,7 +2765,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     for (long slot = maxSlot; slot >= 1; slot--) {
                         boolean slotFilled = false;
                         for (long slotUnconfirmed = maxSlot; slotUnconfirmed >= slot; slotUnconfirmed--) {
-                            // using a tree map we already have it naturally sorted by priority
+                            // Using tree map to get transactions sorted by priority
                             TreeMap<Long, Transaction> candidateTxs = unconfirmedTransactionsOrderedBySlotThenPriority
                                     .get(slotUnconfirmed);
                             if (candidateTxs != null) {
@@ -2104,7 +2819,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
                     int txIndirects = transaction.getType().getIndirectIncomings(transaction).size();
                     if (indirectsCount + txIndirects > maxIndirects) {
-                        // skip this transaction, max indirects per block reached
+                        // Skip this transaction, max indirects per block reached
                         continue;
                     }
                     indirectsCount += txIndirects;
@@ -2113,7 +2828,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     long slotFee = Signum.getFluxCapacitor().getValue(FluxValues.PRE_POC2) ? slot * FEE_QUANT_SIP3
                             : ONE_SIGNA;
                     if (Signum.getFluxCapacitor().getValue(FluxValues.SPEEDWAY)) {
-                        // we already got the list by priority, no need to check the fees again
+                        // Already got the list by priority, no need to check the fees again
                         slotFee = feeQuant;
                     }
                     if (transaction.getFeeNqt() >= slotFee) {
@@ -2164,7 +2879,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             AtBlock atBlock = AtController.getCurrentBlockATs(payloadSize, blockHeight, generatorId, indirectsCount);
             byte[] byteAts = atBlock.getBytesForBlock();
 
-            // digesting AT Bytes
+            // Digesting AT Bytes
             if (byteAts != null) {
                 payloadSize -= byteAts.length;
                 totalFeeNqt += atBlock.getTotalFees();
@@ -2175,7 +2890,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             }
 
             // ATs for block
-
             MessageDigest digest = Crypto.sha256();
             orderedBlockTransactions.forEach(transaction -> digest.update(transaction.getBytes()));
             byte[] payloadHash = digest.digest();
@@ -2197,6 +2911,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             }
             block.sign(secretPhrase);
             blockService.setPrevious(block, previousBlock);
+
             try {
                 blockService.preVerify(block, previousBlock);
                 pushBlock(block);
@@ -2205,7 +2920,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     logger.debug("Account {} generated block {} at height {}",
                             Convert.toUnsignedLong(block.getGeneratorId()), block.getStringId(), block.getHeight());
                 }
-                downloadCache.resetCache();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             } catch (TransactionNotAcceptedException e) {
@@ -2217,8 +2931,40 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             } catch (BlockNotAcceptedException e) {
                 logger.debug("Generate block failed: {}", e.getMessage());
                 throw e;
+            } finally {
+                downloadCache.resetCache();
             }
         } // end synchronized cache
+    }
+
+    public void rollbackDerivedTables(DerivedTableManager derivedTableManager, int height) {
+        if (!Db.isInTransaction()) {
+            throw new IllegalStateException("Not in transaction");
+        }
+
+        logger.info("Rollback: Starting rollback for all derived tables to height {}", height);
+
+        for (DerivedTable table : derivedTableManager.getDerivedTables()) {
+            try {
+                String tableName = table.getTable();
+                logger.info("Rollback: Processing derived table {} ({})", tableName, table.getClass().getSimpleName());
+
+                // --- Derived table rollback ---
+                table.rollback(height); // A belső rollback már logolja a deleted/updated row-okat
+
+                // --- Cache flush minden tábla után ---
+                dbCacheManager.flushCache();
+                logger.info("Rollback: Cache flushed after table {} rollback", tableName);
+
+                // --- Ha belső rollback logolja a részleteket, itt csak visszaigazolás ---
+                logger.info("Rollback: Finished derived table {} rollback", tableName);
+            } catch (Exception e) {
+                // Hiba esetén logoljuk a táblát és a kivételt
+                logger.error("Rollback: ERROR rolling back derived table {}: {}", table.getTable(), e.toString(), e);
+            }
+        }
+
+        logger.info("Rollback: Finished rollback for all derived tables to height {}", height);
     }
 
     private boolean hasAllReferencedTransactions(Transaction transaction, int timestamp, int count) {
