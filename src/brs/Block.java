@@ -262,21 +262,36 @@ public class Block {
     }
 
     public List<Transaction> getTransactions() {
-        if (blockTransactions.get() == null) {
-            this.blockTransactions
-                    .set(Collections.unmodifiableList(
-                            transactionDb().findBlockTransactions(getId(), true)));
-            this.blockTransactions.get().forEach(transaction -> transaction.setBlock(this));
+        List<Transaction> transactions = blockTransactions.get();
+        if (transactions != null) {
+            return transactions;
         }
+
+        List<Transaction> newTransactions = Collections
+                .unmodifiableList(transactionDb().findBlockTransactions(getId(), true));
+
+        if (blockTransactions.compareAndSet(null, newTransactions)) {
+            newTransactions.forEach(transaction -> transaction.setBlock(this));
+            return newTransactions;
+        }
+
         return blockTransactions.get();
     }
 
     public List<Transaction> getAllTransactions() {
-        if (allBlockTransactions.get() == null) {
-            this.allBlockTransactions
-                    .set(Collections.unmodifiableList(transactionDb().findBlockTransactions(getId(), false)));
-            this.allBlockTransactions.get().forEach(transaction -> transaction.setBlock(this));
+        List<Transaction> transactions = allBlockTransactions.get();
+        if (transactions != null) {
+            return transactions;
         }
+
+        List<Transaction> newTransactions = Collections
+                .unmodifiableList(transactionDb().findBlockTransactions(getId(), false));
+
+        if (allBlockTransactions.compareAndSet(null, newTransactions)) {
+            newTransactions.forEach(transaction -> transaction.setBlock(this));
+            return newTransactions;
+        }
+
         return allBlockTransactions.get();
     }
 
