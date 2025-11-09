@@ -52,6 +52,19 @@ public class MetricsPanel extends JPanel {
     private final LinkedList<Long> blockApplyTimes = new LinkedList<>();
     private final LinkedList<Long> miscTimes = new LinkedList<>();
     private final LinkedList<Integer> atCounts = new LinkedList<>();
+    private final LinkedList<Double> pushTimeHistory = new LinkedList<>();
+    private final LinkedList<Double> validationTimeHistory = new LinkedList<>();
+    private final LinkedList<Double> txLoopTimeHistory = new LinkedList<>();
+    private final LinkedList<Double> housekeepingTimeHistory = new LinkedList<>();
+    private final LinkedList<Double> commitTimeHistory = new LinkedList<>();
+    private final LinkedList<Double> atTimeHistory = new LinkedList<>();
+    private final LinkedList<Double> txApplyTimeHistory = new LinkedList<>();
+    private final LinkedList<Double> subscriptionTimeHistory = new LinkedList<>();
+    private final LinkedList<Double> blockApplyTimeHistory = new LinkedList<>();
+    private final LinkedList<Double> miscTimeHistory = new LinkedList<>();
+    private final LinkedList<Double> atTransactionsPerBlockHistory = new LinkedList<>();
+    private final LinkedList<Double> atCountHistory = new LinkedList<>();
+    private final LinkedList<Double> transactionsPerBlockHistory = new LinkedList<>();
     private final LinkedList<Double> blocksPerSecondHistory = new LinkedList<>();
     private final LinkedList<Double> transactionsPerSecondHistory = new LinkedList<>();
     private final LinkedList<Double> atTransactionsPerSecondHistory = new LinkedList<>();
@@ -121,9 +134,12 @@ public class MetricsPanel extends JPanel {
     private ChartPanel performanceChartPanel;
     private ChartPanel timingChartPanel;
     private ChartPanel netSpeedChartPanel;
+    private Timer netSpeedChartUpdater;
 
     private final LinkedList<Double> uploadSpeedHistory = new LinkedList<>();
     private final LinkedList<Double> downloadSpeedHistory = new LinkedList<>();
+    private final LinkedList<Double> downloadSpeedMAHistory = new LinkedList<>();
+    private final LinkedList<Double> uploadSpeedMAHistory = new LinkedList<>();
 
     private XYSeries uploadVolumeSeries;
     private XYSeries downloadVolumeSeries;
@@ -173,7 +189,7 @@ public class MetricsPanel extends JPanel {
         JPanel SyncPanel = new JPanel(new GridBagLayout());
 
         // Verified/Total Blocks
-        tooltip = "Shows the number of blocks in the download queue that have passed PoC verification against the total number of blocks in the queue.\n\n- Verified: PoC signature has been checked (CPU/GPU intensive).\n- Total: All blocks currently in the download queue.\n\nA high number of unverified blocks may indicate a slow verification process.";
+        tooltip = "Shows the number of blocks in the download queue that have passed PoC verification against the total number of blocks in the queue.\n\n- Verified: PoC signature has been checked (CPU/GPU intensive).\n- Total: All blocks currently in the download queue.\n\nA high number of unverified blocks may indicate a slow verification process.\n\nThe progress bar displays: Verified Blocks / Total Blocks - Percentage of Verified Blocks.";
         JLabel verifLabel = createLabel("Verified/Total Blocks", null, tooltip);
         syncProgressBarDownloadedBlocks = createProgressBar(0, 100, Color.GREEN, "0 / 0 - 0%", progressBarSize1);
         addComponent(SyncPanel, verifLabel, 0, 0, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
@@ -182,7 +198,7 @@ public class MetricsPanel extends JPanel {
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // Unverified Blocks
-        tooltip = "The number of blocks in the download queue that are waiting for Proof-of-Capacity (PoC) verification.\n\nA persistently high number might indicate that the CPU or GPU is a bottleneck and cannot keep up with the network's block generation rate.";
+        tooltip = "The number of blocks in the download queue that are waiting for Proof-of-Capacity (PoC) verification.\n\nA persistently high number might indicate that the CPU or GPU is a bottleneck and cannot keep up with the network's block generation rate.\n\nThe progress bar displays the current count of unverified blocks.";
         JLabel unVerifLabel = createLabel("Unverified Blocks", null, tooltip);
         syncProgressBarUnverifiedBlocks = createProgressBar(0, 2000, Color.GREEN, "0", progressBarSize1);
         addComponent(SyncPanel, unVerifLabel, 0, 1, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
@@ -196,54 +212,54 @@ public class MetricsPanel extends JPanel {
                 barInsets);
 
         // Blocks/Second (Moving Average)
-        tooltip = "The moving average of blocks processed per second. This is a key indicator of the node's synchronization speed.\n\nA higher value means the node is rapidly catching up with the current state of the blockchain. This metric is particularly useful during the initial sync or after a period of being offline.";
+        tooltip = "The moving average of blocks processed per second. This is a key indicator of the node's synchronization speed.\n\nA higher value means the node is rapidly catching up with the current state of the blockchain. This metric is particularly useful during the initial sync or after a period of being offline.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         JLabel blocksPerSecondLabel = createLabel("Blocks/Sec (MA)", Color.CYAN, tooltip);
-        blocksPerSecondProgressBar = createProgressBar(0, 200, null, "0", progressBarSize1);
+        blocksPerSecondProgressBar = createProgressBar(0, 200, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, blocksPerSecondLabel, 0, 3, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
         addComponent(SyncPanel, blocksPerSecondProgressBar, 1, 3, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // All Transactions/Second (Moving Average)
-        tooltip = "The moving average of the total number of transactions (user-submitted and AT-generated) processed per second. This metric reflects the total transactional throughput of the network as seen by your node.\n\nIncludes:\n- Payments (Ordinary, Multi-Out, Multi-Same-Out)\n- Messages (Arbitrary, Alias, Account Info, TLD)\n- Assets (Issuance, Transfer, Orders, Minting, Distribution)\n- Digital Goods (Listing, Delisting, Price Change, Quantity Change, Purchase, Delivery, Feedback, Refund)\n- Account Control (Leasing)\n- Mining (Reward Recipient, Commitment)\n- Advanced Payments (Escrow, Subscriptions)\n- Automated Transactions (ATs)";
+        tooltip = "The moving average of the total number of transactions (user-submitted and AT-generated) processed per second. This metric reflects the total transactional throughput of the network as seen by your node.\n\nIncludes:\n- Payments (Ordinary, Multi-Out, Multi-Same-Out)\n- Messages (Arbitrary, Alias, Account Info, TLD)\n- Assets (Issuance, Transfer, Orders, Minting, Distribution)\n- Digital Goods (Listing, Delisting, Price Change, Quantity Change, Purchase, Delivery, Feedback, Refund)\n- Account Control (Leasing)\n- Mining (Reward Recipient, Commitment)\n- Advanced Payments (Escrow, Subscriptions)\n- Automated Transactions (ATs)\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         JLabel txPerSecondLabel = createLabel("All Txs/Sec (MA)", Color.GREEN, tooltip);
-        transactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0", progressBarSize1);
+        transactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, txPerSecondLabel, 0, 4, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
         addComponent(SyncPanel, transactionsPerSecondProgressBar, 1, 4, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // All Transactions/Block (Moving Average)
-        tooltip = "The moving average of the total number of transactions (user-submitted and AT-generated) included in each block. This metric provides insight into the network's activity and block space utilization.\n\nIncludes:\n- Payments (Ordinary, Multi-Out, Multi-Same-Out)\n- Messages (Arbitrary, Alias, Account Info, TLD)\n- Assets (Issuance, Transfer, Orders, Minting, Distribution)\n- Digital Goods (Listing, Delisting, Price Change, Quantity Change, Purchase, Delivery, Feedback, Refund)\n- Account Control (Leasing)\n- Mining (Reward Recipient, Commitment)\n- Advanced Payments (Escrow, Subscriptions)\n- Automated Transactions (ATs)";
+        tooltip = "The moving average of the total number of transactions (user-submitted and AT-generated) included in each block. This metric provides insight into the network's activity and block space utilization.\n\nIncludes:\n- Payments (Ordinary, Multi-Out, Multi-Same-Out)\n- Messages (Arbitrary, Alias, Account Info, TLD)\n- Assets (Issuance, Transfer, Orders, Minting, Distribution)\n- Digital Goods (Listing, Delisting, Price Change, Quantity Change, Purchase, Delivery, Feedback, Refund)\n- Account Control (Leasing)\n- Mining (Reward Recipient, Commitment)\n- Advanced Payments (Escrow, Subscriptions)\n- Automated Transactions (ATs)\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         JLabel txPerBlockLabel = createLabel("All Txs/Block (MA)", new Color(255, 165, 0), tooltip); // Orange
-        transactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0", progressBarSize1);
+        transactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, txPerBlockLabel, 0, 5, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
         addComponent(SyncPanel, transactionsPerBlockProgressBar, 1, 5, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // System Transactions/Second (Moving Average)
-        tooltip = "The moving average of system-generated transactions processed per second. This includes payments from Automated Transactions (ATs), Escrow results, and Subscription payments.";
+        tooltip = "The moving average of system-generated transactions processed per second. This includes payments from Automated Transactions (ATs), Escrow results, and Subscription payments.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         systemTxPerSecondLabel = createLabel("System Txs/Sec (MA)", new Color(135, 206, 250), tooltip); // LightSkyBlue
-        systemTransactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0", progressBarSize1);
+        systemTransactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, systemTxPerSecondLabel, 0, 6, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
         addComponent(SyncPanel, systemTransactionsPerSecondProgressBar, 1, 6, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // System Transactions/Block (Moving Average)
-        tooltip = "The moving average of system-generated transactions included in each block. This includes payments from Automated Transactions (ATs), Escrow results, and Subscription payments.";
+        tooltip = "The moving average of system-generated transactions included in each block. This includes payments from Automated Transactions (ATs), Escrow results, and Subscription payments.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         systemTxPerBlockLabel = createLabel("System Txs/Block (MA)", Color.BLUE, tooltip);
-        atTransactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0", progressBarSize1);
+        atTransactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, systemTxPerBlockLabel, 0, 7, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
         addComponent(SyncPanel, atTransactionsPerBlockProgressBar, 1, 7, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // ATs/Block (Moving Average)
-        tooltip = "The moving average of the number of Automated Transactions (ATs) executed per block. This metric shows the activity level of smart contracts on the network.";
+        tooltip = "The moving average of the number of Automated Transactions (ATs) executed per block. This metric shows the activity level of smart contracts on the network.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         atCountLabel = createLabel("ATs/Block (MA)", new Color(153, 0, 76), tooltip); // Deep Pink
-        atCountProgressBar = createProgressBar(0, 100, null, "0", progressBarSize1);
+        atCountProgressBar = createProgressBar(0, 100, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, atCountLabel, 0, 8, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
         addComponent(SyncPanel, atCountProgressBar, 1, 8, 1, 0, 0, GridBagConstraints.LINE_START,
@@ -279,18 +295,18 @@ public class MetricsPanel extends JPanel {
 
         // --- Row 1: Push Time / Validation Time ---
         // Push Time (Left)
-        tooltip = "The moving average of the total time taken to process and push a new block. This value is the sum of all individual timing components measured during block processing.\n\nIt includes:\n- Validation Time\n- TX Loop Time\n- Housekeeping Time\n- TX Apply Time\n- AT Time\n- Subscription Time\n- Block Apply Time\n- Commit Time\n- Complementer (miscellaneous) Time";
+        tooltip = "The moving average of the total time taken to process and push a new block. This value is the sum of all individual timing components measured during block processing.\n\nIt includes:\n- Validation Time\n- TX Loop Time\n- Housekeeping Time\n- TX Apply Time\n- AT Time\n- Subscription Time\n- Block Apply Time\n- Commit Time\n- Complementer (miscellaneous) Time\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         pushTimeLabel = createLabel("Push Time (MA)", Color.BLUE, tooltip);
-        pushTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
+        pushTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
         addComponent(timingInfoPanel, pushTimeLabel, 0, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
         addComponent(timingInfoPanel, pushTimeProgressBar, 0, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, timerBarInsets);
 
         // Validation Time (Right)
-        tooltip = "The moving average of the time spent on block-level validation, excluding the per-transaction validation loop. This is a CPU-intensive task.\n\nMeasured steps include:\n- Verifying block version and timestamp\n- Checking previous block reference\n- Verifying block and generation signatures\n- Validating payload hash and total amounts/fees after transaction processing";
+        tooltip = "The moving average of the time spent on block-level validation, excluding the per-transaction validation loop. This is a CPU-intensive task.\n\nMeasured steps include:\n- Verifying block version and timestamp\n- Checking previous block reference\n- Verifying block and generation signatures\n- Validating payload hash and total amounts/fees after transaction processing\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         validationTimeLabel = createLabel("Validation Time (MA)", Color.YELLOW, tooltip);
-        validationTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
+        validationTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
         addComponent(timingInfoPanel, validationTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
         addComponent(timingInfoPanel, validationTimeProgressBar, 2, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
@@ -299,18 +315,18 @@ public class MetricsPanel extends JPanel {
 
         // --- Row 2: TX Loop / Housekeeping ---
         // TX Loop Time (Left)
-        tooltip = "The moving average of the time spent iterating through and validating all transactions within a block. This involves both CPU and database read operations.\n\nFor each transaction, this includes:\n- Checking timestamps and deadlines\n- Verifying signatures and public keys\n- Validating referenced transactions\n- Checking for duplicates\n- Executing transaction-specific business logic";
+        tooltip = "The moving average of the time spent iterating through and validating all transactions within a block. This involves both CPU and database read operations.\n\nFor each transaction, this includes:\n- Checking timestamps and deadlines\n- Verifying signatures and public keys\n- Validating referenced transactions\n- Checking for duplicates\n- Executing transaction-specific business logic\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         txLoopTimeLabel = createLabel("TX Loop Time (MA)", new Color(128, 0, 128), tooltip);
-        txLoopTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
+        txLoopTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
         addComponent(timingInfoPanel, txLoopTimeLabel, 0, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
         addComponent(timingInfoPanel, txLoopTimeProgressBar, 0, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, timerBarInsets);
 
         // Housekeeping Time (Right)
-        tooltip = "The moving average of the time spent on various 'housekeeping' tasks during block processing.\n\nThis includes:\n- Re-queuing unconfirmed transactions that were not included in the new block\n- Updating peer states and other miscellaneous tasks";
+        tooltip = "The moving average of the time spent on various 'housekeeping' tasks during block processing.\n\nThis includes:\n- Re-queuing unconfirmed transactions that were not included in the new block\n- Updating peer states and other miscellaneous tasks\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         housekeepingTimeLabel = createLabel("Housekeeping Time (MA)", new Color(42, 223, 223), tooltip);
-        housekeepingTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
+        housekeepingTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
         addComponent(timingInfoPanel, housekeepingTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
         addComponent(timingInfoPanel, housekeepingTimeProgressBar, 2, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
@@ -319,18 +335,18 @@ public class MetricsPanel extends JPanel {
 
         // --- Row 3: TX Apply / AT Time ---
         // TX Apply Time (Left)
-        tooltip = "The moving average of the time spent applying the effects of each transaction within the block to the in-memory state. This step handles changes to account balances, aliases, assets, etc., based on the transaction type. It is the first major operation within the 'apply' phase.";
+        tooltip = "The moving average of the time spent applying the effects of each transaction within the block to the in-memory state. This step handles changes to account balances, aliases, assets, etc., based on the transaction type. It is the first major operation within the 'apply' phase.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         txApplyTimeLabel = createLabel("TX Apply Time (MA)", new Color(255, 165, 0), tooltip);
-        txApplyTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
+        txApplyTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
         addComponent(timingInfoPanel, txApplyTimeLabel, 0, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
         addComponent(timingInfoPanel, txApplyTimeProgressBar, 0, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, timerBarInsets);
 
         // AT Time (Right)
-        tooltip = "The moving average of the time spent validating and processing all Automated Transactions (ATs) within the block. This is a separate computational step that occurs after 'TX Apply Time'.";
+        tooltip = "The moving average of the time spent validating and processing all Automated Transactions (ATs) within the block. This is a separate computational step that occurs after 'TX Apply Time'.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         atTimeLabel = createLabel("AT Time (MA)", new Color(153, 0, 76), tooltip);
-        atTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
+        atTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
         addComponent(timingInfoPanel, atTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
         addComponent(timingInfoPanel, atTimeProgressBar, 2, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
@@ -339,18 +355,18 @@ public class MetricsPanel extends JPanel {
 
         // --- Row 4: Subscription / Block Apply ---
         // Subscription Time (Left)
-        tooltip = "The moving average of the time spent processing recurring subscription payments for the block. This is a separate step that occurs after AT processing.";
+        tooltip = "The moving average of the time spent processing recurring subscription payments for the block. This is a separate step that occurs after AT processing.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         subscriptionTimeLabel = createLabel("Subscription Time (MA)", new Color(255, 105, 100), tooltip); // Hot pink
-        subscriptionTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
+        subscriptionTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
         addComponent(timingInfoPanel, subscriptionTimeLabel, 0, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
         addComponent(timingInfoPanel, subscriptionTimeProgressBar, 0, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, timerBarInsets);
 
         // Block Apply Time (Right)
-        tooltip = "The moving average of the time spent applying block-level changes. This includes distributing the block reward to the generator, updating escrow services, and notifying listeners about the applied block. This is the final step before the 'Commit' phase.";
+        tooltip = "The moving average of the time spent applying block-level changes. This includes distributing the block reward to the generator, updating escrow services, and notifying listeners about the applied block. This is the final step before the 'Commit' phase.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         blockApplyTimeLabel = createLabel("Block Apply Time (MA)", new Color(0, 100, 100), tooltip); // Teal
-        blockApplyTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
+        blockApplyTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
         addComponent(timingInfoPanel, blockApplyTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
         addComponent(timingInfoPanel, blockApplyTimeProgressBar, 2, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
@@ -359,18 +375,18 @@ public class MetricsPanel extends JPanel {
 
         // --- Row 5: Commit / Misc. Time ---
         // Commit Time (Left)
-        tooltip = "The moving average of the time spent committing all in-memory state changes to the database on disk. This is a disk I/O-intensive operation.";
+        tooltip = "The moving average of the time spent committing all in-memory state changes to the database on disk. This is a disk I/O-intensive operation.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         commitTimeLabel = createLabel("Commit Time (MA)", new Color(150, 0, 200), tooltip);
-        commitTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
+        commitTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
         addComponent(timingInfoPanel, commitTimeLabel, 0, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
         addComponent(timingInfoPanel, commitTimeProgressBar, 0, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, timerBarInsets);
 
         // Misc. Time (Right)
-        tooltip = "The moving average of the time spent on miscellaneous operations not explicitly measured in other timing categories. This value is the difference between the 'Total Push Time' and the sum of all other measured components (Validation, TX Loop, Housekeeping, TX Apply, AT, Subscription, Block Apply, and Commit). A consistently high value may indicate performance overhead in parts of the code that are not individually timed, such as memory management or other background tasks.";
+        tooltip = "The moving average of the time spent on miscellaneous operations not explicitly measured in other timing categories. This value is the difference between the 'Total Push Time' and the sum of all other measured components (Validation, TX Loop, Housekeeping, TX Apply, AT, Subscription, Block Apply, and Commit). A consistently high value may indicate performance overhead in parts of the code that are not individually timed, such as memory management or other background tasks.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         miscTimeLabel = createLabel("Misc. Time (MA)", Color.LIGHT_GRAY, tooltip);
-        miscTimeProgressBar = createProgressBar(0, 100, null, "0 ms", progressBarSize1);
+        miscTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
         addComponent(timingInfoPanel, miscTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, timerLabelInsets);
         addComponent(timingInfoPanel, miscTimeProgressBar, 2, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
@@ -405,18 +421,18 @@ public class MetricsPanel extends JPanel {
                 barInsets);
 
         // --- Upload Speed ---
-        tooltip = "The moving average of data upload speed to other peers in the network.\n\nThis reflects how much data your node is sharing, which includes:\n- Blocks\n- Transactions\n- Peer information";
+        tooltip = "The moving average of data upload speed to other peers in the network.\n\nThis reflects how much data your node is sharing, which includes:\n- Blocks\n- Transactions\n- Peer information\n\nThe progress bar displays the current moving average speed.";
         uploadSpeedLabel = createLabel("▲ Speed (MA)", new Color(128, 0, 0), tooltip);
-        uploadSpeedProgressBar = createProgressBar(0, MAX_SPEED_BPS, null, "0 B/s", progressBarSize2);
+        uploadSpeedProgressBar = createProgressBar(0, MAX_SPEED_BPS, null, "0.00 B/s", progressBarSize2);
         addComponent(netSpeedInfoPanel, uploadSpeedLabel, 0, 1, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
         addComponent(netSpeedInfoPanel, uploadSpeedProgressBar, 1, 1, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // --- Download Speed ---
-        tooltip = "The moving average of data download speed from other peers in the network.\n\nThis indicates how quickly your node is receiving data, which includes:\n- Blocks\n- Transactions\n- Peer information";
+        tooltip = "The moving average of data download speed from other peers in the network.\n\nThis indicates how quickly your node is receiving data, which includes:\n- Blocks\n- Transactions\n- Peer information\n\nThe progress bar displays the current moving average speed.";
         downloadSpeedLabel = createLabel("▼ Speed (MA)", new Color(0, 100, 0), tooltip);
-        downloadSpeedProgressBar = createProgressBar(0, MAX_SPEED_BPS, null, "0 B/s", progressBarSize2);
+        downloadSpeedProgressBar = createProgressBar(0, MAX_SPEED_BPS, null, "0.00 B/s", progressBarSize2);
         addComponent(netSpeedInfoPanel, downloadSpeedLabel, 0, 2, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
         addComponent(netSpeedInfoPanel, downloadSpeedProgressBar, 1, 2, 1, 0, 0, GridBagConstraints.LINE_START,
@@ -431,6 +447,7 @@ public class MetricsPanel extends JPanel {
         metricsUploadVolumeLabel = createLabel("", new Color(233, 150, 122), tooltip);
         tooltip = "The total amount of data downloaded from the network during this session.";
         metricsDownloadVolumeLabel = createLabel("", new Color(50, 205, 50), tooltip);
+
         combinedVolumePanel.add(volumeTitleLabel);
         combinedVolumePanel.add(metricsUploadVolumeLabel);
         combinedVolumePanel.add(new JLabel(" / "));
@@ -441,12 +458,14 @@ public class MetricsPanel extends JPanel {
         // --- Moving Average Window ---
         tooltip = "The number of recent blocks used to calculate the moving average for performance metrics. A larger window provides a smoother but less responsive trend, while a smaller window is more reactive to recent changes.";
         JLabel maWindowLabel = createLabel("MA Window (Blocks)", null, tooltip);
+        addComponent(netSpeedInfoPanel, maWindowLabel, 0, 4, 1, 0, 0, GridBagConstraints.LINE_END,
+                GridBagConstraints.NONE, labelInsets);
 
         // Define the discrete values for the dropdown
         final Integer[] maWindowValues = { 10, 100, 200, 300, 400, 500 };
         JComboBox<Integer> movingAverageComboBox = new JComboBox<>(maWindowValues);
         movingAverageComboBox.setSelectedItem(movingAverageWindow);
-        movingAverageComboBox.setPreferredSize(new Dimension(150, 25));
+        movingAverageComboBox.setPreferredSize(progressBarSize2);
 
         movingAverageComboBox.addActionListener(e -> {
             JComboBox<?> source = (JComboBox<?>) e.getSource();
@@ -455,9 +474,6 @@ public class MetricsPanel extends JPanel {
                 movingAverageWindow = (Integer) selectedItem;
             }
         });
-
-        addComponent(netSpeedInfoPanel, maWindowLabel, 0, 4, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
         addComponent(netSpeedInfoPanel, movingAverageComboBox, 1, 4, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
@@ -499,7 +515,7 @@ public class MetricsPanel extends JPanel {
 
         // Timer to periodically update the network speed chart so it flows even with no
         // traffic
-        Timer netSpeedChartUpdater = new Timer(100, e -> {
+        netSpeedChartUpdater = new Timer(100, e -> {
             updateNetVolumeAndSpeedChart(uploadedVolume, downloadedVolume);
         });
         netSpeedChartUpdater.start();
@@ -518,6 +534,9 @@ public class MetricsPanel extends JPanel {
 
     public void shutdown() {
         chartUpdateExecutor.shutdown();
+        if (netSpeedChartUpdater != null) {
+            netSpeedChartUpdater.stop();
+        }
     }
 
     public void onQueueStatus() {
@@ -723,6 +742,12 @@ public class MetricsPanel extends JPanel {
                     .mapToDouble(d -> d)
                     .average().orElse(0.0);
 
+            uploadSpeedMAHistory.add(avgUploadSpeed);
+            downloadSpeedMAHistory.add(avgDownloadSpeed);
+
+            double maxUploadSpeedMA = uploadSpeedMAHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
+            double maxDownloadSpeedMA = downloadSpeedMAHistory.stream().mapToDouble(Double::doubleValue).max()
+                    .orElse(0.0);
             lastNetVolumeUpdateTime = currentTime;
             lastUploadedVolume = uploadedVolume;
             lastDownloadedVolume = downloadedVolume;
@@ -736,9 +761,11 @@ public class MetricsPanel extends JPanel {
                     metricsDownloadVolumeLabel.setText("▼ " + formatDataSize(downloadedVolume));
                 }
 
-                uploadSpeedProgressBar.setValue((int) avgUploadSpeed);
+                uploadSpeedProgressBar.setMaximum((int) Math.ceil(maxUploadSpeedMA));
+                uploadSpeedProgressBar.setValue((int) Math.min(avgUploadSpeed, maxUploadSpeedMA));
                 uploadSpeedProgressBar.setString(formatDataRate(avgUploadSpeed));
-                downloadSpeedProgressBar.setValue((int) avgDownloadSpeed);
+                downloadSpeedProgressBar.setMaximum((int) Math.ceil(maxDownloadSpeedMA));
+                downloadSpeedProgressBar.setValue((int) Math.min(avgDownloadSpeed, maxDownloadSpeedMA));
                 downloadSpeedProgressBar.setString(formatDataRate(avgDownloadSpeed));
 
                 if (uploadedVolume > 0 || downloadedVolume > 0) {
@@ -850,22 +877,41 @@ public class MetricsPanel extends JPanel {
         while (miscTimes.size() > CHART_HISTORY_SIZE) {
             miscTimes.removeFirst();
         }
+        while (pushTimeHistory.size() > CHART_HISTORY_SIZE) {
+            pushTimeHistory.removeFirst();
+        }
+        while (validationTimeHistory.size() > CHART_HISTORY_SIZE) {
+            validationTimeHistory.removeFirst();
+        }
+        while (txLoopTimeHistory.size() > CHART_HISTORY_SIZE) {
+            txLoopTimeHistory.removeFirst();
+        }
+        while (housekeepingTimeHistory.size() > CHART_HISTORY_SIZE) {
+            housekeepingTimeHistory.removeFirst();
+        }
+        while (commitTimeHistory.size() > CHART_HISTORY_SIZE) {
+            commitTimeHistory.removeFirst();
+        }
+        while (atTimeHistory.size() > CHART_HISTORY_SIZE) {
+            atTimeHistory.removeFirst();
+        }
+        while (txApplyTimeHistory.size() > CHART_HISTORY_SIZE) {
+            txApplyTimeHistory.removeFirst();
+        }
+        while (subscriptionTimeHistory.size() > CHART_HISTORY_SIZE) {
+            subscriptionTimeHistory.removeFirst();
+        }
+        while (blockApplyTimeHistory.size() > CHART_HISTORY_SIZE) {
+            blockApplyTimeHistory.removeFirst();
+        }
+        while (miscTimeHistory.size() > CHART_HISTORY_SIZE) {
+            miscTimeHistory.removeFirst();
+        }
 
         int currentWindowSize = Math.min(pushTimes.size(), movingAverageWindow);
         if (currentWindowSize < 1) {
             return;
         }
-
-        long maxPushTime = pushTimes.stream().mapToLong(Long::longValue).max().orElse(0);
-        long maxValidationTime = validationTimes.stream().mapToLong(Long::longValue).max().orElse(0);
-        long maxTxLoopTime = txLoopTimes.stream().mapToLong(Long::longValue).max().orElse(0);
-        long maxHousekeepingTime = housekeepingTimes.stream().mapToLong(Long::longValue).max().orElse(0);
-        long maxCommitTime = commitTimes.stream().mapToLong(Long::longValue).max().orElse(0);
-        long maxAtTime = atTimes.stream().mapToLong(Long::longValue).max().orElse(0);
-        long maxTxApplyTime = txApplyTimes.stream().mapToLong(Long::longValue).max().orElse(0);
-        long maxSubscriptionTime = subscriptionTimes.stream().mapToLong(Long::longValue).max().orElse(0);
-        long maxBlockApplyTime = blockApplyTimes.stream().mapToLong(Long::longValue).max().orElse(0);
-        long maxMiscTime = miscTimes.stream().mapToLong(Long::longValue).max().orElse(0);
 
         long displayPushTime = (long) pushTimes.stream()
                 .skip(Math.max(0, pushTimes.size() - currentWindowSize))
@@ -916,41 +962,66 @@ public class MetricsPanel extends JPanel {
                 .skip(Math.max(0, miscTimes.size() - currentWindowSize))
                 .mapToLong(Long::longValue)
                 .average().orElse(0.0);
+
+        pushTimeHistory.add((double) displayPushTime);
+        validationTimeHistory.add((double) displayValidationTime);
+        txLoopTimeHistory.add((double) displayTxLoopTime);
+        housekeepingTimeHistory.add((double) displayHousekeepingTime);
+        commitTimeHistory.add((double) displayCommitTime);
+        atTimeHistory.add((double) displayAtTime);
+        txApplyTimeHistory.add((double) displayTxApplyTime);
+        subscriptionTimeHistory.add((double) displaySubscriptionTime);
+        blockApplyTimeHistory.add((double) displayBlockApplyTime);
+        miscTimeHistory.add((double) displayMiscTime);
+
+        double maxPushTime = pushTimeHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
+        double maxValidationTime = validationTimeHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
+        double maxTxLoopTime = txLoopTimeHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
+        double maxHousekeepingTime = housekeepingTimeHistory.stream().mapToDouble(Double::doubleValue).max()
+                .orElse(0.0);
+        double maxCommitTime = commitTimeHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
+        double maxAtTime = atTimeHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
+        double maxTxApplyTime = txApplyTimeHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
+        double maxSubscriptionTime = subscriptionTimeHistory.stream().mapToDouble(Double::doubleValue).max()
+                .orElse(0.0);
+        double maxBlockApplyTime = blockApplyTimeHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
+        double maxMiscTime = miscTimeHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
+
         SwingUtilities.invokeLater(() -> {
             pushTimeProgressBar.setMaximum((int) Math.ceil(maxPushTime));
             pushTimeProgressBar.setValue((int) displayPushTime);
-            pushTimeProgressBar.setString(String.format("%d ms - max: %d ms", displayPushTime, maxPushTime));
+            pushTimeProgressBar.setString(String.format("%d ms - max: %.0f ms", displayPushTime, maxPushTime));
             validationTimeProgressBar.setMaximum((int) Math.ceil(maxValidationTime));
             validationTimeProgressBar.setValue((int) displayValidationTime);
             validationTimeProgressBar
-                    .setString(String.format("%d ms - max: %d ms", displayValidationTime, maxValidationTime));
+                    .setString(String.format("%d ms - max: %.0f ms", displayValidationTime, maxValidationTime));
             txLoopTimeProgressBar.setMaximum((int) Math.ceil(maxTxLoopTime));
             txLoopTimeProgressBar.setValue((int) displayTxLoopTime);
-            txLoopTimeProgressBar.setString(String.format("%d ms - max: %d ms", displayTxLoopTime, maxTxLoopTime));
+            txLoopTimeProgressBar.setString(String.format("%d ms - max: %.0f ms", displayTxLoopTime, maxTxLoopTime));
             housekeepingTimeProgressBar.setMaximum((int) Math.ceil(maxHousekeepingTime));
             housekeepingTimeProgressBar.setValue((int) displayHousekeepingTime);
             housekeepingTimeProgressBar
-                    .setString(String.format("%d ms - max: %d ms", displayHousekeepingTime, maxHousekeepingTime));
+                    .setString(String.format("%d ms - max: %.0f ms", displayHousekeepingTime, maxHousekeepingTime));
             commitTimeProgressBar.setMaximum((int) Math.ceil(maxCommitTime));
             commitTimeProgressBar.setValue((int) displayCommitTime);
-            commitTimeProgressBar.setString(String.format("%d ms - max: %d ms", displayCommitTime, maxCommitTime));
+            commitTimeProgressBar.setString(String.format("%d ms - max: %.0f ms", displayCommitTime, maxCommitTime));
             atTimeProgressBar.setMaximum((int) Math.ceil(maxAtTime));
             atTimeProgressBar.setValue((int) displayAtTime);
-            atTimeProgressBar.setString(String.format("%d ms - max: %d ms", displayAtTime, maxAtTime));
+            atTimeProgressBar.setString(String.format("%d ms - max: %.0f ms", displayAtTime, maxAtTime));
             txApplyTimeProgressBar.setMaximum((int) Math.ceil(maxTxApplyTime));
             txApplyTimeProgressBar.setValue((int) displayTxApplyTime);
-            txApplyTimeProgressBar.setString(String.format("%d ms - max: %d ms", displayTxApplyTime, maxTxApplyTime));
+            txApplyTimeProgressBar.setString(String.format("%d ms - max: %.0f ms", displayTxApplyTime, maxTxApplyTime));
             subscriptionTimeProgressBar.setMaximum((int) Math.ceil(maxSubscriptionTime));
             subscriptionTimeProgressBar.setValue((int) displaySubscriptionTime);
             subscriptionTimeProgressBar
-                    .setString(String.format("%d ms - max: %d ms", displaySubscriptionTime, maxSubscriptionTime));
+                    .setString(String.format("%d ms - max: %.0f ms", displaySubscriptionTime, maxSubscriptionTime));
             blockApplyTimeProgressBar.setMaximum((int) Math.ceil(maxBlockApplyTime));
             blockApplyTimeProgressBar.setValue((int) displayBlockApplyTime);
             blockApplyTimeProgressBar
-                    .setString(String.format("%d ms - max: %d ms", displayBlockApplyTime, maxBlockApplyTime));
+                    .setString(String.format("%d ms - max: %.0f ms", displayBlockApplyTime, maxBlockApplyTime));
             miscTimeProgressBar.setMaximum((int) Math.ceil(maxMiscTime));
             miscTimeProgressBar.setValue((int) displayMiscTime);
-            miscTimeProgressBar.setString(String.format("%d ms - max: %d ms", displayMiscTime, maxMiscTime));
+            miscTimeProgressBar.setString(String.format("%d ms - max: %.0f ms", displayMiscTime, maxMiscTime));
 
             // Update timing chart series
             pushTimePerBlockSeries.add(blockHeight, displayPushTime);
@@ -1272,6 +1343,12 @@ public class MetricsPanel extends JPanel {
             if (!atTransactionsPerSecondHistory.isEmpty()) {
                 atTransactionsPerSecondHistory.removeFirst();
             }
+            if (!atTransactionsPerBlockHistory.isEmpty()) {
+                atTransactionsPerBlockHistory.removeFirst();
+            }
+            if (!transactionsPerBlockHistory.isEmpty()) {
+                transactionsPerBlockHistory.removeFirst();
+            }
         }
 
         long timeSpanMs = blockTimestamps.getLast()
@@ -1303,10 +1380,15 @@ public class MetricsPanel extends JPanel {
         double atTransactionsPerSecond = avgAtTransactions * blocksPerSecond;
         atTransactionsPerSecondHistory.add(atTransactionsPerSecond);
 
+        atTransactionsPerBlockHistory.add(avgAtTransactions);
+        atCountHistory.add(avgAtCount);
+        transactionsPerBlockHistory.add(avgTransactions);
         double maxBlocksPerSecond = blocksPerSecondHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
-        int maxTransactionsPerBlock = transactionCounts.stream().mapToInt(Integer::intValue).max().orElse(0);
-        int maxAtTransactionsPerBlock = atTransactionCounts.stream().mapToInt(Integer::intValue).max().orElse(0);
-        int maxAtCount = atCounts.stream().mapToInt(Integer::intValue).max().orElse(0);
+        double maxTransactionsPerBlock = transactionsPerBlockHistory.stream().mapToDouble(Double::doubleValue).max()
+                .orElse(0.0);
+        double maxAtTransactionsPerBlock = atTransactionsPerBlockHistory.stream().mapToDouble(Double::doubleValue).max()
+                .orElse(0.0);
+        double maxAtCount = atCountHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
         double maxTransactionsPerSecond = transactionsPerSecondHistory.stream().mapToDouble(Double::doubleValue).max()
                 .orElse(0.0);
         double maxAtTransactionsPerSecond = atTransactionsPerSecondHistory.stream().mapToDouble(Double::doubleValue)
@@ -1337,37 +1419,37 @@ public class MetricsPanel extends JPanel {
 
             blocksPerSecondSeries.add(block.getHeight(), blocksPerSecond);
             transactionsPerBlockSeries.add(block.getHeight(), avgTransactions);
-            blocksPerSecondProgressBar.setMaximum((int) Math.ceil(maxBlocksPerSecond));
-            blocksPerSecondProgressBar.setValue((int) (blocksPerSecond));
+            blocksPerSecondProgressBar.setMaximum((int) Math.ceil(maxBlocksPerSecond * 100));
+            blocksPerSecondProgressBar.setValue((int) (blocksPerSecond * 100));
             blocksPerSecondProgressBar
                     .setString(String.format("%.2f - max: %.2f", blocksPerSecond, maxBlocksPerSecond));
 
             transactionsPerSecondSeries.add(block.getHeight(), transactionsPerSecond);
-            transactionsPerSecondProgressBar.setMaximum((int) Math.ceil(maxTransactionsPerSecond));
-            transactionsPerSecondProgressBar.setValue((int) transactionsPerSecond);
+            transactionsPerSecondProgressBar.setMaximum((int) Math.ceil(maxTransactionsPerSecond * 100));
+            transactionsPerSecondProgressBar.setValue((int) (transactionsPerSecond * 100));
             transactionsPerSecondProgressBar
                     .setString(String.format("%.2f - max: %.2f", transactionsPerSecond, maxTransactionsPerSecond));
 
-            transactionsPerBlockProgressBar.setMaximum(maxTransactionsPerBlock);
-            transactionsPerBlockProgressBar.setValue((int) avgTransactions);
+            transactionsPerBlockProgressBar.setMaximum((int) Math.ceil(maxTransactionsPerBlock * 100));
+            transactionsPerBlockProgressBar.setValue((int) (avgTransactions * 100));
             transactionsPerBlockProgressBar
-                    .setString(String.format("%.2f - max: %d", avgTransactions, maxTransactionsPerBlock));
+                    .setString(String.format("%.2f - max: %.2f", avgTransactions, maxTransactionsPerBlock));
 
             atTransactionsPerBlockSeries.add(block.getHeight(), avgAtTransactions);
-            atTransactionsPerBlockProgressBar.setMaximum(maxAtTransactionsPerBlock);
-            atTransactionsPerBlockProgressBar.setValue((int) avgAtTransactions);
+            atTransactionsPerBlockProgressBar.setMaximum((int) Math.ceil(maxAtTransactionsPerBlock * 100));
+            atTransactionsPerBlockProgressBar.setValue((int) (avgAtTransactions * 100));
             atTransactionsPerBlockProgressBar
-                    .setString(String.format("%.2f - max: %d", avgAtTransactions, maxAtTransactionsPerBlock));
+                    .setString(String.format("%.2f - max: %.2f", avgAtTransactions, maxAtTransactionsPerBlock));
 
             atCountPerBlockSeries.add(block.getHeight(), avgAtCount);
-            atCountProgressBar.setMaximum(maxAtCount);
-            atCountProgressBar.setValue((int) avgAtCount);
+            atCountProgressBar.setMaximum((int) Math.ceil(maxAtCount * 100));
+            atCountProgressBar.setValue((int) (avgAtCount * 100));
             atCountProgressBar
-                    .setString(String.format("%.2f - max: %d", avgAtCount, maxAtCount));
+                    .setString(String.format("%.2f - max: %.2f", avgAtCount, maxAtCount));
 
-            systemTransactionsPerSecondProgressBar.setMaximum((int) Math.ceil(maxAtTransactionsPerSecond));
+            systemTransactionsPerSecondProgressBar.setMaximum((int) Math.ceil(maxAtTransactionsPerSecond * 100));
             atTransactionsPerSecondSeries.add(block.getHeight(), atTransactionsPerSecond);
-            systemTransactionsPerSecondProgressBar.setValue((int) atTransactionsPerSecond);
+            systemTransactionsPerSecondProgressBar.setValue((int) (atTransactionsPerSecond * 100));
             systemTransactionsPerSecondProgressBar
                     .setString(
                             String.format("%.2f - max: %.2f", atTransactionsPerSecond, maxAtTransactionsPerSecond));
