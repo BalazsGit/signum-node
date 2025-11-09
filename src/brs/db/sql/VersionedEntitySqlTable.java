@@ -164,14 +164,19 @@ public abstract class VersionedEntitySqlTable<T> extends EntitySqlTable<T> imple
             logger.debug("Total trimmed {} rows from {} below height {}",
                     totalDeleted, tableClass.getName(), height);
 
-            int deletedNotLatest = ctx.deleteFrom(tableClass)
-                    .where(heightField.lt(height).and(latestField.isFalse()))
-                    .execute();
-
-            if (deletedNotLatest > 0) {
-                logger.debug("Trimming {} removed {} obsolete non-latest elements below height {}",
-                        tableClass, deletedNotLatest, height);
+            int totalDeletedNotLatest = 0;
+            while (true) {
+                int deletedInBatch = ctx.deleteFrom(tableClass)
+                        .where(heightField.lt(height).and(latestField.isFalse()))
+                        .limit(deleteBatchSize)
+                        .execute();
+                totalDeletedNotLatest += deletedInBatch;
+                if (deletedInBatch < deleteBatchSize) {
+                    break;
+                }
             }
+            logger.debug("Trimming {} removed {} obsolete elements (latest = 0) below height {}",
+                    tableClass.getName(), totalDeletedNotLatest, height);
         });
     }
 
