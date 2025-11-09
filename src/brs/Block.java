@@ -41,6 +41,7 @@ public class Block {
     private final byte[] generationSignature;
     private final byte[] payloadHash;
     private final AtomicReference<List<Transaction>> blockTransactions = new AtomicReference<>();
+    private final AtomicReference<List<Transaction>> allBlockTransactions = new AtomicReference<>();
 
     private byte[] blockSignature;
 
@@ -271,7 +272,12 @@ public class Block {
     }
 
     public List<Transaction> getAllTransactions() {
-        return Collections.unmodifiableList(transactionDb().findBlockTransactions(getId(), false));
+        if (allBlockTransactions.get() == null) {
+            this.allBlockTransactions
+                    .set(Collections.unmodifiableList(transactionDb().findBlockTransactions(getId(), false)));
+            this.allBlockTransactions.get().forEach(transaction -> transaction.setBlock(this));
+        }
+        return allBlockTransactions.get();
     }
 
     public long getBaseTarget() {

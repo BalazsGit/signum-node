@@ -513,7 +513,6 @@ public class MetricsPanel extends JPanel {
                     BlockchainProcessor.Event.NET_VOLUME_CHANGED);
             blockchainProcessor.addListener(this::onPerformanceStatsUpdated,
                     BlockchainProcessor.Event.PERFORMANCE_STATS_UPDATED);
-            blockchainProcessor.addListener(this::onBlockPushed, BlockchainProcessor.Event.BLOCK_PUSHED);
         }
     }
 
@@ -538,11 +537,7 @@ public class MetricsPanel extends JPanel {
     public void onPerformanceStatsUpdated(Block block) {
         BlockchainProcessor.PerformanceStats stats = Signum.getBlockchainProcessor().getPerformanceStats();
         if (stats != null && block != null) {
-            chartUpdateExecutor.submit(() -> updateTimingChart(stats.totalTimeMs, stats.validationTimeMs,
-                    stats.txLoopTimeMs,
-                    stats.housekeepingTimeMs, stats.txApplyTimeMs, stats.atTimeMs,
-                    stats.subscriptionTimeMs, stats.blockApplyTimeMs, stats.commitTimeMs,
-                    stats.miscTimeMs, block));
+            chartUpdateExecutor.submit(() -> updateAllCharts(stats));
         }
     }
 
@@ -574,13 +569,6 @@ public class MetricsPanel extends JPanel {
                 }
             }
         });
-    }
-
-    private void onBlockPushed(Block block) {
-        if (block == null) {
-            return;
-        }
-        chartUpdateExecutor.submit(() -> updatePerformanceChart(block));
     }
 
     private JProgressBar createProgressBar(int min, int max, Color color, String initialString, Dimension size) {
@@ -807,9 +795,13 @@ public class MetricsPanel extends JPanel {
         return String.format("%.2f %s/s", bytesPerSecond, units[unitIndex]);
     }
 
-    private void updateTimingChart(long totalTimeMs, long validationTimeMs, long txLoopTimeMs, long housekeepingTimeMs,
-            long txApplyTimeMs, long atTimeMs, long subscriptionTimeMs, long blockApplyTimeMs, long commitTimeMs,
-            long miscTimeMs, Block block) {
+    private void updateAllCharts(BlockchainProcessor.PerformanceStats stats) {
+        updateTimingChart(stats);
+        updatePerformanceChart(stats.block);
+    }
+
+    private void updateTimingChart(BlockchainProcessor.PerformanceStats stats) {
+        Block block = stats.block;
 
         if (block == null) {
             return;
@@ -817,16 +809,16 @@ public class MetricsPanel extends JPanel {
 
         int blockHeight = block.getHeight();
 
-        pushTimes.add(totalTimeMs);
-        validationTimes.add(validationTimeMs);
-        txLoopTimes.add(txLoopTimeMs);
-        housekeepingTimes.add(housekeepingTimeMs);
-        txApplyTimes.add(txApplyTimeMs);
-        commitTimes.add(commitTimeMs);
-        atTimes.add(atTimeMs);
-        subscriptionTimes.add(subscriptionTimeMs);
-        blockApplyTimes.add(blockApplyTimeMs);
-        miscTimes.add(miscTimeMs);
+        pushTimes.add(stats.totalTimeMs);
+        validationTimes.add(stats.validationTimeMs);
+        txLoopTimes.add(stats.txLoopTimeMs);
+        housekeepingTimes.add(stats.housekeepingTimeMs);
+        txApplyTimes.add(stats.txApplyTimeMs);
+        commitTimes.add(stats.commitTimeMs);
+        atTimes.add(stats.atTimeMs);
+        subscriptionTimes.add(stats.subscriptionTimeMs);
+        blockApplyTimes.add(stats.blockApplyTimeMs);
+        miscTimes.add(stats.miscTimeMs);
 
         while (pushTimes.size() > CHART_HISTORY_SIZE) {
             pushTimes.removeFirst();
@@ -1245,6 +1237,10 @@ public class MetricsPanel extends JPanel {
     }
 
     private void updatePerformanceChart(Block block) {
+
+        if (block == null) {
+            return;
+        }
 
         blockTimestamps.add(System.currentTimeMillis());
 
