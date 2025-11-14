@@ -801,6 +801,10 @@ public class SignumGUI extends JFrame {
                     if (experimentalActive) {
                         experimentalPanel.setVisible(true);
                         timePanel.setVisible(true);
+
+                        updateLatestBlock(Signum.getBlockchain().getLastBlock());
+                        updatePeerCount(Signum.getBlockchainProcessor().getLastKnownConnectedPeerCount(),
+                                Signum.getBlockchainProcessor().getLastKnownPeerCount());
                     }
                 });
 
