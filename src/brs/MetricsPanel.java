@@ -421,22 +421,44 @@ public class MetricsPanel extends JPanel {
                 barInsets);
 
         // --- Upload Speed ---
+        JPanel uploadSpeedPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
+        uploadSpeedPanel.setOpaque(false);
         tooltip = "The moving average of data upload speed to other peers in the network.\n\nThis reflects how much data your node is sharing, which includes:\n- Blocks\n- Transactions\n- Peer information\n\nThe progress bar displays the current moving average speed.";
         uploadSpeedLabel = createLabel("▲ Speed (MA)", new Color(128, 0, 0), tooltip);
         uploadSpeedProgressBar = createProgressBar(0, MAX_SPEED_BPS, null, "0.00 B/s", progressBarSize2);
-        addComponent(netSpeedInfoPanel, uploadSpeedLabel, 0, 1, 1, 0, 0, GridBagConstraints.LINE_END,
+        uploadSpeedPanel.add(uploadSpeedLabel);
+        uploadSpeedPanel.add(uploadSpeedProgressBar);
+        addComponent(netSpeedInfoPanel, uploadSpeedPanel, 0, 1, 2, 0, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, labelInsets);
-        addComponent(netSpeedInfoPanel, uploadSpeedProgressBar, 1, 1, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+
+        /*
+         * addComponent(netSpeedInfoPanel, uploadSpeedLabel, 0, 1, 1, 0, 0,
+         * GridBagConstraints.LINE_END,
+         * GridBagConstraints.NONE, labelInsets);
+         * addComponent(netSpeedInfoPanel, uploadSpeedProgressBar, 1, 1, 1, 0, 0,
+         * GridBagConstraints.LINE_START,
+         * GridBagConstraints.HORIZONTAL, barInsets);
+         */
 
         // --- Download Speed ---
+        JPanel downloadSpeePanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
+        downloadSpeePanel.setOpaque(false);
         tooltip = "The moving average of data download speed from other peers in the network.\n\nThis indicates how quickly your node is receiving data, which includes:\n- Blocks\n- Transactions\n- Peer information\n\nThe progress bar displays the current moving average speed.";
         downloadSpeedLabel = createLabel("▼ Speed (MA)", new Color(0, 100, 0), tooltip);
         downloadSpeedProgressBar = createProgressBar(0, MAX_SPEED_BPS, null, "0.00 B/s", progressBarSize2);
-        addComponent(netSpeedInfoPanel, downloadSpeedLabel, 0, 2, 1, 0, 0, GridBagConstraints.LINE_END,
+        downloadSpeePanel.add(downloadSpeedLabel);
+        downloadSpeePanel.add(downloadSpeedProgressBar);
+        addComponent(netSpeedInfoPanel, downloadSpeePanel, 0, 2, 2, 0, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, labelInsets);
-        addComponent(netSpeedInfoPanel, downloadSpeedProgressBar, 1, 2, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+
+        /*
+         * addComponent(netSpeedInfoPanel, downloadSpeedLabel, 0, 2, 1, 0, 0,
+         * GridBagConstraints.LINE_END,
+         * GridBagConstraints.NONE, labelInsets);
+         * addComponent(netSpeedInfoPanel, downloadSpeedProgressBar, 1, 2, 1, 0, 0,
+         * GridBagConstraints.LINE_START,
+         * GridBagConstraints.HORIZONTAL, barInsets);
+         */
 
         // --- Combined Volume ---
         JPanel combinedVolumePanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
@@ -456,10 +478,10 @@ public class MetricsPanel extends JPanel {
                 GridBagConstraints.NONE, barInsets);
 
         // --- Moving Average Window ---
+        JPanel maWindowPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
+        maWindowPanel.setOpaque(false);
         tooltip = "The number of recent blocks used to calculate the moving average for performance metrics. A larger window provides a smoother but less responsive trend, while a smaller window is more reactive to recent changes.";
         JLabel maWindowLabel = createLabel("MA Window (Blocks)", null, tooltip);
-        addComponent(netSpeedInfoPanel, maWindowLabel, 0, 4, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
 
         // Define the discrete values for the dropdown
         final Integer[] maWindowValues = { 10, 100, 200, 300, 400, 500 };
@@ -474,8 +496,19 @@ public class MetricsPanel extends JPanel {
                 movingAverageWindow = (Integer) selectedItem;
             }
         });
-        addComponent(netSpeedInfoPanel, movingAverageComboBox, 1, 4, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+
+        maWindowPanel.add(maWindowLabel);
+        maWindowPanel.add(movingAverageComboBox);
+        addComponent(netSpeedInfoPanel, maWindowPanel, 0, 4, 2, 0, 0, GridBagConstraints.CENTER,
+                GridBagConstraints.NONE, new Insets(2, 0, 2, 0));
+
+        // addComponent(netSpeedInfoPanel, maWindowLabel, 0, 4, 1, 0, 0,
+        // GridBagConstraints.LINE_END,
+        // GridBagConstraints.NONE, labelInsets);
+
+        // addComponent(netSpeedInfoPanel, movingAverageComboBox, 1, 4, 1, 0, 0,
+        // GridBagConstraints.LINE_START,
+        // GridBagConstraints.HORIZONTAL, barInsets);
 
         netSpeedChartContainer.add(netSpeedInfoPanel);
         addComponent(this, netSpeedChartContainer, 3, 0, 1, 0, 0, GridBagConstraints.NORTH,
@@ -742,12 +775,6 @@ public class MetricsPanel extends JPanel {
                     .mapToDouble(d -> d)
                     .average().orElse(0.0);
 
-            uploadSpeedMAHistory.add(avgUploadSpeed);
-            downloadSpeedMAHistory.add(avgDownloadSpeed);
-
-            double maxUploadSpeedMA = uploadSpeedMAHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
-            double maxDownloadSpeedMA = downloadSpeedMAHistory.stream().mapToDouble(Double::doubleValue).max()
-                    .orElse(0.0);
             lastNetVolumeUpdateTime = currentTime;
             lastUploadedVolume = uploadedVolume;
             lastDownloadedVolume = downloadedVolume;
@@ -761,11 +788,24 @@ public class MetricsPanel extends JPanel {
                     metricsDownloadVolumeLabel.setText("▼ " + formatDataSize(downloadedVolume));
                 }
 
+                uploadSpeedMAHistory.add(avgUploadSpeed);
+                if (uploadSpeedMAHistory.size() > SPEED_HISTORY_SIZE) {
+                    uploadSpeedMAHistory.removeFirst();
+                }
+                double maxUploadSpeedMA = uploadSpeedMAHistory.stream().mapToDouble(Double::doubleValue).max()
+                        .orElse(0.0);
                 uploadSpeedProgressBar.setMaximum((int) Math.ceil(maxUploadSpeedMA));
-                uploadSpeedProgressBar.setValue((int) Math.min(avgUploadSpeed, maxUploadSpeedMA));
+                uploadSpeedProgressBar.setValue((int) avgUploadSpeed);
                 uploadSpeedProgressBar.setString(formatDataRate(avgUploadSpeed));
+
+                downloadSpeedMAHistory.add(avgDownloadSpeed);
+                if (downloadSpeedMAHistory.size() > SPEED_HISTORY_SIZE) {
+                    downloadSpeedMAHistory.removeFirst();
+                }
+                double maxDownloadSpeedMA = downloadSpeedMAHistory.stream().mapToDouble(Double::doubleValue).max()
+                        .orElse(0.0);
                 downloadSpeedProgressBar.setMaximum((int) Math.ceil(maxDownloadSpeedMA));
-                downloadSpeedProgressBar.setValue((int) Math.min(avgDownloadSpeed, maxDownloadSpeedMA));
+                downloadSpeedProgressBar.setValue((int) avgDownloadSpeed);
                 downloadSpeedProgressBar.setString(formatDataRate(avgDownloadSpeed));
 
                 if (uploadedVolume > 0 || downloadedVolume > 0) {
@@ -1316,7 +1356,8 @@ public class MetricsPanel extends JPanel {
         blockTimestamps.add(System.currentTimeMillis());
 
         int allTxCount = block.getAllTransactions().size();
-        int systemTxCount = block.getAllTransactions().size() - block.getTransactions().size();
+        int signedTxCount = block.getTransactions().size();
+        int systemTxCount = allTxCount - signedTxCount;
         int atCount = 0;
         if (block.getBlockAts() != null) {
             try {
