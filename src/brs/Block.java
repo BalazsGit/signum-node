@@ -42,7 +42,9 @@ public class Block {
     private final byte[] payloadHash;
     private final AtomicReference<List<Transaction>> blockTransactions = new AtomicReference<>();
     private final AtomicReference<List<Transaction>> allBlockTransactions = new AtomicReference<>();
-
+    private List<Transaction> atTransactions = new ArrayList<>();
+    private List<Transaction> subscriptionTransactions = new ArrayList<>();
+    private List<Transaction> escrowTransactions = new ArrayList<>();
     private byte[] blockSignature;
 
     private BigInteger cumulativeDifficulty = BigInteger.ZERO;
@@ -263,36 +265,58 @@ public class Block {
 
     public List<Transaction> getTransactions() {
         List<Transaction> transactions = blockTransactions.get();
-        if (transactions != null) {
-            return transactions;
+        if (transactions == null) {
+            synchronized (this) {
+                transactions = blockTransactions.get();
+                if (transactions == null) {
+                    List<Transaction> newTransactions = transactionDb().findBlockTransactions(getId(), true);
+                    newTransactions.forEach(transaction -> transaction.setBlock(this));
+                    transactions = Collections.unmodifiableList(newTransactions);
+                    blockTransactions.set(transactions);
+                }
+            }
         }
-
-        List<Transaction> newTransactions = Collections
-                .unmodifiableList(transactionDb().findBlockTransactions(getId(), true));
-
-        if (blockTransactions.compareAndSet(null, newTransactions)) {
-            newTransactions.forEach(transaction -> transaction.setBlock(this));
-            return newTransactions;
-        }
-
-        return blockTransactions.get();
+        return transactions;
     }
 
     public List<Transaction> getAllTransactions() {
         List<Transaction> transactions = allBlockTransactions.get();
-        if (transactions != null) {
-            return transactions;
+        if (transactions == null) {
+            synchronized (this) {
+                transactions = allBlockTransactions.get();
+                if (transactions == null) {
+                    List<Transaction> newTransactions = transactionDb().findBlockTransactions(getId(), false);
+                    newTransactions.forEach(transaction -> transaction.setBlock(this));
+                    transactions = Collections.unmodifiableList(newTransactions);
+                    allBlockTransactions.set(transactions);
+                }
+            }
         }
+        return transactions;
+    }
 
-        List<Transaction> newTransactions = Collections
-                .unmodifiableList(transactionDb().findBlockTransactions(getId(), false));
+    public void setAtTransactions(List<Transaction> transactions) {
+        this.atTransactions = transactions;
+    }
 
-        if (allBlockTransactions.compareAndSet(null, newTransactions)) {
-            newTransactions.forEach(transaction -> transaction.setBlock(this));
-            return newTransactions;
-        }
+    public List<Transaction> getAtTransactions() {
+        return Collections.unmodifiableList(this.atTransactions);
+    }
 
-        return allBlockTransactions.get();
+    public void setSubscriptionTransactions(List<Transaction> transactions) {
+        this.subscriptionTransactions = transactions;
+    }
+
+    public List<Transaction> getSubscriptionTransactions() {
+        return Collections.unmodifiableList(this.subscriptionTransactions);
+    }
+
+    public void setEscrowTransactions(List<Transaction> transactions) {
+        this.escrowTransactions = transactions;
+    }
+
+    public List<Transaction> getEscrowTransactions() {
+        return Collections.unmodifiableList(this.escrowTransactions);
     }
 
     public long getBaseTarget() {
