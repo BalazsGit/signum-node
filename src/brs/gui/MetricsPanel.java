@@ -1,4 +1,4 @@
-package brs;
+package brs.gui;
 
 import org.jfree.chart.ChartFactory;
 import org.jfree.chart.ChartPanel;
@@ -13,22 +13,25 @@ import org.jfree.data.xy.XYSeries;
 import org.jfree.data.xy.XYSeriesCollection;
 
 import javax.swing.*;
-import java.awt.*;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
-import java.awt.font.TextAttribute;
-import java.util.HashMap;
-import java.util.Hashtable;
-import java.util.LinkedList;
+import java.awt.event.*;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
+import brs.Signum;
+import brs.BlockchainProcessor;
+import brs.Block;
 import brs.at.AtController;
 import brs.props.Props;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.concurrent.ForkJoinPool;
+import java.awt.*;
+import java.awt.font.TextAttribute;
+import java.util.HashMap;
 
 @SuppressWarnings("serial")
 public class MetricsPanel extends JPanel {
@@ -38,42 +41,27 @@ public class MetricsPanel extends JPanel {
     private static final int SPEED_HISTORY_SIZE = 1000;
     private static final int MAX_SPEED_BPS = 10 * 1024 * 1024; // 10 MB/s
 
-    private final LinkedList<Long> blockTimestamps = new LinkedList<>();
-    private final LinkedList<Integer> transactionCounts = new LinkedList<>();
-    private final LinkedList<Integer> atTransactionCounts = new LinkedList<>();
-    private final LinkedList<Long> pushTimes = new LinkedList<>();
-    private final LinkedList<Long> validationTimes = new LinkedList<>();
-    private final LinkedList<Long> txLoopTimes = new LinkedList<>();
-    private final LinkedList<Long> housekeepingTimes = new LinkedList<>();
-    private final LinkedList<Long> txApplyTimes = new LinkedList<>();
-    private final LinkedList<Long> commitTimes = new LinkedList<>();
-    private final LinkedList<Long> atTimes = new LinkedList<>();
-    private final LinkedList<Long> subscriptionTimes = new LinkedList<>();
-    private final LinkedList<Long> blockApplyTimes = new LinkedList<>();
-    private final LinkedList<Long> miscTimes = new LinkedList<>();
-    private final LinkedList<Integer> atCounts = new LinkedList<>();
-    private final LinkedList<Double> pushTimeHistory = new LinkedList<>();
-    private final LinkedList<Double> validationTimeHistory = new LinkedList<>();
-    private final LinkedList<Double> txLoopTimeHistory = new LinkedList<>();
-    private final LinkedList<Double> housekeepingTimeHistory = new LinkedList<>();
-    private final LinkedList<Double> commitTimeHistory = new LinkedList<>();
-    private final LinkedList<Double> atTimeHistory = new LinkedList<>();
-    private final LinkedList<Double> txApplyTimeHistory = new LinkedList<>();
-    private final LinkedList<Double> subscriptionTimeHistory = new LinkedList<>();
-    private final LinkedList<Double> blockApplyTimeHistory = new LinkedList<>();
-    private final LinkedList<Double> miscTimeHistory = new LinkedList<>();
-    private final LinkedList<Double> atTransactionsPerBlockHistory = new LinkedList<>();
-    private final LinkedList<Double> atCountHistory = new LinkedList<>();
-    private final LinkedList<Double> transactionsPerBlockHistory = new LinkedList<>();
-    private final LinkedList<Double> blocksPerSecondHistory = new LinkedList<>();
-    private final LinkedList<Double> transactionsPerSecondHistory = new LinkedList<>();
-    private final LinkedList<Double> atTransactionsPerSecondHistory = new LinkedList<>();
-    private int movingAverageWindow = 100; // Default value
+    private int movingAverageWindow = 100;
+    private final MovingAverage blockTimestamps = new MovingAverage(CHART_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage transactionCounts = new MovingAverage(CHART_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage systemTransactionCounts = new MovingAverage(CHART_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage pushTimes = new MovingAverage(CHART_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage validationTimes = new MovingAverage(CHART_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage txLoopTimes = new MovingAverage(CHART_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage housekeepingTimes = new MovingAverage(CHART_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage txApplyTimes = new MovingAverage(CHART_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage commitTimes = new MovingAverage(CHART_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage atTimes = new MovingAverage(CHART_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage subscriptionTimes = new MovingAverage(CHART_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage blockApplyTimes = new MovingAverage(CHART_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage miscTimes = new MovingAverage(CHART_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage atCounts = new MovingAverage(CHART_HISTORY_SIZE, movingAverageWindow);
+
     private XYSeries blocksPerSecondSeries;
     private XYSeries transactionsPerSecondSeries;
     private XYSeries transactionsPerBlockSeries;
     private XYSeries atTransactionsPerBlockSeries;
-    private XYSeries atTransactionsPerSecondSeries;
+    private XYSeries systemTransactionsPerSecondSeries;
     private XYSeries pushTimePerBlockSeries;
     private XYSeries uploadSpeedSeries;
     private XYSeries downloadSpeedSeries;
@@ -135,11 +123,20 @@ public class MetricsPanel extends JPanel {
     private ChartPanel timingChartPanel;
     private ChartPanel netSpeedChartPanel;
     private Timer netSpeedChartUpdater;
-
-    private final LinkedList<Double> uploadSpeedHistory = new LinkedList<>();
-    private final LinkedList<Double> downloadSpeedHistory = new LinkedList<>();
-    private final LinkedList<Double> downloadSpeedMAHistory = new LinkedList<>();
-    private final LinkedList<Double> uploadSpeedMAHistory = new LinkedList<>();
+    private final MovingAverage uploadSpeedHistory = new MovingAverage(SPEED_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage downloadSpeedHistory = new MovingAverage(SPEED_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage downloadSpeedMAHistory = new MovingAverage(SPEED_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage uploadSpeedMAHistory = new MovingAverage(SPEED_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage blocksPerSecondHistory = new MovingAverage(CHART_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage transactionsPerSecondHistory = new MovingAverage(CHART_HISTORY_SIZE,
+            movingAverageWindow);
+    private final MovingAverage systemTransactionsPerSecondHistory = new MovingAverage(CHART_HISTORY_SIZE,
+            movingAverageWindow);
+    private final MovingAverage atTransactionsPerBlockHistory = new MovingAverage(CHART_HISTORY_SIZE,
+            movingAverageWindow);
+    private final MovingAverage atCountHistory = new MovingAverage(CHART_HISTORY_SIZE, movingAverageWindow);
+    private final MovingAverage transactionsPerBlockHistory = new MovingAverage(CHART_HISTORY_SIZE,
+            movingAverageWindow);
 
     private XYSeries uploadVolumeSeries;
     private XYSeries downloadVolumeSeries;
@@ -159,6 +156,18 @@ public class MetricsPanel extends JPanel {
     private final ExecutorService chartUpdateExecutor = Executors.newSingleThreadExecutor();
 
     private JProgressBar syncProgressBarDownloadedBlocks;
+
+    // Data Transfer Objects for UI updates
+    private static class TimingUpdateData {
+        Map<JProgressBar, Runnable> progressBarUpdates = new HashMap<>();
+        Map<XYSeries, Point.Double> seriesUpdates = new HashMap<>();
+    }
+
+    private static class PerformanceUpdateData {
+        Map<JProgressBar, Runnable> progressBarUpdates = new HashMap<>();
+        Map<XYSeries, Point.Double> seriesUpdates = new HashMap<>();
+    }
+
     private JProgressBar syncProgressBarUnverifiedBlocks;
     private final JFrame parentFrame;
 
@@ -494,6 +503,20 @@ public class MetricsPanel extends JPanel {
             Object selectedItem = source.getSelectedItem();
             if (selectedItem instanceof Integer) {
                 movingAverageWindow = (Integer) selectedItem;
+                blockTimestamps.setWindowSize(movingAverageWindow);
+                transactionCounts.setWindowSize(movingAverageWindow);
+                systemTransactionCounts.setWindowSize(movingAverageWindow);
+                pushTimes.setWindowSize(movingAverageWindow);
+                validationTimes.setWindowSize(movingAverageWindow);
+                txLoopTimes.setWindowSize(movingAverageWindow);
+                housekeepingTimes.setWindowSize(movingAverageWindow);
+                txApplyTimes.setWindowSize(movingAverageWindow);
+                commitTimes.setWindowSize(movingAverageWindow);
+                atTimes.setWindowSize(movingAverageWindow);
+                subscriptionTimes.setWindowSize(movingAverageWindow);
+                blockApplyTimes.setWindowSize(movingAverageWindow);
+                miscTimes.setWindowSize(movingAverageWindow);
+                atCounts.setWindowSize(movingAverageWindow);
             }
         });
 
@@ -751,84 +774,48 @@ public class MetricsPanel extends JPanel {
 
             // Add current speed to history and maintain size
             uploadSpeedHistory.add(currentUploadSpeed);
-            if (uploadSpeedHistory.size() > SPEED_HISTORY_SIZE) {
-                uploadSpeedHistory.removeFirst();
-            }
-
             downloadSpeedHistory.add(currentDownloadSpeed);
-            if (downloadSpeedHistory.size() > SPEED_HISTORY_SIZE) {
-                downloadSpeedHistory.removeFirst();
-            }
 
             int currentWindowSize = Math.min(uploadSpeedHistory.size(), movingAverageWindow);
             if (currentWindowSize < 1) {
                 return;
             }
 
-            double avgUploadSpeed = uploadSpeedHistory.stream()
-                    .skip(Math.max(0, uploadSpeedHistory.size() - currentWindowSize))
-                    .mapToDouble(d -> d)
-                    .average().orElse(0.0);
-
-            double avgDownloadSpeed = downloadSpeedHistory.stream()
-                    .skip(Math.max(0, downloadSpeedHistory.size() - currentWindowSize))
-                    .mapToDouble(d -> d)
-                    .average().orElse(0.0);
+            double avgUploadSpeed = uploadSpeedHistory.getAverage();
+            double avgDownloadSpeed = downloadSpeedHistory.getAverage();
 
             lastNetVolumeUpdateTime = currentTime;
             lastUploadedVolume = uploadedVolume;
             lastDownloadedVolume = downloadedVolume;
 
             // --- UI Updates on EDT ---
-            SwingUtilities.invokeLater(() -> {
-                if (metricsUploadVolumeLabel != null) {
-                    metricsUploadVolumeLabel.setText("▲ " + formatDataSize(uploadedVolume));
-                }
-                if (metricsDownloadVolumeLabel != null) {
-                    metricsDownloadVolumeLabel.setText("▼ " + formatDataSize(downloadedVolume));
-                }
-
-                uploadSpeedMAHistory.add(avgUploadSpeed);
-                if (uploadSpeedMAHistory.size() > SPEED_HISTORY_SIZE) {
-                    uploadSpeedMAHistory.removeFirst();
-                }
-                double maxUploadSpeedMA = uploadSpeedMAHistory.stream().mapToDouble(Double::doubleValue).max()
-                        .orElse(0.0);
-                uploadSpeedProgressBar.setMaximum((int) Math.ceil(maxUploadSpeedMA));
-                uploadSpeedProgressBar.setValue((int) avgUploadSpeed);
-                uploadSpeedProgressBar.setString(formatDataRate(avgUploadSpeed));
-
-                downloadSpeedMAHistory.add(avgDownloadSpeed);
-                if (downloadSpeedMAHistory.size() > SPEED_HISTORY_SIZE) {
-                    downloadSpeedMAHistory.removeFirst();
-                }
-                double maxDownloadSpeedMA = downloadSpeedMAHistory.stream().mapToDouble(Double::doubleValue).max()
-                        .orElse(0.0);
-                downloadSpeedProgressBar.setMaximum((int) Math.ceil(maxDownloadSpeedMA));
-                downloadSpeedProgressBar.setValue((int) avgDownloadSpeed);
-                downloadSpeedProgressBar.setString(formatDataRate(avgDownloadSpeed));
-
-                if (uploadedVolume > 0 || downloadedVolume > 0) {
-                    uploadSpeedSeries.add(currentTime, avgUploadSpeed);
-                    downloadSpeedSeries.add(currentTime, avgDownloadSpeed);
-                    uploadVolumeSeries.add(currentTime, uploadedVolume);
-                    downloadVolumeSeries.add(currentTime, downloadedVolume);
-
-                    while (uploadSpeedSeries.getItemCount() > SPEED_HISTORY_SIZE) {
-                        uploadSpeedSeries.remove(0);
-                    }
-                    while (downloadSpeedSeries.getItemCount() > SPEED_HISTORY_SIZE) {
-                        downloadSpeedSeries.remove(0);
-                    }
-                    while (uploadVolumeSeries.getItemCount() > SPEED_HISTORY_SIZE) {
-                        uploadVolumeSeries.remove(0);
-                    }
-                    while (downloadVolumeSeries.getItemCount() > SPEED_HISTORY_SIZE) {
-                        downloadVolumeSeries.remove(0);
-                    }
-                }
-            });
+            SwingUtilities.invokeLater(() -> updateNetSpeedUI(currentTime, uploadedVolume, downloadedVolume,
+                    avgUploadSpeed, avgDownloadSpeed));
         });
+    }
+
+    private void updateNetSpeedUI(long currentTime, long uploadedVolume, long downloadedVolume, double avgUploadSpeed,
+            double avgDownloadSpeed) {
+        if (metricsUploadVolumeLabel != null) {
+            metricsUploadVolumeLabel.setText("▲ " + formatDataSize(uploadedVolume));
+        }
+        if (metricsDownloadVolumeLabel != null) {
+            metricsDownloadVolumeLabel.setText("▼ " + formatDataSize(downloadedVolume));
+        }
+
+        uploadSpeedMAHistory.add(avgUploadSpeed);
+        updateProgressBar(uploadSpeedProgressBar, avgUploadSpeed, uploadSpeedMAHistory.getMax(), this::formatDataRate);
+
+        downloadSpeedMAHistory.add(avgDownloadSpeed);
+        updateProgressBar(downloadSpeedProgressBar, avgDownloadSpeed, downloadSpeedMAHistory.getMax(),
+                this::formatDataRate);
+
+        if (uploadedVolume > 0 || downloadedVolume > 0) {
+            updateChartSeries(uploadSpeedSeries, currentTime, avgUploadSpeed, SPEED_HISTORY_SIZE);
+            updateChartSeries(downloadSpeedSeries, currentTime, avgDownloadSpeed, SPEED_HISTORY_SIZE);
+            updateChartSeries(uploadVolumeSeries, currentTime, uploadedVolume, SPEED_HISTORY_SIZE);
+            updateChartSeries(downloadVolumeSeries, currentTime, downloadedVolume, SPEED_HISTORY_SIZE);
+        }
     }
 
     private void updateNetVolume(long uploadedVolume, long downloadedVolume) {
@@ -863,16 +850,41 @@ public class MetricsPanel extends JPanel {
     }
 
     private void updateAllCharts(BlockchainProcessor.PerformanceStats stats) {
-        updateTimingChart(stats);
-        updatePerformanceChart(stats.block);
+        // Run independent calculations in parallel using CompletableFuture
+        CompletableFuture<TimingUpdateData> timingFuture = CompletableFuture
+                .supplyAsync(() -> calculateTimingUpdate(stats), ForkJoinPool.commonPool());
+        CompletableFuture<PerformanceUpdateData> performanceFuture = CompletableFuture
+                .supplyAsync(() -> calculatePerformanceUpdate(stats.block), ForkJoinPool.commonPool());
+
+        // Wait for both to complete and then update the UI in a single batch on the EDT
+        CompletableFuture.allOf(timingFuture, performanceFuture).thenRun(() -> {
+            try {
+                TimingUpdateData timingData = timingFuture.get();
+                PerformanceUpdateData performanceData = performanceFuture.get();
+
+                // Schedule a single UI update on the EDT
+                SwingUtilities.invokeLater(() -> {
+                    // Apply timing updates
+                    timingData.progressBarUpdates.values().forEach(Runnable::run);
+                    timingData.seriesUpdates.forEach(
+                            (series, point) -> updateChartSeries(series, point.x, point.y, CHART_HISTORY_SIZE));
+
+                    // Apply performance updates
+                    performanceData.progressBarUpdates.values().forEach(Runnable::run);
+                    performanceData.seriesUpdates.forEach(
+                            (series, point) -> updateChartSeries(series, point.x, point.y, CHART_HISTORY_SIZE));
+                });
+            } catch (Exception e) {
+                LOGGER.error("Error updating charts in parallel", e);
+            }
+        });
     }
 
-    private void updateTimingChart(BlockchainProcessor.PerformanceStats stats) {
+    private TimingUpdateData calculateTimingUpdate(BlockchainProcessor.PerformanceStats stats) {
         Block block = stats.block;
-
-        if (block == null) {
-            return;
-        }
+        TimingUpdateData data = new TimingUpdateData();
+        if (block == null)
+            return data;
 
         int blockHeight = block.getHeight();
 
@@ -887,237 +899,94 @@ public class MetricsPanel extends JPanel {
         blockApplyTimes.add(stats.blockApplyTimeMs);
         miscTimes.add(stats.miscTimeMs);
 
-        while (pushTimes.size() > CHART_HISTORY_SIZE) {
-            pushTimes.removeFirst();
-        }
-        while (validationTimes.size() > CHART_HISTORY_SIZE) {
-            validationTimes.removeFirst();
-        }
-        while (txLoopTimes.size() > CHART_HISTORY_SIZE) {
-            txLoopTimes.removeFirst();
-        }
-        while (housekeepingTimes.size() > CHART_HISTORY_SIZE) {
-            housekeepingTimes.removeFirst();
-        }
-        while (commitTimes.size() > CHART_HISTORY_SIZE) {
-            commitTimes.removeFirst();
-        }
-        while (atTimes.size() > CHART_HISTORY_SIZE) {
-            atTimes.removeFirst();
-        }
-        while (txApplyTimes.size() > CHART_HISTORY_SIZE) {
-            txApplyTimes.removeFirst();
-        }
-        while (subscriptionTimes.size() > CHART_HISTORY_SIZE) {
-            subscriptionTimes.removeFirst();
-        }
-        while (blockApplyTimes.size() > CHART_HISTORY_SIZE) {
-            blockApplyTimes.removeFirst();
-        }
-        while (miscTimes.size() > CHART_HISTORY_SIZE) {
-            miscTimes.removeFirst();
-        }
-        while (pushTimeHistory.size() > CHART_HISTORY_SIZE) {
-            pushTimeHistory.removeFirst();
-        }
-        while (validationTimeHistory.size() > CHART_HISTORY_SIZE) {
-            validationTimeHistory.removeFirst();
-        }
-        while (txLoopTimeHistory.size() > CHART_HISTORY_SIZE) {
-            txLoopTimeHistory.removeFirst();
-        }
-        while (housekeepingTimeHistory.size() > CHART_HISTORY_SIZE) {
-            housekeepingTimeHistory.removeFirst();
-        }
-        while (commitTimeHistory.size() > CHART_HISTORY_SIZE) {
-            commitTimeHistory.removeFirst();
-        }
-        while (atTimeHistory.size() > CHART_HISTORY_SIZE) {
-            atTimeHistory.removeFirst();
-        }
-        while (txApplyTimeHistory.size() > CHART_HISTORY_SIZE) {
-            txApplyTimeHistory.removeFirst();
-        }
-        while (subscriptionTimeHistory.size() > CHART_HISTORY_SIZE) {
-            subscriptionTimeHistory.removeFirst();
-        }
-        while (blockApplyTimeHistory.size() > CHART_HISTORY_SIZE) {
-            blockApplyTimeHistory.removeFirst();
-        }
-        while (miscTimeHistory.size() > CHART_HISTORY_SIZE) {
-            miscTimeHistory.removeFirst();
-        }
+        double displayPushTime = pushTimes.getAverage();
+        double displayValidationTime = validationTimes.getAverage();
+        double displayTxLoopTime = txLoopTimes.getAverage();
+        double displayHousekeepingTime = housekeepingTimes.getAverage();
+        double displayCommitTime = commitTimes.getAverage();
+        double displayAtTime = atTimes.getAverage();
+        double displayTxApplyTime = txApplyTimes.getAverage();
+        double displaySubscriptionTime = subscriptionTimes.getAverage();
+        double displayBlockApplyTime = blockApplyTimes.getAverage();
+        double displayMiscTime = miscTimes.getAverage();
 
-        int currentWindowSize = Math.min(pushTimes.size(), movingAverageWindow);
-        if (currentWindowSize < 1) {
-            return;
-        }
+        // Round values to the nearest integer for consistent display
+        long roundedPushTime = Math.round(displayPushTime);
+        long roundedPushTimeMax = Math.round(pushTimes.getMax());
+        long roundedValidationTime = Math.round(displayValidationTime);
+        long roundedValidationTimeMax = Math.round(validationTimes.getMax());
+        long roundedTxLoopTime = Math.round(displayTxLoopTime);
+        long roundedTxLoopTimeMax = Math.round(txLoopTimes.getMax());
+        long roundedHousekeepingTime = Math.round(displayHousekeepingTime);
+        long roundedHousekeepingTimeMax = Math.round(housekeepingTimes.getMax());
+        long roundedCommitTime = Math.round(displayCommitTime);
+        long roundedCommitTimeMax = Math.round(commitTimes.getMax());
+        long roundedAtTime = Math.round(displayAtTime);
+        long roundedAtTimeMax = Math.round(atTimes.getMax());
+        long roundedTxApplyTime = Math.round(displayTxApplyTime);
+        long roundedTxApplyTimeMax = Math.round(txApplyTimes.getMax());
+        long roundedSubscriptionTime = Math.round(displaySubscriptionTime);
+        long roundedSubscriptionTimeMax = Math.round(subscriptionTimes.getMax());
+        long roundedBlockApplyTime = Math.round(displayBlockApplyTime);
+        long roundedBlockApplyTimeMax = Math.round(blockApplyTimes.getMax());
+        long roundedMiscTime = Math.round(displayMiscTime);
+        long roundedMiscTimeMax = Math.round(miscTimes.getMax());
 
-        long displayPushTime = (long) pushTimes.stream()
-                .skip(Math.max(0, pushTimes.size() - currentWindowSize))
-                .mapToLong(Long::longValue)
-                .average().orElse(0.0);
+        // Prepare progress bar updates
+        data.progressBarUpdates.put(pushTimeProgressBar, () -> updateProgressBar(pushTimeProgressBar, roundedPushTime,
+                roundedPushTimeMax, val -> String.format("%.0f ms - max: %.0f ms", val, pushTimes.getMax())));
+        data.progressBarUpdates.put(validationTimeProgressBar,
+                () -> updateProgressBar(validationTimeProgressBar, roundedValidationTime, roundedValidationTimeMax,
+                        val -> String.format("%.0f ms - max: %.0f ms", val, validationTimes.getMax())));
+        data.progressBarUpdates.put(txLoopTimeProgressBar,
+                () -> updateProgressBar(txLoopTimeProgressBar, roundedTxLoopTime, roundedTxLoopTimeMax,
+                        val -> String.format("%.0f ms - max: %.0f ms", val, txLoopTimes.getMax())));
+        data.progressBarUpdates.put(housekeepingTimeProgressBar,
+                () -> updateProgressBar(housekeepingTimeProgressBar, roundedHousekeepingTime,
+                        roundedHousekeepingTimeMax,
+                        val -> String.format("%.0f ms - max: %.0f ms", val, housekeepingTimes.getMax())));
+        data.progressBarUpdates.put(commitTimeProgressBar,
+                () -> updateProgressBar(commitTimeProgressBar, roundedCommitTime, roundedCommitTimeMax,
+                        val -> String.format("%.0f ms - max: %.0f ms", val, commitTimes.getMax())));
+        data.progressBarUpdates.put(atTimeProgressBar, () -> updateProgressBar(atTimeProgressBar, roundedAtTime,
+                roundedAtTimeMax, val -> String.format("%.0f ms - max: %.0f ms", val, atTimes.getMax())));
+        data.progressBarUpdates.put(txApplyTimeProgressBar,
+                () -> updateProgressBar(txApplyTimeProgressBar, roundedTxApplyTime, roundedTxApplyTimeMax,
+                        val -> String.format("%.0f ms - max: %.0f ms", val, txApplyTimes.getMax())));
+        data.progressBarUpdates.put(subscriptionTimeProgressBar,
+                () -> updateProgressBar(subscriptionTimeProgressBar, roundedSubscriptionTime,
+                        roundedSubscriptionTimeMax,
+                        val -> String.format("%.0f ms - max: %.0f ms", val, subscriptionTimes.getMax())));
+        data.progressBarUpdates.put(blockApplyTimeProgressBar,
+                () -> updateProgressBar(blockApplyTimeProgressBar, roundedBlockApplyTime, roundedBlockApplyTimeMax,
+                        val -> String.format("%.0f ms - max: %.0f ms", val, blockApplyTimes.getMax())));
+        data.progressBarUpdates.put(miscTimeProgressBar, () -> updateProgressBar(miscTimeProgressBar, roundedMiscTime,
+                roundedMiscTimeMax, val -> String.format("%.0f ms - max: %.0f ms", val, miscTimes.getMax())));
 
-        long displayValidationTime = (long) validationTimes.stream()
-                .skip(Math.max(0, validationTimes.size() - currentWindowSize))
-                .mapToLong(Long::longValue)
-                .average().orElse(0.0);
+        // Prepare chart series updates
+        data.seriesUpdates.put(pushTimePerBlockSeries, new Point.Double(blockHeight, displayPushTime));
+        data.seriesUpdates.put(validationTimePerBlockSeries, new Point.Double(blockHeight, displayValidationTime));
+        data.seriesUpdates.put(txLoopTimePerBlockSeries, new Point.Double(blockHeight, displayTxLoopTime));
+        data.seriesUpdates.put(housekeepingTimePerBlockSeries, new Point.Double(blockHeight, displayHousekeepingTime));
+        data.seriesUpdates.put(commitTimePerBlockSeries, new Point.Double(blockHeight, displayCommitTime));
+        data.seriesUpdates.put(atTimePerBlockSeries, new Point.Double(blockHeight, displayAtTime));
+        data.seriesUpdates.put(txApplyTimePerBlockSeries, new Point.Double(blockHeight, displayTxApplyTime));
+        data.seriesUpdates.put(subscriptionTimePerBlockSeries, new Point.Double(blockHeight, displaySubscriptionTime));
+        data.seriesUpdates.put(miscTimePerBlockSeries, new Point.Double(blockHeight, displayMiscTime));
+        data.seriesUpdates.put(blockApplyTimePerBlockSeries, new Point.Double(blockHeight, displayBlockApplyTime));
 
-        long displayTxLoopTime = (long) txLoopTimes.stream()
-                .skip(Math.max(0, txLoopTimes.size() - currentWindowSize))
-                .mapToLong(Long::longValue)
-                .average().orElse(0.0);
-
-        long displayHousekeepingTime = (long) housekeepingTimes.stream()
-                .skip(Math.max(0, housekeepingTimes.size() - currentWindowSize))
-                .mapToLong(Long::longValue)
-                .average().orElse(0.0);
-
-        long displayCommitTime = (long) commitTimes.stream()
-                .skip(Math.max(0, commitTimes.size() - currentWindowSize))
-                .mapToLong(Long::longValue)
-                .average().orElse(0.0);
-
-        long displayAtTime = (long) atTimes.stream()
-                .skip(Math.max(0, atTimes.size() - currentWindowSize))
-                .mapToLong(Long::longValue)
-                .average().orElse(0.0);
-
-        long displayTxApplyTime = (long) txApplyTimes.stream()
-                .skip(Math.max(0, txApplyTimes.size() - currentWindowSize))
-                .mapToLong(Long::longValue)
-                .average().orElse(0.0);
-
-        long displaySubscriptionTime = (long) subscriptionTimes.stream()
-                .skip(Math.max(0, subscriptionTimes.size() - currentWindowSize))
-                .mapToLong(Long::longValue)
-                .average().orElse(0.0);
-
-        long displayBlockApplyTime = (long) blockApplyTimes.stream()
-                .skip(Math.max(0, blockApplyTimes.size() - currentWindowSize))
-                .mapToLong(Long::longValue)
-                .average().orElse(0.0);
-
-        long displayMiscTime = (long) miscTimes.stream()
-                .skip(Math.max(0, miscTimes.size() - currentWindowSize))
-                .mapToLong(Long::longValue)
-                .average().orElse(0.0);
-
-        pushTimeHistory.add((double) displayPushTime);
-        validationTimeHistory.add((double) displayValidationTime);
-        txLoopTimeHistory.add((double) displayTxLoopTime);
-        housekeepingTimeHistory.add((double) displayHousekeepingTime);
-        commitTimeHistory.add((double) displayCommitTime);
-        atTimeHistory.add((double) displayAtTime);
-        txApplyTimeHistory.add((double) displayTxApplyTime);
-        subscriptionTimeHistory.add((double) displaySubscriptionTime);
-        blockApplyTimeHistory.add((double) displayBlockApplyTime);
-        miscTimeHistory.add((double) displayMiscTime);
-
-        double maxPushTime = pushTimeHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
-        double maxValidationTime = validationTimeHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
-        double maxTxLoopTime = txLoopTimeHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
-        double maxHousekeepingTime = housekeepingTimeHistory.stream().mapToDouble(Double::doubleValue).max()
-                .orElse(0.0);
-        double maxCommitTime = commitTimeHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
-        double maxAtTime = atTimeHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
-        double maxTxApplyTime = txApplyTimeHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
-        double maxSubscriptionTime = subscriptionTimeHistory.stream().mapToDouble(Double::doubleValue).max()
-                .orElse(0.0);
-        double maxBlockApplyTime = blockApplyTimeHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
-        double maxMiscTime = miscTimeHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
-
-        SwingUtilities.invokeLater(() -> {
-            pushTimeProgressBar.setMaximum((int) Math.ceil(maxPushTime));
-            pushTimeProgressBar.setValue((int) displayPushTime);
-            pushTimeProgressBar.setString(String.format("%d ms - max: %.0f ms", displayPushTime, maxPushTime));
-            validationTimeProgressBar.setMaximum((int) Math.ceil(maxValidationTime));
-            validationTimeProgressBar.setValue((int) displayValidationTime);
-            validationTimeProgressBar
-                    .setString(String.format("%d ms - max: %.0f ms", displayValidationTime, maxValidationTime));
-            txLoopTimeProgressBar.setMaximum((int) Math.ceil(maxTxLoopTime));
-            txLoopTimeProgressBar.setValue((int) displayTxLoopTime);
-            txLoopTimeProgressBar.setString(String.format("%d ms - max: %.0f ms", displayTxLoopTime, maxTxLoopTime));
-            housekeepingTimeProgressBar.setMaximum((int) Math.ceil(maxHousekeepingTime));
-            housekeepingTimeProgressBar.setValue((int) displayHousekeepingTime);
-            housekeepingTimeProgressBar
-                    .setString(String.format("%d ms - max: %.0f ms", displayHousekeepingTime, maxHousekeepingTime));
-            commitTimeProgressBar.setMaximum((int) Math.ceil(maxCommitTime));
-            commitTimeProgressBar.setValue((int) displayCommitTime);
-            commitTimeProgressBar.setString(String.format("%d ms - max: %.0f ms", displayCommitTime, maxCommitTime));
-            atTimeProgressBar.setMaximum((int) Math.ceil(maxAtTime));
-            atTimeProgressBar.setValue((int) displayAtTime);
-            atTimeProgressBar.setString(String.format("%d ms - max: %.0f ms", displayAtTime, maxAtTime));
-            txApplyTimeProgressBar.setMaximum((int) Math.ceil(maxTxApplyTime));
-            txApplyTimeProgressBar.setValue((int) displayTxApplyTime);
-            txApplyTimeProgressBar.setString(String.format("%d ms - max: %.0f ms", displayTxApplyTime, maxTxApplyTime));
-            subscriptionTimeProgressBar.setMaximum((int) Math.ceil(maxSubscriptionTime));
-            subscriptionTimeProgressBar.setValue((int) displaySubscriptionTime);
-            subscriptionTimeProgressBar
-                    .setString(String.format("%d ms - max: %.0f ms", displaySubscriptionTime, maxSubscriptionTime));
-            blockApplyTimeProgressBar.setMaximum((int) Math.ceil(maxBlockApplyTime));
-            blockApplyTimeProgressBar.setValue((int) displayBlockApplyTime);
-            blockApplyTimeProgressBar
-                    .setString(String.format("%d ms - max: %.0f ms", displayBlockApplyTime, maxBlockApplyTime));
-            miscTimeProgressBar.setMaximum((int) Math.ceil(maxMiscTime));
-            miscTimeProgressBar.setValue((int) displayMiscTime);
-            miscTimeProgressBar.setString(String.format("%d ms - max: %.0f ms", displayMiscTime, maxMiscTime));
-
-            // Update timing chart series
-            pushTimePerBlockSeries.add(blockHeight, displayPushTime);
-            validationTimePerBlockSeries.add(blockHeight, displayValidationTime);
-            txLoopTimePerBlockSeries.add(blockHeight, displayTxLoopTime);
-            housekeepingTimePerBlockSeries.add(blockHeight, displayHousekeepingTime);
-            commitTimePerBlockSeries.add(blockHeight, displayCommitTime);
-            atTimePerBlockSeries.add(blockHeight, displayAtTime);
-            txApplyTimePerBlockSeries.add(blockHeight, displayTxApplyTime);
-            subscriptionTimePerBlockSeries.add(blockHeight, displaySubscriptionTime);
-            miscTimePerBlockSeries.add(blockHeight, displayMiscTime);
-            blockApplyTimePerBlockSeries.add(blockHeight, displayBlockApplyTime);
-
-            // Keep history size for timing chart
-            while (pushTimePerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
-                pushTimePerBlockSeries.remove(0);
-            }
-            while (validationTimePerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
-                validationTimePerBlockSeries.remove(0);
-            }
-            while (txLoopTimePerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
-                txLoopTimePerBlockSeries.remove(0);
-            }
-            while (housekeepingTimePerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
-                housekeepingTimePerBlockSeries.remove(0);
-            }
-            while (commitTimePerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
-                commitTimePerBlockSeries.remove(0);
-            }
-            while (atTimePerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
-                atTimePerBlockSeries.remove(0);
-            }
-            while (txApplyTimePerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
-                txApplyTimePerBlockSeries.remove(0);
-            }
-            while (subscriptionTimePerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
-                subscriptionTimePerBlockSeries.remove(0);
-            }
-            while (blockApplyTimePerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
-                blockApplyTimePerBlockSeries.remove(0);
-            }
-            while (miscTimePerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
-                miscTimePerBlockSeries.remove(0);
-            }
-        });
+        return data;
     }
 
     private ChartPanel createPerformanceChartPanel() {
         blocksPerSecondSeries = new XYSeries("Blocks/Second (MA)");
         transactionsPerSecondSeries = new XYSeries("All Txs/Sec (MA)");
-        atTransactionsPerSecondSeries = new XYSeries("User Txs/Sec (MA)");
+        systemTransactionsPerSecondSeries = new XYSeries("System Txs/Sec (MA)");
 
         XYSeriesCollection lineDataset = new XYSeriesCollection();
         lineDataset.addSeries(blocksPerSecondSeries);
         lineDataset.addSeries(transactionsPerSecondSeries);
-        lineDataset.addSeries(atTransactionsPerSecondSeries);
+        lineDataset.addSeries(systemTransactionsPerSecondSeries);
 
         // Create chart with no title or axis labels to save space
         JFreeChart chart = ChartFactory.createXYLineChart(
@@ -1347,18 +1216,23 @@ public class MetricsPanel extends JPanel {
         return chartPanel;
     }
 
-    private void updatePerformanceChart(Block block) {
-
-        if (block == null) {
-            return;
-        }
+    private PerformanceUpdateData calculatePerformanceUpdate(Block block) {
+        PerformanceUpdateData data = new PerformanceUpdateData();
+        if (block == null)
+            return data;
 
         blockTimestamps.add(System.currentTimeMillis());
 
-        int allTxCount = block.getAllTransactions().size();
         int signedTxCount = block.getTransactions().size();
-        int systemTxCount = allTxCount - signedTxCount;
+        int atTxCount = block.getAtTransactions().size();
+        int subscriptionTxCount = block.getSubscriptionTransactions().size();
+        int escrowTxCount = block.getEscrowTransactions().size();
+
+        int systemTxCount = atTxCount + subscriptionTxCount + escrowTxCount;
+        int allTxCount = signedTxCount + systemTxCount;
+
         int atCount = 0;
+
         if (block.getBlockAts() != null) {
             try {
                 atCount = AtController.getATsFromBlock(block.getBlockAts()).size();
@@ -1366,134 +1240,101 @@ public class MetricsPanel extends JPanel {
                 LOGGER.warn("Could not parse ATs from block", e);
             }
         }
-        transactionCounts.add(allTxCount);
-        atTransactionCounts.add(systemTxCount);
-        atCounts.add(atCount);
+        transactionCounts.add((double) allTxCount);
+        systemTransactionCounts.add((double) systemTxCount);
+        atCounts.add((double) atCount);
 
-        while (blockTimestamps.size() > CHART_HISTORY_SIZE) {
-            blockTimestamps.removeFirst();
-            transactionCounts.removeFirst();
-            atTransactionCounts.removeFirst();
-            atCounts.removeFirst();
-            if (!blocksPerSecondHistory.isEmpty()) {
-                blocksPerSecondHistory.removeFirst();
-            }
-            if (!transactionsPerSecondHistory.isEmpty()) {
-                transactionsPerSecondHistory.removeFirst();
-            }
-            if (!atTransactionsPerSecondHistory.isEmpty()) {
-                atTransactionsPerSecondHistory.removeFirst();
-            }
-            if (!atTransactionsPerBlockHistory.isEmpty()) {
-                atTransactionsPerBlockHistory.removeFirst();
-            }
-            if (!transactionsPerBlockHistory.isEmpty()) {
-                transactionsPerBlockHistory.removeFirst();
-            }
-        }
-
-        long timeSpanMs = blockTimestamps.getLast()
+        double timeSpanMs = blockTimestamps.getLast()
                 - blockTimestamps.get(blockTimestamps.size() - Math.min(blockTimestamps.size(), movingAverageWindow));
-        double blocksPerSecond = (timeSpanMs > 0)
-                ? (double) Math.min(blockTimestamps.size(), movingAverageWindow) * 1000.0 / timeSpanMs
-                : 0;
+
+        double blocksPerSecond = 0.0;
+        if (timeSpanMs > 0) {
+            blocksPerSecond = (double) Math.min(blockTimestamps.size(), movingAverageWindow) * 1000.0 / timeSpanMs;
+        }
         blocksPerSecondHistory.add(blocksPerSecond);
+        double avgBlocksPerSecond = blocksPerSecondHistory.getAverage();
+        double maxBlocksPerSecond = blocksPerSecondHistory.getMax();
 
-        double avgTransactions = transactionCounts.stream()
-                .skip(Math.max(0, transactionCounts.size() - Math.min(transactionCounts.size(), movingAverageWindow)))
-                .mapToInt(Integer::intValue)
-                .average().orElse(0.0);
+        double avgTransactions = transactionCounts.getAverage();
+        double avgSystemTransactions = systemTransactionCounts.getAverage();
+        double avgAtCount = atCounts.getAverage();
 
-        double avgAtTransactions = atTransactionCounts.stream()
-                .skip(Math.max(0,
-                        atTransactionCounts.size() - Math.min(atTransactionCounts.size(), movingAverageWindow)))
-                .mapToInt(Integer::intValue)
-                .average().orElse(0.0);
-
-        double avgAtCount = atCounts.stream()
-                .skip(Math.max(0, atCounts.size() - Math.min(atCounts.size(), movingAverageWindow)))
-                .mapToInt(Integer::intValue)
-                .average().orElse(0.0);
-
-        double transactionsPerSecond = avgTransactions * blocksPerSecond;
+        double transactionsPerSecond = 0.0;
+        if (timeSpanMs > 0) {
+            transactionsPerSecond = transactionCounts.getSum() * 1000.0 / timeSpanMs;
+        }
         transactionsPerSecondHistory.add(transactionsPerSecond);
+        double avgTransactionsPerSecond = transactionsPerSecondHistory.getAverage();
+        double maxTransactionsPerSecond = transactionsPerSecondHistory.getMax();
 
-        double atTransactionsPerSecond = avgAtTransactions * blocksPerSecond;
-        atTransactionsPerSecondHistory.add(atTransactionsPerSecond);
-
-        atTransactionsPerBlockHistory.add(avgAtTransactions);
+        double systemTransactionsPerSecond = avgSystemTransactions * blocksPerSecond;
+        systemTransactionsPerSecondHistory.add(systemTransactionsPerSecond);
+        double maxSystemTransactionsPerSecond = systemTransactionsPerSecondHistory.getMax();
+        atTransactionsPerBlockHistory.add(avgSystemTransactions);
+        double maxAtTransactionsPerBlock = atTransactionsPerBlockHistory.getMax();
         atCountHistory.add(avgAtCount);
+        double maxAtCount = atCountHistory.getMax();
         transactionsPerBlockHistory.add(avgTransactions);
-        double maxBlocksPerSecond = blocksPerSecondHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
-        double maxTransactionsPerBlock = transactionsPerBlockHistory.stream().mapToDouble(Double::doubleValue).max()
-                .orElse(0.0);
-        double maxAtTransactionsPerBlock = atTransactionsPerBlockHistory.stream().mapToDouble(Double::doubleValue).max()
-                .orElse(0.0);
-        double maxAtCount = atCountHistory.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
-        double maxTransactionsPerSecond = transactionsPerSecondHistory.stream().mapToDouble(Double::doubleValue).max()
-                .orElse(0.0);
-        double maxAtTransactionsPerSecond = atTransactionsPerSecondHistory.stream().mapToDouble(Double::doubleValue)
-                .max()
-                .orElse(0.0);
+        double maxTransactionsPerBlock = transactionsPerBlockHistory.getMax();
 
-        // Now, schedule only the UI updates on the EDT
-        SwingUtilities.invokeLater(() -> {
-            // Prune series on EDT before adding new data
-            while (blocksPerSecondSeries.getItemCount() >= CHART_HISTORY_SIZE) {
-                blocksPerSecondSeries.remove(0);
-            }
-            while (transactionsPerSecondSeries.getItemCount() >= CHART_HISTORY_SIZE) {
-                transactionsPerSecondSeries.remove(0);
-            }
-            while (transactionsPerBlockSeries.getItemCount() >= CHART_HISTORY_SIZE) {
-                transactionsPerBlockSeries.remove(0);
-            }
-            while (atTransactionsPerBlockSeries.getItemCount() >= CHART_HISTORY_SIZE) {
-                atTransactionsPerBlockSeries.remove(0);
-            }
-            while (atTransactionsPerSecondSeries.getItemCount() >= CHART_HISTORY_SIZE) {
-                atTransactionsPerSecondSeries.remove(0);
-            }
-            while (atCountPerBlockSeries.getItemCount() > CHART_HISTORY_SIZE) {
-                atCountPerBlockSeries.remove(0);
-            }
+        // Prepare chart series updates
+        data.seriesUpdates.put(blocksPerSecondSeries,
+                new Point.Double(block.getHeight(), avgBlocksPerSecond));
+        data.seriesUpdates.put(transactionsPerSecondSeries,
+                new Point.Double(block.getHeight(), avgTransactionsPerSecond));
+        data.seriesUpdates.put(transactionsPerBlockSeries,
+                new Point.Double(block.getHeight(), avgTransactions));
+        data.seriesUpdates.put(atTransactionsPerBlockSeries,
+                new Point.Double(block.getHeight(), avgSystemTransactions));
+        data.seriesUpdates.put(atCountPerBlockSeries,
+                new Point.Double(block.getHeight(), avgAtCount));
+        data.seriesUpdates.put(systemTransactionsPerSecondSeries,
+                new Point.Double(block.getHeight(), systemTransactionsPerSecond));
 
-            blocksPerSecondSeries.add(block.getHeight(), blocksPerSecond);
-            transactionsPerBlockSeries.add(block.getHeight(), avgTransactions);
-            blocksPerSecondProgressBar.setMaximum((int) Math.ceil(maxBlocksPerSecond * 100));
-            blocksPerSecondProgressBar.setValue((int) (blocksPerSecond * 100));
-            blocksPerSecondProgressBar
-                    .setString(String.format("%.2f - max: %.2f", blocksPerSecond, maxBlocksPerSecond));
+        // Prepare progress bar updates
+        data.progressBarUpdates.put(blocksPerSecondProgressBar,
+                () -> updateProgressBar(blocksPerSecondProgressBar, avgBlocksPerSecond, maxBlocksPerSecond,
+                        val -> String.format("%.2f - max: %.2f", val, maxBlocksPerSecond), 100));
+        data.progressBarUpdates.put(transactionsPerSecondProgressBar,
+                () -> updateProgressBar(transactionsPerSecondProgressBar, avgTransactionsPerSecond,
+                        maxTransactionsPerSecond,
+                        val -> String.format("%.2f - max: %.2f", val, maxTransactionsPerSecond), 100));
+        data.progressBarUpdates.put(transactionsPerBlockProgressBar,
+                () -> updateProgressBar(transactionsPerBlockProgressBar, avgTransactions, maxTransactionsPerBlock,
+                        val -> String.format("%.2f - max: %.2f", val, maxTransactionsPerBlock),
+                        100));
+        data.progressBarUpdates.put(atTransactionsPerBlockProgressBar,
+                () -> updateProgressBar(atTransactionsPerBlockProgressBar, avgSystemTransactions,
+                        maxAtTransactionsPerBlock,
+                        val -> String.format("%.2f - max: %.2f", val, maxAtTransactionsPerBlock), 100));
+        data.progressBarUpdates.put(atCountProgressBar,
+                () -> updateProgressBar(atCountProgressBar, avgAtCount, maxAtCount,
+                        val -> String.format("%.2f - max: %.2f", val, maxAtCount), 100));
+        data.progressBarUpdates.put(systemTransactionsPerSecondProgressBar,
+                () -> updateProgressBar(systemTransactionsPerSecondProgressBar, systemTransactionsPerSecond,
+                        maxSystemTransactionsPerSecond,
+                        val -> String.format("%.2f - max: %.2f", val, maxSystemTransactionsPerSecond),
+                        100));
 
-            transactionsPerSecondSeries.add(block.getHeight(), transactionsPerSecond);
-            transactionsPerSecondProgressBar.setMaximum((int) Math.ceil(maxTransactionsPerSecond * 100));
-            transactionsPerSecondProgressBar.setValue((int) (transactionsPerSecond * 100));
-            transactionsPerSecondProgressBar
-                    .setString(String.format("%.2f - max: %.2f", transactionsPerSecond, maxTransactionsPerSecond));
+        return data;
+    }
 
-            transactionsPerBlockProgressBar.setMaximum((int) Math.ceil(maxTransactionsPerBlock * 100));
-            transactionsPerBlockProgressBar.setValue((int) (avgTransactions * 100));
-            transactionsPerBlockProgressBar
-                    .setString(String.format("%.2f - max: %.2f", avgTransactions, maxTransactionsPerBlock));
+    private void updateProgressBar(JProgressBar bar, double value, double max,
+            java.util.function.Function<Double, String> stringFormatter) {
+        updateProgressBar(bar, value, max, stringFormatter, 1);
+    }
 
-            atTransactionsPerBlockSeries.add(block.getHeight(), avgAtTransactions);
-            atTransactionsPerBlockProgressBar.setMaximum((int) Math.ceil(maxAtTransactionsPerBlock * 100));
-            atTransactionsPerBlockProgressBar.setValue((int) (avgAtTransactions * 100));
-            atTransactionsPerBlockProgressBar
-                    .setString(String.format("%.2f - max: %.2f", avgAtTransactions, maxAtTransactionsPerBlock));
+    private void updateProgressBar(JProgressBar bar, double value, double max,
+            java.util.function.Function<Double, String> stringFormatter, int multiplier) {
+        bar.setMaximum((int) (max * multiplier));
+        bar.setValue((int) (value * multiplier));
+        bar.setString(stringFormatter.apply(value));
+    }
 
-            atCountPerBlockSeries.add(block.getHeight(), avgAtCount);
-            atCountProgressBar.setMaximum((int) Math.ceil(maxAtCount * 100));
-            atCountProgressBar.setValue((int) (avgAtCount * 100));
-            atCountProgressBar
-                    .setString(String.format("%.2f - max: %.2f", avgAtCount, maxAtCount));
-
-            systemTransactionsPerSecondProgressBar.setMaximum((int) Math.ceil(maxAtTransactionsPerSecond * 100));
-            atTransactionsPerSecondSeries.add(block.getHeight(), atTransactionsPerSecond);
-            systemTransactionsPerSecondProgressBar.setValue((int) (atTransactionsPerSecond * 100));
-            systemTransactionsPerSecondProgressBar
-                    .setString(
-                            String.format("%.2f - max: %.2f", atTransactionsPerSecond, maxAtTransactionsPerSecond));
-        });
+    private void updateChartSeries(XYSeries series, double x, double y, int maxItems) {
+        while (series.getItemCount() >= maxItems) {
+            series.remove(0);
+        }
+        series.add(x, y);
     }
 }

@@ -1,4 +1,4 @@
-package brs;
+package brs.gui;
 
 import java.awt.*;
 import java.awt.TrayIcon.MessageType;
@@ -39,6 +39,9 @@ import javax.swing.UIManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import brs.Signum;
+import brs.BlockchainProcessor;
+import brs.Block;
 import brs.fluxcapacitor.FluxValues;
 import brs.props.PropertyService;
 import brs.props.Props;
