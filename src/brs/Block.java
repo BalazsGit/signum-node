@@ -24,10 +24,9 @@ import org.slf4j.LoggerFactory;
 
 //TODO: Create JavaDocs and remove this
 @SuppressWarnings({ "checkstyle:MissingJavadocTypeCheck", "checkstyle:MissingJavadocMethodCheck" })
-
 public class Block {
-
     private static final Logger logger = LoggerFactory.getLogger(Block.class);
+
     private final int version;
     private final int timestamp;
     private final long previousBlockId;
@@ -42,13 +41,13 @@ public class Block {
     private final byte[] payloadHash;
     private final AtomicReference<List<Transaction>> blockTransactions = new AtomicReference<>();
     private final AtomicReference<List<Transaction>> allBlockTransactions = new AtomicReference<>();
+    private final AtomicReference<byte[]> cachedBytes = new AtomicReference<>();
+    private final AtomicReference<JsonObject> cachedJsonObject = new AtomicReference<>();
     private List<Transaction> atTransactions = new ArrayList<>();
     private List<Transaction> subscriptionTransactions = new ArrayList<>();
     private List<Transaction> escrowTransactions = new ArrayList<>();
     private byte[] blockSignature;
-
     private BigInteger cumulativeDifficulty = BigInteger.ZERO;
-
     private long baseTarget = Constants.INITIAL_BASE_TARGET;
     private final AtomicLong nextBlockId = new AtomicLong();
     private int height = -1;
@@ -56,12 +55,9 @@ public class Block {
     private final AtomicReference<String> stringId = new AtomicReference<>();
     private final AtomicLong generatorId = new AtomicLong();
     private long nonce;
-
     private BigInteger pocTime = null;
     private long commitment = 0L;
-
     private final byte[] blockAts;
-
     private Peer downloadedFrom = null;
     private int byteLength = 0;
 
@@ -85,7 +81,6 @@ public class Block {
             int height,
             long baseTarget)
             throws SignumException.ValidationException {
-
         if (payloadLength > Signum.getFluxCapacitor().getValue(
                 FluxValues.MAX_PAYLOAD_LENGTH, height)
                 || payloadLength < 0) {
@@ -94,7 +89,6 @@ public class Block {
                             + payloadLength + " height " + height + "previd "
                             + previousBlockId);
         }
-
         this.version = version;
         this.timestamp = timestamp;
         this.previousBlockId = previousBlockId;
@@ -107,7 +101,6 @@ public class Block {
         this.generatorPublicKey = generatorPublicKey;
         this.generationSignature = generationSignature;
         this.blockSignature = blockSignature;
-
         this.previousBlockHash = previousBlockHash;
         if (transactions != null) {
             this.blockTransactions.set(Collections.unmodifiableList(transactions));
@@ -154,7 +147,6 @@ public class Block {
             long nonce,
             byte[] blockAts)
             throws SignumException.ValidationException {
-
         this(
                 version,
                 timestamp,
@@ -174,7 +166,6 @@ public class Block {
                 blockAts,
                 height,
                 baseTarget);
-
         this.cumulativeDifficulty = cumulativeDifficulty == null
                 ? BigInteger.ZERO
                 : cumulativeDifficulty;
@@ -412,29 +403,36 @@ public class Block {
     }
 
     public JsonObject getJsonObject() {
-        JsonObject json = new JsonObject();
-        json.addProperty("version", version);
-        json.addProperty("timestamp", timestamp);
-        json.addProperty("previousBlock", Convert.toUnsignedLong(previousBlockId));
-        json.addProperty("totalAmountNQT", totalAmountNqt);
-        json.addProperty("totalFeeNQT", totalFeeNqt);
-        json.addProperty("totalFeeCashBackNQT", totalFeeCashBackNqt);
-        json.addProperty("totalFeeBurntNQT", totalFeeBurntNqt);
-        json.addProperty("payloadLength", payloadLength);
-        json.addProperty("payloadHash", Convert.toHexString(payloadHash));
-        json.addProperty("generatorPublicKey", Convert.toHexString(generatorPublicKey));
-        json.addProperty("generationSignature", Convert.toHexString(generationSignature));
-        if (version > 1) {
-            json.addProperty("previousBlockHash", Convert.toHexString(previousBlockHash));
+        if (cachedJsonObject.get() == null) {
+            synchronized (this) {
+                if (cachedJsonObject.get() == null) {
+                    JsonObject json = new JsonObject();
+                    json.addProperty("version", version);
+                    json.addProperty("timestamp", timestamp);
+                    json.addProperty("previousBlock", Convert.toUnsignedLong(previousBlockId));
+                    json.addProperty("totalAmountNQT", totalAmountNqt);
+                    json.addProperty("totalFeeNQT", totalFeeNqt);
+                    json.addProperty("totalFeeCashBackNQT", totalFeeCashBackNqt);
+                    json.addProperty("totalFeeBurntNQT", totalFeeBurntNqt);
+                    json.addProperty("payloadLength", payloadLength);
+                    json.addProperty("payloadHash", Convert.toHexString(payloadHash));
+                    json.addProperty("generatorPublicKey", Convert.toHexString(generatorPublicKey));
+                    json.addProperty("generationSignature", Convert.toHexString(generationSignature));
+                    if (version > 1) {
+                        json.addProperty("previousBlockHash", Convert.toHexString(previousBlockHash));
+                    }
+                    json.addProperty("blockSignature", Convert.toHexString(blockSignature));
+                    JsonArray transactionsData = new JsonArray();
+                    getTransactions().forEach(transaction -> transactionsData.add(transaction.getJsonObject()));
+                    json.add("transactions", transactionsData);
+                    json.addProperty("nonce", Convert.toUnsignedLong(nonce));
+                    json.addProperty("baseTarget", Convert.toUnsignedLong(baseTarget));
+                    json.addProperty("blockATs", Convert.toHexString(blockAts));
+                    cachedJsonObject.set(json);
+                }
+            }
         }
-        json.addProperty("blockSignature", Convert.toHexString(blockSignature));
-        JsonArray transactionsData = new JsonArray();
-        getTransactions().forEach(transaction -> transactionsData.add(transaction.getJsonObject()));
-        json.add("transactions", transactionsData);
-        json.addProperty("nonce", Convert.toUnsignedLong(nonce));
-        json.addProperty("baseTarget", Convert.toUnsignedLong(baseTarget));
-        json.addProperty("blockATs", Convert.toHexString(blockAts));
-        return json;
+        return cachedJsonObject.get();
     }
 
     // TODO: See about removing this check suppression:
@@ -470,15 +468,12 @@ public class Block {
             long nonce = Convert.parseUnsignedLong(JSON.getAsString(blockData.get("nonce")));
             long baseTarget = Convert.parseUnsignedLong(
                     JSON.getAsString(blockData.get("baseTarget")));
-
             if (Signum.getFluxCapacitor().getValue(
                     FluxValues.POC_PLUS, height) && baseTarget == 0L) {
                 throw new SignumException.NotValidException("Block received without a baseTarget");
             }
-
             SortedMap<Long, Transaction> blockTransactions = new TreeMap<>();
             JsonArray transactionsData = JSON.getAsJsonArray(blockData.get("transactions"));
-
             for (JsonElement transactionData : transactionsData) {
                 Transaction transaction = Transaction.parseTransaction(
                         JSON.getAsJsonObject(transactionData), height);
@@ -488,7 +483,6 @@ public class Block {
                             "Block contains duplicate transactions: " + transaction.getStringId());
                 }
             }
-
             byte[] blockAts = Convert.parseHexString(JSON.getAsString(blockData.get("blockATs")));
             return new Block(
                     version,
@@ -518,6 +512,28 @@ public class Block {
     }
 
     public byte[] getBytes() {
+        if (cachedBytes.get() == null) {
+            synchronized (this) {
+                if (cachedBytes.get() == null) {
+                    byte[] unsignedBytes = getUnsignedBytes();
+                    ByteBuffer buffer = ByteBuffer.allocate(unsignedBytes.length + blockSignature.length);
+                    buffer.order(ByteOrder.LITTLE_ENDIAN);
+                    buffer.put(unsignedBytes);
+                    if (buffer.limit() - buffer.position() < blockSignature.length) {
+                        logger.error("Something is too large here "
+                                + "- buffer should have {} bytes left but only has {}",
+                                blockSignature.length,
+                                (buffer.limit() - buffer.position()));
+                    }
+                    buffer.put(blockSignature);
+                    cachedBytes.set(buffer.array());
+                }
+            }
+        }
+        return cachedBytes.get();
+    }
+
+    byte[] getUnsignedBytes() {
         ByteBuffer buffer = ByteBuffer.allocate(
                 4
                         + 4
@@ -529,8 +545,7 @@ public class Block {
                         + 32
                         + (32 + 32)
                         + 8
-                        + (blockAts != null ? blockAts.length : 0)
-                        + 64);
+                        + (blockAts != null ? blockAts.length : 0));
         buffer.order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(version);
         buffer.putInt(timestamp);
@@ -554,25 +569,35 @@ public class Block {
         if (blockAts != null) {
             buffer.put(blockAts);
         }
-        if (buffer.limit() - buffer.position() < blockSignature.length) {
-            logger.error("Something is too large here "
-                    + "- buffer should have {} bytes left but only has {}",
-                    blockSignature.length,
-                    (buffer.limit() - buffer.position()));
-        }
-        buffer.put(blockSignature);
         return buffer.array();
     }
 
     void sign(String secretPhrase) {
-        if (blockSignature != null) {
-            throw new IllegalStateException("Block already signed");
+        synchronized (this) {
+            if (blockSignature != null) {
+                throw new IllegalStateException("Block already signed");
+            }
+            // 1. Calculate the unsigned bytes first.
+            byte[] unsignedBytes = getUnsignedBytes();
+
+            // 2. Sign the unsigned bytes to get the block signature.
+            blockSignature = Crypto.sign(unsignedBytes, secretPhrase);
+
+            // 3. Now that blockSignature is available, construct the full signed bytes
+            // and cache them. This ensures cachedBytes always holds the final, signed
+            // state.
+            ByteBuffer buffer = ByteBuffer.allocate(unsignedBytes.length + blockSignature.length);
+            buffer.order(ByteOrder.LITTLE_ENDIAN);
+            buffer.put(unsignedBytes);
+            if (buffer.limit() - buffer.position() < blockSignature.length) {
+                logger.error("Something is too large here "
+                        + "- buffer should have {} bytes left but only has {}",
+                        blockSignature.length,
+                        (buffer.limit() - buffer.position()));
+            }
+            buffer.put(blockSignature);
+            cachedBytes.set(buffer.array()); // Cache the final, signed bytes
         }
-        blockSignature = new byte[64];
-        byte[] data = getBytes();
-        byte[] data2 = new byte[data.length - 64];
-        System.arraycopy(data, 0, data2, 0, data2.length);
-        blockSignature = Crypto.sign(data2, secretPhrase);
     }
 
     public byte[] getBlockAts() {
