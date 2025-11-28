@@ -481,7 +481,7 @@ public class MetricsPanel extends JPanel {
 
         // Cache Fullness
         cacheFullnessLabel = createLabel("Download Cache", null, null); // Tooltip is set in init()
-        cacheFullnessProgressBar = createProgressBar(0, 100, Color.ORANGE, "0 / 0 MB - 0%", progressBarSize1);
+        cacheFullnessProgressBar = createProgressBar(0, 100, Color.ORANGE, "0 / 0 MB | 0%", progressBarSize1);
         addComponent(SyncPanel, cacheFullnessLabel, 0, 0, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
                 labelInsets);
         addComponent(SyncPanel, cacheFullnessProgressBar, 1, 0, 1, 1, 0, GridBagConstraints.LINE_START,
@@ -490,7 +490,7 @@ public class MetricsPanel extends JPanel {
         // Verified / Total Blocks
         tooltip = "Shows the number of blocks in the download queue that have passed PoC verification against the total number of blocks in the queue.\n\n- Verified: PoC signature has been checked (CPU/GPU intensive).\n- Total: All blocks currently in the download queue.\n\nA high number of unverified blocks may indicate a slow verification process.\n\nThe progress bar displays: Verified Blocks / Total Blocks - Percentage of Verified Blocks.";
         JLabel verifLabel = createLabel("Verified / Total Blocks", null, tooltip);
-        syncProgressBarDownloadedBlocks = createProgressBar(0, 100, Color.GREEN, "0 / 0 - 0%", progressBarSize1);
+        syncProgressBarDownloadedBlocks = createProgressBar(0, 100, Color.GREEN, "0 / 0 0%", progressBarSize1);
         addComponent(SyncPanel, verifLabel, 0, 1, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
                 labelInsets);
         addComponent(SyncPanel, syncProgressBarDownloadedBlocks, 1, 1, 1, 1, 0, GridBagConstraints.LINE_START,
@@ -1076,19 +1076,19 @@ public class MetricsPanel extends JPanel {
         cacheFullnessProgressBar.setStringPainted(true);
         cacheFullnessProgressBar
                 .setString(
-                        String.format("%.2f / %.2f MB - %d%%", cacheSizeMB, cacheCapacityMB, cacheFullnessPercentage));
+                        String.format("%.2f / %.2f MB | %d%%", cacheSizeMB, cacheCapacityMB, cacheFullnessPercentage));
         cacheFullnessProgressBar.setMaximum(100);
         cacheFullnessProgressBar.setValue(cacheFullnessPercentage);
         syncProgressBarUnverifiedBlocks.setStringPainted(true);
 
         if (downloadCacheTotalSize != 0) {
             int percentage = (int) (100.0 * downloadCacheVerifiedSize / downloadCacheTotalSize);
-            syncProgressBarDownloadedBlocks.setString(String.format("%d / %d - %d%%", downloadCacheVerifiedSize,
+            syncProgressBarDownloadedBlocks.setString(String.format("%d / %d | %d%%", downloadCacheVerifiedSize,
                     downloadCacheTotalSize, percentage));
             syncProgressBarDownloadedBlocks.setValue(percentage);
 
         } else {
-            syncProgressBarDownloadedBlocks.setString("0 / 0 - 0%");
+            syncProgressBarDownloadedBlocks.setString("0 / 0 | 0%");
             syncProgressBarDownloadedBlocks.setValue(0);
         }
 
