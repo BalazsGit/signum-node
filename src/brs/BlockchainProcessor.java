@@ -25,11 +25,14 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
         public final int unverifiedSize;
         public final int verifiedSize;
         public final int totalSize;
+        public final int cacheFullness;
 
-        public QueueStatus(int unverifiedSize, int verifiedSize, int totalSize) {
+        public QueueStatus(int unverifiedSize, int verifiedSize, int totalSize, int cacheFullness) {
             this.unverifiedSize = unverifiedSize;
             this.verifiedSize = verifiedSize;
             this.totalSize = totalSize;
+            this.cacheFullness = cacheFullness;
+
         }
     }
 
@@ -55,12 +58,19 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
         public final long blockApplyTimeMs;
         public final long commitTimeMs;
         public final long miscTimeMs;
-        public final Block block;
+        public final int height;
+        public final int allTransactionCount;
+        public final int systemTransactionCount;
+        public final int atCount;
+        public final int payloadSize;
+        public final int maxPayloadSize;
 
         public PerformanceStats(long totalTimeMs, long validationTimeMs, long txLoopTimeMs,
                 long housekeepingTimeMs, long txApplyTimeMs, long atTimeMs,
                 long subscriptionTimeMs, long blockApplyTimeMs, long commitTimeMs,
-                long miscTimeMs, Block block) {
+                long miscTimeMs, int height,
+                int allTransactionCount, int systemTransactionCount, int atCount,
+                int payloadSize, int maxPayloadSize) {
             this.totalTimeMs = totalTimeMs;
             this.validationTimeMs = validationTimeMs;
             this.txLoopTimeMs = txLoopTimeMs;
@@ -71,7 +81,12 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
             this.blockApplyTimeMs = blockApplyTimeMs;
             this.commitTimeMs = commitTimeMs;
             this.miscTimeMs = miscTimeMs;
-            this.block = block;
+            this.height = height;
+            this.allTransactionCount = allTransactionCount;
+            this.systemTransactionCount = systemTransactionCount;
+            this.atCount = atCount;
+            this.payloadSize = payloadSize;
+            this.maxPayloadSize = maxPayloadSize;
         }
 
     }

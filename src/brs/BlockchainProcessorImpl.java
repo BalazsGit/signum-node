@@ -664,6 +664,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                                 // we stop the loop since cahce has been locked
                                                 return;
                                             }
+                                            updateAndFireQueueStatus(); // Fire event immediately after adding
                                             if (logger.isDebugEnabled()) {
                                                 logger.debug("Added from download: Id: {} Height: {}", block.getId(),
                                                         block.getHeight());
@@ -1092,7 +1093,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         if (totalSize != lastTotalSize || unverifiedSize != lastUnverifiedQueueSize) {
             lastUnverifiedQueueSize = unverifiedSize;
             lastTotalSize = totalSize;
-            queueStatus.set(new BlockchainProcessor.QueueStatus(unverifiedSize, verifiedSize, totalSize));
+            int downloadCacheFullness = (int) downloadCache.getBlockCacheSize();
+            queueStatus
+                    .set(new BlockchainProcessor.QueueStatus(unverifiedSize, verifiedSize, totalSize,
+                            downloadCacheFullness));
             blockListeners.notify(null, Event.QUEUE_STATUS_CHANGED);
         }
     }
@@ -1751,10 +1755,30 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     + subscriptionTimeMs + blockApplyTimeMs + commitTimeMs;
             long miscTimeMs = totalTimeMs - sumTimeMs;
 
-            performanceStats.set(new BlockchainProcessor.PerformanceStats(
-                    totalTimeMs, validationTimeMs, txLoopTimeMs, housekeepingTimeMs, txApplyTimeMs, atTimeMs,
-                    subscriptionTimeMs, blockApplyTimeMs, commitTimeMs, miscTimeMs, block));
-            blockListeners.notify(block, Event.PERFORMANCE_STATS_UPDATED);
+            int userTransactionCount = block.getTransactions().size();
+            int atTransactionCount = block.getAtTransactions().size();
+            int subscriptionTransactionCount = block.getSubscriptionTransactions().size();
+            int escrowTransactionCount = block.getEscrowTransactions().size();
+            int systemTransactionCount = atTransactionCount + subscriptionTransactionCount
+                    + escrowTransactionCount;
+            int allTransactionCount = userTransactionCount + systemTransactionCount;
+            int atCount = 0;
+
+            if (block.getBlockAts() != null) {
+                try {
+                    atCount = AtController.getATsFromBlock(block.getBlockAts()).size();
+                } catch (Exception e) {
+                    // ignore, as this is for measurement only
+                }
+            }
+
+            int maxPayloadSize = Signum.getFluxCapacitor().getValue(FluxValues.MAX_PAYLOAD_LENGTH, block.getHeight());
+
+            performanceStats.set(new BlockchainProcessor.PerformanceStats(totalTimeMs, validationTimeMs, txLoopTimeMs,
+                    housekeepingTimeMs, txApplyTimeMs, atTimeMs, subscriptionTimeMs, blockApplyTimeMs, commitTimeMs,
+                    miscTimeMs, block.getHeight(), allTransactionCount, systemTransactionCount, atCount,
+                    block.getPayloadLength(), maxPayloadSize));
+            blockListeners.notify(null, Event.PERFORMANCE_STATS_UPDATED);
 
             logger.debug("Successfully pushed {} (height {})", block.getId(), block.getHeight());
             statisticsManager.blockAdded();
@@ -1912,7 +1936,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     stores.commitTransaction();
                     downloadCache.resetCache();
                     atProcessorCache.reset();
-                    ;
                 } catch (RuntimeException e) {
                     stores.rollbackTransaction();
                     logger.debug("Error popping off to {}", commonBlock.getHeight(), e);
