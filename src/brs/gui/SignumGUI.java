@@ -21,6 +21,7 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -81,6 +82,7 @@ public class SignumGUI extends JFrame {
     private JCheckBox showMetricsCheckbox;
     private boolean showMetrics = false;
     private boolean showPopOff = false;
+    private boolean isSyncStopped = false;
 
     private JButton openPhoenixButton;
     private JButton openClassicButton;
@@ -88,6 +90,7 @@ public class SignumGUI extends JFrame {
     private JButton editConfButton;
     private JButton popOff10Button;
     private JButton popOff100Button;
+    private JButton syncButton;
     private JButton shutdownButton;
     // private JButton restartButton;
 
@@ -544,6 +547,8 @@ public class SignumGUI extends JFrame {
                 IconFontSwing.buildIcon(FontAwesome.STEP_BACKWARD, 18, iconColor));
         popOff100Button = new JButton("Pop off 100 blocks",
                 IconFontSwing.buildIcon(FontAwesome.BACKWARD, 18, iconColor));
+        syncButton = new JButton("Stop Sync",
+                IconFontSwing.buildIcon(FontAwesome.PAUSE, 18, iconColor));
         /*
          * restartButton = new JButton("Restart",
          * IconFontSwing.buildIcon(FontAwesome.REFRESH, 18, iconColor));
@@ -555,6 +560,19 @@ public class SignumGUI extends JFrame {
         // JButton popOffMaxButton = new JButton("Pop off max",
         // IconFontSwing.buildIcon(FontAwesome.FAST_BACKWARD, 18, iconColor));
 
+        addInfoTooltip(openPhoenixButton, "Opens the modern Phoenix Wallet in your default web browser.");
+        addInfoTooltip(openClassicButton, "Opens the Classic Wallet in your default web browser.");
+        addInfoTooltip(openApiButton, "Opens the interactive API documentation in your default web browser.");
+        addInfoTooltip(editConfButton,
+                "Opens the node's configuration file (node.properties or node-default.properties) in your default text editor for easy modification.");
+
+        addInfoTooltip(popOff10Button,
+                "Removes the last 10 blocks from your local blockchain. This can help resolve a local fork if your node is stuck.");
+        addInfoTooltip(popOff100Button,
+                "Removes the last 100 blocks from your local blockchain. Use this if a smaller pop-off does not resolve a fork.");
+        addInfoTooltip(syncButton,
+                "Toggles the synchronization process. 'Pause Sync' pauses the downloading and processing of new blocks. 'Resume Sync' continues the process.");
+
         openPhoenixButton.addActionListener(e -> openWebUi("/phoenix"));
         openClassicButton.addActionListener(e -> openWebUi("/classic"));
         openApiButton.addActionListener(e -> openWebUi("/api-doc"));
@@ -565,6 +583,28 @@ public class SignumGUI extends JFrame {
 
         File phoenixIndex = new File("html/ui/phoenix/index.html");
         File classicIndex = new File("html/ui/classic/index.html");
+
+        syncButton.addActionListener(e -> {
+            isSyncStopped = !isSyncStopped;
+            if (isSyncStopped) {
+                Signum.getBlockchainProcessor().setGetMoreBlocksPause(true);
+                Signum.getBlockchainProcessor().setBlockImporterPause(true);
+                syncButton.setText("Resume Sync");
+                syncButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PLAY, 18, iconColor));
+                if (guiTimer != null) {
+                    guiTimer.stop();
+                }
+            } else {
+                Signum.getBlockchainProcessor().setGetMoreBlocksPause(false);
+                Signum.getBlockchainProcessor().setBlockImporterPause(false);
+                syncButton.setText("Pause Sync");
+                syncButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PAUSE, 18, iconColor));
+                if (guiTimer != null) {
+                    guiTimer.start();
+                }
+            }
+            updateTitle();
+        });
 
         shutdownButton.addActionListener(e -> {
             if (JOptionPane.showConfirmDialog(SignumGUI.this,
@@ -600,6 +640,8 @@ public class SignumGUI extends JFrame {
         leftButtons.add(popOff100Button);
         popOff100Button.setVisible(showPopOff);
         // leftButtons.add(popOffMaxButton);
+
+        leftButtons.add(syncButton);
 
         // leftButtons.add(restartButton);
         leftButtons.add(shutdownButton);
@@ -870,10 +912,15 @@ public class SignumGUI extends JFrame {
 
     private void updateTitle() {
         String networkName = Signum.getPropertyService().getString(Props.NETWORK_NAME);
-        SwingUtilities.invokeLater(() -> setTitle(
-                this.programName + " [" + networkName + "] " + this.version));
-        if (trayIcon != null)
-            trayIcon.setToolTip(trayIcon.getToolTip() + " " + networkName);
+        String title = this.programName + " [" + networkName + "] " + this.version;
+        if (isSyncStopped) {
+            title += " (Sync paused)";
+        }
+        final String finalTitle = title;
+        SwingUtilities.invokeLater(() -> setTitle(finalTitle));
+        if (trayIcon != null) {
+            trayIcon.setToolTip(finalTitle);
+        }
     }
 
     private void updateLatestBlock(Block block) {
@@ -921,6 +968,33 @@ public class SignumGUI extends JFrame {
     private void updatePeerCount(int newConnectedCount, int count) {
         connectedPeersLabel.setText(newConnectedCount + "");
         peersCountLabel.setText(count + "");
+    }
+
+    private void addInfoTooltip(JComponent component, String text) {
+        component.setToolTipText("Right-click for more info");
+        component.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (SwingUtilities.isRightMouseButton(e)) {
+                    String title = "";
+                    if (component instanceof JLabel) {
+                        title = ((JLabel) component).getText();
+                    } else if (component instanceof JButton) {
+                        title = ((JButton) component).getText();
+                    }
+                    showInfoDialog(title, text, 300);
+                }
+            }
+        });
+    }
+
+    private void showInfoDialog(String title, String text, int width) {
+        if (title.endsWith(":")) {
+            title = title.substring(0, title.length() - 1);
+        }
+        String htmlText = "<html><body><p style='width: " + width + "px;'>" + text.replace("\n", "<br>")
+                + "</p></body></html>";
+        JOptionPane.showMessageDialog(SignumGUI.this, htmlText, title, JOptionPane.PLAIN_MESSAGE);
     }
 
     private String formatDataSize(double bytes) {

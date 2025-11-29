@@ -146,6 +146,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private final AtomicReference<Peer> lastBlockchainFeeder = new AtomicReference<>();
     private final AtomicInteger lastBlockchainFeederHeight = new AtomicInteger();
     private final AtomicBoolean getMoreBlocks = new AtomicBoolean(true);
+    private final AtomicBoolean getMoreBlocksPause = new AtomicBoolean(false);
+    private final AtomicBoolean blockImporterPause = new AtomicBoolean(false);
 
     private final AtomicBoolean isScanning = new AtomicBoolean(false);
 
@@ -510,6 +512,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 while (!Thread.currentThread().isInterrupted() && ThreadPool.running.get()) {
                     try {
                         try {
+
+                            if (getMoreBlocksPause.get()) {
+                                return;
+                            }
+
                             if (!getMoreBlocks.get()) {
                                 return;
                             }
@@ -949,6 +956,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         Runnable blockImporterThread = () -> {
             while (!Thread.interrupted() && ThreadPool.running.get() && downloadCache.size() > 0) {
                 try {
+
+                    if (blockImporterPause.get()) {
+                        return;
+                    }
+
                     Block lastBlock = blockchain.getLastBlock();
                     Long lastId = lastBlock.getId();
                     Block currentBlock = downloadCache.getNextBlock(lastId); /*
@@ -1441,6 +1453,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         addGenesisBlock();
         dbCacheManager.flushCache();
         downloadCache.resetCache();
+    }
+
+    @Override
+    public void setGetMoreBlocksPause(boolean getMoreBlocksPause) {
+        this.getMoreBlocksPause.set(getMoreBlocksPause);
+    }
+
+    @Override
+    public void setBlockImporterPause(boolean blockImporterPause) {
+        this.blockImporterPause.set(blockImporterPause);
     }
 
     void setGetMoreBlocks(boolean getMoreBlocks) {

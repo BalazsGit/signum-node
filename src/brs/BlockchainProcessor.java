@@ -127,6 +127,10 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     void fullReset();
 
+    void setGetMoreBlocksPause(boolean getMoreBlocksPause);
+
+    void setBlockImporterPause(boolean blockImporterPause);
+
     void generateBlock(String secretPhrase, byte[] publicKey, Long nonce)
             throws BlockNotAcceptedException;
 
