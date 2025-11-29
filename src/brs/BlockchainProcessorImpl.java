@@ -59,6 +59,7 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -246,6 +247,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
     public QueueStatus getQueueStatus() {
         return queueStatus.get();
+    }
+
+    @Override
+    public Collection<Peer> getAllPeers() {
+        return Peers.getAllPeers();
     }
 
     @Override

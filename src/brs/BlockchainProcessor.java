@@ -6,6 +6,8 @@ import brs.peer.Peer;
 import brs.util.JSON;
 import brs.util.Observable;
 import com.google.gson.JsonObject;
+
+import java.util.Collection;
 import java.util.List;
 
 public interface BlockchainProcessor extends Observable<Block, BlockchainProcessor.Event> {
@@ -112,6 +114,8 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
     int getLastKnownConnectedPeerCount();
 
     QueueStatus getQueueStatus();
+
+    Collection<Peer> getAllPeers();
 
     PerformanceStats getPerformanceStats();
 

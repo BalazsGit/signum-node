@@ -12,8 +12,13 @@ import java.io.OutputStream;
 import java.io.PrintStream;
 import java.net.URI;
 import java.text.SimpleDateFormat;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import java.util.List;
 
 import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
@@ -43,10 +48,12 @@ import org.slf4j.LoggerFactory;
 import brs.Signum;
 import brs.BlockchainProcessor;
 import brs.Block;
+import brs.peer.Peer;
 import brs.fluxcapacitor.FluxValues;
 import brs.props.PropertyService;
 import brs.props.Props;
 import brs.util.Convert;
+import brs.util.Listener;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 
@@ -76,6 +83,7 @@ public class SignumGUI extends JFrame {
 
     private JLabel connectedPeersLabel;
     private JLabel peersCountLabel;
+    private JLabel blacklistedPeersLabel;
     private JLabel uploadVolumeLabel;
     private JLabel downloadVolumeLabel;
     private JCheckBox showPopOffCheckbox;
@@ -373,17 +381,29 @@ public class SignumGUI extends JFrame {
 
         // --- Peers ---
         JPanel peersPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        tooltip = "The number of peers (other nodes) your node is currently actively connected to. These are the nodes with which your node is exchanging blockchain data, such as new blocks and transactions.\n\nA healthy number of connected peers is crucial for staying synchronized with the network.";
-        connectedPeersLabel = createLabel("0", null, tooltip);
-        tooltip = "The total number of known peers in the network that your node has discovered. This includes both connected and disconnected peers.\n\nYour node periodically attempts to connect to peers from this list to maintain a stable set of connections.";
-        peersCountLabel = createLabel("0", null, tooltip);
+        tooltip = "Active Peers: The number of peers your node is currently communicating with.";
+        connectedPeersLabel = createLabel("0", null, tooltip); // Represents 'Active' peers now
+        tooltip = "Total Discovered Peers: The total number of peers your node has ever discovered, including active, disconnected, and blacklisted ones.";
+        peersCountLabel = createLabel("0", null, tooltip); // Represents 'All Known' peers
+        tooltip = "Blacklisted Peers: The number of peers that have been temporarily banned for sending invalid data or other network violations.";
+        blacklistedPeersLabel = createLabel("0", null, tooltip);
 
         peersPanel.add(new JLabel("Peers: "));
         peersPanel.add(connectedPeersLabel);
         peersPanel.add(new JLabel(" / "));
         peersPanel.add(peersCountLabel);
+        peersPanel.add(new JLabel(" (BL: "));
+        peersPanel.add(blacklistedPeersLabel);
+        peersPanel.add(new JLabel(")"));
 
         // Add peersPanel
+        peersPanel.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                new PeersDialog(SignumGUI.this).setVisible(true);
+            }
+        });
+        peersPanel.setToolTipText("Click to see detailed peer information.");
         gbc.gridx = 1;
         infoPanel.add(peersPanel, gbc); // No left inset needed, timePanel provides right spacing
 
@@ -755,8 +775,8 @@ public class SignumGUI extends JFrame {
 
     public void onPeerCountChanged() {
         BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
-        SwingUtilities.invokeLater(() -> updatePeerCount(blockchainProcessor.getLastKnownConnectedPeerCount(),
-                blockchainProcessor.getLastKnownPeerCount()));
+        Collection<Peer> allPeers = blockchainProcessor.getAllPeers();
+        SwingUtilities.invokeLater(() -> updatePeerCount(allPeers));
     }
 
     public void onNetVolumeChanged() {
@@ -992,9 +1012,17 @@ public class SignumGUI extends JFrame {
         if (title.endsWith(":")) {
             title = title.substring(0, title.length() - 1);
         }
-        String htmlText = "<html><body><p style='width: " + width + "px;'>" + text.replace("\n", "<br>")
-                + "</p></body></html>";
-        JOptionPane.showMessageDialog(SignumGUI.this, htmlText, title, JOptionPane.PLAIN_MESSAGE);
+    }
+
+    private void updatePeerCount(Collection<Peer> peers) {
+        long activeCount = peers.stream().filter(p -> p.getState() != Peer.State.NON_CONNECTED).count();
+        long allKnownCount = peers.size();
+        long blacklistedCount = peers.stream().filter(Peer::isBlacklisted).count();
+
+        // The label previously for 'connected' now shows 'active' peers.
+        connectedPeersLabel.setText(String.valueOf(activeCount));
+        peersCountLabel.setText(String.valueOf(allKnownCount));
+        blacklistedPeersLabel.setText(blacklistedCount + "");
     }
 
     private String formatDataSize(double bytes) {

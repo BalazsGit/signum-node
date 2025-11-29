@@ -21,6 +21,7 @@ import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
 import brs.Signum;
+import brs.gui.util.MovingAverage;
 import brs.BlockchainProcessor;
 import brs.Block;
 import brs.props.Props;

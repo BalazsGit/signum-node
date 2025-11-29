@@ -1,4 +1,4 @@
-package brs.gui;
+package brs.gui.util;
 
 public class MovingAverage {
     private final double[] rawDataList;
