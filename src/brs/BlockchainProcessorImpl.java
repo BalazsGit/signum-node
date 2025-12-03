@@ -484,7 +484,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     isTrimming.set(true);
                     long totalStartTime = System.currentTimeMillis();
                     try {
-                        stores.beginTransaction();
                         blockListeners.notify(block, Event.TRIM_START);
                         logger.debug("Trimming derived tables...");
                         List<DerivedTable> tablesToTrim = derivedTableManager.getDerivedTables();
@@ -506,13 +505,12 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     } catch (Exception e) {
                         logger.error("Error during automatic database trim", e);
                     } finally {
-                        stores.endTransaction();
                         currentlyTrimmingTable.set(null);
                         isTrimming.set(false);
                         blockListeners.notify(block, Event.TRIM_END);
                     }
                 }
-            }, Event.BLOCK_PUSHED);
+            }, Event.AFTER_BLOCK_APPLY);
         }
 
         blockListeners.addListener(block -> {
