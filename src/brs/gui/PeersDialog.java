@@ -19,6 +19,8 @@ import java.util.stream.Collectors;
 @SuppressWarnings("serial")
 public class PeersDialog extends JFrame {
 
+    private static volatile PeersDialog instance;
+
     private final Listener<Block> peerListener;
     private final JTabbedPane tabbedPane;
 
@@ -37,7 +39,20 @@ public class PeersDialog extends JFrame {
         }
     }
 
-    public PeersDialog(JFrame owner) {
+    public static void showPeersDialog(JFrame owner) {
+        if (instance == null) {
+            synchronized (PeersDialog.class) {
+                if (instance == null) {
+                    instance = new PeersDialog(owner);
+                }
+            }
+        }
+        instance.setVisible(true);
+        instance.toFront();
+        instance.requestFocus();
+    }
+
+    private PeersDialog(JFrame owner) {
         super("Peer Information");
 
         JPanel mainPanel = new JPanel(new BorderLayout(5, 5));
@@ -65,12 +80,13 @@ public class PeersDialog extends JFrame {
         updateTabs(); // Initial population
 
         peerListener = block -> SwingUtilities.invokeLater(this::updateTabs);
-        Signum.getBlockchainProcessor().addListener(peerListener, BlockchainProcessor.Event.PEER_COUNT_CHANGED);
+        Signum.getBlockchainProcessor().addListener(peerListener, BlockchainProcessor.Event.PEERS_UPDATED);
 
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
-                Signum.getBlockchainProcessor().removeListener(peerListener, BlockchainProcessor.Event.PEER_COUNT_CHANGED);
+                Signum.getBlockchainProcessor().removeListener(peerListener, BlockchainProcessor.Event.PEERS_UPDATED);
+                instance = null;
                 dispose();
             }
         });
@@ -111,7 +127,11 @@ public class PeersDialog extends JFrame {
                     color = category == PeerCategory.ALL ? "yellow" : "green";
                 }
                 sb.append("<font color='").append(color).append("'>");
-                sb.append(p.getPeerAddress()).append(" (").append(p.getVersion().toStringIfNotEmpty()).append(")");
+                String version = p.getVersion().toStringIfNotEmpty();
+                if (version.isEmpty()) {
+                    version = "unknown";
+                }
+                sb.append(p.getPeerAddress()).append(" (").append(version).append(")");
                 sb.append("</font><br>");
             }
         }

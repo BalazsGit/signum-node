@@ -907,7 +907,7 @@ public class MetricsPanel extends JPanel {
             blockchainProcessor.addListener(block -> onQueueStatus(), BlockchainProcessor.Event.QUEUE_STATUS_CHANGED);
             blockchainProcessor.addListener(block -> onNetVolumeChanged(),
                     BlockchainProcessor.Event.NET_VOLUME_CHANGED);
-            blockchainProcessor.addListener(this::onPerformanceStatsUpdated,
+            blockchainProcessor.addListener(block -> onPerformanceStatsUpdated(),
                     BlockchainProcessor.Event.PERFORMANCE_STATS_UPDATED);
             brs.TransactionProcessor transactionProcessor = Signum.getTransactionProcessor();
             transactionProcessor.addListener(transactions -> onUnconfirmedTransactionCountChanged(),
@@ -943,7 +943,7 @@ public class MetricsPanel extends JPanel {
                 blockchainProcessor.getDownloadedVolume()));
     }
 
-    public void onPerformanceStatsUpdated(Block block) {
+    public void onPerformanceStatsUpdated() {
         BlockchainProcessor.PerformanceStats stats = Signum.getBlockchainProcessor().getPerformanceStats();
         if (stats != null) { // block is not used, we use the DTO
             chartUpdateExecutor.submit(() -> updateAllCharts(stats));

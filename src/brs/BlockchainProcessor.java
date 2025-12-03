@@ -9,6 +9,7 @@ import com.google.gson.JsonObject;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public interface BlockchainProcessor extends Observable<Block, BlockchainProcessor.Event> {
 
@@ -98,7 +99,8 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
         RESCAN_BEGIN, RESCAN_END,
         BEFORE_BLOCK_ACCEPT,
         BEFORE_BLOCK_APPLY, AFTER_BLOCK_APPLY,
-        PEER_COUNT_CHANGED, NET_VOLUME_CHANGED, QUEUE_STATUS_CHANGED, PERFORMANCE_STATS_UPDATED
+        PEERS_UPDATED, NET_VOLUME_CHANGED, QUEUE_STATUS_CHANGED, PERFORMANCE_STATS_UPDATED,
+        TRIM_START, TRIM_END
     }
 
     Peer getLastBlockchainFeeder();
@@ -109,9 +111,11 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     int getMinRollbackHeight();
 
-    int getLastKnownPeerCount();
+    AtomicInteger getCurrentTrimHeight();
 
-    int getLastKnownConnectedPeerCount();
+    AtomicInteger getLastTrimHeight();
+
+    String getCurrentlyTrimmingTable();
 
     QueueStatus getQueueStatus();
 

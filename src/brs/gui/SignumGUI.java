@@ -16,6 +16,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.List;
@@ -52,6 +53,7 @@ import brs.peer.Peer;
 import brs.fluxcapacitor.FluxValues;
 import brs.props.PropertyService;
 import brs.props.Props;
+import brs.util.DurationFormatter;
 import brs.util.Convert;
 import brs.util.Listener;
 import jiconfont.icons.font_awesome.FontAwesome;
@@ -88,9 +90,16 @@ public class SignumGUI extends JFrame {
     private JLabel downloadVolumeLabel;
     private JCheckBox showPopOffCheckbox;
     private JCheckBox showMetricsCheckbox;
+    private JLabel trimHeightLabel;
+    private JSeparator trimSeparator;
     private boolean showMetrics = false;
     private boolean showPopOff = false;
     private boolean isSyncStopped = false;
+    private boolean isShuttingDown = false;
+
+    private boolean measurementActive = false;
+    private boolean experimentalActive = false;
+    private boolean trimEnabled = false;
 
     private JButton openPhoenixButton;
     private JButton openClassicButton;
@@ -107,10 +116,14 @@ public class SignumGUI extends JFrame {
     private final JPanel checkboxPanel;
     private JLabel measurementLabel;
     private JLabel experimentalLabel;
+    private JLabel trimLabel;
     private JSeparator measurementSeparator;
     private JSeparator experimentalSeparator;
+    private JSeparator trimIconSeparator;
     private JPanel measurementPanel;
     private JPanel experimentalPanel;
+    private JPanel trimPanel;
+
     private final Dimension verticalSeparatorSize = new Dimension(2, 20);
 
     private Dimension progressBarSize2 = new Dimension(150, 20);
@@ -312,6 +325,17 @@ public class SignumGUI extends JFrame {
         addInfoTooltip(latestBlockTimestampLabel, blockInfoTooltip);
         metricsPanel = new MetricsPanel(this);
 
+        trimSeparator = new JSeparator(SwingConstants.VERTICAL);
+        trimSeparator.setPreferredSize(verticalSeparatorSize);
+        String trimTooltip = "The minimum height to which the blockchain can be rolled back. Older data is pruned to save space.\n"
+                + "Trimming occurs every " + (brs.Constants.MAX_ROLLBACK * 10) + " blocks.";
+        trimHeightLabel = createLabel("Trim height: -", null, trimTooltip);
+
+        trimSeparator.setVisible(false);
+        trimHeightLabel.setVisible(false);
+        latestBlockInfoPanel.add(trimSeparator);
+        latestBlockInfoPanel.add(trimHeightLabel);
+
         // === Add checkboxes to toolBar ===
         checkboxPanel = new JPanel();
         checkboxPanel.setLayout(new BoxLayout(checkboxPanel, BoxLayout.Y_AXIS));
@@ -381,8 +405,8 @@ public class SignumGUI extends JFrame {
 
         // --- Peers ---
         JPanel peersPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        tooltip = "Active Peers: The number of peers your node is currently communicating with.";
-        connectedPeersLabel = createLabel("0", null, tooltip); // Represents 'Active' peers now
+        tooltip = "Connected Peers: The number of peers with a stable, established connection to your node.";
+        connectedPeersLabel = createLabel("0", null, tooltip);
         tooltip = "Total Discovered Peers: The total number of peers your node has ever discovered, including active, disconnected, and blacklisted ones.";
         peersCountLabel = createLabel("0", null, tooltip); // Represents 'All Known' peers
         tooltip = "Blacklisted Peers: The number of peers that have been temporarily banned for sending invalid data or other network violations.";
@@ -400,7 +424,7 @@ public class SignumGUI extends JFrame {
         peersPanel.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
-                new PeersDialog(SignumGUI.this).setVisible(true);
+                PeersDialog.showPeersDialog(SignumGUI.this);
             }
         });
         peersPanel.setToolTipText("Click to see detailed peer information.");
@@ -452,7 +476,7 @@ public class SignumGUI extends JFrame {
                 + "Detailed synchronization data is being collected for each block and saved to:\n"
                 + "- measurement/sync_measurement.csv\n"
                 + "- measurement/sync_progress.csv\n" + "for analysis.";
-        measurementLabel = createLabel("🔬 MEAS", null, tooltip);
+        measurementLabel = createLabel("🔬︎ MEAS", null, tooltip);
         measurementPanel.setVisible(false);
 
         measurementPanel.add(measurementLabel);
@@ -484,7 +508,28 @@ public class SignumGUI extends JFrame {
         gbc.gridx = 6;
         infoPanel.add(experimentalPanel, gbc);
 
+        // --- Trim ---
+        trimPanel = new JPanel();
+        trimPanel.setLayout(new BoxLayout(trimPanel, BoxLayout.X_AXIS));
+        trimPanel.setOpaque(false);
+        trimIconSeparator = new JSeparator(SwingConstants.VERTICAL);
+        trimIconSeparator.setPreferredSize(verticalSeparatorSize);
+        tooltip = "Automatic table trimming is active.\n" +
+                "Derived tables are being periodically pruned to save disk space.\n" +
+                "This happens every " + (brs.Constants.MAX_ROLLBACK * 10) + " blocks.";
+        trimLabel = createLabel("✂ TRIM", null, tooltip);
+        trimPanel.setVisible(false);
+
+        trimPanel.add(trimLabel);
+        trimPanel.add(Box.createHorizontalStrut(5));
+        trimPanel.add(trimIconSeparator);
+        trimPanel.add(Box.createHorizontalStrut(5));
+
+        // Add trimPanel
         gbc.gridx = 7;
+        infoPanel.add(trimPanel, gbc);
+
+        gbc.gridx = 8;
         gbc.weightx = 1.0; // Allow progress bar to take up remaining horizontal space
         gbc.fill = GridBagConstraints.HORIZONTAL; // Fill horizontally
         infoPanel.add(syncProgressBar, gbc);
@@ -526,6 +571,9 @@ public class SignumGUI extends JFrame {
     }
 
     private void shutdown() {
+
+        isShuttingDown = true;
+        updateTitle();
 
         Signum.shutdown(false);
 
@@ -585,13 +633,14 @@ public class SignumGUI extends JFrame {
         addInfoTooltip(openApiButton, "Opens the interactive API documentation in your default web browser.");
         addInfoTooltip(editConfButton,
                 "Opens the node's configuration file (node.properties or node-default.properties) in your default text editor for easy modification.");
-
         addInfoTooltip(popOff10Button,
                 "Removes the last 10 blocks from your local blockchain. This can help resolve a local fork if your node is stuck.");
         addInfoTooltip(popOff100Button,
                 "Removes the last 100 blocks from your local blockchain. Use this if a smaller pop-off does not resolve a fork.");
         addInfoTooltip(syncButton,
                 "Toggles the synchronization process. 'Pause Sync' pauses the downloading and processing of new blocks. 'Resume Sync' continues the process.");
+        addInfoTooltip(shutdownButton,
+                "Safely stops the Signum node application. This ensures all data is saved correctly and prevents potential database corruption. A confirmation dialog will be shown before shutting down.");
 
         openPhoenixButton.addActionListener(e -> openWebUi("/phoenix"));
         openClassicButton.addActionListener(e -> openWebUi("/classic"));
@@ -768,12 +817,18 @@ public class SignumGUI extends JFrame {
 
     private void initListeners() {
         BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
-        blockchainProcessor.addListener(block -> onPeerCountChanged(), BlockchainProcessor.Event.PEER_COUNT_CHANGED);
+        blockchainProcessor.addListener(block -> onPeersUpdated(), BlockchainProcessor.Event.PEERS_UPDATED);
         blockchainProcessor.addListener(block -> onNetVolumeChanged(), BlockchainProcessor.Event.NET_VOLUME_CHANGED);
         blockchainProcessor.addListener(this::onBlockPushed, BlockchainProcessor.Event.BLOCK_PUSHED);
+        if (trimEnabled) {
+            blockchainProcessor.addListener(block -> onTrimStart(),
+                    BlockchainProcessor.Event.TRIM_START);
+            blockchainProcessor.addListener(block -> onTrimHeightChanged(),
+                    BlockchainProcessor.Event.TRIM_END);
+        }
     }
 
-    public void onPeerCountChanged() {
+    public void onPeersUpdated() {
         BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
         Collection<Peer> allPeers = blockchainProcessor.getAllPeers();
         SwingUtilities.invokeLater(() -> updatePeerCount(allPeers));
@@ -813,17 +868,40 @@ public class SignumGUI extends JFrame {
         guiTimer = new Timer(1000, e -> {
             if (Signum.getBlockchain() != null && Signum.getBlockchainProcessor() != null) {
                 guiAccumulatedSyncTimeMs += 1000;
-                totalTimeLabel.setText("🕒 " + formatDuration(guiAccumulatedSyncTimeMs));
+                totalTimeLabel.setText("🕒 " + DurationFormatter.format(guiAccumulatedSyncTimeMs,
+                        DurationFormatter.Unit.YEAR, DurationFormatter.Unit.SECOND));
 
                 if (isSyncing) {
                     guiAccumulatedSyncInProgressTimeMs += 1000;
                 }
                 syncInProgressTimeLabel
-                        .setText("🔄 " + formatDuration(guiAccumulatedSyncInProgressTimeMs));
+                        .setText("🔄 " + DurationFormatter.format(guiAccumulatedSyncInProgressTimeMs,
+                                DurationFormatter.Unit.YEAR, DurationFormatter.Unit.SECOND));
                 updateTimeLabelVisibility();
             }
         });
         guiTimer.start();
+    }
+
+    private void onTrimStart() {
+        // The 'block' parameter is a placeholder here, we get the real data from the
+        // source.
+        // In a real implementation, we might pass the table name through a custom event
+        // object.
+        int currentTrimHeight = Signum.getBlockchainProcessor().getCurrentTrimHeight().get();
+        int lastTrimHeight = Signum.getBlockchainProcessor().getLastTrimHeight().get();
+        SwingUtilities.invokeLater(() -> {
+
+            if (lastTrimHeight > currentTrimHeight) {
+                if (currentTrimHeight < 0) {
+                    trimHeightLabel.setText(String.format("Trim height: - ➔ %d", lastTrimHeight));
+                } else {
+                    trimHeightLabel
+                            .setText(String.format("Trim height: %d ➔ %d", currentTrimHeight, lastTrimHeight));
+                }
+            }
+            trimHeightLabel.setForeground(Color.GREEN);
+        });
     }
 
     private void onBlockPushed(Block block) {
@@ -848,8 +926,9 @@ public class SignumGUI extends JFrame {
             // Now that properties are loaded, set the correct values for the GUI
             showPopOff = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
             showMetrics = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
-            boolean measurementActive = Signum.getPropertyService().getBoolean(Props.MEASUREMENT_ACTIVE);
-            boolean experimentalActive = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
+            measurementActive = Signum.getPropertyService().getBoolean(Props.MEASUREMENT_ACTIVE);
+            experimentalActive = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
+            trimEnabled = Signum.getPropertyService().getBoolean(Props.DB_TRIM_DERIVED_TABLES);
 
             try {
                 SwingUtilities.invokeLater(() -> {
@@ -860,17 +939,32 @@ public class SignumGUI extends JFrame {
                     showMetricsCheckbox.setSelected(showMetrics);
                     // Sync panel visibility with loaded properties
                     metricsPanel.setVisible(showMetrics);
+
                     if (measurementActive) {
                         measurementPanel.setVisible(true);
                     }
+
                     if (experimentalActive) {
                         experimentalPanel.setVisible(true);
                         timePanel.setVisible(true);
-
-                        updateLatestBlock(Signum.getBlockchain().getLastBlock());
-                        updatePeerCount(Signum.getBlockchainProcessor().getLastKnownConnectedPeerCount(),
-                                Signum.getBlockchainProcessor().getLastKnownPeerCount());
                     }
+
+                    if (trimEnabled) {
+                        trimPanel.setVisible(true);
+                        trimHeightLabel.setVisible(true);
+                        trimSeparator.setVisible(true);
+                    } else {
+                        trimPanel.setVisible(false);
+                        trimHeightLabel.setVisible(false);
+                        trimSeparator.setVisible(false);
+                    }
+
+                    onTrimHeightChanged();
+
+                    updateLatestBlock(Signum.getBlockchain().getLastBlock());
+                    BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+                    Collection<Peer> allPeers = blockchainProcessor.getAllPeers();
+                    updatePeerCount(allPeers);
                 });
 
                 updateTitle();
@@ -886,14 +980,17 @@ public class SignumGUI extends JFrame {
                     }
                     // Update labels with initial values from log file
                     SwingUtilities.invokeLater(() -> {
-                        totalTimeLabel.setText("🕒 " + formatDuration(guiAccumulatedSyncTimeMs));
+                        totalTimeLabel.setText("🕒 " + DurationFormatter.format(guiAccumulatedSyncTimeMs,
+                                DurationFormatter.Unit.YEAR, DurationFormatter.Unit.SECOND));
                         syncInProgressTimeLabel
-                                .setText("🔄 " + formatDuration(guiAccumulatedSyncInProgressTimeMs));
+                                .setText("🔄 " + DurationFormatter.format(guiAccumulatedSyncInProgressTimeMs,
+                                        DurationFormatter.Unit.YEAR, DurationFormatter.Unit.SECOND));
                         updateTimeLabelVisibility(); // Initial visibility check
                     });
                 }
-                if (Signum.getBlockchain() == null)
+                if (Signum.getBlockchain() == null) {
                     onBrsStopped();
+                }
             } catch (Exception t) {
                 LOGGER.error("Could not determine if running in testnet mode", t);
             }
@@ -935,6 +1032,8 @@ public class SignumGUI extends JFrame {
         String title = this.programName + " [" + networkName + "] " + this.version;
         if (isSyncStopped) {
             title += " (Sync paused)";
+        } else if (isShuttingDown) {
+            title += " (Shutting Down...)";
         }
         final String finalTitle = title;
         SwingUtilities.invokeLater(() -> setTitle(finalTitle));
@@ -985,9 +1084,16 @@ public class SignumGUI extends JFrame {
         syncProgressBar.setString(String.format("%.2f %%", prog));
     }
 
-    private void updatePeerCount(int newConnectedCount, int count) {
-        connectedPeersLabel.setText(newConnectedCount + "");
-        peersCountLabel.setText(count + "");
+    private void onTrimHeightChanged() {
+        SwingUtilities.invokeLater(() -> {
+            int currentTrimHeight = Signum.getBlockchainProcessor().getCurrentTrimHeight().get();
+            if (currentTrimHeight != -1) {
+                trimHeightLabel.setText("Trim height: " + currentTrimHeight);
+            } else {
+                trimHeightLabel.setText("Trim height: -");
+            }
+            trimHeightLabel.setForeground(iconColor);
+        });
     }
 
     private void addInfoTooltip(JComponent component, String text) {
@@ -1012,15 +1118,18 @@ public class SignumGUI extends JFrame {
         if (title.endsWith(":")) {
             title = title.substring(0, title.length() - 1);
         }
+        String htmlText = "<html><body><p style='width: " + width + "px;'>" + text.replace("\n", "<br>")
+                + "</p></body></html>";
+        JOptionPane.showMessageDialog(this, htmlText, title, JOptionPane.PLAIN_MESSAGE);
     }
 
     private void updatePeerCount(Collection<Peer> peers) {
-        long activeCount = peers.stream().filter(p -> p.getState() != Peer.State.NON_CONNECTED).count();
+        long connectedCount = peers.stream().filter(p -> p.getState() == Peer.State.CONNECTED).count();
         long allKnownCount = peers.size();
         long blacklistedCount = peers.stream().filter(Peer::isBlacklisted).count();
 
         // The label previously for 'connected' now shows 'active' peers.
-        connectedPeersLabel.setText(String.valueOf(activeCount));
+        connectedPeersLabel.setText(String.valueOf(connectedCount));
         peersCountLabel.setText(String.valueOf(allKnownCount));
         blacklistedPeersLabel.setText(blacklistedCount + "");
     }
@@ -1054,56 +1163,6 @@ public class SignumGUI extends JFrame {
             System.err.println("Showing message: " + message);
             JOptionPane.showMessageDialog(this, message, "Signum Message", JOptionPane.ERROR_MESSAGE);
         });
-    }
-
-    /**
-     * Formats a duration in milliseconds into a human-readable string (e.g.,
-     * "1y:02d:03h:04m:05s").
-     * Omits larger units if they are zero.
-     *
-     * @param millis The duration in milliseconds.
-     * @return A formatted string representing the duration.
-     */
-    private String formatDuration(long millis) {
-        if (millis <= 0) {
-            return "0s";
-        }
-
-        long totalSeconds = millis / 1000;
-
-        final long SEC_PER_MINUTE = 60;
-        final long SEC_PER_HOUR = SEC_PER_MINUTE * 60;
-        final long SEC_PER_DAY = SEC_PER_HOUR * 24;
-        final long SEC_PER_YEAR = SEC_PER_DAY * 365; // Approximation
-
-        long years = totalSeconds / SEC_PER_YEAR;
-        long secondsAfterYears = totalSeconds % SEC_PER_YEAR;
-
-        long days = secondsAfterYears / SEC_PER_DAY;
-        long secondsAfterDays = secondsAfterYears % SEC_PER_DAY;
-
-        long hours = secondsAfterDays / SEC_PER_HOUR;
-        long secondsAfterHours = secondsAfterDays % SEC_PER_HOUR;
-
-        long minutes = secondsAfterHours / SEC_PER_MINUTE;
-        long seconds = secondsAfterHours % SEC_PER_MINUTE;
-
-        StringBuilder sb = new StringBuilder();
-        if (years > 0) {
-            sb.append(years).append("y:");
-        }
-        if (days > 0 || sb.length() > 0) {
-            sb.append(String.format(sb.length() > 0 ? "%02d" : "%d", days)).append("d:");
-        }
-        if (hours > 0 || sb.length() > 0) {
-            sb.append(String.format(sb.length() > 0 ? "%02d" : "%d", hours)).append("h:");
-        }
-        if (minutes > 0 || sb.length() > 0) {
-            sb.append(String.format(sb.length() > 0 ? "%02d" : "%d", minutes)).append("m:");
-        }
-        sb.append(String.format(sb.length() > 0 ? "%02d" : "%d", seconds)).append("s");
-
-        return sb.toString();
     }
 
     private static class TextAreaOutputStream extends OutputStream {

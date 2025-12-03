@@ -32,6 +32,7 @@ import brs.util.Convert;
 import brs.util.DownloadCacheImpl;
 import brs.util.JSON;
 import brs.util.Listener;
+import brs.util.DurationFormatter;
 import brs.util.Listeners;
 import brs.util.ThreadPool;
 import com.google.gson.JsonArray;
@@ -141,7 +142,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private final Semaphore gpuUsage = new Semaphore(2);
 
     private final boolean trimDerivedTables;
+    // The intentional requested trim height calculated
     private final AtomicInteger lastTrimHeight = new AtomicInteger();
+    // The current trim height requested from derived table datas
+    private final AtomicInteger currentTrimHeight = new AtomicInteger();
 
     private final Listeners<Block, Event> blockListeners = new Listeners<>();
     private final AtomicReference<Peer> lastBlockchainFeeder = new AtomicReference<>();
@@ -150,17 +154,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private final AtomicBoolean getMoreBlocksPause = new AtomicBoolean(false);
     private final AtomicBoolean blockImporterPause = new AtomicBoolean(false);
 
+    private final AtomicBoolean isTrimming = new AtomicBoolean(false);
     private final AtomicBoolean isScanning = new AtomicBoolean(false);
 
     private final AtomicBoolean isConsistent = new AtomicBoolean(false);
 
     private final AtomicReference<QueueStatus> queueStatus = new AtomicReference<>();
     private final AtomicReference<PerformanceStats> performanceStats = new AtomicReference<>();
+    private final AtomicReference<String> currentlyTrimmingTable = new AtomicReference<>();
     private final AtomicLong uploadedVolume = new AtomicLong();
     private final AtomicLong downloadedVolume = new AtomicLong();
-
-    private int lastKnownPeerCount = -1;
-    private int lastKnownConnectedPeerCount = -1;
 
     private int autoPopOffLastStuckHeight = 0;
     private int autoPopOffNumberOfBlocks = 0;
@@ -174,7 +177,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private int lastTotalSize = 0;
     private int lastUnverifiedQueueSize = 0;
 
-    private final Listener<Peer> peerListener = peer -> updateAndFirePeerCount();
+    private final Listener<Peer> peerListener = peer -> blockListeners.notify(null, Event.PEERS_UPDATED);
 
     private final Listener<Peer> netVolumeListener = peer -> updateAndFireNetVolume();
 
@@ -183,8 +186,20 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     @Override
     public void shutdown() {
         logger.info("Shutting down blockchain processor...");
-        if (isShutdown.getAndSet(true)) {
+        if (isShutdown.getAndSet(true) && !isTrimming.get()) {
             return; // Already shutdown
+        }
+
+        if (isTrimming.get()) {
+            logger.info("Waiting for database trim to finish before shutdown...");
+            while (isTrimming.get()) {
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    logger.warn("Interrupted while waiting for trim to finish.");
+                }
+            }
         }
 
         if (logSyncProgressToCsv) {
@@ -236,14 +251,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     }
 
     // --- Firing events ---
-
-    public int getLastKnownPeerCount() {
-        return lastKnownPeerCount;
-    }
-
-    public int getLastKnownConnectedPeerCount() {
-        return lastKnownConnectedPeerCount;
-    }
 
     public QueueStatus getQueueStatus() {
         return queueStatus.get();
@@ -469,15 +476,43 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         blockListeners.addListener(
                 block -> transactionProcessor.revalidateUnconfirmedTransactions(),
                 Event.BLOCK_PUSHED);
+
         if (trimDerivedTables) {
             blockListeners.addListener(block -> {
                 if (block.getHeight() % (Constants.MAX_ROLLBACK * 10) == 0
                         && lastTrimHeight.get() > 0) {
-                    logger.debug("Trimming derived tables...");
-                    this.derivedTableManager.getDerivedTables()
-                            .forEach(table -> table.trim(lastTrimHeight.get()));
+                    isTrimming.set(true);
+                    long totalStartTime = System.currentTimeMillis();
+                    try {
+                        stores.beginTransaction();
+                        blockListeners.notify(block, Event.TRIM_START);
+                        logger.debug("Trimming derived tables...");
+                        List<DerivedTable> tablesToTrim = derivedTableManager.getDerivedTables();
+                        logger.info("Trimming {} derived tables...", tablesToTrim.size());
+                        int tableIndex = 1;
+                        for (DerivedTable table : tablesToTrim) {
+                            long tableStartTime = System.currentTimeMillis();
+                            currentlyTrimmingTable.set(table.getTable());
+                            table.trim(lastTrimHeight.get());
+                            long tableEndTime = System.currentTimeMillis();
+                            logger.info("#{} Table '{}' trimmed in {}", String.format("%02d", tableIndex++),
+                                    table.getTable(),
+                                    DurationFormatter.format(tableEndTime - tableStartTime));
+                        }
+                        long totalEndTime = System.currentTimeMillis();
+                        logger.info("Automatic database trim completed successfully in {}",
+                                DurationFormatter.format(totalEndTime - totalStartTime));
+                        currentTrimHeight.set(lastTrimHeight.get());
+                    } catch (Exception e) {
+                        logger.error("Error during automatic database trim", e);
+                    } finally {
+                        stores.endTransaction();
+                        currentlyTrimmingTable.set(null);
+                        isTrimming.set(false);
+                        blockListeners.notify(block, Event.TRIM_END);
+                    }
                 }
-            }, Event.AFTER_BLOCK_APPLY);
+            }, Event.BLOCK_PUSHED);
         }
 
         blockListeners.addListener(block -> {
@@ -491,6 +526,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         }
         if (measurementActive) {
             initMeasurementLogging();
+        }
+
+        if (trimDerivedTables) {
+            if (blockchain.getHeight() < Constants.MAX_ROLLBACK * 10) {
+                currentTrimHeight.set(0);
+            } else {
+                // Undefined trim height
+                currentTrimHeight.set(-1);
+            }
+            lastTrimHeight.set(0);
         }
 
         if (Boolean.FALSE.equals(propertyService.getBoolean(Props.DB_SKIP_CHECK))
@@ -1119,18 +1164,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         }
     }
 
-    private void updateAndFirePeerCount() {
-        int newPeerCount = Peers.getAllPeers().size();
-        int newConnectedPeerCount = (int) Peers.getActivePeers().stream()
-                .filter(peer -> peer.getState() == Peer.State.CONNECTED)
-                .count();
-        if (newPeerCount != lastKnownPeerCount || newConnectedPeerCount != lastKnownConnectedPeerCount) {
-            lastKnownPeerCount = newPeerCount;
-            lastKnownConnectedPeerCount = newConnectedPeerCount;
-            blockListeners.notify(null, Event.PEER_COUNT_CHANGED);
-        }
-    }
-
     private void updateAndFireNetVolume() {
         List<Peer> peersList = Peers.getActivePeers();
         long sumUploadedVolume = 0;
@@ -1426,6 +1459,21 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 ? lastTrimHeight.get()
                 : Math.max(blockchain.getHeight() - Constants.MAX_ROLLBACK, 0));
         return trimDerivedTables ? trimHeight : 0;
+    }
+
+    @Override
+    public AtomicInteger getCurrentTrimHeight() {
+        return currentTrimHeight;
+    }
+
+    @Override
+    public AtomicInteger getLastTrimHeight() {
+        return lastTrimHeight;
+    }
+
+    @Override
+    public String getCurrentlyTrimmingTable() {
+        return currentlyTrimmingTable.get();
     }
 
     @Override
