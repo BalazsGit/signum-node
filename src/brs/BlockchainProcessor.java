@@ -99,7 +99,7 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
         RESCAN_BEGIN, RESCAN_END,
         BEFORE_BLOCK_ACCEPT,
         BEFORE_BLOCK_APPLY, AFTER_BLOCK_APPLY,
-        PEERS_UPDATED, NET_VOLUME_CHANGED, QUEUE_STATUS_CHANGED, PERFORMANCE_STATS_UPDATED,
+    PEERS_UPDATED, NET_VOLUME_CHANGED, QUEUE_STATUS_CHANGED, FORK_CACHE_CHANGED, PERFORMANCE_STATS_UPDATED,
         TRIM_START, TRIM_END
     }
 
@@ -118,6 +118,8 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
     String getCurrentlyTrimmingTable();
 
     QueueStatus getQueueStatus();
+
+    int getForkCacheSize();
 
     Collection<Peer> getAllPeers();
 

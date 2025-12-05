@@ -23,7 +23,6 @@ import java.util.function.Consumer;
 import brs.Signum;
 import brs.gui.util.MovingAverage;
 import brs.BlockchainProcessor;
-import brs.Block;
 import brs.props.Props;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -84,6 +83,9 @@ public class MetricsPanel extends JPanel {
     private XYSeries payloadFullnessSeries;
 
     private JProgressBar blocksPerSecondProgressBar;
+    private JLabel blocksPerSecondLabel;
+    private JLabel txPerSecondLabel;
+    private JLabel txPerBlockLabel;
     private JProgressBar allTransactionsPerSecondProgressBar;
     private JProgressBar allTransactionsPerBlockProgressBar;
     private int oclUnverifiedQueueThreshold;
@@ -130,11 +132,14 @@ public class MetricsPanel extends JPanel {
     private JLabel systemTxPerSecondLabel;
     private JProgressBar systemTransactionsPerSecondProgressBar;
     private JProgressBar uploadSpeedProgressBar;
+
     private JProgressBar downloadSpeedProgressBar;
 
     private JProgressBar unconfirmedTxsProgressBar;
     private JLabel cacheFullnessLabel;
     private JProgressBar cacheFullnessProgressBar;
+    private JLabel forkCacheLabel;
+    private JProgressBar forkCacheProgressBar;
 
     private ChartPanel performanceChartPanel;
     private ChartPanel timingChartPanel;
@@ -149,8 +154,11 @@ public class MetricsPanel extends JPanel {
 
     private final Dimension chartDimension1 = new Dimension(320, 240);
     private final Dimension chartDimension2 = new Dimension(320, 120);
+    private final Dimension chartDimension = new Dimension(360, 270);
 
     private final Dimension progressBarSize1 = new Dimension(200, 20);
+    private final Dimension wideProgressBarSize = new Dimension(progressBarSize1.width * 2 + 5,
+            progressBarSize1.height);
     private final Dimension progressBarSize2 = new Dimension(150, 20);
 
     private final Insets labelInsets = new Insets(2, 5, 2, 0);
@@ -234,9 +242,9 @@ public class MetricsPanel extends JPanel {
         plot.setAxisOffset(new RectangleInsets(0, 0, 0, 0));
 
         ChartPanel chartPanel = new ChartPanel(chart);
-        chartPanel.setPreferredSize(chartDimension1);
-        chartPanel.setMinimumSize(chartDimension1);
-        chartPanel.setMaximumSize(chartDimension1);
+        chartPanel.setPreferredSize(chartDimension);
+        chartPanel.setMinimumSize(chartDimension);
+        chartPanel.setMaximumSize(chartDimension);
         return chartPanel;
     }
 
@@ -480,98 +488,113 @@ public class MetricsPanel extends JPanel {
         // SyncPanel (Progress Bars)
         JPanel SyncPanel = new JPanel(new GridBagLayout());
 
+        int yPos = 0;
+
+        // Fork Cache
+        forkCacheLabel = createLabel("Fork Cache", null, "The number of blocks in the fork cache.");
+        forkCacheProgressBar = createProgressBar(0, brs.Constants.MAX_ROLLBACK, Color.MAGENTA,
+                "0 / " + brs.Constants.MAX_ROLLBACK, progressBarSize1);
+        addComponent(SyncPanel, forkCacheLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
+                labelInsets);
+        addComponent(SyncPanel, forkCacheProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
+                GridBagConstraints.HORIZONTAL, barInsets);
+
         // Cache Fullness
         cacheFullnessLabel = createLabel("Download Cache", null, null); // Tooltip is set in init()
         cacheFullnessProgressBar = createProgressBar(0, 100, Color.ORANGE, "0 / 0 MB | 0%", progressBarSize1);
-        addComponent(SyncPanel, cacheFullnessLabel, 0, 0, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
+        addComponent(SyncPanel, cacheFullnessLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
+                GridBagConstraints.NONE,
                 labelInsets);
-        addComponent(SyncPanel, cacheFullnessProgressBar, 1, 0, 1, 1, 0, GridBagConstraints.LINE_START,
+        addComponent(SyncPanel, cacheFullnessProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // Verified / Total Blocks
         tooltip = "Shows the number of blocks in the download queue that have passed PoC verification against the total number of blocks in the queue.\n\n- Verified: PoC signature has been checked (CPU/GPU intensive).\n- Total: All blocks currently in the download queue.\n\nA high number of unverified blocks may indicate a slow verification process.\n\nThe progress bar displays: Verified Blocks / Total Blocks - Percentage of Verified Blocks.";
         JLabel verifLabel = createLabel("Verified / Total Blocks", null, tooltip);
         syncProgressBarDownloadedBlocks = createProgressBar(0, 100, Color.GREEN, "0 / 0 0%", progressBarSize1);
-        addComponent(SyncPanel, verifLabel, 0, 1, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
+        addComponent(SyncPanel, verifLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
                 labelInsets);
-        addComponent(SyncPanel, syncProgressBarDownloadedBlocks, 1, 1, 1, 1, 0, GridBagConstraints.LINE_START,
+        addComponent(SyncPanel, syncProgressBarDownloadedBlocks, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // Unverified Blocks
         tooltip = "The number of blocks in the download queue that are waiting for Proof-of-Capacity (PoC) verification.\n\nA persistently high number might indicate that the CPU or GPU is a bottleneck and cannot keep up with the network's block generation rate.\n\nThe progress bar displays the current count of unverified blocks.";
         JLabel unVerifLabel = createLabel("Unverified Blocks", null, tooltip);
         syncProgressBarUnverifiedBlocks = createProgressBar(0, 2000, Color.GREEN, "0", progressBarSize1);
-        addComponent(SyncPanel, unVerifLabel, 0, 2, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
+        addComponent(SyncPanel, unVerifLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
                 labelInsets);
-        addComponent(SyncPanel, syncProgressBarUnverifiedBlocks, 1, 2, 1, 1, 0, GridBagConstraints.LINE_START,
+        addComponent(SyncPanel, syncProgressBarUnverifiedBlocks, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // Unconfirmed Transactions
         tooltip = "The number of transactions waiting in the memory pool to be included in the next block.\n\nA high number indicates significant network activity. If this number grows continuously without being cleared, it might suggest that transaction fees are too low or the network is under heavy load.\n\nThe progress bar displays the current count of unconfirmed transactions.";
         JLabel unconfirmedTxsLabel = createLabel("Unconfirmed Txs", null, tooltip);
         unconfirmedTxsProgressBar = createProgressBar(0, 1000, Color.GREEN, "0 / 0", progressBarSize1);
-        addComponent(SyncPanel, unconfirmedTxsLabel, 0, 3, 1, 0, 0, GridBagConstraints.LINE_END,
+        addComponent(SyncPanel, unconfirmedTxsLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, unconfirmedTxsProgressBar, 1, 3, 1, 1, 0, GridBagConstraints.LINE_START,
+        addComponent(SyncPanel, unconfirmedTxsProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // Separator
         JSeparator separator1 = new JSeparator(SwingConstants.HORIZONTAL);
-        addComponent(SyncPanel, separator1, 0, 4, 2, 1, 0, GridBagConstraints.CENTER, GridBagConstraints.HORIZONTAL,
+        addComponent(SyncPanel, separator1, 0, yPos++, 2, 1, 0, GridBagConstraints.CENTER,
+                GridBagConstraints.HORIZONTAL,
                 barInsets);
 
         // Blocks/Second (Moving Average)
         tooltip = "The moving average of blocks processed per second. This is a key indicator of the node's synchronization speed.\n\nA higher value means the node is rapidly catching up with the current state of the blockchain. This metric is particularly useful during the initial sync or after a period of being offline.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
-        JLabel blocksPerSecondLabel = createLabel("Blocks/Sec (MA)", Color.CYAN, tooltip);
+        blocksPerSecondLabel = createLabel("Blocks/Sec (MA)", Color.CYAN, tooltip);
         blocksPerSecondProgressBar = createProgressBar(0, 200, null, "0.00 - max: 0.00", progressBarSize1);
-        addComponent(SyncPanel, blocksPerSecondLabel, 0, 5, 1, 0, 0, GridBagConstraints.LINE_END,
+        addComponent(SyncPanel, blocksPerSecondLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, blocksPerSecondProgressBar, 1, 5, 1, 0, 0, GridBagConstraints.LINE_START,
+        addComponent(SyncPanel, blocksPerSecondProgressBar, 1, yPos++, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // All Transactions/Second (Moving Average)
         tooltip = "The moving average of the total number of transactions (user-submitted and AT-generated) processed per second. This metric reflects the total transactional throughput of the network as seen by your node.\n\nIncludes:\n- Payments (Ordinary, Multi-Out, Multi-Same-Out)\n- Messages (Arbitrary, Alias, Account Info, TLD)\n- Assets (Issuance, Transfer, Orders, Minting, Distribution)\n- Digital Goods (Listing, Delisting, Price Change, Quantity Change, Purchase, Delivery, Feedback, Refund)\n- Account Control (Leasing)\n- Mining (Reward Recipient, Commitment)\n- Advanced Payments (Escrow, Subscriptions)\n- Automated Transactions (ATs)\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
-        JLabel txPerSecondLabel = createLabel("All Txs/Sec (MA)", Color.GREEN, tooltip);
+        txPerSecondLabel = createLabel("All Txs/Sec (MA)", Color.GREEN, tooltip);
         allTransactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0.00 - max: 0.00", progressBarSize1);
-        addComponent(SyncPanel, txPerSecondLabel, 0, 6, 1, 0, 0, GridBagConstraints.LINE_END,
+        addComponent(SyncPanel, txPerSecondLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, allTransactionsPerSecondProgressBar, 1, 6, 1, 0, 0, GridBagConstraints.LINE_START,
+        addComponent(SyncPanel, allTransactionsPerSecondProgressBar, 1, yPos++, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // All Transactions/Block (Moving Average)
         tooltip = "The moving average of the total number of transactions (user-submitted and AT-generated) included in each block. This metric provides insight into the network's activity and block space utilization.\n\nIncludes:\n- Payments (Ordinary, Multi-Out, Multi-Same-Out)\n- Messages (Arbitrary, Alias, Account Info, TLD)\n- Assets (Issuance, Transfer, Orders, Minting, Distribution)\n- Digital Goods (Listing, Delisting, Price Change, Quantity Change, Purchase, Delivery, Feedback, Refund)\n- Account Control (Leasing)\n- Mining (Reward Rec. Assignment, Commitment)\n- Advanced Payments (Escrow, Subscriptions)\n- Automated Transactions (ATs)\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
-        JLabel txPerBlockLabel = createLabel("All Txs/Block (MA)", new Color(255, 165, 0), tooltip); // Orange
+        txPerBlockLabel = createLabel("All Txs/Block (MA)", new Color(255, 165, 0), tooltip); // Orange
         allTransactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0.00 - max: 0.00", progressBarSize1);
-        addComponent(SyncPanel, txPerBlockLabel, 0, 7, 1, 0, 0, GridBagConstraints.LINE_END,
+        addComponent(SyncPanel, txPerBlockLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, allTransactionsPerBlockProgressBar, 1, 7, 1, 0, 0, GridBagConstraints.LINE_START,
+        addComponent(SyncPanel, allTransactionsPerBlockProgressBar, 1, yPos++, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // System Transactions/Second (Moving Average)
         tooltip = "The moving average of system-generated transactions processed per second. This includes payments from Automated Transactions (ATs), Escrow results, and Subscription payments.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         systemTxPerSecondLabel = createLabel("System Txs/Sec (MA)", new Color(135, 206, 250), tooltip); // LightSkyBlue
         systemTransactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0.00 - max: 0.00", progressBarSize1);
-        addComponent(SyncPanel, systemTxPerSecondLabel, 0, 8, 1, 0, 0, GridBagConstraints.LINE_END,
+        addComponent(SyncPanel, systemTxPerSecondLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, systemTransactionsPerSecondProgressBar, 1, 8, 1, 0, 0, GridBagConstraints.LINE_START,
+        addComponent(SyncPanel, systemTransactionsPerSecondProgressBar, 1, yPos++, 1, 0, 0,
+                GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // System Transactions/Block (Moving Average)
         tooltip = "The moving average of system-generated transactions included in each block. This includes payments from Automated Transactions (ATs), Escrow results, and Subscription payments.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         systemTxPerBlockLabel = createLabel("System Txs/Block (MA)", new Color(0, 0, 255, 128), tooltip);
         systemTransactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0.00 - max: 0.00", progressBarSize1);
-        addComponent(SyncPanel, systemTxPerBlockLabel, 0, 9, 1, 0, 0, GridBagConstraints.LINE_END,
+        addComponent(SyncPanel, systemTxPerBlockLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, systemTransactionsPerBlockProgressBar, 1, 9, 1, 0, 0, GridBagConstraints.LINE_START,
+        addComponent(SyncPanel, systemTransactionsPerBlockProgressBar, 1, yPos++, 1, 0, 0,
+                GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // ATs/Block (Moving Average)
         tooltip = "The moving average of the number of Automated Transactions (ATs) executed per block. This metric shows the activity level of smart contracts on the network.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         atCountLabel = createLabel("ATs/Block (MA)", new Color(153, 0, 76), tooltip); // Deep Pink
         atCountsPerBlockProgressBar = createProgressBar(0, 100, null, "0.00 - max: 0.00", progressBarSize1);
-        addComponent(SyncPanel, atCountLabel, 0, 10, 1, 0, 0, GridBagConstraints.LINE_END,
+        addComponent(SyncPanel, atCountLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, atCountsPerBlockProgressBar, 1, 10, 1, 0, 0, GridBagConstraints.LINE_START,
+        addComponent(SyncPanel, atCountsPerBlockProgressBar, 1, yPos++, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // Add SyncPanel to performanceMetricsPanel
@@ -597,120 +620,115 @@ public class MetricsPanel extends JPanel {
         JPanel timingMetricsPanel = new JPanel(new GridBagLayout());
 
         JPanel timingInfoPanel = new JPanel(new GridBagLayout());
-        int y = 0;
+        yPos = 0;
 
         Insets timerLabelInsets = new Insets(2, 5, 0, 0);
-        Insets timerBarInsets = new Insets(0, 5, 2, 5);
 
-        // --- Row 1: Push Time / Validation Time ---
-        // Push Time (Left)
-        tooltip = "The moving average of the total time taken to process and push a new block. This value is the sum of all individual timing components measured during block processing.\n\nIt includes:\n- Validation Time\n- TX Loop Time\n- Housekeeping Time\n- TX Apply Time\n- AT Time\n- Subscription Time\n- Block Apply Time\n- Commit Time\n- Complementer (miscellaneous) Time\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
+        // Push Time
+        tooltip = "The moving average of the total time taken to process and push a new block. This value is the sum of all individual timing components measured during block processing.\n\nIt includes:\n- Validation Time\n- TX Loop Time\n- Housekeeping Time\n- TX Apply Time\n- AT Time\n- Subscription Time\n- Block Apply Time\n- Commit Time\n- Complementer (miscellaneous) Time\n\nThe progress bar displays:\n- Absolute Time (ms): Current MA Value - Max MA Value seen in this session.";
         pushTimeLabel = createLabel("Push Time (MA)", Color.BLUE, tooltip);
-        pushTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
-        addComponent(timingInfoPanel, pushTimeLabel, 0, y, 1, 1, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, timerLabelInsets);
-        addComponent(timingInfoPanel, pushTimeProgressBar, 0, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, timerBarInsets);
+        pushTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
 
-        // Validation Time (Right)
-        tooltip = "The moving average of the time spent on block-level validation, excluding the per-transaction validation loop. This is a CPU-intensive task.\n\nMeasured steps include:\n- Verifying block version and timestamp\n- Checking previous block reference\n- Verifying block and generation signatures\n- Validating payload hash and total amounts/fees after transaction processing\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
+        // The toggle slider is now next to the payload bar, so we just add the label
+        // here.
+        addComponent(timingInfoPanel, pushTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
+                GridBagConstraints.NONE, labelInsets);
+        addComponent(timingInfoPanel, pushTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
+                GridBagConstraints.HORIZONTAL, barInsets);
+
+        // Validation Time
+        tooltip = "The moving average of the time spent on block-level validation, excluding the per-transaction validation loop. This is a CPU-intensive task.\n\nMeasured steps include:\n- Verifying block version and timestamp\n- Checking previous block reference\n- Verifying block and generation signatures\n- Validating payload hash and total amounts/fees after transaction processing\n\nThe progress bar displays:\n- Absolute Time (ms): Current MA Value - Max MA Value seen in this session.\n- Percentage (%): The component's contribution to the total 'Push Time'.";
         validationTimeLabel = createLabel("Validation Time (MA)", Color.YELLOW, tooltip);
-        validationTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
-        addComponent(timingInfoPanel, validationTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, timerLabelInsets);
-        addComponent(timingInfoPanel, validationTimeProgressBar, 2, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, timerBarInsets);
-        y += 2;
+        validationTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
+        addComponent(timingInfoPanel, validationTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
+                GridBagConstraints.NONE, labelInsets);
+        addComponent(timingInfoPanel, validationTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
+                GridBagConstraints.HORIZONTAL, barInsets);
 
-        // --- Row 2: TX Loop / Housekeeping ---
-        // TX Loop Time (Left)
-        tooltip = "The moving average of the time spent iterating through and validating all transactions within a block. This involves both CPU and database read operations.\n\nFor each transaction, this includes:\n- Checking timestamps and deadlines\n- Verifying signatures and public keys\n- Validating referenced transactions\n- Checking for duplicates\n- Executing transaction-specific business logic\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
+        // TX Loop Time
+        tooltip = "The moving average of the time spent iterating through and validating all transactions within a block. This involves both CPU and database read operations.\n\nFor each transaction, this includes:\n- Checking timestamps and deadlines\n- Verifying signatures and public keys\n- Validating referenced transactions\n- Checking for duplicates\n- Executing transaction-specific business logic\n\nThe progress bar displays:\n- Absolute Time (ms): Current MA Value - Max MA Value seen in this session.\n- Percentage (%): The component's contribution to the total 'Push Time'.";
         txLoopTimeLabel = createLabel("TX Loop Time (MA)", new Color(128, 0, 128), tooltip);
-        txLoopTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
-        addComponent(timingInfoPanel, txLoopTimeLabel, 0, y, 1, 1, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, timerLabelInsets);
-        addComponent(timingInfoPanel, txLoopTimeProgressBar, 0, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, timerBarInsets);
+        txLoopTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
+        addComponent(timingInfoPanel, txLoopTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
+                GridBagConstraints.NONE, labelInsets);
+        addComponent(timingInfoPanel, txLoopTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
+                GridBagConstraints.HORIZONTAL, barInsets);
 
-        // Housekeeping Time (Right)
-        tooltip = "The moving average of the time spent on various 'housekeeping' tasks during block processing.\n\nThis includes:\n- Re-queuing unconfirmed transactions that were not included in the new block\n- Updating peer states and other miscellaneous tasks\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
+        // Housekeeping Time
+        tooltip = "The moving average of the time spent on various 'housekeeping' tasks during block processing.\n\nThis includes:\n- Re-queuing unconfirmed transactions that were not included in the new block\n- Updating peer states and other miscellaneous tasks\n\nThe progress bar displays:\n- Absolute Time (ms): Current MA Value - Max MA Value seen in this session.\n- Percentage (%): The component's contribution to the total 'Push Time'.";
         housekeepingTimeLabel = createLabel("Housekeeping Time (MA)", new Color(42, 223, 223), tooltip);
-        housekeepingTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
-        addComponent(timingInfoPanel, housekeepingTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, timerLabelInsets);
-        addComponent(timingInfoPanel, housekeepingTimeProgressBar, 2, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, timerBarInsets);
-        y += 2;
+        housekeepingTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
+        addComponent(timingInfoPanel, housekeepingTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
+                GridBagConstraints.NONE, labelInsets);
+        addComponent(timingInfoPanel, housekeepingTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
+                GridBagConstraints.HORIZONTAL, barInsets);
 
-        // --- Row 3: TX Apply / AT Time ---
-        // TX Apply Time (Left)
-        tooltip = "The moving average of the time spent applying the effects of each transaction within the block to the in-memory state. This step handles changes to account balances, aliases, assets, etc., based on the transaction type. It is the first major operation within the 'apply' phase.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
+        // TX Apply Time
+        tooltip = "The moving average of the time spent applying the effects of each transaction within the block to the in-memory state. This step handles changes to account balances, aliases, assets, etc., based on the transaction type. It is the first major operation within the 'apply' phase.\n\nThe progress bar displays:\n- Absolute Time (ms): Current MA Value - Max MA Value seen in this session.\n- Percentage (%): The component's contribution to the total 'Push Time'.";
         txApplyTimeLabel = createLabel("TX Apply Time (MA)", new Color(255, 165, 0), tooltip);
-        txApplyTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
-        addComponent(timingInfoPanel, txApplyTimeLabel, 0, y, 1, 1, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, timerLabelInsets);
-        addComponent(timingInfoPanel, txApplyTimeProgressBar, 0, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, timerBarInsets);
+        txApplyTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
+        addComponent(timingInfoPanel, txApplyTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
+                GridBagConstraints.NONE, labelInsets);
+        addComponent(timingInfoPanel, txApplyTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
+                GridBagConstraints.HORIZONTAL, barInsets);
 
-        // AT Time (Right)
-        tooltip = "The moving average of the time spent validating and processing all Automated Transactions (ATs) within the block. This is a separate computational step that occurs after 'TX Apply Time'.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
+        // AT Time
+        tooltip = "The moving average of the time spent validating and processing all Automated Transactions (ATs) within the block. This is a separate computational step that occurs after 'TX Apply Time'.\n\nThe progress bar displays:\n- Absolute Time (ms): Current MA Value - Max MA Value seen in this session.\n- Percentage (%): The component's contribution to the total 'Push Time'.";
         atTimeLabel = createLabel("AT Time (MA)", new Color(153, 0, 76), tooltip);
-        atTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
-        addComponent(timingInfoPanel, atTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, timerLabelInsets);
-        addComponent(timingInfoPanel, atTimeProgressBar, 2, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, timerBarInsets);
-        y += 2;
+        atTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
+        addComponent(timingInfoPanel, atTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
+                GridBagConstraints.NONE, labelInsets);
+        addComponent(timingInfoPanel, atTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
+                GridBagConstraints.HORIZONTAL, barInsets);
 
-        // --- Row 4: Subscription / Block Apply ---
-        // Subscription Time (Left)
-        tooltip = "The moving average of the time spent processing recurring subscription payments for the block. This is a separate step that occurs after AT processing.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
+        // Subscription Time
+        tooltip = "The moving average of the time spent processing recurring subscription payments for the block. This is a separate step that occurs after AT processing.\n\nThe progress bar displays:\n- Absolute Time (ms): Current MA Value - Max MA Value seen in this session.\n- Percentage (%): The component's contribution to the total 'Push Time'.";
         subscriptionTimeLabel = createLabel("Subscription Time (MA)", new Color(255, 105, 100), tooltip); // Hot pink
-        subscriptionTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
-        addComponent(timingInfoPanel, subscriptionTimeLabel, 0, y, 1, 1, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, timerLabelInsets);
-        addComponent(timingInfoPanel, subscriptionTimeProgressBar, 0, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, timerBarInsets);
+        subscriptionTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
+        addComponent(timingInfoPanel, subscriptionTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
+                GridBagConstraints.NONE, labelInsets);
+        addComponent(timingInfoPanel, subscriptionTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
+                GridBagConstraints.HORIZONTAL, barInsets);
 
-        // Block Apply Time (Right)
-        tooltip = "The moving average of the time spent applying block-level changes. This includes distributing the block reward to the generator, updating escrow services, and notifying listeners about the applied block. This is the final step before the 'Commit' phase.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
+        // Block Apply Time
+        tooltip = "The moving average of the time spent applying block-level changes. This includes distributing the block reward to the generator, updating escrow services, and notifying listeners about the applied block. This is the final step before the 'Commit' phase.\n\nThe progress bar displays:\n- Absolute Time (ms): Current MA Value - Max MA Value seen in this session.\n- Percentage (%): The component's contribution to the total 'Push Time'.";
         blockApplyTimeLabel = createLabel("Block Apply Time (MA)", new Color(0, 100, 100), tooltip); // Teal
-        blockApplyTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
-        addComponent(timingInfoPanel, blockApplyTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, timerLabelInsets);
-        addComponent(timingInfoPanel, blockApplyTimeProgressBar, 2, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, timerBarInsets);
-        y += 2;
+        blockApplyTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
+        addComponent(timingInfoPanel, blockApplyTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
+                GridBagConstraints.NONE, labelInsets);
+        addComponent(timingInfoPanel, blockApplyTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
+                GridBagConstraints.HORIZONTAL, barInsets);
 
-        // --- Row 5: Commit / Misc. Time ---
-        // Commit Time (Left)
-        tooltip = "The moving average of the time spent committing all in-memory state changes to the database on disk. This is a disk I/O-intensive operation.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
+        // Commit Time
+        tooltip = "The moving average of the time spent committing all in-memory state changes to the database on disk. This is a disk I/O-intensive operation.\n\nThe progress bar displays:\n- Absolute Time (ms): Current MA Value - Max MA Value seen in this session.\n- Percentage (%): The component's contribution to the total 'Push Time'.";
         commitTimeLabel = createLabel("Commit Time (MA)", new Color(150, 0, 200), tooltip);
-        commitTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
-        addComponent(timingInfoPanel, commitTimeLabel, 0, y, 1, 1, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, timerLabelInsets);
-        addComponent(timingInfoPanel, commitTimeProgressBar, 0, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, timerBarInsets);
+        commitTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
+        addComponent(timingInfoPanel, commitTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
+                GridBagConstraints.NONE, labelInsets);
+        addComponent(timingInfoPanel, commitTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
+                GridBagConstraints.HORIZONTAL, barInsets);
 
-        // Misc. Time (Right)
-        tooltip = "The moving average of the time spent on miscellaneous operations not explicitly measured in other timing categories. This value is the difference between the 'Total Push Time' and the sum of all other measured components (Validation, TX Loop, Housekeeping, TX Apply, AT, Subscription, Block Apply, and Commit). A consistently high value may indicate performance overhead in parts of the code that are not individually timed, such as memory management or other background tasks.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
+        // Misc. Time
+        tooltip = "The moving average of the time spent on miscellaneous operations not explicitly measured in other timing categories. This value is the difference between the 'Total Push Time' and the sum of all other measured components (Validation, TX Loop, Housekeeping, TX Apply, AT, Subscription, Block Apply, and Commit). A consistently high value may indicate performance overhead in parts of the code that are not individually timed, such as memory management or other background tasks.\n\nThe progress bar displays:\n- Absolute Time (ms): Current MA Value - Max MA Value seen in this session.\n- Percentage (%): The component's contribution to the total 'Push Time'.";
         miscTimeLabel = createLabel("Misc. Time (MA)", Color.LIGHT_GRAY, tooltip);
-        miscTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
-        addComponent(timingInfoPanel, miscTimeLabel, 2, y, 1, 1, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, timerLabelInsets);
-        addComponent(timingInfoPanel, miscTimeProgressBar, 2, y + 1, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, timerBarInsets);
-        y += 2;
-
-        // --- Row 6: Payload Fullness ---
+        miscTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
+        addComponent(timingInfoPanel, miscTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
+                GridBagConstraints.NONE, labelInsets);
+        addComponent(timingInfoPanel, miscTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
+                GridBagConstraints.HORIZONTAL, barInsets);
+        // --- Payload Fullness Panel (spanning below both columns) ---
+        JPanel payloadPanel = new JPanel(new GridBagLayout());
         payloadFullnessLabel = createLabel("Payload Fullness (MA)", Color.WHITE, null); // Tooltip is set in init()
-        Dimension wideProgressBarSize = new Dimension(progressBarSize1.width * 2 + 5, progressBarSize1.height);
         payloadFullnessProgressBar = createProgressBar(0, 100, null,
-                "0% - C: 0% (0 / 0 bytes) - min: 0% - max: 0%", wideProgressBarSize);
-        addComponent(timingInfoPanel, payloadFullnessLabel, 0, y + 2, 3, 1, 0, GridBagConstraints.CENTER,
+                "0% - C: 0% (0 / 0 bytes) - min: 0% - max: 0%", wideProgressBarSize); // by layout
+
+        // Add payloadPanel to timingMetricsPanel, spanning 2 columns
+        addComponent(payloadPanel, payloadFullnessLabel, 0, 0, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.NONE, timerLabelInsets);
-        addComponent(timingInfoPanel, payloadFullnessProgressBar, 0, y + 3, 3, 1, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.HORIZONTAL, timerBarInsets);
+        addComponent(payloadPanel, payloadFullnessProgressBar, 1, 0, 1, 1, 0, GridBagConstraints.CENTER,
+                GridBagConstraints.HORIZONTAL, timerLabelInsets);
+        addComponent(timingMetricsPanel, payloadPanel, 0, 1, 2, 1, 0, GridBagConstraints.CENTER,
+                GridBagConstraints.HORIZONTAL, new Insets(5, 0, 0, 0));
 
         // Add timingInfoPanel to timingMetricsPanel
         addComponent(timingMetricsPanel, timingInfoPanel, 0, 0, 1, 0, 0, GridBagConstraints.NORTHWEST,
@@ -905,6 +923,8 @@ public class MetricsPanel extends JPanel {
         BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
         if (blockchainProcessor != null) {
             blockchainProcessor.addListener(block -> onQueueStatus(), BlockchainProcessor.Event.QUEUE_STATUS_CHANGED);
+            blockchainProcessor.addListener(block -> onForkCacheChanged(),
+                    BlockchainProcessor.Event.FORK_CACHE_CHANGED);
             blockchainProcessor.addListener(block -> onNetVolumeChanged(),
                     BlockchainProcessor.Event.NET_VOLUME_CHANGED);
             blockchainProcessor.addListener(block -> onPerformanceStatsUpdated(),
@@ -930,6 +950,10 @@ public class MetricsPanel extends JPanel {
             SwingUtilities.invokeLater(() -> updateQueueStatus(status.unverifiedSize,
                     status.verifiedSize, status.totalSize, status.cacheFullness));
         }
+    }
+
+    public void onForkCacheChanged() {
+        SwingUtilities.invokeLater(() -> updateForkCacheStatus(Signum.getBlockchainProcessor().getForkCacheSize()));
     }
 
     public void onUnconfirmedTransactionCountChanged() {
@@ -1055,6 +1079,11 @@ public class MetricsPanel extends JPanel {
             chartPanel1.getChart().getXYPlot().getRenderer(rendererIndex1).setSeriesVisible(seriesIndex1, isVisible);
             chartPanel2.getChart().getXYPlot().getRenderer(rendererIndex2).setSeriesVisible(seriesIndex2, isVisible);
         });
+    }
+
+    private void updateForkCacheStatus(int forkCacheSize) {
+        forkCacheProgressBar.setValue(forkCacheSize);
+        forkCacheProgressBar.setString(forkCacheSize + " / " + brs.Constants.MAX_ROLLBACK);
     }
 
     private void updateUnconfirmedTxCount(int count) {
@@ -1312,35 +1341,60 @@ public class MetricsPanel extends JPanel {
         long avgBlockApplyTimeMax = Math.round(blockApplyTimes.getMax());
         long avgMiscTimeMax = Math.round(miscTimes.getMax());
 
+        long validationPercentage = (avgPushTime > 0) ? Math.round(100.0 * avgValidationTime / avgPushTime) : 0;
+        long txLoopPercentage = (avgPushTime > 0) ? Math.round(100.0 * avgTxLoopTime / avgPushTime) : 0;
+        long housekeepingPercentage = (avgPushTime > 0) ? Math.round(100.0 * avgHousekeepingTime / avgPushTime) : 0;
+        long txApplyPercentage = (avgPushTime > 0) ? Math.round(100.0 * avgTxApplyTime / avgPushTime) : 0;
+        long atPercentage = (avgPushTime > 0) ? Math.round(100.0 * avgAtTime / avgPushTime) : 0;
+        long subscriptionPercentage = (avgPushTime > 0) ? Math.round(100.0 * avgSubscriptionTime / avgPushTime) : 0;
+        long blockApplyPercentage = (avgPushTime > 0) ? Math.round(100.0 * avgBlockApplyTime / avgPushTime) : 0;
+        long commitPercentage = (avgPushTime > 0) ? Math.round(100.0 * avgCommitTime / avgPushTime) : 0;
+        long miscPercentage = (avgPushTime > 0) ? Math.round(100.0 * avgMiscTime / avgPushTime) : 0;
+
+        // String formatters now always show both ms and percentage
+        java.util.function.Function<Double, String> pushTimeStrFormatter = val -> String.format("%d ms - max: %d ms",
+                avgPushTime, avgPushTimeMax);
+        java.util.function.Function<Double, String> validationTimeStrFormatter = val -> String
+                .format("%d ms - max: %d ms | %d%%", avgValidationTime, avgValidationTimeMax, validationPercentage);
+        java.util.function.Function<Double, String> txLoopTimeStrFormatter = val -> String
+                .format("%d ms - max: %d ms | %d%%", avgTxLoopTime, avgTxLoopTimeMax, txLoopPercentage);
+        java.util.function.Function<Double, String> housekeepingTimeStrFormatter = val -> String.format(
+                "%d ms - max: %d ms | %d%%", avgHousekeepingTime, avgHousekeepingTimeMax, housekeepingPercentage);
+        java.util.function.Function<Double, String> commitTimeStrFormatter = val -> String
+                .format("%d ms - max: %d ms | %d%%", avgCommitTime, avgCommitTimeMax, commitPercentage);
+        java.util.function.Function<Double, String> atTimeStrFormatter = val -> String
+                .format("%d ms - max: %d ms | %d%%", avgAtTime, avgAtTimeMax, atPercentage);
+        java.util.function.Function<Double, String> txApplyTimeStrFormatter = val -> String
+                .format("%d ms - max: %d ms | %d%%", avgTxApplyTime, avgTxApplyTimeMax, txApplyPercentage);
+        java.util.function.Function<Double, String> subscriptionTimeStrFormatter = val -> String.format(
+                "%d ms - max: %d ms | %d%%", avgSubscriptionTime, avgSubscriptionTimeMax, subscriptionPercentage);
+        java.util.function.Function<Double, String> blockApplyTimeStrFormatter = val -> String
+                .format("%d ms - max: %d ms | %d%%", avgBlockApplyTime, avgBlockApplyTimeMax, blockApplyPercentage);
+        java.util.function.Function<Double, String> miscTimeStrFormatter = val -> String
+                .format("%d ms - max: %d ms | %d%%", avgMiscTime, avgMiscTimeMax, miscPercentage);
+
         // Prepare progress bar updates
-        data.progressBarUpdates.put(pushTimeProgressBar, () -> updateProgressBar(pushTimeProgressBar, avgPushTime,
-                avgPushTimeMax, val -> String.format("%.0f ms - max: %d ms", val, avgPushTimeMax)));
-        data.progressBarUpdates.put(validationTimeProgressBar,
-                () -> updateProgressBar(validationTimeProgressBar, avgValidationTime, avgValidationTimeMax,
-                        val -> String.format("%.0f ms - max: %d ms", val, avgValidationTimeMax)));
+        data.progressBarUpdates.put(pushTimeProgressBar,
+                () -> updateProgressBar(pushTimeProgressBar, avgPushTime, avgPushTimeMax, pushTimeStrFormatter));
+        data.progressBarUpdates.put(validationTimeProgressBar, () -> updateProgressBar(validationTimeProgressBar,
+                validationPercentage, 100, validationTimeStrFormatter));
         data.progressBarUpdates.put(txLoopTimeProgressBar,
-                () -> updateProgressBar(txLoopTimeProgressBar, avgTxLoopTime, avgTxLoopTimeMax,
-                        val -> String.format("%.0f ms - max: %d ms", val, avgTxLoopTimeMax)));
-        data.progressBarUpdates.put(housekeepingTimeProgressBar,
-                () -> updateProgressBar(housekeepingTimeProgressBar, avgHousekeepingTime,
-                        avgHousekeepingTimeMax,
-                        val -> String.format("%.0f ms - max: %d ms", val, avgHousekeepingTimeMax)));
+                () -> updateProgressBar(txLoopTimeProgressBar, txLoopPercentage, 100, txLoopTimeStrFormatter));
+        data.progressBarUpdates.put(housekeepingTimeProgressBar, () -> updateProgressBar(housekeepingTimeProgressBar,
+                housekeepingPercentage, 100, housekeepingTimeStrFormatter));
         data.progressBarUpdates.put(commitTimeProgressBar,
-                () -> updateProgressBar(commitTimeProgressBar, avgCommitTime, avgCommitTimeMax,
-                        val -> String.format("%.0f ms - max: %d ms", val, avgCommitTimeMax)));
-        data.progressBarUpdates.put(atTimeProgressBar, () -> updateProgressBar(atTimeProgressBar, avgAtTime,
-                avgAtTimeMax, val -> String.format("%.0f ms - max: %d ms", val, avgAtTimeMax)));
+                () -> updateProgressBar(commitTimeProgressBar, commitPercentage, 100, commitTimeStrFormatter));
+        data.progressBarUpdates.put(atTimeProgressBar,
+                () -> updateProgressBar(atTimeProgressBar, atPercentage, 100, atTimeStrFormatter));
         data.progressBarUpdates.put(txApplyTimeProgressBar,
-                () -> updateProgressBar(txApplyTimeProgressBar, avgTxApplyTime, avgTxApplyTimeMax,
-                        val -> String.format("%.0f ms - max: %d ms", val, avgTxApplyTimeMax)));
+                () -> updateProgressBar(txApplyTimeProgressBar, txApplyPercentage, 100, txApplyTimeStrFormatter));
         data.progressBarUpdates.put(subscriptionTimeProgressBar,
-                () -> updateProgressBar(subscriptionTimeProgressBar, avgSubscriptionTime, avgSubscriptionTimeMax,
-                        val -> String.format("%.0f ms - max: %d ms", val, avgSubscriptionTimeMax)));
-        data.progressBarUpdates.put(blockApplyTimeProgressBar,
-                () -> updateProgressBar(blockApplyTimeProgressBar, avgBlockApplyTime, avgBlockApplyTimeMax,
-                        val -> String.format("%.0f ms - max: %d ms", val, avgBlockApplyTimeMax)));
-        data.progressBarUpdates.put(miscTimeProgressBar, () -> updateProgressBar(miscTimeProgressBar, avgMiscTime,
-                avgMiscTimeMax, val -> String.format("%.0f ms - max: %d ms", val, avgMiscTimeMax)));
+                () -> updateProgressBar(subscriptionTimeProgressBar, subscriptionPercentage, 100,
+                        subscriptionTimeStrFormatter));
+        data.progressBarUpdates.put(blockApplyTimeProgressBar, () -> updateProgressBar(blockApplyTimeProgressBar,
+                blockApplyPercentage, 100, blockApplyTimeStrFormatter));
+        data.progressBarUpdates.put(miscTimeProgressBar,
+                () -> updateProgressBar(miscTimeProgressBar, miscPercentage, 100, miscTimeStrFormatter));
         data.progressBarUpdates.put(payloadFullnessProgressBar,
                 () -> updateProgressBar(payloadFullnessProgressBar, avgPayloadFullnessPercentage, 100, val -> String
                         .format("%06.2f%% - C: %03d%% (%06d / %d bytes) - min: %03d%% - max: %03d%%",

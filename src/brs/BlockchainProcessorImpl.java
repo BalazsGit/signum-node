@@ -257,6 +257,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     }
 
     @Override
+    public int getForkCacheSize() {
+        return downloadCache.getForkList().size();
+    }
+
+    @Override
     public Collection<Peer> getAllPeers() {
         return Peers.getAllPeers();
     }
@@ -770,6 +775,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                     break;
                                 }
                                 processFork(peer, downloadCache.getForkList(), commonBlockId);
+                                blockListeners.notify(null, Event.FORK_CACHE_CHANGED);
                             }
 
                         } catch (SignumException.StopException e) {
