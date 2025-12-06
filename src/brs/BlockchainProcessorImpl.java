@@ -204,6 +204,19 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             }
         }
 
+        if (popOffBlocksCount.get() > 0) {
+            logger.info("Waiting for pop-off to finish before shutdown...");
+            while (popOffBlocksCount.get() > 0) {
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    logger.warn("Interrupted while waiting for pop-off to finish.");
+                    break; // Exit loop if interrupted
+                }
+            }
+        }
+
         if (logSyncProgressToCsv) {
             long currentTime = System.currentTimeMillis();
             long deltaTime = currentTime - lastSyncLogTimestamp;
