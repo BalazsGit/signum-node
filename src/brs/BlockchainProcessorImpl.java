@@ -166,6 +166,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private final AtomicReference<String> currentlyTrimmingTable = new AtomicReference<>();
     private final AtomicLong uploadedVolume = new AtomicLong();
     private final AtomicLong downloadedVolume = new AtomicLong();
+    private final AtomicLong lastCheckTotalMined = new AtomicLong(0);
+    private final AtomicLong lastCheckTotalEffectiveBalance = new AtomicLong(0);
+    private final AtomicInteger lastCheckHeight = new AtomicInteger(0);
 
     private int autoPopOffLastStuckHeight = 0;
     private int autoPopOffNumberOfBlocks = 0;
@@ -1576,6 +1579,67 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             logger.debug("Database is consistent: {}", isConsistent.get());
         }
         return Long.compare(totalMined, totalEffectiveBalance);
+    }
+
+    public int checkDatabaseStateRequest() {
+        synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
+            logger.debug("Block height {}, checking database state...", blockchain.getHeight());
+            long totalMined = blockchain.getTotalMined();
+
+            long totalEffectiveBalance = accountService.getAllAccountsBalance();
+            for (Escrow escrow : escrowService.getAllEscrowTransactions()) {
+                totalEffectiveBalance += escrow.getAmountNQT();
+            }
+
+            if (totalMined != totalEffectiveBalance) {
+                logger.warn(
+                        "Block height {}, total mined {}, total effective+burnt {}",
+                        blockchain.getHeight(),
+                        totalMined,
+                        totalEffectiveBalance);
+            }
+
+            lastCheckTotalMined.set(totalMined);
+            lastCheckTotalEffectiveBalance.set(totalEffectiveBalance);
+            lastCheckHeight.set(blockchain.getHeight());
+
+            isConsistent.set(totalMined == totalEffectiveBalance);
+
+            if (logger.isDebugEnabled()) {
+                logger.debug("Total mined {}, total effective {}", totalMined, totalEffectiveBalance);
+                logger.debug("Database is consistent: {}", isConsistent.get());
+            }
+            return Long.compare(totalMined, totalEffectiveBalance);
+        }
+    }
+
+    @Override
+    public long getTotalMined() {
+        return blockchain.getTotalMined();
+    }
+
+    @Override
+    public long getTotalEffectiveBalance() {
+        long totalEffectiveBalance = accountService.getAllAccountsBalance();
+        for (Escrow escrow : escrowService.getAllEscrowTransactions()) {
+            totalEffectiveBalance += escrow.getAmountNQT();
+        }
+        return totalEffectiveBalance;
+    }
+
+    @Override
+    public long getLastCheckTotalMined() {
+        return lastCheckTotalMined.get();
+    }
+
+    @Override
+    public long getLastCheckTotalEffectiveBalance() {
+        return lastCheckTotalEffectiveBalance.get();
+    }
+
+    @Override
+    public int getLastCheckHeight() {
+        return lastCheckHeight.get();
     }
 
     private void addGenesisBlock() {

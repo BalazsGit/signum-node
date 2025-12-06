@@ -25,6 +25,7 @@ import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
@@ -48,6 +49,7 @@ import org.slf4j.LoggerFactory;
 
 import brs.Signum;
 import brs.BlockchainProcessor;
+import brs.Constants;
 import brs.Block;
 import brs.peer.Peer;
 import brs.fluxcapacitor.FluxValues;
@@ -109,6 +111,7 @@ public class SignumGUI extends JFrame {
     private JButton editConfButton;
     private JButton popOff10Button;
     private JButton popOff100Button;
+    private JButton dbCheckButton;
     private JButton syncButton;
     private JButton shutdownButton;
     // private JButton restartButton;
@@ -626,6 +629,8 @@ public class SignumGUI extends JFrame {
                 IconFontSwing.buildIcon(FontAwesome.STEP_BACKWARD, 18, iconColor));
         popOff100Button = new JButton("Pop off 100 blocks",
                 IconFontSwing.buildIcon(FontAwesome.BACKWARD, 18, iconColor));
+        dbCheckButton = new JButton("Database check",
+                IconFontSwing.buildIcon(FontAwesome.DATABASE, 18, iconColor));
         syncButton = new JButton("Stop Sync",
                 IconFontSwing.buildIcon(FontAwesome.PAUSE, 18, iconColor));
         /*
@@ -648,6 +653,8 @@ public class SignumGUI extends JFrame {
                 "Removes the last 10 blocks from your local blockchain. This can help resolve a local fork if your node is stuck.");
         addInfoTooltip(popOff100Button,
                 "Removes the last 100 blocks from your local blockchain. Use this if a smaller pop-off does not resolve a fork.");
+        addInfoTooltip(dbCheckButton,
+                "Performs a manual consistency check on the database to ensure data integrity.");
         addInfoTooltip(syncButton,
                 "Toggles the synchronization process. 'Pause Sync' pauses the downloading and processing of new blocks. 'Resume Sync' continues the process.");
         addInfoTooltip(shutdownButton,
@@ -663,6 +670,51 @@ public class SignumGUI extends JFrame {
 
         File phoenixIndex = new File("html/ui/phoenix/index.html");
         File classicIndex = new File("html/ui/classic/index.html");
+
+        dbCheckButton.addActionListener(e -> {
+            new Thread(() -> {
+                BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+                final int result = blockchainProcessor.checkDatabaseStateRequest();
+                final int height = blockchainProcessor.getLastCheckHeight();
+                final long totalMined = blockchainProcessor.getLastCheckTotalMined();
+                final double totalMinedSigna = (double) totalMined / Constants.ONE_SIGNA;
+                final long totalEffectiveBalance = blockchainProcessor.getLastCheckTotalEffectiveBalance();
+                final double totalEffectiveBalanceSigna = (double) totalEffectiveBalance / Constants.ONE_SIGNA;
+                final long difference = totalMined - totalEffectiveBalance;
+
+                SwingUtilities.invokeLater(() -> {
+                    String message;
+                    Icon icon;
+                    if (result == 0) {
+                        message = String.format("Database is consistent at block height %d.\n\n" +
+                                "Total Mined: %,.2f SIGNA (%,d NQT)\n" +
+                                "Total Effective Balance: %,.2f SIGNA (%,d NQT)",
+                                height,
+                                totalMinedSigna, totalMined,
+                                totalEffectiveBalanceSigna, totalEffectiveBalance);
+                        icon = IconFontSwing.buildIcon(FontAwesome.CHECK_CIRCLE, 32, new Color(0, 128, 0));
+                    } else {
+                        String inconsistencyType;
+                        if (result > 0) {
+                            inconsistencyType = "Total mined is greater than total effective balance.";
+                        } else {
+                            inconsistencyType = "Total mined is less than total effective balance.";
+                        }
+                        message = String.format("Database is INCONSISTENT!\n\n%s\n\n" +
+                                "Total Mined: %,.2f SIGNA (%,d NQT)\n" +
+                                "Total Effective Balance: %,.2f SIGNA (%,d NQT)\n\n" +
+                                "Difference: %,d NQT\n\nCheck logs for more details at block height %d.",
+                                inconsistencyType,
+                                totalMinedSigna, totalMined,
+                                totalEffectiveBalanceSigna, totalEffectiveBalance,
+                                difference, height);
+                        icon = IconFontSwing.buildIcon(FontAwesome.TIMES_CIRCLE, 32, Color.RED);
+                    }
+                    JOptionPane.showMessageDialog(SignumGUI.this, message, "Database Consistency Check",
+                            JOptionPane.INFORMATION_MESSAGE, icon);
+                });
+            }).start();
+        });
 
         syncButton.addActionListener(e -> {
             isSyncStopped = !isSyncStopped;
@@ -721,6 +773,7 @@ public class SignumGUI extends JFrame {
         popOff100Button.setVisible(showPopOff);
         // leftButtons.add(popOffMaxButton);
 
+        leftButtons.add(dbCheckButton);
         leftButtons.add(syncButton);
 
         // leftButtons.add(restartButton);

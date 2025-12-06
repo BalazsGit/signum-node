@@ -135,6 +135,18 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     long getDownloadedVolume();
 
+    int checkDatabaseStateRequest();
+
+    long getTotalMined();
+
+    long getTotalEffectiveBalance();
+
+    long getLastCheckTotalMined();
+
+    long getLastCheckTotalEffectiveBalance();
+
+    int getLastCheckHeight();
+
     void processPeerBlock(JsonObject request, Peer peer) throws SignumException;
 
     void fullReset();
