@@ -147,6 +147,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     // The current trim height requested from derived table datas
     private final AtomicInteger currentTrimHeight = new AtomicInteger();
 
+    private final AtomicInteger popOffBlocksCount = new AtomicInteger(0);
+
     private final Listeners<Block, Event> blockListeners = new Listeners<>();
     private final AtomicReference<Peer> lastBlockchainFeeder = new AtomicReference<>();
     private final AtomicInteger lastBlockchainFeederHeight = new AtomicInteger();
@@ -259,6 +261,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     @Override
     public int getForkCacheSize() {
         return downloadCache.getForkList().size();
+    }
+
+    @Override
+    public int getPopOffBlocksCount() {
+        return popOffBlocksCount.get();
     }
 
     @Override
@@ -1985,6 +1992,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 try {
                     stores.beginTransaction();
                     Block block = blockchain.getLastBlock();
+                    popOffBlocksCount.addAndGet(block.getHeight() - commonBlock.getHeight());
                     logger.info("Rollback from {} to {}", block.getHeight(), commonBlock.getHeight());
                     while (block.getId() != commonBlock.getId() && block.getId() != genesisBlockId) {
                         if (forkBlocks != null) {
@@ -2021,6 +2029,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     logger.debug("Error popping off to {}", commonBlock.getHeight(), e);
                     throw e;
                 } finally {
+                    popOffBlocksCount.set(0);
                     stores.endTransaction();
                 }
             }
@@ -2038,6 +2047,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         blockchain.setLastBlock(block, previousBlock);
         txs.forEach(Transaction::unsetBlock);
         blockDb.deleteBlocksFrom(block.getId());
+        popOffBlocksCount.decrementAndGet();
         blockListeners.notify(block, Event.BLOCK_POPPED);
         return previousBlock;
     }

@@ -92,6 +92,8 @@ public class SignumGUI extends JFrame {
     private JCheckBox showMetricsCheckbox;
     private JLabel trimHeightLabel;
     private JSeparator trimSeparator;
+    private JLabel popOffBlocksLabel;
+    private JSeparator popOffSeparator;
     private boolean showMetrics = false;
     private boolean showPopOff = false;
     private boolean isSyncStopped = false;
@@ -335,6 +337,15 @@ public class SignumGUI extends JFrame {
         trimHeightLabel.setVisible(false);
         latestBlockInfoPanel.add(trimSeparator);
         latestBlockInfoPanel.add(trimHeightLabel);
+
+        popOffSeparator = new JSeparator(SwingConstants.VERTICAL);
+        popOffSeparator.setPreferredSize(verticalSeparatorSize);
+        String popOffTooltip = "Shows the number of blocks remaining to be removed from the blockchain during a 'pop-off' operation.\n\nThis counter appears only when a pop-off is in progress and helps monitor its advancement.";
+        popOffBlocksLabel = createLabel("Pop off blocks: 0", null, popOffTooltip);
+
+        latestBlockInfoPanel.add(popOffSeparator);
+        latestBlockInfoPanel.add(popOffBlocksLabel);
+        setPopOffLabelVisible(false);
 
         // === Add checkboxes to toolBar ===
         checkboxPanel = new JPanel();
@@ -820,6 +831,8 @@ public class SignumGUI extends JFrame {
         blockchainProcessor.addListener(block -> onPeersUpdated(), BlockchainProcessor.Event.PEERS_UPDATED);
         blockchainProcessor.addListener(block -> onNetVolumeChanged(), BlockchainProcessor.Event.NET_VOLUME_CHANGED);
         blockchainProcessor.addListener(this::onBlockPushed, BlockchainProcessor.Event.BLOCK_PUSHED);
+        blockchainProcessor.addListener(block -> onBlockPopped(), BlockchainProcessor.Event.BLOCK_POPPED);
+        blockchainProcessor.addListener(block -> onPopOffProgress(), BlockchainProcessor.Event.BLOCK_POPPED);
         if (trimEnabled) {
             blockchainProcessor.addListener(block -> onTrimStart(),
                     BlockchainProcessor.Event.TRIM_START);
@@ -916,6 +929,25 @@ public class SignumGUI extends JFrame {
                 startGuiTimer();
             }
         });
+    }
+
+    private void onBlockPopped() {
+        SwingUtilities.invokeLater(() -> {
+            updateLatestBlock(Signum.getBlockchain().getLastBlock());
+        });
+    }
+
+    private void onPopOffProgress() {
+        SwingUtilities.invokeLater(() -> {
+            int remaining = Signum.getBlockchainProcessor().getPopOffBlocksCount();
+            popOffBlocksLabel.setText("Pop off blocks: " + remaining);
+            setPopOffLabelVisible(remaining > 0);
+        });
+    }
+
+    private void setPopOffLabelVisible(boolean isVisible) {
+        popOffBlocksLabel.setVisible(isVisible);
+        popOffSeparator.setVisible(isVisible);
     }
 
     public void startSignumWithGUI() {
