@@ -40,7 +40,7 @@ dependencies {
     implementation 'com.zaxxer:HikariCP:7.0.2'
     implementation 'org.jocl:jocl:2.0.5'
 
-    implementation 'org.jooq:jooq:3.20.9'
+    implementation 'org.jooq:jooq:3.20.10'
     implementation 'org.flywaydb:flyway-core:11.18.0'
     implementation 'org.flywaydb:flyway-mysql:11.18.0'
     implementation 'org.flywaydb:flyway-database-postgresql:11.18.0'
@@ -56,11 +56,11 @@ dependencies {
     implementation 'org.slf4j:slf4j-api:2.0.17'
     implementation 'org.slf4j:slf4j-jdk14:2.0.17'
 
-    implementation 'org.eclipse.jetty.ee10:jetty-ee10-servlet:12.1.4'
-    implementation 'org.eclipse.jetty.ee10:jetty-ee10-servlets:12.1.4'
-    implementation 'org.eclipse.jetty.ee10.websocket:jetty-ee10-websocket-jetty-server:12.1.4'
-    implementation 'org.eclipse.jetty.compression:jetty-compression-server:12.1.4' 
-    implementation 'org.eclipse.jetty.compression:jetty-compression-gzip:12.1.4'   
+    implementation 'org.eclipse.jetty.ee10:jetty-ee10-servlet:12.1.5'
+    implementation 'org.eclipse.jetty.ee10:jetty-ee10-servlets:12.1.5'
+    implementation 'org.eclipse.jetty.ee10.websocket:jetty-ee10-websocket-jetty-server:12.1.5'
+    implementation 'org.eclipse.jetty.compression:jetty-compression-server:12.1.5' 
+    implementation 'org.eclipse.jetty.compression:jetty-compression-gzip:12.1.5'   
 
     implementation 'com.github.jiconfont:jiconfont:1.0.0'
     implementation 'com.github.jiconfont:jiconfont-swing:1.0.1'
