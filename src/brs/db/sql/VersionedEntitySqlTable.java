@@ -12,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public abstract class VersionedEntitySqlTable<T> extends EntitySqlTable<T> implements VersionedEntityTable<T> {
@@ -74,45 +75,57 @@ public abstract class VersionedEntitySqlTable<T> extends EntitySqlTable<T> imple
     }
 
     @Override
-    public final void trim(int height) {
+    public void trim(int height) {
         trim(tableClass, heightField, height, dbKeyFactory);
     }
 
-    static void trim(final TableImpl<?> tableClass, Field<Integer> heightField, final int height,
-            final DbKey.Factory dbKeyFactory) {
+    static void trim(
+            final TableImpl<?> tableClass,
+            final Field<Integer> heightField,
+            final int trimHeight,
+            final DbKey.Factory<?> dbKeyFactory) {
+
         if (!Db.isInTransaction()) {
             throw new IllegalStateException("Not in transaction");
         }
 
-        // "accounts" is just an example to make it easier to understand what the code
-        // does
-        // select all accounts with multiple entries where height < trimToHeight[current
-        // height - 1440]
-
-        final int selectBatchSize = 10000;
-        final int deleteBatchSize = 1000;
+        final int selectBatchSize = 10_000;
+        final int deleteBatchSize = 1_000;
 
         Db.useDSLContext(ctx -> {
-            Field<Boolean> latestField = tableClass.field("latest", Boolean.class);
+            List<Field<Long>> pkFields = new ArrayList<>();
+            for (String column : dbKeyFactory.getPKColumns()) {
+                pkFields.add(tableClass.field(column, Long.class));
+            }
 
-            int offset = 0;
+            DbKey lastKey = null;
             int totalDeleted = 0;
 
             while (true) {
                 SelectQuery<Record> selectMaxHeightQuery = ctx.selectQuery();
                 selectMaxHeightQuery.addFrom(tableClass);
                 selectMaxHeightQuery.addSelect(DSL.max(heightField).as("max_height"));
+                pkFields.forEach(selectMaxHeightQuery::addSelect);
+                pkFields.forEach(selectMaxHeightQuery::addGroupBy);
+                selectMaxHeightQuery.addConditions(heightField.lt(trimHeight));
+                selectMaxHeightQuery.addHaving(DSL.countDistinct(heightField).gt(1));
 
-                for (String column : dbKeyFactory.getPKColumns()) {
-                    Field<Long> pkField = tableClass.field(column, Long.class);
-                    selectMaxHeightQuery.addSelect(pkField);
-                    selectMaxHeightQuery.addGroupBy(pkField);
+                // Keyset pagination
+                if (lastKey != null) {
+                    Condition pkCondition = null;
+                    long[] lastValues = lastKey.getPKValues();
+                    for (int i = 0; i < pkFields.size(); i++) {
+                        Condition c = pkFields.get(i).gt(lastValues[i]);
+                        for (int j = 0; j < i; j++) {
+                            c = c.and(pkFields.get(j).eq(lastValues[j]));
+                        }
+                        pkCondition = (pkCondition == null) ? c : pkCondition.or(c);
+                    }
+                    selectMaxHeightQuery.addConditions(pkCondition);
                 }
 
-                selectMaxHeightQuery.addConditions(heightField.lt(height));
-                selectMaxHeightQuery.addHaving(DSL.countDistinct(heightField).gt(1));
+                selectMaxHeightQuery.addOrderBy(pkFields);
                 selectMaxHeightQuery.addLimit(selectBatchSize);
-                selectMaxHeightQuery.addOffset(offset);
 
                 List<Record> records = selectMaxHeightQuery.fetch();
                 if (records.isEmpty()) {
@@ -127,56 +140,37 @@ public abstract class VersionedEntitySqlTable<T> extends EntitySqlTable<T> imple
                 }
 
                 BatchBindStep deleteBatch = ctx.batch(deleteLowerHeightQuery);
-                int deleteCounter = 0;
+                int batchCount = 0;
 
                 for (Record record : records) {
                     DbKey dbKey = (DbKey) dbKeyFactory.newKey(record);
                     int maxHeight = record.get("max_height", Integer.class);
 
-                    List<Object> bindValues = new ArrayList<>();
-                    bindValues.add(maxHeight);
+                    Object[] binds = new Object[1 + pkFields.size()];
+                    binds[0] = maxHeight;
+                    long[] pkValues = dbKey.getPKValues();
+                    for (int i = 0; i < pkValues.length; i++)
+                        binds[i + 1] = pkValues[i];
 
-                    for (long pkValue : dbKey.getPKValues()) {
-                        bindValues.add(pkValue);
-                    }
+                    deleteBatch.bind(binds);
+                    batchCount++;
+                    lastKey = dbKey;
 
-                    deleteBatch.bind(bindValues.toArray());
-                    deleteCounter++;
-
-                    if (deleteCounter % deleteBatchSize == 0) {
-                        deleteBatch.execute();
-                        totalDeleted += deleteCounter;
+                    if (batchCount % deleteBatchSize == 0) {
+                        totalDeleted += Arrays.stream(deleteBatch.execute()).sum();
                         deleteBatch = ctx.batch(deleteLowerHeightQuery);
                     }
                 }
 
-                if (deleteCounter % deleteBatchSize != 0) {
-                    deleteBatch.execute();
-                    totalDeleted += deleteCounter;
+                if (batchCount % deleteBatchSize != 0) {
+                    totalDeleted += Arrays.stream(deleteBatch.execute()).sum();
                 }
 
-                logger.debug("Trimmed {} batch: {} rows processed (offset {}).",
-                        tableClass.getName(), deleteCounter, offset);
-
-                offset += selectBatchSize;
+                logger.debug("Processed {} PKs in current batch, lastKey={}", records.size(), lastKey);
             }
 
-            logger.debug("Total trimmed {} rows from {} below height {}",
-                    totalDeleted, tableClass.getName(), height);
-
-            int totalDeletedNotLatest = 0;
-            while (true) {
-                int deletedInBatch = ctx.deleteFrom(tableClass)
-                        .where(heightField.lt(height).and(latestField.isFalse()))
-                        .limit(deleteBatchSize)
-                        .execute();
-                totalDeletedNotLatest += deletedInBatch;
-                if (deletedInBatch < deleteBatchSize) {
-                    break;
-                }
-            }
-            logger.debug("Trimming {} removed {} obsolete elements (latest = 0) below height {}",
-                    tableClass.getName(), totalDeletedNotLatest, height);
+            logger.debug("Total trimmed {} rows from {} below height {}", totalDeleted, tableClass.getName(),
+                    trimHeight);
         });
     }
 
