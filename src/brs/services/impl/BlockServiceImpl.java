@@ -378,7 +378,11 @@ public class BlockServiceImpl implements BlockService {
                 if (previousHeight < 1) {
                     break;
                 }
-                itBlock = downloadCache.getBlock(itBlock.getPreviousBlockId());
+                long previousBlockId = itBlock.getPreviousBlockId();
+                itBlock = downloadCache.getBlock(previousBlockId);
+                if (itBlock == null) {
+                    itBlock = blockchain.getBlock(previousBlockId);
+                }
                 if (itBlock == null) {
                     throw new BlockOutOfOrderException(
                             "Previous block does no longer exist for block height "
