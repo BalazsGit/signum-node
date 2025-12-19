@@ -1,5 +1,19 @@
 package brs.gui.util;
 
+/**
+ * A thread-safe utility class for calculating the moving average of a stream of
+ * double values.
+ * <p>
+ * This class uses circular arrays to store a fixed number of raw data points
+ * and their
+ * corresponding moving averages. It employs the Kahan summation algorithm to
+ * minimize
+ * floating-point precision errors when calculating the sum over the sliding
+ * window.
+ * <p>
+ * The class also tracks the minimum and maximum moving average values recorded.
+ * All public methods are synchronized.
+ */
 public class MovingAverage {
     private final double[] rawDataList;
     private int rawDataHead = 0;
@@ -18,6 +32,14 @@ public class MovingAverage {
 
     private final Object lock = new Object();
 
+    /**
+     * Constructs a new MovingAverage instance.
+     *
+     * @param capacity   The maximum number of data points and averages to store.
+     *                   This defines the size of the internal buffers.
+     * @param windowSize The size of the sliding window used to calculate the moving
+     *                   average.
+     */
     public MovingAverage(int capacity, int windowSize) {
         this.capacity = capacity;
         this.windowSize = windowSize;
@@ -25,6 +47,13 @@ public class MovingAverage {
         this.avgDataList = new double[capacity];
     }
 
+    /**
+     * Sets a new size for the moving average window.
+     *
+     * @param newWindowSize The new window size. Must be greater than 0 and not
+     *                      exceed the capacity.
+     * @throws IllegalArgumentException if the new window size is invalid.
+     */
     public void setWindowSize(int newWindowSize) {
         synchronized (lock) {
             if (newWindowSize <= 0 || newWindowSize > capacity) {
@@ -36,6 +65,11 @@ public class MovingAverage {
         }
     }
 
+    /**
+     * Recalculates the sum of the values within the current window from scratch.
+     * This is used to correct potential floating-point drift or after the window
+     * size changes.
+     */
     private void recalculateSum() {
         sum = 0.0;
         compensation = 0.0;
@@ -46,6 +80,12 @@ public class MovingAverage {
         }
     }
 
+    /**
+     * Adds a value to the sum using the Kahan summation algorithm to reduce
+     * numerical error.
+     *
+     * @param input The double value to add to the sum.
+     */
     private void kahanAdd(double input) {
         double y = input - compensation;
         double t = sum + y;
@@ -53,6 +93,12 @@ public class MovingAverage {
         sum = t;
     }
 
+    /**
+     * Adds a new data point to the series, updates the moving average, and stores
+     * the new average.
+     *
+     * @param value The new data point to add.
+     */
     public void add(double value) {
         synchronized (lock) {
             rawDataList[rawDataHead] = value;
@@ -84,6 +130,12 @@ public class MovingAverage {
         }
     }
 
+    /**
+     * Adds a calculated average value to the internal storage of averages.
+     * It also updates the overall min and max average values.
+     *
+     * @param value The new average value to store.
+     */
     private void addToAvg(double value) {
         double removed = 0.0;
         boolean wasFull = avgDataCount == capacity;
@@ -109,6 +161,12 @@ public class MovingAverage {
         }
     }
 
+    /**
+     * Recalculates the maximum value among the stored averages.
+     * This is an O(N) operation and is only called when the previous maximum value
+     * is removed from the buffer.
+     * This method must be called from within a synchronized block.
+     */
     private void recalculateMax() {
         // This method should only be called from within a synchronized(lock) block.
         if (avgDataCount == 0) {
@@ -125,6 +183,12 @@ public class MovingAverage {
         }
     }
 
+    /**
+     * Recalculates the minimum value among the stored averages.
+     * This is an O(N) operation and is only called when the previous minimum value
+     * is removed from the buffer.
+     * This method must be called from within a synchronized block.
+     */
     private void recalculateMin() {
         // This method should only be called from within a synchronized(lock) block.
         if (avgDataCount == 0) {
@@ -141,24 +205,46 @@ public class MovingAverage {
         }
     }
 
+    /**
+     * Gets the current moving average.
+     *
+     * @return The current moving average, or 0.0 if no data is available. Returns a
+     *         non-negative value.
+     */
     public double getAverage() {
         synchronized (lock) {
             return avgDataCount == 0 ? 0.0 : Math.max(avg, 0.0);
         }
     }
 
+    /**
+     * Gets the number of raw data points currently stored.
+     *
+     * @return The number of data points.
+     */
     public int size() {
         synchronized (lock) {
             return rawDataCount;
         }
     }
 
+    /**
+     * Checks if the data series is empty.
+     *
+     * @return {@code true} if no data points have been added, {@code false}
+     *         otherwise.
+     */
     public boolean isEmpty() {
         synchronized (lock) {
             return rawDataCount == 0;
         }
     }
 
+    /**
+     * Gets the most recently added raw data point.
+     *
+     * @return The last raw value added, or 0.0 if empty.
+     */
     public double getLast() {
         synchronized (lock) {
             if (rawDataCount == 0) {
@@ -168,6 +254,14 @@ public class MovingAverage {
         }
     }
 
+    /**
+     * Gets the raw data point at a specific logical index. Index 0 is the oldest
+     * element.
+     *
+     * @param index The logical index of the data point to retrieve.
+     * @return The raw data point at the specified index, or 0.0 if the index is out
+     *         of bounds.
+     */
     public double get(int index) {
         synchronized (lock) {
             if (index < 0 || index >= rawDataCount) {
@@ -178,24 +272,48 @@ public class MovingAverage {
         }
     }
 
+    /**
+     * Gets the maximum moving average value recorded so far.
+     *
+     * @return The maximum average, or 0.0 if no data is available. Returns a
+     *         non-negative value.
+     */
     public double getMax() {
         synchronized (lock) {
             return Math.max(max, 0.0);
         }
     }
 
+    /**
+     * Gets the minimum moving average value recorded so far.
+     *
+     * @return The minimum average, or 0.0 if no data is available. Returns a
+     *         non-negative value.
+     */
     public double getMin() {
         synchronized (lock) {
             return avgDataCount == 0 ? 0.0 : Math.max(min, 0.0);
         }
     }
 
+    /**
+     * Gets the current sum of values in the sliding window.
+     *
+     * @return The current sum, or 0.0 if no data is available. Returns a
+     *         non-negative value.
+     */
     public double getSum() {
         synchronized (lock) {
             return Math.max(sum, 0.0);
         }
     }
 
+    /**
+     * Clears all data and resets the state of the MovingAverage instance.
+     * All stored data points, averages, and calculated values (sum, min, max) are
+     * reset
+     * to their initial states.
+     */
     public void clear() {
         synchronized (lock) {
             rawDataHead = 0;
