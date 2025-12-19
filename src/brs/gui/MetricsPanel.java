@@ -559,15 +559,6 @@ public class MetricsPanel extends JPanel {
         addComponent(SyncPanel, allTransactionsPerSecondProgressBar, 1, yPos++, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
-        // All Transactions/Block (Moving Average)
-        tooltip = "The moving average of the total number of transactions (user-submitted and AT-generated) included in each block. This metric provides insight into the network's activity and block space utilization.\n\nIncludes:\n- Payments (Ordinary, Multi-Out, Multi-Same-Out)\n- Messages (Arbitrary, Alias, Account Info, TLD)\n- Assets (Issuance, Transfer, Orders, Minting, Distribution)\n- Digital Goods (Listing, Delisting, Price Change, Quantity Change, Purchase, Delivery, Feedback, Refund)\n- Account Control (Leasing)\n- Mining (Reward Rec. Assignment, Commitment)\n- Advanced Payments (Escrow, Subscriptions)\n- Automated Transactions (ATs)\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
-        txPerBlockLabel = createLabel("All Txs/Block (MA)", new Color(255, 165, 0), tooltip); // Orange
-        allTransactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0.00 - max: 0.00", progressBarSize1);
-        addComponent(SyncPanel, txPerBlockLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, allTransactionsPerBlockProgressBar, 1, yPos++, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
-
         // System Transactions/Second (Moving Average)
         tooltip = "The moving average of system-generated transactions processed per second. This includes payments from Automated Transactions (ATs), Escrow results, and Subscription payments.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
         systemTxPerSecondLabel = createLabel("System Txs/Sec (MA)", new Color(135, 206, 250), tooltip); // LightSkyBlue
@@ -576,6 +567,15 @@ public class MetricsPanel extends JPanel {
                 GridBagConstraints.NONE, labelInsets);
         addComponent(SyncPanel, systemTransactionsPerSecondProgressBar, 1, yPos++, 1, 0, 0,
                 GridBagConstraints.LINE_START,
+                GridBagConstraints.HORIZONTAL, barInsets);
+
+        // All Transactions/Block (Moving Average)
+        tooltip = "The moving average of the total number of transactions (user-submitted and AT-generated) included in each block. This metric provides insight into the network's activity and block space utilization.\n\nIncludes:\n- Payments (Ordinary, Multi-Out, Multi-Same-Out)\n- Messages (Arbitrary, Alias, Account Info, TLD)\n- Assets (Issuance, Transfer, Orders, Minting, Distribution)\n- Digital Goods (Listing, Delisting, Price Change, Quantity Change, Purchase, Delivery, Feedback, Refund)\n- Account Control (Leasing)\n- Mining (Reward Rec. Assignment, Commitment)\n- Advanced Payments (Escrow, Subscriptions)\n- Automated Transactions (ATs)\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
+        txPerBlockLabel = createLabel("All Txs/Block (MA)", new Color(255, 165, 0), tooltip); // Orange
+        allTransactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0.00 - max: 0.00", progressBarSize1);
+        addComponent(SyncPanel, txPerBlockLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
+                GridBagConstraints.NONE, labelInsets);
+        addComponent(SyncPanel, allTransactionsPerBlockProgressBar, 1, yPos++, 1, 0, 0, GridBagConstraints.LINE_START,
                 GridBagConstraints.HORIZONTAL, barInsets);
 
         // System Transactions/Block (Moving Average)
