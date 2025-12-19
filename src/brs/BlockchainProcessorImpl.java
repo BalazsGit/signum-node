@@ -2415,8 +2415,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                             popOffBlocksCount.set(0);
                             break;
                         }
-                        // if (maxRollbackHeight < block.getHeight()) {
-                        if (1000 < block.getHeight()) {
+                        if (maxRollbackHeight < block.getHeight()) {
                             block = popLastBlock();
                             poppedBlocks++;
                             for (DerivedTable table : derivedTableManager.getDerivedTables()) {
