@@ -1578,6 +1578,15 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                             if (measurementActive) {
                                 writeTrimLog(lastTrimHeight.get(), totalEndTime - totalStartTime);
                             }
+                            if (lastTrimHeight.get() > currentTrimHeight.get()) {
+                                if (currentTrimHeight.get() < 0) {
+                                    logger.info("Trim height: - 🡺 {}", lastTrimHeight);
+                                } else {
+                                    logger.info("Trim height: {} 🡺 {}", currentTrimHeight, lastTrimHeight);
+                                }
+                            } else {
+                                logger.info("Trim height: {}", currentTrimHeight);
+                            }
                             currentTrimHeight.set(lastTrimHeight.get());
                             stores.commitTransaction();
                         } else {
@@ -1641,6 +1650,15 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     if (measurementActive) {
                         writeTrimLog(lastTrimHeight.get(), totalEndTime - totalStartTime);
                     }
+                    if (lastTrimHeight.get() > currentTrimHeight.get()) {
+                        if (currentTrimHeight.get() < 0) {
+                            logger.info("Trim height: - 🡺 {}", lastTrimHeight);
+                        } else {
+                            logger.info("Trim height: {} 🡺 {}", currentTrimHeight, lastTrimHeight);
+                        }
+                    } else {
+                        logger.info("Trim height: {}", currentTrimHeight);
+                    }
                     currentTrimHeight.set(lastTrimHeight.get());
                     stores.commitTransaction();
                 } else {
@@ -1656,7 +1674,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             } finally {
                 currentlyTrimmingTable.set(null);
                 isTrimming.set(false);
-                logger.info("Trim height: {} 🡺 {}", currentTrimHeight, lastTrimHeight);
                 blockListeners.notify(block, Event.TRIM_END);
                 stores.endTransaction();
             }
