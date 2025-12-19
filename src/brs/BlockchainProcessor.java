@@ -1,7 +1,5 @@
 package brs;
 
-import brs.BlockchainProcessor.PerformanceStats;
-import brs.BlockchainProcessor.QueueStatus;
 import brs.peer.Peer;
 import brs.util.JSON;
 import brs.util.Observable;
@@ -98,18 +96,32 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
         BLOCK_PUSHED, BLOCK_POPPED, BLOCK_GENERATED, BLOCK_SCANNED,
         RESCAN_BEGIN, RESCAN_END,
         BEFORE_BLOCK_ACCEPT,
-        BEFORE_BLOCK_APPLY, AFTER_BLOCK_APPLY,
+        BEFORE_BLOCK_APPLY, AFTER_BLOCK_APPLY, DATABASE_CONSISTENCY_UPDATE,
         PEERS_UPDATED, NET_VOLUME_CHANGED, QUEUE_STATUS_CHANGED, FORK_CACHE_CHANGED, PERFORMANCE_STATS_UPDATED,
         TRIM_START, TRIM_END
+    }
+
+    enum ConsistencyState {
+        UNDEFINED,
+        CONSISTENT,
+        INCONSISTENT
     }
 
     Peer getLastBlockchainFeeder();
 
     int getLastBlockchainFeederHeight();
 
-    boolean isScanning();
+    int getForkCacheSize();
+
+    int getPopOffBlocksCount();
+
+    int getLastPopOffHeight();
+
+    int getBeforeRollbackHeight();
 
     int getMinRollbackHeight();
+
+    boolean isScanning();
 
     AtomicInteger getCurrentTrimHeight();
 
@@ -118,10 +130,6 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
     String getCurrentlyTrimmingTable();
 
     QueueStatus getQueueStatus();
-
-    int getForkCacheSize();
-
-    int getPopOffBlocksCount();
 
     Collection<Peer> getAllPeers();
 
@@ -147,6 +155,8 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     int getLastCheckHeight();
 
+    ConsistencyState getConsistencyState();
+
     void processPeerBlock(JsonObject request, Peer peer) throws SignumException;
 
     void fullReset();
@@ -161,6 +171,10 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
     void shutdown();
 
     List<Block> popOffTo(int height);
+
+    void popOff(int count);
+
+    void scheduleTrim(Block block);
 
     class BlockNotAcceptedException extends SignumException {
 
