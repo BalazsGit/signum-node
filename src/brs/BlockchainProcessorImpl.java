@@ -2493,6 +2493,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             logger.error("Setting blockchain height back to {}.", block.getHeight());
         } finally {
             logger.info("Blocks popped off: {} ", poppedBlocks);
+            logger.info("Pop-off height: {} <- {}", block.getHeight(), beforeRollbackHeight.get());
             if (checkDatabaseState() != 0) {
                 logger.warn("Pop-off failed.");
                 logger.warn("Database is inconsistent after pop-off.");
