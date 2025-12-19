@@ -1656,6 +1656,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             } finally {
                 currentlyTrimmingTable.set(null);
                 isTrimming.set(false);
+                logger.info("Trim height: {} 🡺 {}", currentTrimHeight, lastTrimHeight);
                 blockListeners.notify(block, Event.TRIM_END);
                 stores.endTransaction();
             }
@@ -2417,7 +2418,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         }
                         if (maxRollbackHeight < block.getHeight()) {
                             block = popLastBlock();
-                            poppedBlocks++;
                             for (DerivedTable table : derivedTableManager.getDerivedTables()) {
                                 table.rollback(block.getHeight());
                             }
@@ -2440,6 +2440,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                 break;
                             } else {
                                 stores.commitTransaction();
+                                poppedBlocks++;
                             }
                         } else {
                             logger.warn("Reached minimum rollback height {}, cannot pop off block at height {}.",
@@ -2493,7 +2494,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             logger.error("Setting blockchain height back to {}.", block.getHeight());
         } finally {
             logger.info("Blocks popped off: {} ", poppedBlocks);
-            logger.info("Pop-off height: {} <- {}", block.getHeight(), beforeRollbackHeight.get());
+            logger.info("Pop-off height: {} 🡸 {}", block.getHeight(), beforeRollbackHeight.get());
             if (checkDatabaseState() != 0) {
                 logger.warn("Pop-off failed.");
                 logger.warn("Database is inconsistent after pop-off.");
