@@ -2549,7 +2549,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             if (checkDatabaseState() != 0) {
                 logger.warn("Pop-off failed.");
                 logger.warn("Database is inconsistent after pop-off.");
-                // TODO: implement resync and revalidate features
                 logger.warn("Please restore from backup, resync, or revalidate database.");
             } else {
                 logger.info("Pop-off completed.");
@@ -2634,9 +2633,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         autoPopOffBlocksCount.decrementAndGet();
                         blockListeners.notify(block, Event.BLOCK_AUTO_POPPED);
                     }
-                    dbCacheManager.flushCache();
-                    downloadCache.resetCache();
-                    atProcessorCache.reset();
                 } catch (RuntimeException e) {
                     stores.rollbackTransaction();
                     // Get block height from datbase
@@ -2647,6 +2643,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     blockListeners.notify(block, Event.BLOCK_AUTO_POPPED);
                     throw e;
                 } finally {
+                    dbCacheManager.flushCache();
+                    downloadCache.resetCache();
+                    atProcessorCache.reset();
                     autoPopOffBlocksCount.set(0);
                     autoLastPopOffHeight.set(-1);
                     // Get block height from datbase
