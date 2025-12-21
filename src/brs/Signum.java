@@ -121,7 +121,7 @@ public final class Signum {
 
     private static WebServer webServer;
 
-    private static AtomicBoolean shuttingdown = new AtomicBoolean(false);
+    private static AtomicBoolean isShutdown = new AtomicBoolean(false);
     private static AtomicBoolean nodeStopped = new AtomicBoolean(false);
 
     private static PropertyService loadProperties(String confFolder) {
@@ -215,6 +215,12 @@ public final class Signum {
             return false;
         }
         return true;
+    }
+
+    // Init shutdown flags in case of restart node
+    public static void initShutdown() {
+        isShutdown.set(false);
+        nodeStopped.set(false);
     }
 
     public static void init(CaselessProperties customProperties) {
@@ -555,13 +561,13 @@ public final class Signum {
      */
     public static void shutdown(boolean ignoreDbShutdown) {
 
-        if (shuttingdown.get() && !nodeStopped.get()) {
+        if (isShutdown.get() && !nodeStopped.get()) {
             logger.info("Already shutting down...");
         }
 
-        synchronized (shuttingdown) {
+        synchronized (isShutdown) {
 
-            if (shuttingdown.getAndSet(true)) {
+            if (isShutdown.getAndSet(true)) {
                 return;
             }
 

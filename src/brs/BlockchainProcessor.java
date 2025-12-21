@@ -93,7 +93,7 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
     }
 
     enum Event {
-        BLOCK_PUSHED, BLOCK_POPPED, BLOCK_GENERATED, BLOCK_SCANNED,
+        BLOCK_PUSHED, BLOCK_AUTO_POPPED, BLOCK_MANUAL_POPPED, BLOCK_GENERATED, BLOCK_SCANNED,
         RESCAN_BEGIN, RESCAN_END,
         BEFORE_BLOCK_ACCEPT,
         BEFORE_BLOCK_APPLY, AFTER_BLOCK_APPLY, DATABASE_CONSISTENCY_UPDATE,
@@ -113,9 +113,13 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     int getForkCacheSize();
 
-    int getPopOffBlocksCount();
+    int getManualPopOffBlocksCount();
 
-    int getLastPopOffHeight();
+    int getManualLastPopOffHeight();
+
+    int getAutoPopOffBlocksCount();
+
+    int getAutoLastPopOffHeight();
 
     int getBeforeRollbackHeight();
 

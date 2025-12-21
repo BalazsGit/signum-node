@@ -146,8 +146,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     // The current trim height requested from derived table datas
     private final AtomicInteger currentTrimHeight = new AtomicInteger();
 
-    private final AtomicInteger popOffBlocksCount = new AtomicInteger(0);
-
     private final Listeners<Block, Event> blockListeners = new Listeners<>();
     private final AtomicReference<Peer> lastBlockchainFeeder = new AtomicReference<>();
     private final AtomicInteger lastBlockchainFeederHeight = new AtomicInteger();
@@ -196,7 +194,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private final boolean autoPopOffEnabled;
 
     private int maxRollbackHeight = 0;
-    private AtomicInteger lastPopOffHeight = new AtomicInteger(-1);
+    private final AtomicInteger manualPopOffBlocksCount = new AtomicInteger(0);
+    private final AtomicInteger autoPopOffBlocksCount = new AtomicInteger(0);
+    private AtomicInteger manualLastPopOffHeight = new AtomicInteger(-1);
+    private AtomicInteger autoLastPopOffHeight = new AtomicInteger(-1);
     private AtomicInteger beforeRollbackHeight = new AtomicInteger(0);
 
     @Override
@@ -212,54 +213,60 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             logger.info("Waiting for database trim to finish before shutdown...");
         }
 
-        if (popOffBlocksCount.get() > 0) {
+        if (manualPopOffBlocksCount.get() > 0 || autoPopOffBlocksCount.get() > 0) {
             logger.info("Waiting for pop-off to finish before shutdown...");
         }
 
         // Stop getMoreBlocks and blockImporter threads
         getMoreBlocksAutoPause.set(true);
         blockImporterAutoPause.set(true);
+        getMoreBlocksLock.writeLock().lock();
+        blockImporterLock.writeLock().lock();
+        try {
+            synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
 
-        synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
-
-            if (logSyncProgressToCsv) {
-                long currentTime = System.currentTimeMillis();
-                long deltaTime = currentTime - lastSyncLogTimestamp;
-                accumulatedSyncTimeMs += deltaTime;
-                if (isSyncingForLog.get()) {
-                    accumulatedSyncInProgressTimeMs += deltaTime;
-                }
-                writeSyncProgressLog(accumulatedSyncTimeMs, blockchain.getHeight());
-            }
-
-            if (measurementActive) {
-                writeMeasurementLog();
-            }
-
-            if (measurementLogExecutor != null) {
-                logger.info("Shutting down measurement log executor...");
-                measurementLogExecutor.shutdown();
-                try {
-                    if (!measurementLogExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
-                        logger.warn("Measurement log executor did not terminate in 10 seconds.");
-                        measurementLogExecutor.shutdownNow();
+                if (logSyncProgressToCsv) {
+                    long currentTime = System.currentTimeMillis();
+                    long deltaTime = currentTime - lastSyncLogTimestamp;
+                    accumulatedSyncTimeMs += deltaTime;
+                    if (isSyncingForLog.get()) {
+                        accumulatedSyncInProgressTimeMs += deltaTime;
                     }
-                } catch (InterruptedException e) {
-                    logger.warn("Interrupted while waiting for measurement log executor to terminate.");
-                    measurementLogExecutor.shutdownNow();
-                    Thread.currentThread().interrupt();
+                    writeSyncProgressLog(accumulatedSyncTimeMs, blockchain.getHeight());
+                }
+
+                if (measurementActive) {
+                    writeMeasurementLog();
+                }
+
+                if (measurementLogExecutor != null) {
+                    logger.info("Shutting down measurement log executor...");
+                    measurementLogExecutor.shutdown();
+                    try {
+                        if (!measurementLogExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
+                            logger.warn("Measurement log executor did not terminate in 10 seconds.");
+                            measurementLogExecutor.shutdownNow();
+                        }
+                    } catch (InterruptedException e) {
+                        logger.warn("Interrupted while waiting for measurement log executor to terminate.");
+                        measurementLogExecutor.shutdownNow();
+                        Thread.currentThread().interrupt();
+                    }
+                }
+
+                blockListeners.clear();
+                for (Peers.Event event : Peers.Event.values()) {
+                    Peers.removeListener(peerListener, event);
+                }
+
+                if (getOclVerify()) {
+                    logger.info("Destroying OCLPoC instance from BlockchainProcessor.");
+                    OCLPoC.destroy();
                 }
             }
-
-            blockListeners.clear();
-            for (Peers.Event event : Peers.Event.values()) {
-                Peers.removeListener(peerListener, event);
-            }
-
-            if (getOclVerify()) {
-                logger.info("Destroying OCLPoC instance from BlockchainProcessor.");
-                OCLPoC.destroy();
-            }
+        } finally {
+            blockImporterLock.writeLock().unlock();
+            getMoreBlocksLock.writeLock().unlock();
         }
     }
 
@@ -283,13 +290,23 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     }
 
     @Override
-    public int getPopOffBlocksCount() {
-        return popOffBlocksCount.get();
+    public int getManualPopOffBlocksCount() {
+        return manualPopOffBlocksCount.get();
     }
 
     @Override
-    public int getLastPopOffHeight() {
-        return lastPopOffHeight.get();
+    public int getManualLastPopOffHeight() {
+        return manualLastPopOffHeight.get();
+    }
+
+    @Override
+    public int getAutoPopOffBlocksCount() {
+        return autoPopOffBlocksCount.get();
+    }
+
+    @Override
+    public int getAutoLastPopOffHeight() {
+        return autoLastPopOffHeight.get();
     }
 
     @Override
@@ -1284,6 +1301,15 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         }
     }
 
+    // Init shutdown flags in case of restart node
+    public void initShudown() {
+        isShutdown.set(false);
+        getMoreBlocksAutoPause.set(false);
+        blockImporterAutoPause.set(false);
+        getMoreBlocksLock.writeLock().unlock();
+        blockImporterLock.writeLock().unlock();
+    }
+
     private void initSyncProgressLogging() {
         File file = new File(this.syncProgressLogFilename);
         boolean fileExistsAndHasContent = file.exists() && file.length() > 0;
@@ -1373,7 +1399,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 try {
                     writeSystemInfo(writer);
                 } catch (Exception e) {
-                    logger.error("Failed to write system info to sync measurement log", e);
+                    logger.error("Failed to write system info to {}", this.syncMeasurementLogFilename.get(), e);
                 }
                 /*
                  * The file starts with a block of system information (Property;Value).
@@ -1413,7 +1439,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 writer.println(
                         "Block_timestamp[s];Cumulative_difficulty;Accumulated_sync_in_progress_time[ms];Accumulated_sync_time[ms];Push_block_time[ms];Validation_time[ms];Tx_loop_time[ms];Housekeeping_time[ms];Tx_apply_time[ms];AT_time[ms];Subscription_time[ms];Block_apply_time[ms];Commit_time[ms];Misc_time[ms];Block_height;AT_count;User_transaction_count;All_transaction_count");
             } catch (IOException e) {
-                logger.error("Failed to create sync measurement log", e);
+                logger.error("Failed to create file: {}", this.syncMeasurementLogFilename.get(), e);
             }
         }
 
@@ -1424,14 +1450,14 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 try {
                     writeSystemInfo(writer);
                 } catch (Exception e) {
-                    logger.error("Failed to write system info to sync trim log", e);
+                    logger.error("Failed to write system info to {}", this.dbTrimLogFilename, e);
                 }
                 /*
                  * Header: trim_height;trim_time[ms]
                  */
                 writer.println("trim_height;trim_time[ms]");
             } catch (IOException e) {
-                logger.error("Failed to create sync trim log", e);
+                logger.error("Failed to create file: {}", this.dbTrimLogFilename, e);
             }
         }
     }
@@ -1456,7 +1482,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             try (PrintWriter writer = new PrintWriter(new FileWriter(this.syncProgressLogFilename, true))) {
                 writer.println(accumulatedSyncInProgressTimeMs / 1000 + ";" + totalTime / 1000 + ";" + height);
             } catch (IOException e) {
-                logger.error("Failed to write to sync progress log", e);
+                logger.error("Failed to write sync progress log to {}", this.syncProgressLogFilename, e);
             }
         });
     }
@@ -1507,7 +1533,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             try (PrintWriter writer = new PrintWriter(new FileWriter(this.syncMeasurementLogFilename.get(), true))) {
                 dataToWrite.forEach(writer::println);
             } catch (IOException e) {
-                logger.error("Failed to write to sync measurement log", e);
+                logger.error("Failed to write sync measurement log to {}", this.syncMeasurementLogFilename.get(), e);
             }
         });
     }
@@ -1521,7 +1547,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             try (PrintWriter writer = new PrintWriter(new FileWriter(this.dbTrimLogFilename, true))) {
                 writer.println(trimHeight + ";" + trimTimeMs);
             } catch (IOException e) {
-                logger.error("Failed to write to sync trim log", e);
+                logger.error("Failed to write trim log to {}", this.dbTrimLogFilename, e);
             }
         });
     }
@@ -1550,6 +1576,13 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         logger.info("Block processing threads paused for database trim.");
         getMoreBlocksLock.writeLock().lock();
         blockImporterLock.writeLock().lock();
+        if (isShutdown.get()) {
+            logger.info("Node is shutting down, database trim aborted.");
+            isTrimming.set(false);
+            blockImporterLock.writeLock().unlock();
+            getMoreBlocksLock.writeLock().unlock();
+            return;
+        }
         try {
             synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
                 lastTrimHeight.set(Math.max(block.getHeight() - Constants.MAX_ROLLBACK, 0));
@@ -1580,9 +1613,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                             }
                             if (lastTrimHeight.get() > currentTrimHeight.get()) {
                                 if (currentTrimHeight.get() < 0) {
-                                    logger.info("Trim height: - 🡺 {}", lastTrimHeight);
+                                    logger.info("Trim height from - to {}", lastTrimHeight);
                                 } else {
-                                    logger.info("Trim height: {} 🡺 {}", currentTrimHeight, lastTrimHeight);
+                                    logger.info("Trim height from {} to {}", currentTrimHeight, lastTrimHeight);
                                 }
                             } else {
                                 logger.info("Trim height: {}", currentTrimHeight);
@@ -1652,9 +1685,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     }
                     if (lastTrimHeight.get() > currentTrimHeight.get()) {
                         if (currentTrimHeight.get() < 0) {
-                            logger.info("Trim height: - 🡺 {}", lastTrimHeight);
+                            logger.info("Trim height from - to {}", lastTrimHeight);
                         } else {
-                            logger.info("Trim height: {} 🡺 {}", currentTrimHeight, lastTrimHeight);
+                            logger.info("Trim height from {} to {}", currentTrimHeight, lastTrimHeight);
                         }
                     } else {
                         logger.info("Trim height: {}", currentTrimHeight);
@@ -1898,7 +1931,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         if (isTrimming.get()) {
             logger.info("Trim is in progress. Database state check will give results after trim finished.");
         }
-        if (popOffBlocksCount.get() > 0) {
+        if (manualPopOffBlocksCount.get() > 0 || autoPopOffBlocksCount.get() > 0) {
             logger.info("Pop-off is in progress. Database state check will give results after pop-off finished.");
         }
 
@@ -2366,17 +2399,17 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     @Override
     public void popOff(int blockCount) {
         synchronized (this) {
-            if (popOffBlocksCount.getAndAdd(blockCount) > 0) {
+            if (manualPopOffBlocksCount.getAndAdd(blockCount) > 0) {
                 logger.info("Request adds {} blocks to pop off.", blockCount);
-                if (lastPopOffHeight.get() > 0) {
-                    lastPopOffHeight.set(Math.max(lastPopOffHeight.get() - blockCount, 0));
+                if (manualLastPopOffHeight.get() > 0) {
+                    manualLastPopOffHeight.set(Math.max(manualLastPopOffHeight.get() - blockCount, 0));
                     Block block = blockchain.getLastBlock();
-                    blockListeners.notify(block, Event.BLOCK_POPPED);
+                    blockListeners.notify(block, Event.BLOCK_MANUAL_POPPED);
                 }
                 return;
             }
         }
-        if (popOffBlocksCount.get() == 0) {
+        if (manualPopOffBlocksCount.get() == 0) {
             logger.info("No blocks to pop off.");
             return;
         }
@@ -2387,13 +2420,24 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         if (isTrimming.get()) {
             logger.info("Trim is in progress. Pop off will start after database trim.");
         }
+        if (autoPopOffBlocksCount.get() > 0) {
+            logger.info("Auto pop off is in progress. Manual pop off will start after auto pop off.");
+        }
         getMoreBlocksLock.writeLock().lock();
         blockImporterLock.writeLock().lock();
+        if (isShutdown.get()) {
+            logger.info("Node is shutting down, pop-off aborted.");
+            manualPopOffBlocksCount.set(0);
+            manualLastPopOffHeight.set(-1);
+            blockImporterLock.writeLock().unlock();
+            getMoreBlocksLock.writeLock().unlock();
+            return;
+        }
         int poppedBlocks = 0;
         Block block = blockchain.getLastBlock();
         try {
             synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
-                if (popOffBlocksCount.get() == 0) {
+                if (manualPopOffBlocksCount.get() == 0) {
                     logger.info("No blocks to pop off.");
                     return;
                 }
@@ -2402,8 +2446,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 try {
                     int blockHeight = block.getHeight();
                     beforeRollbackHeight.set(blockHeight);
-                    lastPopOffHeight.set(Math.max(beforeRollbackHeight.get() - popOffBlocksCount.get(), 0));
-                    blockListeners.notify(block, Event.BLOCK_POPPED);
+                    manualLastPopOffHeight.set(Math.max(beforeRollbackHeight.get() - manualPopOffBlocksCount.get(), 0));
+                    blockListeners.notify(block, Event.BLOCK_MANUAL_POPPED);
                     if (currentTrimHeight.get() >= 0) {
                         maxRollbackHeight = currentTrimHeight.get() + 1;
                     } else if (maxRollbackHeight > 0) {
@@ -2411,10 +2455,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     } else {
                         maxRollbackHeight = Math.max(blockchain.getHeight() - Constants.MAX_ROLLBACK, 0);
                     }
-                    while (popOffBlocksCount.get() > 0) {
+                    while (manualPopOffBlocksCount.get() > 0) {
                         if (block == null || block.getId() == genesisBlockId) {
                             logger.info("Blockchain is empty or at genesis block, nothing more to pop off.");
-                            popOffBlocksCount.set(0);
+                            manualPopOffBlocksCount.set(0);
                             break;
                         }
                         if (maxRollbackHeight < block.getHeight()) {
@@ -2428,8 +2472,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                             atProcessorCache.reset();
                             // Checking database consistency after each block popped
                             if (checkDatabaseState() != 0) {
-                                popOffBlocksCount.set(0);
-                                lastPopOffHeight.set(-1);
+                                manualPopOffBlocksCount.set(0);
+                                manualLastPopOffHeight.set(-1);
                                 stores.rollbackTransaction();
                                 // Get block height from datbase
                                 block = blockDb.findLastBlock();
@@ -2442,6 +2486,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                             } else {
                                 stores.commitTransaction();
                                 poppedBlocks++;
+                                manualPopOffBlocksCount.decrementAndGet();
+                                blockListeners.notify(block, Event.BLOCK_MANUAL_POPPED);
                             }
                         } else {
                             logger.warn("Reached minimum rollback height {}, cannot pop off block at height {}.",
@@ -2454,8 +2500,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     }
                     transactionProcessor.requeueAllUnconfirmedTransactions();
                 } catch (Exception e) {
-                    popOffBlocksCount.set(0);
-                    lastPopOffHeight.set(-1);
+                    manualPopOffBlocksCount.set(0);
+                    manualLastPopOffHeight.set(-1);
                     stores.rollbackTransaction();
                     // Get block height from datbase
                     block = blockDb.findLastBlock();
@@ -2464,8 +2510,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     logger.error("Cacelling pop-off process to prevent database consistency.");
                     logger.error("Setting blockchain height back to {}.", block.getHeight());
                 } catch (Error e) {
-                    popOffBlocksCount.set(0);
-                    lastPopOffHeight.set(-1);
+                    manualPopOffBlocksCount.set(0);
+                    manualLastPopOffHeight.set(-1);
                     stores.rollbackTransaction();
                     // Get block height from datbase
                     block = blockDb.findLastBlock();
@@ -2484,8 +2530,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 }
             }
         } catch (Exception e) {
-            popOffBlocksCount.set(0);
-            lastPopOffHeight.set(-1);
+            manualPopOffBlocksCount.set(0);
+            manualLastPopOffHeight.set(-1);
             stores.rollbackTransaction();
             // Get block height from datbase
             block = blockDb.findLastBlock();
@@ -2496,7 +2542,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         } finally {
             logger.info("Blocks popped off: {} ", poppedBlocks);
             if (block.getHeight() < beforeRollbackHeight.get()) {
-                logger.info("Pop-off height: {} 🡸 {}", block.getHeight(), beforeRollbackHeight.get());
+                logger.info("Pop-off height to {} from {}", block.getHeight(), beforeRollbackHeight.get());
             } else {
                 logger.info("Pop-off height: {}", block.getHeight());
             }
@@ -2509,12 +2555,12 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 logger.info("Pop-off completed.");
                 logger.info("Database is consistent after pop-off.");
             }
-            popOffBlocksCount.set(0);
-            lastPopOffHeight.set(-1);
+            manualPopOffBlocksCount.set(0);
+            manualLastPopOffHeight.set(-1);
             // Get block height from datbase
             block = blockDb.findLastBlock();
             blockchain.setLastBlock(block);
-            blockListeners.notify(block, Event.BLOCK_POPPED);
+            blockListeners.notify(block, Event.BLOCK_MANUAL_POPPED);
             blockImporterLock.writeLock().unlock();
             getMoreBlocksLock.writeLock().unlock();
             getMoreBlocksAutoPause.set(false);
@@ -2527,19 +2573,19 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
         int currentHeight = blockchain.getHeight();
         if (commonBlock.getHeight() < getMinRollbackHeight()) {
-            popOffBlocksCount.set(0);
+            autoPopOffBlocksCount.set(0);
             throw new IllegalArgumentException("Rollback to height " + commonBlock.getHeight() + " not suppported, "
                     + "current height " + currentHeight);
         }
         if (!blockchain.hasBlock(commonBlock.getId())) {
-            popOffBlocksCount.set(0);
+            autoPopOffBlocksCount.set(0);
             logger.debug("Block {} not found in blockchain, nothing to pop off", commonBlock.getStringId());
             return Collections.emptyList();
         }
         if (commonBlock.getHeight() > currentHeight) {
-            popOffBlocksCount.set(0);
-            logger.warn("Rollback from {} to {} is non-sense, ignoring pop off", currentHeight,
-                    commonBlock.getHeight());
+            autoPopOffBlocksCount.set(0);
+            logger.warn("Rollback to {} from {} is non-sense, ignoring pop off", commonBlock.getHeight(),
+                    currentHeight);
             return Collections.emptyList();
 
         }
@@ -2551,10 +2597,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     stores.beginTransaction();
                     int blockHeight = block.getHeight();
                     beforeRollbackHeight.set(blockHeight);
-                    popOffBlocksCount.addAndGet(blockHeight - commonBlock.getHeight());
+                    autoPopOffBlocksCount.set(Math.max(beforeRollbackHeight.get() - commonBlock.getHeight(), 0));
                     int newRollbackHeight = commonBlock.getHeight();
-                    lastPopOffHeight.set(newRollbackHeight);
-                    logger.info("Rollback from {} to {}", block.getHeight(), commonBlock.getHeight());
+                    autoLastPopOffHeight.set(newRollbackHeight);
+                    blockListeners.notify(block, Event.BLOCK_AUTO_POPPED);
+                    logger.info("Rollback to {} from {}", commonBlock.getHeight(), block.getHeight());
                     while (block.getId() != commonBlock.getId() && block.getId() != genesisBlockId) {
                         if (forkBlocks != null) {
                             for (Block fb : forkBlocks) {
@@ -2574,15 +2621,20 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                 block.getCumulativeDifficulty(), block.getCommitment());
                         poppedOffBlocks.add(block);
                         block = popLastBlock();
+                        logger.debug("Rolling back derived tables...");
+                        for (DerivedTable table : derivedTableManager.getDerivedTables()) {
+                            logger.debug("Rolling back {}", table.getTable());
+                            table.rollback(block.getHeight());
+                        }
+                        indirectIncomingService.rollback(block.getHeight());
+                        dbCacheManager.flushCache();
+                        downloadCache.resetCache();
+                        atProcessorCache.reset();
+                        stores.commitTransaction();
+                        autoPopOffBlocksCount.decrementAndGet();
+                        blockListeners.notify(block, Event.BLOCK_AUTO_POPPED);
                     }
-                    logger.debug("Rolling back derived tables...");
-                    for (DerivedTable table : derivedTableManager.getDerivedTables()) {
-                        logger.debug("Rolling back {}", table.getTable());
-                        table.rollback(commonBlock.getHeight());
-                    }
-                    indirectIncomingService.rollback(commonBlock.getHeight());
                     dbCacheManager.flushCache();
-                    stores.commitTransaction();
                     downloadCache.resetCache();
                     atProcessorCache.reset();
                 } catch (RuntimeException e) {
@@ -2592,14 +2644,15 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     blockchain.setLastBlock(block);
                     logger.error("Error popping off to {}", commonBlock.getHeight(), e);
                     logger.error("Setting blockchain height back to {}.", block.getHeight());
+                    blockListeners.notify(block, Event.BLOCK_AUTO_POPPED);
                     throw e;
                 } finally {
-                    popOffBlocksCount.set(0);
-                    lastPopOffHeight.set(-1);
+                    autoPopOffBlocksCount.set(0);
+                    autoLastPopOffHeight.set(-1);
                     // Get block height from datbase
                     block = blockDb.findLastBlock();
                     blockchain.setLastBlock(block);
-                    blockListeners.notify(block, Event.BLOCK_POPPED);
+                    blockListeners.notify(block, Event.BLOCK_AUTO_POPPED);
                     stores.endTransaction();
                 }
             }
@@ -2617,8 +2670,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         blockchain.setLastBlock(block, previousBlock);
         txs.forEach(Transaction::unsetBlock);
         blockDb.deleteBlocksFrom(block.getId());
-        popOffBlocksCount.decrementAndGet();
-        blockListeners.notify(block, Event.BLOCK_POPPED);
         return previousBlock;
     }
 

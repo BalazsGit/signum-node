@@ -908,8 +908,11 @@ public class SignumGUI extends JFrame {
         blockchainProcessor.addListener(block -> onPeersUpdated(), BlockchainProcessor.Event.PEERS_UPDATED);
         blockchainProcessor.addListener(block -> onNetVolumeChanged(), BlockchainProcessor.Event.NET_VOLUME_CHANGED);
         blockchainProcessor.addListener(this::onBlockPushed, BlockchainProcessor.Event.BLOCK_PUSHED);
-        blockchainProcessor.addListener(block -> onBlockPopped(), BlockchainProcessor.Event.BLOCK_POPPED);
-        blockchainProcessor.addListener(block -> onPopOffProgress(), BlockchainProcessor.Event.BLOCK_POPPED);
+        blockchainProcessor.addListener(block -> onBlockPopped(), BlockchainProcessor.Event.BLOCK_MANUAL_POPPED);
+        blockchainProcessor.addListener(block -> onBlockPopped(), BlockchainProcessor.Event.BLOCK_AUTO_POPPED);
+        blockchainProcessor.addListener(block -> onManualPopOffProgress(),
+                BlockchainProcessor.Event.BLOCK_MANUAL_POPPED);
+        blockchainProcessor.addListener(block -> onAutoPopOffProgress(), BlockchainProcessor.Event.BLOCK_AUTO_POPPED);
 
         if (trimEnabled) {
             blockchainProcessor.addListener(block -> onTrimStart(),
@@ -1032,17 +1035,36 @@ public class SignumGUI extends JFrame {
         });
     }
 
-    private void onPopOffProgress() {
+    private void onManualPopOffProgress() {
         SwingUtilities.invokeLater(() -> {
-            int remaining = Signum.getBlockchainProcessor().getPopOffBlocksCount();
+            int remaining = Signum.getBlockchainProcessor().getManualPopOffBlocksCount();
             int blockHeight = Signum.getBlockchainProcessor().getBeforeRollbackHeight();
-            int targetHeight = Signum.getBlockchainProcessor().getLastPopOffHeight();
+            int targetHeight = Signum.getBlockchainProcessor().getManualLastPopOffHeight();
             popOffBlockCountLabel.setText("Pop off blocks: " + remaining);
             popOffBlockHeightLabel.setText("Pop-off height: "
                     + (targetHeight < 0 ? "-" : targetHeight) + " 🡸 " + blockHeight);
             if (remaining > 0) {
                 popOffBlockCountLabel.setForeground(Color.YELLOW);
                 popOffBlockHeightLabel.setForeground(Color.YELLOW);
+            } else {
+                popOffBlockCountLabel.setForeground(iconColor);
+                popOffBlockHeightLabel.setForeground(iconColor);
+            }
+            setPopOffLabelVisible(remaining > 0);
+        });
+    }
+
+    private void onAutoPopOffProgress() {
+        SwingUtilities.invokeLater(() -> {
+            int remaining = Signum.getBlockchainProcessor().getAutoPopOffBlocksCount();
+            int blockHeight = Signum.getBlockchainProcessor().getBeforeRollbackHeight();
+            int targetHeight = Signum.getBlockchainProcessor().getAutoLastPopOffHeight();
+            popOffBlockCountLabel.setText("Pop off blocks: " + remaining);
+            popOffBlockHeightLabel.setText("Auto pop-off height: "
+                    + (targetHeight < 0 ? "-" : targetHeight) + " 🡸 " + blockHeight);
+            if (remaining > 0) {
+                popOffBlockCountLabel.setForeground(Color.ORANGE);
+                popOffBlockHeightLabel.setForeground(Color.ORANGE);
             } else {
                 popOffBlockCountLabel.setForeground(iconColor);
                 popOffBlockHeightLabel.setForeground(iconColor);
