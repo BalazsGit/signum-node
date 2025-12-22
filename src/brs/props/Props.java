@@ -116,6 +116,7 @@ public class Props {
     public static final Prop<Integer> GPU_DEVICE_IDX = new Prop<>("GPU.DeviceIdx", 0);
     public static final Prop<Integer> GPU_UNVERIFIED_QUEUE = new Prop<>("GPU.UnverifiedQueue", 1000);
     public static final Prop<Integer> GPU_HASHES_PER_BATCH = new Prop<>("GPU.HashesPerBatch", 1000);
+    public static final Prop<Boolean> GPU_DYNAMIC_HASHES_PER_BATCH = new Prop<>("GPU.DynamicHashesPerBatch", true);
     public static final Prop<Integer> GPU_MEM_PERCENT = new Prop<>("GPU.MemPercent", 50);
 
     // CPU options

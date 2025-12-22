@@ -1,3 +1,4 @@
+
 package brs;
 
 import brs.props.PropertyService;
@@ -24,7 +25,7 @@ final class OCLPoC {
     }
 
     private static final Logger logger = LoggerFactory.getLogger(OCLPoC.class);
-
+    private static int HASHES_PER_ENQUEUE_DYNAMIC;
     private static final int HASHES_PER_ENQUEUE;
     private static final int MEM_PERCENT;
 
@@ -33,7 +34,7 @@ final class OCLPoC {
     private static cl_program program;
     private static cl_kernel genKernel;
     private static cl_kernel getKernel;
-    private static final cl_kernel getKernel2;
+    private static cl_kernel getKernel2;
 
     private static long maxItems;
     private static final long MAX_GROUP_ITEMS;
@@ -140,26 +141,107 @@ final class OCLPoC {
             clGetKernelWorkGroupInfo(getKernel, device, CL_KERNEL_WORK_GROUP_SIZE, 8,
                     Pointer.to(getGroupSize), null);
 
+            // Kernel-specific maximum workgroup sizes
             MAX_GROUP_ITEMS = Math.min(genGroupSize[0], getGroupSize[0]);
 
             if (MAX_GROUP_ITEMS <= 0) {
                 throw new OCLCheckerException(
-                        "OpenCL init error. Invalid max group items: " + MAX_GROUP_ITEMS);
+                        "OpenCL initialization error: invalid kernel workgroup size limit: "
+                                + MAX_GROUP_ITEMS);
             }
 
-            long maxItemsByComputeUnits = getComputeUnits(device) * MAX_GROUP_ITEMS;
+            // Device capabilities
+            long[] deviceMaxWorkGroupSize = new long[1];
+            clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, Sizeof.size_t,
+                    Pointer.to(deviceMaxWorkGroupSize), null);
 
+            long[] localMemSize = new long[1];
+            clGetDeviceInfo(device, CL_DEVICE_LOCAL_MEM_SIZE, Sizeof.cl_ulong,
+                    Pointer.to(localMemSize), null);
+
+            long[] globalMemSize = new long[1];
+            clGetDeviceInfo(device, CL_DEVICE_GLOBAL_MEM_SIZE, Sizeof.cl_ulong,
+                    Pointer.to(globalMemSize), null);
+
+            // ---------------------------------------------------------------------
+            // Memory-based limits
+            // ---------------------------------------------------------------------
+
+            // This kernel does not allocate explicit per-workgroup local memory,
+            // therefore local memory does not further restrict the workgroup size.
+            long maxItemsByLocalMem = MAX_GROUP_ITEMS;
+
+            // Apply a safety margin to global memory to avoid allocation pressure
+            long usableGlobalMem = (long) (globalMemSize[0] * 0.75);
+
+            long maxItemsByGlobalMem = MEM_PER_ITEM > 0
+                    ? usableGlobalMem / MEM_PER_ITEM
+                    : Long.MAX_VALUE;
+
+            // ---------------------------------------------------------------------
+            // Hashes per enqueue (batch size)
+            // ---------------------------------------------------------------------
+
+            if (propertyService.getBoolean(Props.GPU_DYNAMIC_HASHES_PER_BATCH)) {
+
+                HASHES_PER_ENQUEUE_DYNAMIC = (int) Math.min(
+                        propertyService.getInt(Props.GPU_HASHES_PER_BATCH),
+                        Math.min(MAX_GROUP_ITEMS, maxItemsByGlobalMem));
+
+                logger.info(
+                        "GPU batch size dynamically optimized to {} hashes (kernel and memory limits applied).",
+                        HASHES_PER_ENQUEUE_DYNAMIC);
+            } else {
+                HASHES_PER_ENQUEUE_DYNAMIC = HASHES_PER_ENQUEUE;
+
+                logger.info(
+                        "GPU batch size fixed at {} hashes (dynamic optimization disabled).",
+                        HASHES_PER_ENQUEUE_DYNAMIC);
+            }
+
+            // ---------------------------------------------------------------------
+            // Logging of effective limits
+            // ---------------------------------------------------------------------
+
+            logger.info(
+                    "Kernel-supported maximum workgroup size on this GPU: {}.",
+                    MAX_GROUP_ITEMS);
+
+            logger.info(
+                    "Maximum batch size allowed by global memory constraints: {} items.",
+                    maxItemsByGlobalMem);
+
+            // ---------------------------------------------------------------------
+            // Compute-unit–based throughput limit
+            // ---------------------------------------------------------------------
+
+            long computeUnits = getComputeUnits(device);
+            long maxItemsByComputeUnits = computeUnits * MAX_GROUP_ITEMS;
+
+            // Final maximum items per kernel execution (global work size)
             maxItems = Math.min(calculateMaxItemsByMem(device), maxItemsByComputeUnits);
 
+            // Align global work size to whole workgroups
             if (maxItems % MAX_GROUP_ITEMS != 0) {
                 maxItems -= (maxItems % MAX_GROUP_ITEMS);
             }
 
             if (maxItems <= 0) {
                 throw new OCLCheckerException(
-                        "OpenCL init error. Invalid calculated max items: " + maxItems);
+                        "OpenCL initialization error: invalid calculated maximum item count: "
+                                + maxItems);
             }
-            logger.info("OCL max items: {}", maxItems);
+
+            // ---------------------------------------------------------------------
+            // Final summary logs
+            // ---------------------------------------------------------------------
+
+            logger.info("GPU memory usage target: {}%.", MEM_PERCENT);
+
+            logger.info(
+                    "Maximum number of items processed per GPU execution cycle: {}.",
+                    maxItems);
+
         } catch (CLException e) {
             if (logger.isInfoEnabled()) {
                 logger.info("OpenCL exception: {}", e.getMessage(), e);
@@ -242,12 +324,12 @@ final class OCLPoC {
                     clSetKernelArg(genKernel, 5, Sizeof.cl_int, Pointer.to(totalSize));
 
                     int c = 0;
-                    int step = HASHES_PER_ENQUEUE;
+                    int step = Math.min(HASHES_PER_ENQUEUE_DYNAMIC, (int) maxItems);
                     int[] cur = new int[1];
                     int[] st = new int[1];
-                    while (c < 8192) {
+                    while (c < maxItems) {
                         cur[0] = c;
-                        st[0] = (c + step) > 8192 ? 8192 - c : step;
+                        st[0] = Math.min(step, (int) (maxItems - c));
                         clSetKernelArg(genKernel, 3, Sizeof.cl_int, Pointer.to(cur));
                         clSetKernelArg(genKernel, 4, Sizeof.cl_int, Pointer.to(st));
                         clEnqueueNDRangeKernel(queue, genKernel, 1, null, new long[] { jobSize },
@@ -272,10 +354,13 @@ final class OCLPoC {
                                 new long[] { MAX_GROUP_ITEMS }, 0, null, null);
                     }
 
-                    clEnqueueReadBuffer(queue, scoopOutMem, true, 0,
-                            (long) MiningPlot.SCOOP_SIZE * blocks.size(), Pointer.to(scoopsOut), 0, null, null);
+                    clEnqueueReadBuffer(queue, scoopOutMem, true, 0, (long) MiningPlot.SCOOP_SIZE * blocks.size(),
+                            Pointer.to(scoopsOut), 0, null, null);
+                } catch (CLException e) {
+                    logger.warn("GPU exception: {}", e.getMessage(), e);
+                    return;
                 } catch (Exception e) {
-                    logger.info("GPU error. Try to set a lower value on GPU.HashesPerBatch in properties.");
+                    logger.warn("Unexpected exception during GPU processing: {}", e.getMessage(), e);
                     return;
                 } finally {
                     if (idMem != null) {
@@ -337,6 +422,10 @@ final class OCLPoC {
             if (getKernel != null) {
                 clReleaseKernel(getKernel);
                 getKernel = null;
+            }
+            if (getKernel2 != null) {
+                clReleaseKernel(getKernel2);
+                getKernel2 = null;
             }
             if (queue != null) {
                 clReleaseCommandQueue(queue);
