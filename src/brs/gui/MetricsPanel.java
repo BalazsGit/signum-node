@@ -511,7 +511,7 @@ public class MetricsPanel extends JPanel {
         // Verified / Total Blocks
         tooltip = "Shows the number of blocks in the download queue that have passed PoC verification against the total number of blocks in the queue.\n\n- Verified: PoC signature has been checked (CPU/GPU intensive).\n- Total: All blocks currently in the download queue.\n\nA high number of unverified blocks may indicate a slow verification process.\n\nThe progress bar displays: Verified Blocks / Total Blocks - Percentage of Verified Blocks.";
         JLabel verifLabel = createLabel("Verified / Total Blocks", null, tooltip);
-        syncProgressBarDownloadedBlocks = createProgressBar(0, 100, Color.GREEN, "0 / 0 0%", progressBarSize1);
+        syncProgressBarDownloadedBlocks = createProgressBar(0, 100, Color.GREEN, "0 / 0 | 0%", progressBarSize1);
         addComponent(SyncPanel, verifLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
                 labelInsets);
         addComponent(SyncPanel, syncProgressBarDownloadedBlocks, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
