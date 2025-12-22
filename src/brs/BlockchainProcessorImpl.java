@@ -1052,8 +1052,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     }
                     try {
                         if (!currentBlock.isVerified()) {
-                            downloadCache.removeUnverified(currentBlock.getId()); // This will fire a queue status
-                                                                                  // update
+                            downloadCache.removeUnverified(currentBlock.getId());
                             blockService.preVerify(currentBlock, lastBlock);
                             logger.debug("block was not preverified");
                         }
@@ -1140,8 +1139,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         }
                     } else { // verify using java
                         try {
-                            Block block = downloadCache.getFirstUnverifiedBlock(); // This will fire a queue status
-                                                                                   // update
+                            Block block = downloadCache.getFirstUnverifiedBlock();
                             Block prevBlock = downloadCache.getBlock(block.getPreviousBlockId());
                             if (prevBlock == null) {
                                 prevBlock = blockchain.getBlock(block.getPreviousBlockId());
