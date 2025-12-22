@@ -178,6 +178,8 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     void popOff(int count);
 
+    void onQueueStatusUpdated(QueueStatus newStatus);
+
     void scheduleTrim(Block block);
 
     class BlockNotAcceptedException extends SignumException {

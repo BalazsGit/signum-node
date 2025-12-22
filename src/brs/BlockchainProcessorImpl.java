@@ -184,9 +184,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private long blockApplyTimeNanos;
     private long atTimeMs;
 
-    private int lastTotalSize = 0;
-    private int lastUnverifiedQueueSize = 0;
-
     private final Listener<Peer> peerListener = peer -> blockListeners.notify(null, Event.PEERS_UPDATED);
 
     private final Listener<Peer> netVolumeListener = peer -> updateAndFireNetVolume();
@@ -535,10 +532,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 block -> transactionProcessor.revalidateUnconfirmedTransactions(),
                 Event.BLOCK_PUSHED);
 
-        blockListeners.addListener(block -> {
-            updateAndFireQueueStatus();
-        }, Event.BLOCK_PUSHED);
-
         addGenesisBlock();
 
         if (logSyncProgressToCsv) {
@@ -750,7 +743,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                                 // we stop the loop since cahce has been locked
                                                 return;
                                             }
-                                            updateAndFireQueueStatus(); // Fire event immediately after adding
                                             if (logger.isDebugEnabled()) {
                                                 logger.debug("Added from download: Id: {} Height: {}", block.getId(),
                                                         block.getHeight());
@@ -1060,7 +1052,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     }
                     try {
                         if (!currentBlock.isVerified()) {
-                            downloadCache.removeUnverified(currentBlock.getId());
+                            downloadCache.removeUnverified(currentBlock.getId()); // This will fire a queue status
+                                                                                  // update
                             blockService.preVerify(currentBlock, lastBlock);
                             logger.debug("block was not preverified");
                         }
@@ -1099,8 +1092,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             int queueThreshold = oclVerify ? oclUnverifiedQueue : 0;
 
             while (!Thread.interrupted() && ThreadPool.running.get()) {
-
-                updateAndFireQueueStatus();
                 int unVerified = downloadCache.getUnverifiedSize();
                 if (unVerified > queueThreshold) { // Is there anything to verify
                     if (unVerified >= oclUnverifiedQueue && oclVerify) { // should we use Ocl?
@@ -1135,12 +1126,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         try {
                             OCLPoC.validatePoC(blocks, pocVersion, blockService);
                             downloadCache.removeUnverifiedBatch(blocks.keySet());
-                            updateAndFireQueueStatus();
                         } catch (OCLPoC.PreValidateFailException e) {
                             logger.info(e.toString(), e);
                             blacklistClean(e.getBlock(), e,
                                     "found invalid pull/push data during processing the pocVerification");
-                            updateAndFireQueueStatus();
                         } catch (OCLPoC.OCLCheckerException e) {
                             logger.info("Open CL error. slow verify will occur for the next " + oclUnverifiedQueue
                                     + " Blocks", e);
@@ -1151,13 +1140,13 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         }
                     } else { // verify using java
                         try {
-                            Block block = downloadCache.getFirstUnverifiedBlock();
+                            Block block = downloadCache.getFirstUnverifiedBlock(); // This will fire a queue status
+                                                                                   // update
                             Block prevBlock = downloadCache.getBlock(block.getPreviousBlockId());
                             if (prevBlock == null) {
                                 prevBlock = blockchain.getBlock(block.getPreviousBlockId());
                             }
                             blockService.preVerify(block, prevBlock);
-                            updateAndFireQueueStatus();
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                         } catch (BlockNotAcceptedException e) {
@@ -1183,20 +1172,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         }
     }
 
-    private void updateAndFireQueueStatus() {
-        int totalSize = downloadCache.size();
-        int unverifiedSize = downloadCache.getUnverifiedSize();
-        int verifiedSize = totalSize - unverifiedSize;
-
-        if (totalSize != lastTotalSize || unverifiedSize != lastUnverifiedQueueSize) {
-            lastUnverifiedQueueSize = unverifiedSize;
-            lastTotalSize = totalSize;
-            int downloadCacheFullness = (int) downloadCache.getBlockCacheSize();
-            queueStatus
-                    .set(new BlockchainProcessor.QueueStatus(unverifiedSize, verifiedSize, totalSize,
-                            downloadCacheFullness));
-            blockListeners.notify(null, Event.QUEUE_STATUS_CHANGED);
-        }
+    @Override
+    public void onQueueStatusUpdated(QueueStatus newStatus) {
+        queueStatus.set(newStatus);
+        blockListeners.notify(null, Event.QUEUE_STATUS_CHANGED);
     }
 
     private void updateAndFireNetVolume() {
@@ -1222,7 +1201,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             peer.blacklist(e, description);
         }
         downloadCache.resetCache();
-        updateAndFireQueueStatus();
         logger.debug("Blacklisted peer and cleaned queue");
     }
 

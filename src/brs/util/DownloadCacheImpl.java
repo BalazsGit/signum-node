@@ -2,6 +2,7 @@ package brs.util;
 
 import brs.Block;
 import brs.Blockchain;
+import brs.BlockchainProcessor;
 import brs.Constants;
 import brs.fluxcapacitor.FluxCapacitor;
 import brs.fluxcapacitor.FluxValues;
@@ -33,6 +34,7 @@ public final class DownloadCacheImpl {
 
     private final Blockchain blockchain;
     private final FluxCapacitor fluxCapacitor;
+    private BlockchainProcessor blockchainProcessor;
 
     private int blockCacheSize = 0;
 
@@ -44,6 +46,9 @@ public final class DownloadCacheImpl {
 
     private boolean lockedCache = false;
 
+    private int lastTotalSize = 0;
+    private int lastUnverifiedQueueSize = 0;
+
     public DownloadCacheImpl(
             PropertyService propertyService,
             FluxCapacitor fluxCapacitor,
@@ -51,6 +56,26 @@ public final class DownloadCacheImpl {
         this.blockCacheMb = propertyService.getInt(Props.BRS_BLOCK_CACHE_MB);
         this.fluxCapacitor = fluxCapacitor;
         this.blockchain = blockchain;
+    }
+
+    public void setBlockchainProcessor(BlockchainProcessor blockchainProcessor) {
+        this.blockchainProcessor = blockchainProcessor;
+    }
+
+    private void updateAndFireQueueStatus() {
+        if (blockchainProcessor == null) {
+            return;
+        }
+        int totalSize = blockCache.size();
+        int unverifiedSize = unverified.size();
+        if (totalSize != lastTotalSize || unverifiedSize != lastUnverifiedQueueSize) {
+            lastTotalSize = totalSize;
+            lastUnverifiedQueueSize = unverifiedSize;
+            int verifiedSize = totalSize - unverifiedSize;
+            int downloadCacheFullness = blockCacheSize;
+            blockchainProcessor.onQueueStatusUpdated(new BlockchainProcessor.QueueStatus(unverifiedSize, verifiedSize,
+                    totalSize, downloadCacheFullness));
+        }
     }
 
     private int getChainHeight() {
@@ -217,6 +242,7 @@ public final class DownloadCacheImpl {
             unverified.remove(blockId);
             return block;
         } finally {
+            updateAndFireQueueStatus();
             dcsl.unlockWrite(stamp);
         }
     }
@@ -226,6 +252,7 @@ public final class DownloadCacheImpl {
         try {
             unverified.remove(blockId);
         } finally {
+            updateAndFireQueueStatus();
             dcsl.unlockWrite(stamp);
         }
     }
@@ -237,6 +264,7 @@ public final class DownloadCacheImpl {
                 unverified.remove(block.getId());
             }
         } finally {
+            updateAndFireQueueStatus();
             dcsl.unlockWrite(stamp);
         }
     }
@@ -250,6 +278,7 @@ public final class DownloadCacheImpl {
             blockCacheSize = 0;
             lockedCache = true;
         } finally {
+            updateAndFireQueueStatus();
             dcsl.unlockWrite(stamp);
         }
         setLastVars();
@@ -355,6 +384,7 @@ public final class DownloadCacheImpl {
                 highestCumulativeDifficulty = block.getCumulativeDifficulty();
                 return true;
             } finally {
+                updateAndFireQueueStatus();
                 dcsl.unlockWrite(stamp);
             }
         }
@@ -395,6 +425,7 @@ public final class DownloadCacheImpl {
                 blockCache.remove(block.getId());
                 blockCacheSize -= block.getByteLength();
             } finally {
+                updateAndFireQueueStatus();
                 dcsl.unlockWrite(stamp);
             }
             if (block.getId() == lastId) {

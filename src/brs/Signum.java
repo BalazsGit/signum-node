@@ -397,6 +397,8 @@ public final class Signum {
                     indirectIncomingService,
                     aliasService);
 
+            downloadCache.setBlockchainProcessor(blockchainProcessor);
+
             generator.generateForBlockchainProcessor(threadPool, blockchainProcessor);
 
             final DeeplinkQRCodeGenerator deepLinkQrCodeGenerator = new DeeplinkQRCodeGenerator();
