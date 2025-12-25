@@ -143,7 +143,8 @@ public class MetricsPanel extends JPanel {
 
     private ChartPanel performanceChartPanel;
     private ChartPanel timingChartPanel;
-    private ChartPanel netSpeedChartPanel;
+    private ChartPanel uploadChartPanel;
+    private ChartPanel downloadChartPanel;
     private Timer netSpeedChartUpdater;
 
     private XYSeries uploadVolumeSeries;
@@ -153,7 +154,7 @@ public class MetricsPanel extends JPanel {
     private long downloadedVolume = 0;
 
     private final Dimension chartDimension1 = new Dimension(320, 240);
-    private final Dimension chartDimension2 = new Dimension(320, 120);
+    private final Dimension splitChartDimension = new Dimension(320, 60);
     private final Dimension chartDimension = new Dimension(360, 270);
 
     private final Dimension progressBarSize1 = new Dimension(200, 20);
@@ -163,6 +164,12 @@ public class MetricsPanel extends JPanel {
 
     private final Insets labelInsets = new Insets(2, 5, 2, 0);
     private final Insets barInsets = new Insets(2, 5, 2, 5);
+
+    Color systemTxperBlockColor = new Color(64, 64, 192);
+    Color allTxPerBlockColor = new Color(235, 165, 50);
+
+    Color uploadVolumeColor = new Color(185, 120, 95); // Red
+    Color downloadVolumeColor = new Color(40, 165, 40); // Green
 
     private final ExecutorService chartUpdateExecutor = Executors.newSingleThreadExecutor();
 
@@ -230,12 +237,12 @@ public class MetricsPanel extends JPanel {
         plot.mapDatasetToRangeAxis(1, 1);
 
         // Renderer for transaction bars
-        XYBarRenderer transactionRenderer = new XYBarRenderer(0);
-        transactionRenderer.setBarPainter(new StandardXYBarPainter());
-        transactionRenderer.setShadowVisible(false);
-        transactionRenderer.setSeriesPaint(0, new Color(0, 0, 255, 128)); // System Txs/Block
-        transactionRenderer.setSeriesPaint(1, new Color(255, 165, 0, 128)); // All Txs/Block
+        XYStepAreaRenderer transactionRenderer = new XYStepAreaRenderer();
+        transactionRenderer.setShapesVisible(false);
+        transactionRenderer.setSeriesPaint(0, systemTxperBlockColor); // Blue for System Txs/Block
+        transactionRenderer.setSeriesPaint(1, allTxPerBlockColor); // Orange for All Txs/Block
         plot.setRenderer(1, transactionRenderer);
+        plot.mapDatasetToRangeAxis(1, 1);
 
         // Remove all padding around the plot area
         plot.setInsets(new RectangleInsets(0, 0, 0, 0));
@@ -325,19 +332,19 @@ public class MetricsPanel extends JPanel {
         NumberAxis transactionAxis = new NumberAxis(null); // No label for the second axis
         transactionAxis.setTickLabelsVisible(false);
         XYSeriesCollection barDataset = new XYSeriesCollection(); // All Txs
-        barDataset.addSeries(systemTransactionsPerBlockSeries); // System Txs
-        barDataset.addSeries(allTransactionsPerBlockSeries); // Series 1: All Txs
+        barDataset.addSeries(systemTransactionsPerBlockSeries);
+        barDataset.addSeries(allTransactionsPerBlockSeries);
         plot.setRangeAxis(1, transactionAxis);
         plot.setDataset(1, barDataset);
         plot.mapDatasetToRangeAxis(1, 1);
 
         // Renderer for transaction bars
-        XYBarRenderer transactionRenderer = new XYBarRenderer(0); // Set margin to 0 to remove gaps
-        transactionRenderer.setBarPainter(new StandardXYBarPainter());
-        transactionRenderer.setShadowVisible(false);
-        transactionRenderer.setSeriesPaint(0, new Color(0, 0, 255, 128)); // Blue, semi-transparent
-        transactionRenderer.setSeriesPaint(1, new Color(255, 165, 0, 128)); // Orange, semi-transparent
+        XYStepAreaRenderer transactionRenderer = new XYStepAreaRenderer();
+        transactionRenderer.setShapesVisible(false);
+        transactionRenderer.setSeriesPaint(0, systemTxperBlockColor); // Blue for System Txs/Block
+        transactionRenderer.setSeriesPaint(1, allTxPerBlockColor); // Orange for All Txs/Block
         plot.setRenderer(1, transactionRenderer);
+        plot.mapDatasetToRangeAxis(1, 1);
 
         // Remove all padding around the plot area
         plot.setInsets(new RectangleInsets(0, 0, 0, 0));
@@ -350,15 +357,12 @@ public class MetricsPanel extends JPanel {
         return chartPanel;
     }
 
-    private ChartPanel createNetSpeedChartPanel() {
+    private ChartPanel createUploadChartPanel() {
         uploadSpeedSeries = new XYSeries("Upload Speed");
-        downloadSpeedSeries = new XYSeries("Download Speed");
         uploadVolumeSeries = new XYSeries("Upload Volume");
-        downloadVolumeSeries = new XYSeries("Download Volume");
 
         XYSeriesCollection lineDataset = new XYSeriesCollection();
         lineDataset.addSeries(uploadSpeedSeries);
-        lineDataset.addSeries(downloadSpeedSeries);
 
         JFreeChart chart = ChartFactory.createXYLineChart(
                 null, // No title
@@ -378,11 +382,9 @@ public class MetricsPanel extends JPanel {
         plot.setRangeGridlinesVisible(false);
 
         plot.getRenderer().setSeriesPaint(0, new Color(128, 0, 0)); // Upload - Red, semi-transparent
-        plot.getRenderer().setSeriesPaint(1, new Color(0, 100, 0)); // Download - Green, semi-transparent
 
         // Set line thickness
         plot.getRenderer().setSeriesStroke(0, new java.awt.BasicStroke(1.2f));
-        plot.getRenderer().setSeriesStroke(1, new java.awt.BasicStroke(1.2f));
 
         // Hide axis tick labels (the numbers on the axes)
         plot.getDomainAxis().setTickLabelsVisible(false);
@@ -393,15 +395,13 @@ public class MetricsPanel extends JPanel {
         volumeAxis.setTickLabelsVisible(false);
         plot.setRangeAxis(1, volumeAxis); // Use axis index 1 for volume
 
-        // A single dataset and renderer for both volume series.
+        // Dataset and renderer for volume series.
         XYSeriesCollection volumeDataset = new XYSeriesCollection();
-        volumeDataset.addSeries(downloadVolumeSeries); // Series 0: Download (top layer)
-        volumeDataset.addSeries(uploadVolumeSeries); // Series 1: Upload (bottom layer)
+        volumeDataset.addSeries(uploadVolumeSeries);
 
         XYStepAreaRenderer volumeRenderer = new XYStepAreaRenderer();
         volumeRenderer.setShapesVisible(false);
-        volumeRenderer.setSeriesPaint(0, new Color(50, 205, 50, 128)); // Download - Green
-        volumeRenderer.setSeriesPaint(1, new Color(233, 150, 122, 128)); // Upload - Red
+        volumeRenderer.setSeriesPaint(0, uploadVolumeColor); // Upload - Red
         plot.setDataset(1, volumeDataset);
         plot.setRenderer(1, volumeRenderer);
         plot.mapDatasetToRangeAxis(1, 1);
@@ -411,9 +411,69 @@ public class MetricsPanel extends JPanel {
         plot.setAxisOffset(new RectangleInsets(0, 0, 0, 0));
 
         ChartPanel chartPanel = new ChartPanel(chart);
-        chartPanel.setPreferredSize(chartDimension2);
-        chartPanel.setMinimumSize(chartDimension2);
-        chartPanel.setMaximumSize(chartDimension2);
+        chartPanel.setPreferredSize(splitChartDimension);
+        chartPanel.setMinimumSize(splitChartDimension);
+        chartPanel.setMaximumSize(splitChartDimension);
+        return chartPanel;
+    }
+
+    private ChartPanel createDownloadChartPanel() {
+        downloadSpeedSeries = new XYSeries("Download Speed");
+        downloadVolumeSeries = new XYSeries("Download Volume");
+
+        XYSeriesCollection lineDataset = new XYSeriesCollection();
+        lineDataset.addSeries(downloadSpeedSeries);
+
+        JFreeChart chart = ChartFactory.createXYLineChart(
+                null, // No title
+                null, // No X-axis label
+                null, // No Y-axis label
+                lineDataset);
+
+        // Remove the legend to maximize plot area
+        chart.removeLegend();
+        chart.setBorderVisible(false);
+
+        XYPlot plot = chart.getXYPlot();
+        plot.getDomainAxis().setLowerMargin(0.0);
+        plot.getDomainAxis().setUpperMargin(0.0);
+        plot.setBackgroundPaint(Color.DARK_GRAY);
+        plot.setDomainGridlinesVisible(false);
+        plot.setRangeGridlinesVisible(false);
+
+        plot.getRenderer().setSeriesPaint(0, new Color(0, 100, 0)); // Download - Green, semi-transparent
+
+        // Set line thickness
+        plot.getRenderer().setSeriesStroke(0, new java.awt.BasicStroke(1.2f));
+
+        // Hide axis tick labels (the numbers on the axes)
+        plot.getDomainAxis().setTickLabelsVisible(false);
+        plot.getRangeAxis().setTickLabelsVisible(false);
+
+        // Second Y-axis for volume
+        NumberAxis volumeAxis = new NumberAxis(null); // No label for the second axis
+        volumeAxis.setTickLabelsVisible(false);
+        plot.setRangeAxis(1, volumeAxis); // Use axis index 1 for volume
+
+        // Dataset and renderer for volume series.
+        XYSeriesCollection volumeDataset = new XYSeriesCollection();
+        volumeDataset.addSeries(downloadVolumeSeries);
+
+        XYStepAreaRenderer volumeRenderer = new XYStepAreaRenderer();
+        volumeRenderer.setShapesVisible(false);
+        volumeRenderer.setSeriesPaint(0, downloadVolumeColor); // Download - Green
+        plot.setDataset(1, volumeDataset);
+        plot.setRenderer(1, volumeRenderer);
+        plot.mapDatasetToRangeAxis(1, 1);
+
+        // Remove all padding around the plot area
+        plot.setInsets(new RectangleInsets(0, 0, 0, 0));
+        plot.setAxisOffset(new RectangleInsets(0, 0, 0, 0));
+
+        ChartPanel chartPanel = new ChartPanel(chart);
+        chartPanel.setPreferredSize(splitChartDimension);
+        chartPanel.setMinimumSize(splitChartDimension);
+        chartPanel.setMaximumSize(splitChartDimension);
         return chartPanel;
     }
 
@@ -441,7 +501,8 @@ public class MetricsPanel extends JPanel {
             payloadFullnessSeries = new XYSeries("Payload Fullness (MA)");
             performanceChartPanel = createPerformanceChartPanel();
             timingChartPanel = createTimingChartPanel();
-            netSpeedChartPanel = createNetSpeedChartPanel();
+            uploadChartPanel = createUploadChartPanel();
+            downloadChartPanel = createDownloadChartPanel();
             layoutComponents();
         } catch (Exception e) {
             LOGGER.error("Failed to initialize MetricsPanel", e);
@@ -571,7 +632,7 @@ public class MetricsPanel extends JPanel {
 
         // All Transactions/Block (Moving Average)
         tooltip = "The moving average of the total number of transactions (user-submitted and AT-generated) included in each block. This metric provides insight into the network's activity and block space utilization.\n\nIncludes:\n- Payments (Ordinary, Multi-Out, Multi-Same-Out)\n- Messages (Arbitrary, Alias, Account Info, TLD)\n- Assets (Issuance, Transfer, Orders, Minting, Distribution)\n- Digital Goods (Listing, Delisting, Price Change, Quantity Change, Purchase, Delivery, Feedback, Refund)\n- Account Control (Leasing)\n- Mining (Reward Rec. Assignment, Commitment)\n- Advanced Payments (Escrow, Subscriptions)\n- Automated Transactions (ATs)\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
-        txPerBlockLabel = createLabel("All Txs/Block (MA)", new Color(255, 165, 0), tooltip); // Orange
+        txPerBlockLabel = createLabel("All Txs/Block (MA)", allTxPerBlockColor, tooltip);
         allTransactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, txPerBlockLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -580,7 +641,7 @@ public class MetricsPanel extends JPanel {
 
         // System Transactions/Block (Moving Average)
         tooltip = "The moving average of system-generated transactions included in each block. This includes payments from Automated Transactions (ATs), Escrow results, and Subscription payments.\n\nThe progress bar displays: Current MA Value - Max MA Value seen in this session.";
-        systemTxPerBlockLabel = createLabel("System Txs/Block (MA)", new Color(0, 0, 255, 128), tooltip);
+        systemTxPerBlockLabel = createLabel("System Txs/Block (MA)", systemTxperBlockColor, tooltip);
         systemTransactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, systemTxPerBlockLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -608,11 +669,11 @@ public class MetricsPanel extends JPanel {
         addComponent(performanceMetricsPanel, performanceChartContainer, 1, 0, 1, 0, 0, GridBagConstraints.NORTHWEST,
                 GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
 
+        // Add toggle listeners for performance chart
         addToggleListener(blocksPerSecondLabel, performanceChartPanel, 0, 0);
         addToggleListener(txPerSecondLabel, performanceChartPanel, 0, 1);
         addToggleListener(systemTxPerSecondLabel, performanceChartPanel, 0, 2);
-        addToggleListener(atCountLabel, performanceChartPanel, 0, 3); // atCountPerBlockSeries
-        addDualChartToggleListener(txPerBlockLabel, performanceChartPanel, 1, 1, timingChartPanel, 1, 1);
+        addToggleListener(atCountLabel, performanceChartPanel, 0, 3);
 
         // End Performance Metrics Panel
 
@@ -746,7 +807,8 @@ public class MetricsPanel extends JPanel {
         JPanel netSpeedChartContainer = new JPanel();
         netSpeedChartContainer.setLayout(new BoxLayout(netSpeedChartContainer, BoxLayout.Y_AXIS));
         netSpeedChartContainer.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 0));
-        netSpeedChartContainer.add(netSpeedChartPanel);
+        netSpeedChartContainer.add(uploadChartPanel);
+        netSpeedChartContainer.add(downloadChartPanel);
 
         JPanel netSpeedInfoPanel = new JPanel(new GridBagLayout());
         netSpeedInfoPanel.setBorder(BorderFactory.createEmptyBorder(5, 0, 0, 0));
@@ -768,15 +830,6 @@ public class MetricsPanel extends JPanel {
         addComponent(netSpeedInfoPanel, uploadSpeedPanel, 0, 1, 2, 0, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, labelInsets);
 
-        /*
-         * addComponent(netSpeedInfoPanel, uploadSpeedLabel, 0, 1, 1, 0, 0,
-         * GridBagConstraints.LINE_END,
-         * GridBagConstraints.NONE, labelInsets);
-         * addComponent(netSpeedInfoPanel, uploadSpeedProgressBar, 1, 1, 1, 0, 0,
-         * GridBagConstraints.LINE_START,
-         * GridBagConstraints.HORIZONTAL, barInsets);
-         */
-
         // --- Download Speed ---
         JPanel downloadSpeePanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
         downloadSpeePanel.setOpaque(false);
@@ -787,15 +840,6 @@ public class MetricsPanel extends JPanel {
         downloadSpeePanel.add(downloadSpeedProgressBar);
         addComponent(netSpeedInfoPanel, downloadSpeePanel, 0, 2, 2, 0, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, labelInsets);
-
-        /*
-         * addComponent(netSpeedInfoPanel, downloadSpeedLabel, 0, 2, 1, 0, 0,
-         * GridBagConstraints.LINE_END,
-         * GridBagConstraints.NONE, labelInsets);
-         * addComponent(netSpeedInfoPanel, downloadSpeedProgressBar, 1, 2, 1, 0, 0,
-         * GridBagConstraints.LINE_START,
-         * GridBagConstraints.HORIZONTAL, barInsets);
-         */
 
         // --- Combined Volume ---
         JPanel combinedVolumePanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
@@ -866,14 +910,6 @@ public class MetricsPanel extends JPanel {
         addComponent(netSpeedInfoPanel, maWindowPanel, 0, 4, 2, 0, 0, GridBagConstraints.CENTER,
                 GridBagConstraints.NONE, new Insets(2, 0, 2, 0));
 
-        // addComponent(netSpeedInfoPanel, maWindowLabel, 0, 4, 1, 0, 0,
-        // GridBagConstraints.LINE_END,
-        // GridBagConstraints.NONE, labelInsets);
-
-        // addComponent(netSpeedInfoPanel, movingAverageComboBox, 1, 4, 1, 0, 0,
-        // GridBagConstraints.LINE_START,
-        // GridBagConstraints.HORIZONTAL, barInsets);
-
         netSpeedChartContainer.add(netSpeedInfoPanel);
         addComponent(this, netSpeedChartContainer, 3, 0, 1, 0, 0, GridBagConstraints.NORTH,
                 GridBagConstraints.NONE, new Insets(0, 0, 0, 5));
@@ -891,7 +927,7 @@ public class MetricsPanel extends JPanel {
         addComponent(this, timingMetricsPanel, 2, 0, 1, 0, 0, GridBagConstraints.NORTH,
                 GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
         // END Metrics Panel
-        addDualChartToggleListener(systemTxPerBlockLabel, performanceChartPanel, 1, 0, timingChartPanel, 1, 0);
+
         addToggleListener(pushTimeLabel, timingChartPanel, 0, 0);
         addToggleListener(validationTimeLabel, timingChartPanel, 0, 1);
         addToggleListener(txLoopTimeLabel, timingChartPanel, 0, 2);
@@ -903,13 +939,15 @@ public class MetricsPanel extends JPanel {
         addToggleListener(commitTimeLabel, timingChartPanel, 0, 8);
         addToggleListener(miscTimeLabel, timingChartPanel, 0, 9);
         addToggleListener(payloadFullnessLabel, timingChartPanel, 0, 10);
-        addToggleListener(uploadSpeedLabel, netSpeedChartPanel, 0, 0);
-        addToggleListener(downloadSpeedLabel, netSpeedChartPanel, 0, 1);
+        addToggleListener(uploadSpeedLabel, uploadChartPanel, 0, 0);
+        addToggleListener(downloadSpeedLabel, downloadChartPanel, 0, 0);
+        addPaintToggleListener(systemTxPerBlockLabel, performanceChartPanel, 1, 0, timingChartPanel, 1, 0,
+                systemTxperBlockColor);
+        addPaintToggleListener(txPerBlockLabel, performanceChartPanel, 1, 1, timingChartPanel, 1, 1,
+                allTxPerBlockColor);
 
-        Color uploadVolumeColor = new Color(233, 150, 122, 128); // Red
-        Color downloadVolumeColor = new Color(50, 205, 50, 128); // Green
-        addPaintToggleListener(metricsUploadVolumeLabel, netSpeedChartPanel, 1, 1, uploadVolumeColor);
-        addPaintToggleListener(metricsDownloadVolumeLabel, netSpeedChartPanel, 1, 0, downloadVolumeColor);
+        addPaintToggleListener(metricsUploadVolumeLabel, uploadChartPanel, 1, 0, uploadVolumeColor);
+        addPaintToggleListener(metricsDownloadVolumeLabel, downloadChartPanel, 1, 0, downloadVolumeColor);
 
         // Timer to periodically update the network speed chart so it flows even with no
         // traffic
@@ -1072,12 +1110,21 @@ public class MetricsPanel extends JPanel {
         });
     }
 
-    private void addDualChartToggleListener(JLabel label,
+    private void addPaintToggleListener(JLabel label,
             ChartPanel chartPanel1, int rendererIndex1, int seriesIndex1,
-            ChartPanel chartPanel2, int rendererIndex2, int seriesIndex2) {
+            ChartPanel chartPanel2, int rendererIndex2, int seriesIndex2,
+            Color originalColor) {
+        final Color transparentColor = new Color(0, 0, 0, 0);
         addLabelToggleListener(label, isVisible -> {
-            chartPanel1.getChart().getXYPlot().getRenderer(rendererIndex1).setSeriesVisible(seriesIndex1, isVisible);
-            chartPanel2.getChart().getXYPlot().getRenderer(rendererIndex2).setSeriesVisible(seriesIndex2, isVisible);
+            org.jfree.chart.renderer.xy.AbstractXYItemRenderer renderer1 = (org.jfree.chart.renderer.xy.AbstractXYItemRenderer) chartPanel1
+                    .getChart().getXYPlot().getRenderer(rendererIndex1);
+            renderer1.setSeriesVisible(seriesIndex1, isVisible);
+            renderer1.setSeriesPaint(seriesIndex1, isVisible ? originalColor : transparentColor);
+
+            org.jfree.chart.renderer.xy.AbstractXYItemRenderer renderer2 = (org.jfree.chart.renderer.xy.AbstractXYItemRenderer) chartPanel2
+                    .getChart().getXYPlot().getRenderer(rendererIndex2);
+            renderer2.setSeriesVisible(seriesIndex2, isVisible);
+            renderer2.setSeriesPaint(seriesIndex2, isVisible ? originalColor : transparentColor);
         });
     }
 
@@ -1277,8 +1324,11 @@ public class MetricsPanel extends JPanel {
         if (timingChartPanel != null) {
             timingChartPanel.getChart().getXYPlot().setNotify(enabled);
         }
-        if (netSpeedChartPanel != null) {
-            netSpeedChartPanel.getChart().getXYPlot().setNotify(enabled);
+        if (uploadChartPanel != null) {
+            uploadChartPanel.getChart().getXYPlot().setNotify(enabled);
+        }
+        if (downloadChartPanel != null) {
+            downloadChartPanel.getChart().getXYPlot().setNotify(enabled);
         }
     }
 
