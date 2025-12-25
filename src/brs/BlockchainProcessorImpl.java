@@ -1299,9 +1299,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         this.accumulatedSyncInProgressTimeMs = Long.parseLong(parts[0].trim()) * 1000;
                         this.accumulatedSyncTimeMs = Long.parseLong(parts[1].trim()) * 1000;
                         logger.info("Reading sync progress from {}:", this.syncProgressLogFilename);
-                        logger.info("Accumulated Sync In Progress Time: {}s",
-                                this.accumulatedSyncInProgressTimeMs / 1000);
-                        logger.info("Accumulated Sync Time: {}s", this.accumulatedSyncTimeMs / 1000);
+                        logger.info("Accumulated Sync In Progress Time: {}s ({})",
+                                this.accumulatedSyncInProgressTimeMs / 1000,
+                                DurationFormatter.format(this.accumulatedSyncInProgressTimeMs));
+                        logger.info("Accumulated Sync Time: {}s ({})", this.accumulatedSyncTimeMs / 1000,
+                                DurationFormatter.format(this.accumulatedSyncTimeMs));
                     } else {
                         // Malformed line, treat as new file
                         fileExistsAndHasContent = false;
