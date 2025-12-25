@@ -324,17 +324,19 @@ final class OCLPoC {
                     clSetKernelArg(genKernel, 5, Sizeof.cl_int, Pointer.to(totalSize));
 
                     int c = 0;
-                    int step = Math.min(HASHES_PER_ENQUEUE_DYNAMIC, (int) maxItems);
+                    int step = HASHES_PER_ENQUEUE_DYNAMIC;
                     int[] cur = new int[1];
                     int[] st = new int[1];
-                    while (c < maxItems) {
+                    int totalHashes = 8192;
+                    while (c < totalHashes) {
                         cur[0] = c;
-                        st[0] = Math.min(step, (int) (maxItems - c));
+                        st[0] = Math.min(step, totalHashes - c);
                         clSetKernelArg(genKernel, 3, Sizeof.cl_int, Pointer.to(cur));
                         clSetKernelArg(genKernel, 4, Sizeof.cl_int, Pointer.to(st));
                         clEnqueueNDRangeKernel(queue, genKernel, 1, null, new long[] { jobSize },
                                 new long[] { MAX_GROUP_ITEMS }, 0, null, null);
 
+                        clFinish(queue);
                         c += st[0];
                     }
 
