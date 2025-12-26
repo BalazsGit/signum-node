@@ -967,6 +967,9 @@ public class MetricsPanel extends JPanel {
                     BlockchainProcessor.Event.NET_VOLUME_CHANGED);
             blockchainProcessor.addListener(block -> onPerformanceStatsUpdated(),
                     BlockchainProcessor.Event.PERFORMANCE_STATS_UPDATED);
+            blockchainProcessor.addListener(this::onBlockPopped, BlockchainProcessor.Event.BLOCK_MANUAL_POPPED);
+            blockchainProcessor.addListener(this::onBlockPopped, BlockchainProcessor.Event.BLOCK_AUTO_POPPED);
+
             brs.TransactionProcessor transactionProcessor = Signum.getTransactionProcessor();
             transactionProcessor.addListener(transactions -> onUnconfirmedTransactionCountChanged(),
                     brs.TransactionProcessor.Event.ADDED_UNCONFIRMED_TRANSACTIONS);
@@ -1126,6 +1129,43 @@ public class MetricsPanel extends JPanel {
             renderer2.setSeriesVisible(seriesIndex2, isVisible);
             renderer2.setSeriesPaint(seriesIndex2, isVisible ? originalColor : transparentColor);
         });
+    }
+
+    private void onBlockPopped(brs.Block block) {
+        int height = block.getHeight();
+        SwingUtilities.invokeLater(() -> {
+            truncateSeries(blocksPerSecondSeries, height);
+            truncateSeries(allTransactionsPerSecondSeries, height);
+            truncateSeries(systemTransactionsPerSecondSeries, height);
+            truncateSeries(atCountPerBlockSeries, height);
+
+            truncateSeries(allTransactionsPerBlockSeries, height);
+            truncateSeries(systemTransactionsPerBlockSeries, height);
+
+            truncateSeries(pushTimePerBlockSeries, height);
+            truncateSeries(validationTimePerBlockSeries, height);
+            truncateSeries(txLoopTimePerBlockSeries, height);
+            truncateSeries(housekeepingTimePerBlockSeries, height);
+            truncateSeries(txApplyTimePerBlockSeries, height);
+            truncateSeries(atTimePerBlockSeries, height);
+            truncateSeries(subscriptionTimePerBlockSeries, height);
+            truncateSeries(blockApplyTimePerBlockSeries, height);
+            truncateSeries(commitTimePerBlockSeries, height);
+            truncateSeries(miscTimePerBlockSeries, height);
+            truncateSeries(payloadFullnessSeries, height);
+        });
+    }
+
+    private void truncateSeries(XYSeries series, int height) {
+        if (series == null)
+            return;
+        while (!series.isEmpty()) {
+            if (series.getX(series.getItemCount() - 1).doubleValue() > height) {
+                series.remove(series.getItemCount() - 1);
+            } else {
+                break;
+            }
+        }
     }
 
     private void updateForkCacheStatus(int forkCacheSize) {
