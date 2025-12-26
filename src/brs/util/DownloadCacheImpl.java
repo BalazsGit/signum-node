@@ -375,6 +375,9 @@ public final class DownloadCacheImpl {
         if (!getLockState()) {
             long stamp = dcsl.writeLock();
             try {
+                if (blockCache.containsKey(block.getId())) {
+                    return true;
+                }
                 blockCache.put(block.getId(), block);
                 reverseCache.put(block.getPreviousBlockId(), block.getId());
                 unverified.add(block.getId());
