@@ -5,8 +5,6 @@ import org.jfree.chart.ChartPanel;
 import org.jfree.chart.JFreeChart;
 import org.jfree.chart.axis.NumberAxis;
 import org.jfree.chart.plot.XYPlot;
-import org.jfree.chart.renderer.xy.StandardXYBarPainter;
-import org.jfree.chart.renderer.xy.XYBarRenderer;
 import org.jfree.chart.renderer.xy.XYStepAreaRenderer;
 import org.jfree.chart.ui.RectangleInsets;
 import org.jfree.data.xy.XYSeries;
@@ -89,6 +87,7 @@ public class MetricsPanel extends JPanel {
     private JProgressBar allTransactionsPerSecondProgressBar;
     private JProgressBar allTransactionsPerBlockProgressBar;
     private int oclUnverifiedQueueThreshold;
+    private boolean oclEnabled = false;
     private int maxUnverifiedQueueSize;
     private int maxUnconfirmedTxs;
     private int maxPayloadSize;
@@ -513,7 +512,12 @@ public class MetricsPanel extends JPanel {
     public void init() {
         try {
             oclUnverifiedQueueThreshold = Signum.getPropertyService().getInt(Props.GPU_UNVERIFIED_QUEUE);
-            maxUnverifiedQueueSize = Signum.getPropertyService().getInt(Props.P2P_MAX_BLOCKS);
+            oclEnabled = Signum.getPropertyService().getBoolean(Props.GPU_ACCELERATION);
+            if (oclEnabled) {
+                maxUnverifiedQueueSize = oclUnverifiedQueueThreshold * 2;
+            } else {
+                maxUnverifiedQueueSize = oclUnverifiedQueueThreshold;
+            }
             maxUnconfirmedTxs = Signum.getPropertyService().getInt(Props.P2P_MAX_UNCONFIRMED_TRANSACTIONS);
             maxPayloadSize = (Signum.getFluxCapacitor().getValue(brs.fluxcapacitor.FluxValues.MAX_PAYLOAD_LENGTH,
                     Signum.getBlockchain().getHeight()) / 1024);
@@ -581,7 +585,7 @@ public class MetricsPanel extends JPanel {
         // Unverified Blocks
         tooltip = "The number of blocks in the download queue that are waiting for Proof-of-Capacity (PoC) verification.\n\nA persistently high number might indicate that the CPU or GPU is a bottleneck and cannot keep up with the network's block generation rate.\n\nThe progress bar displays the current count of unverified blocks.";
         JLabel unVerifLabel = createLabel("Unverified Blocks", null, tooltip);
-        syncProgressBarUnverifiedBlocks = createProgressBar(0, 2000, Color.GREEN, "0", progressBarSize1);
+        syncProgressBarUnverifiedBlocks = createProgressBar(0, 1000, Color.GREEN, "0 - CPU", progressBarSize1);
         addComponent(SyncPanel, unVerifLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
                 labelInsets);
         addComponent(SyncPanel, syncProgressBarUnverifiedBlocks, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
