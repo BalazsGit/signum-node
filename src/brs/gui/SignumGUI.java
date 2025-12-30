@@ -13,13 +13,8 @@ import java.io.PrintStream;
 import java.net.URI;
 import java.text.SimpleDateFormat;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.Date;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Predicate;
-import java.util.stream.Collectors;
-import java.util.List;
 
 import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
@@ -57,7 +52,6 @@ import brs.props.PropertyService;
 import brs.props.Props;
 import brs.util.DurationFormatter;
 import brs.util.Convert;
-import brs.util.Listener;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 
