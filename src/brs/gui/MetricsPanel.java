@@ -574,14 +574,14 @@ public class MetricsPanel extends JPanel {
         int yPos = 0;
 
         // Fork Cache
-        forkCacheLabel = createLabel("Fork Cache", null,
-                """
-                        The number of blocks in the fork cache.
+        tooltip = """
+                The number of blocks in the fork cache.
 
-                        The progress bar displays:
-                        - Fork Cache: Current blocks in cache / Maximum Rollback limit.
-                        - Bar length: Indicates the current Fork Cache size relative to the maximum allowed rollback depth.
-                        """);
+                The progress bar displays:
+                - Fork Cache: Current cache size / maximum rollback limit.
+                - Bar length: Indicates the current fork cache size relative to the maximum rollback limit.
+                """;
+        forkCacheLabel = createLabel("Fork Cache", null, tooltip);
         forkCacheProgressBar = createProgressBar(0, brs.Constants.MAX_ROLLBACK, Color.MAGENTA,
                 "0 / " + brs.Constants.MAX_ROLLBACK, progressBarSize1);
         addComponent(SyncPanel, forkCacheLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
@@ -1183,7 +1183,8 @@ public class MetricsPanel extends JPanel {
         JPanel maWindowPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
         maWindowPanel.setOpaque(false);
         tooltip = """
-                The number of recent blocks used to calculate the moving average for performance metrics. A larger window provides a smoother but less responsive trend, while a smaller window is more reactive to recent changes.
+                The number of recent blocks used to calculate the moving average (MA) for the displayed metrics.
+                A larger window produces a smoother but less responsive trend, while a smaller window reacts more quickly to recent changes.
                 """;
         JLabel maWindowLabel = createLabel("MA Window (Blocks)", null, tooltip);
         maWindowPanel.add(maWindowLabel);
