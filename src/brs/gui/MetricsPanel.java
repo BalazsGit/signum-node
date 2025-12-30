@@ -151,6 +151,7 @@ public class MetricsPanel extends JPanel {
 
     private long uploadedVolume = 0;
     private long downloadedVolume = 0;
+    private final int netSpeedUpdateTime = 100; // milliseconds
 
     private final Dimension chartDimension1 = new Dimension(320, 240);
     private final Dimension splitChartDimension = new Dimension(320, 60);
@@ -527,12 +528,12 @@ public class MetricsPanel extends JPanel {
                     The maximum payload size is currently %d KB.
 
                     Legend:
-                    - Moving Average
-                    - C: Current block fullness percentage [%%] (current payload size in bytes / maximum payload size in bytes)
-                    - min: Minimum percentage value in the window [%%]
-                    - max: Maximum percentage value in the window [%%]
+                    - Current Moving Average (MA) payload fullness percentage [%%] over the last %d blocks.
+                    - C: Current block fullness percentage [%%] (current payload size in bytes / maximum payload size in bytes).
+                    - min: Minimum Moving Average (MA) payload fullness percentage [%%] observed in the current chart history window (%d blocks).
+                    - max: Maximum Moving Average (MA) payload fullness percentage [%%] observed in the current chart history window (%d blocks).
                     """
-                    .formatted(maxPayloadSize);
+                    .formatted(movingAverageWindow, maxPayloadSize, movingAverageWindow, movingAverageWindow);
             addInfoTooltip(payloadFullnessLabel, payloadTooltip);
 
             downloadCacheSize = Signum.getPropertyService().getInt(Props.BRS_BLOCK_CACHE_MB);
@@ -545,7 +546,7 @@ public class MetricsPanel extends JPanel {
 
                     The progress bar displays:
                     - Download Cache: Used [MB] / Total [MB] | Percentage [%%] used.
-                    - Length of the bar indicates the current cache usage relative to the total allocated cache size.
+                    - Bar length: Indicates the current cache usage relative to the total allocated cache size.
                     """
                     .formatted(downloadCacheSize);
             addInfoTooltip(cacheFullnessLabel, cacheTooltip);
@@ -579,7 +580,7 @@ public class MetricsPanel extends JPanel {
 
                         The progress bar displays:
                         - Fork Cache: Current blocks in cache / Maximum Rollback limit.
-                        - Length of the bar indicates the current Fork Cache size relative to the maximum allowed rollback depth.
+                        - Bar length: Indicates the current Fork Cache size relative to the maximum allowed rollback depth.
                         """);
         forkCacheProgressBar = createProgressBar(0, brs.Constants.MAX_ROLLBACK, Color.MAGENTA,
                 "0 / " + brs.Constants.MAX_ROLLBACK, progressBarSize1);
@@ -608,7 +609,7 @@ public class MetricsPanel extends JPanel {
 
                 The progress bar displays:
                 - Verified / Total: Number of verified blocks / Total blocks in queue | Percentage [%%].
-                - Length of the bar indicates the number of verified blocks relative to the total number of blocks in the download queue.
+                - Bar length: Indicates the number of verified blocks relative to the total number of blocks in the download queue.
                 """;
         JLabel verifLabel = createLabel("Verified / Total Blocks", null, tooltip);
         syncProgressBarDownloadedBlocks = createProgressBar(0, 100, Color.GREEN, "0 / 0 | 0%", progressBarSize1);
@@ -626,7 +627,7 @@ public class MetricsPanel extends JPanel {
                 The progress bar displays:
                 - Unverified Blocks: Current count of unverified blocks.
                 - Color Status: The text turns red if the count exceeds the 'GPU.UnverifiedQueue' threshold. If GPU acceleration 'GPU.Acceleration' is enabled, this indicates that OCL acceleration is active. Otherwise, it remains green.
-                - Length of the bar indicates the current unverified block count relative to 'GPU.UnverifiedQueue' threshold if GPU acceleration is disabled. If GPU acceleration is enabled, the length indicates the count relative to double the 'GPU.UnverifiedQueue' threshold.
+                - Bar length: Indicates the current unverified block count relative to 'GPU.UnverifiedQueue' threshold if GPU acceleration is disabled. If GPU acceleration is enabled, the length indicates the count relative to double the 'GPU.UnverifiedQueue' threshold.
                 """;
         JLabel unVerifLabel = createLabel("Unverified Blocks", null, tooltip);
         syncProgressBarUnverifiedBlocks = createProgressBar(0, 1000, Color.GREEN, "0 - CPU", progressBarSize1);
@@ -643,7 +644,7 @@ public class MetricsPanel extends JPanel {
 
                 The progress bar displays:
                 - Unconfirmed Txs: Current count / Maximum capacity.
-                - Length of the bar indicates the current number of unconfirmed transactions relative to the maximum memory pool capacity.
+                - Bar length: Indicates the current number of unconfirmed transactions relative to the maximum memory pool capacity.
                 """;
         JLabel unconfirmedTxsLabel = createLabel("Unconfirmed Txs", null, tooltip);
         unconfirmedTxsProgressBar = createProgressBar(0, 1000, Color.GREEN, "0 / 0", progressBarSize1);
@@ -665,10 +666,11 @@ public class MetricsPanel extends JPanel {
                 A higher value means the node is rapidly catching up with the current state of the blockchain. This metric is particularly useful during the initial sync or after a period of being offline.
 
                 The progress bar displays:
-                - Blocks/Sec (MA): Current Moving Average (MA) Value - Maximum Moving Average (MA) Value seen in Chart Hystory (%d).
-                - Length of the bar indicates the current Blocks/Sec (MA) relative to the maximum observed Blocks/Sec (MA) in Chart Hystory (%d).
+                - Blocks/Sec (MA): Current Moving Average (MA) value calculated over the last %d blocks.
+                - max: Maximum Moving Average (MA) value observed in the current chart history window (%d blocks).
+                - Bar length: Indicates the current Blocks/Sec (MA) relative to the maximum observed Blocks/Sec (MA) in the current chart history window (%d blocks).
                 """
-                .formatted(CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
+                .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
         blocksPerSecondLabel = createLabel("Blocks/Sec (MA)", Color.CYAN, tooltip);
         blocksPerSecondProgressBar = createProgressBar(0, 200, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, blocksPerSecondLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
@@ -692,10 +694,11 @@ public class MetricsPanel extends JPanel {
                 - Automated Transactions (ATs)
 
                 The progress bar displays:
-                - All Txs/Sec (MA): Current Moving Average (MA) Value - Maximum Moving Average (MA) Value seen in Chart Hystory (%d).
-                - Length of the bar indicates the current All Txs/Sec (MA) relative to the maximum observed All Txs/Sec (MA) in Chart Hystory (%d).
+                - All Txs/Sec (MA): Current Moving Average (MA) value calculated over the last %d blocks.
+                - max: Maximum Moving Average (MA) value observed in the current chart history window (%d blocks).
+                - Bar length: Indicates the current All Txs/Sec (MA) relative to the maximum observed All Txs/Sec (MA) in the current chart history window (%d blocks).
                 """
-                .formatted(CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
+                .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
         txPerSecondLabel = createLabel("All Txs/Sec (MA)", Color.GREEN, tooltip);
         allTransactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, txPerSecondLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
@@ -708,10 +711,11 @@ public class MetricsPanel extends JPanel {
                 The moving average of system-generated transactions processed per second. This includes payments from Automated Transactions (ATs), Escrow results, and Subscription payments.
 
                 The progress bar displays:
-                - System Txs/Sec (MA): Current Moving Average (MA) Value - Maximum Moving Average (MA) Value seen in Chart Hystory (%d).
-                - Length of the bar indicates the current System Txs/Sec (MA) relative to the maximum observed System Txs/Sec (MA) in Chart Hystory (%d).
+                - System Txs/Sec (MA): Current Moving Average (MA) value calculated over the last %d blocks.
+                - max: Maximum Moving Average (MA) value observed in the current chart history window (%d blocks).
+                - Bar length: Indicates the current System Txs/Sec (MA) relative to the maximum observed System Txs/Sec (MA) in the current chart history window (%d blocks).
                 """
-                .formatted(CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
+                .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
         systemTxPerSecondLabel = createLabel("System Txs/Sec (MA)", new Color(135, 206, 250), tooltip); // LightSkyBlue
         systemTransactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, systemTxPerSecondLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
@@ -735,10 +739,11 @@ public class MetricsPanel extends JPanel {
                 - Automated Transactions (ATs)
 
                 The progress bar displays:
-                - All Txs/Block (MA): Current Moving Average (MA) Value - Maximum Moving Average (MA) Value seen in Chart Hystory (%d).
-                - Length of the bar indicates the current All Txs/Block (MA) relative to the maximum observed All Txs/Block (MA) in Chart Hystory (%d).
+                - All Txs/Block (MA): Current Moving Average (MA) value calculated over the last %d blocks.
+                - max: Maximum Moving Average (MA) value observed in the current chart history window (%d blocks).
+                - Bar length: Indicates the current All Txs/Block (MA) relative to the maximum observed All Txs/Block (MA) in the current chart history window (%d blocks).
                 """
-                .formatted(CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
+                .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
         txPerBlockLabel = createLabel("All Txs/Block (MA)", allTxPerBlockColor, tooltip);
         allTransactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, txPerBlockLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
@@ -751,10 +756,11 @@ public class MetricsPanel extends JPanel {
                 The moving average of system-generated transactions included in each block. This includes payments from Automated Transactions (ATs), Escrow results, and Subscription payments.
 
                 The progress bar displays:
-                - System Txs/Block (MA): Current Moving Average (MA) Value - Maximum Moving Average (MA) Value seen in Chart Hystory (%d).
-                - Length of the bar indicates the current System Txs/Block (MA) relative to the maximum observed System Txs/Block (MA) in Chart Hystory (%d).
+                - System Txs/Block (MA): Current Moving Average (MA) value calculated over the last %d blocks.
+                - max: Maximum Moving Average (MA) value observed in the current chart history window (%d blocks).
+                - Bar length: Indicates the current System Txs/Block (MA) relative to the maximum observed System Txs/Block (MA) in the current chart history window (%d blocks).
                 """
-                .formatted(CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
+                .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
         systemTxPerBlockLabel = createLabel("System Txs/Block (MA)", systemTxperBlockColor, tooltip);
         systemTransactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, systemTxPerBlockLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
@@ -768,10 +774,11 @@ public class MetricsPanel extends JPanel {
                 The moving average of the number of Automated Transactions (ATs) executed per block. This metric shows the activity level of smart contracts on the network.
 
                 The progress bar displays:
-                - ATs/Block (MA): Current Moving Average (MA) Value - Maximum Moving Average (MA) Value seen in Chart Hystory (%d).
-                - Length of the bar indicates the current ATs/Block (MA) relative to the maximum observed ATs/Block (MA) in Chart Hystory (%d).
+                - ATs/Block (MA): Current Moving Average (MA) value calculated over the last %d blocks.
+                - max: Maximum Moving Average (MA) value observed in the current chart history window (%d blocks).
+                - Bar length: Indicates the current ATs/Block (MA) relative to the maximum observed ATs/Block (MA) in the current chart history window (%d blocks).
                 """
-                .formatted(CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
+                .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
         atCountLabel = createLabel("ATs/Block (MA)", new Color(153, 0, 76), tooltip); // Deep Pink
         atCountsPerBlockProgressBar = createProgressBar(0, 100, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, atCountLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
@@ -823,11 +830,11 @@ public class MetricsPanel extends JPanel {
                 - Misc. Time
 
                 The progress bar displays:
-                - Push Time (MA): Current Moving Average (MA) Value in [ms] - Maximum Moving Average (MA) Value in [ms] in current Chart Hystory (%d).
-
-                - Length of the bar indicates the current Push Time (MA) [ms] relative to the maximum observed Push Time (MA) [ms] in Chart Hystory (%d).
+                - Push Time (MA): Current Moving Average (MA) value in [ms] calculated over the last %d blocks.
+                - max: Maximum Moving Average (MA) value in [ms] observed in the current chart history window (%d blocks).
+                - Bar length: Indicates the current Push Time (MA) [ms] relative to the maximum observed Push Time (MA) in the current chart history window (%d blocks).
                 """
-                .formatted(CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
+                .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
         pushTimeLabel = createLabel("Push Time (MA)", Color.BLUE, tooltip);
         pushTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
 
@@ -850,11 +857,12 @@ public class MetricsPanel extends JPanel {
                 - Validating payload hash and total amounts/fees after transaction processing
 
                 The progress bar displays:
-                - Validation Time (MA): Current Moving Average (MA) Value in [ms] - Maximum Moving Average (MA) Value in [ms] in current Chart Hystory (%d).
+                - Validation Time (MA): Current Moving Average (MA) value in [ms] calculated over the last %d blocks.
+                - max: Maximum Moving Average (MA) value in [ms] observed in the current chart history window (%d blocks).
                 - Percentage [%%]: The component's contribution to the 'Push Time (MA)' in percentage.
-                - Length of the bar indicates the current Validation Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
+                - Bar length: Indicates the current Validation Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
                 """
-                .formatted(CHART_HISTORY_SIZE);
+                .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
         validationTimeLabel = createLabel("Validation Time (MA)", Color.YELLOW, tooltip);
         validationTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
         addComponent(timingInfoPanel, validationTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
@@ -875,11 +883,12 @@ public class MetricsPanel extends JPanel {
                 - Executing transaction-specific business logic
 
                 The progress bar displays:
-                - TX Loop Time (MA): Current Moving Average (MA) Value in [ms] - Maximum Moving Average (MA) Value in [ms] in current Chart Hystory (%d).
+                - TX Loop Time (MA): Current Moving Average (MA) value in [ms] calculated over the last %d blocks.
+                - max: Maximum Moving Average (MA) value in [ms] observed in the current chart history window (%d blocks).
                 - Percentage [%%]: The component's contribution to the 'Push Time (MA)' in percentage.
-                - Length of the bar indicates the current TX Loop Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
+                - Bar length: Indicates the current TX Loop Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
                 """
-                .formatted(CHART_HISTORY_SIZE);
+                .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
         txLoopTimeLabel = createLabel("TX Loop Time (MA)", new Color(128, 0, 128), tooltip);
         txLoopTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
         addComponent(timingInfoPanel, txLoopTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
@@ -898,11 +907,12 @@ public class MetricsPanel extends JPanel {
                 - Other miscellaneous maintenance tasks
 
                 The progress bar displays:
-                - Housekeeping Time (MA): Current Moving Average (MA) Value in [ms] - Maximum Moving Average (MA) Value in [ms] in current Chart Hystory (%d).
+                - Housekeeping Time (MA): Current Moving Average (MA) value in [ms] calculated over the last %d blocks.
+                - max: Maximum Moving Average (MA) value in [ms] observed in the current chart history window (%d blocks).
                 - Percentage [%%]: The component's contribution to the 'Push Time (MA)' in percentage.
-                - Length of the bar indicates the current Housekeeping Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
+                - Bar length: Indicates the current Housekeeping Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
                 """
-                .formatted(CHART_HISTORY_SIZE);
+                .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
         housekeepingTimeLabel = createLabel("Housekeeping Time (MA)", new Color(42, 223, 223), tooltip);
         housekeepingTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
         addComponent(timingInfoPanel, housekeepingTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
@@ -922,11 +932,12 @@ public class MetricsPanel extends JPanel {
                 - Processing other transaction-specific state changes
 
                 The progress bar displays:
-                - TX Apply Time (MA): Current Moving Average (MA) Value in [ms] - Maximum Moving Average (MA) Value in [ms] in current Chart Hystory (%d).
+                - TX Apply Time (MA): Current Moving Average (MA) value in [ms] calculated over the last %d blocks.
+                - max: Maximum Moving Average (MA) value in [ms] observed in the current chart history window (%d blocks).
                 - Percentage [%%]: The component's contribution to the 'Push Time (MA)' in percentage.
-                - Length of the bar indicates the current TX Apply Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
+                - Bar length: Indicates the current TX Apply Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
                 """
-                .formatted(CHART_HISTORY_SIZE);
+                .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
         txApplyTimeLabel = createLabel("TX Apply Time (MA)", new Color(255, 165, 0), tooltip);
         txApplyTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
         addComponent(timingInfoPanel, txApplyTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
@@ -945,11 +956,12 @@ public class MetricsPanel extends JPanel {
                 - Applying state changes resulting from AT execution
 
                 The progress bar displays:
-                - AT Time (MA): Current Moving Average (MA) Value in [ms] - Maximum Moving Average (MA) Value in [ms] in current Chart Hystory (%d).
+                - AT Time (MA): Current Moving Average (MA) value in [ms] calculated over the last %d blocks.
+                - max: Maximum Moving Average (MA) value in [ms] observed in the current chart history window (%d blocks).
                 - Percentage [%%]: The component's contribution to the 'Push Time (MA)' in percentage.
-                - Length of the bar indicates the current AT Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
+                - Bar length: Indicates the current AT Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
                 """
-                .formatted(CHART_HISTORY_SIZE);
+                .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
         atTimeLabel = createLabel("AT Time (MA)", new Color(153, 0, 76), tooltip);
         atTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
         addComponent(timingInfoPanel, atTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
@@ -968,11 +980,12 @@ public class MetricsPanel extends JPanel {
                 - Executing subscription payments
 
                 The progress bar displays:
-                - Subscription Time (MA): Current Moving Average (MA) Value in [ms] - Maximum Moving Average (MA) Value in [ms] in current Chart Hystory (%d).
+                - Subscription Time (MA): Current Moving Average (MA) value in [ms] calculated over the last %d blocks.
+                - max: Maximum Moving Average (MA) value in [ms] observed in the current chart history window (%d blocks).
                 - Percentage [%%]: The component's contribution to the 'Push Time (MA)' in percentage.
-                - Length of the bar indicates the current Subscription Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
+                - Bar length: Indicates the current Subscription Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
                 """
-                .formatted(CHART_HISTORY_SIZE);
+                .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
         subscriptionTimeLabel = createLabel("Subscription Time (MA)", new Color(255, 105, 100), tooltip); // Hot pink
         subscriptionTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
         addComponent(timingInfoPanel, subscriptionTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
@@ -991,11 +1004,12 @@ public class MetricsPanel extends JPanel {
                 - Notifying listeners about the applied block
 
                 The progress bar displays:
-                - Block Apply Time (MA): Current Moving Average (MA) Value in [ms] - Maximum Moving Average (MA) Value in [ms] in current Chart Hystory (%d).
+                - Block Apply Time (MA): Current Moving Average (MA) value in [ms] calculated over the last %d blocks.
+                - max: Maximum Moving Average (MA) value in [ms] observed in the current chart history window (%d blocks).
                 - Percentage [%%]: The component's contribution to the 'Push Time (MA)' in percentage.
-                - Length of the bar indicates the current Block Apply Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
+                - Bar length: Indicates the current Block Apply Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
                 """
-                .formatted(CHART_HISTORY_SIZE);
+                .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
         blockApplyTimeLabel = createLabel("Block Apply Time (MA)", new Color(0, 100, 100), tooltip); // Teal
         blockApplyTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
         addComponent(timingInfoPanel, blockApplyTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
@@ -1014,11 +1028,12 @@ public class MetricsPanel extends JPanel {
                 - Committing the database transaction
 
                 The progress bar displays:
-                - Commit Time (MA): Current Moving Average (MA) Value in [ms] - Maximum Moving Average (MA) Value in [ms] in current Chart Hystory (%d).
+                - Commit Time (MA): Current Moving Average (MA) value in [ms] calculated over the last %d blocks.
+                - max: Maximum Moving Average (MA) value in [ms] observed in the current chart history window (%d blocks).
                 - Percentage [%%]: The component's contribution to the 'Push Time (MA)' in percentage.
-                - Length of the bar indicates the current Commit Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
+                - Bar length: Indicates the current Commit Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
                 """
-                .formatted(CHART_HISTORY_SIZE);
+                .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
         commitTimeLabel = createLabel("Commit Time (MA)", new Color(150, 0, 200), tooltip);
         commitTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
         addComponent(timingInfoPanel, commitTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
@@ -1037,11 +1052,12 @@ public class MetricsPanel extends JPanel {
                 - Other background tasks not individually timed
 
                 The progress bar displays:
-                - Misc. Time (MA): Current Moving Average (MA) Value in [ms] - Maximum Moving Average (MA) Value in [ms] in current Chart Hystory (%d).
+                - Misc. Time (MA): Current Moving Average (MA) value in [ms] calculated over the last %d blocks.
+                - max: Maximum Moving Average (MA) value in [ms] observed in the current chart history window (%d blocks).
                 - Percentage [%%]: The component's contribution to the 'Push Time (MA)' in percentage.
-                - Length of the bar indicates the current Misc. Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
+                - Bar length: Indicates the current Misc. Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
                 """
-                .formatted(CHART_HISTORY_SIZE);
+                .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
         miscTimeLabel = createLabel("Misc. Time (MA)", Color.LIGHT_GRAY, tooltip);
         miscTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
         addComponent(timingInfoPanel, miscTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
@@ -1102,10 +1118,12 @@ public class MetricsPanel extends JPanel {
                 - Peer information
 
                 The progress bar displays:
-                - Upload Speed (MA): Current Moving Average (MA) Speed - Maximum Moving Average (MA) Speed seen in Chart Hystory (%d).
-                - Length of the bar indicates the current Upload Speed (MA) relative to the maximum observed Upload Speed (MA) in Chart Hystory (%d).
+                - Upload Speed (MA): Current Moving Average (MA) speed calculated over the last %d seconds.
+                - max: Maximum observed Upload Speed (MA) in the current chart history window (%d seconds).
+                - Bar length: Indicates the current Upload Speed (MA) relative to the maximum observed Upload Speed (MA) in the current chart history window (%d seconds).
                 """
-                .formatted(SPEED_HISTORY_SIZE, SPEED_HISTORY_SIZE);
+                .formatted(movingAverageWindow * netSpeedUpdateTime / 1000,
+                        SPEED_HISTORY_SIZE * netSpeedUpdateTime / 1000, SPEED_HISTORY_SIZE * netSpeedUpdateTime / 1000);
         uploadSpeedLabel = createLabel("▲ Speed (MA)", new Color(128, 0, 0), tooltip);
         uploadSpeedProgressBar = createProgressBar(0, MAX_SPEED_BPS, null, "0.00 B/s", progressBarSize2);
         uploadSpeedPanel.add(uploadSpeedLabel);
@@ -1125,10 +1143,12 @@ public class MetricsPanel extends JPanel {
                 - Peer information
 
                 The progress bar displays:
-                - Download Speed (MA): Current Moving Average (MA) Speed - Maximum Moving Average (MA) Speed seen in Chart Hystory (%d).
-                - Length of the bar indicates the current Download Speed (MA) relative to the maximum observed Download Speed (MA) in Chart Hystory (%d).
+                - Download Speed (MA): Current Moving Average (MA) speed calculated over the last %d seconds.
+                - max: Maximum observed Download Speed (MA) in the current chart history window (%d seconds).
+                - Bar length: Indicates the current Download Speed (MA) relative to the maximum observed Download Speed (MA) in the current chart history window (%d seconds).
                 """
-                .formatted(SPEED_HISTORY_SIZE, SPEED_HISTORY_SIZE);
+                .formatted(movingAverageWindow * netSpeedUpdateTime / 1000,
+                        SPEED_HISTORY_SIZE * netSpeedUpdateTime / 1000, SPEED_HISTORY_SIZE * netSpeedUpdateTime / 1000);
         downloadSpeedLabel = createLabel("▼ Speed (MA)", new Color(0, 100, 0), tooltip);
         downloadSpeedProgressBar = createProgressBar(0, MAX_SPEED_BPS, null, "0.00 B/s", progressBarSize2);
         downloadSpeePanel.add(downloadSpeedLabel);
@@ -1254,7 +1274,7 @@ public class MetricsPanel extends JPanel {
 
         // Timer to periodically update the network speed chart so it flows even with no
         // traffic
-        netSpeedChartUpdater = new Timer(100, e -> {
+        netSpeedChartUpdater = new Timer(netSpeedUpdateTime, e -> {
             updateNetVolumeAndSpeedChart(uploadedVolume, downloadedVolume);
         });
         netSpeedChartUpdater.start();
