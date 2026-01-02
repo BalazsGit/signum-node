@@ -630,7 +630,7 @@ public class MetricsPanel extends JPanel {
                 - Bar length: Indicates the current unverified block count relative to 'GPU.UnverifiedQueue' threshold if GPU acceleration is disabled. If GPU acceleration is enabled, the length indicates the count relative to double the 'GPU.UnverifiedQueue' threshold.
                 """;
         JLabel unVerifLabel = createLabel("Unverified Blocks", null, tooltip);
-        syncProgressBarUnverifiedBlocks = createProgressBar(0, 1000, Color.GREEN, "0 - CPU", progressBarSize1);
+        syncProgressBarUnverifiedBlocks = createProgressBar(0, 1000, Color.GREEN, "0", progressBarSize1);
         addComponent(SyncPanel, unVerifLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
                 labelInsets);
         addComponent(SyncPanel, syncProgressBarUnverifiedBlocks, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
