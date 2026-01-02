@@ -430,9 +430,8 @@ public class Block {
     public String getStringId() {
         if (stringId == null) {
             getId();
-            // If the block was initialized with an ID (e.g. from DB), getId() returns
-            // immediately
-            // without setting stringId. We must ensure stringId is set here.
+            // If the block is initialized with a pre-existing id (e.g. loaded from DB),
+            // getId() may return without initializing stringId. Ensure it is set here.
             if (stringId == null) {
                 stringId = Convert.toUnsignedLong(id);
             }
