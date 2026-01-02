@@ -58,10 +58,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.HashSet;
-import java.util.Set;
 import java.util.Collections;
 import java.util.Arrays;
 import java.util.Collection;
@@ -212,7 +208,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private AtomicInteger manualLastPopOffHeight = new AtomicInteger(-1);
     private AtomicInteger autoLastPopOffHeight = new AtomicInteger(-1);
     private AtomicInteger beforeRollbackHeight = new AtomicInteger(0);
-    private final ExecutorService downloadExecutor;
 
     @Override
     public void shutdown() {
@@ -266,10 +261,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         measurementLogExecutor.shutdownNow();
                         Thread.currentThread().interrupt();
                     }
-                }
-
-                if (downloadExecutor != null) {
-                    downloadExecutor.shutdownNow();
                 }
 
                 blockListeners.clear();
@@ -402,7 +393,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         this.accountService = accountService;
         this.indirectIncomingService = indirectIncomingService;
         this.propertyService = propertyService;
-        this.downloadExecutor = Executors.newCachedThreadPool();
         this.measurementActive = propertyService.getBoolean(Props.MEASUREMENT_ACTIVE);
         this.logSyncProgressToCsv = propertyService.getBoolean(Props.EXPERIMENTAL);
 
@@ -927,52 +917,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
             private JsonArray getNextBlocks(Peer peer, long curBlockId) {
 
-                // int maxSimultaneousDownloads =
-                // propertyService.getInt("P2P.maxSimultaneousDownloads");
-                int maxSimultaneousDownloads = 2;
-                if (maxSimultaneousDownloads < 1) {
-                    maxSimultaneousDownloads = 4;
-                }
-
-                List<Callable<JsonArray>> tasks = new ArrayList<>();
-                tasks.add(() -> fetchBlocks(peer, curBlockId));
-
-                if (maxSimultaneousDownloads > 1) {
-                    Set<String> addedPeers = new HashSet<>();
-                    addedPeers.add(peer.getPeerAddress());
-                    Peers.getActivePeers().stream()
-                            .filter(p -> !addedPeers.contains(p.getPeerAddress()))
-                            .filter(p -> p.isHigherOrEqualVersionThan(
-                                    Signum.getFluxCapacitor().getValue(FluxValues.MIN_PEER_VERSION)))
-                            .filter(p -> p.getNetworkName() != null
-                                    && p.getNetworkName().equals(propertyService.getString(Props.NETWORK_NAME)))
-                            .limit(maxSimultaneousDownloads - 1)
-                            .forEach(p -> {
-                                tasks.add(() -> fetchBlocks(p, curBlockId));
-                                addedPeers.add(p.getPeerAddress());
-                            });
-                }
-
-                if (tasks.size() == 1) {
-                    try {
-                        return tasks.get(0).call();
-                    } catch (Exception e) {
-                        return null;
-                    }
-                }
-
-                try {
-                    return downloadExecutor.invokeAny(tasks);
-                } catch (InterruptedException | ExecutionException e) {
-                    return null;
-                }
-            }
-
-            private JsonArray fetchBlocks(Peer peer, long curBlockId) throws Exception {
-                if (Thread.currentThread().isInterrupted()) {
-                    throw new InterruptedException();
-                }
-
                 JsonObject request = new JsonObject();
                 request.addProperty("requestType", "getNextBlocks");
                 request.addProperty("blockId", Convert.toUnsignedLong(curBlockId));
@@ -982,33 +926,21 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 }
                 JsonObject response = peer.send(JSON.prepareRequest(request));
                 if (response == null) {
-                    throw new Exception("No response from peer");
-                }
-
-                if (Thread.currentThread().isInterrupted()) {
-                    throw new InterruptedException();
+                    return null;
                 }
 
                 JsonArray nextBlocks = JSON.getAsJsonArray(response.get("nextBlocks"));
-                if (nextBlocks == null || nextBlocks.isEmpty()) {
-                    throw new Exception("No blocks returned");
+                if (nextBlocks == null) {
+                    return null;
                 }
                 // prevent overloading with blocks
                 if (nextBlocks.size() > 1440) {
                     peer.blacklist("obsolete or rogue peer sends too many nextBlocks");
-                    throw new Exception("Too many blocks");
+                    return null;
                 }
-
-                // Chain continuity check
-                JsonObject firstBlock = JSON.getAsJsonObject(nextBlocks.get(0));
-                long prevId = Convert.parseUnsignedLong(JSON.getAsString(firstBlock.get("previousBlock")));
-
-                if (prevId != curBlockId) {
-                    throw new Exception("Fork mismatch: peer=" + peer.getPeerAddress());
-                }
-
                 logger.debug("Got {} blocks after {} from {}", nextBlocks.size(), curBlockId, peer.getPeerAddress());
                 return nextBlocks;
+
             }
 
             private void processFork(Peer peer, final List<Block> forkBlocks, long forkBlockId) {
