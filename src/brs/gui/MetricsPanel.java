@@ -234,7 +234,9 @@ public class MetricsPanel extends JPanel {
         XYSeriesCollection barDataset = new XYSeriesCollection();
         barDataset.addSeries(systemTransactionsPerBlockSeries);
         barDataset.addSeries(allTransactionsPerBlockSeries);
-        barDataset.setIntervalWidth(1.0);
+        // Adjacent bars are overlapped as a visual compromise to avoid
+        // background gaps or flickering between columns.
+        barDataset.setIntervalWidth(3.0);
         plot.setRangeAxis(1, transactionAxis);
         plot.setDataset(1, barDataset);
         plot.mapDatasetToRangeAxis(1, 1);
@@ -342,7 +344,9 @@ public class MetricsPanel extends JPanel {
         XYSeriesCollection barDataset = new XYSeriesCollection();
         barDataset.addSeries(systemTransactionsPerBlockSeries);
         barDataset.addSeries(allTransactionsPerBlockSeries);
-        barDataset.setIntervalWidth(1.0);
+        // Adjacent bars are overlapped as a visual compromise to avoid
+        // background gaps or flickering between columns.
+        barDataset.setIntervalWidth(3.0);
         plot.setRangeAxis(1, transactionAxis);
         plot.setDataset(1, barDataset);
         plot.mapDatasetToRangeAxis(1, 1);
