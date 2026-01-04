@@ -5,6 +5,8 @@ import org.jfree.chart.ChartPanel;
 import org.jfree.chart.JFreeChart;
 import org.jfree.chart.axis.NumberAxis;
 import org.jfree.chart.plot.XYPlot;
+import org.jfree.chart.renderer.xy.StandardXYBarPainter;
+import org.jfree.chart.renderer.xy.XYBarRenderer;
 import org.jfree.chart.renderer.xy.XYStepAreaRenderer;
 import org.jfree.chart.ui.RectangleInsets;
 import org.jfree.data.xy.XYSeries;
@@ -232,13 +234,19 @@ public class MetricsPanel extends JPanel {
         XYSeriesCollection barDataset = new XYSeriesCollection();
         barDataset.addSeries(systemTransactionsPerBlockSeries);
         barDataset.addSeries(allTransactionsPerBlockSeries);
+        barDataset.setIntervalWidth(1.0);
         plot.setRangeAxis(1, transactionAxis);
         plot.setDataset(1, barDataset);
         plot.mapDatasetToRangeAxis(1, 1);
 
         // Renderer for transaction bars
-        XYStepAreaRenderer transactionRenderer = new XYStepAreaRenderer();
-        transactionRenderer.setShapesVisible(false);
+        // XYStepAreaRenderer transactionRenderer = new XYStepAreaRenderer();
+        // transactionRenderer.setShapesVisible(false);
+
+        XYBarRenderer transactionRenderer = new XYBarRenderer();
+        transactionRenderer.setBarPainter(new StandardXYBarPainter());
+        transactionRenderer.setShadowVisible(false);
+        transactionRenderer.setMargin(0.0);
         transactionRenderer.setSeriesPaint(0, systemTxperBlockColor); // Blue for System Txs/Block
         transactionRenderer.setSeriesPaint(1, allTxPerBlockColor); // Orange for All Txs/Block
         plot.setRenderer(1, transactionRenderer);
@@ -329,18 +337,24 @@ public class MetricsPanel extends JPanel {
         plot.getRangeAxis().setTickLabelsVisible(false);
 
         // Second Y-axis for transaction count
-        NumberAxis transactionAxis = new NumberAxis(null); // No label for the second axis
+        NumberAxis transactionAxis = new NumberAxis(null);
         transactionAxis.setTickLabelsVisible(false);
-        XYSeriesCollection barDataset = new XYSeriesCollection(); // All Txs
+        XYSeriesCollection barDataset = new XYSeriesCollection();
         barDataset.addSeries(systemTransactionsPerBlockSeries);
         barDataset.addSeries(allTransactionsPerBlockSeries);
+        barDataset.setIntervalWidth(1.0);
         plot.setRangeAxis(1, transactionAxis);
         plot.setDataset(1, barDataset);
         plot.mapDatasetToRangeAxis(1, 1);
 
         // Renderer for transaction bars
-        XYStepAreaRenderer transactionRenderer = new XYStepAreaRenderer();
-        transactionRenderer.setShapesVisible(false);
+        // XYStepAreaRenderer transactionRenderer = new XYStepAreaRenderer();
+        // transactionRenderer.setShapesVisible(false);
+
+        XYBarRenderer transactionRenderer = new XYBarRenderer();
+        transactionRenderer.setBarPainter(new StandardXYBarPainter());
+        transactionRenderer.setShadowVisible(false);
+        transactionRenderer.setMargin(0.0);
         transactionRenderer.setSeriesPaint(0, systemTxperBlockColor); // Blue for System Txs/Block
         transactionRenderer.setSeriesPaint(1, allTxPerBlockColor); // Orange for All Txs/Block
         plot.setRenderer(1, transactionRenderer);
