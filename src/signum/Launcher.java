@@ -47,7 +47,8 @@ public class Launcher {
             } catch (ClassNotFoundException | NoSuchMethodException | IllegalAccessException
                     | InvocationTargetException e) {
                 logger.warn(
-                        "Your build does not seem to include the SignumGUI extension or it cannot be run. Running as headless...");
+                        "Your build does not seem to include the SignumGUI extension or it cannot be run. Running as headless...",
+                        e);
                 Signum.main(args);
             }
         } else {
