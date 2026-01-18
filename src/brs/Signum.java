@@ -113,6 +113,7 @@ public final class Signum {
     private static TransactionService transactionService;
     private static SubscriptionService subscriptionService;
     private static AssetExchange assetExchange;
+    private static Generator generator;
 
     private static PropertyService propertyService;
     private static FluxCapacitor fluxCapacitor;
@@ -161,6 +162,10 @@ public final class Signum {
 
     public static BlockchainProcessor getBlockchainProcessor() {
         return blockchainProcessor;
+    }
+
+    public static Generator getGenerator() {
+        return generator;
     }
 
     public static TransactionProcessorImpl getTransactionProcessor() {
@@ -302,7 +307,7 @@ public final class Signum {
                     fluxCapacitor,
                     blockchain);
 
-            final Generator generator = propertyService.getBoolean(Props.DEV_MOCK_MINING)
+            generator = propertyService.getBoolean(Props.DEV_MOCK_MINING)
                     ? new GeneratorImpl.MockGenerator(
                             propertyService,
                             blockchain,
