@@ -7,7 +7,7 @@ import static brs.web.api.http.common.Parameters.RECIPIENT_PARAMETER;
 
 import java.util.ArrayList;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import brs.web.api.http.common.APITransactionManager;
 import brs.web.api.http.common.JSONResponses;

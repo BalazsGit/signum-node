@@ -13,7 +13,7 @@ import com.google.gson.JsonObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import static brs.web.api.http.common.Parameters.TRANSACTION_BYTES_PARAMETER;
 import static brs.web.api.http.common.Parameters.TRANSACTION_JSON_PARAMETER;

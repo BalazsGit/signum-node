@@ -7,7 +7,7 @@ import static brs.web.api.http.common.ResultFields.ERROR_RESPONSE;
 
 import java.util.List;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import brs.web.api.http.ApiServlet;
 import brs.web.api.http.common.LegacyDocTag;

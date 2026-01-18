@@ -13,7 +13,7 @@ import com.google.gson.JsonObject;
 import org.junit.Before;
 import org.junit.Test;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Collection;
 
 import static brs.web.api.http.common.Parameters.ACCOUNTS_RESPONSE;

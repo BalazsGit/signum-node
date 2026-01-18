@@ -7,7 +7,7 @@ import com.google.gson.JsonObject;
 
 import java.util.UUID;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 public final class GetMyInfo extends ApiServlet.JsonRequestHandler {
 

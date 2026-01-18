@@ -18,7 +18,11 @@ public class DerivedTableManager {
   }
 
   public void registerDerivedTable(DerivedTable table) {
-    logger.info("Registering derived table " + table.getClass());
+    if (derivedTables.contains(table)) {
+      logger.debug("Derived table {} already registered", table.getTable());
+      return;
+    }
+    logger.info("Registering derived table {}", table.getTable());
     derivedTables.add(table);
   }
 

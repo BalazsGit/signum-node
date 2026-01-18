@@ -13,7 +13,7 @@ import brs.web.api.http.ApiServlet;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 public final class GetMiningInfo extends ApiServlet.JsonRequestHandler {
 

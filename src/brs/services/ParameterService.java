@@ -5,7 +5,7 @@ import brs.at.AT;
 import brs.crypto.EncryptedData;
 import brs.web.api.http.common.ParameterException;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 
 public interface ParameterService {

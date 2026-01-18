@@ -1,9 +1,9 @@
 package brs.web.api.ws;
 
 import brs.web.server.WebServerContext;
-import org.eclipse.jetty.websocket.server.JettyServerUpgradeRequest;
-import org.eclipse.jetty.websocket.server.JettyServerUpgradeResponse;
-import org.eclipse.jetty.websocket.server.JettyWebSocketCreator;
+import org.eclipse.jetty.ee10.websocket.server.JettyServerUpgradeRequest;
+import org.eclipse.jetty.ee10.websocket.server.JettyServerUpgradeResponse;
+import org.eclipse.jetty.ee10.websocket.server.JettyWebSocketCreator;
 
 public class WebSocketConnectionCreator implements JettyWebSocketCreator {
 
@@ -13,7 +13,7 @@ public class WebSocketConnectionCreator implements JettyWebSocketCreator {
     this.context = context;
   }
 
-    @Override
+  @Override
   public Object createWebSocket(JettyServerUpgradeRequest jettyServerUpgradeRequest, JettyServerUpgradeResponse jettyServerUpgradeResponse) {
     return new WebSocketConnectionAdapter(this.context);
   }
