@@ -121,7 +121,8 @@ public final class Signum {
 
     private static WebServer webServer;
 
-    private static AtomicBoolean shuttingdown = new AtomicBoolean(false);
+    private static AtomicBoolean isShutdown = new AtomicBoolean(false);
+    private static AtomicBoolean nodeStopped = new AtomicBoolean(false);
 
     private static PropertyService loadProperties(String confFolder) {
         logger.info("Initializing Signum Node version {}", VERSION);
@@ -214,6 +215,12 @@ public final class Signum {
             return false;
         }
         return true;
+    }
+
+    // Init shutdown flags in case of restart node
+    public static void initShutdown() {
+        isShutdown.set(false);
+        nodeStopped.set(false);
     }
 
     public static void init(CaselessProperties customProperties) {
@@ -390,6 +397,8 @@ public final class Signum {
                     indirectIncomingService,
                     aliasService);
 
+            downloadCache.setBlockchainProcessor(blockchainProcessor);
+
             generator.generateForBlockchainProcessor(threadPool, blockchainProcessor);
 
             final DeeplinkQRCodeGenerator deepLinkQrCodeGenerator = new DeeplinkQRCodeGenerator();
@@ -553,31 +562,46 @@ public final class Signum {
      * @param ignoreDbShutdown if true, shuts down everything but the database.
      */
     public static void shutdown(boolean ignoreDbShutdown) {
-        if (!shuttingdown.get()) {
+
+        if (isShutdown.get() && !nodeStopped.get()) {
+            logger.info("Already shutting down...");
+        }
+
+        synchronized (isShutdown) {
+
+            if (isShutdown.getAndSet(true)) {
+                return;
+            }
+
             logger.info("Shutting down...");
             logger.info("Do not force exit or kill the node process.");
-        }
 
-        if (webServer != null) {
-            webServer.shutdown();
-        }
-        if (threadPool != null) {
-            Peers.shutdown(threadPool);
-            threadPool.shutdown();
-        }
-        if (blockchainProcessor != null) {
-            blockchainProcessor.shutdown();
-        }
-        if (!ignoreDbShutdown && !shuttingdown.get()) {
-            shuttingdown.set(true);
-            Db.shutdown();
-        }
+            if (webServer != null) {
+                webServer.shutdown();
+            }
 
-        if (dbCacheManager != null) {
-            dbCacheManager.close();
+            if (blockchainProcessor != null) {
+                blockchainProcessor.shutdown();
+            }
+
+            if (threadPool != null) {
+                Peers.shutdown(threadPool);
+                threadPool.shutdown();
+            }
+
+            if (!ignoreDbShutdown) {
+                Db.shutdown();
+            }
+
+            if (dbCacheManager != null) {
+                dbCacheManager.close();
+            }
+
+            logger.info("BRS {} stopped.", VERSION);
+            LoggerConfigurator.shutdown();
+            nodeStopped.set(true);
+
         }
-        logger.info("BRS {} stopped.", VERSION);
-        LoggerConfigurator.shutdown();
     }
 
     public static PropertyService getPropertyService() {

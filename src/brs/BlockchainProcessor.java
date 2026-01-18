@@ -1,12 +1,13 @@
 package brs;
 
-import brs.BlockchainProcessor.PerformanceStats;
-import brs.BlockchainProcessor.QueueStatus;
 import brs.peer.Peer;
 import brs.util.JSON;
 import brs.util.Observable;
 import com.google.gson.JsonObject;
+
+import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public interface BlockchainProcessor extends Observable<Block, BlockchainProcessor.Event> {
 
@@ -25,11 +26,14 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
         public final int unverifiedSize;
         public final int verifiedSize;
         public final int totalSize;
+        public final int cacheFullness;
 
-        public QueueStatus(int unverifiedSize, int verifiedSize, int totalSize) {
+        public QueueStatus(int unverifiedSize, int verifiedSize, int totalSize, int cacheFullness) {
             this.unverifiedSize = unverifiedSize;
             this.verifiedSize = verifiedSize;
             this.totalSize = totalSize;
+            this.cacheFullness = cacheFullness;
+
         }
     }
 
@@ -55,12 +59,19 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
         public final long blockApplyTimeMs;
         public final long commitTimeMs;
         public final long miscTimeMs;
-        public final Block block;
+        public final int height;
+        public final int allTransactionCount;
+        public final int systemTransactionCount;
+        public final int atCount;
+        public final int payloadSize;
+        public final int maxPayloadSize;
 
         public PerformanceStats(long totalTimeMs, long validationTimeMs, long txLoopTimeMs,
                 long housekeepingTimeMs, long txApplyTimeMs, long atTimeMs,
                 long subscriptionTimeMs, long blockApplyTimeMs, long commitTimeMs,
-                long miscTimeMs, Block block) {
+                long miscTimeMs, int height,
+                int allTransactionCount, int systemTransactionCount, int atCount,
+                int payloadSize, int maxPayloadSize) {
             this.totalTimeMs = totalTimeMs;
             this.validationTimeMs = validationTimeMs;
             this.txLoopTimeMs = txLoopTimeMs;
@@ -71,32 +82,60 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
             this.blockApplyTimeMs = blockApplyTimeMs;
             this.commitTimeMs = commitTimeMs;
             this.miscTimeMs = miscTimeMs;
-            this.block = block;
+            this.height = height;
+            this.allTransactionCount = allTransactionCount;
+            this.systemTransactionCount = systemTransactionCount;
+            this.atCount = atCount;
+            this.payloadSize = payloadSize;
+            this.maxPayloadSize = maxPayloadSize;
         }
 
     }
 
     enum Event {
-        BLOCK_PUSHED, BLOCK_POPPED, BLOCK_GENERATED, BLOCK_SCANNED,
+        BLOCK_PUSHED, BLOCK_AUTO_POPPED, BLOCK_MANUAL_POPPED, BLOCK_GENERATED, BLOCK_SCANNED,
         RESCAN_BEGIN, RESCAN_END,
         BEFORE_BLOCK_ACCEPT,
-        BEFORE_BLOCK_APPLY, AFTER_BLOCK_APPLY,
-        PEER_COUNT_CHANGED, NET_VOLUME_CHANGED, QUEUE_STATUS_CHANGED, PERFORMANCE_STATS_UPDATED
+        BEFORE_BLOCK_APPLY, AFTER_BLOCK_APPLY, DATABASE_CONSISTENCY_UPDATE,
+        PEERS_UPDATED, NET_VOLUME_CHANGED, QUEUE_STATUS_CHANGED, FORK_CACHE_CHANGED, PERFORMANCE_STATS_UPDATED,
+        TRIM_START, TRIM_END
+    }
+
+    enum ConsistencyState {
+        UNDEFINED,
+        CONSISTENT,
+        INCONSISTENT
     }
 
     Peer getLastBlockchainFeeder();
 
     int getLastBlockchainFeederHeight();
 
-    boolean isScanning();
+    int getForkCacheSize();
+
+    int getManualPopOffBlocksCount();
+
+    int getManualLastPopOffHeight();
+
+    int getAutoPopOffBlocksCount();
+
+    int getAutoLastPopOffHeight();
+
+    int getBeforeRollbackHeight();
 
     int getMinRollbackHeight();
 
-    int getLastKnownPeerCount();
+    boolean isScanning();
 
-    int getLastKnownConnectedPeerCount();
+    AtomicInteger getCurrentTrimHeight();
+
+    AtomicInteger getLastTrimHeight();
+
+    String getCurrentlyTrimmingTable();
 
     QueueStatus getQueueStatus();
+
+    Collection<Peer> getAllPeers();
 
     PerformanceStats getPerformanceStats();
 
@@ -108,9 +147,27 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     long getDownloadedVolume();
 
+    int checkDatabaseStateRequest();
+
+    long getTotalMined();
+
+    long getTotalEffectiveBalance();
+
+    long getLastCheckTotalMined();
+
+    long getLastCheckTotalEffectiveBalance();
+
+    int getLastCheckHeight();
+
+    ConsistencyState getConsistencyState();
+
     void processPeerBlock(JsonObject request, Peer peer) throws SignumException;
 
     void fullReset();
+
+    void setGetMoreBlocksPause(boolean getMoreBlocksPause);
+
+    void setBlockImporterPause(boolean blockImporterPause);
 
     void generateBlock(String secretPhrase, byte[] publicKey, Long nonce)
             throws BlockNotAcceptedException;
@@ -118,6 +175,12 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
     void shutdown();
 
     List<Block> popOffTo(int height);
+
+    void popOff(int count);
+
+    void onQueueStatusUpdated(QueueStatus newStatus);
+
+    void scheduleTrim(Block block);
 
     class BlockNotAcceptedException extends SignumException {
 

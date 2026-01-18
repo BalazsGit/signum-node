@@ -17,17 +17,69 @@ import java.util.Collections;
 import java.util.List;
 import java.util.SortedMap;
 import java.util.TreeMap;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-//TODO: Create JavaDocs and remove this
-@SuppressWarnings({ "checkstyle:MissingJavadocTypeCheck", "checkstyle:MissingJavadocMethodCheck" })
+/**
+ * Represents a fundamental building block of the Signum blockchain.
+ *
+ * <p>
+ * A {@code Block} groups a set of transactions and links to the previous block,
+ * forming the immutable blockchain ledger. In addition to transactions, it
+ * contains consensus-critical metadata such as the generation signature
+ * (Proof of Capacity), timestamp, base target, and cumulative difficulty.
+ *
+ * <h3>Concurrency and Thread Safety</h3>
+ * <p>
+ * This class follows a lightweight concurrency model optimized for performance
+ * and memory efficiency:
+ * </p>
+ * <ul>
+ * <li>
+ * <b>Volatile fields:</b> Lazily initialized and cached values
+ * (e.g. {@code id}, {@code stringId}, serialized bytes, JSON representation)
+ * are declared {@code volatile} to guarantee visibility across threads.
+ * </li>
+ * <li>
+ * <b>Double-checked locking (DCL):</b> Expensive computations such as ID
+ * calculation and byte serialization are performed at most once using
+ * synchronized blocks with double-checked locking.
+ * </li>
+ * <li>
+ * <b>Effective immutability:</b> After signing, the block’s core state does
+ * not change. Transaction collections are exposed as unmodifiable lists.
+ * </li>
+ * </ul>
+ *
+ * <p>
+ * After signing, the class is safe for concurrent read access.
+ * </p>
+ *
+ * <h3>Lifecycle</h3>
+ * <ol>
+ * <li>
+ * <b>Construction (unsigned):</b> The block is created with transactions and
+ * metadata but without a signature or ID.
+ * </li>
+ * <li>
+ * <b>Signing:</b> Calling {@link #sign(String)} generates the block signature.
+ * </li>
+ * <li>
+ * <b>Finalization (cached):</b> Accessing the ID or serialized bytes triggers
+ * their computation and caching. The block is now ready to be linked into
+ * the blockchain.
+ * </li>
+ * </ol>
+ *
+ * <p>
+ * <b>Note:</b> Equality and {@code hashCode} are only well-defined after the
+ * block has been signed.
+ * </p>
+ */
 
 public class Block {
-
     private static final Logger logger = LoggerFactory.getLogger(Block.class);
+
     private final int version;
     private final int timestamp;
     private final long previousBlockId;
@@ -40,27 +92,33 @@ public class Block {
     private final int payloadLength;
     private final byte[] generationSignature;
     private final byte[] payloadHash;
-    private final AtomicReference<List<Transaction>> blockTransactions = new AtomicReference<>();
 
-    private byte[] blockSignature;
+    private volatile List<Transaction> blockTransactions;
+    private volatile List<Transaction> allBlockTransactions;
 
+    private volatile byte[] cachedBytes;
+    private volatile JsonObject cachedJsonObject;
+
+    private volatile List<Transaction> atTransactions = Collections.emptyList();
+    private volatile List<Transaction> subscriptionTransactions = Collections.emptyList();
+    private volatile List<Transaction> escrowTransactions = Collections.emptyList();
+
+    private volatile byte[] blockSignature;
     private BigInteger cumulativeDifficulty = BigInteger.ZERO;
-
     private long baseTarget = Constants.INITIAL_BASE_TARGET;
-    private final AtomicLong nextBlockId = new AtomicLong();
+    private volatile long nextBlockId;
     private int height = -1;
-    private final AtomicLong id = new AtomicLong();
-    private final AtomicReference<String> stringId = new AtomicReference<>();
-    private final AtomicLong generatorId = new AtomicLong();
-    private long nonce;
 
+    private volatile long id;
+    private volatile String stringId;
+    private volatile long generatorId;
+
+    private long nonce;
     private BigInteger pocTime = null;
     private long commitment = 0L;
-
     private final byte[] blockAts;
-
-    private Peer downloadedFrom = null;
-    private int byteLength = 0;
+    private volatile Peer downloadedFrom = null;
+    private volatile int byteLength = 0;
 
     Block(
             int version,
@@ -82,7 +140,6 @@ public class Block {
             int height,
             long baseTarget)
             throws SignumException.ValidationException {
-
         if (payloadLength > Signum.getFluxCapacitor().getValue(
                 FluxValues.MAX_PAYLOAD_LENGTH, height)
                 || payloadLength < 0) {
@@ -91,7 +148,6 @@ public class Block {
                             + payloadLength + " height " + height + "previd "
                             + previousBlockId);
         }
-
         this.version = version;
         this.timestamp = timestamp;
         this.previousBlockId = previousBlockId;
@@ -104,19 +160,17 @@ public class Block {
         this.generatorPublicKey = generatorPublicKey;
         this.generationSignature = generationSignature;
         this.blockSignature = blockSignature;
-
         this.previousBlockHash = previousBlockHash;
         if (transactions != null) {
-            this.blockTransactions.set(Collections.unmodifiableList(transactions));
-            if (blockTransactions.get()
-                    .size() > (Signum.getFluxCapacitor().getValue(
-                            FluxValues.MAX_NUMBER_TRANSACTIONS, height))) {
+            this.blockTransactions = Collections.unmodifiableList(transactions);
+            if (blockTransactions.size() > (Signum.getFluxCapacitor().getValue(
+                    FluxValues.MAX_NUMBER_TRANSACTIONS, height))) {
                 throw new SignumException.NotValidException(
                         "attempted to create a block with "
-                                + blockTransactions.get().size() + " transactions");
+                                + blockTransactions.size() + " transactions");
             }
             long previousId = 0;
-            for (Transaction transaction : this.blockTransactions.get()) {
+            for (Transaction transaction : this.blockTransactions) {
                 if (transaction.getId() <= previousId && previousId != 0) {
                     throw new SignumException.NotValidException(
                             "Block transactions are not sorted!");
@@ -151,7 +205,6 @@ public class Block {
             long nonce,
             byte[] blockAts)
             throws SignumException.ValidationException {
-
         this(
                 version,
                 timestamp,
@@ -171,13 +224,12 @@ public class Block {
                 blockAts,
                 height,
                 baseTarget);
-
         this.cumulativeDifficulty = cumulativeDifficulty == null
                 ? BigInteger.ZERO
                 : cumulativeDifficulty;
-        this.nextBlockId.set(nextBlockId);
+        this.nextBlockId = nextBlockId;
         this.height = height;
-        this.id.set(id);
+        this.id = id;
     }
 
     private TransactionDb transactionDb() {
@@ -261,17 +313,53 @@ public class Block {
     }
 
     public List<Transaction> getTransactions() {
-        if (blockTransactions.get() == null) {
-            this.blockTransactions
-                    .set(Collections.unmodifiableList(
-                            transactionDb().findBlockTransactions(getId(), true)));
-            this.blockTransactions.get().forEach(transaction -> transaction.setBlock(this));
+        if (blockTransactions == null) {
+            synchronized (this) {
+                if (blockTransactions == null) {
+                    List<Transaction> newTransactions = transactionDb().findBlockTransactions(getId(), true);
+                    newTransactions.forEach(transaction -> transaction.setBlock(this));
+                    blockTransactions = Collections.unmodifiableList(newTransactions);
+                }
+            }
         }
-        return blockTransactions.get();
+        return blockTransactions;
     }
 
     public List<Transaction> getAllTransactions() {
-        return Collections.unmodifiableList(transactionDb().findBlockTransactions(getId(), false));
+        if (allBlockTransactions == null) {
+            synchronized (this) {
+                if (allBlockTransactions == null) {
+                    List<Transaction> newTransactions = transactionDb().findBlockTransactions(getId(), false);
+                    newTransactions.forEach(transaction -> transaction.setBlock(this));
+                    allBlockTransactions = Collections.unmodifiableList(newTransactions);
+                }
+            }
+        }
+        return allBlockTransactions;
+    }
+
+    public void setAtTransactions(List<Transaction> transactions) {
+        this.atTransactions = transactions;
+    }
+
+    public List<Transaction> getAtTransactions() {
+        return Collections.unmodifiableList(this.atTransactions);
+    }
+
+    public void setSubscriptionTransactions(List<Transaction> transactions) {
+        this.subscriptionTransactions = transactions;
+    }
+
+    public List<Transaction> getSubscriptionTransactions() {
+        return Collections.unmodifiableList(this.subscriptionTransactions);
+    }
+
+    public void setEscrowTransactions(List<Transaction> transactions) {
+        this.escrowTransactions = transactions;
+    }
+
+    public List<Transaction> getEscrowTransactions() {
+        return Collections.unmodifiableList(this.escrowTransactions);
     }
 
     public long getBaseTarget() {
@@ -313,7 +401,7 @@ public class Block {
     }
 
     public long getNextBlockId() {
-        return nextBlockId.get();
+        return nextBlockId;
     }
 
     public int getHeight() {
@@ -325,71 +413,121 @@ public class Block {
     }
 
     public long getId() {
-        if (id.get() == 0) {
-            if (blockSignature == null) {
-                throw new IllegalStateException("Block is not signed yet");
+        if (id == 0) {
+            synchronized (this) {
+                if (id == 0) {
+                    requireSigned();
+                    byte[] hash = Crypto.sha256().digest(getBytes());
+                    long longId = Convert.fullHashToId(hash);
+                    stringId = Convert.toUnsignedLong(longId);
+                    id = longId;
+                }
             }
-            byte[] hash = Crypto.sha256().digest(getBytes());
-            long longId = Convert.fullHashToId(hash);
-            id.set(longId);
-            stringId.set(Convert.toUnsignedLong(longId));
         }
-        return id.get();
+        return id;
     }
 
     public String getStringId() {
-        if (stringId.get() == null) {
+        if (stringId == null) {
             getId();
-            if (stringId.get() == null) {
-                stringId.set(Convert.toUnsignedLong(id.get()));
+            // If the block is initialized with a pre-existing id (e.g. loaded from DB),
+            // getId() may return without initializing stringId. Ensure it is set here.
+            if (stringId == null) {
+                stringId = Convert.toUnsignedLong(id);
             }
         }
-        return stringId.get();
+        return stringId;
     }
 
     public long getGeneratorId() {
-        if (generatorId.get() == 0) {
-            generatorId.set(Account.getId(generatorPublicKey));
+        if (generatorId == 0) {
+            synchronized (this) {
+                if (generatorId == 0) {
+                    generatorId = Account.getId(generatorPublicKey);
+                }
+            }
         }
-        return generatorId.get();
+        return generatorId;
     }
 
     public Long getNonce() {
         return nonce;
     }
 
+    /**
+     * Checks if the block is signed.
+     * <p>
+     * Only signed blocks have a valid ID and can be used in {@code equals} and
+     * {@code hashCode}.
+     * </p>
+     * 
+     * @return true if the block is signed, false otherwise.
+     */
+    public boolean isSigned() {
+        return blockSignature != null;
+    }
+
+    private void requireSigned() {
+        if (blockSignature == null) {
+            throw new IllegalStateException("Unsigned block");
+        }
+    }
+
+    @Override
     public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        requireSigned();
         return o instanceof Block && this.getId() == ((Block) o).getId();
     }
 
+    @Override
     public int hashCode() {
-        return (int) (getId() ^ (getId() >>> 32));
+        requireSigned();
+        long blockId = getId();
+        return (int) (blockId ^ (blockId >>> 32));
+    }
+
+    @Override
+    public String toString() {
+        return "Block{" +
+                "height=" + height +
+                ", id=" + (blockSignature != null ? getStringId() : "unsigned") +
+                '}';
     }
 
     public JsonObject getJsonObject() {
-        JsonObject json = new JsonObject();
-        json.addProperty("version", version);
-        json.addProperty("timestamp", timestamp);
-        json.addProperty("previousBlock", Convert.toUnsignedLong(previousBlockId));
-        json.addProperty("totalAmountNQT", totalAmountNqt);
-        json.addProperty("totalFeeNQT", totalFeeNqt);
-        json.addProperty("totalFeeCashBackNQT", totalFeeCashBackNqt);
-        json.addProperty("totalFeeBurntNQT", totalFeeBurntNqt);
-        json.addProperty("payloadLength", payloadLength);
-        json.addProperty("payloadHash", Convert.toHexString(payloadHash));
-        json.addProperty("generatorPublicKey", Convert.toHexString(generatorPublicKey));
-        json.addProperty("generationSignature", Convert.toHexString(generationSignature));
-        if (version > 1) {
-            json.addProperty("previousBlockHash", Convert.toHexString(previousBlockHash));
+        if (cachedJsonObject == null) {
+            synchronized (this) {
+                if (cachedJsonObject == null) {
+                    JsonObject json = new JsonObject();
+                    json.addProperty("version", version);
+                    json.addProperty("timestamp", timestamp);
+                    json.addProperty("previousBlock", Convert.toUnsignedLong(previousBlockId));
+                    json.addProperty("totalAmountNQT", totalAmountNqt);
+                    json.addProperty("totalFeeNQT", totalFeeNqt);
+                    json.addProperty("totalFeeCashBackNQT", totalFeeCashBackNqt);
+                    json.addProperty("totalFeeBurntNQT", totalFeeBurntNqt);
+                    json.addProperty("payloadLength", payloadLength);
+                    json.addProperty("payloadHash", Convert.toHexString(payloadHash));
+                    json.addProperty("generatorPublicKey", Convert.toHexString(generatorPublicKey));
+                    json.addProperty("generationSignature", Convert.toHexString(generationSignature));
+                    if (version > 1) {
+                        json.addProperty("previousBlockHash", Convert.toHexString(previousBlockHash));
+                    }
+                    json.addProperty("blockSignature", Convert.toHexString(blockSignature));
+                    JsonArray transactionsData = new JsonArray();
+                    getTransactions().forEach(transaction -> transactionsData.add(transaction.getJsonObject()));
+                    json.add("transactions", transactionsData);
+                    json.addProperty("nonce", Convert.toUnsignedLong(nonce));
+                    json.addProperty("baseTarget", Convert.toUnsignedLong(baseTarget));
+                    json.addProperty("blockATs", Convert.toHexString(blockAts));
+                    cachedJsonObject = json;
+                }
+            }
         }
-        json.addProperty("blockSignature", Convert.toHexString(blockSignature));
-        JsonArray transactionsData = new JsonArray();
-        getTransactions().forEach(transaction -> transactionsData.add(transaction.getJsonObject()));
-        json.add("transactions", transactionsData);
-        json.addProperty("nonce", Convert.toUnsignedLong(nonce));
-        json.addProperty("baseTarget", Convert.toUnsignedLong(baseTarget));
-        json.addProperty("blockATs", Convert.toHexString(blockAts));
-        return json;
+        return cachedJsonObject;
     }
 
     // TODO: See about removing this check suppression:
@@ -425,15 +563,12 @@ public class Block {
             long nonce = Convert.parseUnsignedLong(JSON.getAsString(blockData.get("nonce")));
             long baseTarget = Convert.parseUnsignedLong(
                     JSON.getAsString(blockData.get("baseTarget")));
-
             if (Signum.getFluxCapacitor().getValue(
                     FluxValues.POC_PLUS, height) && baseTarget == 0L) {
                 throw new SignumException.NotValidException("Block received without a baseTarget");
             }
-
             SortedMap<Long, Transaction> blockTransactions = new TreeMap<>();
             JsonArray transactionsData = JSON.getAsJsonArray(blockData.get("transactions"));
-
             for (JsonElement transactionData : transactionsData) {
                 Transaction transaction = Transaction.parseTransaction(
                         JSON.getAsJsonObject(transactionData), height);
@@ -443,7 +578,6 @@ public class Block {
                             "Block contains duplicate transactions: " + transaction.getStringId());
                 }
             }
-
             byte[] blockAts = Convert.parseHexString(JSON.getAsString(blockData.get("blockATs")));
             return new Block(
                     version,
@@ -473,6 +607,28 @@ public class Block {
     }
 
     public byte[] getBytes() {
+        if (cachedBytes == null) {
+            synchronized (this) {
+                if (cachedBytes == null) {
+                    byte[] unsignedBytes = getUnsignedBytes();
+                    ByteBuffer buffer = ByteBuffer.allocate(unsignedBytes.length + blockSignature.length);
+                    buffer.order(ByteOrder.LITTLE_ENDIAN);
+                    buffer.put(unsignedBytes);
+                    if (buffer.limit() - buffer.position() < blockSignature.length) {
+                        logger.error("Something is too large here "
+                                + "- buffer should have {} bytes left but only has {}",
+                                blockSignature.length,
+                                (buffer.limit() - buffer.position()));
+                    }
+                    buffer.put(blockSignature);
+                    cachedBytes = buffer.array();
+                }
+            }
+        }
+        return cachedBytes;
+    }
+
+    byte[] getUnsignedBytes() {
         ByteBuffer buffer = ByteBuffer.allocate(
                 4
                         + 4
@@ -484,8 +640,7 @@ public class Block {
                         + 32
                         + (32 + 32)
                         + 8
-                        + (blockAts != null ? blockAts.length : 0)
-                        + 64);
+                        + (blockAts != null ? blockAts.length : 0));
         buffer.order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(version);
         buffer.putInt(timestamp);
@@ -509,25 +664,35 @@ public class Block {
         if (blockAts != null) {
             buffer.put(blockAts);
         }
-        if (buffer.limit() - buffer.position() < blockSignature.length) {
-            logger.error("Something is too large here "
-                    + "- buffer should have {} bytes left but only has {}",
-                    blockSignature.length,
-                    (buffer.limit() - buffer.position()));
-        }
-        buffer.put(blockSignature);
         return buffer.array();
     }
 
     void sign(String secretPhrase) {
-        if (blockSignature != null) {
-            throw new IllegalStateException("Block already signed");
+        synchronized (this) {
+            if (blockSignature != null) {
+                throw new IllegalStateException("Block already signed");
+            }
+            // 1. Calculate the unsigned bytes first.
+            byte[] unsignedBytes = getUnsignedBytes();
+
+            // 2. Sign the unsigned bytes to get the block signature.
+            blockSignature = Crypto.sign(unsignedBytes, secretPhrase);
+
+            // 3. Now that blockSignature is available, construct the full signed bytes
+            // and cache them. This ensures cachedBytes always holds the final, signed
+            // state.
+            ByteBuffer buffer = ByteBuffer.allocate(unsignedBytes.length + blockSignature.length);
+            buffer.order(ByteOrder.LITTLE_ENDIAN);
+            buffer.put(unsignedBytes);
+            if (buffer.limit() - buffer.position() < blockSignature.length) {
+                logger.error("Something is too large here "
+                        + "- buffer should have {} bytes left but only has {}",
+                        blockSignature.length,
+                        (buffer.limit() - buffer.position()));
+            }
+            buffer.put(blockSignature);
+            cachedBytes = buffer.array(); // Cache the final, signed bytes
         }
-        blockSignature = new byte[64];
-        byte[] data = getBytes();
-        byte[] data2 = new byte[data.length - 64];
-        System.arraycopy(data, 0, data2, 0, data2.length);
-        blockSignature = Crypto.sign(data2, secretPhrase);
     }
 
     public byte[] getBlockAts() {
