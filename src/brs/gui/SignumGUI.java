@@ -45,6 +45,7 @@ import org.slf4j.LoggerFactory;
 import brs.Signum;
 import brs.BlockchainProcessor;
 import brs.Constants;
+import brs.gui.util.CustomDrawings;
 import brs.Block;
 import brs.peer.Peer;
 import brs.fluxcapacitor.FluxValues;
@@ -84,15 +85,12 @@ public class SignumGUI extends JFrame {
     private JLabel blacklistedPeersLabel;
     private JLabel uploadVolumeLabel;
     private JLabel downloadVolumeLabel;
-    private JCheckBox showPopOffCheckbox;
-    private JCheckBox showMetricsCheckbox;
     private JLabel trimHeightLabel;
     private JSeparator trimSeparator;
     private JLabel popOffBlockCountLabel;
     private JLabel popOffBlockHeightLabel;
     private JSeparator popOffSeparator1;
     private JSeparator popOffSeparator2;
-    private boolean showMetrics = false;
     private boolean showPopOff = false;
     private boolean isSyncStopped = false;
     private boolean isShuttingDown = false;
@@ -114,7 +112,8 @@ public class SignumGUI extends JFrame {
 
     private MetricsPanel metricsPanel;
 
-    private final JPanel checkboxPanel;
+    private JComponent popOffToggle;
+    private JComponent hamburgerMenu;
     private JLabel measurementLabel;
     private JLabel experimentalLabel;
     private JLabel trimLabel;
@@ -268,12 +267,19 @@ public class SignumGUI extends JFrame {
             public void append(String str) {
                 super.append(str);
 
-                while (getText().split("\n", -1).length > OUTPUT_MAX_LINES) {
-                    int fle = getText().indexOf('\n');
-                    super.replaceRange("", 0, fle + 1);
+                try {
+                    int lineCount = getLineCount();
+                    if (lineCount > OUTPUT_MAX_LINES) {
+                        int endOffset = getLineEndOffset(lineCount - OUTPUT_MAX_LINES - 1);
+                        replaceRange("", 0, endOffset);
+                    }
+                } catch (Exception e) {
+                    // ignore
                 }
-                JScrollBar vertical = textScrollPane.getVerticalScrollBar();
-                vertical.setValue(vertical.getMaximum());
+                if (textScrollPane != null) {
+                    JScrollBar vertical = textScrollPane.getVerticalScrollBar();
+                    vertical.setValue(vertical.getMaximum());
+                }
             }
         };
         iconColor = textArea.getForeground();
@@ -325,6 +331,7 @@ public class SignumGUI extends JFrame {
         addInfoTooltip(latestBlockHeightLabel, blockInfoTooltip);
         addInfoTooltip(latestBlockTimestampLabel, blockInfoTooltip);
         metricsPanel = new MetricsPanel(this);
+        metricsPanel.setVisible(false);
 
         trimSeparator = new JSeparator(SwingConstants.VERTICAL);
         trimSeparator.setPreferredSize(verticalSeparatorSize);
@@ -355,35 +362,60 @@ public class SignumGUI extends JFrame {
         latestBlockInfoPanel.add(popOffBlockHeightLabel);
         setPopOffLabelVisible(false);
 
-        // === Add checkboxes to toolBar ===
-        checkboxPanel = new JPanel();
-        checkboxPanel.setLayout(new BoxLayout(checkboxPanel, BoxLayout.Y_AXIS));
+        // === Add toggle to toolBar ===
+        popOffToggle = new JComponent() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                (showPopOff ? CustomDrawings.Chevron.LEFT : CustomDrawings.Chevron.RIGHT)
+                        .draw((Graphics2D) g, getWidth(), getHeight(), iconColor);
+            }
 
-        showPopOffCheckbox = new JCheckBox("Pop off");
-        // showPopOffCheckbox.setHorizontalTextPosition(SwingConstants.LEFT);
-        showPopOffCheckbox.setSelected(showPopOff);
-        showPopOffCheckbox.addActionListener(e -> {
-            showPopOff = showPopOffCheckbox.isSelected();
-            popOff10Button.setVisible(showPopOff);
-            popOff100Button.setVisible(showPopOff);
+            @Override
+            public Dimension getPreferredSize() {
+                return new Dimension(16, 20);
+            }
+
+            @Override
+            public Dimension getMaximumSize() {
+                return getPreferredSize();
+            }
+        };
+        popOffToggle.setToolTipText("Toggle Pop-off buttons");
+        popOffToggle.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                showPopOff = !showPopOff;
+                popOff10Button.setVisible(showPopOff);
+                popOff100Button.setVisible(showPopOff);
+                popOffToggle.repaint();
+            }
         });
 
-        showMetricsCheckbox = new JCheckBox("Metrics");
-        // showMetricsCheckbox.setHorizontalTextPosition(SwingConstants.LEFT);
-        showMetricsCheckbox.setSelected(showMetrics); // default visible
-        showMetricsCheckbox.addActionListener(e -> {
-            showMetrics = showMetricsCheckbox.isSelected();
-            metricsPanel.setVisible(showMetrics);
-        });
+        // Hamburger Menu
+        hamburgerMenu = new JComponent() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                CustomDrawings.HAMBURGER.draw((Graphics2D) g, getWidth(), getHeight(), iconColor);
+            }
 
-        checkboxPanel.add(showPopOffCheckbox);
-        checkboxPanel.add(showMetricsCheckbox);
+            @Override
+            public Dimension getPreferredSize() {
+                return new Dimension(16, 20);
+            }
+
+            @Override
+            public Dimension getMaximumSize() {
+                return getPreferredSize();
+            }
+        };
+        hamburgerMenu.setToolTipText("Menu");
 
         JPanel topPanel = new JPanel();
         topPanel.setLayout(new BoxLayout(topPanel, BoxLayout.Y_AXIS));
         topPanel.add(toolBar);
         topPanel.add(metricsPanel);
-        metricsPanel.setVisible(showMetrics);
 
         // Use GridBagLayout for infoPanel to allow precise vertical alignment
         infoPanel = new JPanel(new GridBagLayout());
@@ -557,7 +589,10 @@ public class SignumGUI extends JFrame {
         bottomPanel.add(infoPanel, BorderLayout.LINE_END);
 
         try {
-            setIconImage(ImageIO.read(getClass().getResourceAsStream(iconLocation)));
+            java.io.InputStream iconStream = getClass().getResourceAsStream(iconLocation);
+            if (iconStream != null) {
+                setIconImage(ImageIO.read(iconStream));
+            }
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -712,10 +747,15 @@ public class SignumGUI extends JFrame {
 
         // leftButtons.add(restartButton);
         leftButtons.add(shutdownButton);
+        leftButtons.add(popOffToggle);
 
         toolBar.add(leftButtons);
         toolBar.add(Box.createHorizontalGlue());
-        toolBar.add(checkboxPanel);
+        toolBar.add(hamburgerMenu);
+        toolBar.add(Box.createHorizontalStrut(5));
+        JLabel globeLabel = new JLabel("🌍");
+        globeLabel.setFont(globeLabel.getFont().deriveFont(22f));
+        toolBar.add(globeLabel);
         toolBar.add(Box.createHorizontalStrut(10));
 
         openPheonixWalletItem.addActionListener(e -> openWebUi("/phoenix"));
@@ -1081,7 +1121,6 @@ public class SignumGUI extends JFrame {
 
             // Now that properties are loaded, set the correct values for the GUI
             showPopOff = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
-            showMetrics = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
             measurementActive = Signum.getPropertyService().getBoolean(Props.MEASUREMENT_ACTIVE);
             experimentalActive = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
             trimEnabled = Signum.getPropertyService().getBoolean(Props.DB_TRIM_DERIVED_TABLES);
@@ -1089,12 +1128,10 @@ public class SignumGUI extends JFrame {
             try {
                 SwingUtilities.invokeLater(() -> {
                     metricsPanel.init();
+                    metricsPanel.setVisible(true);
                     showTrayIcon();
                     // Sync checkbox states with loaded properties
-                    showPopOffCheckbox.setSelected(showPopOff);
-                    showMetricsCheckbox.setSelected(showMetrics);
-                    // Sync panel visibility with loaded properties
-                    metricsPanel.setVisible(showMetrics);
+                    popOffToggle.repaint();
 
                     if (measurementActive) {
                         measurementPanel.setVisible(true);
@@ -1326,12 +1363,15 @@ public class SignumGUI extends JFrame {
     private static class TextAreaOutputStream extends OutputStream {
         private final JTextArea textArea;
         private final PrintStream actualOutput;
-
-        private StringBuilder lineBuilder = new StringBuilder();
+        private final StringBuilder buffer = new StringBuilder();
+        private final Timer timer;
 
         private TextAreaOutputStream(JTextArea textArea, PrintStream actualOutput) {
             this.textArea = textArea;
             this.actualOutput = actualOutput;
+            this.timer = new Timer(500, e -> flush());
+            this.timer.setRepeats(true);
+            this.timer.start();
         }
 
         @Override
@@ -1349,15 +1389,21 @@ public class SignumGUI extends JFrame {
             writeString(new String(b, off, len));
         }
 
-        private void writeString(String string) {
-            lineBuilder.append(string);
-            String line = lineBuilder.toString();
-            if (line.contains("\n")) {
-                actualOutput.print(line);
-                if (textArea != null)
-                    SwingUtilities.invokeLater(() -> textArea.append(line));
-                lineBuilder.delete(0, lineBuilder.length());
+        private synchronized void writeString(String string) {
+            actualOutput.print(string);
+            buffer.append(string);
+        }
+
+        @Override
+        public void flush() {
+            String text;
+            synchronized (this) {
+                if (buffer.length() == 0)
+                    return;
+                text = buffer.toString();
+                buffer.setLength(0);
             }
+            textArea.append(text);
         }
     }
 
