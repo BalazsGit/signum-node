@@ -11,77 +11,99 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
 
-
 public abstract class DatabaseInstanceBaseImpl implements DatabaseInstance {
-  private static final Logger logger = LoggerFactory.getLogger(DatabaseInstanceBaseImpl.class);
+    private static final Logger logger = LoggerFactory.getLogger(DatabaseInstanceBaseImpl.class);
 
-  private final HikariDataSource dataSource;
-  private HikariConfig config = new HikariConfig();
-  protected PropertyService propertyService;
+    private final HikariDataSource dataSource;
+    private HikariConfig config = new HikariConfig();
+    protected PropertyService propertyService;
 
-  protected DatabaseInstanceBaseImpl(PropertyService propertyService){
-    this.propertyService = propertyService;
-    String dbUrl = propertyService.getString(Props.DB_URL);
-    String dbUsername = propertyService.getString(Props.DB_USERNAME);
-    String dbPassword = propertyService.getString(Props.DB_PASSWORD);
-    logger.debug("Database jdbc url set to: {}", dbUrl);
-    config.setJdbcUrl(dbUrl);
-    config.setAutoCommit(true);
-    if (dbUsername != null) {
-      config.setUsername(dbUsername);
+    protected DatabaseInstanceBaseImpl(PropertyService propertyService) {
+        this.propertyService = propertyService;
+        String dbUrl = propertyService.getString(Props.DB_URL);
+        String dbUsername = propertyService.getString(Props.DB_USERNAME);
+        String dbPassword = propertyService.getString(Props.DB_PASSWORD);
+        logger.debug("Database jdbc url set to: {}", dbUrl);
+        config.setJdbcUrl(dbUrl);
+        config.setAutoCommit(true);
+        if (dbUsername != null) {
+            config.setUsername(dbUsername);
+        }
+        if (dbPassword != null) {
+            config.setPassword(dbPassword);
+        }
+        config.setMaximumPoolSize(propertyService.getInt(Props.DB_CONNECTIONS));
+        config = this.configureImpl(config);
+        dataSource = new HikariDataSource(config);
     }
-    if (dbPassword != null) {
-      config.setPassword(dbPassword);
+
+    protected abstract HikariConfig configureImpl(HikariConfig config);
+
+    protected abstract void onShutdownImpl();
+
+    protected abstract void onStartupImpl();
+
+    protected void executeSQL(String sql) {
+        try {
+            Connection c = dataSource.getConnection();
+            Statement stmt = c.createStatement();
+            stmt.execute(sql);
+        } catch (SQLException e) {
+            logger.error(e.toString(), e);
+        }
     }
-    config.setMaximumPoolSize(propertyService.getInt(Props.DB_CONNECTIONS));
-    config = this.configureImpl(config);
-    dataSource = new HikariDataSource(config);
-  }
 
-  protected abstract HikariConfig configureImpl(HikariConfig config);
-  protected abstract void onShutdownImpl();
-  protected abstract void onStartupImpl();
+    @Override
+    public void onShutdown() {
+        if (dataSource == null || dataSource.isClosed()) {
+            return;
+        }
+        Throwable firstException = null;
+        try {
+            this.onShutdownImpl();
+        } catch (Throwable t) {
+            logger.error("Error during database specific shutdown", t);
+            firstException = t;
+        }
 
-  protected void executeSQL(String sql){
-    try {
-      Connection c = dataSource.getConnection();
-      Statement stmt = c.createStatement();
-      stmt.execute(sql);
-    } catch (SQLException e) {
-      logger.error(e.toString(), e);
+        if (!dataSource.isClosed()) {
+            logger.info("Closing Database connections...");
+            try {
+                dataSource.close();
+            } catch (Throwable t) {
+                logger.error("Error closing data source", t);
+                if (firstException == null) {
+                    firstException = t;
+                }
+            }
+        }
+        if (firstException != null) {
+            if (firstException instanceof RuntimeException) {
+                throw (RuntimeException) firstException;
+            }
+            throw new RuntimeException("Error during DatabaseInstance shutdown", firstException);
+        }
     }
-  }
 
-  @Override
-  public void onShutdown() {
-    if (dataSource == null || dataSource.isClosed()) {
-      return;
+    @Override
+    public void onStartup() {
+        if (dataSource != null) {
+            this.onStartupImpl();
+        }
     }
-    this.onShutdownImpl();
-    if (!dataSource.isClosed()) {
-      logger.info("Closing Database connections...");
-      dataSource.close();
+
+    @Override
+    public HikariConfig getConfig() {
+        return this.config;
     }
-  }
 
-  @Override
-  public void onStartup() {
-    if(dataSource != null){
-      this.onStartupImpl();
+    @Override
+    public HikariDataSource getDataSource() {
+        return this.dataSource;
     }
-  }
 
-  @Override
-  public HikariConfig getConfig() {
-    return this.config;
-  }
-  @Override
-  public HikariDataSource getDataSource() {
-    return this.dataSource;
-  }
-
-  @Override
-  public String getMigrationClassPath() {
-    return "classpath:/brs/db/sql/migration";
-  }
+    @Override
+    public String getMigrationClassPath() {
+        return "classpath:/brs/db/sql/migration";
+    }
 }
