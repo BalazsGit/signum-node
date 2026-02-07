@@ -1,9 +1,11 @@
 package brs;
 
 import brs.peer.Peer;
+import brs.peer.PeerMetric;
 import brs.util.JSON;
 import brs.util.Observable;
 import com.google.gson.JsonObject;
+import brs.util.Listener;
 
 import java.util.Collection;
 import java.util.List;
@@ -97,14 +99,53 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
         RESCAN_BEGIN, RESCAN_END,
         BEFORE_BLOCK_ACCEPT,
         BEFORE_BLOCK_APPLY, AFTER_BLOCK_APPLY, DATABASE_CONSISTENCY_UPDATE,
+        CONSISTENCY_RESOLUTION_STARTED, CONSISTENCY_RESOLUTION_FINISHED,
         PEERS_UPDATED, NET_VOLUME_CHANGED, QUEUE_STATUS_CHANGED, FORK_CACHE_CHANGED, PERFORMANCE_STATS_UPDATED,
         TRIM_START, TRIM_END
     }
 
+    enum PeerMetricEvent {
+        METRIC
+    }
+
+    /**
+     * Represents the consistency state of the database.
+     * The state is checked periodically and on demand.
+     */
     enum ConsistencyState {
+        /** The state has not been checked yet. */
         UNDEFINED,
+        /**
+         * The database is consistent (total supply matches total effective balances).
+         */
         CONSISTENT,
+        /** The database is inconsistent. */
         INCONSISTENT
+    }
+
+    /**
+     * Tracks the lifecycle of the database consistency resolution process.
+     * This state machine ensures that only one resolution process runs at a time
+     * and provides feedback on its outcome.
+     */
+    enum ResolutionState {
+        /** Default state. No resolution process is running. */
+        IDLE,
+        /**
+         * A resolution process is currently active (popping off blocks). New requests
+         * are ignored.
+         */
+        ACTIVE,
+        /**
+         * The last resolution process finished successfully, and the database is now
+         * consistent.
+         */
+        SUCCESS,
+        /**
+         * The last resolution process failed to restore consistency. Auto-resolve will
+         * not retry until manually triggered.
+         */
+        FAILED
     }
 
     Peer getLastBlockchainFeeder();
@@ -127,9 +168,13 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     boolean isScanning();
 
+    boolean isTrimming();
+
     AtomicInteger getCurrentTrimHeight();
 
     AtomicInteger getLastTrimHeight();
+
+    int getEstimatedTrimHeight();
 
     String getCurrentlyTrimmingTable();
 
@@ -161,6 +206,8 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     ConsistencyState getConsistencyState();
 
+    ResolutionState getResolutionState();
+
     void processPeerBlock(JsonObject request, Peer peer) throws SignumException;
 
     void fullReset();
@@ -181,6 +228,16 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
     void onQueueStatusUpdated(QueueStatus newStatus);
 
     void scheduleTrim(Block block);
+
+    void manualResolveDatabaseConsistency();
+
+    void autoResolveDatabaseConsistency();
+
+    void addPeerMetricListener(Listener<PeerMetric> listener);
+
+    void removePeerMetricListener(Listener<PeerMetric> listener);
+
+    void notifyPeerMetric(PeerMetric metric);
 
     class BlockNotAcceptedException extends SignumException {
 
