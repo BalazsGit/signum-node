@@ -4,6 +4,7 @@ import brs.Generator;
 import brs.Signum;
 import brs.gui.BlockGenerationMetricsPanel.MinerEntry;
 import brs.util.Convert;
+import brs.gui.util.TableUtils;
 import signumj.entity.SignumAddress;
 import signumj.entity.SignumID;
 
@@ -33,6 +34,18 @@ public class MinersListDialog extends JFrame {
     private static final Color COLOR_ACTIVE_MINER = new Color(218, 165, 32); // Goldenrod
     private static final Color COLOR_DISCOVERED_NODE_MINER = new Color(50, 205, 50); // Lime Green
     private static final Color COLOR_DISCOVERED_NETWORK_MINER = new Color(0, 100, 0); // Dark Green
+
+    private static final String COL_STATUS = "Status";
+    private static final String COL_ADDRESS = "Address";
+    private static final String COL_ACCOUNT_ID = "Account ID";
+    private static final String COL_NAME = "Name";
+    private static final String COL_DEADLINES = "Deadlines";
+    private static final String COL_AVG_DEADLINE = "Avg Deadline";
+    private static final String COL_MIN_DEADLINE = "Min Deadline";
+    private static final String COL_MAX_DEADLINE = "Max Deadline";
+    private static final String COL_LAST_DEADLINE = "Last Deadline";
+    private static final String COL_LAST_BLOCK_HEIGHT = "Last Block Height";
+    private static final String COL_BLOCKS_FOUND = "Blocks Found";
 
     public static void showDialog(JFrame owner, int tabIndex,
             List<BlockGenerationMetricsPanel.BlockHistoryEntry> history,
@@ -74,18 +87,6 @@ public class MinersListDialog extends JFrame {
                 networkMinersTable = null;
             }
         });
-
-        final String COL_STATUS = "Status";
-        final String COL_ADDRESS = "Address";
-        final String COL_ACCOUNT_ID = "Account ID";
-        final String COL_NAME = "Name";
-        final String COL_DEADLINES = "Deadlines";
-        final String COL_AVG_DEADLINE = "Avg Deadline";
-        final String COL_MIN_DEADLINE = "Min Deadline";
-        final String COL_MAX_DEADLINE = "Max Deadline";
-        final String COL_LAST_DEADLINE = "Last Deadline";
-        final String COL_LAST_BLOCK_HEIGHT = "Last Block Height";
-        final String COL_BLOCKS_FOUND = "Blocks Found";
 
         String[] nodeMinerColumns = { COL_STATUS, COL_ADDRESS, COL_ACCOUNT_ID, COL_NAME, COL_DEADLINES,
                 COL_AVG_DEADLINE,
@@ -162,15 +163,21 @@ public class MinersListDialog extends JFrame {
                 "</ul>" +
                 "<b>Columns:</b>" +
                 "<ul>" +
-                "<li><b>Deadlines:</b> Total number of nonces submitted by this miner in the history window.</li>" +
-                "<li><b>Avg Deadline:</b> The average value of the <b>best</b> deadlines submitted per block (lower is better).</li>"
+                "<li><b>" + COL_DEADLINES
+                + ":</b> Total number of nonces submitted by this miner in the history window.</li>" +
+                "<li><b>" + COL_AVG_DEADLINE
+                + ":</b> The average value of the <b>best</b> deadlines submitted per block (lower is better).</li>"
                 +
-                "<li><b>Min/Max Deadline:</b> The minimum (best) and maximum (worst) of the best-per-block deadlines.</li>"
+                "<li><b>" + COL_MIN_DEADLINE + "/" + COL_MAX_DEADLINE
+                + ":</b> The minimum (best) and maximum (worst) of the best-per-block deadlines.</li>"
                 +
-                "<li><b>Last Deadline:</b> The best deadline submitted for the most recent active block.</li>"
-                + "<li><b>Last Block Height:</b> The height of the most recent block where this miner was active.</li>"
+                "<li><b>" + COL_LAST_DEADLINE
+                + ":</b> The best deadline submitted for the most recent active block.</li>"
+                + "<li><b>" + COL_LAST_BLOCK_HEIGHT
+                + ":</b> The height of the most recent block where this miner was active.</li>"
                 +
-                "<li><b>Blocks Found:</b> Number of blocks forged by this miner in the history window.</li>" +
+                "<li><b>" + COL_BLOCKS_FOUND + ":</b> Number of blocks forged by this miner in the history window.</li>"
+                +
                 "</ul>" +
                 "</body></html>";
     }
@@ -185,14 +192,19 @@ public class MinersListDialog extends JFrame {
                 "</ul>" +
                 "<b>Columns:</b>" +
                 "<ul>" +
-                "<li><b>Avg Deadline:</b> The average block time (deadline) of blocks forged by this miner. Calculated from block timestamps.</li>"
+                "<li><b>" + COL_AVG_DEADLINE
+                + ":</b> The average block time (deadline) of blocks forged by this miner. Calculated from block timestamps.</li>"
                 +
-                "<li><b>Min/Max Deadline:</b> The minimum and maximum block time of blocks forged by this miner.</li>"
+                "<li><b>" + COL_MIN_DEADLINE + "/" + COL_MAX_DEADLINE
+                + ":</b> The minimum and maximum block time of blocks forged by this miner.</li>"
                 +
-                "<li><b>Last Deadline:</b> The block time of the most recent block forged by this miner.</li>"
-                + "<li><b>Last Block Height:</b> The height of the most recent block forged by this miner.</li>"
+                "<li><b>" + COL_LAST_DEADLINE
+                + ":</b> The block time of the most recent block forged by this miner.</li>"
+                + "<li><b>" + COL_LAST_BLOCK_HEIGHT
+                + ":</b> The height of the most recent block forged by this miner.</li>"
                 +
-                "<li><b>Blocks Found:</b> Number of blocks forged by this miner in the history window.</li>" +
+                "<li><b>" + COL_BLOCKS_FOUND + ":</b> Number of blocks forged by this miner in the history window.</li>"
+                +
                 "</ul>" +
                 "</body></html>";
     }
@@ -283,10 +295,10 @@ public class MinersListDialog extends JFrame {
         updateTableModelData(networkMinersModel, networkMinersData);
 
         if (nodeMinersTable != null) {
-            BlockGenerationMetricsPanel.packTableColumns(nodeMinersTable);
+            TableUtils.packTableColumns(nodeMinersTable);
         }
         if (networkMinersTable != null) {
-            BlockGenerationMetricsPanel.packTableColumns(networkMinersTable);
+            TableUtils.packTableColumns(networkMinersTable);
         }
     }
 
@@ -480,6 +492,14 @@ public class MinersListDialog extends JFrame {
                 int row, int column) {
             Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
 
+            if (value instanceof Long) {
+                long val = (Long) value;
+                if (val > 1_000_000) {
+                    setText(formatCount(val));
+                    setToolTipText(String.format("%,d", val));
+                }
+            }
+
             if (!isSelected) {
                 int statusIndex = table.getColumnModel().getColumnIndex(statusColumnName);
                 String status = (String) table.getValueAt(row, statusIndex);
@@ -500,6 +520,15 @@ public class MinersListDialog extends JFrame {
         public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus,
                 int row, int column) {
             Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+
+            if (value instanceof Long) {
+                long val = (Long) value;
+                if (val > 1_000_000) {
+                    setText(formatCount(val));
+                    setToolTipText(String.format("%,d", val));
+                }
+            }
+
             if (!isSelected) {
                 c.setForeground(COLOR_DISCOVERED_NETWORK_MINER);
             }
@@ -509,5 +538,15 @@ public class MinersListDialog extends JFrame {
 
     private static String toHex(Color color) {
         return String.format("#%02x%02x%02x", color.getRed(), color.getGreen(), color.getBlue());
+    }
+
+    private static String formatCount(long count) {
+        if (count > 100_000_000) {
+            return "> 100M";
+        }
+        if (count < 1_000_000) {
+            return String.valueOf(count);
+        }
+        return String.format("%.1fM", count / 1_000_000.0);
     }
 }
