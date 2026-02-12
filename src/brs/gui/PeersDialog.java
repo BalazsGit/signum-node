@@ -89,8 +89,14 @@ public class PeersDialog extends JFrame {
                         "<b>Colors:</b><br>" +
                         "<span style='color:" + greenHex + "'>&#9632;</span> <b>Green:</b> OK / Synced<br>" +
                         "<span style='color:" + yellowHex
-                        + "'>&#9632;</span> <b>Yellow:</b> Lagging / Old / Non-Connected<br>" +
-                        "<span style='color:" + redHex + "'>&#9632;</span> <b>Red:</b> Blacklisted" +
+                        + "'>&#9632;</span> <b>Yellow:</b> Lagging / Old / Non-Connected<br>"
+                        + "<span style='color:" + redHex + "'>&#9632;</span> <b>Red:</b> Blacklisted<br><br>" +
+                        "<b>Version Notes:</b>" +
+                        "<ul>" +
+                        "<li><b>v0.0.0:</b> The peer's version is unknown. This often occurs with newly discovered or unresponsive peers.</li>"
+                        +
+                        "<li><b>- / empty:</b> The peer did not provide a version. This may happen with very old clients.</li>"
+                        + "</ul>" +
                         "</body></html>");
         mainPanel.add(legendArea, BorderLayout.NORTH);
 
