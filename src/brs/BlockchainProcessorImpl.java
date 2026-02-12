@@ -231,6 +231,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private AtomicInteger manualLastPopOffHeight = new AtomicInteger(-1);
     private AtomicInteger autoLastPopOffHeight = new AtomicInteger(-1);
     private AtomicInteger beforeRollbackHeight = new AtomicInteger(0);
+    private volatile PopOffState manualPopOffState = PopOffState.IDLE;
+    private volatile PopOffState autoPopOffState = PopOffState.IDLE;
 
     private final Listeners<PeerMetric, PeerMetricEvent> peerMetricListeners = new Listeners<>();
 
@@ -262,7 +264,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             logger.info("Waiting for database trim to finish before shutdown...");
         }
 
-        if (manualPopOffBlocksCount.get() > 0 || autoPopOffBlocksCount.get() > 0) {
+        if (manualPopOffState == PopOffState.ACTIVE || autoPopOffState == PopOffState.ACTIVE) {
             logger.info("Waiting for pop-off to finish before shutdown...");
         }
 
@@ -631,13 +633,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             }
         }
 
-        if (Boolean.FALSE.equals(propertyService.getBoolean(Props.DB_SKIP_CHECK))
-                && checkDatabaseState() != 0) {
-            logger.warn("Database is inconsistent,"
-                    + "try to pop off to block height {} or sync from empty.",
-                    getMinRollbackHeight());
-        }
-
+        initialCleanDatabase();
         Runnable getMoreBlocksThread = new Runnable() {
             private JsonElement getCumulativeDifficultyRequest;
 
@@ -1758,53 +1754,117 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     }
 
     /**
-     * Attempts to resolve database inconsistencies by automatically popping off
-     * blocks.
+     * Checks if the automatic database consistency resolution process is required.
      * <p>
-     * This method runs in a new thread to avoid blocking the main application. It
-     * is protected by the
-     * {@link #resolutionState} state machine to prevent multiple instances from
-     * running concurrently.
-     * <p>
-     * The process is as follows:
-     * <ol>
-     * <li>The state is set to {@link ResolutionState#ACTIVE}.</li>
-     * <li>Block processing and download threads are paused.</li>
-     * <li>It checks if the database is already consistent. If so, it sets the state
-     * to {@link ResolutionState#SUCCESS} and exits.</li>
-     * <li>It determines a safe limit height to pop off to (either the last trim
-     * height or {@link Constants#MAX_ROLLBACK} blocks back).</li>
-     * <li>It enters a loop, popping one block at a time and re-checking for
-     * consistency.</li>
-     * <li>If consistency is restored, the loop breaks, and the state is set to
-     * {@link ResolutionState#SUCCESS}.</li>
-     * <li>If the limit height is reached without restoring consistency, the process
-     * stops, and the state is set to {@link ResolutionState#FAILED}.</li>
-     * <li>A {@code finally} block ensures that the resolution state is always
-     * updated and that the processing threads are resumed.</li>
-     * </ol>
+     * This method assesses the current state of the database consistency and the
+     * node's configuration
+     * to decide if an automatic recovery attempt is necessary. It ensures that
+     * resolution is not
+     * initiated if other critical blockchain operations (like trimming or pop-off)
+     * are currently in progress.
+     *
+     * @return {@code true} if the conditions for automatic resolution are met,
+     *         {@code false} otherwise.
      */
-    // TODO update javadoc
-    // for autoResolveDatabaseConsistency don't need lock because the caller holds
-    // it
-    // also don't need to notify start and finish events here
-    // also don't need to run in new thread here
-    // TODO: we need some some unique bottom panel indication to show Auto reolve
-    // e.g insted of pop-off Auto resolve
-    // Maybe introduce consistency check with log and without log to prevent GUI
-    // spam
-    // Auto resolve and manual trigger resolve should not log each pop-off block in
-    // the GUI
-    // only the database check button trigger only once it requested
+    private boolean isAutoResolutionRequired() {
+
+        // Auto resolution trigger only if no trim or pop-off is ongoing
+        // This avoids conflicts during active recovery operations
+        // Pop-off and trim operations already handle consistency related issues
+        // internally by rolling back erroneous transactions
+        if (isTrimming.get() || manualPopOffState != PopOffState.IDLE || autoPopOffState != PopOffState.IDLE) {
+            return false;
+        }
+
+        // If database consistency state transitions to INCONSISTENT
+        // UNDEFINED -> INCONSISTENT or
+        // CONSISTENT -> INCONSISTENT
+        if (consistencyState.get() == ConsistencyState.INCONSISTENT) {
+            if (previousConsistencyState == ConsistencyState.UNDEFINED
+                    || previousConsistencyState == ConsistencyState.CONSISTENT) {
+                logger.info(
+                        "Database state transitioned from {} to INCONSISTENT.",
+                        previousConsistencyState);
+                if (propertyService.getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED)) {
+                    return true;
+                } else {
+                    logger.info(
+                            "Auto Database Resolution is disabled.");
+                    logger.info(
+                            "Please try to resolve Database manually via the GUI: Database Check -> Start Auto Resolve Database Consistency.");
+                    return false;
+                }
+            } else if (resolutionState == ResolutionState.IDLE
+                    || resolutionState == ResolutionState.SUCCESS) {
+                if (propertyService.getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED)) {
+                    logger.info(
+                            "Database is INCONSISTENT previous Database Resolution state was {}.",
+                            resolutionState);
+                    return true;
+                } else {
+                    logger.info(
+                            "Auto Database Resolution is disabled.");
+                    logger.info(
+                            "Please try to resolve Database manually via the GUI: Database Check -> Start Auto Resolve Database Consistency.");
+                    return false;
+                }
+            } else if (resolutionState == ResolutionState.FAILED) {
+                logger.info("Database is INCONSISTENT and previous Database Resolution state was FAILED.");
+                if (propertyService.getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED)) {
+                    logger.info(
+                            "Automatic consistency resolution will not be attempted again until manual intervention or a successful resolution occurs.");
+                    logger.info("Revalidate, or Resync the node to reset the consistency.");
+                    return false;
+                } else {
+                    logger.info(
+                            "Auto Database Resolution is disabled.");
+                    logger.info(
+                            "Please try to resolve Database manually via the GUI: Database Check -> Start Auto Resolve Database Consistency.");
+                    return false;
+                }
+            } else {
+                logger.error(
+                        "Database became inconsistent. Please try to resolve it manually via the GUI: Database Check -> Start Auto Resolve Database Consistency.");
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Initiates the automatic database consistency resolution process.
+     * <p>
+     * This method attempts to restore database consistency by iteratively popping
+     * off blocks from the
+     * blockchain until a consistent state is reached or a safety limit is
+     * encountered.
+     * <p>
+     * The process follows these steps:
+     * <ol>
+     * <li>Checks if a resolution process is already active to prevent concurrent
+     * executions.</li>
+     * <li>Sets the resolution state to {@link ResolutionState#ACTIVE}.</li>
+     * <li>Verifies the database state; if already consistent, marks as
+     * {@link ResolutionState#SUCCESS}.</li>
+     * <li>Calculates a rollback limit height (based on trim height or max rollback
+     * constants).</li>
+     * <li>Iteratively pops off the last block, rolling back derived tables and
+     * caches, until consistency is restored.</li>
+     * <li>Updates the resolution state to {@link ResolutionState#SUCCESS} upon
+     * recovery, or {@link ResolutionState#FAILED} if the limit is reached.</li>
+     * </ol>
+     *
+     * @see #manualResolveDatabaseConsistency()
+     */
     @Override
     public void autoResolveDatabaseConsistency() {
         if (resolutionState == ResolutionState.ACTIVE) {
             logger.info("Consistency resolution is already active. Ignoring new request.");
             return;
         }
+
         resolutionState = ResolutionState.ACTIVE;
         blockListeners.notify(null, Event.CONSISTENCY_RESOLUTION_STARTED);
-
         logger.info("Resolving database consistency...");
 
         if (checkDatabaseState() == 0) {
@@ -1894,31 +1954,19 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     }
 
     /**
-     * Attempts to resolve database inconsistencies by automatically popping off
-     * blocks.
+     * Manually triggers the database consistency resolution process.
      * <p>
-     * This method runs in a new thread to avoid blocking the main application. It
-     * is protected by the
-     * {@link #resolutionState} state machine to prevent multiple instances from
-     * running concurrently.
+     * This method is designed to be called from an external source (e.g., API or
+     * GUI) to force a
+     * consistency check and resolution attempt. Unlike
+     * {@link #autoResolveDatabaseConsistency()},
+     * this method spawns a new thread to perform the operation asynchronously,
+     * ensuring that the
+     * calling thread is not blocked.
      * <p>
-     * The process is as follows:
-     * <ol>
-     * <li>The state is set to {@link ResolutionState#ACTIVE}.</li>
-     * <li>Block processing and download threads are paused.</li>
-     * <li>It checks if the database is already consistent. If so, it sets the state
-     * to {@link ResolutionState#SUCCESS} and exits.</li>
-     * <li>It determines a safe limit height to pop off to (either the last trim
-     * height or {@link Constants#MAX_ROLLBACK} blocks back).</li>
-     * <li>It enters a loop, popping one block at a time and re-checking for
-     * consistency.</li>
-     * <li>If consistency is restored, the loop breaks, and the state is set to
-     * {@link ResolutionState#SUCCESS}.</li>
-     * <li>If the limit height is reached without restoring consistency, the process
-     * stops, and the state is set to {@link ResolutionState#FAILED}.</li>
-     * <li>A {@code finally} block ensures that the resolution state is always
-     * updated and that the processing threads are resumed.</li>
-     * </ol>
+     * It explicitly pauses block processing threads (downloader and importer)
+     * before starting the
+     * resolution logic and resumes them afterwards.
      */
     @Override
     public void manualResolveDatabaseConsistency() {
@@ -1927,16 +1975,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             return;
         }
         resolutionState = ResolutionState.ACTIVE;
-        blockListeners.notify(null, Event.CONSISTENCY_RESOLUTION_STARTED);
 
         new Thread(() -> {
-            logger.info("Resolving database consistency...");
             getMoreBlocksAutoPause.set(true);
             blockImporterAutoPause.set(true);
             getMoreBlocksLock.writeLock().lock();
             blockImporterLock.writeLock().lock();
             try {
                 synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
+                    blockListeners.notify(null, Event.CONSISTENCY_RESOLUTION_STARTED);
+                    logger.info("Resolving database consistency...");
                     if (checkDatabaseState() == 0) {
                         resolutionState = ResolutionState.SUCCESS;
                         blockListeners.notify(null, Event.CONSISTENCY_RESOLUTION_FINISHED);
@@ -2063,6 +2111,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
                 if (checkDatabaseState() != 0) {
                     logger.warn("Database is inconsistent. Skipping trim to preserve rollback capability.");
+                    if (isAutoResolutionRequired()) {
+                        autoResolveDatabaseConsistency();
+                    }
                     return;
                 }
                 isTrimming.set(true);
@@ -2318,6 +2369,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     }
 
     @Override
+    public PopOffState getManualPopOffState() {
+        return manualPopOffState;
+    }
+
+    @Override
+    public PopOffState getAutoPopOffState() {
+        return autoPopOffState;
+    }
+
+    @Override
     public void processPeerBlock(JsonObject request, Peer peer) throws SignumException {
         Block newBlock = Block.parseBlock(request, blockchain.getHeight());
         // * This process takes care of the blocks that is announced by peers We do not
@@ -2423,6 +2484,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         lastCheckTotalEffectiveBalance.set(totalEffectiveBalance);
         lastCheckHeight.set(blockchain.getHeight());
 
+        // Update previous state for the next check
+        previousConsistencyState = consistencyState.get();
+
         ConsistencyState newConsistencyState = (totalMined == totalEffectiveBalance) ? ConsistencyState.CONSISTENT
                 : ConsistencyState.INCONSISTENT;
         consistencyState.set(newConsistencyState);
@@ -2437,35 +2501,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             resolutionState = ResolutionState.IDLE;
             logger.info("Database consistency restored. Resolution state updated to IDLE.");
         }
-
-        // Auto resolution trigger only if no trim or pop-off is ongoing
-        // This avoids conflicts during active recovery operations
-        // Pop-off and trim operations already handle consistency related issues
-        // internally by rolling back erroneous transactions
-        if (isTrimming.get() == false && manualPopOffBlocksCount.get() == 0 && autoPopOffBlocksCount.get() == 0) {
-            // If database consistency state transitions to INCONSISTENT
-            // UNDEFINED -> INCONSISTENT or
-            // CONSISTENT -> INCONSISTENT
-            if ((previousConsistencyState == ConsistencyState.UNDEFINED
-                    || previousConsistencyState == ConsistencyState.CONSISTENT)
-                    && newConsistencyState == ConsistencyState.INCONSISTENT) {
-                // Trigger auto-resolution if
-                // Auto Resolution is enabled via property
-                // resolution state is IDLE or SUCCESS (not already ACTIVE or FAILED)
-                // This prevents overlapping resolution attempts
-                if (propertyService.getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED)
-                        && (resolutionState == ResolutionState.IDLE
-                                || resolutionState == ResolutionState.SUCCESS)) {
-                    logger.info(
-                            "Database state transitioned from {} to INCONSISTENT. Starting automatic consistency resolution...",
-                            previousConsistencyState);
-                    autoResolveDatabaseConsistency();
-                }
-            }
-        }
-
-        // Update previous state for the next check
-        previousConsistencyState = newConsistencyState;
 
         blockListeners.notify(null, Event.DATABASE_CONSISTENCY_UPDATE); // Notify listeners about the state update
 
@@ -2522,7 +2557,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         lastCheckTotalEffectiveBalance.set(totalEffectiveBalance);
         lastCheckHeight.set(blockchain.getHeight());
 
-        // Log consistency state
+        // Update previous state for the next check
+        previousConsistencyState = consistencyState.get();
 
         ConsistencyState newConsistencyState = (totalMined == totalEffectiveBalance) ? ConsistencyState.CONSISTENT
                 : ConsistencyState.INCONSISTENT;
@@ -2539,38 +2575,26 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             logger.info("Database consistency restored. Resolution state updated to IDLE.");
         }
 
-        // Auto resolution trigger only if no trim or pop-off is ongoing
-        // This avoids conflicts during active recovery operations
-        // Pop-off and trim operations already handle consistency related issues
-        // internally by rolling back erroneous transactions
-        if (isTrimming.get() == false && manualPopOffBlocksCount.get() == 0 && autoPopOffBlocksCount.get() == 0) {
-            // If database consistency state transitions to INCONSISTENT
-            // UNDEFINED -> INCONSISTENT or
-            // CONSISTENT -> INCONSISTENT
-            if ((previousConsistencyState == ConsistencyState.UNDEFINED
-                    || previousConsistencyState == ConsistencyState.CONSISTENT)
-                    && newConsistencyState == ConsistencyState.INCONSISTENT) {
-                // Trigger auto-resolution if
-                // Auto Resolution is enabled via property
-                // resolution state is IDLE or SUCCESS (not already ACTIVE or FAILED)
-                // This prevents overlapping resolution attempts
-                if (propertyService.getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED)
-                        && (resolutionState == ResolutionState.IDLE
-                                || resolutionState == ResolutionState.SUCCESS)) {
-                    logger.info(
-                            "Database state transitioned from {} to INCONSISTENT. Starting automatic consistency resolution...",
-                            previousConsistencyState);
-                    autoResolveDatabaseConsistency();
-                }
-            }
-        }
-
-        // Update previous state for the next check
-        previousConsistencyState = newConsistencyState;
-
         blockListeners.notify(null, Event.DATABASE_CONSISTENCY_UPDATE); // Notify listeners about the state update
 
         return comparison;
+    }
+
+    private void initialCleanDatabase() {
+        logger.info("Initial DatabaseClean popoff 1 block...");
+        if (blockchain.getHeight() > 0) {
+            popOff(1);
+        }
+
+        if (Boolean.FALSE.equals(propertyService.getBoolean(Props.DB_SKIP_CHECK))) {
+            // Check database state and auto-resolve if needed on startup
+            logger.info("Initial database check...");
+            checkDatabaseStateRequest();
+            if (isAutoResolutionRequired()) {
+                logger.info("Database is inconsistent on startup.");
+                manualResolveDatabaseConsistency();
+            }
+        }
     }
 
     /**
@@ -2589,7 +2613,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         if (resolutionState == ResolutionState.ACTIVE) {
             logger.info(
                     "Database consistency resolution is in progress. Database state check will give results after resolution finished.");
-        } else if (manualPopOffBlocksCount.get() > 0 || autoPopOffBlocksCount.get() > 0) {
+        } else if (manualPopOffState == PopOffState.ACTIVE || autoPopOffState == PopOffState.ACTIVE) {
             logger.info("Pop-off is in progress. Database state check will give results after pop-off finished.");
         }
 
@@ -2698,8 +2722,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         long txLoopTime = 0;
         long housekeepingTime = 0;
         long commitTime = 0;
-
-        final Map<String, Boolean> referencedTransactionValidityCache = new HashMap<>();
 
         synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
             stores.beginTransaction();
@@ -2956,10 +2978,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         trimDatabase(block);
                     }
                 } else {
-                    // If datbase auto resolve == false
-                    if (!propertyService.getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED)) {
-                        logger.error(
-                                "Database inconsistenc detected, please try resolve database consistency, by clicking Database Check -> Start Auto Resolve Database Consistency.");
+                    logger.warn(
+                            "Database is inconsistent at block height {}, skipping trim to preserve rollback capability.",
+                            block.getHeight());
+                    if (isAutoResolutionRequired()) {
+                        autoResolveDatabaseConsistency();
                     }
                 }
             }
@@ -3045,15 +3068,21 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
     @Override
     public List<Block> popOffTo(int height) {
-        List<Block> blocks = popOffTo(blockchain.getBlockAtHeight(height), null);
-        if (Boolean.FALSE.equals(propertyService.getBoolean(Props.DB_SKIP_CHECK))
-                && checkDatabaseState() != 0) {
-            logger.warn(
-                    "Database is inconsistent,"
-                            + " try to pop off to block height {} or sync from empty.",
-                    getMinRollbackHeight());
+        // We need to acquire locks here because autoResolveDatabaseConsistency assumes
+        // exclusive access, and the private popOffTo releases its locks before
+        // returning.
+        synchronized (downloadCache) {
+            synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
+                List<Block> blocks = popOffTo(blockchain.getBlockAtHeight(height), null);
+                if (Boolean.FALSE.equals(propertyService.getBoolean(Props.DB_SKIP_CHECK))
+                        && checkDatabaseState() != 0) {
+                    if (isAutoResolutionRequired()) {
+                        autoResolveDatabaseConsistency();
+                    }
+                }
+                return blocks;
+            }
         }
-        return blocks;
     }
 
     @Override
@@ -3097,6 +3126,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         Block block = blockchain.getLastBlock();
         try {
             synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
+                manualPopOffState = PopOffState.ACTIVE;
                 if (manualPopOffBlocksCount.get() == 0) {
                     logger.info("No blocks to pop off.");
                     return;
@@ -3219,6 +3249,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             // Get block height from datbase
             block = blockDb.findLastBlock();
             blockchain.setLastBlock(block);
+            manualPopOffState = PopOffState.IDLE;
             blockListeners.notify(block, Event.BLOCK_MANUAL_POPPED);
             blockImporterLock.writeLock().unlock();
             getMoreBlocksLock.writeLock().unlock();
@@ -3253,6 +3284,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
                 Block block = blockchain.getLastBlock();
                 try {
+                    autoPopOffState = PopOffState.ACTIVE;
                     stores.beginTransaction();
                     int blockHeight = block.getHeight();
                     beforeRollbackHeight.set(blockHeight);
@@ -3313,6 +3345,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     blockchain.setLastBlock(block);
                     blockListeners.notify(block, Event.BLOCK_AUTO_POPPED);
                     stores.endTransaction();
+                    autoPopOffState = PopOffState.IDLE;
                 }
             }
         }
