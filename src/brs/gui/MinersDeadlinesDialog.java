@@ -1,10 +1,13 @@
 package brs.gui;
 
+import brs.gui.util.TableUtils;
+
 import javax.swing.*;
 import javax.swing.table.TableRowSorter;
 import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.util.List;
 
 public class MinersDeadlinesDialog extends JFrame {
     private static volatile MinersDeadlinesDialog instance;
@@ -27,7 +30,7 @@ public class MinersDeadlinesDialog extends JFrame {
 
     public static void packColumns() {
         if (instance != null && instance.isVisible() && instance.table != null) {
-            BlockGenerationMetricsPanel.packTableColumns(instance.table);
+            TableUtils.packTableColumns(instance.table);
         }
     }
 
@@ -55,7 +58,21 @@ public class MinersDeadlinesDialog extends JFrame {
         table.setDefaultRenderer(Object.class, new BlockGenerationMetricsPanel.MinerTableCellRenderer());
         table.setFillsViewportHeight(true);
 
-        TableRowSorter<BlockGenerationMetricsPanel.MinersTableModel> sorter = new TableRowSorter<>(model);
+        TableRowSorter<BlockGenerationMetricsPanel.MinersTableModel> sorter = new TableRowSorter<BlockGenerationMetricsPanel.MinersTableModel>(
+                model) {
+            @Override
+            public void toggleSortOrder(int column) {
+                List<? extends RowSorter.SortKey> sortKeys = getSortKeys();
+                if (sortKeys.size() > 0) {
+                    if (sortKeys.get(0).getColumn() == column
+                            && sortKeys.get(0).getSortOrder() == SortOrder.DESCENDING) {
+                        setSortKeys(null);
+                        return;
+                    }
+                }
+                super.toggleSortOrder(column);
+            }
+        };
         table.setRowSorter(sorter);
 
         table.getColumn(BlockGenerationMetricsPanel.MinersTableModel.COL_IO).setPreferredWidth(30);
