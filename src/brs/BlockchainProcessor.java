@@ -148,6 +148,17 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
         FAILED
     }
 
+    /**
+     * Represents the state of a pop-off process (removing blocks from the
+     * blockchain).
+     */
+    enum PopOffState {
+        /** No pop-off is currently in progress. */
+        IDLE,
+        /** A pop-off process is currently active. */
+        ACTIVE
+    }
+
     Peer getLastBlockchainFeeder();
 
     int getLastBlockchainFeederHeight();
@@ -207,6 +218,10 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
     ConsistencyState getConsistencyState();
 
     ResolutionState getResolutionState();
+
+    PopOffState getManualPopOffState();
+
+    PopOffState getAutoPopOffState();
 
     void processPeerBlock(JsonObject request, Peer peer) throws SignumException;
 
