@@ -413,11 +413,6 @@ public final class Signum {
                     indirectIncomingService,
                     aliasService);
 
-            // Now that the processor is up, perform recovery if needed
-            if (shutdownManager.wasPreviousShutdownDirty()) {
-                logger.warn("Previous shutdown was not clean. Popping off 10 blocks to ensure consistency...");
-                blockchainProcessor.popOff(10);
-            }
             downloadCache.setBlockchainProcessor(blockchainProcessor);
 
             generator.generateForBlockchainProcessor(threadPool, blockchainProcessor);
