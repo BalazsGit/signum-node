@@ -4,6 +4,7 @@ import brs.BlockchainProcessor;
 import brs.peer.PeerMetric;
 import brs.Signum;
 import brs.gui.util.MovingAverage;
+import brs.gui.util.TableUtils;
 import brs.gui.PeersDialog.PeerCategory;
 import brs.peer.Peer;
 import brs.peer.Peers;
@@ -24,6 +25,7 @@ import org.jfree.data.xy.XYSeriesCollection;
 import org.jfree.data.xy.XYDataset;
 
 import javax.swing.*;
+import javax.swing.table.JTableHeader;
 import javax.swing.table.AbstractTableModel;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableRowSorter;
@@ -54,16 +56,38 @@ public class PeerMetricsPanel extends JPanel {
     private static final int AXIS_LINES = 0;
     private static final int AXIS_BARS = 1;
 
-    private static final Color LIGHT_MAGENTA = new Color(230, 60, 230); // More vivid Magenta
-    private static final Color LIGHT_RED = new Color(255, 100, 100); // Lighter Red for better contrast
-    private static final Color COLOR_MIN_LATENCY = new Color(25, 120, 40); // Contrast Green
-    private static final Color COLOR_MAX_LATENCY = new Color(160, 0, 0); // Darker Red
+    private static final Color COLOR_OTHER_RESPONSE_TIME = new Color(160, 85, 230); // More vivid Magenta
+    private static final Color COLOR_BLACKLISTED_PEERS = new Color(255, 100, 100); // Lighter Red for better contrast
+    private static final Color COLOR_MIN_RESPONSE_TIME = new Color(80, 170, 50); // Contrast Green
+    private static final Color COLOR_MAX_RESPONSE_TIME = new Color(160, 0, 0); // Darker Red
 
-    private static final Color COLOR_RX_LATENCY = new Color(0, 100, 0); // Dark Green
-    private static final Color COLOR_RX_COUNT = Color.GREEN;
-    private static final Color COLOR_TX_LATENCY = Color.ORANGE;
-    private static final Color COLOR_TX_COUNT = new Color(255, 70, 0); // Contrast Red-Orange
+    private static final Color COLOR_RX_RESPONSE_TIME = new Color(0, 100, 0); // Dark Green
+    private static final Color COLOR_RX_COUNT = Color.GREEN; // Green
+    private static final Color COLOR_TX_RESPONSE_TIME = Color.ORANGE; // Orange
+    private static final Color COLOR_TX_COUNT = Color.BLUE; // Blue
+
     private static final Color COLOR_OTHER_COUNT = new Color(255, 215, 0); // Gold
+
+    private static final Color COLOR_CONNECTED_PEERS = Color.GREEN; // Green
+    private static final Color COLOR_ACTIVE_PEERS = Color.CYAN; // Cyan
+    private static final Color COLOR_ALL_PEERS = Color.WHITE; // White
+
+    private static final BasicStroke CHART_STROKE = new BasicStroke(1.2f);
+
+    // Column Headers
+    private static final String COL_TIME = "Time";
+    private static final String COL_ADDRESS = "Address";
+    private static final String COL_ANNOUNCED = "Announced";
+    private static final String COL_STATE = "State";
+    private static final String COL_VERSION = "Version";
+    private static final String COL_HEIGHT = "Height";
+    private static final String COL_AVG_RESP = "Avg R.";
+    private static final String COL_MIN_RESP = "Min R.";
+    private static final String COL_MAX_RESP = "Max R.";
+    private static final String COL_LAST_RESP = "Last R.";
+    private static final String COL_AVG_BLOCKS = "Avg B.";
+    private static final String COL_TOTAL_BLOCKS = "Tot B.";
+    private static final String COL_REQ = "Req";
 
     private enum MetricType {
         RX, TX, OTHER
@@ -129,7 +153,11 @@ public class PeerMetricsPanel extends JPanel {
     private final List<PeersDialog.PeerTabPanel> overviewPeerPanels = new ArrayList<>();
     private final List<PeersDialog.PeerCategory> overviewPeerCategories = new ArrayList<>();
 
-    private long updateCounter = 0;
+    private long rxUpdateCounter = 0;
+    private long txUpdateCounter = 0;
+    private long otherUpdateCounter = 0;
+    private long overviewUpdateCounter = 0;
+    private volatile String latestNetworkVersion = Signum.VERSION.toString();
 
     private final ExecutorService chartUpdateExecutor = Executors.newSingleThreadExecutor();
 
@@ -146,10 +174,12 @@ public class PeerMetricsPanel extends JPanel {
 
     public void init() {
         Signum.getBlockchainProcessor().addPeerMetricListener(this::onPeerMetric);
+        Signum.getBlockchainProcessor().addListener(this::onPeersUpdated, BlockchainProcessor.Event.PEERS_UPDATED);
     }
 
     public void shutdown() {
         Signum.getBlockchainProcessor().removePeerMetricListener(this::onPeerMetric);
+        Signum.getBlockchainProcessor().removeListener(this::onPeersUpdated, BlockchainProcessor.Event.PEERS_UPDATED);
         chartUpdateExecutor.shutdown();
     }
 
@@ -157,10 +187,10 @@ public class PeerMetricsPanel extends JPanel {
         setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
         setLayout(new BorderLayout(0, 0));
 
-        connectedPeersBar = createProgressBar();
-        allPeersBar = createProgressBar();
-        activePeersBar = createProgressBar();
-        blacklistedPeersBar = createProgressBar();
+        connectedPeersBar = createProgressBar("0");
+        allPeersBar = createProgressBar("0");
+        activePeersBar = createProgressBar("0");
+        blacklistedPeersBar = createProgressBar("0");
 
         connectedSeries = new XYSeries("Connected", true, false);
         activeSeries = new XYSeries("Active", true, false);
@@ -172,14 +202,14 @@ public class PeerMetricsPanel extends JPanel {
         tabbedPane.setTabPlacement(JTabbedPane.BOTTOM);
 
         // RX Tab
-        rxLatencyBar = createProgressBar();
-        rxCountBar = createProgressBar();
+        rxLatencyBar = createProgressBar("C: 0 | MA: 0 - min: 0 - max: 0 ms");
+        rxCountBar = createProgressBar("C: 0 | MA: 0.00 - min: 0.00 - max: 0.00");
         rxLatencySeries = new XYSeries("Response Time (ms)", true, false);
         rxCountSeries = new XYSeries("Block Count", true, false);
-        rxAbsMinSeries = new XYSeries("Abs Min Latency", true, false);
-        rxAbsMaxSeries = new XYSeries("Abs Max Latency", true, false);
+        rxAbsMinSeries = new XYSeries("Abs Min Resp Time", true, false);
+        rxAbsMaxSeries = new XYSeries("Abs Max Resp Time", true, false);
 
-        String rxLatencyTooltip = "The moving average of the latency (response time) for Rx (Received) Block operations from peers.\n\n"
+        String rxLatencyTooltip = "The moving average of the response time for Rx (Received) Block operations from peers.\n\n"
                 +
                 "Lower values indicate faster network communication.";
         String rxCountTooltip = "The moving average of the number of blocks received from peers.";
@@ -187,22 +217,22 @@ public class PeerMetricsPanel extends JPanel {
         tabbedPane.addTab("Block Rx", createMetricTab(
                 "RX Block Metrics",
                 rxLatencyBar, rxCountBar,
-                "Block Rx Latency (MA)", "Block Rx Count (MA)",
+                "Block Rx Resp Time (MA)", "Block Rx Count (MA)",
                 rxLatencyTooltip, rxCountTooltip,
                 rxLatencySeries, rxCountSeries,
                 rxAbsMinSeries, rxAbsMaxSeries,
-                COLOR_RX_LATENCY, COLOR_RX_COUNT,
+                COLOR_RX_RESPONSE_TIME, COLOR_RX_COUNT,
                 MetricType.RX));
 
         // TX Tab
-        txLatencyBar = createProgressBar();
-        txCountBar = createProgressBar();
+        txLatencyBar = createProgressBar("C: 0 | MA: 0 - min: 0 - max: 0 ms");
+        txCountBar = createProgressBar("C: 0 | MA: 0.00 - min: 0.00 - max: 0.00");
         txLatencySeries = new XYSeries("Response Time (ms)", true, false);
         txCountSeries = new XYSeries("Request Count", true, false);
-        txAbsMinSeries = new XYSeries("Abs Min Latency", true, false);
-        txAbsMaxSeries = new XYSeries("Abs Max Latency", true, false);
+        txAbsMinSeries = new XYSeries("Abs Min Resp Time", true, false);
+        txAbsMaxSeries = new XYSeries("Abs Max Resp Time", true, false);
 
-        String txLatencyTooltip = "The moving average of the latency (response time) for Tx (Transmitted) Block operations to peers.\n\n"
+        String txLatencyTooltip = "The moving average of the response time for Tx (Transmitted) Block operations to peers.\n\n"
                 +
                 "Lower values indicate faster network communication.";
         String txCountTooltip = "The moving average of the number of block requests sent to peers.";
@@ -210,32 +240,32 @@ public class PeerMetricsPanel extends JPanel {
         tabbedPane.addTab("Block Tx", createMetricTab(
                 "TX Block Metrics",
                 txLatencyBar, txCountBar,
-                "Block Tx Latency (MA)", "Block Tx Count (MA)",
+                "Block Tx Resp Time (MA)", "Block Tx Count (MA)",
                 txLatencyTooltip, txCountTooltip,
                 txLatencySeries, txCountSeries,
                 txAbsMinSeries, txAbsMaxSeries,
-                COLOR_TX_LATENCY, COLOR_TX_COUNT,
+                COLOR_TX_RESPONSE_TIME, COLOR_TX_COUNT,
                 MetricType.TX));
 
         // Other Tab
-        otherLatencyBar = createProgressBar();
-        otherCountBar = createProgressBar();
+        otherLatencyBar = createProgressBar("C: 0 | MA: 0 - min: 0 - max: 0 ms");
+        otherCountBar = createProgressBar("C: 0 | MA: 0.00 - min: 0.00 - max: 0.00");
         otherLatencySeries = new XYSeries("Response Time (ms)", true, false);
         otherCountSeries = new XYSeries("Request Count", true, false);
-        otherAbsMinSeries = new XYSeries("Abs Min Latency", true, false);
-        otherAbsMaxSeries = new XYSeries("Abs Max Latency", true, false);
+        otherAbsMinSeries = new XYSeries("Abs Min Resp Time", true, false);
+        otherAbsMaxSeries = new XYSeries("Abs Max Resp Time", true, false);
 
-        String otherLatencyTooltip = "The moving average of the latency for other types of peer communication.";
+        String otherLatencyTooltip = "The moving average of the response time for other types of peer communication.";
         String otherCountTooltip = "The moving average of the count of other peer requests.";
 
         tabbedPane.addTab("Other Communication", createMetricTab(
                 "Other Communication Metrics",
                 otherLatencyBar, otherCountBar,
-                "Other Comm. Latency (MA)", "Other Comm. Count (MA)",
+                "Other Comm. Resp Time (MA)", "Other Comm. Count (MA)",
                 otherLatencyTooltip, otherCountTooltip,
                 otherLatencySeries, otherCountSeries,
                 otherAbsMinSeries, otherAbsMaxSeries,
-                LIGHT_MAGENTA, COLOR_OTHER_COUNT,
+                COLOR_OTHER_RESPONSE_TIME, COLOR_OTHER_COUNT,
                 MetricType.OTHER));
 
         // --- Peer Counts (Overview Tab) ---
@@ -245,18 +275,28 @@ public class PeerMetricsPanel extends JPanel {
         JPanel leftOverview = new JPanel(new GridBagLayout());
 
         JPanel metricsOverview = new JPanel(new GridBagLayout());
-        addMetricRow(metricsOverview, 0, createLabel("Connected", Color.GREEN, "Number of currently connected peers."),
-                connectedPeersBar);
-        addMetricRow(metricsOverview, 1, createLabel("Active", Color.CYAN, "Number of active peers (communicating)."),
-                activePeersBar);
-        addMetricRow(metricsOverview, 2, createLabel("All Known", Color.WHITE, "Total number of known peers."),
-                allPeersBar);
-        addMetricRow(metricsOverview, 3, createLabel("Blacklisted", LIGHT_RED, "Number of blacklisted peers."),
-                blacklistedPeersBar);
+        int yPos = 0;
+        JLabel connectedLabel = createLabel("Connected", COLOR_CONNECTED_PEERS, "Number of currently connected peers.");
+        addMetricRow(metricsOverview, yPos++, connectedLabel, connectedPeersBar);
+
+        JLabel activeLabel = createLabel("Active", COLOR_ACTIVE_PEERS, "Number of active peers (communicating).");
+        addMetricRow(metricsOverview, yPos++, activeLabel, activePeersBar);
+
+        JLabel allLabel = createLabel("All Known", COLOR_ALL_PEERS, "Total number of known peers.");
+        addMetricRow(metricsOverview, yPos++, allLabel, allPeersBar);
+
+        JLabel blacklistedLabel = createLabel("Blacklisted", COLOR_BLACKLISTED_PEERS, "Number of blacklisted peers.");
+        addMetricRow(metricsOverview, yPos++, blacklistedLabel, blacklistedPeersBar);
+
         addComponent(leftOverview, metricsOverview, 0, 0, 1, 0.0, 0.0, GridBagConstraints.NORTHWEST,
                 GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
 
         ChartPanel overviewChartPanel = createOverviewChartPanel();
+        addToggleListener(connectedLabel, overviewChartPanel, connectedSeries.getKey().toString());
+        addToggleListener(activeLabel, overviewChartPanel, activeSeries.getKey().toString());
+        addToggleListener(allLabel, overviewChartPanel, allSeries.getKey().toString());
+        addToggleListener(blacklistedLabel, overviewChartPanel, blacklistedSeries.getKey().toString());
+
         addComponent(leftOverview, overviewChartPanel, 1, 0, 1, 0.0, 0.0, GridBagConstraints.NORTHWEST,
                 GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
 
@@ -341,21 +381,23 @@ public class PeerMetricsPanel extends JPanel {
         tableTitleLabel.setForeground(UIManager.getColor("TitledBorder.titleColor"));
         tableTitleLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
-        addMetricRow(metricsPanel, yPos++, lLabel, latencyBar);
         addMetricRow(metricsPanel, yPos++, cLabel, countBar);
+        addMetricRow(metricsPanel, yPos++, lLabel, latencyBar);
 
-        String absMaxTooltip = "The absolute maximum latency observed across all peers for " + type + " operations.\n\n"
+        String absMaxTooltip = "The absolute maximum response time observed across all peers for " + type
+                + " operations.\n\n"
                 +
                 "Displays: Current (C) | min - max over history.";
-        JLabel absMaxLabel = createLabel("Abs Max Latency", COLOR_MAX_LATENCY, absMaxTooltip);
-        JProgressBar absMaxLatencyBar = createProgressBar();
+        JLabel absMaxLabel = createLabel("Abs Max Resp Time", COLOR_MAX_RESPONSE_TIME, absMaxTooltip);
+        JProgressBar absMaxLatencyBar = createProgressBar("C: 0 | min: 0 - max: 0");
         addMetricRow(metricsPanel, yPos++, absMaxLabel, absMaxLatencyBar);
 
-        String absMinTooltip = "The absolute minimum latency observed across all peers for " + type + " operations.\n\n"
+        String absMinTooltip = "The absolute minimum response time observed across all peers for " + type
+                + " operations.\n\n"
                 +
                 "Displays: Current (C) | min - max over history.";
-        JLabel absMinLabel = createLabel("Abs Min Latency", COLOR_MIN_LATENCY, absMinTooltip);
-        JProgressBar absMinLatencyBar = createProgressBar();
+        JLabel absMinLabel = createLabel("Abs Min Resp Time", COLOR_MIN_RESPONSE_TIME, absMinTooltip);
+        JProgressBar absMinLatencyBar = createProgressBar("C: 0 | min: 0 - max: 0");
         addMetricRow(metricsPanel, yPos++, absMinLabel, absMinLatencyBar);
 
         // Store UI references in client properties or map for update
@@ -384,10 +426,10 @@ public class PeerMetricsPanel extends JPanel {
                 barColor);
         chartPanels.put(type, chartPanel);
         zoomRanges.put(type, HISTORY_SIZE);
-        addToggleListener(lLabel, chartPanel, DATASET_LINES, 0); // Dataset 1 (Line), Series 0
-        addToggleListener(cLabel, chartPanel, DATASET_BARS, 0); // Dataset 0 (Bar), Series 0
-        addToggleListener(absMinLabel, chartPanel, DATASET_LINES, 1); // Dataset 1 (Line), Series 1
-        addToggleListener(absMaxLabel, chartPanel, DATASET_LINES, 2); // Dataset 1 (Line), Series 2
+        addToggleListener(lLabel, chartPanel, latencySeries.getKey().toString());
+        addToggleListener(cLabel, chartPanel, countSeries.getKey().toString());
+        addToggleListener(absMinLabel, chartPanel, absMinSeries.getKey().toString());
+        addToggleListener(absMaxLabel, chartPanel, absMaxSeries.getKey().toString());
 
         addComponent(leftPanel, chartPanel, 1, 0, 1, 0.0, 0.0, GridBagConstraints.NORTHWEST, GridBagConstraints.NONE,
                 new Insets(0, 0, 0, 0));
@@ -397,7 +439,19 @@ public class PeerMetricsPanel extends JPanel {
 
         // Table Section (Center)
         PeersTableModel model = new PeersTableModel(type);
-        JTable table = new JTable(model);
+        JTable table = new JTable(model) {
+            @Override
+            protected JTableHeader createDefaultTableHeader() {
+                return new JTableHeader(columnModel) {
+                    @Override
+                    public String getToolTipText(MouseEvent e) {
+                        int index = columnModel.getColumnIndexAtX(e.getPoint().x);
+                        int modelIndex = index == -1 ? -1 : columnModel.getColumn(index).getModelIndex();
+                        return model.getColumnTooltip(modelIndex);
+                    }
+                };
+            }
+        };
         TableRowSorter<PeersTableModel> sorter = setupTable(table, model);
 
         JPanel tablePanel = new JPanel(new BorderLayout(0, 0));
@@ -472,7 +526,7 @@ public class PeerMetricsPanel extends JPanel {
         }
 
         // Setup renderer and click listener
-        PeerMetricTableCellRenderer renderer = new PeerMetricTableCellRenderer(lineColor);
+        PeerMetricTableCellRenderer renderer = new PeerMetricTableCellRenderer(lineColor, barColor);
         table.setDefaultRenderer(Object.class, renderer);
         table.setDefaultRenderer(Double.class, renderer);
         table.setDefaultRenderer(Long.class, renderer);
@@ -482,7 +536,7 @@ public class PeerMetricsPanel extends JPanel {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (SwingUtilities.isLeftMouseButton(e)) {
-                    String legend = getLegendHtml(type, lineColor);
+                    String legend = getLegendHtml(type, lineColor, barColor);
                     PeerTableDialog.showDialog(SwingUtilities.getWindowAncestor(PeerMetricsPanel.this), sectionTitle,
                             model, renderer, legend);
                 }
@@ -640,12 +694,12 @@ public class PeerMetricsPanel extends JPanel {
         return sorter;
     }
 
-    private JProgressBar createProgressBar() {
+    private JProgressBar createProgressBar(String initialString) {
         JProgressBar bar = new JProgressBar(0, 100);
         bar.setPreferredSize(new Dimension(300, 20));
         bar.setMinimumSize(new Dimension(150, 20));
         bar.setStringPainted(true);
-        bar.setString("0");
+        bar.setString(initialString);
         return bar;
     }
 
@@ -718,23 +772,13 @@ public class PeerMetricsPanel extends JPanel {
         plot.mapDatasetToRangeAxis(DATASET_LINES, AXIS_LINES);
 
         XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, true);
-        lineRenderer.setUseFillPaint(true);
-        lineRenderer.setDefaultFillPaint(new Color(0, 0, 0, 0));
-        lineRenderer.setDrawOutlines(false);
-        lineRenderer.setDefaultShape(tooltipHitShape);
 
-        // Avg Latency
-        lineRenderer.setSeriesShape(0, tooltipHitShape);
-        lineRenderer.setSeriesPaint(0, lineColor);
-        // Abs Min
-        lineRenderer.setSeriesShape(1, tooltipHitShape);
-        lineRenderer.setSeriesPaint(1, COLOR_MIN_LATENCY);
-        // Abs Max
-        lineRenderer.setSeriesShape(2, tooltipHitShape);
-        lineRenderer.setSeriesPaint(2, COLOR_MAX_LATENCY);
+        Map<String, Color> lineColors = new HashMap<>();
+        lineColors.put(lineSeries.getKey().toString(), lineColor);
+        lineColors.put(absMinSeries.getKey().toString(), COLOR_MIN_RESPONSE_TIME);
+        lineColors.put(absMaxSeries.getKey().toString(), COLOR_MAX_RESPONSE_TIME);
 
-        lineRenderer.setSeriesStroke(0, new BasicStroke(1.2f));
-        lineRenderer.setDefaultToolTipGenerator(new PeerChartToolTipGenerator());
+        configureLineRenderer(lineRenderer, lineDataset, lineColors);
         plot.setRenderer(DATASET_LINES, lineRenderer);
 
         plot.setDatasetRenderingOrder(DatasetRenderingOrder.FORWARD);
@@ -779,20 +823,14 @@ public class PeerMetricsPanel extends JPanel {
         plot.setAxisOffset(new RectangleInsets(0, 0, 0, 0));
 
         XYLineAndShapeRenderer renderer = new XYLineAndShapeRenderer(true, true);
-        renderer.setUseFillPaint(true);
-        renderer.setDefaultFillPaint(new Color(0, 0, 0, 0));
-        renderer.setDrawOutlines(false);
-        renderer.setDefaultShape(tooltipHitShape);
-        for (int i = 0; i < dataset.getSeriesCount(); i++) {
-            renderer.setSeriesShape(i, tooltipHitShape);
-            renderer.setSeriesStroke(i, new BasicStroke(1.2f));
-        }
-        renderer.setSeriesPaint(0, Color.GREEN); // Connected
-        renderer.setSeriesPaint(1, Color.CYAN); // Active
-        renderer.setSeriesPaint(2, Color.WHITE); // All
-        renderer.setSeriesPaint(3, LIGHT_RED); // Blacklisted
 
-        renderer.setDefaultToolTipGenerator(new PeerChartToolTipGenerator());
+        Map<String, Color> overviewColors = new HashMap<>();
+        overviewColors.put(connectedSeries.getKey().toString(), COLOR_CONNECTED_PEERS);
+        overviewColors.put(activeSeries.getKey().toString(), COLOR_ACTIVE_PEERS);
+        overviewColors.put(allSeries.getKey().toString(), COLOR_ALL_PEERS);
+        overviewColors.put(blacklistedSeries.getKey().toString(), COLOR_BLACKLISTED_PEERS);
+
+        configureLineRenderer(renderer, dataset, overviewColors);
         plot.setRenderer(renderer);
         plot.setDataset(dataset);
         chart.removeLegend();
@@ -810,9 +848,13 @@ public class PeerMetricsPanel extends JPanel {
 
     private void onPeerMetric(PeerMetric metric) {
         chartUpdateExecutor.submit(() -> {
-            updateCounter++;
+            MetricType type;
+            long currentCounter;
 
             if (metric.getType() == PeerMetric.Type.BLOCK_RX) {
+                type = MetricType.RX;
+                rxUpdateCounter++;
+                currentCounter = rxUpdateCounter;
                 rxLatencyMA.add((double) metric.getLatency());
                 if (metric.getBlocksReceived() > 0) {
                     rxBlockCountMA.add((double) metric.getBlocksReceived());
@@ -820,10 +862,16 @@ public class PeerMetricsPanel extends JPanel {
                     rxBlockCountMA.add(0.0);
                 }
             } else if (metric.getType() == PeerMetric.Type.BLOCK_TX) {
+                type = MetricType.TX;
+                txUpdateCounter++;
+                currentCounter = txUpdateCounter;
                 txLatencyMA.add((double) metric.getLatency());
                 // For TX, we count requests, so add 1
                 txRequestCountMA.add(1.0);
             } else { // OTHER
+                type = MetricType.OTHER;
+                otherUpdateCounter++;
+                currentCounter = otherUpdateCounter;
                 otherLatencyMA.add((double) metric.getLatency());
                 otherRequestCountMA.add(1.0);
             }
@@ -832,15 +880,6 @@ public class PeerMetricsPanel extends JPanel {
             PeerHistory peerHistory = peerHistories.computeIfAbsent(metric.getPeerAddress(),
                     k -> new PeerHistory(metric.getPeerAddress()));
             peerHistory.add(metric);
-
-            MetricType type;
-            if (metric.getType() == PeerMetric.Type.BLOCK_RX) {
-                type = MetricType.RX;
-            } else if (metric.getType() == PeerMetric.Type.BLOCK_TX) {
-                type = MetricType.TX;
-            } else {
-                type = MetricType.OTHER;
-            }
 
             AbsLatencyStats stats = absLatencyStats.computeIfAbsent(type, k -> new AbsLatencyStats());
             long peerMinLatency = (type == MetricType.RX) ? peerHistory.blockMinLatency
@@ -876,31 +915,58 @@ public class PeerMetricsPanel extends JPanel {
 
             // Prepare DTOs for UI update
             MetricsUpdateData data = new MetricsUpdateData();
-            data.updateCounter = updateCounter;
-            data.rx = new MetricSnapshot(rxLatencyMA, rxBlockCountMA);
-            data.tx = new MetricSnapshot(txLatencyMA, txRequestCountMA);
-            data.other = new MetricSnapshot(otherLatencyMA, otherRequestCountMA);
+            data.updatedPeerAddress = metric.getPeerAddress();
+            data.updatedType = type;
+            data.typeCounter = currentCounter;
 
-            data.rxAbsMin = new MetricSnapshot(rxAbsMinMA, null);
-            data.rxAbsMax = new MetricSnapshot(rxAbsMaxMA, null);
-            data.txAbsMin = new MetricSnapshot(txAbsMinMA, null);
-            data.txAbsMax = new MetricSnapshot(txAbsMaxMA, null);
-            data.otherAbsMin = new MetricSnapshot(otherAbsMinMA, null);
-            data.otherAbsMax = new MetricSnapshot(otherAbsMaxMA, null);
-
-            data.rxPeers = getPeerSnapshots(MetricType.RX);
-            data.txPeers = getPeerSnapshots(MetricType.TX);
-            data.otherPeers = getPeerSnapshots(MetricType.OTHER);
-
-            data.overviewData = calculateOverviewUpdate();
+            if (type == MetricType.RX) {
+                data.rx = new MetricSnapshot(rxLatencyMA, rxBlockCountMA);
+                data.rxAbsMin = new MetricSnapshot(rxAbsMinMA, null);
+                data.rxAbsMax = new MetricSnapshot(rxAbsMaxMA, null);
+                data.rxPeers = getPeerSnapshots(MetricType.RX);
+            } else if (type == MetricType.TX) {
+                data.tx = new MetricSnapshot(txLatencyMA, txRequestCountMA);
+                data.txAbsMin = new MetricSnapshot(txAbsMinMA, null);
+                data.txAbsMax = new MetricSnapshot(txAbsMaxMA, null);
+                data.txPeers = getPeerSnapshots(MetricType.TX);
+            } else {
+                data.other = new MetricSnapshot(otherLatencyMA, otherRequestCountMA);
+                data.otherAbsMin = new MetricSnapshot(otherAbsMinMA, null);
+                data.otherAbsMax = new MetricSnapshot(otherAbsMaxMA, null);
+                data.otherPeers = getPeerSnapshots(MetricType.OTHER);
+            }
 
             // Update UI components on EDT
             SwingUtilities.invokeLater(() -> {
                 updateGlobalUI(data);
                 updateTable(data);
-                if (data.overviewData != null) {
-                    applyOverviewUpdate(data.overviewData);
+            });
+        });
+    }
+
+    private void onPeersUpdated(brs.Block block) {
+        chartUpdateExecutor.submit(() -> {
+            String latestVersion = Signum.VERSION.toString();
+            Collection<Peer> allPeers = Peers.getAllPeers();
+            for (Peer p : allPeers) {
+                String v = p.getVersion() != null ? p.getVersion().toString() : "";
+                if (!v.isEmpty() && !"unknown".equals(v)) {
+                    if (PeersDialog.compareVersions(v, latestVersion) > 0) {
+                        latestVersion = v;
+                    }
                 }
+            }
+            this.latestNetworkVersion = latestVersion;
+
+            overviewUpdateCounter++;
+            OverviewUpdateData overviewData = calculateOverviewUpdate(overviewUpdateCounter);
+            SwingUtilities.invokeLater(() -> {
+                if (overviewData != null) {
+                    applyOverviewUpdate(overviewData);
+                }
+                rxTableModel.fireTableDataChanged();
+                txTableModel.fireTableDataChanged();
+                otherTableModel.fireTableDataChanged();
             });
         });
     }
@@ -915,38 +981,44 @@ public class PeerMetricsPanel extends JPanel {
             else if (type == MetricType.OTHER && ph.otherRequestCount > 0)
                 snapshots.add(new PeerStatsSnapshot(ph, type));
         }
-        snapshots.sort(Comparator.comparingLong(p -> p.creationTime));
+        snapshots.sort((p1, p2) -> Long.compare(p2.lastTimestamp, p1.lastTimestamp));
         return snapshots;
     }
 
     private void updateGlobalUI(MetricsUpdateData data) {
-        updateMetricSet(data.rx, rxLatencyBar, rxCountBar, rxLatencySeries, rxCountSeries, "ms",
-                "");
-        updateChartRange(MetricType.RX);
-        updateMetricSet(data.tx, txLatencyBar, txCountBar, txLatencySeries, txCountSeries, "ms",
-                "");
-        updateChartRange(MetricType.TX);
-        updateMetricSet(data.other, otherLatencyBar, otherCountBar, otherLatencySeries,
-                otherCountSeries, "ms", "");
-        updateChartRange(MetricType.OTHER);
-
-        updateAbsMetric(rxLatencyBar, data.rxAbsMin, data.rxAbsMax, rxAbsMinSeries, rxAbsMaxSeries);
-        updateAbsMetric(txLatencyBar, data.txAbsMin, data.txAbsMax, txAbsMinSeries, txAbsMaxSeries);
-        updateAbsMetric(otherLatencyBar, data.otherAbsMin, data.otherAbsMax, otherAbsMinSeries, otherAbsMaxSeries);
+        if (data.updatedType == MetricType.RX) {
+            updateMetricSet(data.rx, rxLatencyBar, rxCountBar, rxLatencySeries, rxCountSeries, "ms", "",
+                    data.typeCounter);
+            updateChartRange(MetricType.RX);
+            updateAbsMetric(rxLatencyBar, data.rxAbsMin, data.rxAbsMax, rxAbsMinSeries, rxAbsMaxSeries,
+                    data.typeCounter);
+        } else if (data.updatedType == MetricType.TX) {
+            updateMetricSet(data.tx, txLatencyBar, txCountBar, txLatencySeries, txCountSeries, "ms", "",
+                    data.typeCounter);
+            updateChartRange(MetricType.TX);
+            updateAbsMetric(txLatencyBar, data.txAbsMin, data.txAbsMax, txAbsMinSeries, txAbsMaxSeries,
+                    data.typeCounter);
+        } else {
+            updateMetricSet(data.other, otherLatencyBar, otherCountBar, otherLatencySeries, otherCountSeries, "ms", "",
+                    data.typeCounter);
+            updateChartRange(MetricType.OTHER);
+            updateAbsMetric(otherLatencyBar, data.otherAbsMin, data.otherAbsMax, otherAbsMinSeries, otherAbsMaxSeries,
+                    data.typeCounter);
+        }
     }
 
     private void updateAbsMetric(JProgressBar parentBar, MetricSnapshot minSnap, MetricSnapshot maxSnap,
-            XYSeries minSeries, XYSeries maxSeries) {
+            XYSeries minSeries, XYSeries maxSeries, long counter) {
         JProgressBar minBar = (JProgressBar) parentBar.getClientProperty("absMinBar");
         JProgressBar maxBar = (JProgressBar) parentBar.getClientProperty("absMaxBar");
 
         if (minBar != null) {
-            updateMetricSet(minSnap, minBar, null, minSeries, null, "ms", "");
+            updateMetricSet(minSnap, minBar, null, minSeries, null, "ms", "", counter);
             minBar.setString(
                     String.format("C: %.0f | min: %.0f - max: %.0f", minSnap.latCur, minSnap.latMin, minSnap.latMax));
         }
         if (maxBar != null) {
-            updateMetricSet(maxSnap, maxBar, null, maxSeries, null, "ms", "");
+            updateMetricSet(maxSnap, maxBar, null, maxSeries, null, "ms", "", counter);
             maxBar.setString(
                     String.format("C: %.0f | min: %.0f - max: %.0f", maxSnap.latCur, maxSnap.latMin, maxSnap.latMax));
         }
@@ -955,7 +1027,7 @@ public class PeerMetricsPanel extends JPanel {
     private void updateMetricSet(MetricSnapshot snapshot,
             JProgressBar latBar, JProgressBar countBar,
             XYSeries latSeries, XYSeries countSeries,
-            String latUnit, String countUnit) {
+            String latUnit, String countUnit, long counter) {
 
         latBar.setMaximum((int) (snapshot.latMax > 0 ? snapshot.latMax : 100));
         latBar.setValue((int) snapshot.latCur);
@@ -969,9 +1041,9 @@ public class PeerMetricsPanel extends JPanel {
                     snapshot.countAvg, snapshot.countMin, snapshot.countMax, countUnit));
         }
 
-        latSeries.addOrUpdate((double) updateCounter, snapshot.latAvg);
+        latSeries.addOrUpdate((double) counter, snapshot.latAvg);
         if (countSeries != null) {
-            countSeries.addOrUpdate((double) updateCounter, snapshot.countAvg);
+            countSeries.addOrUpdate((double) counter, snapshot.countAvg);
         }
 
         if (latSeries.getItemCount() > HISTORY_SIZE) {
@@ -997,7 +1069,7 @@ public class PeerMetricsPanel extends JPanel {
         panel.getChart().getXYPlot().getDomainAxis().setRange(lastX - range + 0.5, lastX + 0.5);
     }
 
-    private OverviewUpdateData calculateOverviewUpdate() {
+    private OverviewUpdateData calculateOverviewUpdate(long counter) {
         OverviewUpdateData data = new OverviewUpdateData();
         int all = Peers.getAllPeers().size();
         int connected = 0;
@@ -1035,7 +1107,7 @@ public class PeerMetricsPanel extends JPanel {
         data.blacklisted = blacklisted;
         data.maxHeight = maxHeight;
         data.latestVersion = latestVersion;
-        data.updateCounter = updateCounter;
+        data.updateCounter = counter;
 
         // Filter lists for tabs
         data.connectedList = new ArrayList<>();
@@ -1063,10 +1135,10 @@ public class PeerMetricsPanel extends JPanel {
         updateCountBar(activePeersBar, data.active, data.all);
         updateCountBar(blacklistedPeersBar, data.blacklisted, data.all);
 
-        connectedSeries.addOrUpdate((double) data.updateCounter, data.connected);
-        activeSeries.addOrUpdate((double) data.updateCounter, data.active);
-        allSeries.addOrUpdate((double) data.updateCounter, data.all);
-        blacklistedSeries.addOrUpdate((double) data.updateCounter, data.blacklisted);
+        connectedSeries.addOrUpdate((double) data.updateCounter, (double) data.connected);
+        activeSeries.addOrUpdate((double) data.updateCounter, (double) data.active);
+        allSeries.addOrUpdate((double) data.updateCounter, (double) data.all);
+        blacklistedSeries.addOrUpdate((double) data.updateCounter, (double) data.blacklisted);
 
         if (connectedSeries.getItemCount() > HISTORY_SIZE) {
             connectedSeries.remove(0);
@@ -1114,9 +1186,16 @@ public class PeerMetricsPanel extends JPanel {
     }
 
     private void updateTable(MetricsUpdateData data) {
-        rxTableModel.setData(data.rxPeers);
-        txTableModel.setData(data.txPeers);
-        otherTableModel.setData(data.otherPeers);
+        if (data.updatedType == MetricType.RX) {
+            rxTableModel.setData(data.rxPeers, data.updatedPeerAddress);
+            TableUtils.packTableColumns(rxPeersTable);
+        } else if (data.updatedType == MetricType.TX) {
+            txTableModel.setData(data.txPeers, data.updatedPeerAddress);
+            TableUtils.packTableColumns(txPeersTable);
+        } else {
+            otherTableModel.setData(data.otherPeers, data.updatedPeerAddress);
+            TableUtils.packTableColumns(otherPeersTable);
+        }
     }
 
     private void addComponent(JPanel panel, Component comp, int x, int y, int gridwidth, double weightx, double weighty,
@@ -1164,25 +1243,47 @@ public class PeerMetricsPanel extends JPanel {
         });
     }
 
-    private void addToggleListener(JLabel label, ChartPanel chartPanel, int datasetIndex, int seriesIndex) {
+    private void addLabelToggleListener(JLabel label, Consumer<Boolean> onToggleAction) {
         label.putClientProperty("visible", true);
         final Font originalFont = label.getFont();
-        final java.util.Map<java.awt.font.TextAttribute, Object> attributes = new java.util.HashMap<>(
-                originalFont.getAttributes());
-        attributes.put(java.awt.font.TextAttribute.STRIKETHROUGH, java.awt.font.TextAttribute.STRIKETHROUGH_ON);
+        final Map<TextAttribute, Object> attributes = new HashMap<>(originalFont.getAttributes());
+        attributes.put(TextAttribute.STRIKETHROUGH, TextAttribute.STRIKETHROUGH_ON);
         final Font strikethroughFont = originalFont.deriveFont(attributes);
 
         label.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent evt) {
                 if (SwingUtilities.isLeftMouseButton(evt)) {
+                    // Toggle the visibility state
                     boolean isVisible = !((boolean) label.getClientProperty("visible"));
                     label.putClientProperty("visible", isVisible);
+
+                    // Update the label's font to show the state
                     label.setFont(isVisible ? originalFont : strikethroughFont);
 
-                    XYPlot plot = chartPanel.getChart().getXYPlot();
-                    if (plot.getRenderer(datasetIndex) != null) {
-                        plot.getRenderer(datasetIndex).setSeriesVisible(seriesIndex, isVisible);
+                    // Perform the specific toggle action
+                    onToggleAction.accept(isVisible);
+                }
+            }
+        });
+    }
+
+    private void addToggleListener(JLabel label, ChartPanel chartPanel, String... seriesKeys) {
+        addLabelToggleListener(label, isVisible -> {
+            XYPlot plot = chartPanel.getChart().getXYPlot();
+            int datasetCount = plot.getDatasetCount();
+            for (String key : seriesKeys) {
+                for (int i = 0; i < datasetCount; i++) {
+                    XYDataset dataset = plot.getDataset(i);
+                    if (dataset instanceof XYSeriesCollection) {
+                        XYSeriesCollection seriesCollection = (XYSeriesCollection) dataset;
+                        int seriesIndex = seriesCollection.getSeriesIndex(key);
+                        if (seriesIndex >= 0) {
+                            if (plot.getRenderer(i) != null) {
+                                plot.getRenderer(i).setSeriesVisible(seriesIndex, isVisible);
+                            }
+                            break;
+                        }
                     }
                 }
             }
@@ -1223,34 +1324,83 @@ public class PeerMetricsPanel extends JPanel {
         private final MetricType type;
         private final String[] columns;
         private List<PeerStatsSnapshot> peerData = new ArrayList<>();
+        private String lastUpdatedPeer = null;
+        double maxAvgLatency = -1;
+        double minAvgLatency = Double.MAX_VALUE;
+        long minMinLatency = Long.MAX_VALUE;
+        long maxMinLatency = -1;
+        long minMaxLatency = Long.MAX_VALUE;
+        long maxMaxLatency = -1;
+        long minLastLatency = Long.MAX_VALUE;
+        long maxLastLatency = -1;
 
         PeersTableModel(MetricType type) {
             this.type = type;
             if (type == MetricType.RX) {
                 columns = new String[] {
-                        "Time", "Peer Address", "Announced", "State", "Version", "Height",
-                        "Avg Lat (ms)", "Min Lat (ms)", "Max Lat (ms)", "Last Lat (ms)",
-                        "Requests",
-                        "Avg Blocks", "Total Blocks"
+                        COL_TIME, COL_ADDRESS, COL_ANNOUNCED, COL_STATE, COL_VERSION, COL_HEIGHT,
+                        COL_AVG_RESP, COL_MIN_RESP, COL_MAX_RESP, COL_LAST_RESP,
+                        COL_AVG_BLOCKS, COL_TOTAL_BLOCKS,
+                        COL_REQ
                 };
-            } else if (type == MetricType.TX) {
+            } else { // TX and OTHER
                 columns = new String[] {
-                        "Time", "Peer Address", "Announced", "State", "Version", "Height",
-                        "Avg Lat (ms)", "Min Lat (ms)", "Max Lat (ms)", "Last Lat (ms)",
-                        "Requests"
-                };
-            } else { // OTHER
-                columns = new String[] {
-                        "Time", "Peer Address", "Announced", "State", "Version", "Height",
-                        "Avg Latency (ms)", "Min Latency (ms)", "Max Latency (ms)", "Last Latency (ms)",
-                        "Requests"
+                        COL_TIME, COL_ADDRESS, COL_ANNOUNCED, COL_STATE, COL_VERSION, COL_HEIGHT,
+                        COL_AVG_RESP, COL_MIN_RESP, COL_MAX_RESP, COL_LAST_RESP,
+                        COL_REQ
                 };
             }
         }
 
-        void setData(List<PeerStatsSnapshot> newData) {
+        void setData(List<PeerStatsSnapshot> newData, String updatedPeer) {
             this.peerData = newData;
+            this.lastUpdatedPeer = updatedPeer;
+            calculateExtremes();
             fireTableDataChanged();
+        }
+
+        private void calculateExtremes() {
+            maxAvgLatency = -1;
+            minAvgLatency = Double.MAX_VALUE;
+            minMinLatency = Long.MAX_VALUE;
+            maxMinLatency = -1;
+            minMaxLatency = Long.MAX_VALUE;
+            maxMaxLatency = -1;
+            minLastLatency = Long.MAX_VALUE;
+            maxLastLatency = -1;
+
+            if (peerData.isEmpty())
+                return;
+
+            for (PeerStatsSnapshot p : peerData) {
+                // Avg
+                if (p.avgLatency > maxAvgLatency)
+                    maxAvgLatency = p.avgLatency;
+                if (p.avgLatency < minAvgLatency)
+                    minAvgLatency = p.avgLatency;
+                // Min
+                if (p.minLatency < minMinLatency)
+                    minMinLatency = p.minLatency;
+                if (p.minLatency > maxMinLatency)
+                    maxMinLatency = p.minLatency;
+                // Max
+                if (p.maxLatency < minMaxLatency)
+                    minMaxLatency = p.maxLatency;
+                if (p.maxLatency > maxMaxLatency)
+                    maxMaxLatency = p.maxLatency;
+                // Last
+                if (p.lastLatency < minLastLatency)
+                    minLastLatency = p.lastLatency;
+                if (p.lastLatency > maxLastLatency)
+                    maxLastLatency = p.lastLatency;
+            }
+        }
+
+        PeerStatsSnapshot getSnapshotAt(int row) {
+            if (row >= 0 && row < peerData.size()) {
+                return peerData.get(row);
+            }
+            return null;
         }
 
         @Override
@@ -1268,6 +1418,42 @@ public class PeerMetricsPanel extends JPanel {
             return columns[column];
         }
 
+        String getColumnTooltip(int column) {
+            if (column < 0 || column >= columns.length)
+                return null;
+            String name = columns[column];
+            switch (name) {
+                case COL_TIME:
+                    return "The timestamp of the most recent communication with this peer.";
+                case COL_ADDRESS:
+                    return "The IP address or hostname of the peer.";
+                case COL_ANNOUNCED:
+                    return "The announced address of the peer (if configured).";
+                case COL_STATE:
+                    return "Connection state (CONNECTED, DISCONNECTED, NON_CONNECTED).";
+                case COL_VERSION:
+                    return "The software version the peer is running.";
+                case COL_HEIGHT:
+                    return "The blockchain height reported by the peer.";
+                case COL_AVG_RESP:
+                    return "Avg R. = Average Response Time (latency) in milliseconds.";
+                case COL_MIN_RESP:
+                    return "Min R. = Minimum Response Time observed in milliseconds.";
+                case COL_MAX_RESP:
+                    return "Max R. = Maximum Response Time observed in milliseconds.";
+                case COL_LAST_RESP:
+                    return "Last R. = Response Time of the most recent request in milliseconds.";
+                case COL_REQ:
+                    return "Req = Total number of requests sent to/received from this peer.";
+                case COL_AVG_BLOCKS:
+                    return "Avg B. = Average number of blocks received per request.";
+                case COL_TOTAL_BLOCKS:
+                    return "Tot B. = Total number of blocks received from this peer.";
+                default:
+                    return null;
+            }
+        }
+
         @Override
         public Object getValueAt(int rowIndex, int columnIndex) {
             if (rowIndex >= peerData.size())
@@ -1277,39 +1463,35 @@ public class PeerMetricsPanel extends JPanel {
 
             String columnName = getColumnName(columnIndex);
             switch (columnName) {
-                case "Time":
+                case COL_TIME:
                     if (history.lastTimestamp > 0) {
                         return new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
                                 .format(new java.util.Date(history.lastTimestamp));
                     }
                     return "-";
-                case "Peer Address":
+                case COL_ADDRESS:
                     return history.address;
-                case "Announced":
+                case COL_ANNOUNCED:
                     return peer != null ? peer.getAnnouncedAddress() : "-";
-                case "State":
+                case COL_STATE:
                     return peer != null ? peer.getState() : "-";
-                case "Version":
+                case COL_VERSION:
                     return peer != null && peer.getVersion() != null ? peer.getVersion().toString() : "-";
-                case "Height":
+                case COL_HEIGHT:
                     return peer != null ? peer.getHeight() : "-";
-                case "Avg Lat (ms)":
-                case "Avg Latency (ms)":
+                case COL_AVG_RESP:
                     return history.avgLatency;
-                case "Min Lat (ms)":
-                case "Min Latency (ms)":
+                case COL_MIN_RESP:
                     return history.minLatency;
-                case "Max Lat (ms)":
-                case "Max Latency (ms)":
+                case COL_MAX_RESP:
                     return history.maxLatency;
-                case "Last Lat (ms)":
-                case "Last Latency (ms)":
+                case COL_LAST_RESP:
                     return history.lastLatency;
-                case "Requests":
+                case COL_REQ:
                     return history.requestCount;
-                case "Avg Blocks":
+                case COL_AVG_BLOCKS:
                     return history.avgBlocks;
-                case "Total Blocks":
+                case COL_TOTAL_BLOCKS:
                     return history.totalBlocks;
                 default:
                     return null;
@@ -1320,25 +1502,21 @@ public class PeerMetricsPanel extends JPanel {
         public Class<?> getColumnClass(int columnIndex) {
             String columnName = getColumnName(columnIndex);
             switch (columnName) {
-                case "Peer Address":
-                case "Announced":
-                case "State":
-                case "Version":
+                case COL_ADDRESS:
+                case COL_ANNOUNCED:
+                case COL_STATE:
+                case COL_VERSION:
                     return String.class;
-                case "Height":
+                case COL_HEIGHT:
                     return Integer.class;
-                case "Avg Lat (ms)":
-                case "Avg Latency (ms)":
-                case "Avg Blocks":
+                case COL_AVG_RESP:
+                case COL_AVG_BLOCKS:
                     return Double.class;
-                case "Min Lat (ms)":
-                case "Min Latency (ms)":
-                case "Max Lat (ms)":
-                case "Max Latency (ms)":
-                case "Last Lat (ms)":
-                case "Last Latency (ms)":
-                case "Requests":
-                case "Total Blocks":
+                case COL_MIN_RESP:
+                case COL_MAX_RESP:
+                case COL_LAST_RESP:
+                case COL_REQ:
+                case COL_TOTAL_BLOCKS:
                     return Long.class;
                 default:
                     return Object.class;
@@ -1383,7 +1561,9 @@ public class PeerMetricsPanel extends JPanel {
             if (metric.getType() == PeerMetric.Type.BLOCK_TX) {
                 txBlockHistory.add(metric);
                 txBlockTotalLatency += metric.getLatency();
-                txBlockRequestCount++;
+                if (txBlockRequestCount < Long.MAX_VALUE) {
+                    txBlockRequestCount++;
+                }
                 if (txBlockHistory.size() > PEER_HISTORY_SIZE) {
                     PeerMetric removed = txBlockHistory.remove(0);
                     txBlockTotalLatency -= removed.getLatency();
@@ -1393,7 +1573,9 @@ public class PeerMetricsPanel extends JPanel {
                 blockHistory.add(metric);
                 blockTotalLatency += metric.getLatency();
                 blockTotalBlocks += metric.getBlocksReceived();
-                blockRequestCount++;
+                if (blockRequestCount < Long.MAX_VALUE) {
+                    blockRequestCount++;
+                }
                 if (blockHistory.size() > PEER_HISTORY_SIZE) {
                     PeerMetric removed = blockHistory.remove(0);
                     blockTotalLatency -= removed.getLatency();
@@ -1403,7 +1585,9 @@ public class PeerMetricsPanel extends JPanel {
             } else {
                 otherHistory.add(metric);
                 otherTotalLatency += metric.getLatency();
-                otherRequestCount++;
+                if (otherRequestCount < Long.MAX_VALUE) {
+                    otherRequestCount++;
+                }
                 if (otherHistory.size() > PEER_HISTORY_SIZE) {
                     PeerMetric removed = otherHistory.remove(0);
                     otherTotalLatency -= removed.getLatency();
@@ -1654,7 +1838,9 @@ public class PeerMetricsPanel extends JPanel {
     }
 
     private static class MetricsUpdateData {
-        long updateCounter;
+        String updatedPeerAddress;
+        MetricType updatedType;
+        long typeCounter;
         MetricSnapshot rx;
         MetricSnapshot tx;
         MetricSnapshot other;
@@ -1667,7 +1853,6 @@ public class PeerMetricsPanel extends JPanel {
         List<PeerStatsSnapshot> rxPeers;
         List<PeerStatsSnapshot> txPeers;
         List<PeerStatsSnapshot> otherPeers;
-        OverviewUpdateData overviewData;
     }
 
     private static class OverviewUpdateData {
@@ -1723,11 +1908,11 @@ public class PeerMetricsPanel extends JPanel {
 
     private class PeerMetricTableCellRenderer extends DefaultTableCellRenderer {
         private final Color metricColor;
-        private final String latestVersion;
+        private final Color countColor;
 
-        PeerMetricTableCellRenderer(Color metricColor) {
+        PeerMetricTableCellRenderer(Color metricColor, Color countColor) {
             this.metricColor = metricColor;
-            this.latestVersion = Signum.VERSION.toString();
+            this.countColor = countColor;
         }
 
         @Override
@@ -1739,69 +1924,186 @@ public class PeerMetricsPanel extends JPanel {
                 setText((value == null) ? "" : String.format("%.0f", (Double) value));
             }
 
+            if (value instanceof Long) {
+                long val = (Long) value;
+                if (val > 1_000_000) {
+                    setText(formatCount(val));
+                    setToolTipText(String.format("%,d", val));
+                }
+            }
+
             if (!isSelected) {
                 c.setBackground(table.getBackground());
 
                 int modelRow = table.convertRowIndexToModel(row);
-                String version = null;
-                javax.swing.table.TableModel model = table.getModel();
-                for (int i = 0; i < model.getColumnCount(); i++) {
-                    if ("Version".equals(model.getColumnName(i))) {
-                        Object val = model.getValueAt(modelRow, i);
-                        if (val instanceof String) {
-                            version = (String) val;
-                        }
-                        break;
+                PeersTableModel model = (PeersTableModel) table.getModel();
+                PeerStatsSnapshot snapshot = model.getSnapshotAt(modelRow);
+                Peer peer = snapshot != null ? Peers.getPeer(snapshot.address) : null;
+
+                Color fg = metricColor;
+                if (snapshot != null && snapshot.address.equals(model.lastUpdatedPeer)) {
+                    fg = countColor;
+                }
+
+                if (peer != null) {
+                    if (peer.isBlacklisted()) {
+                        fg = Color.RED;
+                    } else if (peer.getState() == Peer.State.NON_CONNECTED
+                            || peer.getState() == Peer.State.DISCONNECTED) {
+                        fg = Color.YELLOW;
                     }
                 }
 
-                boolean isOutdated = version != null && !version.isEmpty() && !"unknown".equals(version)
-                        && PeersDialog.compareVersions(version, latestVersion) < 0;
+                String columnName = table.getColumnName(column);
+                String version = null;
+                // Try to get version from the table value if it's the Version column, otherwise
+                // from peer object
+                if (COL_VERSION.equals(columnName) && value instanceof String) {
+                    version = (String) value;
+                } else if (peer != null && peer.getVersion() != null) {
+                    version = peer.getVersion().toString();
+                }
 
-                if (isOutdated && "Version".equals(table.getColumnName(column))) {
+                boolean isOutdated = version != null && !version.isEmpty() && !"unknown".equals(version)
+                        && PeersDialog.compareVersions(version, latestNetworkVersion) < 0;
+
+                if (isOutdated && COL_VERSION.equals(columnName)) {
                     c.setForeground(Color.YELLOW);
                 } else {
-                    c.setForeground(metricColor);
+                    c.setForeground(fg);
+                }
+
+                if (model.getRowCount() >= 2) {
+                    if (columnName.equals(COL_AVG_RESP)) {
+                        if (value instanceof Double) {
+                            double val = (Double) value;
+                            if (Math.abs(val - model.minAvgLatency) < 0.0001) {
+                                c.setForeground(COLOR_MIN_RESPONSE_TIME);
+                            } else if (Math.abs(val - model.maxAvgLatency) < 0.0001) {
+                                c.setForeground(COLOR_MAX_RESPONSE_TIME);
+                            }
+                        }
+                    }
+                    if (columnName.equals(COL_MIN_RESP)) {
+                        if (value instanceof Long) {
+                            long val = (Long) value;
+                            if (val == model.minMinLatency) {
+                                c.setForeground(COLOR_MIN_RESPONSE_TIME);
+                            } else if (val == model.maxMinLatency) {
+                                c.setForeground(COLOR_MAX_RESPONSE_TIME);
+                            }
+                        }
+                    }
+                    if (columnName.equals(COL_MAX_RESP)) {
+                        if (value instanceof Long) {
+                            long val = (Long) value;
+                            if (val == model.minMaxLatency) {
+                                c.setForeground(COLOR_MIN_RESPONSE_TIME);
+                            } else if (val == model.maxMaxLatency) {
+                                c.setForeground(COLOR_MAX_RESPONSE_TIME);
+                            }
+                        }
+                    }
+                    if (columnName.equals(COL_LAST_RESP)) {
+                        if (value instanceof Long) {
+                            long val = (Long) value;
+                            if (val == model.minLastLatency) {
+                                c.setForeground(COLOR_MIN_RESPONSE_TIME);
+                            } else if (val == model.maxLastLatency) {
+                                c.setForeground(COLOR_MAX_RESPONSE_TIME);
+                            }
+                        }
+                    }
                 }
             }
             return c;
         }
     }
 
-    private String getLegendHtml(MetricType type, Color metricColor) {
-        String hexColor = String.format("#%02x%02x%02x", metricColor.getRed(), metricColor.getGreen(),
-                metricColor.getBlue());
+    private String getLegendHtml(MetricType type, Color metricColor, Color countColor) {
+        String hexColor = toHex(metricColor);
+        String countHexColor = toHex(countColor);
+        String minHexColor = toHex(COLOR_MIN_RESPONSE_TIME);
+        String maxHexColor = toHex(COLOR_MAX_RESPONSE_TIME);
         StringBuilder sb = new StringBuilder();
         sb.append("<html><body style='font-family: sans-serif; font-size: 10px;'>");
         sb.append("<h3>").append(type).append(" Metrics Legend</h3>");
         sb.append("<ul>");
         sb.append("<li><span style='color:").append(hexColor)
                 .append("'>&#9632;</span> <b>Normal:</b> Peer is running the latest version.</li>");
+        sb.append("<li><span style='color:").append(countHexColor)
+                .append("'>&#9632;</span> <b>Latest:</b> The most recently updated peer.</li>");
+        sb.append("<li><span style='color:").append(toHex(Color.YELLOW))
+                .append("'>&#9632;</span> <b>Outdated:</b> Peer is running an older version than this node.</li>");
+        sb.append("<li><span style='color:").append(minHexColor)
+                .append("'>&#9632;</span> <b>Best:</b> Lowest response time in column.</li>");
+        sb.append("<li><span style='color:").append(maxHexColor)
+                .append("'>&#9632;</span> <b>Worst:</b> Highest response time in column.</li>");
+        sb.append("</ul>");
+        sb.append("<b>Version Notes:</b><br>");
+        sb.append("<ul>");
         sb.append(
-                "<li><span style='color:yellow'>&#9632;</span> <b>Outdated:</b> Peer is running an older version than this node.</li>");
+                "<li><b>v0.0.0:</b> The peer's version is unknown. This often occurs with newly discovered or unresponsive peers.</li>");
+        sb.append(
+                "<li><b>- / empty:</b> The peer did not provide a version. This may happen with very old clients.</li>");
         sb.append("</ul>");
         sb.append("<b>Columns:</b>");
         sb.append("<ul>");
-        sb.append("<li><b>Time:</b> The timestamp of the most recent communication.</li>");
-        sb.append("<li><b>Peer Address:</b> IP address or hostname of the peer.</li>");
-        sb.append("<li><b>Announced:</b> The announced address of the peer (if any).</li>");
-        sb.append("<li><b>State:</b> Connection state (CONNECTED, DISCONNECTED, NON_CONNECTED).</li>");
-        sb.append("<li><b>Version:</b> The software version the peer is running.</li>");
-        sb.append("<li><b>Height:</b> The blockchain height reported by the peer.</li>");
-        sb.append("<li><b>Avg Lat (ms):</b> Average latency (response time) for requests.</li>");
-        sb.append("<li><b>Min Lat (ms):</b> Minimum latency observed.</li>");
-        sb.append("<li><b>Max Lat (ms):</b> Maximum latency observed.</li>");
-        sb.append("<li><b>Last Lat (ms):</b> Latency of the most recent request.</li>");
-        sb.append(
-                "<li><b>Requests:</b> Total number of requests sent to/received from this peer in the current session/history window.</li>");
+        sb.append("<li><b>").append(COL_TIME).append(":</b> The timestamp of the most recent communication.</li>");
+        sb.append("<li><b>").append(COL_ADDRESS).append(":</b> IP address or hostname of the peer.</li>");
+        sb.append("<li><b>").append(COL_ANNOUNCED).append(":</b> The announced address of the peer (if any).</li>");
+        sb.append("<li><b>").append(COL_STATE)
+                .append(":</b> Connection state (CONNECTED, DISCONNECTED, NON_CONNECTED).</li>");
+        sb.append("<li><b>").append(COL_VERSION).append(":</b> The software version the peer is running.</li>");
+        sb.append("<li><b>").append(COL_HEIGHT).append(":</b> The blockchain height reported by the peer.</li>");
+        sb.append("<li><b>").append(COL_AVG_RESP).append(":</b> Average response time (ms) for requests.</li>");
+        sb.append("<li><b>").append(COL_MIN_RESP).append(":</b> Minimum response time (ms) observed.</li>");
+        sb.append("<li><b>").append(COL_MAX_RESP).append(":</b> Maximum response time (ms) observed.</li>");
+        sb.append("<li><b>").append(COL_LAST_RESP).append(":</b> Response time (ms) of the most recent request.</li>");
 
         if (type == MetricType.RX) {
-            sb.append("<li><b>Avg Blocks:</b> Average number of blocks received per request.</li>");
-            sb.append("<li><b>Total Blocks:</b> Total number of blocks received from this peer.</li>");
+            sb.append("<li><b>").append(COL_AVG_BLOCKS)
+                    .append(":</b> Average number of blocks received per request.</li>");
+            sb.append("<li><b>").append(COL_TOTAL_BLOCKS)
+                    .append(":</b> Total number of blocks received from this peer.</li>");
         }
+        sb.append("<li><b>").append(COL_REQ).append(
+                ":</b> Total number of requests sent to/received from this peer in the current session/history window.</li>");
 
         sb.append("</ul>");
         sb.append("</body></html>");
         return sb.toString();
+    }
+
+    private static String toHex(Color color) {
+        return String.format("#%02x%02x%02x", color.getRed(), color.getGreen(), color.getBlue());
+    }
+
+    private void configureLineRenderer(XYLineAndShapeRenderer renderer, XYSeriesCollection dataset,
+            Map<String, Color> colors) {
+        renderer.setUseFillPaint(true);
+        renderer.setDefaultFillPaint(new Color(0, 0, 0, 0));
+        renderer.setDrawOutlines(false);
+        renderer.setDefaultShape(tooltipHitShape);
+        renderer.setDefaultToolTipGenerator(new PeerChartToolTipGenerator());
+
+        for (int i = 0; i < dataset.getSeriesCount(); i++) {
+            renderer.setSeriesShape(i, tooltipHitShape);
+            renderer.setSeriesStroke(i, CHART_STROKE);
+            Comparable key = dataset.getSeriesKey(i);
+            if (colors.containsKey(key.toString())) {
+                renderer.setSeriesPaint(i, colors.get(key.toString()));
+            }
+        }
+    }
+
+    private static String formatCount(long count) {
+        if (count > 100_000_000) {
+            return "> 100M";
+        }
+        if (count < 1_000_000) {
+            return String.valueOf(count);
+        }
+        return String.format("%.1fM", count / 1_000_000.0);
     }
 }
