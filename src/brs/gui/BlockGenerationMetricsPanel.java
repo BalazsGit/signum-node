@@ -9,6 +9,7 @@ import brs.Signum;
 import brs.fluxcapacitor.FluxValues;
 import brs.gui.util.CustomDrawings;
 import brs.gui.util.MovingAverage;
+import brs.gui.util.TableUtils;
 import brs.util.Convert;
 import brs.util.DurationFormatter;
 import signumj.entity.SignumAddress;
@@ -83,22 +84,23 @@ public class BlockGenerationMetricsPanel extends JPanel {
     private static final int AXIS_COUNTS = 4;
     private static final int AXIS_SHARE = 5;
 
-    private static final Color COLOR_NETWORK_SIZE = Color.WHITE;
+    private static final Color COLOR_NETWORK_SIZE = Color.WHITE; // White
     private static final Color COLOR_COMMITMENT = new Color(220, 130, 255); // Lighter Purple
-    private static final Color COLOR_BASE_TARGET = Color.YELLOW;
+    private static final Color COLOR_BASE_TARGET = Color.YELLOW; // Yellow
     private static final Color COLOR_NODE_MINERS = new Color(50, 205, 50); // Lime Green
     private static final Color COLOR_NETWORK_MINERS = new Color(0, 80, 0); // Even Darker Green
     private static final Color COLOR_ACTIVE_MINER = new Color(218, 165, 32); // Goldenrod
-    private static final Color COLOR_DEADLINES_RX = Color.PINK;
-    private static final Color COLOR_NODE_SHARE = Color.GREEN;
-    private static final Color COLOR_NODE_DEADLINE = COLOR_ACTIVE_MINER;
+    private static final Color COLOR_DEADLINES_RX = Color.PINK; // Pink
+    private static final Color COLOR_NODE_SHARE = Color.GREEN; // Green
+    private static final Color COLOR_NODE_DEADLINE = COLOR_ACTIVE_MINER; // Goldenrod
     private static final Color COLOR_CHAIN_DEADLINE = new Color(0, 100, 0); // Dark Green
-    private static final Color COLOR_CHAIN_DEADLINE_MA = COLOR_CHAIN_DEADLINE.brighter();
-    private static final Color COLOR_NODE_DEADLINE_MA = COLOR_NODE_MINERS.darker(); // Changed to use new
-                                                                                    // COLOR_NODE_MINERS
-    private static final Color COLOR_MINED_BLOCK = COLOR_NODE_MINERS;
-    private static final Color COLOR_NODE_SHARE_LEGEND = Color.GREEN;
-    private static final Color COLOR_NETWORK_SHARE_LEGEND = Color.CYAN;
+    private static final Color COLOR_CHAIN_DEADLINE_MA = COLOR_CHAIN_DEADLINE.brighter(); // Brighter Dark Green
+    private static final Color COLOR_NODE_DEADLINE_MA = COLOR_NODE_MINERS.darker(); // Darker Lime Green
+    private static final Color COLOR_MINED_BLOCK = COLOR_NODE_MINERS; // Lime Green
+    private static final Color COLOR_NODE_SHARE_LEGEND = Color.GREEN; // Green
+    private static final Color COLOR_NETWORK_SHARE_LEGEND = Color.CYAN; // Cyan
+
+    private static final BasicStroke CHART_STROKE = new BasicStroke(1.2f);
 
     private final JFrame parentFrame;
     private JLabel heightLabel;
@@ -185,6 +187,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
     private volatile boolean lastMinedByNode = false;
 
     private final ExecutorService updateExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
+
+    private final Shape tooltipHitShape = new java.awt.geom.Ellipse2D.Double(-10.0, -10.0, 20.0, 20.0);
 
     public BlockGenerationMetricsPanel(JFrame parentFrame) {
         super(new GridBagLayout());
@@ -658,10 +662,10 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
                 This metric is calculated over the last %d blocks.
 
-                - Green slices in the pie chart represent blocks mined by this node.
+                - <span style='color:%s'>&#9632;</span> slices in the pie chart represent blocks mined by this node.
                 - Clicking this label toggles the visibility of local miners in the pie chart.
                 """
-                .formatted(CHART_HISTORY_SIZE);
+                .formatted(CHART_HISTORY_SIZE, toHex(COLOR_NODE_SHARE_LEGEND));
         addInfoTooltip(nodeShareLegendLabel, nodeShareLegendTooltip);
         nodeShareLegendLabel.addMouseListener(new MouseAdapter() {
             @Override
@@ -681,10 +685,10 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
                 This metric is calculated over the last %d blocks.
 
-                - Blue/Other colored slices in the pie chart represent blocks mined by other nodes.
+                - <span style='color:%s'>&#9632;</span> slices in the pie chart represent blocks mined by other nodes.
                 - Clicking this label toggles the visibility of remote miners in the pie chart.
                 """
-                .formatted(CHART_HISTORY_SIZE);
+                .formatted(CHART_HISTORY_SIZE, toHex(COLOR_NETWORK_SHARE_LEGEND));
         addInfoTooltip(networkShareLegendLabel, networkShareTooltip);
         networkShareLegendLabel.addMouseListener(new MouseAdapter() {
             @Override
@@ -899,9 +903,6 @@ public class BlockGenerationMetricsPanel extends JPanel {
         plot.getDomainAxis().setTickMarksVisible(false);
         plot.getDomainAxis().setAxisLineVisible(false);
 
-        // Define a larger invisible shape for better tooltip hit detection
-        Shape tooltipHitShape = new java.awt.geom.Ellipse2D.Double(-10.0, -10.0, 20.0, 20.0);
-
         // Configure Range Axes
         // Axis 0 is default (Time)
         plot.getRangeAxis(AXIS_DEADLINE).setTickLabelsVisible(false);
@@ -942,110 +943,61 @@ public class BlockGenerationMetricsPanel extends JPanel {
         // Renderer 1: Time MA Lines
         plot.setDataset(DATASET_DEADLINE_MA, timeMaDataset);
         XYLineAndShapeRenderer timeMaRenderer = new XYLineAndShapeRenderer(true, true);
-        timeMaRenderer.setUseFillPaint(true);
-        timeMaRenderer.setDefaultFillPaint(new Color(0, 0, 0, 0));
-        timeMaRenderer.setDrawOutlines(false);
-        timeMaRenderer.setDefaultShape(tooltipHitShape);
-        for (int i = 0; i < timeMaDataset.getSeriesCount(); i++) {
-            timeMaRenderer.setSeriesShape(i, tooltipHitShape);
-        }
 
         Map<String, Paint> timeMaPaints = new HashMap<>();
         timeMaPaints.put("Accepted Deadline (MA)", COLOR_CHAIN_DEADLINE_MA);
         timeMaPaints.put("Node Deadline (MA)", COLOR_NODE_DEADLINE_MA);
-        assignSeriesPaints(timeMaRenderer, timeMaDataset, timeMaPaints);
 
-        timeMaRenderer.setDefaultToolTipGenerator(new BlockChartToolTipGenerator());
-        timeMaRenderer.setSeriesStroke(0, new BasicStroke(1.2f));
-        timeMaRenderer.setSeriesStroke(1, new BasicStroke(1.2f));
+        configureLineRenderer(timeMaRenderer, timeMaDataset, timeMaPaints);
         plot.setRenderer(DATASET_DEADLINE_MA, timeMaRenderer);
         plot.mapDatasetToRangeAxis(DATASET_DEADLINE_MA, AXIS_DEADLINE);
 
         // Renderer 2: Network Size
         plot.setDataset(DATASET_NETWORK_SIZE, netSizeDataset);
         XYLineAndShapeRenderer netSizeRenderer = new XYLineAndShapeRenderer(true, true);
-        netSizeRenderer.setUseFillPaint(true);
-        netSizeRenderer.setDefaultFillPaint(new Color(0, 0, 0, 0));
-        netSizeRenderer.setDrawOutlines(false);
-        netSizeRenderer.setDefaultShape(tooltipHitShape);
-        for (int i = 0; i < netSizeDataset.getSeriesCount(); i++) {
-            netSizeRenderer.setSeriesShape(i, tooltipHitShape);
-        }
-        netSizeRenderer.setSeriesPaint(0, COLOR_NETWORK_SIZE);
-        netSizeRenderer.setDefaultToolTipGenerator(new BlockChartToolTipGenerator());
-        netSizeRenderer.setSeriesStroke(0, new BasicStroke(1.2f));
+        Map<String, Paint> netSizePaints = new HashMap<>();
+        netSizePaints.put(networkSizeMASeries.getKey().toString(), COLOR_NETWORK_SIZE);
+        configureLineRenderer(netSizeRenderer, netSizeDataset, netSizePaints);
         plot.setRenderer(DATASET_NETWORK_SIZE, netSizeRenderer);
         plot.mapDatasetToRangeAxis(DATASET_NETWORK_SIZE, AXIS_NETWORK_SIZE);
 
         // Renderer 3: Commitment
         plot.setDataset(DATASET_COMMITMENT, commitmentDataset);
         XYLineAndShapeRenderer commitmentRenderer = new XYLineAndShapeRenderer(true, true);
-        commitmentRenderer.setUseFillPaint(true);
-        commitmentRenderer.setDefaultFillPaint(new Color(0, 0, 0, 0));
-        commitmentRenderer.setDrawOutlines(false);
-        commitmentRenderer.setDefaultShape(tooltipHitShape);
-        for (int i = 0; i < commitmentDataset.getSeriesCount(); i++) {
-            commitmentRenderer.setSeriesShape(i, tooltipHitShape);
-        }
-        commitmentRenderer.setSeriesPaint(0, COLOR_COMMITMENT);
-        commitmentRenderer.setDefaultToolTipGenerator(new BlockChartToolTipGenerator());
-        commitmentRenderer.setSeriesStroke(0, new BasicStroke(1.2f));
+        Map<String, Paint> commitmentPaints = new HashMap<>();
+        commitmentPaints.put(commitmentMASeries.getKey().toString(), COLOR_COMMITMENT);
+        configureLineRenderer(commitmentRenderer, commitmentDataset, commitmentPaints);
         plot.setRenderer(DATASET_COMMITMENT, commitmentRenderer);
         plot.mapDatasetToRangeAxis(DATASET_COMMITMENT, AXIS_COMMITMENT);
 
         // Renderer 4: Base Target
         plot.setDataset(DATASET_BASE_TARGET, baseTargetDataset);
         XYLineAndShapeRenderer baseTargetRenderer = new XYLineAndShapeRenderer(true, true);
-        baseTargetRenderer.setUseFillPaint(true);
-        baseTargetRenderer.setDefaultFillPaint(new Color(0, 0, 0, 0));
-        baseTargetRenderer.setDrawOutlines(false);
-        baseTargetRenderer.setDefaultShape(tooltipHitShape);
-        for (int i = 0; i < baseTargetDataset.getSeriesCount(); i++) {
-            baseTargetRenderer.setSeriesShape(i, tooltipHitShape);
-        }
-        baseTargetRenderer.setSeriesPaint(0, COLOR_BASE_TARGET);
-        baseTargetRenderer.setDefaultToolTipGenerator(new BlockChartToolTipGenerator());
-        baseTargetRenderer.setSeriesStroke(0, new BasicStroke(1.2f));
+        Map<String, Paint> baseTargetPaints = new HashMap<>();
+        baseTargetPaints.put(baseTargetMASeries.getKey().toString(), COLOR_BASE_TARGET);
+        configureLineRenderer(baseTargetRenderer, baseTargetDataset, baseTargetPaints);
         plot.setRenderer(DATASET_BASE_TARGET, baseTargetRenderer);
         plot.mapDatasetToRangeAxis(DATASET_BASE_TARGET, AXIS_BASE_TARGET);
 
         // Renderer 5: Counts
         plot.setDataset(DATASET_COUNTS, countsDataset);
         XYLineAndShapeRenderer countsRenderer = new XYLineAndShapeRenderer(true, true);
-        countsRenderer.setUseFillPaint(true);
-        countsRenderer.setDefaultFillPaint(new Color(0, 0, 0, 0));
-        countsRenderer.setDrawOutlines(false);
-        countsRenderer.setDefaultShape(tooltipHitShape);
-        for (int i = 0; i < countsDataset.getSeriesCount(); i++) {
-            countsRenderer.setSeriesShape(i, tooltipHitShape);
-        }
 
         Map<String, Paint> countsPaints = new HashMap<>();
         countsPaints.put("Node Miners (MA)", COLOR_NODE_MINERS); // Uses new COLOR_NODE_MINERS
         countsPaints.put("Network Miners (MA)", COLOR_NETWORK_MINERS); // Uses new COLOR_NETWORK_MINERS
         countsPaints.put("Deadlines Rx (MA)", COLOR_DEADLINES_RX);
-        assignSeriesPaints(countsRenderer, countsDataset, countsPaints);
 
-        countsRenderer.setDefaultToolTipGenerator(new BlockChartToolTipGenerator());
-        countsRenderer.setSeriesStroke(0, new BasicStroke(1.2f));
-        countsRenderer.setSeriesStroke(1, new BasicStroke(1.2f));
-        countsRenderer.setSeriesStroke(2, new BasicStroke(1.2f));
+        configureLineRenderer(countsRenderer, countsDataset, countsPaints);
         plot.setRenderer(DATASET_COUNTS, countsRenderer);
         plot.mapDatasetToRangeAxis(DATASET_COUNTS, AXIS_COUNTS);
 
         // Renderer 6: Share
         plot.setDataset(DATASET_SHARE, shareDataset);
         XYLineAndShapeRenderer shareRenderer = new XYLineAndShapeRenderer(true, true);
-        shareRenderer.setUseFillPaint(true);
-        shareRenderer.setDefaultFillPaint(new Color(0, 0, 0, 0));
-        shareRenderer.setDrawOutlines(false);
-        shareRenderer.setDefaultShape(tooltipHitShape);
-        for (int i = 0; i < shareDataset.getSeriesCount(); i++) {
-            shareRenderer.setSeriesShape(i, tooltipHitShape);
-        }
-        shareRenderer.setSeriesPaint(0, COLOR_NODE_SHARE); // Uses new COLOR_NODE_SHARE (Color.GREEN)
-        shareRenderer.setDefaultToolTipGenerator(new BlockChartToolTipGenerator());
-        shareRenderer.setSeriesStroke(0, new BasicStroke(1.2f));
+        Map<String, Paint> sharePaints = new HashMap<>();
+        sharePaints.put(nodeShareMASeries.getKey().toString(), COLOR_NODE_SHARE);
+        configureLineRenderer(shareRenderer, shareDataset, sharePaints);
         plot.setRenderer(DATASET_SHARE, shareRenderer);
         plot.mapDatasetToRangeAxis(DATASET_SHARE, AXIS_SHARE);
 
@@ -1071,6 +1023,24 @@ public class BlockGenerationMetricsPanel extends JPanel {
             Comparable key = dataset.getSeriesKey(i);
             if (paintMap.containsKey(key)) {
                 renderer.setSeriesPaint(i, paintMap.get(key));
+            }
+        }
+    }
+
+    private void configureLineRenderer(XYLineAndShapeRenderer renderer, XYSeriesCollection dataset,
+            Map<String, Paint> paints) {
+        renderer.setUseFillPaint(true);
+        renderer.setDefaultFillPaint(new Color(0, 0, 0, 0));
+        renderer.setDrawOutlines(false);
+        renderer.setDefaultShape(tooltipHitShape);
+        renderer.setDefaultToolTipGenerator(new BlockChartToolTipGenerator());
+
+        for (int i = 0; i < dataset.getSeriesCount(); i++) {
+            renderer.setSeriesShape(i, tooltipHitShape);
+            renderer.setSeriesStroke(i, CHART_STROKE);
+            Comparable key = dataset.getSeriesKey(i);
+            if (paints.containsKey(key.toString())) {
+                renderer.setSeriesPaint(i, paints.get(key.toString()));
             }
         }
     }
@@ -1990,7 +1960,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
         for (int i = 0; i < minersTable.getColumnCount(); i++) {
             String columnName = minersTable.getColumnName(i);
-            if ("Height".equals(columnName) || "Deadline".equals(columnName)) {
+            if (MinersTableModel.COL_HEIGHT.equals(columnName) || MinersTableModel.COL_DEADLINE.equals(columnName)) {
                 packColumn(minersTable, i, 2);
             }
         }
@@ -2241,17 +2211,17 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 "<span style='color:" + toHex(COLOR_ACTIVE_MINER)
                 + "'>&#9632;</span> <b>Goldenrod:</b> Active Deadline (Submitted to this node)<br><br>"
                 +
-                "<b>Indicators (I/O Column):</b><br>" +
+                "<b>Indicators (" + MinersTableModel.COL_IO + " Column):</b><br>" +
                 "<b>&#8963; (Up):</b> Local Generation (Outgoing)<br>" +
                 "<b>&#8964; (Down):</b> Remote Generation (Incoming)<br><br>" +
                 "<b>Data Columns:</b><br>" +
-                "<b>Height:</b> The block height in the blockchain.<br>" +
-                "<b>I/O:</b> Input/Output direction (Local vs Remote).<br>" +
-                "<b>Block ID:</b> The unique identifier of the block.<br>" +
-                "<b>Time:</b> The timestamp of block generation.<br>" +
-                "<b>Name:</b> The name of the miner (if available).<br>" +
-                "<b>Account ID:</b> The numeric account ID of the miner.<br>" +
-                "<b>Deadline:</b> The deadline value submitted by the miner.<br><br>" +
+                "<b>" + MinersTableModel.COL_HEIGHT + ":</b> The block height in the blockchain.<br>" +
+                "<b>" + MinersTableModel.COL_IO + ":</b> Input/Output direction (Local vs Remote).<br>" +
+                "<b>" + MinersTableModel.COL_BLOCK_ID + ":</b> The unique identifier of the block.<br>" +
+                "<b>" + MinersTableModel.COL_TIME + ":</b> The timestamp of block generation.<br>" +
+                "<b>" + MinersTableModel.COL_NAME + ":</b> The name of the miner (if available).<br>" +
+                "<b>" + MinersTableModel.COL_ACCOUNT_ID + ":</b> The numeric account ID of the miner.<br>" +
+                "<b>" + MinersTableModel.COL_DEADLINE + ":</b> The deadline value submitted by the miner.<br><br>" +
                 "<b>History Size:</b> " + CHART_HISTORY_SIZE + " blocks" +
                 "</body></html>";
     }
