@@ -169,8 +169,8 @@ public class SynchronizationMetricsPanel extends JPanel {
     private XYSeries uploadVolumeSeries;
     private XYSeries downloadVolumeSeries;
 
-    private long uploadedVolume = 0;
-    private long downloadedVolume = 0;
+    private volatile long uploadedVolume = 0;
+    private volatile long downloadedVolume = 0;
     private final int netSpeedUpdateTime = 100; // milliseconds
 
     private final Dimension chartDimension1 = new Dimension(320, 240);
@@ -185,11 +185,33 @@ public class SynchronizationMetricsPanel extends JPanel {
     private final Insets labelInsets = new Insets(2, 5, 2, 0);
     private final Insets barInsets = new Insets(2, 5, 2, 5);
 
-    Color systemTxperBlockColor = new Color(64, 64, 192);
-    Color allTxPerBlockColor = new Color(235, 165, 50);
+    private static final Color COLOR_SYSTEM_TX_PER_BLOCK = new Color(64, 64, 192); // Blue-ish
+    private static final Color COLOR_ALL_TX_PER_BLOCK = new Color(235, 165, 50); // Orange-ish
 
-    Color uploadVolumeColor = new Color(185, 120, 95); // Red
-    Color downloadVolumeColor = new Color(40, 165, 40); // Green
+    private static final Color COLOR_UPLOAD_VOLUME = new Color(185, 120, 95); // Red-ish
+    private static final Color COLOR_DOWNLOAD_VOLUME = new Color(40, 165, 40); // Green
+
+    private static final Color COLOR_PUSH_TIME = Color.BLUE; // Blue
+    private static final Color COLOR_VALIDATION_TIME = Color.YELLOW; // Yellow
+    private static final Color COLOR_TX_LOOP_TIME = new Color(128, 0, 128); // Purple
+    private static final Color COLOR_HOUSEKEEPING_TIME = new Color(42, 223, 223); // Cyan
+    private static final Color COLOR_TX_APPLY_TIME = new Color(255, 165, 0); // Orange
+    private static final Color COLOR_AT_TIME = new Color(153, 0, 76); // Dark Red
+    private static final Color COLOR_SUBSCRIPTION_TIME = new Color(255, 105, 100); // Hot Pink
+    private static final Color COLOR_BLOCK_APPLY_TIME = new Color(0, 100, 100); // Teal
+    private static final Color COLOR_COMMIT_TIME = new Color(220, 130, 255); // Lighter Purple
+    private static final Color COLOR_MISC_TIME = Color.LIGHT_GRAY; // Light Gray
+    private static final Color COLOR_PAYLOAD_FULLNESS = Color.WHITE; // White
+
+    private static final Color COLOR_BLOCKS_PER_SEC = Color.CYAN; // Cyan
+    private static final Color COLOR_ALL_TX_PER_SEC = Color.GREEN; // Green
+    private static final Color COLOR_SYSTEM_TX_PER_SEC = new Color(135, 206, 250); // Light Sky Blue
+    private static final Color COLOR_AT_COUNT_PER_BLOCK = new Color(153, 0, 76); // Deep Pink
+
+    private static final Color COLOR_UPLOAD_SPEED = new Color(128, 0, 0); // Dark Red
+    private static final Color COLOR_DOWNLOAD_SPEED = new Color(0, 100, 0); // Dark Green
+
+    private static final BasicStroke CHART_STROKE = new BasicStroke(1.2f);
 
     private final ExecutorService chartUpdateExecutor = Executors.newSingleThreadExecutor();
 
@@ -264,33 +286,25 @@ public class SynchronizationMetricsPanel extends JPanel {
         // transactionRenderer.setShapesVisible(false);
 
         XYBarRenderer transactionRenderer = new XYBarRenderer();
-        transactionRenderer.setBarPainter(new StandardXYBarPainter());
-        transactionRenderer.setShadowVisible(false);
-        transactionRenderer.setMargin(0.0);
-        transactionRenderer.setSeriesPaint(0, systemTxperBlockColor); // Blue for System Txs/Block
-        transactionRenderer.setSeriesPaint(1, allTxPerBlockColor); // Orange for All Txs/Block
-        transactionRenderer.setDefaultToolTipGenerator(new SyncChartToolTipGenerator());
+        Map<String, Color> barColors = new HashMap<>();
+        barColors.put(systemTransactionsPerBlockSeries.getKey().toString(), COLOR_SYSTEM_TX_PER_BLOCK);
+        barColors.put(allTransactionsPerBlockSeries.getKey().toString(), COLOR_ALL_TX_PER_BLOCK);
+        configureBarRenderer(transactionRenderer, barDataset, barColors);
+
         plot.setRenderer(PERF_TIMING_DATASET_BARS, transactionRenderer);
 
         // Renderer for lines (Dataset 1)
         plot.setDataset(PERF_TIMING_DATASET_LINES, lineDataset);
         XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, true);
-        lineRenderer.setUseFillPaint(true);
-        lineRenderer.setDefaultFillPaint(new Color(0, 0, 0, 0));
-        lineRenderer.setDrawOutlines(false);
-        lineRenderer.setDefaultShape(tooltipHitShape);
-        for (int i = 0; i < lineDataset.getSeriesCount(); i++) {
-            lineRenderer.setSeriesShape(i, tooltipHitShape);
-        }
-        lineRenderer.setSeriesPaint(0, Color.CYAN);
-        lineRenderer.setSeriesPaint(1, Color.GREEN);
-        lineRenderer.setSeriesPaint(2, new Color(135, 206, 250));
-        lineRenderer.setSeriesPaint(3, new Color(153, 0, 76));
-        lineRenderer.setSeriesStroke(0, new java.awt.BasicStroke(1.2f));
-        lineRenderer.setSeriesStroke(1, new java.awt.BasicStroke(1.2f));
-        lineRenderer.setSeriesStroke(2, new java.awt.BasicStroke(1.2f));
-        lineRenderer.setSeriesStroke(3, new java.awt.BasicStroke(1.2f));
-        lineRenderer.setDefaultToolTipGenerator(new SyncChartToolTipGenerator());
+
+        Map<String, Color> lineColors = new HashMap<>();
+        lineColors.put(blocksPerSecondSeries.getKey().toString(), COLOR_BLOCKS_PER_SEC);
+        lineColors.put(allTransactionsPerSecondSeries.getKey().toString(), COLOR_ALL_TX_PER_SEC);
+        lineColors.put(systemTransactionsPerSecondSeries.getKey().toString(), COLOR_SYSTEM_TX_PER_SEC);
+        lineColors.put(atCountPerBlockSeries.getKey().toString(), COLOR_AT_COUNT_PER_BLOCK);
+
+        configureLineRenderer(lineRenderer, lineDataset, lineColors);
+
         plot.setRenderer(PERF_TIMING_DATASET_LINES, lineRenderer);
         plot.mapDatasetToRangeAxis(PERF_TIMING_DATASET_LINES, PERF_TIMING_AXIS_LINES);
 
@@ -382,48 +396,32 @@ public class SynchronizationMetricsPanel extends JPanel {
         // transactionRenderer.setShapesVisible(false);
 
         XYBarRenderer transactionRenderer = new XYBarRenderer();
-        transactionRenderer.setBarPainter(new StandardXYBarPainter());
-        transactionRenderer.setShadowVisible(false);
-        transactionRenderer.setMargin(0.0);
-        transactionRenderer.setSeriesPaint(0, systemTxperBlockColor); // Blue for System Txs/Block
-        transactionRenderer.setSeriesPaint(1, allTxPerBlockColor); // Orange for All Txs/Block
-        transactionRenderer.setDefaultToolTipGenerator(new SyncChartToolTipGenerator());
+        Map<String, Color> barColors = new HashMap<>();
+        barColors.put(systemTransactionsPerBlockSeries.getKey().toString(), COLOR_SYSTEM_TX_PER_BLOCK);
+        barColors.put(allTransactionsPerBlockSeries.getKey().toString(), COLOR_ALL_TX_PER_BLOCK);
+        configureBarRenderer(transactionRenderer, barDataset, barColors);
+
         plot.setRenderer(PERF_TIMING_DATASET_BARS, transactionRenderer);
 
         // Renderer for lines (Dataset 1)
         plot.setDataset(PERF_TIMING_DATASET_LINES, lineDataset);
         XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, true);
-        lineRenderer.setUseFillPaint(true);
-        lineRenderer.setDefaultFillPaint(new Color(0, 0, 0, 0));
-        lineRenderer.setDrawOutlines(false);
-        lineRenderer.setDefaultShape(tooltipHitShape);
-        for (int i = 0; i < lineDataset.getSeriesCount(); i++) {
-            lineRenderer.setSeriesShape(i, tooltipHitShape);
-        }
-        lineRenderer.setSeriesPaint(0, Color.BLUE);
-        lineRenderer.setSeriesPaint(1, Color.YELLOW);
-        lineRenderer.setSeriesPaint(2, new Color(128, 0, 128)); // Purple for TX Loop
-        lineRenderer.setSeriesPaint(3, new Color(42, 223, 223)); // Cyan for Housekeeping
-        lineRenderer.setSeriesPaint(4, new Color(255, 165, 0)); // Orange for TX Apply
-        lineRenderer.setSeriesPaint(5, new Color(153, 0, 76)); // Dark Red for AT
-        lineRenderer.setSeriesPaint(6, new Color(255, 105, 100)); // Hot Pink for Subscription
-        lineRenderer.setSeriesPaint(7, new Color(0, 100, 100)); // Teal for Block Apply
-        lineRenderer.setSeriesPaint(8, new Color(220, 130, 255)); // Lighter Purple for Commit
-        lineRenderer.setSeriesPaint(9, Color.LIGHT_GRAY); // Light Gray for Misc
-        lineRenderer.setSeriesPaint(10, Color.WHITE); // Payload Fullness
 
-        lineRenderer.setSeriesStroke(0, new java.awt.BasicStroke(1.2f));
-        lineRenderer.setSeriesStroke(1, new java.awt.BasicStroke(1.2f));
-        lineRenderer.setSeriesStroke(2, new java.awt.BasicStroke(1.2f));
-        lineRenderer.setSeriesStroke(3, new java.awt.BasicStroke(1.2f));
-        lineRenderer.setSeriesStroke(4, new java.awt.BasicStroke(1.2f));
-        lineRenderer.setSeriesStroke(5, new java.awt.BasicStroke(1.2f));
-        lineRenderer.setSeriesStroke(6, new java.awt.BasicStroke(1.2f));
-        lineRenderer.setSeriesStroke(7, new java.awt.BasicStroke(1.2f));
-        lineRenderer.setSeriesStroke(8, new java.awt.BasicStroke(1.2f));
-        lineRenderer.setSeriesStroke(9, new java.awt.BasicStroke(1.2f));
-        lineRenderer.setSeriesStroke(10, new java.awt.BasicStroke(1.2f));
-        lineRenderer.setDefaultToolTipGenerator(new SyncChartToolTipGenerator());
+        Map<String, Color> lineColors = new HashMap<>();
+        lineColors.put(pushTimePerBlockSeries.getKey().toString(), COLOR_PUSH_TIME);
+        lineColors.put(validationTimePerBlockSeries.getKey().toString(), COLOR_VALIDATION_TIME);
+        lineColors.put(txLoopTimePerBlockSeries.getKey().toString(), COLOR_TX_LOOP_TIME);
+        lineColors.put(housekeepingTimePerBlockSeries.getKey().toString(), COLOR_HOUSEKEEPING_TIME);
+        lineColors.put(txApplyTimePerBlockSeries.getKey().toString(), COLOR_TX_APPLY_TIME);
+        lineColors.put(atTimePerBlockSeries.getKey().toString(), COLOR_AT_TIME);
+        lineColors.put(subscriptionTimePerBlockSeries.getKey().toString(), COLOR_SUBSCRIPTION_TIME);
+        lineColors.put(blockApplyTimePerBlockSeries.getKey().toString(), COLOR_BLOCK_APPLY_TIME);
+        lineColors.put(commitTimePerBlockSeries.getKey().toString(), COLOR_COMMIT_TIME);
+        lineColors.put(miscTimePerBlockSeries.getKey().toString(), COLOR_MISC_TIME);
+        lineColors.put(payloadFullnessSeries.getKey().toString(), COLOR_PAYLOAD_FULLNESS);
+
+        configureLineRenderer(lineRenderer, lineDataset, lineColors);
+
         plot.setRenderer(PERF_TIMING_DATASET_LINES, lineRenderer);
         plot.mapDatasetToRangeAxis(PERF_TIMING_DATASET_LINES, PERF_TIMING_AXIS_LINES);
 
@@ -490,7 +488,7 @@ public class SynchronizationMetricsPanel extends JPanel {
 
         XYStepAreaRenderer volumeRenderer = new XYStepAreaRenderer();
         volumeRenderer.setShapesVisible(false);
-        volumeRenderer.setSeriesPaint(0, uploadVolumeColor); // Upload - Red
+        volumeRenderer.setSeriesPaint(0, COLOR_UPLOAD_VOLUME); // Upload - Red
         volumeRenderer.setDefaultToolTipGenerator(new SyncChartToolTipGenerator());
         plot.setDataset(NET_SPEED_DATASET_VOLUME, volumeDataset);
         plot.setRenderer(NET_SPEED_DATASET_VOLUME, volumeRenderer);
@@ -499,16 +497,11 @@ public class SynchronizationMetricsPanel extends JPanel {
         // Dataset 1: Speed (Line)
         plot.setDataset(NET_SPEED_DATASET_SPEED, lineDataset);
         XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, true);
-        lineRenderer.setUseFillPaint(true);
-        lineRenderer.setDefaultFillPaint(new Color(0, 0, 0, 0));
-        lineRenderer.setDrawOutlines(false);
-        lineRenderer.setDefaultShape(tooltipHitShape);
-        for (int i = 0; i < lineDataset.getSeriesCount(); i++) {
-            lineRenderer.setSeriesShape(i, tooltipHitShape);
-        }
-        lineRenderer.setSeriesPaint(0, new Color(128, 0, 0));
-        lineRenderer.setSeriesStroke(0, new java.awt.BasicStroke(1.2f));
-        lineRenderer.setDefaultToolTipGenerator(new SyncChartToolTipGenerator());
+
+        Map<String, Color> lineColors = new HashMap<>();
+        lineColors.put(uploadSpeedSeries.getKey().toString(), COLOR_UPLOAD_SPEED);
+        configureLineRenderer(lineRenderer, lineDataset, lineColors);
+
         plot.setRenderer(NET_SPEED_DATASET_SPEED, lineRenderer);
         plot.mapDatasetToRangeAxis(NET_SPEED_DATASET_SPEED, NET_SPEED_AXIS_SPEED);
 
@@ -575,7 +568,7 @@ public class SynchronizationMetricsPanel extends JPanel {
 
         XYStepAreaRenderer volumeRenderer = new XYStepAreaRenderer();
         volumeRenderer.setShapesVisible(false);
-        volumeRenderer.setSeriesPaint(0, downloadVolumeColor); // Download - Green
+        volumeRenderer.setSeriesPaint(0, COLOR_DOWNLOAD_VOLUME); // Download - Green
         volumeRenderer.setDefaultToolTipGenerator(new SyncChartToolTipGenerator());
         plot.setDataset(NET_SPEED_DATASET_VOLUME, volumeDataset);
         plot.setRenderer(NET_SPEED_DATASET_VOLUME, volumeRenderer);
@@ -584,16 +577,11 @@ public class SynchronizationMetricsPanel extends JPanel {
         // Dataset 1: Speed (Line)
         plot.setDataset(NET_SPEED_DATASET_SPEED, lineDataset);
         XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, true);
-        lineRenderer.setUseFillPaint(true);
-        lineRenderer.setDefaultFillPaint(new Color(0, 0, 0, 0));
-        lineRenderer.setDrawOutlines(false);
-        lineRenderer.setDefaultShape(tooltipHitShape);
-        for (int i = 0; i < lineDataset.getSeriesCount(); i++) {
-            lineRenderer.setSeriesShape(i, tooltipHitShape);
-        }
-        lineRenderer.setSeriesPaint(0, new Color(0, 100, 0));
-        lineRenderer.setSeriesStroke(0, new java.awt.BasicStroke(1.2f));
-        lineRenderer.setDefaultToolTipGenerator(new SyncChartToolTipGenerator());
+
+        Map<String, Color> lineColors = new HashMap<>();
+        lineColors.put(downloadSpeedSeries.getKey().toString(), COLOR_DOWNLOAD_SPEED);
+        configureLineRenderer(lineRenderer, lineDataset, lineColors);
+
         plot.setRenderer(NET_SPEED_DATASET_SPEED, lineRenderer);
         plot.mapDatasetToRangeAxis(NET_SPEED_DATASET_SPEED, NET_SPEED_AXIS_SPEED);
 
@@ -805,7 +793,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current Blocks/Sec (MA) relative to the maximum observed Blocks/Sec (MA) in the current chart history window (%d blocks).
                 """
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
-        blocksPerSecondLabel = createLabel("Blocks/Sec (MA)", Color.CYAN, tooltip);
+        blocksPerSecondLabel = createLabel("Blocks/Sec (MA)", COLOR_BLOCKS_PER_SEC, tooltip);
         blocksPerSecondProgressBar = createProgressBar(0, 200, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, blocksPerSecondLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -833,7 +821,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current All Txs/Sec (MA) relative to the maximum observed All Txs/Sec (MA) in the current chart history window (%d blocks).
                 """
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
-        txPerSecondLabel = createLabel("All Txs/Sec (MA)", Color.GREEN, tooltip);
+        txPerSecondLabel = createLabel("All Txs/Sec (MA)", COLOR_ALL_TX_PER_SEC, tooltip);
         allTransactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, txPerSecondLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -850,7 +838,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current System Txs/Sec (MA) relative to the maximum observed System Txs/Sec (MA) in the current chart history window (%d blocks).
                 """
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
-        systemTxPerSecondLabel = createLabel("System Txs/Sec (MA)", new Color(135, 206, 250), tooltip); // LightSkyBlue
+        systemTxPerSecondLabel = createLabel("System Txs/Sec (MA)", COLOR_SYSTEM_TX_PER_SEC, tooltip); // LightSkyBlue
         systemTransactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, systemTxPerSecondLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -878,7 +866,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current All Txs/Block (MA) relative to the maximum observed All Txs/Block (MA) in the current chart history window (%d blocks).
                 """
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
-        txPerBlockLabel = createLabel("All Txs/Block (MA)", allTxPerBlockColor, tooltip);
+        txPerBlockLabel = createLabel("All Txs/Block (MA)", COLOR_ALL_TX_PER_BLOCK, tooltip);
         allTransactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, txPerBlockLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -895,7 +883,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current System Txs/Block (MA) relative to the maximum observed System Txs/Block (MA) in the current chart history window (%d blocks).
                 """
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
-        systemTxPerBlockLabel = createLabel("System Txs/Block (MA)", systemTxperBlockColor, tooltip);
+        systemTxPerBlockLabel = createLabel("System Txs/Block (MA)", COLOR_SYSTEM_TX_PER_BLOCK, tooltip);
         systemTransactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, systemTxPerBlockLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -913,7 +901,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current ATs/Block (MA) relative to the maximum observed ATs/Block (MA) in the current chart history window (%d blocks).
                 """
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
-        atCountLabel = createLabel("ATs/Block (MA)", new Color(153, 0, 76), tooltip); // Deep Pink
+        atCountLabel = createLabel("ATs/Block (MA)", COLOR_AT_COUNT_PER_BLOCK, tooltip); // Deep Pink
         atCountsPerBlockProgressBar = createProgressBar(0, 100, null, "0.00 - max: 0.00", progressBarSize1);
         addComponent(SyncPanel, atCountLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -969,7 +957,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current Push Time (MA) [ms] relative to the maximum observed Push Time (MA) in the current chart history window (%d blocks).
                 """
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
-        pushTimeLabel = createLabel("Push Time (MA)", Color.BLUE, tooltip);
+        pushTimeLabel = createLabel("Push Time (MA)", COLOR_PUSH_TIME, tooltip);
         pushTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
 
         // The toggle slider is now next to the payload bar, so we just add the label
@@ -997,7 +985,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current Validation Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
                 """
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
-        validationTimeLabel = createLabel("Validation Time (MA)", Color.YELLOW, tooltip);
+        validationTimeLabel = createLabel("Validation Time (MA)", COLOR_VALIDATION_TIME, tooltip);
         validationTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
         addComponent(timingInfoPanel, validationTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -1023,7 +1011,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current TX Loop Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
                 """
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
-        txLoopTimeLabel = createLabel("TX Loop Time (MA)", new Color(128, 0, 128), tooltip);
+        txLoopTimeLabel = createLabel("TX Loop Time (MA)", COLOR_TX_LOOP_TIME, tooltip);
         txLoopTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
         addComponent(timingInfoPanel, txLoopTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -1047,7 +1035,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current Housekeeping Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
                 """
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
-        housekeepingTimeLabel = createLabel("Housekeeping Time (MA)", new Color(42, 223, 223), tooltip);
+        housekeepingTimeLabel = createLabel("Housekeeping Time (MA)", COLOR_HOUSEKEEPING_TIME, tooltip);
         housekeepingTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
         addComponent(timingInfoPanel, housekeepingTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -1072,7 +1060,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current TX Apply Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
                 """
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
-        txApplyTimeLabel = createLabel("TX Apply Time (MA)", new Color(255, 165, 0), tooltip);
+        txApplyTimeLabel = createLabel("TX Apply Time (MA)", COLOR_TX_APPLY_TIME, tooltip);
         txApplyTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
         addComponent(timingInfoPanel, txApplyTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -1096,7 +1084,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current AT Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
                 """
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
-        atTimeLabel = createLabel("AT Time (MA)", new Color(153, 0, 76), tooltip);
+        atTimeLabel = createLabel("AT Time (MA)", COLOR_AT_TIME, tooltip);
         atTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
         addComponent(timingInfoPanel, atTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -1120,7 +1108,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current Subscription Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
                 """
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
-        subscriptionTimeLabel = createLabel("Subscription Time (MA)", new Color(255, 105, 100), tooltip); // Hot pink
+        subscriptionTimeLabel = createLabel("Subscription Time (MA)", COLOR_SUBSCRIPTION_TIME, tooltip); // Hot pink
         subscriptionTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
         addComponent(timingInfoPanel, subscriptionTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -1144,7 +1132,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current Block Apply Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
                 """
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
-        blockApplyTimeLabel = createLabel("Block Apply Time (MA)", new Color(0, 100, 100), tooltip); // Teal
+        blockApplyTimeLabel = createLabel("Block Apply Time (MA)", COLOR_BLOCK_APPLY_TIME, tooltip); // Teal
         blockApplyTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
         addComponent(timingInfoPanel, blockApplyTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -1168,7 +1156,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current Commit Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
                 """
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
-        commitTimeLabel = createLabel("Commit Time (MA)", new Color(220, 130, 255), tooltip);
+        commitTimeLabel = createLabel("Commit Time (MA)", COLOR_COMMIT_TIME, tooltip);
         commitTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
         addComponent(timingInfoPanel, commitTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -1192,7 +1180,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current Misc. Time (MA) relative to Push Time (MA) which value is shown by the Percentage [%%].
                 """
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
-        miscTimeLabel = createLabel("Misc. Time (MA)", Color.LIGHT_GRAY, tooltip);
+        miscTimeLabel = createLabel("Misc. Time (MA)", COLOR_MISC_TIME, tooltip);
         miscTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
         addComponent(timingInfoPanel, miscTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
                 GridBagConstraints.NONE, labelInsets);
@@ -1200,7 +1188,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 GridBagConstraints.HORIZONTAL, barInsets);
         // --- Payload Fullness Panel (spanning below both columns) ---
         JPanel payloadPanel = new JPanel(new GridBagLayout());
-        payloadFullnessLabel = createLabel("Payload Fullness (MA)", Color.WHITE, null); // Tooltip is set in init()
+        payloadFullnessLabel = createLabel("Payload Fullness (MA)", COLOR_PAYLOAD_FULLNESS, null); // Tooltip is set in
+                                                                                                   // init()
         payloadFullnessProgressBar = createProgressBar(0, 100, null,
                 "000.00% - C: 000% (000000 / 0 bytes) - min: 000% - max: 000%", wideProgressBarSize); // by layout
 
@@ -1258,7 +1247,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 """
                 .formatted(movingAverageWindow * netSpeedUpdateTime / 1000,
                         SPEED_HISTORY_SIZE * netSpeedUpdateTime / 1000, SPEED_HISTORY_SIZE * netSpeedUpdateTime / 1000);
-        uploadSpeedLabel = createLabel("▲ Speed (MA)", new Color(128, 0, 0), tooltip);
+        uploadSpeedLabel = createLabel("▲ Speed (MA)", COLOR_UPLOAD_SPEED, tooltip);
         uploadSpeedProgressBar = createProgressBar(0, MAX_SPEED_BPS, null, "0.00 B/s", progressBarSize2);
         uploadSpeedPanel.add(uploadSpeedLabel);
         uploadSpeedPanel.add(uploadSpeedProgressBar);
@@ -1283,7 +1272,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 """
                 .formatted(movingAverageWindow * netSpeedUpdateTime / 1000,
                         SPEED_HISTORY_SIZE * netSpeedUpdateTime / 1000, SPEED_HISTORY_SIZE * netSpeedUpdateTime / 1000);
-        downloadSpeedLabel = createLabel("▼ Speed (MA)", new Color(0, 100, 0), tooltip);
+        downloadSpeedLabel = createLabel("▼ Speed (MA)", COLOR_DOWNLOAD_SPEED, tooltip);
         downloadSpeedProgressBar = createProgressBar(0, MAX_SPEED_BPS, null, "0.00 B/s", progressBarSize2);
         downloadSpeePanel.add(downloadSpeedLabel);
         downloadSpeePanel.add(downloadSpeedProgressBar);
@@ -1300,11 +1289,11 @@ public class SynchronizationMetricsPanel extends JPanel {
         tooltip = """
                 The total amount of data uploaded to the network during this session.
                 """;
-        metricsUploadVolumeLabel = createLabel("", new Color(233, 150, 122), tooltip);
+        metricsUploadVolumeLabel = createLabel("", COLOR_UPLOAD_VOLUME, tooltip);
         tooltip = """
                 The total amount of data downloaded from the network during this session.
                 """;
-        metricsDownloadVolumeLabel = createLabel("", new Color(50, 205, 50), tooltip);
+        metricsDownloadVolumeLabel = createLabel("", COLOR_DOWNLOAD_VOLUME, tooltip);
 
         combinedVolumePanel.add(volumeTitleLabel);
         combinedVolumePanel.add(metricsUploadVolumeLabel);
@@ -1445,13 +1434,14 @@ public class SynchronizationMetricsPanel extends JPanel {
         addToggleListener(downloadSpeedLabel, downloadChartPanel, "Download Speed");
         addPaintToggleListener(systemTxPerBlockLabel, performanceChartPanel, "System Txs/Block (MA)", timingChartPanel,
                 "System Txs/Block (MA)",
-                systemTxperBlockColor);
+                COLOR_SYSTEM_TX_PER_BLOCK);
         addPaintToggleListener(txPerBlockLabel, performanceChartPanel, "All Txs/Block (MA)", timingChartPanel,
                 "All Txs/Block (MA)",
-                allTxPerBlockColor);
+                COLOR_ALL_TX_PER_BLOCK);
 
-        addPaintToggleListener(metricsUploadVolumeLabel, uploadChartPanel, "Upload Volume", uploadVolumeColor);
-        addPaintToggleListener(metricsDownloadVolumeLabel, downloadChartPanel, "Download Volume", downloadVolumeColor);
+        addPaintToggleListener(metricsUploadVolumeLabel, uploadChartPanel, "Upload Volume", COLOR_UPLOAD_VOLUME);
+        addPaintToggleListener(metricsDownloadVolumeLabel, downloadChartPanel, "Download Volume",
+                COLOR_DOWNLOAD_VOLUME);
 
         // Timer to periodically update the network speed chart so it flows even with no
         // traffic
@@ -1490,26 +1480,33 @@ public class SynchronizationMetricsPanel extends JPanel {
     }
 
     public void onQueueStatus() {
-        BlockchainProcessor.QueueStatus status = Signum.getBlockchainProcessor().getQueueStatus();
-        if (status != null) {
-            SwingUtilities.invokeLater(() -> updateQueueStatus(status.unverifiedSize,
-                    status.verifiedSize, status.totalSize, status.cacheFullness));
-        }
+        chartUpdateExecutor.submit(() -> {
+            BlockchainProcessor.QueueStatus status = Signum.getBlockchainProcessor().getQueueStatus();
+            if (status != null) {
+                SwingUtilities.invokeLater(() -> updateQueueStatus(status.unverifiedSize,
+                        status.verifiedSize, status.totalSize, status.cacheFullness));
+            }
+        });
     }
 
     public void onForkCacheChanged() {
-        SwingUtilities.invokeLater(() -> updateForkCacheStatus(Signum.getBlockchainProcessor().getForkCacheSize()));
+        chartUpdateExecutor.submit(() -> {
+            int forkCacheSize = Signum.getBlockchainProcessor().getForkCacheSize();
+            SwingUtilities.invokeLater(() -> updateForkCacheStatus(forkCacheSize));
+        });
     }
 
     public void onUnconfirmedTransactionCountChanged() {
-        SwingUtilities.invokeLater(() -> updateUnconfirmedTxCount(
-                Signum.getTransactionProcessor().getAmountUnconfirmedTransactions()));
+        chartUpdateExecutor.submit(() -> {
+            int count = Signum.getTransactionProcessor().getAmountUnconfirmedTransactions();
+            SwingUtilities.invokeLater(() -> updateUnconfirmedTxCount(count));
+        });
     }
 
     public void onNetVolumeChanged() {
         BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
-        SwingUtilities.invokeLater(() -> updateNetVolume(blockchainProcessor.getUploadedVolume(),
-                blockchainProcessor.getDownloadedVolume()));
+        this.uploadedVolume = blockchainProcessor.getUploadedVolume();
+        this.downloadedVolume = blockchainProcessor.getDownloadedVolume();
     }
 
     public void onPerformanceStatsUpdated() {
@@ -1664,34 +1661,36 @@ public class SynchronizationMetricsPanel extends JPanel {
 
     private void onBlockPopped(brs.Block block) {
         int height = block.getHeight();
-        SwingUtilities.invokeLater(() -> {
-            setChartNotification(false);
-            try {
-                truncateSeries(blocksPerSecondSeries, height);
-                truncateSeries(allTransactionsPerSecondSeries, height);
-                truncateSeries(systemTransactionsPerSecondSeries, height);
-                truncateSeries(atCountPerBlockSeries, height);
+        chartUpdateExecutor.submit(() -> {
+            SwingUtilities.invokeLater(() -> {
+                setChartNotification(false);
+                try {
+                    truncateSeries(blocksPerSecondSeries, height);
+                    truncateSeries(allTransactionsPerSecondSeries, height);
+                    truncateSeries(systemTransactionsPerSecondSeries, height);
+                    truncateSeries(atCountPerBlockSeries, height);
 
-                truncateSeries(allTransactionsPerBlockSeries, height);
-                truncateSeries(systemTransactionsPerBlockSeries, height);
+                    truncateSeries(allTransactionsPerBlockSeries, height);
+                    truncateSeries(systemTransactionsPerBlockSeries, height);
 
-                truncateSeries(pushTimePerBlockSeries, height);
-                truncateSeries(validationTimePerBlockSeries, height);
-                truncateSeries(txLoopTimePerBlockSeries, height);
-                truncateSeries(housekeepingTimePerBlockSeries, height);
-                truncateSeries(txApplyTimePerBlockSeries, height);
-                truncateSeries(atTimePerBlockSeries, height);
-                truncateSeries(subscriptionTimePerBlockSeries, height);
-                truncateSeries(blockApplyTimePerBlockSeries, height);
-                truncateSeries(commitTimePerBlockSeries, height);
-                truncateSeries(miscTimePerBlockSeries, height);
-                truncateSeries(payloadFullnessSeries, height);
+                    truncateSeries(pushTimePerBlockSeries, height);
+                    truncateSeries(validationTimePerBlockSeries, height);
+                    truncateSeries(txLoopTimePerBlockSeries, height);
+                    truncateSeries(housekeepingTimePerBlockSeries, height);
+                    truncateSeries(txApplyTimePerBlockSeries, height);
+                    truncateSeries(atTimePerBlockSeries, height);
+                    truncateSeries(subscriptionTimePerBlockSeries, height);
+                    truncateSeries(blockApplyTimePerBlockSeries, height);
+                    truncateSeries(commitTimePerBlockSeries, height);
+                    truncateSeries(miscTimePerBlockSeries, height);
+                    truncateSeries(payloadFullnessSeries, height);
 
-                updateChartRanges();
-                updateProgressBarsFromSeries();
-            } finally {
-                setChartNotification(true);
-            }
+                    updateChartRanges();
+                    updateProgressBarsFromSeries();
+                } finally {
+                    setChartNotification(true);
+                }
+            });
         });
     }
 
@@ -1935,11 +1934,6 @@ public class SynchronizationMetricsPanel extends JPanel {
 
         updateProgressBar(uploadSpeedProgressBar, avgUploadSpeed, avgUploadSpeedMax, this::formatDataRate);
         updateProgressBar(downloadSpeedProgressBar, avgDownloadSpeed, avgDownloadSpeedMax, this::formatDataRate);
-    }
-
-    private void updateNetVolume(long uploadedVolume, long downloadedVolume) {
-        this.uploadedVolume = uploadedVolume;
-        this.downloadedVolume = downloadedVolume;
     }
 
     private String formatDataSize(double bytes) {
@@ -2354,6 +2348,38 @@ public class SynchronizationMetricsPanel extends JPanel {
             min = Math.min(min, series.getY(i).doubleValue());
         }
         return min;
+    }
+
+    private void configureLineRenderer(XYLineAndShapeRenderer renderer, XYSeriesCollection dataset,
+            Map<String, Color> colors) {
+        renderer.setUseFillPaint(true);
+        renderer.setDefaultFillPaint(new Color(0, 0, 0, 0));
+        renderer.setDrawOutlines(false);
+        renderer.setDefaultShape(tooltipHitShape);
+        renderer.setDefaultToolTipGenerator(new SyncChartToolTipGenerator());
+
+        for (int i = 0; i < dataset.getSeriesCount(); i++) {
+            renderer.setSeriesShape(i, tooltipHitShape);
+            renderer.setSeriesStroke(i, CHART_STROKE);
+            Comparable key = dataset.getSeriesKey(i);
+            if (colors.containsKey(key)) {
+                renderer.setSeriesPaint(i, colors.get(key));
+            }
+        }
+    }
+
+    private void configureBarRenderer(XYBarRenderer renderer, XYSeriesCollection dataset, Map<String, Color> colors) {
+        renderer.setBarPainter(new StandardXYBarPainter());
+        renderer.setShadowVisible(false);
+        renderer.setMargin(0.0);
+        renderer.setDefaultToolTipGenerator(new SyncChartToolTipGenerator());
+
+        for (int i = 0; i < dataset.getSeriesCount(); i++) {
+            Comparable key = dataset.getSeriesKey(i);
+            if (colors.containsKey(key)) {
+                renderer.setSeriesPaint(i, colors.get(key));
+            }
+        }
     }
 
     private class SyncChartToolTipGenerator implements XYToolTipGenerator {
