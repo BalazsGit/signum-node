@@ -1470,6 +1470,8 @@ public class SignumGUI extends JFrame {
 
                     onTrimHeightChanged();
                     onConsistencyUpdate();
+                    onManualPopOffProgress();
+                    onAutoPopOffProgress();
 
                     updateLatestBlock(Signum.getBlockchain().getLastBlock());
                     BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
