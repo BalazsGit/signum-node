@@ -1,5 +1,7 @@
 package brs.gui;
 
+import brs.gui.util.TableUtils;
+
 import javax.swing.*;
 import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableModel;
@@ -7,6 +9,8 @@ import javax.swing.table.TableRowSorter;
 import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.util.ArrayList;
+import java.util.List;
 
 public class PeerTableDialog extends JFrame {
     private static volatile PeerTableDialog instance;
@@ -52,7 +56,20 @@ public class PeerTableDialog extends JFrame {
         table.setDefaultRenderer(Integer.class, renderer);
         table.setFillsViewportHeight(true);
 
-        TableRowSorter<TableModel> sorter = new TableRowSorter<>(model);
+        TableRowSorter<TableModel> sorter = new TableRowSorter<TableModel>(model) {
+            @Override
+            public void toggleSortOrder(int column) {
+                List<? extends RowSorter.SortKey> sortKeys = getSortKeys();
+                if (sortKeys.size() > 0) {
+                    if (sortKeys.get(0).getColumn() == column
+                            && sortKeys.get(0).getSortOrder() == SortOrder.DESCENDING) {
+                        setSortKeys(null);
+                        return;
+                    }
+                }
+                super.toggleSortOrder(column);
+            }
+        };
         table.setRowSorter(sorter);
 
         filterTextField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
@@ -102,7 +119,7 @@ public class PeerTableDialog extends JFrame {
         contentPanel.add(scrollPane, BorderLayout.CENTER);
 
         setContentPane(contentPanel);
-        setSize(1000, 700);
+        setSize(1200, 700);
         setLocationRelativeTo(owner);
     }
 }
