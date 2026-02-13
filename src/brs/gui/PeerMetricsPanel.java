@@ -2206,6 +2206,7 @@ public class PeerMetricsPanel extends JPanel {
 
     private void configureLineRenderer(XYLineAndShapeRenderer renderer, XYSeriesCollection dataset,
             Map<String, Color> colors) {
+        renderer.setDrawSeriesLineAsPath(true);
         renderer.setUseFillPaint(true);
         renderer.setDefaultFillPaint(new Color(0, 0, 0, 0));
         renderer.setDrawOutlines(false);
