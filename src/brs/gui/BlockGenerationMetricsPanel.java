@@ -130,8 +130,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
     private static final Color WAITING_COLOR = Color.DARK_GRAY;
     private static final Color FILTERED_OUT_COLOR = Color.DARK_GRAY;
 
-    private boolean showNodeShare = true;
-    private boolean showNetworkShare = true;
+    private volatile boolean showNodeShare = true;
+    private volatile boolean showNetworkShare = true;
     private JLabel nodeShareLegendLabel;
     private JLabel networkShareLegendLabel;
     private JLabel nodeMinersCountLabel;
@@ -190,6 +190,13 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
     private final Shape tooltipHitShape = new java.awt.geom.Ellipse2D.Double(-10.0, -10.0, 20.0, 20.0);
 
+    private boolean isTabActive = false;
+    private boolean uiOptimizationEnabled = true;
+    private MinerUpdateData lastMinerData;
+    private PieChartUpdateData lastPieData;
+    private BlockchainUpdateData lastBlockchainData;
+    private BlockUpdateData lastBlockUpdateData;
+
     public BlockGenerationMetricsPanel(JFrame parentFrame) {
         super(new GridBagLayout());
         this.parentFrame = parentFrame;
@@ -230,12 +237,49 @@ public class BlockGenerationMetricsPanel extends JPanel {
             }
         }
         updateMinersUI(calculateMinerData(false));
-        updatePieChartFromGenerators();
+        updatePieChartUI(calculatePieChartData());
         initListeners();
+
+        addHierarchyListener(e -> {
+            if ((e.getChangeFlags() & java.awt.event.HierarchyEvent.SHOWING_CHANGED) != 0) {
+                boolean showing = isShowing();
+                if (showing != isTabActive) {
+                    isTabActive = showing;
+                    if (isTabActive && uiOptimizationEnabled)
+                        refreshUI();
+                }
+            }
+        });
+        isTabActive = isShowing();
     }
 
     public void shutdown() {
         updateExecutor.shutdown();
+    }
+
+    public void setUiOptimizationEnabled(boolean enabled) {
+        this.uiOptimizationEnabled = enabled;
+        if (!enabled) {
+            refreshUI();
+        }
+    }
+
+    private void refreshUI() {
+        SwingUtilities.invokeLater(() -> {
+            if (lastBlockchainData != null)
+                updateBlockchainInfoUI(lastBlockchainData);
+            if (lastBlockUpdateData != null)
+                applyBlockUpdate(lastBlockUpdateData);
+            if (lastMinerData != null)
+                updateMinersUI(lastMinerData);
+            if (lastPieData != null)
+                updatePieChartUI(lastPieData);
+            updateChartRange();
+            if (chartPanel != null)
+                chartPanel.getChart().getXYPlot().setNotify(true);
+            if (pieChartPanel != null)
+                pieChartPanel.getChart().setNotify(true);
+        });
     }
 
     private void layoutComponents() {
@@ -673,7 +717,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 if (SwingUtilities.isLeftMouseButton(e)) {
                     showNodeShare = !showNodeShare;
                     updateNodeShareLegend();
-                    updatePieChartFromGenerators();
+                    triggerPieChartUpdate();
                 }
             }
         });
@@ -696,7 +740,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 if (SwingUtilities.isLeftMouseButton(e)) {
                     showNetworkShare = !showNetworkShare;
                     updateNetworkShareLegend();
-                    updatePieChartFromGenerators();
+                    triggerPieChartUpdate();
                 }
             }
         });
@@ -1154,12 +1198,16 @@ public class BlockGenerationMetricsPanel extends JPanel {
     }
 
     private void updateBlockchainInfoUI(BlockchainUpdateData data) {
+        this.lastBlockchainData = data;
         if (data == null)
             return;
 
         updateInfoLabel(heightLabel, "Block Generation Height", data.heightStr);
         updateInfoLabel(difficultyLabel, "Difficulty", data.difficultyStr);
         updateInfoLabel(cumulativeDifficultyLabel, "Cumulative Diff", data.cumDiffStr);
+
+        if (uiOptimizationEnabled && !isTabActive)
+            return;
 
         lastNetworkSizeBytes = data.networkSizeBytes;
         updateProgressBar(networkSizeProgressBar, data.avgNetworkSize, data.maxNetworkSize,
@@ -1186,12 +1234,13 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 nodeDeadlineHistory.computeIfAbsent(nextHeight, k -> new CopyOnWriteArrayList<>()).add(entry);
 
                 MinerUpdateData minerData = calculateMinerData(false);
+                PieChartUpdateData pieData = calculatePieChartData();
 
                 // Prepare UI updates
                 SwingUtilities.invokeLater(() -> {
                     updateMinersUI(minerData);
                     // updateReceivedDeadlineProgressBar is handled in updateMinersUI via DTO
-                    updatePieChartFromGenerators();
+                    updatePieChartUI(pieData);
                     if (minerData.bestDeadline != null) {
                         updateCurrentNodeDeadlineOnChart(nextHeight, minerData.bestDeadline.doubleValue());
                     }
@@ -1214,6 +1263,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 // Calculate miner data BEFORE clearing current deadlines to capture the final
                 // state of the block
                 MinerUpdateData minerData = calculateMinerData(true);
+                PieChartUpdateData pieData = calculatePieChartData();
 
                 deadlineReceivedCountSinceLastBlock = 0;
                 currentBlockDeadlines.clear();
@@ -1224,7 +1274,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
                     updateBlockchainInfoUI(blockchainData);
                     applyBlockUpdate(updateData);
                     updateMinersUI(minerData);
-                    updatePieChartFromGenerators();
+                    updatePieChartUI(pieData);
                     updateChartRange();
                 });
             });
@@ -1465,6 +1515,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
     }
 
     private void applyBlockUpdate(BlockUpdateData data) {
+        this.lastBlockUpdateData = data;
         if (data.block == null || data.block.getHeight() <= 1)
             return;
 
@@ -1489,9 +1540,9 @@ public class BlockGenerationMetricsPanel extends JPanel {
         updateProgressBar(commitmentProgressBar, data.avgCommitment, data.maxCommitment,
                 val -> String.format("C: %.2f | MA: %.2f - max: %.2f", data.signaPerTB, val, data.maxCommitment));
 
-        // Apply Series Updates
+        // Apply Series Updates - ALWAYS update data model to prevent gaps
         data.seriesUpdates.forEach((series, point) -> {
-            series.add(point.x, point.y);
+            series.addOrUpdate(point.x, point.y);
         });
 
         JFreeChart chart = chartPanel.getChart();
@@ -1522,7 +1573,9 @@ public class BlockGenerationMetricsPanel extends JPanel {
             removeOldItems(nodeShareMASeries, data.minHeight);
             removeOldItems(minedBlockSeries, data.minHeight);
         } finally {
-            chart.getXYPlot().setNotify(true);
+            if (!uiOptimizationEnabled || isTabActive) {
+                chart.getXYPlot().setNotify(true);
+            }
         }
     }
 
@@ -1531,9 +1584,13 @@ public class BlockGenerationMetricsPanel extends JPanel {
         chart.getXYPlot().setNotify(false);
         try {
             nodeDeadlineSeries.addOrUpdate((double) height, deadline);
-            updateChartRange();
+            if (!uiOptimizationEnabled || isTabActive) {
+                updateChartRange();
+            }
         } finally {
-            chart.getXYPlot().setNotify(true);
+            if (!uiOptimizationEnabled || isTabActive) {
+                chart.getXYPlot().setNotify(true);
+            }
         }
     }
 
@@ -1550,6 +1607,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
             // Recalculate state after pop-off
             BlockchainUpdateData blockchainData = calculateBlockchainInfo(false);
             MinerUpdateData minerData = calculateMinerData(false);
+            PieChartUpdateData pieData = calculatePieChartData();
 
             // --- UI UPDATES ---
             SwingUtilities.invokeLater(() -> {
@@ -1573,10 +1631,12 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
                     updateMinersUI(minerData);
                     updateProgressBarsFromSeries();
-                    updatePieChartFromGenerators();
+                    updatePieChartUI(pieData);
                     updateChartRange();
                 } finally {
-                    mainChart.getXYPlot().setNotify(true);
+                    if (!uiOptimizationEnabled || isTabActive) {
+                        mainChart.getXYPlot().setNotify(true);
+                    }
                 }
             });
         });
@@ -1685,7 +1745,23 @@ public class BlockGenerationMetricsPanel extends JPanel {
         return min;
     }
 
-    private void updatePieChartFromGenerators() {
+    private static class PieChartUpdateData {
+        double nodeSharePercent;
+        double networkSharePercent;
+        List<Map.Entry<String, Double>> slices;
+        boolean isEmpty;
+        boolean isFilteredOut;
+    }
+
+    private void triggerPieChartUpdate() {
+        updateExecutor.submit(() -> {
+            PieChartUpdateData data = calculatePieChartData();
+            SwingUtilities.invokeLater(() -> updatePieChartUI(data));
+        });
+    }
+
+    private PieChartUpdateData calculatePieChartData() {
+        PieChartUpdateData data = new PieChartUpdateData();
         Set<Long> localGeneratorIds = new HashSet<>();
         Generator generator = Signum.getGenerator();
         if (generator != null) {
@@ -1695,18 +1771,15 @@ public class BlockGenerationMetricsPanel extends JPanel {
         }
 
         long totalHistory = recentGenerators.size();
-        double nodeSharePercent = 0;
-        double networkSharePercent = 0;
 
         if (totalHistory > 0) {
             long nodeCount = recentGenerators.stream().map(e -> e.generatorId).filter(localGeneratorIds::contains)
                     .count();
-            nodeSharePercent = (double) nodeCount * 100.0 / totalHistory;
-            networkSharePercent = 100.0 - nodeSharePercent;
+            data.nodeSharePercent = (double) nodeCount * 100.0 / totalHistory;
+            data.networkSharePercent = 100.0 - data.nodeSharePercent;
+        } else {
+            data.isEmpty = true;
         }
-
-        updateNodeShareLegend(nodeSharePercent);
-        updateNetworkShareLegend(networkSharePercent);
 
         List<Long> filteredGenerators = new ArrayList<>();
         for (BlockHistoryEntry entry : recentGenerators) {
@@ -1720,11 +1793,15 @@ public class BlockGenerationMetricsPanel extends JPanel {
         Map<Long, Long> counts = filteredGenerators.stream()
                 .collect(Collectors.groupingBy(Function.identity(), Collectors.counting()));
 
-        JFreeChart chart = pieChartPanel.getChart();
-        chart.setNotify(false);
-        try {
-            pieDataset.clear();
-            long total = filteredGenerators.size();
+        data.slices = new ArrayList<>();
+        long total = filteredGenerators.size();
+
+        if (total == 0 && !data.isEmpty) {
+            data.isFilteredOut = true;
+        }
+
+        if (total > 0) {
+            // Calculate slices
             if (total > 0) {
                 // To avoid clutter, let's group small shares into "Others"
                 final double threshold = 1.0; // 1%
@@ -1742,20 +1819,39 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
                 for (Map.Entry<Long, Double> entry : sortedShares) {
                     if (entry.getValue() >= threshold) {
-                        pieDataset.setValue(String.valueOf(entry.getKey()), entry.getValue());
+                        data.slices.add(new java.util.AbstractMap.SimpleEntry<>(String.valueOf(entry.getKey()),
+                                entry.getValue()));
                     } else {
                         othersShare += entry.getValue();
                         othersCount++;
                     }
                 }
-
                 if (othersCount > 0) {
-                    pieDataset.setValue("Others (" + othersCount + ")", othersShare);
+                    data.slices
+                            .add(new java.util.AbstractMap.SimpleEntry<>("Others (" + othersCount + ")", othersShare));
+                }
+            }
+        }
+        return data;
+    }
+
+    private void updatePieChartUI(PieChartUpdateData data) {
+        this.lastPieData = data;
+        updateNodeShareLegend(data.nodeSharePercent);
+        updateNetworkShareLegend(data.networkSharePercent);
+
+        JFreeChart chart = pieChartPanel.getChart();
+        chart.setNotify(false);
+        try {
+            pieDataset.clear();
+            if (!data.slices.isEmpty()) {
+                for (Map.Entry<String, Double> entry : data.slices) {
+                    pieDataset.setValue(entry.getKey(), entry.getValue());
                 }
             } else {
-                if (recentGenerators.isEmpty()) {
+                if (data.isEmpty) {
                     pieDataset.setValue("Waiting for blocks...", 100);
-                } else {
+                } else if (data.isFilteredOut) {
                     pieDataset.setValue("Filtered out", 100);
                 }
             }
@@ -1784,7 +1880,9 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 }
             }
         } finally {
-            chart.setNotify(true);
+            if (!uiOptimizationEnabled || isTabActive) {
+                chart.setNotify(true);
+            }
         }
 
         // Refresh tooltip if mouse is over the chart
@@ -1930,6 +2028,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
     }
 
     private void updateMinersUI(MinerUpdateData data) {
+        this.lastMinerData = data;
         if (data == null)
             return;
         minersTableModel.setData(data.entries);
@@ -1942,6 +2041,9 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 "<html>Node Miners: <font color='" + toHex(COLOR_ACTIVE_MINER) + "'>" + data.activeMinerCount
                         + "</font> / <font color='" + toHex(COLOR_NODE_MINERS) + "'>"
                         + data.uniqueNodeMiners + "</font></html>");
+
+        if (uiOptimizationEnabled && !isTabActive)
+            return;
 
         if (data.bestDeadline != null) {
             nodeBestDeadline = data.bestDeadline;
