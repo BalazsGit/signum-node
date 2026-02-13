@@ -29,7 +29,7 @@ import org.slf4j.LoggerFactory;
  * contains consensus-critical metadata such as the generation signature
  * (Proof of Capacity), timestamp, base target, and cumulative difficulty.
  *
- * <h3>Concurrency and Thread Safety</h3>
+ * <h2>Concurrency and Thread Safety</h2>
  * <p>
  * This class follows a lightweight concurrency model optimized for performance
  * and memory efficiency:
@@ -55,7 +55,7 @@ import org.slf4j.LoggerFactory;
  * After signing, the class is safe for concurrent read access.
  * </p>
  *
- * <h3>Lifecycle</h3>
+ * <h2>Lifecycle</h2>
  * <ol>
  * <li>
  * <b>Construction (unsigned):</b> The block is created with transactions and
