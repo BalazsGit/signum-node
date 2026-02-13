@@ -159,27 +159,35 @@ public class PeersDialog extends JFrame {
             v1 = "";
         if (v2 == null)
             v2 = "";
-        String[] parts1 = v1.replaceAll("[^0-9.]", "").split("\\.");
-        String[] parts2 = v2.replaceAll("[^0-9.]", "").split("\\.");
-        int length = Math.max(parts1.length, parts2.length);
-        for (int i = 0; i < length; i++) {
-            int num1 = 0;
-            if (i < parts1.length && !parts1[i].isEmpty()) {
-                try {
-                    num1 = Integer.parseInt(parts1[i]);
-                } catch (NumberFormatException e) {
-                    /* ignore */ }
+
+        int i1 = 0;
+        int i2 = 0;
+        int len1 = v1.length();
+        int len2 = v2.length();
+
+        while (i1 < len1 || i2 < len2) {
+            // Skip non-digits
+            while (i1 < len1 && !Character.isDigit(v1.charAt(i1)))
+                i1++;
+            while (i2 < len2 && !Character.isDigit(v2.charAt(i2)))
+                i2++;
+
+            // Parse number
+            long n1 = 0;
+            while (i1 < len1 && Character.isDigit(v1.charAt(i1))) {
+                n1 = n1 * 10 + (v1.charAt(i1) - '0');
+                i1++;
             }
-            int num2 = 0;
-            if (i < parts2.length && !parts2[i].isEmpty()) {
-                try {
-                    num2 = Integer.parseInt(parts2[i]);
-                } catch (NumberFormatException e) {
-                    /* ignore */ }
+
+            long n2 = 0;
+            while (i2 < len2 && Character.isDigit(v2.charAt(i2))) {
+                n2 = n2 * 10 + (v2.charAt(i2) - '0');
+                i2++;
             }
-            if (num1 < num2)
+
+            if (n1 < n2)
                 return -1;
-            if (num1 > num2)
+            if (n1 > n2)
                 return 1;
         }
         return 0;
