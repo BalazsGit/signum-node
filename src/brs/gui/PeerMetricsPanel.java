@@ -167,6 +167,13 @@ public class PeerMetricsPanel extends JPanel {
 
     private final Shape tooltipHitShape = new java.awt.geom.Ellipse2D.Double(-10.0, -10.0, 20.0, 20.0);
 
+    private boolean isTabActive = false;
+    private boolean uiOptimizationEnabled = true;
+    private MetricsUpdateData lastRxUpdateData;
+    private MetricsUpdateData lastTxUpdateData;
+    private MetricsUpdateData lastOtherUpdateData;
+    private OverviewUpdateData lastOverviewUpdateData;
+
     public PeerMetricsPanel() {
         super(new GridBagLayout());
         initUI();
@@ -181,6 +188,43 @@ public class PeerMetricsPanel extends JPanel {
         Signum.getBlockchainProcessor().removePeerMetricListener(this::onPeerMetric);
         Signum.getBlockchainProcessor().removeListener(this::onPeersUpdated, BlockchainProcessor.Event.PEERS_UPDATED);
         chartUpdateExecutor.shutdown();
+    }
+
+    public void setUiOptimizationEnabled(boolean enabled) {
+        this.uiOptimizationEnabled = enabled;
+        if (!enabled) {
+            refreshUI();
+        }
+    }
+
+    private void refreshUI() {
+        SwingUtilities.invokeLater(() -> {
+            if (lastRxUpdateData != null) {
+                updateGlobalUI(lastRxUpdateData);
+                updateTable(lastRxUpdateData);
+            }
+            if (lastTxUpdateData != null) {
+                updateGlobalUI(lastTxUpdateData);
+                updateTable(lastTxUpdateData);
+            }
+            if (lastOtherUpdateData != null) {
+                updateGlobalUI(lastOtherUpdateData);
+                updateTable(lastOtherUpdateData);
+            }
+            if (lastOverviewUpdateData != null) {
+                applyOverviewUpdate(lastOverviewUpdateData);
+            }
+            // Force repaint of charts
+            for (ChartPanel cp : chartPanels.values()) {
+                cp.getChart().getXYPlot().setNotify(true);
+            }
+            // Overview chart is not in chartPanels map, handle separately if needed,
+            // but applyOverviewUpdate handles series updates which should trigger repaint
+            // if notify is true.
+            // Actually we need to find the overview chart panel reference or store it.
+            // It's created in createOverviewChartPanel but not stored in a field.
+            // However, applyOverviewUpdate updates series which updates the chart.
+        });
     }
 
     private void initUI() {
@@ -350,6 +394,18 @@ public class PeerMetricsPanel extends JPanel {
         tabbedPane.addTab("Overview", overviewPanel);
 
         add(tabbedPane, BorderLayout.CENTER);
+
+        addHierarchyListener(e -> {
+            if ((e.getChangeFlags() & java.awt.event.HierarchyEvent.SHOWING_CHANGED) != 0) {
+                boolean showing = isShowing();
+                if (showing != isTabActive) {
+                    isTabActive = showing;
+                    if (isTabActive && uiOptimizationEnabled)
+                        refreshUI();
+                }
+            }
+        });
+        isTabActive = isShowing();
     }
 
     private JPanel createMetricTab(String sectionTitle,
@@ -949,16 +1005,19 @@ public class PeerMetricsPanel extends JPanel {
                 data.rxAbsMin = new MetricSnapshot(rxAbsMinMA, null);
                 data.rxAbsMax = new MetricSnapshot(rxAbsMaxMA, null);
                 data.rxPeers = getPeerSnapshots(MetricType.RX);
+                this.lastRxUpdateData = data;
             } else if (type == MetricType.TX) {
                 data.tx = new MetricSnapshot(txLatencyMA, txRequestCountMA);
                 data.txAbsMin = new MetricSnapshot(txAbsMinMA, null);
                 data.txAbsMax = new MetricSnapshot(txAbsMaxMA, null);
                 data.txPeers = getPeerSnapshots(MetricType.TX);
+                this.lastTxUpdateData = data;
             } else {
                 data.other = new MetricSnapshot(otherLatencyMA, otherRequestCountMA);
                 data.otherAbsMin = new MetricSnapshot(otherAbsMinMA, null);
                 data.otherAbsMax = new MetricSnapshot(otherAbsMaxMA, null);
                 data.otherPeers = getPeerSnapshots(MetricType.OTHER);
+                this.lastOtherUpdateData = data;
             }
 
             // Update UI components on EDT
@@ -985,6 +1044,7 @@ public class PeerMetricsPanel extends JPanel {
 
             overviewUpdateCounter++;
             OverviewUpdateData overviewData = calculateOverviewUpdate(overviewUpdateCounter);
+            this.lastOverviewUpdateData = overviewData;
             SwingUtilities.invokeLater(() -> {
                 if (overviewData != null) {
                     applyOverviewUpdate(overviewData);
@@ -1000,11 +1060,11 @@ public class PeerMetricsPanel extends JPanel {
         List<PeerStatsSnapshot> snapshots = new ArrayList<>();
         for (PeerHistory ph : peerHistories.values()) {
             if (type == MetricType.RX && ph.blockRequestCount > 0)
-                snapshots.add(new PeerStatsSnapshot(ph, type));
+                snapshots.add(new PeerStatsSnapshot(ph, type, latestNetworkVersion));
             else if (type == MetricType.TX && ph.txBlockRequestCount > 0)
-                snapshots.add(new PeerStatsSnapshot(ph, type));
+                snapshots.add(new PeerStatsSnapshot(ph, type, latestNetworkVersion));
             else if (type == MetricType.OTHER && ph.otherRequestCount > 0)
-                snapshots.add(new PeerStatsSnapshot(ph, type));
+                snapshots.add(new PeerStatsSnapshot(ph, type, latestNetworkVersion));
         }
         snapshots.sort((p1, p2) -> Long.compare(p2.lastTimestamp, p1.lastTimestamp));
         return snapshots;
@@ -1030,6 +1090,9 @@ public class PeerMetricsPanel extends JPanel {
             updateAbsMetric(otherLatencyBar, data.otherAbsMin, data.otherAbsMax, otherAbsMinSeries, otherAbsMaxSeries,
                     data.typeCounter);
         }
+
+        // Note: updateMetricSet updates series which is safe. Bars are updated there
+        // too.
     }
 
     private void updateAbsMetric(JProgressBar parentBar, MetricSnapshot minSnap, MetricSnapshot maxSnap,
@@ -1054,6 +1117,21 @@ public class PeerMetricsPanel extends JPanel {
             XYSeries latSeries, XYSeries countSeries,
             String latUnit, String countUnit, long counter) {
 
+        // Update Series - ALWAYS update data model to prevent gaps
+        latSeries.addOrUpdate((double) counter, snapshot.latAvg);
+        if (countSeries != null) {
+            countSeries.addOrUpdate((double) counter, snapshot.countAvg);
+        }
+
+        if (latSeries.getItemCount() > HISTORY_SIZE) {
+            latSeries.remove(0);
+            if (countSeries != null)
+                countSeries.remove(0);
+        }
+
+        if (uiOptimizationEnabled && !isTabActive)
+            return;
+
         latBar.setMaximum((int) (snapshot.latMax > 0 ? snapshot.latMax : 100));
         latBar.setValue((int) snapshot.latCur);
         latBar.setString(String.format("C: %.0f | MA: %.0f - min: %.0f - max: %.0f %s", snapshot.latCur,
@@ -1064,17 +1142,6 @@ public class PeerMetricsPanel extends JPanel {
             countBar.setValue((int) snapshot.countCur);
             countBar.setString(String.format("C: %.0f | MA: %.2f - min: %.2f - max: %.2f %s", snapshot.countCur,
                     snapshot.countAvg, snapshot.countMin, snapshot.countMax, countUnit));
-        }
-
-        latSeries.addOrUpdate((double) counter, snapshot.latAvg);
-        if (countSeries != null) {
-            countSeries.addOrUpdate((double) counter, snapshot.countAvg);
-        }
-
-        if (latSeries.getItemCount() > HISTORY_SIZE) {
-            latSeries.remove(0);
-            if (countSeries != null)
-                countSeries.remove(0);
         }
     }
 
@@ -1151,15 +1218,16 @@ public class PeerMetricsPanel extends JPanel {
                 data.blacklistedList.add(p);
         }
 
+        // Regenerate snapshots for tables to reflect state changes (e.g. blacklisting)
+        // immediately
+        data.rxPeers = getPeerSnapshots(MetricType.RX);
+        data.txPeers = getPeerSnapshots(MetricType.TX);
+        data.otherPeers = getPeerSnapshots(MetricType.OTHER);
+
         return data;
     }
 
     private void applyOverviewUpdate(OverviewUpdateData data) {
-        updateCountBar(allPeersBar, data.all, data.all);
-        updateCountBar(connectedPeersBar, data.connected, data.all);
-        updateCountBar(activePeersBar, data.active, data.all);
-        updateCountBar(blacklistedPeersBar, data.blacklisted, data.all);
-
         connectedSeries.addOrUpdate((double) data.updateCounter, (double) data.connected);
         activeSeries.addOrUpdate((double) data.updateCounter, (double) data.active);
         allSeries.addOrUpdate((double) data.updateCounter, (double) data.all);
@@ -1171,6 +1239,14 @@ public class PeerMetricsPanel extends JPanel {
             allSeries.remove(0);
             blacklistedSeries.remove(0);
         }
+
+        if (uiOptimizationEnabled && !isTabActive)
+            return;
+
+        updateCountBar(allPeersBar, data.all, data.all);
+        updateCountBar(connectedPeersBar, data.connected, data.all);
+        updateCountBar(activePeersBar, data.active, data.all);
+        updateCountBar(blacklistedPeersBar, data.blacklisted, data.all);
 
         // Update overview tabs
         for (int i = 0; i < overviewPeerCategories.size(); i++) {
@@ -1202,6 +1278,11 @@ public class PeerMetricsPanel extends JPanel {
                 }
             }
         }
+
+        // Update metric tables with fresh snapshots
+        rxTableModel.setData(data.rxPeers, null);
+        txTableModel.setData(data.txPeers, null);
+        otherTableModel.setData(data.otherPeers, null);
     }
 
     private void updateCountBar(JProgressBar bar, int value, int max) {
@@ -1379,7 +1460,9 @@ public class PeerMetricsPanel extends JPanel {
 
         void setData(List<PeerStatsSnapshot> newData, String updatedPeer) {
             this.peerData = newData;
-            this.lastUpdatedPeer = updatedPeer;
+            if (updatedPeer != null) {
+                this.lastUpdatedPeer = updatedPeer;
+            }
             calculateExtremes();
             fireTableDataChanged();
         }
@@ -1484,7 +1567,6 @@ public class PeerMetricsPanel extends JPanel {
             if (rowIndex >= peerData.size())
                 return null;
             PeerStatsSnapshot history = peerData.get(rowIndex);
-            Peer peer = Peers.getPeer(history.address);
 
             String columnName = getColumnName(columnIndex);
             switch (columnName) {
@@ -1497,13 +1579,13 @@ public class PeerMetricsPanel extends JPanel {
                 case COL_ADDRESS:
                     return history.address;
                 case COL_ANNOUNCED:
-                    return peer != null ? peer.getAnnouncedAddress() : "-";
+                    return history.announcedAddress;
                 case COL_STATE:
-                    return peer != null ? peer.getState() : "-";
+                    return history.state;
                 case COL_VERSION:
-                    return peer != null && peer.getVersion() != null ? peer.getVersion().toString() : "-";
+                    return history.version;
                 case COL_HEIGHT:
-                    return peer != null ? peer.getHeight() : "-";
+                    return history.height;
                 case COL_AVG_RESP:
                     return history.avgLatency;
                 case COL_MIN_RESP:
@@ -1827,8 +1909,15 @@ public class PeerMetricsPanel extends JPanel {
         final double avgBlocks;
         final long totalBlocks;
         final long lastTimestamp;
+        final String version;
+        final boolean isOutdated;
+        final String announcedAddress;
+        final String state;
+        final String height;
+        final boolean isBlacklisted;
+        final boolean isYellowState;
 
-        PeerStatsSnapshot(PeerHistory ph, MetricType type) {
+        PeerStatsSnapshot(PeerHistory ph, MetricType type, String latestVersion) {
             this.address = ph.address;
             this.creationTime = ph.creationTime;
             if (type == MetricType.RX) {
@@ -1858,6 +1947,28 @@ public class PeerMetricsPanel extends JPanel {
                 this.avgBlocks = 0;
                 this.totalBlocks = 0;
                 this.lastTimestamp = ph.getOtherLastTimestamp();
+            }
+
+            Peer peer = Peers.getPeer(ph.address);
+            if (peer != null) {
+                this.announcedAddress = peer.getAnnouncedAddress() != null ? peer.getAnnouncedAddress() : "-";
+                this.state = String.valueOf(peer.getState());
+                this.height = String.valueOf(peer.getHeight());
+                this.version = peer.getVersion() != null ? peer.getVersion().toString() : "-";
+                this.isOutdated = !this.version.isEmpty() && !"-".equals(this.version)
+                        && !"unknown".equals(this.version)
+                        && PeersDialog.compareVersions(this.version, latestVersion) < 0;
+                this.isBlacklisted = peer.isBlacklisted();
+                this.isYellowState = peer.getState() == Peer.State.NON_CONNECTED
+                        || peer.getState() == Peer.State.DISCONNECTED;
+            } else {
+                this.announcedAddress = "-";
+                this.state = "-";
+                this.height = "-";
+                this.version = "-";
+                this.isOutdated = false;
+                this.isBlacklisted = false;
+                this.isYellowState = true; // Treat unknown/null peer as disconnected/yellow
             }
         }
     }
@@ -1889,6 +2000,9 @@ public class PeerMetricsPanel extends JPanel {
         List<Peer> activeList;
         List<Peer> allList;
         List<Peer> blacklistedList;
+        List<PeerStatsSnapshot> rxPeers;
+        List<PeerStatsSnapshot> txPeers;
+        List<PeerStatsSnapshot> otherPeers;
     }
 
     private class PeerChartToolTipGenerator implements XYToolTipGenerator {
@@ -1963,34 +2077,20 @@ public class PeerMetricsPanel extends JPanel {
                 int modelRow = table.convertRowIndexToModel(row);
                 PeersTableModel model = (PeersTableModel) table.getModel();
                 PeerStatsSnapshot snapshot = model.getSnapshotAt(modelRow);
-                Peer peer = snapshot != null ? Peers.getPeer(snapshot.address) : null;
 
                 Color fg = metricColor;
                 if (snapshot != null && snapshot.address.equals(model.lastUpdatedPeer)) {
                     fg = countColor;
                 }
 
-                if (peer != null) {
-                    if (peer.isBlacklisted()) {
-                        fg = Color.RED;
-                    } else if (peer.getState() == Peer.State.NON_CONNECTED
-                            || peer.getState() == Peer.State.DISCONNECTED) {
-                        fg = Color.YELLOW;
-                    }
+                if (snapshot != null && snapshot.isBlacklisted) {
+                    fg = Color.RED;
+                } else if (snapshot != null && snapshot.isYellowState) {
+                    fg = Color.YELLOW;
                 }
 
                 String columnName = table.getColumnName(column);
-                String version = null;
-                // Try to get version from the table value if it's the Version column, otherwise
-                // from peer object
-                if (COL_VERSION.equals(columnName) && value instanceof String) {
-                    version = (String) value;
-                } else if (peer != null && peer.getVersion() != null) {
-                    version = peer.getVersion().toString();
-                }
-
-                boolean isOutdated = version != null && !version.isEmpty() && !"unknown".equals(version)
-                        && PeersDialog.compareVersions(version, latestNetworkVersion) < 0;
+                boolean isOutdated = snapshot != null && snapshot.isOutdated;
 
                 if (isOutdated && COL_VERSION.equals(columnName)) {
                     c.setForeground(Color.YELLOW);
