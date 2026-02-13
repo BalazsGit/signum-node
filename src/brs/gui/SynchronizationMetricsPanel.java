@@ -219,6 +219,13 @@ public class SynchronizationMetricsPanel extends JPanel {
 
     private JProgressBar syncProgressBarDownloadedBlocks;
 
+    private boolean isTabActive = false;
+    private boolean uiOptimizationEnabled = true;
+    private TimingUpdateData lastTimingData;
+    private PerformanceUpdateData lastPerformanceData;
+    private SharedBarChartUpdateData lastSharedData;
+    private Runnable lastNetSpeedUpdate;
+
     // Data Transfer Objects for UI updates
     private static class TimingUpdateData {
         Map<JProgressBar, Runnable> progressBarUpdates = new HashMap<>();
@@ -230,6 +237,11 @@ public class SynchronizationMetricsPanel extends JPanel {
         allTransactionsPerSecondSeries = new XYSeries("All Txs/Sec (MA)", true, false);
         systemTransactionsPerSecondSeries = new XYSeries("System Txs/Sec (MA)", true, false);
         atCountPerBlockSeries = new XYSeries("ATs/Block (MA)", true, false);
+
+        blocksPerSecondSeries.setMaximumItemCount(CHART_HISTORY_SIZE);
+        allTransactionsPerSecondSeries.setMaximumItemCount(CHART_HISTORY_SIZE);
+        systemTransactionsPerSecondSeries.setMaximumItemCount(CHART_HISTORY_SIZE);
+        atCountPerBlockSeries.setMaximumItemCount(CHART_HISTORY_SIZE);
 
         XYSeriesCollection lineDataset = new XYSeriesCollection();
         lineDataset.addSeries(blocksPerSecondSeries);
@@ -333,6 +345,17 @@ public class SynchronizationMetricsPanel extends JPanel {
         blockApplyTimePerBlockSeries = new XYSeries("Block Apply Time (MA)", true, false);
         commitTimePerBlockSeries = new XYSeries("Commit Time (MA)", true, false);
         miscTimePerBlockSeries = new XYSeries("Misc. Time (MA)", true, false);
+
+        pushTimePerBlockSeries.setMaximumItemCount(CHART_HISTORY_SIZE);
+        validationTimePerBlockSeries.setMaximumItemCount(CHART_HISTORY_SIZE);
+        txLoopTimePerBlockSeries.setMaximumItemCount(CHART_HISTORY_SIZE);
+        housekeepingTimePerBlockSeries.setMaximumItemCount(CHART_HISTORY_SIZE);
+        txApplyTimePerBlockSeries.setMaximumItemCount(CHART_HISTORY_SIZE);
+        atTimePerBlockSeries.setMaximumItemCount(CHART_HISTORY_SIZE);
+        subscriptionTimePerBlockSeries.setMaximumItemCount(CHART_HISTORY_SIZE);
+        blockApplyTimePerBlockSeries.setMaximumItemCount(CHART_HISTORY_SIZE);
+        commitTimePerBlockSeries.setMaximumItemCount(CHART_HISTORY_SIZE);
+        miscTimePerBlockSeries.setMaximumItemCount(CHART_HISTORY_SIZE);
 
         XYSeriesCollection lineDataset = new XYSeriesCollection();
         lineDataset.addSeries(pushTimePerBlockSeries);
@@ -441,6 +464,8 @@ public class SynchronizationMetricsPanel extends JPanel {
     private ChartPanel createUploadChartPanel() {
         uploadSpeedSeries = new XYSeries("Upload Speed", true, false);
         uploadVolumeSeries = new XYSeries("Upload Volume", true, false);
+        uploadSpeedSeries.setMaximumItemCount(SPEED_HISTORY_SIZE);
+        uploadVolumeSeries.setMaximumItemCount(SPEED_HISTORY_SIZE);
 
         XYSeriesCollection lineDataset = new XYSeriesCollection();
         lineDataset.addSeries(uploadSpeedSeries);
@@ -521,6 +546,8 @@ public class SynchronizationMetricsPanel extends JPanel {
     private ChartPanel createDownloadChartPanel() {
         downloadSpeedSeries = new XYSeries("Download Speed", true, false);
         downloadVolumeSeries = new XYSeries("Download Volume", true, false);
+        downloadSpeedSeries.setMaximumItemCount(SPEED_HISTORY_SIZE);
+        downloadVolumeSeries.setMaximumItemCount(SPEED_HISTORY_SIZE);
 
         XYSeriesCollection lineDataset = new XYSeriesCollection();
         lineDataset.addSeries(downloadSpeedSeries);
@@ -616,10 +643,12 @@ public class SynchronizationMetricsPanel extends JPanel {
         super(new GridBagLayout());
         try {
             this.parentFrame = parentFrame;
-            atCountPerBlockSeries = new XYSeries("ATs/Block (MA)", true, false);
             allTransactionsPerBlockSeries = new XYSeries("All Txs/Block (MA)", true, false); // Orange
+            allTransactionsPerBlockSeries.setMaximumItemCount(CHART_HISTORY_SIZE);
             systemTransactionsPerBlockSeries = new XYSeries("System Txs/Block (MA)", true, false); // Blue
+            systemTransactionsPerBlockSeries.setMaximumItemCount(CHART_HISTORY_SIZE);
             payloadFullnessSeries = new XYSeries("Payload Fullness (MA)", true, false);
+            payloadFullnessSeries.setMaximumItemCount(CHART_HISTORY_SIZE);
             performanceChartPanel = createPerformanceChartPanel();
             timingChartPanel = createTimingChartPanel();
             uploadChartPanel = createUploadChartPanel();
@@ -677,11 +706,49 @@ public class SynchronizationMetricsPanel extends JPanel {
             unconfirmedTxsProgressBar.setString(0 + " / " + maxUnconfirmedTxs);
             initListeners();
 
+            addHierarchyListener(e -> {
+                if ((e.getChangeFlags() & java.awt.event.HierarchyEvent.SHOWING_CHANGED) != 0) {
+                    boolean showing = isShowing();
+                    if (showing != isTabActive) {
+                        isTabActive = showing;
+                        if (isTabActive && uiOptimizationEnabled)
+                            refreshUI();
+                    }
+                }
+            });
+            isTabActive = isShowing();
+
             LOGGER.info("SynchronizationMetricsPanel initialized successfully");
         } catch (Exception e) {
             LOGGER.error("Failed to initialize SynchronizationMetricsPanel components", e);
             throw new RuntimeException("Could not initialize SynchronizationMetricsPanel components", e);
         }
+    }
+
+    public void setUiOptimizationEnabled(boolean enabled) {
+        this.uiOptimizationEnabled = enabled;
+        if (!enabled) {
+            refreshUI();
+        }
+    }
+
+    private void refreshUI() {
+        SwingUtilities.invokeLater(() -> {
+            if (lastTimingData != null) {
+                applyProgressBarUpdates(lastTimingData.progressBarUpdates);
+            }
+            if (lastPerformanceData != null) {
+                applyProgressBarUpdates(lastPerformanceData.progressBarUpdates);
+            }
+            if (lastSharedData != null) {
+                applyProgressBarUpdates(lastSharedData.progressBarUpdates);
+            }
+            if (lastNetSpeedUpdate != null) {
+                lastNetSpeedUpdate.run();
+            }
+            updateChartRanges();
+            setPerformanceChartsNotification(true);
+        });
     }
 
     private void layoutComponents() {
@@ -1663,7 +1730,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         int height = block.getHeight();
         chartUpdateExecutor.submit(() -> {
             SwingUtilities.invokeLater(() -> {
-                setChartNotification(false);
+                setPerformanceChartsNotification(false);
                 try {
                     truncateSeries(blocksPerSecondSeries, height);
                     truncateSeries(allTransactionsPerSecondSeries, height);
@@ -1685,10 +1752,14 @@ public class SynchronizationMetricsPanel extends JPanel {
                     truncateSeries(miscTimePerBlockSeries, height);
                     truncateSeries(payloadFullnessSeries, height);
 
-                    updateChartRanges();
-                    updateProgressBarsFromSeries();
+                    if (!uiOptimizationEnabled || isTabActive) {
+                        updateChartRanges();
+                        updateProgressBarsFromSeries();
+                    }
                 } finally {
-                    setChartNotification(true);
+                    if (!uiOptimizationEnabled || isTabActive) {
+                        setPerformanceChartsNotification(true);
+                    }
                 }
             });
         });
@@ -1901,39 +1972,54 @@ public class SynchronizationMetricsPanel extends JPanel {
             lastDownloadedVolume = downloadedVolume;
 
             // --- UI Updates on EDT ---
-            SwingUtilities.invokeLater(() -> updateNetSpeedUI(currentTime, uploadedVolume, downloadedVolume,
-                    avgUploadSpeed, avgDownloadSpeed, avgUploadSpeedMax, avgDownloadSpeedMax));
+            Runnable updateTask = () -> updateNetSpeedUI(currentTime, uploadedVolume, downloadedVolume,
+                    avgUploadSpeed, avgDownloadSpeed, avgUploadSpeedMax, avgDownloadSpeedMax);
+            this.lastNetSpeedUpdate = updateTask;
+            SwingUtilities.invokeLater(updateTask);
         });
     }
 
     private void updateNetSpeedUI(long currentTime, long uploadedVolume, long downloadedVolume, double avgUploadSpeed,
             double avgDownloadSpeed, double avgUploadSpeedMax, double avgDownloadSpeedMax) {
-        if (uploadedVolume > 0 || downloadedVolume > 0) {
-            updateChartSeries(uploadSpeedSeries, currentTime, avgUploadSpeed, SPEED_HISTORY_SIZE);
-            updateChartSeries(downloadSpeedSeries, currentTime, avgDownloadSpeed, SPEED_HISTORY_SIZE);
-            updateChartSeries(uploadVolumeSeries, currentTime, uploadedVolume, SPEED_HISTORY_SIZE);
-            updateChartSeries(downloadVolumeSeries, currentTime, downloadedVolume, SPEED_HISTORY_SIZE);
+        setNetworkChartsNotification(false);
+        try {
+            if (uploadedVolume > 0 || downloadedVolume > 0) {
+                updateChartSeries(uploadSpeedSeries, currentTime, avgUploadSpeed);
+                updateChartSeries(downloadSpeedSeries, currentTime, avgDownloadSpeed);
+                updateChartSeries(uploadVolumeSeries, currentTime, uploadedVolume);
+                updateChartSeries(downloadVolumeSeries, currentTime, downloadedVolume);
 
-            if (uploadChartPanel != null) {
-                double range = SPEED_HISTORY_SIZE * netSpeedUpdateTime;
-                uploadChartPanel.getChart().getXYPlot().getDomainAxis().setRange(currentTime - range, currentTime);
+                if (uiOptimizationEnabled && !isTabActive)
+                    return;
+
+                if (uploadChartPanel != null) {
+                    double range = SPEED_HISTORY_SIZE * netSpeedUpdateTime;
+                    uploadChartPanel.getChart().getXYPlot().getDomainAxis().setRange(currentTime - range, currentTime);
+                }
+                if (downloadChartPanel != null) {
+                    double range = SPEED_HISTORY_SIZE * netSpeedUpdateTime;
+                    downloadChartPanel.getChart().getXYPlot().getDomainAxis().setRange(currentTime - range,
+                            currentTime);
+                }
             }
-            if (downloadChartPanel != null) {
-                double range = SPEED_HISTORY_SIZE * netSpeedUpdateTime;
-                downloadChartPanel.getChart().getXYPlot().getDomainAxis().setRange(currentTime - range,
-                        currentTime);
+
+            if (uiOptimizationEnabled && !isTabActive)
+                return;
+
+            if (metricsUploadVolumeLabel != null) {
+                metricsUploadVolumeLabel.setText("▲ " + formatDataSize(uploadedVolume));
+            }
+            if (metricsDownloadVolumeLabel != null) {
+                metricsDownloadVolumeLabel.setText("▼ " + formatDataSize(downloadedVolume));
+            }
+
+            updateProgressBar(uploadSpeedProgressBar, avgUploadSpeed, avgUploadSpeedMax, this::formatDataRate);
+            updateProgressBar(downloadSpeedProgressBar, avgDownloadSpeed, avgDownloadSpeedMax, this::formatDataRate);
+        } finally {
+            if (!uiOptimizationEnabled || isTabActive) {
+                setNetworkChartsNotification(true);
             }
         }
-
-        if (metricsUploadVolumeLabel != null) {
-            metricsUploadVolumeLabel.setText("▲ " + formatDataSize(uploadedVolume));
-        }
-        if (metricsDownloadVolumeLabel != null) {
-            metricsDownloadVolumeLabel.setText("▼ " + formatDataSize(downloadedVolume));
-        }
-
-        updateProgressBar(uploadSpeedProgressBar, avgUploadSpeed, avgUploadSpeedMax, this::formatDataRate);
-        updateProgressBar(downloadSpeedProgressBar, avgDownloadSpeed, avgDownloadSpeedMax, this::formatDataRate);
     }
 
     private String formatDataSize(double bytes) {
@@ -1972,6 +2058,10 @@ public class SynchronizationMetricsPanel extends JPanel {
             SharedBarChartUpdateData sharedBarChartData = calculateSharedBarChartUpdate(stats);
             PerformanceUpdateData performanceData = calculatePerformanceUpdate(stats);
 
+            this.lastTimingData = timingData;
+            this.lastPerformanceData = performanceData;
+            this.lastSharedData = sharedBarChartData;
+
             if (Signum.getBlockchain() != null && stats.height > Signum.getBlockchain().getHeight()) {
                 return;
             }
@@ -1980,21 +2070,25 @@ public class SynchronizationMetricsPanel extends JPanel {
             SwingUtilities.invokeLater(() -> {
                 try {
                     // Disable chart notifications to batch updates and prevent GUI freezes
-                    setChartNotification(false);
+                    setPerformanceChartsNotification(false);
 
                     // Apply series updates (always, to keep history)
                     applySeriesUpdates(timingData.seriesUpdates);
                     applySeriesUpdates(performanceData.seriesUpdates);
                     applySeriesUpdates(sharedBarChartData.seriesUpdates);
 
-                    applyProgressBarUpdates(timingData.progressBarUpdates);
-                    applyProgressBarUpdates(performanceData.progressBarUpdates);
-                    applyProgressBarUpdates(sharedBarChartData.progressBarUpdates);
-                    updateChartRanges();
+                    if (!uiOptimizationEnabled || isTabActive) {
+                        applyProgressBarUpdates(timingData.progressBarUpdates);
+                        applyProgressBarUpdates(performanceData.progressBarUpdates);
+                        applyProgressBarUpdates(sharedBarChartData.progressBarUpdates);
+                        updateChartRanges();
+                    }
                 } finally {
                     // Re-enable chart notifications and trigger a repaint, even if an error
                     // occurred
-                    setChartNotification(true);
+                    if (!uiOptimizationEnabled || isTabActive) {
+                        setPerformanceChartsNotification(true);
+                    }
                 }
             });
         } catch (Exception e) {
@@ -2050,13 +2144,16 @@ public class SynchronizationMetricsPanel extends JPanel {
         }
     }
 
-    private void setChartNotification(boolean enabled) {
+    private void setPerformanceChartsNotification(boolean enabled) {
         if (performanceChartPanel != null) {
             performanceChartPanel.getChart().getXYPlot().setNotify(enabled);
         }
         if (timingChartPanel != null) {
             timingChartPanel.getChart().getXYPlot().setNotify(enabled);
         }
+    }
+
+    private void setNetworkChartsNotification(boolean enabled) {
         if (uploadChartPanel != null) {
             uploadChartPanel.getChart().getXYPlot().setNotify(enabled);
         }
@@ -2071,7 +2168,7 @@ public class SynchronizationMetricsPanel extends JPanel {
 
     private void applySeriesUpdates(Map<XYSeries, Point.Double> seriesUpdates) {
         seriesUpdates.forEach(
-                (series, point) -> updateChartSeries(series, point.x, point.y, CHART_HISTORY_SIZE));
+                (series, point) -> updateChartSeries(series, point.x, point.y));
     }
 
     private TimingUpdateData calculateTimingUpdate(BlockchainProcessor.PerformanceStats stats) {
@@ -2314,10 +2411,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         bar.setString(stringFormatter.apply(value));
     }
 
-    private void updateChartSeries(XYSeries series, double x, double y, int maxItems) {
-        while (series.getItemCount() >= maxItems) {
-            series.remove(0);
-        }
+    private void updateChartSeries(XYSeries series, double x, double y) {
         series.addOrUpdate(x, y);
     }
 
