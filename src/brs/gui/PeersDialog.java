@@ -134,14 +134,14 @@ public class PeersDialog extends JFrame {
         long maxHeight = 0;
         String latestVersion = Signum.VERSION.toString();
 
-        for (Peer p : allPeers) {
-            if (p.getState() == Peer.State.CONNECTED) {
-                maxHeight = Math.max(maxHeight, p.getHeight());
+        for (Peer peer : allPeers) {
+            if (peer.getState() == Peer.State.CONNECTED) {
+                maxHeight = Math.max(maxHeight, peer.getHeight());
             }
-            String v = p.getVersion() != null ? p.getVersion().toString() : "";
-            if (!v.isEmpty() && !"unknown".equals(v)) {
-                if (compareVersions(v, latestVersion) > 0) {
-                    latestVersion = v;
+            String version = peer.getVersion() != null ? peer.getVersion().toString() : "";
+            if (!version.isEmpty() && !"unknown".equals(version)) {
+                if (compareVersions(version, latestVersion) > 0) {
+                    latestVersion = version;
                 }
             }
         }
@@ -154,40 +154,40 @@ public class PeersDialog extends JFrame {
         }
     }
 
-    public static int compareVersions(String v1, String v2) {
-        if (v1 == null)
-            v1 = "";
-        if (v2 == null)
-            v2 = "";
+    public static int compareVersions(String version1, String version2) {
+        if (version1 == null)
+            version1 = "";
+        if (version2 == null)
+            version2 = "";
 
-        int i1 = 0;
-        int i2 = 0;
-        int len1 = v1.length();
-        int len2 = v2.length();
+        int index1 = 0;
+        int index2 = 0;
+        int length1 = version1.length();
+        int length2 = version2.length();
 
-        while (i1 < len1 || i2 < len2) {
+        while (index1 < length1 || index2 < length2) {
             // Skip non-digits
-            while (i1 < len1 && !Character.isDigit(v1.charAt(i1)))
-                i1++;
-            while (i2 < len2 && !Character.isDigit(v2.charAt(i2)))
-                i2++;
+            while (index1 < length1 && !Character.isDigit(version1.charAt(index1)))
+                index1++;
+            while (index2 < length2 && !Character.isDigit(version2.charAt(index2)))
+                index2++;
 
             // Parse number
-            long n1 = 0;
-            while (i1 < len1 && Character.isDigit(v1.charAt(i1))) {
-                n1 = n1 * 10 + (v1.charAt(i1) - '0');
-                i1++;
+            long number1 = 0;
+            while (index1 < length1 && Character.isDigit(version1.charAt(index1))) {
+                number1 = number1 * 10 + (version1.charAt(index1) - '0');
+                index1++;
             }
 
-            long n2 = 0;
-            while (i2 < len2 && Character.isDigit(v2.charAt(i2))) {
-                n2 = n2 * 10 + (v2.charAt(i2) - '0');
-                i2++;
+            long number2 = 0;
+            while (index2 < length2 && Character.isDigit(version2.charAt(index2))) {
+                number2 = number2 * 10 + (version2.charAt(index2) - '0');
+                index2++;
             }
 
-            if (n1 < n2)
+            if (number1 < number2)
                 return -1;
-            if (n1 > n2)
+            if (number1 > number2)
                 return 1;
         }
         return 0;
@@ -318,18 +318,18 @@ public class PeersDialog extends JFrame {
 
         @Override
         public Object getValueAt(int rowIndex, int columnIndex) {
-            Peer p = peers.get(rowIndex);
+            Peer peer = peers.get(rowIndex);
             String columnName = getColumnName(columnIndex);
             if (COL_ADDRESS.equals(columnName))
-                return p.getPeerAddress();
+                return peer.getPeerAddress();
             if (COL_ANNOUNCED.equals(columnName))
-                return p.getAnnouncedAddress() != null ? p.getAnnouncedAddress() : "-";
+                return peer.getAnnouncedAddress() != null ? peer.getAnnouncedAddress() : "-";
             if (COL_STATE.equals(columnName))
-                return String.valueOf(p.getState());
+                return String.valueOf(peer.getState());
             if (COL_VERSION.equals(columnName))
-                return p.getVersion() != null ? p.getVersion().toString() : "";
+                return peer.getVersion() != null ? peer.getVersion().toString() : "";
             if (COL_HEIGHT.equals(columnName))
-                return p.getHeight();
+                return peer.getHeight();
             return null;
         }
 
@@ -351,44 +351,44 @@ public class PeersDialog extends JFrame {
         @Override
         public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus,
                 int row, int column) {
-            Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+            Component component = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
             PeersTableModel model = (PeersTableModel) table.getModel();
-            Peer p = model.getPeerAt(table.convertRowIndexToModel(row));
+            Peer peer = model.getPeerAt(table.convertRowIndexToModel(row));
 
             if (!isSelected) {
-                c.setBackground(table.getBackground());
-                Color fg = Color.GREEN;
-                if (p.isBlacklisted()) {
-                    fg = Color.RED;
-                } else if (p.getState() == Peer.State.NON_CONNECTED || p.getState() == Peer.State.DISCONNECTED) {
-                    fg = Color.YELLOW;
+                component.setBackground(table.getBackground());
+                Color foregroundColor = Color.GREEN;
+                if (peer.isBlacklisted()) {
+                    foregroundColor = Color.RED;
+                } else if (peer.getState() == Peer.State.NON_CONNECTED || peer.getState() == Peer.State.DISCONNECTED) {
+                    foregroundColor = Color.YELLOW;
                 }
-                c.setForeground(fg);
+                component.setForeground(foregroundColor);
 
                 // Specific column coloring overrides
                 String columnName = table.getColumnName(column);
                 if (PeersTableModel.COL_VERSION.equals(columnName)) { // Version
-                    String v = p.getVersion() != null ? p.getVersion().toString() : "";
-                    if (PeersDialog.compareVersions(v, model.getLatestVersion()) < 0) {
-                        c.setForeground(Color.YELLOW);
+                    String version = peer.getVersion() != null ? peer.getVersion().toString() : "";
+                    if (PeersDialog.compareVersions(version, model.getLatestVersion()) < 0) {
+                        component.setForeground(Color.YELLOW);
                     } else {
-                        c.setForeground(Color.GREEN);
+                        component.setForeground(Color.GREEN);
                     }
                 } else if (PeersTableModel.COL_HEIGHT.equals(columnName)) { // Height
-                    if (p.getHeight() < model.getMaxHeight()) {
-                        c.setForeground(Color.YELLOW);
+                    if (peer.getHeight() < model.getMaxHeight()) {
+                        component.setForeground(Color.YELLOW);
                     } else {
-                        c.setForeground(Color.GREEN);
+                        component.setForeground(Color.GREEN);
                     }
                 } else {
                     // Address and State keep the status color
                 }
             } else {
-                c.setForeground(table.getSelectionForeground());
-                c.setBackground(table.getSelectionBackground());
+                component.setForeground(table.getSelectionForeground());
+                component.setBackground(table.getSelectionBackground());
             }
 
-            return c;
+            return component;
         }
     }
 }
