@@ -120,4 +120,10 @@ public class MetricsPanel extends JTabbedPane {
             LOGGER.warn("Error shutting down peer metrics panel", t);
         }
     }
+
+    public void setUiOptimizationEnabled(boolean enabled) {
+        syncPanel.setUiOptimizationEnabled(enabled);
+        blockGenPanel.setUiOptimizationEnabled(enabled);
+        peerMetricsPanel.setUiOptimizationEnabled(enabled);
+    }
 }
