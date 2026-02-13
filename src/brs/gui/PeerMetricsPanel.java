@@ -799,11 +799,16 @@ public class PeerMetricsPanel extends JPanel {
     }
 
     private ChartPanel createOverviewChartPanel() {
-        XYSeriesCollection dataset = new XYSeriesCollection();
-        dataset.addSeries(connectedSeries);
-        dataset.addSeries(activeSeries);
-        dataset.addSeries(allSeries);
-        dataset.addSeries(blacklistedSeries);
+        // Dataset 0: Bars (All Peers)
+        XYSeriesCollection barDataset = new XYSeriesCollection();
+        barDataset.addSeries(allSeries);
+        barDataset.setIntervalWidth(1.0);
+
+        // Dataset 1: Lines (Connected, Active, Blacklisted)
+        XYSeriesCollection lineDataset = new XYSeriesCollection();
+        lineDataset.addSeries(connectedSeries);
+        lineDataset.addSeries(activeSeries);
+        lineDataset.addSeries(blacklistedSeries);
 
         JFreeChart chart = ChartFactory.createXYLineChart(null, null, null, null);
         XYPlot plot = chart.getXYPlot();
@@ -819,20 +824,40 @@ public class PeerMetricsPanel extends JPanel {
         plot.getDomainAxis().setLowerMargin(0.0);
         plot.getDomainAxis().setUpperMargin(0.0);
 
+        // Axis 1: Bars (All Peers) - Mapped to Dataset 0
+        NumberAxis axis1 = new NumberAxis(null);
+        axis1.setTickLabelsVisible(false);
+        axis1.setTickMarksVisible(false);
+        axis1.setAxisLineVisible(false);
+        plot.setRangeAxis(AXIS_BARS, axis1);
+
         plot.setInsets(new RectangleInsets(0, 0, 0, 0));
         plot.setAxisOffset(new RectangleInsets(0, 0, 0, 0));
 
-        XYLineAndShapeRenderer renderer = new XYLineAndShapeRenderer(true, true);
+        // Renderer 0: Bars
+        XYBarRenderer barRenderer = new XYBarRenderer();
+        barRenderer.setBarPainter(new StandardXYBarPainter());
+        barRenderer.setShadowVisible(false);
+        barRenderer.setMargin(0.0);
+        barRenderer.setSeriesPaint(0, COLOR_ALL_PEERS);
+        barRenderer.setDefaultToolTipGenerator(new PeerChartToolTipGenerator());
+        plot.setDataset(DATASET_BARS, barDataset);
+        plot.setRenderer(DATASET_BARS, barRenderer);
+        plot.mapDatasetToRangeAxis(DATASET_BARS, AXIS_BARS);
 
+        // Renderer 1: Lines
+        XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, true);
         Map<String, Color> overviewColors = new HashMap<>();
         overviewColors.put(connectedSeries.getKey().toString(), COLOR_CONNECTED_PEERS);
         overviewColors.put(activeSeries.getKey().toString(), COLOR_ACTIVE_PEERS);
-        overviewColors.put(allSeries.getKey().toString(), COLOR_ALL_PEERS);
         overviewColors.put(blacklistedSeries.getKey().toString(), COLOR_BLACKLISTED_PEERS);
 
-        configureLineRenderer(renderer, dataset, overviewColors);
-        plot.setRenderer(renderer);
-        plot.setDataset(dataset);
+        configureLineRenderer(lineRenderer, lineDataset, overviewColors);
+        plot.setDataset(DATASET_LINES, lineDataset);
+        plot.setRenderer(DATASET_LINES, lineRenderer);
+        plot.mapDatasetToRangeAxis(DATASET_LINES, AXIS_LINES);
+
+        plot.setDatasetRenderingOrder(DatasetRenderingOrder.FORWARD);
         chart.removeLegend();
         chart.setBorderVisible(false);
 
