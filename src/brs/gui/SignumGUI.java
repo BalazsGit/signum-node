@@ -1048,12 +1048,17 @@ public class SignumGUI extends JFrame {
                 final long totalMined = blockchainProcessor.getLastCheckTotalMined();
                 final long totalEffectiveBalance = blockchainProcessor.getLastCheckTotalEffectiveBalance();
 
+                final int finalLimitHeight = blockchainProcessor.getSafeRollbackHeight();
+                int lastTrimHeight = blockchainProcessor.getLastTrimHeight().get();
+                final int finalLastTrimHeight = lastTrimHeight;
+
                 SwingUtilities.invokeLater(() -> {
                     if (waitDialog.isDisplayable()) {
                         rotatingIcon.stop();
                         waitDialog.dispose();
                     }
-                    showDbCheckResult(result, height, totalMined, totalEffectiveBalance, wasResolutionActive);
+                    showDbCheckResult(result, height, totalMined, totalEffectiveBalance, wasResolutionActive,
+                            finalLimitHeight, finalLastTrimHeight);
                 });
             } catch (Exception e) {
                 LOGGER.error("Error during DB check", e);
@@ -1077,7 +1082,7 @@ public class SignumGUI extends JFrame {
     }
 
     private void showDbCheckResult(int result, int height, long totalMined, long totalEffectiveBalance,
-            boolean wasResolutionActive) {
+            boolean wasResolutionActive, int limitHeight, int lastTrimHeight) {
         BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
         final double totalMinedSigna = (double) totalMined / Constants.ONE_SIGNA;
         final double totalEffectiveBalanceSigna = (double) totalEffectiveBalance / Constants.ONE_SIGNA;
@@ -1110,18 +1115,6 @@ public class SignumGUI extends JFrame {
                     totalMinedSigna, totalMined,
                     totalEffectiveBalanceSigna, totalEffectiveBalance,
                     difference, height);
-
-            int limitHeight;
-            int lastTrimHeight = blockchainProcessor.getLastTrimHeight().get();
-            if (trimEnabled) {
-                if (lastTrimHeight > 0) {
-                    limitHeight = lastTrimHeight;
-                } else {
-                    limitHeight = blockchainProcessor.getEstimatedTrimHeight();
-                }
-            } else {
-                limitHeight = Math.max(0, height - Constants.MAX_ROLLBACK);
-            }
 
             String resolveMessage = "This tool can try to automatically resolve the inconsistency by popping off blocks.\n"
                     + "It will rollback blocks until the database becomes consistent or the safe rollback limit is reached.\n\n"
@@ -1273,20 +1266,24 @@ public class SignumGUI extends JFrame {
     public void onPeersUpdated() {
         BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
         Collection<Peer> allPeers = blockchainProcessor.getAllPeers();
-        SwingUtilities.invokeLater(() -> updatePeerCount(allPeers));
+        long connectedCount = allPeers.stream().filter(p -> p.getState() == Peer.State.CONNECTED).count();
+        long allKnownCount = allPeers.size();
+        long blacklistedCount = allPeers.stream().filter(Peer::isBlacklisted).count();
+        SwingUtilities.invokeLater(() -> updatePeerCount(connectedCount, allKnownCount, blacklistedCount));
     }
 
     public void onNetVolumeChanged() {
         BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
-        long newDownloadedVolume = blockchainProcessor.getDownloadedVolume();
+        long uploaded = blockchainProcessor.getUploadedVolume();
+        long downloaded = blockchainProcessor.getDownloadedVolume();
         SwingUtilities.invokeLater(() -> {
-            uploadVolumeLabel.setText("▲ " + formatDataSize(blockchainProcessor.getUploadedVolume()));
-            downloadVolumeLabel.setText("▼ " + formatDataSize(newDownloadedVolume));
+            uploadVolumeLabel.setText("▲ " + formatDataSize(uploaded));
+            downloadVolumeLabel.setText("▼ " + formatDataSize(downloaded));
 
             // Start the GUI timer only once, when the first download volume is received,
             // and if experimental features are enabled in the config.
             if (Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL)
-                    && blockchainProcessor.getDownloadedVolume() > 0
+                    && downloaded > 0
                     && !guiTimerStarted.getAndSet(true)) {
                 startGuiTimer();
             }
@@ -1331,8 +1328,8 @@ public class SignumGUI extends JFrame {
     }
 
     private void onConsistencyUpdate() {
+        BlockchainProcessor.ConsistencyState state = Signum.getBlockchainProcessor().getConsistencyState();
         SwingUtilities.invokeLater(() -> {
-            BlockchainProcessor.ConsistencyState state = Signum.getBlockchainProcessor().getConsistencyState();
 
             Color color;
             switch (state) {
@@ -1352,8 +1349,10 @@ public class SignumGUI extends JFrame {
     private void onBlockPushed(Block block) {
         if (block == null)
             return;
+        int maxPeerHeight = calculateMaxPeerHeight();
+        long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
         SwingUtilities.invokeLater(() -> {
-            updateLatestBlock(block);
+            updateLatestBlock(block, maxPeerHeight, blockTime);
 
             // Start the GUI timer only once, when the first block is pushed,
             // and if experimental features are enabled in the config.
@@ -1364,16 +1363,19 @@ public class SignumGUI extends JFrame {
     }
 
     private void onBlockPopped() {
+        Block lastBlock = Signum.getBlockchain().getLastBlock();
+        int maxPeerHeight = calculateMaxPeerHeight();
+        long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
         SwingUtilities.invokeLater(() -> {
-            updateLatestBlock(Signum.getBlockchain().getLastBlock());
+            updateLatestBlock(lastBlock, maxPeerHeight, blockTime);
         });
     }
 
     private void onManualPopOffProgress() {
+        int remaining = Signum.getBlockchainProcessor().getManualPopOffBlocksCount();
+        int blockHeight = Signum.getBlockchainProcessor().getBeforeRollbackHeight();
+        int targetHeight = Signum.getBlockchainProcessor().getManualLastPopOffHeight();
         SwingUtilities.invokeLater(() -> {
-            int remaining = Signum.getBlockchainProcessor().getManualPopOffBlocksCount();
-            int blockHeight = Signum.getBlockchainProcessor().getBeforeRollbackHeight();
-            int targetHeight = Signum.getBlockchainProcessor().getManualLastPopOffHeight();
             popOffBlockCountLabel.setText("Pop off blocks: " + remaining);
             popOffBlockHeightLabel.setText(targetHeight < 0 ? "-" : targetHeight + " 🡸 " + blockHeight);
             if (remaining > 0) {
@@ -1388,10 +1390,10 @@ public class SignumGUI extends JFrame {
     }
 
     private void onAutoPopOffProgress() {
+        int remaining = Signum.getBlockchainProcessor().getAutoPopOffBlocksCount();
+        int blockHeight = Signum.getBlockchainProcessor().getBeforeRollbackHeight();
+        int targetHeight = Signum.getBlockchainProcessor().getAutoLastPopOffHeight();
         SwingUtilities.invokeLater(() -> {
-            int remaining = Signum.getBlockchainProcessor().getAutoPopOffBlocksCount();
-            int blockHeight = Signum.getBlockchainProcessor().getBeforeRollbackHeight();
-            int targetHeight = Signum.getBlockchainProcessor().getAutoLastPopOffHeight();
             popOffBlockCountLabel.setText("Pop off blocks: " + remaining);
             popOffBlockHeightLabel.setText(targetHeight < 0 ? "-" : targetHeight + " 🡸 " + blockHeight);
 
@@ -1435,6 +1437,15 @@ public class SignumGUI extends JFrame {
             trimEnabled = Signum.getPropertyService().getBoolean(Props.DB_TRIM_DERIVED_TABLES);
             autoResolveEnabled = Signum.getPropertyService().getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED);
 
+            Block lastBlock = Signum.getBlockchain().getLastBlock();
+            int maxPeerHeight = calculateMaxPeerHeight();
+            BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+            Collection<Peer> allPeers = blockchainProcessor.getAllPeers();
+            long connectedCount = allPeers.stream().filter(p -> p.getState() == Peer.State.CONNECTED).count();
+            long allKnownCount = allPeers.size();
+            long blacklistedCount = allPeers.stream().filter(Peer::isBlacklisted).count();
+            long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
+
             try {
                 SwingUtilities.invokeLater(() -> {
                     metricsPanel.init();
@@ -1473,10 +1484,8 @@ public class SignumGUI extends JFrame {
                     onManualPopOffProgress();
                     onAutoPopOffProgress();
 
-                    updateLatestBlock(Signum.getBlockchain().getLastBlock());
-                    BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
-                    Collection<Peer> allPeers = blockchainProcessor.getAllPeers();
-                    updatePeerCount(allPeers);
+                    updateLatestBlock(lastBlock, maxPeerHeight, blockTime);
+                    updatePeerCount(connectedCount, allKnownCount, blacklistedCount);
                 });
 
                 updateTitle();
@@ -1484,7 +1493,6 @@ public class SignumGUI extends JFrame {
                 initListeners();
                 if (Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL)) {
                     // Initialize timers from the log file.
-                    BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
                     if (blockchainProcessor != null) {
                         this.guiAccumulatedSyncTimeMs = blockchainProcessor.getAccumulatedSyncTimeMs();
                         this.guiAccumulatedSyncInProgressTimeMs = blockchainProcessor
@@ -1554,22 +1562,11 @@ public class SignumGUI extends JFrame {
         }
     }
 
-    private void updateLatestBlock(Block block) {
+    private void updateLatestBlock(Block block, int maxPeerHeight, long blockTime) {
         if (block == null) {
             return;
         }
         Date blockDate = Convert.fromEpochTime(block.getTimestamp());
-
-        int maxPeerHeight = 0;
-        try {
-            maxPeerHeight = Signum.getBlockchainProcessor().getAllPeers().stream()
-                    .filter(p -> p.getState() == Peer.State.CONNECTED)
-                    .mapToInt(p -> (int) p.getHeight())
-                    .max()
-                    .orElse(0);
-        } catch (Exception e) {
-            // ignore
-        }
 
         int missingBlocks;
         if (maxPeerHeight > 0) {
@@ -1578,7 +1575,6 @@ public class SignumGUI extends JFrame {
         } else {
             // No peers, fall back to time-based estimation.
             Date now = new Date();
-            long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
             long secondsSinceLastBlock = (now.getTime() - blockDate.getTime()) / 1000;
             missingBlocks = secondsSinceLastBlock > 0 ? (int) (secondsSinceLastBlock / blockTime) : 0;
         }
@@ -1642,6 +1638,18 @@ public class SignumGUI extends JFrame {
         syncProgressBar.setString(String.format("%.2f %%", prog));
     }
 
+    private int calculateMaxPeerHeight() {
+        try {
+            return Signum.getBlockchainProcessor().getAllPeers().stream()
+                    .filter(p -> p.getState() == Peer.State.CONNECTED)
+                    .mapToInt(p -> (int) p.getHeight())
+                    .max()
+                    .orElse(0);
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
     private void updateElapsedTime() {
         if (!elapsedTimeLabel.isVisible()) {
             return;
@@ -1651,13 +1659,14 @@ public class SignumGUI extends JFrame {
     }
 
     private void onTrimHeightChanged() {
+        int currentTrimHeight = Signum.getBlockchainProcessor().getCurrentTrimHeight().get();
+        int estimatedTrimHeight = (currentTrimHeight == -1) ? Signum.getBlockchainProcessor().getEstimatedTrimHeight()
+                : 0;
         SwingUtilities.invokeLater(() -> {
-            int currentTrimHeight = Signum.getBlockchainProcessor().getCurrentTrimHeight().get();
 
             if (currentTrimHeight != -1) {
                 trimHeightLabel.setText("Trim height: " + currentTrimHeight);
             } else {
-                int estimatedTrimHeight = Signum.getBlockchainProcessor().getEstimatedTrimHeight();
                 trimHeightLabel.setText("Trim height: est. " + estimatedTrimHeight);
             }
             trimHeightLabel.setForeground(iconColor);
@@ -1691,11 +1700,7 @@ public class SignumGUI extends JFrame {
         JOptionPane.showMessageDialog(this, htmlText, title, JOptionPane.PLAIN_MESSAGE);
     }
 
-    private void updatePeerCount(Collection<Peer> peers) {
-        long connectedCount = peers.stream().filter(p -> p.getState() == Peer.State.CONNECTED).count();
-        long allKnownCount = peers.size();
-        long blacklistedCount = peers.stream().filter(Peer::isBlacklisted).count();
-
+    private void updatePeerCount(long connectedCount, long allKnownCount, long blacklistedCount) {
         // The label previously for 'connected' now shows 'active' peers.
         connectedPeersLabel.setText(String.valueOf(connectedCount));
         peersCountLabel.setText(String.valueOf(allKnownCount));
