@@ -1928,8 +1928,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 logger.info("Blocks popped off: {}", startHeight - blockchain.getHeight());
                 logger.info("Pop-off height to {} from {}", blockchain.getHeight(), startHeight);
                 logger.info("Database consistent at height {}", blockchain.getHeight());
-                logger.info("Total Mined (Supply)         : {}", lastCheckTotalMined.get());
-                logger.info("Total Effective Balance      : {}", lastCheckTotalEffectiveBalance.get());
+                logger.info("Total Mined (Supply)           : {}", lastCheckTotalMined.get());
+                logger.info("Total Effective Balance        : {}", lastCheckTotalEffectiveBalance.get());
             } else {
                 logger.info("Database consistency resolution failed.");
             }
@@ -2037,8 +2037,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                             logger.info("Blocks popped off: {}", startHeight - blockchain.getHeight());
                             logger.info("Pop-off height to {} from {}", blockchain.getHeight(), startHeight);
                             logger.info("Database consistent at height {}", blockchain.getHeight());
-                            logger.info("Total Mined (Supply)         : {}", lastCheckTotalMined.get());
-                            logger.info("Total Effective Balance      : {}", lastCheckTotalEffectiveBalance.get());
+                            logger.info("Total Mined (Supply)           : {}", lastCheckTotalMined.get());
+                            logger.info("Total Effective Balance        : {}", lastCheckTotalEffectiveBalance.get());
                         } else {
                             logger.info("Database consistency resolution failed.");
                         }
@@ -2447,8 +2447,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             // If Auto Resolve is active, log at debug level to reduce spam
             if (resolutionState == ResolutionState.ACTIVE) {
                 logger.debug("  Database inconsistency detected at height {}", blockchain.getHeight());
-                logger.debug("  Total Mined (Supply)         : {}", totalMined);
-                logger.debug("  Total Effective Balance      : {}", totalEffectiveBalance);
+                logger.debug("  Total Mined (Supply)           : {}", totalMined);
+                logger.debug("  Total Effective Balance        : {}", totalEffectiveBalance);
                 logger.debug("  Difference (Mined - Effective) : {}", diff);
                 logger.debug(" --------------------------------------------------");
                 logger.debug("  Component - Account Balances   : {}", accountBalances);
@@ -2457,8 +2457,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 logger.debug("----------------------------------------------------");
             } else {
                 logger.error("  DATABASE INCONSISTENCY DETECTED at height {}", blockchain.getHeight());
-                logger.error("  Total Mined (Supply)         : {}", totalMined);
-                logger.error("  Total Effective Balance      : {}", totalEffectiveBalance);
+                logger.error("  Total Mined (Supply)           : {}", totalMined);
+                logger.error("  Total Effective Balance        : {}", totalEffectiveBalance);
                 logger.error("  Difference (Mined - Effective) : {}", diff);
                 logger.error("  --------------------------------------------------");
                 logger.error("  Component - Account Balances   : {}", accountBalances);
@@ -2527,8 +2527,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             long diff = totalMined - totalEffectiveBalance;
 
             logger.error("  DATABASE INCONSISTENCY DETECTED at height {}", blockchain.getHeight());
-            logger.error("  Total Mined (Supply)         : {}", totalMined);
-            logger.error("  Total Effective Balance      : {}", totalEffectiveBalance);
+            logger.error("  Total Mined (Supply)           : {}", totalMined);
+            logger.error("  Total Effective Balance        : {}", totalEffectiveBalance);
             logger.error("  Difference (Mined - Effective) : {}", diff);
             logger.error("  --------------------------------------------------");
             logger.error("  Component - Account Balances   : {}", accountBalances);
@@ -2543,8 +2543,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     totalEffectiveBalance);
         } else {
             logger.info("Database is consistent at height {}", blockchain.getHeight());
-            logger.info("Total Mined (Supply)         : {}", totalMined);
-            logger.info("Total Effective Balance      : {}", totalEffectiveBalance);
+            logger.info("Total Mined (Supply)           : {}", totalMined);
+            logger.info("Total Effective Balance        : {}", totalEffectiveBalance);
         }
 
         lastCheckTotalMined.set(totalMined);
