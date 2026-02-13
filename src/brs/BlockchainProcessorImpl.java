@@ -1874,16 +1874,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             return;
         }
 
-        int limitHeight;
-        if (trimDerivedTables) {
-            if (lastTrimHeight.get() > 0) {
-                limitHeight = lastTrimHeight.get();
-            } else {
-                limitHeight = getEstimatedTrimHeight(); // Uses TRIM_PERIOD internally
-            }
-        } else {
-            limitHeight = Math.max(0, blockchain.getHeight() - Constants.MAX_ROLLBACK);
-        }
+        int limitHeight = getSafeRollbackHeight();
 
         logger.info("Popping off blocks until consistent or height {}", limitHeight);
 
@@ -1992,16 +1983,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         return;
                     }
 
-                    int limitHeight;
-                    if (trimDerivedTables) {
-                        if (lastTrimHeight.get() > 0) {
-                            limitHeight = lastTrimHeight.get();
-                        } else {
-                            limitHeight = getEstimatedTrimHeight(); // Uses TRIM_PERIOD internally
-                        }
-                    } else {
-                        limitHeight = Math.max(0, blockchain.getHeight() - Constants.MAX_ROLLBACK);
-                    }
+                    int limitHeight = getSafeRollbackHeight();
 
                     logger.info("Popping off blocks until consistent or height {}", limitHeight);
 
@@ -2340,6 +2322,18 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 ? lastTrimHeight.get()
                 : Math.max(blockchain.getHeight() - Constants.MAX_ROLLBACK, 0));
         return trimDerivedTables ? trimHeight : 0;
+    }
+
+    @Override
+    public int getSafeRollbackHeight() {
+        if (trimDerivedTables) {
+            if (lastTrimHeight.get() > 0) {
+                return lastTrimHeight.get();
+            } else {
+                return getEstimatedTrimHeight();
+            }
+        }
+        return Math.max(0, blockchain.getHeight() - Constants.MAX_ROLLBACK);
     }
 
     @Override
