@@ -27,6 +27,7 @@ import java.util.function.Consumer;
 
 import brs.Signum;
 import brs.gui.util.MovingAverage;
+import brs.Block;
 import brs.BlockchainProcessor;
 import brs.props.Props;
 import org.slf4j.Logger;
@@ -1724,9 +1725,9 @@ public class SynchronizationMetricsPanel extends JPanel {
         }
     }
 
-    private void onBlockPopped(brs.Block block) {
+    private void onBlockPopped(Block block) {
+        int height = block.getHeight();
         chartUpdateExecutor.submit(() -> {
-            int height = Signum.getBlockchain().getHeight();
             SwingUtilities.invokeLater(() -> {
                 lastTimingData = null;
                 lastPerformanceData = null;
