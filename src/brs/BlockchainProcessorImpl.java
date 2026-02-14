@@ -236,6 +236,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
     private final Listeners<PeerMetric, PeerMetricEvent> peerMetricListeners = new Listeners<>();
     private final Listeners<PerformanceStats, Event> performanceStatsListeners = new Listeners<>();
+    private final Listeners<QueueStatus, Event> queueStatusListeners = new Listeners<>();
 
     @Override
     public void addPeerMetricListener(Listener<PeerMetric> listener) {
@@ -260,6 +261,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     @Override
     public void removePerformanceStatsListener(Listener<PerformanceStats> listener) {
         performanceStatsListeners.removeListener(listener, Event.PERFORMANCE_STATS_UPDATED);
+    }
+
+    @Override
+    public void addQueueStatusListener(Listener<QueueStatus> listener) {
+        queueStatusListeners.addListener(listener, Event.QUEUE_STATUS_CHANGED);
+    }
+
+    @Override
+    public void removeQueueStatusListener(Listener<QueueStatus> listener) {
+        queueStatusListeners.removeListener(listener, Event.QUEUE_STATUS_CHANGED);
     }
 
     @Override
@@ -1280,6 +1291,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     public void onQueueStatusUpdated(QueueStatus newStatus) {
         queueStatus.set(newStatus);
         blockListeners.notify(null, Event.QUEUE_STATUS_CHANGED);
+        queueStatusListeners.notify(newStatus, Event.QUEUE_STATUS_CHANGED);
     }
 
     private void updateAndFireNetVolume() {
