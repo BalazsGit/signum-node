@@ -256,6 +256,10 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     void notifyPeerMetric(PeerMetric metric);
 
+    void addPerformanceStatsListener(Listener<PerformanceStats> listener);
+
+    void removePerformanceStatsListener(Listener<PerformanceStats> listener);
+
     class BlockNotAcceptedException extends SignumException {
 
         BlockNotAcceptedException(String message) {
