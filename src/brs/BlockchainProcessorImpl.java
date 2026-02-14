@@ -235,6 +235,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private volatile PopOffState autoPopOffState = PopOffState.IDLE;
 
     private final Listeners<PeerMetric, PeerMetricEvent> peerMetricListeners = new Listeners<>();
+    private final Listeners<PerformanceStats, Event> performanceStatsListeners = new Listeners<>();
 
     @Override
     public void addPeerMetricListener(Listener<PeerMetric> listener) {
@@ -249,6 +250,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     @Override
     public void notifyPeerMetric(PeerMetric metric) {
         peerMetricListeners.notify(metric, PeerMetricEvent.METRIC);
+    }
+
+    @Override
+    public void addPerformanceStatsListener(Listener<PerformanceStats> listener) {
+        performanceStatsListeners.addListener(listener, Event.PERFORMANCE_STATS_UPDATED);
+    }
+
+    @Override
+    public void removePerformanceStatsListener(Listener<PerformanceStats> listener) {
+        performanceStatsListeners.removeListener(listener, Event.PERFORMANCE_STATS_UPDATED);
     }
 
     @Override
@@ -2950,7 +2961,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     housekeepingTimeMs, txApplyTimeMs, atTimeMs, subscriptionTimeMs, blockApplyTimeMs, commitTimeMs,
                     miscTimeMs, block.getHeight(), allTransactionCount, systemTransactionCount, atCount,
                     block.getPayloadLength(), maxPayloadSize));
-            blockListeners.notify(null, Event.PERFORMANCE_STATS_UPDATED);
+            performanceStatsListeners.notify(performanceStats.get(), Event.PERFORMANCE_STATS_UPDATED);
 
             logger.debug("Successfully pushed {} (height {})", block.getId(), block.getHeight());
             statisticsManager.blockAdded();
