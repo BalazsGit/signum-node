@@ -115,6 +115,7 @@ public class PeerMetricsPanel extends JPanel {
 
     private final Map<MetricType, ChartPanel> chartPanels = new HashMap<>();
     private final Map<MetricType, Integer> zoomRanges = new HashMap<>();
+    private ChartPanel overviewChartPanel;
 
     private XYSeries rxLatencySeries;
     private XYSeries rxCountSeries;
@@ -335,7 +336,7 @@ public class PeerMetricsPanel extends JPanel {
         addComponent(leftOverview, metricsOverview, 0, 0, 1, 0.0, 0.0, GridBagConstraints.NORTHWEST,
                 GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
 
-        ChartPanel overviewChartPanel = createOverviewChartPanel();
+        overviewChartPanel = createOverviewChartPanel();
         addToggleListener(connectedLabel, overviewChartPanel, connectedSeries.getKey().toString());
         addToggleListener(activeLabel, overviewChartPanel, activeSeries.getKey().toString());
         addToggleListener(allLabel, overviewChartPanel, allSeries.getKey().toString());
@@ -1071,24 +1072,38 @@ public class PeerMetricsPanel extends JPanel {
     }
 
     private void updateGlobalUI(MetricsUpdateData data) {
-        if (data.updatedType == MetricType.RX) {
-            updateMetricSet(data.rx, rxLatencyBar, rxCountBar, rxLatencySeries, rxCountSeries, "ms", "",
-                    data.typeCounter);
-            updateChartRange(MetricType.RX);
-            updateAbsMetric(rxLatencyBar, data.rxAbsMin, data.rxAbsMax, rxAbsMinSeries, rxAbsMaxSeries,
-                    data.typeCounter);
-        } else if (data.updatedType == MetricType.TX) {
-            updateMetricSet(data.tx, txLatencyBar, txCountBar, txLatencySeries, txCountSeries, "ms", "",
-                    data.typeCounter);
-            updateChartRange(MetricType.TX);
-            updateAbsMetric(txLatencyBar, data.txAbsMin, data.txAbsMax, txAbsMinSeries, txAbsMaxSeries,
-                    data.typeCounter);
-        } else {
-            updateMetricSet(data.other, otherLatencyBar, otherCountBar, otherLatencySeries, otherCountSeries, "ms", "",
-                    data.typeCounter);
-            updateChartRange(MetricType.OTHER);
-            updateAbsMetric(otherLatencyBar, data.otherAbsMin, data.otherAbsMax, otherAbsMinSeries, otherAbsMaxSeries,
-                    data.typeCounter);
+        ChartPanel panel = chartPanels.get(data.updatedType);
+        if (panel != null) {
+            panel.setRefreshBuffer(false);
+            panel.getChart().getXYPlot().setNotify(false);
+        }
+        try {
+            if (data.updatedType == MetricType.RX) {
+                updateMetricSet(data.rx, rxLatencyBar, rxCountBar, rxLatencySeries, rxCountSeries, "ms", "",
+                        data.typeCounter);
+                updateChartRange(MetricType.RX);
+                updateAbsMetric(rxLatencyBar, data.rxAbsMin, data.rxAbsMax, rxAbsMinSeries, rxAbsMaxSeries,
+                        data.typeCounter);
+            } else if (data.updatedType == MetricType.TX) {
+                updateMetricSet(data.tx, txLatencyBar, txCountBar, txLatencySeries, txCountSeries, "ms", "",
+                        data.typeCounter);
+                updateChartRange(MetricType.TX);
+                updateAbsMetric(txLatencyBar, data.txAbsMin, data.txAbsMax, txAbsMinSeries, txAbsMaxSeries,
+                        data.typeCounter);
+            } else {
+                updateMetricSet(data.other, otherLatencyBar, otherCountBar, otherLatencySeries, otherCountSeries, "ms",
+                        "",
+                        data.typeCounter);
+                updateChartRange(MetricType.OTHER);
+                updateAbsMetric(otherLatencyBar, data.otherAbsMin, data.otherAbsMax, otherAbsMinSeries,
+                        otherAbsMaxSeries,
+                        data.typeCounter);
+            }
+        } finally {
+            if (panel != null) {
+                panel.setRefreshBuffer(true);
+                panel.getChart().getXYPlot().setNotify(true);
+            }
         }
 
         // Note: updateMetricSet updates series which is safe. Bars are updated there
@@ -1228,10 +1243,21 @@ public class PeerMetricsPanel extends JPanel {
     }
 
     private void applyOverviewUpdate(OverviewUpdateData data) {
-        connectedSeries.addOrUpdate((double) data.updateCounter, (double) data.connected);
-        activeSeries.addOrUpdate((double) data.updateCounter, (double) data.active);
-        allSeries.addOrUpdate((double) data.updateCounter, (double) data.all);
-        blacklistedSeries.addOrUpdate((double) data.updateCounter, (double) data.blacklisted);
+        if (overviewChartPanel != null) {
+            overviewChartPanel.setRefreshBuffer(false);
+            overviewChartPanel.getChart().getXYPlot().setNotify(false);
+        }
+        try {
+            connectedSeries.addOrUpdate((double) data.updateCounter, (double) data.connected);
+            activeSeries.addOrUpdate((double) data.updateCounter, (double) data.active);
+            allSeries.addOrUpdate((double) data.updateCounter, (double) data.all);
+            blacklistedSeries.addOrUpdate((double) data.updateCounter, (double) data.blacklisted);
+        } finally {
+            if (overviewChartPanel != null) {
+                overviewChartPanel.setRefreshBuffer(true);
+                overviewChartPanel.getChart().getXYPlot().setNotify(true);
+            }
+        }
 
         if (connectedSeries.getItemCount() > HISTORY_SIZE) {
             connectedSeries.remove(0);

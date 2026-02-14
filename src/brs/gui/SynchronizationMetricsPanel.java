@@ -1984,10 +1984,10 @@ public class SynchronizationMetricsPanel extends JPanel {
         setNetworkChartsNotification(false);
         try {
             if (uploadedVolume > 0 || downloadedVolume > 0) {
-                updateChartSeries(uploadSpeedSeries, currentTime, avgUploadSpeed);
-                updateChartSeries(downloadSpeedSeries, currentTime, avgDownloadSpeed);
-                updateChartSeries(uploadVolumeSeries, currentTime, uploadedVolume);
-                updateChartSeries(downloadVolumeSeries, currentTime, downloadedVolume);
+                updateChartSeries(uploadSpeedSeries, currentTime, avgUploadSpeed, SPEED_HISTORY_SIZE);
+                updateChartSeries(downloadSpeedSeries, currentTime, avgDownloadSpeed, SPEED_HISTORY_SIZE);
+                updateChartSeries(uploadVolumeSeries, currentTime, uploadedVolume, SPEED_HISTORY_SIZE);
+                updateChartSeries(downloadVolumeSeries, currentTime, downloadedVolume, SPEED_HISTORY_SIZE);
 
                 if (uiOptimizationEnabled && !isTabActive)
                     return;
@@ -2130,17 +2130,27 @@ public class SynchronizationMetricsPanel extends JPanel {
     }
 
     private void updateChartRanges() {
-        if (performanceChartPanel != null && blocksPerSecondSeries.getItemCount() > 0) {
-            double lastX = blocksPerSecondSeries.getX(blocksPerSecondSeries.getItemCount() - 1).doubleValue();
-            int itemCount = blocksPerSecondSeries.getItemCount();
-            int range = Math.min(Math.max(itemCount, 10), currentZoomRange);
-            performanceChartPanel.getChart().getXYPlot().getDomainAxis().setRange(lastX - range + 0.5, lastX + 0.5);
+        boolean isZoomed = currentZoomRange < CHART_HISTORY_SIZE;
+
+        if (performanceChartPanel != null) {
+            if (isZoomed && blocksPerSecondSeries.getItemCount() > 0) {
+                double lastX = blocksPerSecondSeries.getX(blocksPerSecondSeries.getItemCount() - 1).doubleValue();
+                int itemCount = blocksPerSecondSeries.getItemCount();
+                int range = Math.min(Math.max(itemCount, 10), currentZoomRange);
+                performanceChartPanel.getChart().getXYPlot().getDomainAxis().setRange(lastX - range + 0.5, lastX + 0.5);
+            } else {
+                performanceChartPanel.getChart().getXYPlot().getDomainAxis().setAutoRange(true);
+            }
         }
-        if (timingChartPanel != null && pushTimePerBlockSeries.getItemCount() > 0) {
-            double lastX = pushTimePerBlockSeries.getX(pushTimePerBlockSeries.getItemCount() - 1).doubleValue();
-            int itemCount = pushTimePerBlockSeries.getItemCount();
-            int range = Math.min(Math.max(itemCount, 10), currentZoomRange);
-            timingChartPanel.getChart().getXYPlot().getDomainAxis().setRange(lastX - range + 0.5, lastX + 0.5);
+        if (timingChartPanel != null) {
+            if (isZoomed && pushTimePerBlockSeries.getItemCount() > 0) {
+                double lastX = pushTimePerBlockSeries.getX(pushTimePerBlockSeries.getItemCount() - 1).doubleValue();
+                int itemCount = pushTimePerBlockSeries.getItemCount();
+                int range = Math.min(Math.max(itemCount, 10), currentZoomRange);
+                timingChartPanel.getChart().getXYPlot().getDomainAxis().setRange(lastX - range + 0.5, lastX + 0.5);
+            } else {
+                timingChartPanel.getChart().getXYPlot().getDomainAxis().setAutoRange(true);
+            }
         }
     }
 
@@ -2168,7 +2178,7 @@ public class SynchronizationMetricsPanel extends JPanel {
 
     private void applySeriesUpdates(Map<XYSeries, Point.Double> seriesUpdates) {
         seriesUpdates.forEach(
-                (series, point) -> updateChartSeries(series, point.x, point.y));
+                (series, point) -> updateChartSeries(series, point.x, point.y, CHART_HISTORY_SIZE));
     }
 
     private TimingUpdateData calculateTimingUpdate(BlockchainProcessor.PerformanceStats stats) {
@@ -2411,7 +2421,10 @@ public class SynchronizationMetricsPanel extends JPanel {
         bar.setString(stringFormatter.apply(value));
     }
 
-    private void updateChartSeries(XYSeries series, double x, double y) {
+    private void updateChartSeries(XYSeries series, double x, double y, int maxItems) {
+        while (series.getItemCount() >= maxItems) {
+            series.remove(0);
+        }
         series.addOrUpdate(x, y);
     }
 

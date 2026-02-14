@@ -275,10 +275,14 @@ public class BlockGenerationMetricsPanel extends JPanel {
             if (lastPieData != null)
                 updatePieChartUI(lastPieData);
             updateChartRange();
-            if (chartPanel != null)
+            if (chartPanel != null) {
+                chartPanel.setRefreshBuffer(true);
                 chartPanel.getChart().getXYPlot().setNotify(true);
-            if (pieChartPanel != null)
+            }
+            if (pieChartPanel != null) {
+                pieChartPanel.setRefreshBuffer(true);
                 pieChartPanel.getChart().setNotify(true);
+            }
         });
     }
 
@@ -1547,6 +1551,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
         });
 
         JFreeChart chart = chartPanel.getChart();
+        chartPanel.setRefreshBuffer(false);
         chart.getXYPlot().setNotify(false);
         try {
             acceptedDeadlineSeries.addOrUpdate((double) block.getHeight(), data.acceptedVal);
@@ -1575,6 +1580,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
             removeOldItems(minedBlockSeries, data.minHeight);
         } finally {
             if (!uiOptimizationEnabled || isTabActive) {
+                chartPanel.setRefreshBuffer(true);
                 chart.getXYPlot().setNotify(true);
             }
         }
@@ -1582,6 +1588,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
     private void updateCurrentNodeDeadlineOnChart(int height, double deadline) {
         JFreeChart chart = chartPanel.getChart();
+        chartPanel.setRefreshBuffer(false);
         chart.getXYPlot().setNotify(false);
         try {
             nodeDeadlineSeries.addOrUpdate((double) height, deadline);
@@ -1590,6 +1597,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
             }
         } finally {
             if (!uiOptimizationEnabled || isTabActive) {
+                chartPanel.setRefreshBuffer(true);
                 chart.getXYPlot().setNotify(true);
             }
         }
@@ -1613,6 +1621,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
             // --- UI UPDATES ---
             SwingUtilities.invokeLater(() -> {
                 JFreeChart mainChart = chartPanel.getChart();
+                chartPanel.setRefreshBuffer(false);
                 mainChart.getXYPlot().setNotify(false);
                 try {
                     truncateSeries(acceptedDeadlineSeries, height);
@@ -1636,6 +1645,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
                     updateChartRange();
                 } finally {
                     if (!uiOptimizationEnabled || isTabActive) {
+                        chartPanel.setRefreshBuffer(true);
                         mainChart.getXYPlot().setNotify(true);
                     }
                 }
@@ -1842,6 +1852,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
         updateNetworkShareLegend(data.networkSharePercent);
 
         JFreeChart chart = pieChartPanel.getChart();
+        pieChartPanel.setRefreshBuffer(false);
         chart.setNotify(false);
         try {
             pieDataset.clear();
@@ -1882,6 +1893,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
             }
         } finally {
             if (!uiOptimizationEnabled || isTabActive) {
+                pieChartPanel.setRefreshBuffer(true);
                 chart.setNotify(true);
             }
         }
