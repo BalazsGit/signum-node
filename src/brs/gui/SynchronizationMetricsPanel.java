@@ -1526,8 +1526,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                     BlockchainProcessor.Event.FORK_CACHE_CHANGED);
             blockchainProcessor.addListener(block -> onNetVolumeChanged(),
                     BlockchainProcessor.Event.NET_VOLUME_CHANGED);
-            blockchainProcessor.addListener(block -> onPerformanceStatsUpdated(),
-                    BlockchainProcessor.Event.PERFORMANCE_STATS_UPDATED);
+            blockchainProcessor.addPerformanceStatsListener(this::onPerformanceStatsUpdated);
             blockchainProcessor.addListener(this::onBlockPopped, BlockchainProcessor.Event.BLOCK_MANUAL_POPPED);
             blockchainProcessor.addListener(this::onBlockPopped, BlockchainProcessor.Event.BLOCK_AUTO_POPPED);
 
@@ -1576,9 +1575,8 @@ public class SynchronizationMetricsPanel extends JPanel {
         this.downloadedVolume = blockchainProcessor.getDownloadedVolume();
     }
 
-    public void onPerformanceStatsUpdated() {
-        BlockchainProcessor.PerformanceStats stats = Signum.getBlockchainProcessor().getPerformanceStats();
-        if (stats != null) { // block is not used, we use the DTO
+    public void onPerformanceStatsUpdated(BlockchainProcessor.PerformanceStats stats) {
+        if (stats != null) {
             chartUpdateExecutor.submit(() -> updateAllCharts(stats));
         }
     }
@@ -1727,9 +1725,12 @@ public class SynchronizationMetricsPanel extends JPanel {
     }
 
     private void onBlockPopped(brs.Block block) {
-        int height = block.getHeight();
         chartUpdateExecutor.submit(() -> {
+            int height = Signum.getBlockchain().getHeight();
             SwingUtilities.invokeLater(() -> {
+                lastTimingData = null;
+                lastPerformanceData = null;
+                lastSharedData = null;
                 setPerformanceChartsNotification(false);
                 try {
                     truncateSeries(blocksPerSecondSeries, height);
