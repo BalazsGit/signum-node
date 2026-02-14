@@ -260,6 +260,10 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     void removePerformanceStatsListener(Listener<PerformanceStats> listener);
 
+    void addQueueStatusListener(Listener<QueueStatus> listener);
+
+    void removeQueueStatusListener(Listener<QueueStatus> listener);
+
     class BlockNotAcceptedException extends SignumException {
 
         BlockNotAcceptedException(String message) {
