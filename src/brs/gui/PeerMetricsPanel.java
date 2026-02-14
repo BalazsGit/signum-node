@@ -828,7 +828,7 @@ public class PeerMetricsPanel extends JPanel {
         plot.setDataset(DATASET_LINES, lineDataset);
         plot.mapDatasetToRangeAxis(DATASET_LINES, AXIS_LINES);
 
-        XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, true);
+        XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, false);
 
         Map<String, Color> lineColors = new HashMap<>();
         lineColors.put(lineSeries.getKey().toString(), lineColor);
@@ -903,7 +903,7 @@ public class PeerMetricsPanel extends JPanel {
         plot.mapDatasetToRangeAxis(DATASET_BARS, AXIS_BARS);
 
         // Renderer 1: Lines
-        XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, true);
+        XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, false);
         Map<String, Color> overviewColors = new HashMap<>();
         overviewColors.put(connectedSeries.getKey().toString(), COLOR_CONNECTED_PEERS);
         overviewColors.put(activeSeries.getKey().toString(), COLOR_ACTIVE_PEERS);
@@ -1074,7 +1074,6 @@ public class PeerMetricsPanel extends JPanel {
     private void updateGlobalUI(MetricsUpdateData data) {
         ChartPanel panel = chartPanels.get(data.updatedType);
         if (panel != null) {
-            panel.setRefreshBuffer(false);
             panel.getChart().getXYPlot().setNotify(false);
         }
         try {
@@ -1101,7 +1100,6 @@ public class PeerMetricsPanel extends JPanel {
             }
         } finally {
             if (panel != null) {
-                panel.setRefreshBuffer(true);
                 panel.getChart().getXYPlot().setNotify(true);
             }
         }
@@ -1244,7 +1242,6 @@ public class PeerMetricsPanel extends JPanel {
 
     private void applyOverviewUpdate(OverviewUpdateData data) {
         if (overviewChartPanel != null) {
-            overviewChartPanel.setRefreshBuffer(false);
             overviewChartPanel.getChart().getXYPlot().setNotify(false);
         }
         try {
@@ -1254,7 +1251,6 @@ public class PeerMetricsPanel extends JPanel {
             blacklistedSeries.addOrUpdate((double) data.updateCounter, (double) data.blacklisted);
         } finally {
             if (overviewChartPanel != null) {
-                overviewChartPanel.setRefreshBuffer(true);
                 overviewChartPanel.getChart().getXYPlot().setNotify(true);
             }
         }
