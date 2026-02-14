@@ -307,7 +307,7 @@ public class SynchronizationMetricsPanel extends JPanel {
 
         // Renderer for lines (Dataset 1)
         plot.setDataset(PERF_TIMING_DATASET_LINES, lineDataset);
-        XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, true);
+        XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, false);
 
         Map<String, Color> lineColors = new HashMap<>();
         lineColors.put(blocksPerSecondSeries.getKey().toString(), COLOR_BLOCKS_PER_SEC);
@@ -428,7 +428,7 @@ public class SynchronizationMetricsPanel extends JPanel {
 
         // Renderer for lines (Dataset 1)
         plot.setDataset(PERF_TIMING_DATASET_LINES, lineDataset);
-        XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, true);
+        XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, false);
 
         Map<String, Color> lineColors = new HashMap<>();
         lineColors.put(pushTimePerBlockSeries.getKey().toString(), COLOR_PUSH_TIME);
@@ -521,7 +521,7 @@ public class SynchronizationMetricsPanel extends JPanel {
 
         // Dataset 1: Speed (Line)
         plot.setDataset(NET_SPEED_DATASET_SPEED, lineDataset);
-        XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, true);
+        XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, false);
 
         Map<String, Color> lineColors = new HashMap<>();
         lineColors.put(uploadSpeedSeries.getKey().toString(), COLOR_UPLOAD_SPEED);
@@ -603,7 +603,7 @@ public class SynchronizationMetricsPanel extends JPanel {
 
         // Dataset 1: Speed (Line)
         plot.setDataset(NET_SPEED_DATASET_SPEED, lineDataset);
-        XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, true);
+        XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, false);
 
         Map<String, Color> lineColors = new HashMap<>();
         lineColors.put(downloadSpeedSeries.getKey().toString(), COLOR_DOWNLOAD_SPEED);
@@ -2130,27 +2130,17 @@ public class SynchronizationMetricsPanel extends JPanel {
     }
 
     private void updateChartRanges() {
-        boolean isZoomed = currentZoomRange < CHART_HISTORY_SIZE;
-
-        if (performanceChartPanel != null) {
-            if (isZoomed && blocksPerSecondSeries.getItemCount() > 0) {
-                double lastX = blocksPerSecondSeries.getX(blocksPerSecondSeries.getItemCount() - 1).doubleValue();
-                int itemCount = blocksPerSecondSeries.getItemCount();
-                int range = Math.min(Math.max(itemCount, 10), currentZoomRange);
-                performanceChartPanel.getChart().getXYPlot().getDomainAxis().setRange(lastX - range + 0.5, lastX + 0.5);
-            } else {
-                performanceChartPanel.getChart().getXYPlot().getDomainAxis().setAutoRange(true);
-            }
+        if (performanceChartPanel != null && blocksPerSecondSeries.getItemCount() > 0) {
+            double lastX = blocksPerSecondSeries.getX(blocksPerSecondSeries.getItemCount() - 1).doubleValue();
+            int itemCount = blocksPerSecondSeries.getItemCount();
+            int range = Math.min(Math.max(itemCount, 10), currentZoomRange);
+            performanceChartPanel.getChart().getXYPlot().getDomainAxis().setRange(lastX - range + 0.5, lastX + 0.5);
         }
-        if (timingChartPanel != null) {
-            if (isZoomed && pushTimePerBlockSeries.getItemCount() > 0) {
-                double lastX = pushTimePerBlockSeries.getX(pushTimePerBlockSeries.getItemCount() - 1).doubleValue();
-                int itemCount = pushTimePerBlockSeries.getItemCount();
-                int range = Math.min(Math.max(itemCount, 10), currentZoomRange);
-                timingChartPanel.getChart().getXYPlot().getDomainAxis().setRange(lastX - range + 0.5, lastX + 0.5);
-            } else {
-                timingChartPanel.getChart().getXYPlot().getDomainAxis().setAutoRange(true);
-            }
+        if (timingChartPanel != null && pushTimePerBlockSeries.getItemCount() > 0) {
+            double lastX = pushTimePerBlockSeries.getX(pushTimePerBlockSeries.getItemCount() - 1).doubleValue();
+            int itemCount = pushTimePerBlockSeries.getItemCount();
+            int range = Math.min(Math.max(itemCount, 10), currentZoomRange);
+            timingChartPanel.getChart().getXYPlot().getDomainAxis().setRange(lastX - range + 0.5, lastX + 0.5);
         }
     }
 
