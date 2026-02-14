@@ -1522,7 +1522,7 @@ public class SynchronizationMetricsPanel extends JPanel {
     private void initListeners() {
         BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
         if (blockchainProcessor != null) {
-            blockchainProcessor.addListener(block -> onQueueStatus(), BlockchainProcessor.Event.QUEUE_STATUS_CHANGED);
+            blockchainProcessor.addQueueStatusListener(this::onQueueStatus);
             blockchainProcessor.addListener(block -> onForkCacheChanged(),
                     BlockchainProcessor.Event.FORK_CACHE_CHANGED);
             blockchainProcessor.addListener(block -> onNetVolumeChanged(),
@@ -1546,14 +1546,11 @@ public class SynchronizationMetricsPanel extends JPanel {
         }
     }
 
-    public void onQueueStatus() {
-        chartUpdateExecutor.submit(() -> {
-            BlockchainProcessor.QueueStatus status = Signum.getBlockchainProcessor().getQueueStatus();
-            if (status != null) {
-                SwingUtilities.invokeLater(() -> updateQueueStatus(status.unverifiedSize,
-                        status.verifiedSize, status.totalSize, status.cacheFullness));
-            }
-        });
+    public void onQueueStatus(BlockchainProcessor.QueueStatus status) {
+        if (status != null) {
+            SwingUtilities.invokeLater(() -> updateQueueStatus(status.unverifiedSize,
+                    status.verifiedSize, status.totalSize, status.cacheFullness));
+        }
     }
 
     public void onForkCacheChanged() {
