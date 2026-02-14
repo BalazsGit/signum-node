@@ -1166,8 +1166,11 @@ public class BlockGenerationMetricsPanel extends JPanel {
     }
 
     private BlockchainUpdateData calculateBlockchainInfo(boolean updateMA) {
+        return calculateBlockchainInfo(Signum.getBlockchain().getLastBlock(), updateMA);
+    }
+
+    private BlockchainUpdateData calculateBlockchainInfo(Block lastBlock, boolean updateMA) {
         BlockchainUpdateData data = new BlockchainUpdateData();
-        Block lastBlock = Signum.getBlockchain().getLastBlock();
         if (lastBlock == null)
             return null;
 
@@ -1258,7 +1261,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 // --- BACKGROUND WORK ---
                 receivedDeadlineCountMA.add(deadlineReceivedCountSinceLastBlock);
                 // calculateBlockchainInfo(true) updates networkSizeMA and baseTargetMA
-                BlockchainUpdateData blockchainData = calculateBlockchainInfo(true);
+                BlockchainUpdateData blockchainData = calculateBlockchainInfo(lastBlock, true);
 
                 // Calculate chart and state updates
                 BlockUpdateData updateData = calculateBlockUpdate(lastBlock);
