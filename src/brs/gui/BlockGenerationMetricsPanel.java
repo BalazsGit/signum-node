@@ -276,11 +276,9 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 updatePieChartUI(lastPieData);
             updateChartRange();
             if (chartPanel != null) {
-                chartPanel.setRefreshBuffer(true);
                 chartPanel.getChart().getXYPlot().setNotify(true);
             }
             if (pieChartPanel != null) {
-                pieChartPanel.setRefreshBuffer(true);
                 pieChartPanel.getChart().setNotify(true);
             }
         });
@@ -990,7 +988,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
         // Renderer 1: Time MA Lines
         plot.setDataset(DATASET_DEADLINE_MA, timeMaDataset);
-        XYLineAndShapeRenderer timeMaRenderer = new XYLineAndShapeRenderer(true, true);
+        XYLineAndShapeRenderer timeMaRenderer = new XYLineAndShapeRenderer(true, false);
 
         Map<String, Paint> timeMaPaints = new HashMap<>();
         timeMaPaints.put("Accepted Deadline (MA)", COLOR_CHAIN_DEADLINE_MA);
@@ -1002,7 +1000,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
         // Renderer 2: Network Size
         plot.setDataset(DATASET_NETWORK_SIZE, netSizeDataset);
-        XYLineAndShapeRenderer netSizeRenderer = new XYLineAndShapeRenderer(true, true);
+        XYLineAndShapeRenderer netSizeRenderer = new XYLineAndShapeRenderer(true, false);
         Map<String, Paint> netSizePaints = new HashMap<>();
         netSizePaints.put(networkSizeMASeries.getKey().toString(), COLOR_NETWORK_SIZE);
         configureLineRenderer(netSizeRenderer, netSizeDataset, netSizePaints);
@@ -1011,7 +1009,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
         // Renderer 3: Commitment
         plot.setDataset(DATASET_COMMITMENT, commitmentDataset);
-        XYLineAndShapeRenderer commitmentRenderer = new XYLineAndShapeRenderer(true, true);
+        XYLineAndShapeRenderer commitmentRenderer = new XYLineAndShapeRenderer(true, false);
         Map<String, Paint> commitmentPaints = new HashMap<>();
         commitmentPaints.put(commitmentMASeries.getKey().toString(), COLOR_COMMITMENT);
         configureLineRenderer(commitmentRenderer, commitmentDataset, commitmentPaints);
@@ -1020,7 +1018,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
         // Renderer 4: Base Target
         plot.setDataset(DATASET_BASE_TARGET, baseTargetDataset);
-        XYLineAndShapeRenderer baseTargetRenderer = new XYLineAndShapeRenderer(true, true);
+        XYLineAndShapeRenderer baseTargetRenderer = new XYLineAndShapeRenderer(true, false);
         Map<String, Paint> baseTargetPaints = new HashMap<>();
         baseTargetPaints.put(baseTargetMASeries.getKey().toString(), COLOR_BASE_TARGET);
         configureLineRenderer(baseTargetRenderer, baseTargetDataset, baseTargetPaints);
@@ -1029,7 +1027,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
         // Renderer 5: Counts
         plot.setDataset(DATASET_COUNTS, countsDataset);
-        XYLineAndShapeRenderer countsRenderer = new XYLineAndShapeRenderer(true, true);
+        XYLineAndShapeRenderer countsRenderer = new XYLineAndShapeRenderer(true, false);
 
         Map<String, Paint> countsPaints = new HashMap<>();
         countsPaints.put("Node Miners (MA)", COLOR_NODE_MINERS); // Uses new COLOR_NODE_MINERS
@@ -1042,7 +1040,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
         // Renderer 6: Share
         plot.setDataset(DATASET_SHARE, shareDataset);
-        XYLineAndShapeRenderer shareRenderer = new XYLineAndShapeRenderer(true, true);
+        XYLineAndShapeRenderer shareRenderer = new XYLineAndShapeRenderer(true, false);
         Map<String, Paint> sharePaints = new HashMap<>();
         sharePaints.put(nodeShareMASeries.getKey().toString(), COLOR_NODE_SHARE);
         configureLineRenderer(shareRenderer, shareDataset, sharePaints);
@@ -1551,7 +1549,6 @@ public class BlockGenerationMetricsPanel extends JPanel {
         });
 
         JFreeChart chart = chartPanel.getChart();
-        chartPanel.setRefreshBuffer(false);
         chart.getXYPlot().setNotify(false);
         try {
             acceptedDeadlineSeries.addOrUpdate((double) block.getHeight(), data.acceptedVal);
@@ -1580,7 +1577,6 @@ public class BlockGenerationMetricsPanel extends JPanel {
             removeOldItems(minedBlockSeries, data.minHeight);
         } finally {
             if (!uiOptimizationEnabled || isTabActive) {
-                chartPanel.setRefreshBuffer(true);
                 chart.getXYPlot().setNotify(true);
             }
         }
@@ -1588,7 +1584,6 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
     private void updateCurrentNodeDeadlineOnChart(int height, double deadline) {
         JFreeChart chart = chartPanel.getChart();
-        chartPanel.setRefreshBuffer(false);
         chart.getXYPlot().setNotify(false);
         try {
             nodeDeadlineSeries.addOrUpdate((double) height, deadline);
@@ -1597,7 +1592,6 @@ public class BlockGenerationMetricsPanel extends JPanel {
             }
         } finally {
             if (!uiOptimizationEnabled || isTabActive) {
-                chartPanel.setRefreshBuffer(true);
                 chart.getXYPlot().setNotify(true);
             }
         }
@@ -1621,7 +1615,6 @@ public class BlockGenerationMetricsPanel extends JPanel {
             // --- UI UPDATES ---
             SwingUtilities.invokeLater(() -> {
                 JFreeChart mainChart = chartPanel.getChart();
-                chartPanel.setRefreshBuffer(false);
                 mainChart.getXYPlot().setNotify(false);
                 try {
                     truncateSeries(acceptedDeadlineSeries, height);
@@ -1645,7 +1638,6 @@ public class BlockGenerationMetricsPanel extends JPanel {
                     updateChartRange();
                 } finally {
                     if (!uiOptimizationEnabled || isTabActive) {
-                        chartPanel.setRefreshBuffer(true);
                         mainChart.getXYPlot().setNotify(true);
                     }
                 }
@@ -1852,7 +1844,6 @@ public class BlockGenerationMetricsPanel extends JPanel {
         updateNetworkShareLegend(data.networkSharePercent);
 
         JFreeChart chart = pieChartPanel.getChart();
-        pieChartPanel.setRefreshBuffer(false);
         chart.setNotify(false);
         try {
             pieDataset.clear();
@@ -1893,7 +1884,6 @@ public class BlockGenerationMetricsPanel extends JPanel {
             }
         } finally {
             if (!uiOptimizationEnabled || isTabActive) {
-                pieChartPanel.setRefreshBuffer(true);
                 chart.setNotify(true);
             }
         }
