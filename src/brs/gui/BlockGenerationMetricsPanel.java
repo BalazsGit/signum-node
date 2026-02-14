@@ -1614,6 +1614,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
             // --- UI UPDATES ---
             SwingUtilities.invokeLater(() -> {
+                lastBlockUpdateData = null;
                 JFreeChart mainChart = chartPanel.getChart();
                 mainChart.getXYPlot().setNotify(false);
                 try {
