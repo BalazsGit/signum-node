@@ -8,6 +8,7 @@ import brs.gui.util.TableUtils;
 import brs.gui.PeersDialog.PeerCategory;
 import brs.peer.Peer;
 import brs.peer.Peers;
+import net.miginfocom.swing.MigLayout;
 import org.jfree.chart.ChartFactory;
 import org.jfree.chart.ChartPanel;
 import org.jfree.chart.JFreeChart;
@@ -29,6 +30,7 @@ import javax.swing.table.JTableHeader;
 import javax.swing.table.AbstractTableModel;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableRowSorter;
+import javax.swing.border.Border;
 import java.awt.*;
 import java.awt.font.TextAttribute;
 import java.awt.event.MouseAdapter;
@@ -70,9 +72,11 @@ public class PeerMetricsPanel extends JPanel {
 
     private static final Color COLOR_CONNECTED_PEERS = Color.GREEN; // Green
     private static final Color COLOR_ACTIVE_PEERS = Color.CYAN; // Cyan
-    private static final Color COLOR_ALL_PEERS = Color.WHITE; // White
+    private static final Color COLOR_ALL_PEERS = new Color(230, 230, 230); // Slightly Gray
 
     private static final BasicStroke CHART_STROKE = new BasicStroke(1.2f);
+
+    private static final Border TABLE_PANEL_BORDER = BorderFactory.createEmptyBorder(0, 0, 0, 0);
 
     // Column Headers
     private static final String COL_TIME = "Time";
@@ -150,6 +154,8 @@ public class PeerMetricsPanel extends JPanel {
     private JTabbedPane overviewTablesPane;
 
     private final Dimension progressBarSize = new Dimension(350, 20);
+    private final Dimension chartDimension = new Dimension(320, 240);
+    private final Dimension tableDimension = new Dimension(250, chartDimension.height);
 
     private final List<PeersDialog.PeerTabPanel> overviewPeerPanels = new ArrayList<>();
     private final List<PeersDialog.PeerCategory> overviewPeerCategories = new ArrayList<>();
@@ -175,8 +181,9 @@ public class PeerMetricsPanel extends JPanel {
     private MetricsUpdateData lastOtherUpdateData;
     private OverviewUpdateData lastOverviewUpdateData;
 
+    private boolean migLayoutDebug = false;
+
     public PeerMetricsPanel() {
-        super(new GridBagLayout());
         initUI();
     }
 
@@ -229,8 +236,8 @@ public class PeerMetricsPanel extends JPanel {
     }
 
     private void initUI() {
-        setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
-        setLayout(new BorderLayout(0, 0));
+        setBorder(BorderFactory.createEmptyBorder(0, 5, 0, 5));
+        setLayout(new BorderLayout());
 
         connectedPeersBar = createProgressBar("0");
         allPeersBar = createProgressBar("0");
@@ -314,27 +321,25 @@ public class PeerMetricsPanel extends JPanel {
                 MetricType.OTHER));
 
         // --- Peer Counts (Overview Tab) ---
-        JPanel overviewPanel = new JPanel(new GridBagLayout());
+        JPanel overviewPanel = new JPanel(
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[]5![]5![grow, fill]", "[top]"));
+        overviewPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
 
         // Left Side: Metrics + Chart
-        JPanel leftOverview = new JPanel(new GridBagLayout());
+        JPanel metricsOverview = new JPanel(
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, wrap 1, gapy 4", "[fill, 300!]"));
 
-        JPanel metricsOverview = new JPanel(new GridBagLayout());
-        int yPos = 0;
         JLabel connectedLabel = createLabel("Connected", COLOR_CONNECTED_PEERS, "Number of currently connected peers.");
-        addMetricRow(metricsOverview, yPos++, connectedLabel, connectedPeersBar);
+        addMetricRow(metricsOverview, connectedLabel, connectedPeersBar);
 
         JLabel activeLabel = createLabel("Active", COLOR_ACTIVE_PEERS, "Number of active peers (communicating).");
-        addMetricRow(metricsOverview, yPos++, activeLabel, activePeersBar);
+        addMetricRow(metricsOverview, activeLabel, activePeersBar);
 
         JLabel allLabel = createLabel("All Known", COLOR_ALL_PEERS, "Total number of known peers.");
-        addMetricRow(metricsOverview, yPos++, allLabel, allPeersBar);
+        addMetricRow(metricsOverview, allLabel, allPeersBar);
 
         JLabel blacklistedLabel = createLabel("Blacklisted", COLOR_BLACKLISTED_PEERS, "Number of blacklisted peers.");
-        addMetricRow(metricsOverview, yPos++, blacklistedLabel, blacklistedPeersBar);
-
-        addComponent(leftOverview, metricsOverview, 0, 0, 1, 0.0, 0.0, GridBagConstraints.NORTHWEST,
-                GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
+        addMetricRow(metricsOverview, blacklistedLabel, blacklistedPeersBar);
 
         overviewChartPanel = createOverviewChartPanel();
         addToggleListener(connectedLabel, overviewChartPanel, connectedSeries.getKey().toString());
@@ -342,18 +347,15 @@ public class PeerMetricsPanel extends JPanel {
         addToggleListener(allLabel, overviewChartPanel, allSeries.getKey().toString());
         addToggleListener(blacklistedLabel, overviewChartPanel, blacklistedSeries.getKey().toString());
 
-        addComponent(leftOverview, overviewChartPanel, 1, 0, 1, 0.0, 0.0, GridBagConstraints.NORTHWEST,
-                GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
-
-        addComponent(overviewPanel, leftOverview, 0, 0, 1, 0.0, 1.0, GridBagConstraints.NORTHWEST,
-                GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
+        overviewPanel.add(metricsOverview, "aligny top");
+        overviewPanel.add(overviewChartPanel, "aligny top");
 
         // Right Side: Tables
         JPanel tablesWrapper = new JPanel(new BorderLayout());
-        tablesWrapper.setBorder(BorderFactory.createLineBorder(Color.GRAY));
+        tablesWrapper.setBorder(TABLE_PANEL_BORDER);
 
         JPanel headerPanel = new JPanel(new BorderLayout());
-        headerPanel.setBorder(BorderFactory.createEmptyBorder(2, 5, 0, 0));
+        headerPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
 
         JLabel peersTitleLabel = new JLabel("Peers");
         peersTitleLabel.setFont(UIManager.getFont("TitledBorder.font"));
@@ -376,21 +378,117 @@ public class PeerMetricsPanel extends JPanel {
         headerPanel.add(peersTitleLabel, BorderLayout.WEST);
         tablesWrapper.add(headerPanel, BorderLayout.NORTH);
 
+        tablesWrapper.setPreferredSize(tableDimension);
+        tablesWrapper.setMinimumSize(tableDimension);
+
         overviewTablesPane = new JTabbedPane();
-        overviewTablesPane.setPreferredSize(new Dimension(300, 0));
-        overviewTablesPane.setMinimumSize(new Dimension(300, 0));
-        for (PeersDialog.PeerCategory category : PeersDialog.PeerCategory.values()) {
-            PeersDialog.PeerTabPanel panel = new PeersDialog.PeerTabPanel(category);
-            panel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-            overviewTablesPane.addTab(category.getTitle() + " (0)", panel);
-            overviewPeerPanels.add(panel);
-            overviewPeerCategories.add(category);
+        overviewTablesPane.setBorder(BorderFactory.createEmptyBorder());
+
+        // 1. Connected Tab
+        PeersDialog.PeerTabPanel connectedPanel = new PeersDialog.PeerTabPanel(PeersDialog.PeerCategory.CONNECTED);
+        connectedPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+        ((BorderLayout) connectedPanel.getLayout()).setHgap(0);
+        ((BorderLayout) connectedPanel.getLayout()).setVgap(0);
+
+        Component connectedCenter = ((BorderLayout) connectedPanel.getLayout()).getLayoutComponent(BorderLayout.CENTER);
+        if (connectedCenter instanceof JScrollPane) {
+            JScrollPane sp = (JScrollPane) connectedCenter;
+            sp.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+            sp.setViewportBorder(null);
         }
+
+        Component connectedNorth = ((BorderLayout) connectedPanel.getLayout()).getLayoutComponent(BorderLayout.NORTH);
+        if (connectedNorth instanceof JPanel) {
+            JPanel p = (JPanel) connectedNorth;
+            p.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
+            ((BorderLayout) p.getLayout()).setHgap(0);
+            ((BorderLayout) p.getLayout()).setVgap(0);
+        }
+
+        overviewTablesPane.addTab(PeersDialog.PeerCategory.CONNECTED.getTitle() + " (0)", connectedPanel);
+        overviewPeerPanels.add(connectedPanel);
+        overviewPeerCategories.add(PeersDialog.PeerCategory.CONNECTED);
+
+        // 2. Active Tab
+        PeersDialog.PeerTabPanel activePanel = new PeersDialog.PeerTabPanel(PeersDialog.PeerCategory.ACTIVE);
+        activePanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+        ((BorderLayout) activePanel.getLayout()).setHgap(0);
+        ((BorderLayout) activePanel.getLayout()).setVgap(0);
+
+        Component activeCenter = ((BorderLayout) activePanel.getLayout()).getLayoutComponent(BorderLayout.CENTER);
+        if (activeCenter instanceof JScrollPane) {
+            JScrollPane sp = (JScrollPane) activeCenter;
+            sp.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+            sp.setViewportBorder(null);
+        }
+
+        Component activeNorth = ((BorderLayout) activePanel.getLayout()).getLayoutComponent(BorderLayout.NORTH);
+        if (activeNorth instanceof JPanel) {
+            JPanel p = (JPanel) activeNorth;
+            p.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
+            ((BorderLayout) p.getLayout()).setHgap(0);
+            ((BorderLayout) p.getLayout()).setVgap(0);
+        }
+
+        overviewTablesPane.addTab(PeersDialog.PeerCategory.ACTIVE.getTitle() + " (0)", activePanel);
+        overviewPeerPanels.add(activePanel);
+        overviewPeerCategories.add(PeersDialog.PeerCategory.ACTIVE);
+
+        // 3. All Tab
+        PeersDialog.PeerTabPanel allPanel = new PeersDialog.PeerTabPanel(PeersDialog.PeerCategory.ALL);
+        allPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+        ((BorderLayout) allPanel.getLayout()).setHgap(0);
+        ((BorderLayout) allPanel.getLayout()).setVgap(0);
+
+        Component allCenter = ((BorderLayout) allPanel.getLayout()).getLayoutComponent(BorderLayout.CENTER);
+        if (allCenter instanceof JScrollPane) {
+            JScrollPane sp = (JScrollPane) allCenter;
+            sp.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+            sp.setViewportBorder(null);
+        }
+
+        Component allNorth = ((BorderLayout) allPanel.getLayout()).getLayoutComponent(BorderLayout.NORTH);
+        if (allNorth instanceof JPanel) {
+            JPanel p = (JPanel) allNorth;
+            p.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
+            ((BorderLayout) p.getLayout()).setHgap(0);
+            ((BorderLayout) p.getLayout()).setVgap(0);
+        }
+
+        overviewTablesPane.addTab(PeersDialog.PeerCategory.ALL.getTitle() + " (0)", allPanel);
+        overviewPeerPanels.add(allPanel);
+        overviewPeerCategories.add(PeersDialog.PeerCategory.ALL);
+
+        // 4. Blacklisted Tab
+        PeersDialog.PeerTabPanel blacklistedPanel = new PeersDialog.PeerTabPanel(PeersDialog.PeerCategory.BLACKLISTED);
+        blacklistedPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+        ((BorderLayout) blacklistedPanel.getLayout()).setHgap(0);
+        ((BorderLayout) blacklistedPanel.getLayout()).setVgap(0);
+
+        Component blacklistedCenter = ((BorderLayout) blacklistedPanel.getLayout())
+                .getLayoutComponent(BorderLayout.CENTER);
+        if (blacklistedCenter instanceof JScrollPane) {
+            JScrollPane sp = (JScrollPane) blacklistedCenter;
+            sp.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+            sp.setViewportBorder(null);
+        }
+
+        Component blacklistedNorth = ((BorderLayout) blacklistedPanel.getLayout())
+                .getLayoutComponent(BorderLayout.NORTH);
+        if (blacklistedNorth instanceof JPanel) {
+            JPanel p = (JPanel) blacklistedNorth;
+            p.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
+            ((BorderLayout) p.getLayout()).setHgap(0);
+            ((BorderLayout) p.getLayout()).setVgap(0);
+        }
+
+        overviewTablesPane.addTab(PeersDialog.PeerCategory.BLACKLISTED.getTitle() + " (0)", blacklistedPanel);
+        overviewPeerPanels.add(blacklistedPanel);
+        overviewPeerCategories.add(PeersDialog.PeerCategory.BLACKLISTED);
+
         tablesWrapper.add(overviewTablesPane, BorderLayout.CENTER);
 
-        addComponent(overviewPanel, tablesWrapper, 1, 0, 1, 1.0, 1.0, GridBagConstraints.CENTER,
-                GridBagConstraints.BOTH,
-                new Insets(0, 5, 0, 0));
+        overviewPanel.add(tablesWrapper, "grow, aligny top");
 
         tabbedPane.addTab("Overview", overviewPanel);
 
@@ -418,13 +516,12 @@ public class PeerMetricsPanel extends JPanel {
             Color lineColor, Color barColor,
             MetricType type) {
 
-        JPanel panel = new JPanel(new GridBagLayout());
+        JPanel panel = new JPanel(
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[]5![]5![grow, fill]", "[top]"));
+        panel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
 
-        // Left Side: Metrics + Chart
-        JPanel leftPanel = new JPanel(new GridBagLayout());
-
-        JPanel metricsPanel = new JPanel(new GridBagLayout());
-        int yPos = 0;
+        JPanel metricsPanel = new JPanel(
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, wrap 1, gapy 4", "[fill, 300!]"));
 
         JLabel lLabel = createLabel(latencyLabel, lineColor, latencyTooltip);
         JLabel cLabel = createLabel(countLabel, barColor, countTooltip);
@@ -438,8 +535,8 @@ public class PeerMetricsPanel extends JPanel {
         tableTitleLabel.setForeground(UIManager.getColor("TitledBorder.titleColor"));
         tableTitleLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
-        addMetricRow(metricsPanel, yPos++, cLabel, countBar);
-        addMetricRow(metricsPanel, yPos++, lLabel, latencyBar);
+        addMetricRow(metricsPanel, cLabel, countBar);
+        addMetricRow(metricsPanel, lLabel, latencyBar);
 
         String absMaxTooltip = "The absolute maximum response time observed across all peers for " + type
                 + " operations.\n\n"
@@ -447,7 +544,7 @@ public class PeerMetricsPanel extends JPanel {
                 "Displays: Current (C) | min - max over history.";
         JLabel absMaxLabel = createLabel("Abs Max Resp Time", COLOR_MAX_RESPONSE_TIME, absMaxTooltip);
         JProgressBar absMaxLatencyBar = createProgressBar("C: 0 | min: 0 - max: 0");
-        addMetricRow(metricsPanel, yPos++, absMaxLabel, absMaxLatencyBar);
+        addMetricRow(metricsPanel, absMaxLabel, absMaxLatencyBar);
 
         String absMinTooltip = "The absolute minimum response time observed across all peers for " + type
                 + " operations.\n\n"
@@ -455,7 +552,7 @@ public class PeerMetricsPanel extends JPanel {
                 "Displays: Current (C) | min - max over history.";
         JLabel absMinLabel = createLabel("Abs Min Resp Time", COLOR_MIN_RESPONSE_TIME, absMinTooltip);
         JProgressBar absMinLatencyBar = createProgressBar("C: 0 | min: 0 - max: 0");
-        addMetricRow(metricsPanel, yPos++, absMinLabel, absMinLatencyBar);
+        addMetricRow(metricsPanel, absMinLabel, absMinLatencyBar);
 
         // Store UI references in client properties or map for update
         absMinLatencyBar.putClientProperty("metricType", type);
@@ -473,11 +570,7 @@ public class PeerMetricsPanel extends JPanel {
         }
 
         JPanel sliderPanel = createControlsPanel(type, mas);
-        addComponent(metricsPanel, sliderPanel, 0, yPos, 2, 0.0, 0.0, GridBagConstraints.CENTER,
-                GridBagConstraints.HORIZONTAL, new Insets(5, 0, 0, 0));
-
-        addComponent(leftPanel, metricsPanel, 0, 0, 1, 0.0, 0.0, GridBagConstraints.NORTHWEST, GridBagConstraints.NONE,
-                new Insets(0, 0, 0, 0));
+        metricsPanel.add(sliderPanel, "growx");
 
         ChartPanel chartPanel = createChartPanel(latencySeries, countSeries, absMinSeries, absMaxSeries, lineColor,
                 barColor);
@@ -488,11 +581,8 @@ public class PeerMetricsPanel extends JPanel {
         addToggleListener(absMinLabel, chartPanel, absMinSeries.getKey().toString());
         addToggleListener(absMaxLabel, chartPanel, absMaxSeries.getKey().toString());
 
-        addComponent(leftPanel, chartPanel, 1, 0, 1, 0.0, 0.0, GridBagConstraints.NORTHWEST, GridBagConstraints.NONE,
-                new Insets(0, 0, 0, 0));
-
-        addComponent(panel, leftPanel, 0, 0, 1, 0.0, 1.0, GridBagConstraints.NORTHWEST, GridBagConstraints.NONE,
-                new Insets(0, 0, 0, 0));
+        panel.add(metricsPanel, "aligny top");
+        panel.add(chartPanel, "aligny top");
 
         // Table Section (Center)
         PeersTableModel model = new PeersTableModel(type);
@@ -512,7 +602,7 @@ public class PeerMetricsPanel extends JPanel {
         TableRowSorter<PeersTableModel> sorter = setupTable(table, model);
 
         JPanel tablePanel = new JPanel(new BorderLayout(0, 0));
-        tablePanel.setBorder(BorderFactory.createLineBorder(Color.GRAY));
+        tablePanel.setBorder(TABLE_PANEL_BORDER);
 
         JPanel headerPanel = new JPanel(new BorderLayout(0, 0));
         headerPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
@@ -520,6 +610,7 @@ public class PeerMetricsPanel extends JPanel {
         headerPanel.add(tableTitleLabel, BorderLayout.NORTH);
 
         JPanel filterPanel = new JPanel(new BorderLayout());
+        filterPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
         filterPanel.add(new JLabel("Filter: "), BorderLayout.WEST);
         JTextField filterTextField = new JTextField();
         filterPanel.add(filterTextField, BorderLayout.CENTER);
@@ -528,9 +619,11 @@ public class PeerMetricsPanel extends JPanel {
         tablePanel.add(headerPanel, BorderLayout.NORTH);
 
         JScrollPane scrollPane = new JScrollPane(table);
+        scrollPane.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+        scrollPane.setViewportBorder(null);
         tablePanel.add(scrollPane, BorderLayout.CENTER);
-        tablePanel.setPreferredSize(new Dimension(300, 0));
-        tablePanel.setMinimumSize(new Dimension(300, 0));
+        tablePanel.setPreferredSize(tableDimension);
+        tablePanel.setMinimumSize(tableDimension);
 
         filterTextField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             public void changedUpdate(javax.swing.event.DocumentEvent e) {
@@ -600,8 +693,7 @@ public class PeerMetricsPanel extends JPanel {
             }
         });
 
-        addComponent(panel, tablePanel, 1, 0, 1, 1.0, 1.0, GridBagConstraints.CENTER, GridBagConstraints.BOTH,
-                new Insets(0, 5, 0, 0));
+        panel.add(tablePanel, "grow, aligny top");
 
         return panel;
     }
@@ -652,7 +744,7 @@ public class PeerMetricsPanel extends JPanel {
         maWindowPanel.add(Box.createHorizontalStrut(5));
 
         // Zoom controls
-        JPanel zoomPanel = new JPanel(new GridBagLayout());
+        JPanel zoomPanel = new JPanel(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0", "[]5[]"));
         zoomPanel.setOpaque(false);
 
         JLabel zoomInLabel = new JLabel("+");
@@ -681,14 +773,8 @@ public class PeerMetricsPanel extends JPanel {
             }
         });
 
-        GridBagConstraints gbcZoom = new GridBagConstraints();
-        gbcZoom.gridx = 0;
-        gbcZoom.gridy = 0;
-        gbcZoom.insets = new Insets(0, 0, 0, 5);
-        zoomPanel.add(zoomOutLabel, gbcZoom);
-        gbcZoom.gridx = 1;
-        gbcZoom.insets = new Insets(0, 0, 0, 0);
-        zoomPanel.add(zoomInLabel, gbcZoom);
+        zoomPanel.add(zoomOutLabel);
+        zoomPanel.add(zoomInLabel);
         maWindowPanel.add(zoomPanel);
 
         return maWindowPanel;
@@ -753,21 +839,21 @@ public class PeerMetricsPanel extends JPanel {
 
     private JProgressBar createProgressBar(String initialString) {
         JProgressBar bar = new JProgressBar(0, 100);
-        bar.setPreferredSize(new Dimension(300, 20));
+        bar.setBorder(BorderFactory.createEmptyBorder());
+        bar.setPreferredSize(progressBarSize);
         bar.setMinimumSize(new Dimension(150, 20));
         bar.setStringPainted(true);
         bar.setString(initialString);
         return bar;
     }
 
-    private void addMetricRow(JPanel panel, int row, JLabel label, JProgressBar bar) {
+    private void addMetricRow(JPanel panel, JLabel label, JProgressBar bar) {
         JPanel container = new JPanel(new BorderLayout(0, 3));
         container.setOpaque(false);
         container.add(label, BorderLayout.NORTH);
         container.add(bar, BorderLayout.CENTER);
 
-        addComponent(panel, container, 0, row, 1, 1.0, 0.0, GridBagConstraints.WEST, GridBagConstraints.HORIZONTAL,
-                new Insets(2, 5, 5, 5));
+        panel.add(container, "growx");
     }
 
     private ChartPanel createChartPanel(XYSeries lineSeries, XYSeries barSeries, XYSeries absMinSeries,
@@ -846,10 +932,10 @@ public class PeerMetricsPanel extends JPanel {
         chart.setBorderVisible(false);
 
         ChartPanel chartPanel = new ChartPanel(chart);
-        Dimension d = new Dimension(320, 240);
-        chartPanel.setPreferredSize(d);
-        chartPanel.setMinimumSize(d);
-        chartPanel.setMaximumSize(d);
+        chartPanel.setPreferredSize(chartDimension);
+        chartPanel.setMinimumSize(chartDimension);
+        chartPanel.setMaximumSize(chartDimension);
+        chartPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
         chartPanel.setDisplayToolTips(true);
         ToolTipManager.sharedInstance().registerComponent(chartPanel);
         return chartPanel;
@@ -919,10 +1005,10 @@ public class PeerMetricsPanel extends JPanel {
         chart.setBorderVisible(false);
 
         ChartPanel chartPanel = new ChartPanel(chart);
-        Dimension d = new Dimension(320, 240);
-        chartPanel.setPreferredSize(d);
-        chartPanel.setMinimumSize(d);
-        chartPanel.setMaximumSize(d);
+        chartPanel.setPreferredSize(chartDimension);
+        chartPanel.setMinimumSize(chartDimension);
+        chartPanel.setMaximumSize(chartDimension);
+        chartPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
         chartPanel.setDisplayToolTips(true);
         ToolTipManager.sharedInstance().registerComponent(chartPanel);
         return chartPanel;
@@ -1324,20 +1410,6 @@ public class PeerMetricsPanel extends JPanel {
             otherTableModel.setData(data.otherPeers, data.updatedPeerAddress);
             TableUtils.packTableColumns(otherPeersTable);
         }
-    }
-
-    private void addComponent(JPanel panel, Component comp, int x, int y, int gridwidth, double weightx, double weighty,
-            int anchor, int fill, Insets insets) {
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridx = x;
-        gbc.gridy = y;
-        gbc.gridwidth = gridwidth;
-        gbc.weightx = weightx;
-        gbc.weighty = weighty;
-        gbc.anchor = anchor;
-        gbc.fill = fill;
-        gbc.insets = insets;
-        panel.add(comp, gbc);
     }
 
     private JLabel createLabel(String text, Color color, String tooltip) {

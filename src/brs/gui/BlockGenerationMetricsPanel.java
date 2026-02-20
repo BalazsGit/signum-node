@@ -15,6 +15,7 @@ import brs.util.DurationFormatter;
 import signumj.entity.SignumAddress;
 import signumj.entity.SignumID;
 
+import net.miginfocom.swing.MigLayout;
 import org.jfree.chart.ChartFactory;
 import org.jfree.chart.ChartPanel;
 import org.jfree.chart.JFreeChart;
@@ -43,7 +44,6 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.font.TextAttribute;
 import java.text.AttributedString;
-import java.awt.Point;
 import java.awt.*;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -175,7 +175,6 @@ public class BlockGenerationMetricsPanel extends JPanel {
     private final Dimension chartDimension = new Dimension(360, 270);
     private final Dimension pieChartDimension = new Dimension(300, 180);
     private final Insets labelInsets = new Insets(2, 5, 2, 0);
-    private final Insets barInsets = new Insets(2, 5, 2, 5);
 
     private DefaultPieDataset pieDataset;
     private ChartPanel pieChartPanel;
@@ -197,8 +196,11 @@ public class BlockGenerationMetricsPanel extends JPanel {
     private BlockchainUpdateData lastBlockchainData;
     private BlockUpdateData lastBlockUpdateData;
 
+    private boolean migLayoutDebug = false;
+
     public BlockGenerationMetricsPanel(JFrame parentFrame) {
-        super(new GridBagLayout());
+        setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
+        setLayout(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[]5![]5![]5![grow]", "[top]"));
         this.parentFrame = parentFrame;
         initializeColorPalette();
         layoutComponents();
@@ -285,8 +287,6 @@ public class BlockGenerationMetricsPanel extends JPanel {
     }
 
     private void layoutComponents() {
-        setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
-        GridBagConstraints gbc = new GridBagConstraints();
 
         String heightTooltip = """
                 The height of the block currently being generated.
@@ -317,23 +317,16 @@ public class BlockGenerationMetricsPanel extends JPanel {
         pieChartPanel = createPieChartPanel();
         registerLongTooltip(pieChartPanel);
 
-        // --- Stats Panel ---
-        JPanel statsPanel = new JPanel(new GridBagLayout());
-
         // --- Left Metrics Panel (Labels + Bars) ---
-        JPanel leftMetricsPanel = new JPanel(new GridBagLayout());
-        int leftYPos = 0;
+        JPanel leftMetricsPanel = new JPanel(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, wrap 2",
+                "[align right]5[fill, 350!]", "[]2[]"));
 
-        addComponent(leftMetricsPanel, heightLabel, 0, leftYPos++, 2, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.HORIZONTAL, new Insets(0, 5, 2, 5));
-        addComponent(leftMetricsPanel, difficultyLabel, 0, leftYPos++, 2, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.HORIZONTAL, barInsets);
-        addComponent(leftMetricsPanel, cumulativeDifficultyLabel, 0, leftYPos++, 2, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        leftMetricsPanel.add(heightLabel, "span 2, growx, align right");
+        leftMetricsPanel.add(difficultyLabel, "span 2, growx, align right");
+        leftMetricsPanel.add(cumulativeDifficultyLabel, "span 2, growx, align right");
 
         JSeparator separator = new JSeparator(SwingConstants.HORIZONTAL);
-        addComponent(leftMetricsPanel, separator, 0, leftYPos++, 2, 0, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        leftMetricsPanel.add(separator, "span 2, growx, gaptop 5, gapbottom 5");
 
         String networkSizeTooltip = """
                 The moving average of the estimated total network mining capacity (Network Size).
@@ -361,10 +354,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
         JLabel networkSizeLabel = createLabel("Network Size (MA):", COLOR_NETWORK_SIZE, networkSizeTooltip);
         networkSizeProgressBar = createProgressBar(0, 100, null, "C: 0 B | MA: 0 B - max: 0 B", progressBarSize);
         addToggleListener(networkSizeLabel, chartPanel, "Network Size (MA)");
-        addComponent(leftMetricsPanel, networkSizeLabel, 0, leftYPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(leftMetricsPanel, networkSizeProgressBar, 1, leftYPos++, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        leftMetricsPanel.add(networkSizeLabel);
+        leftMetricsPanel.add(networkSizeProgressBar);
 
         String commitmentTooltip = """
                 The moving average of network commitment in SIGNA per Terabyte (TB) of plot size.
@@ -383,10 +374,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
         JLabel commitmentLabel = createLabel("Commitment (MA):", COLOR_COMMITMENT, commitmentTooltip);
         commitmentProgressBar = createProgressBar(0, 100, null, "C: 0.00 | MA: 0.00 - max: 0.00", progressBarSize);
         addToggleListener(commitmentLabel, chartPanel, "Commitment (MA)");
-        addComponent(leftMetricsPanel, commitmentLabel, 0, leftYPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(leftMetricsPanel, commitmentProgressBar, 1, leftYPos++, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        leftMetricsPanel.add(commitmentLabel);
+        leftMetricsPanel.add(commitmentProgressBar);
 
         String baseTargetTooltip = """
                 The moving average of the Base Target.
@@ -412,10 +401,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
         baseTargetLabel = createLabel("Base Target (MA):", COLOR_BASE_TARGET, baseTargetTooltip);
         addToggleListener(baseTargetLabel, chartPanel, "Base Target (MA)");
         baseTargetProgressBar = createProgressBar(0, 100, null, "C: 0 | MA: 0 - max: 0", progressBarSize);
-        addComponent(leftMetricsPanel, baseTargetLabel, 0, leftYPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(leftMetricsPanel, baseTargetProgressBar, 1, leftYPos++, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        leftMetricsPanel.add(baseTargetLabel);
+        leftMetricsPanel.add(baseTargetProgressBar);
 
         String nodeShareTooltip = """
                 The moving average percentage of blocks mined by this specific node.
@@ -434,10 +421,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
         addToggleListener(nodeShareLabel, chartPanel, "Node Share (MA)");
         nodeShareProgressBar = createProgressBar(0, 100, null, "C: 0.00% | MA: 0.00% - max: 0.00%",
                 progressBarSize);
-        addComponent(leftMetricsPanel, nodeShareLabel, 0, leftYPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(leftMetricsPanel, nodeShareProgressBar, 1, leftYPos++, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        leftMetricsPanel.add(nodeShareLabel);
+        leftMetricsPanel.add(nodeShareProgressBar);
 
         String minerCountTooltip = """
                 The moving average of the number of unique miners discovered (connected) to this node in the recent history.
@@ -458,10 +443,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
         addToggleListener(minerCountLabel, chartPanel, "Node Miners (MA)");
         minerCountProgressBar = createProgressBar(0, 100, null, "C: 0 / 0 | MA: 0.0 - min: 0.0 - max: 0.0",
                 progressBarSize);
-        addComponent(leftMetricsPanel, minerCountLabel, 0, leftYPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(leftMetricsPanel, minerCountProgressBar, 1, leftYPos++, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        leftMetricsPanel.add(minerCountLabel);
+        leftMetricsPanel.add(minerCountProgressBar);
 
         String networkMinersTooltip = """
                 The moving average of the estimated number of active miners on the network.
@@ -478,10 +461,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
         JLabel networkMinersLabel = createLabel("Network Miners (MA)", COLOR_NETWORK_MINERS, networkMinersTooltip);
         addToggleListener(networkMinersLabel, chartPanel, "Network Miners (MA)");
         networkMinersProgressBar = createProgressBar(0, 100, null, "C: 0 | MA: 0 - max: 0", progressBarSize);
-        addComponent(leftMetricsPanel, networkMinersLabel, 0, leftYPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(leftMetricsPanel, networkMinersProgressBar, 1, leftYPos++, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        leftMetricsPanel.add(networkMinersLabel);
+        leftMetricsPanel.add(networkMinersProgressBar);
 
         String deadlinesRxTooltip = """
                 The moving average of the number of deadlines received (Rx) by this node per block interval.
@@ -502,11 +483,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
         addToggleListener(receivedDeadlineCountLabel, chartPanel, "Deadlines Rx (MA)");
         receivedDeadlineCountProgressBar = createProgressBar(0, 100, null, "C: 0 | MA: 0.0 - max: 0.0",
                 progressBarSize);
-        addComponent(leftMetricsPanel, receivedDeadlineCountLabel, 0, leftYPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(leftMetricsPanel, receivedDeadlineCountProgressBar, 1, leftYPos++, 1, 0, 0,
-                GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        leftMetricsPanel.add(receivedDeadlineCountLabel);
+        leftMetricsPanel.add(receivedDeadlineCountProgressBar);
 
         String bestNodeDeadlineTooltip = """
                 The best (lowest) deadline value in seconds submitted by any of the miners connected to this node for the current block generation cycle.
@@ -526,11 +504,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
         addToggleListener(bestNodeDeadlineLabel, chartPanel, "Node Deadline", "Node Deadline (MA)", "Mined Block");
         bestNodeDeadlineProgressBar = createProgressBar(0, 100, null, "C: 0 s | MA: 0 s - min: 0 s - max: 0 s",
                 progressBarSize);
-        addComponent(leftMetricsPanel, bestNodeDeadlineLabel, 0, leftYPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(leftMetricsPanel, bestNodeDeadlineProgressBar, 1, leftYPos++, 1, 0, 0,
-                GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        leftMetricsPanel.add(bestNodeDeadlineLabel);
+        leftMetricsPanel.add(bestNodeDeadlineProgressBar);
 
         String bestChainDeadlineTooltip = """
                 The moving average of the accepted deadline for blocks added to the blockchain, measured in seconds.
@@ -552,11 +527,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
         addToggleListener(bestBlockchainDeadlineLabel, chartPanel, "Accepted Deadline", "Accepted Deadline (MA)");
         bestBlockchainDeadlineProgressBar = createProgressBar(0, 100, null, "C: 0 s | MA: 0 s - min: 0 s - max: 0 s",
                 progressBarSize);
-        addComponent(leftMetricsPanel, bestBlockchainDeadlineLabel, 0, leftYPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(leftMetricsPanel, bestBlockchainDeadlineProgressBar, 1, leftYPos++, 1, 0, 0,
-                GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        leftMetricsPanel.add(bestBlockchainDeadlineLabel);
+        leftMetricsPanel.add(bestBlockchainDeadlineProgressBar);
 
         // --- Moving Average Window Slider ---
         JPanel maWindowPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
@@ -612,7 +584,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
         maWindowPanel.add(Box.createHorizontalStrut(5));
 
         // Zoom controls
-        JPanel zoomPanel = new JPanel(new GridBagLayout());
+        JPanel zoomPanel = new JPanel(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0", "[]5[]"));
         zoomPanel.setOpaque(false);
 
         JLabel zoomInLabel = new JLabel("+");
@@ -641,36 +613,13 @@ public class BlockGenerationMetricsPanel extends JPanel {
             }
         });
 
-        GridBagConstraints gbcZoom = new GridBagConstraints();
-        gbcZoom.gridx = 0;
-        gbcZoom.gridy = 0;
-        gbcZoom.insets = new Insets(0, 0, 0, 5);
-        zoomPanel.add(zoomOutLabel, gbcZoom);
-        gbcZoom.gridx = 1;
-        zoomPanel.add(zoomInLabel, gbcZoom);
+        zoomPanel.add(zoomOutLabel);
+        zoomPanel.add(zoomInLabel);
         maWindowPanel.add(zoomPanel);
 
-        // Create a container for Left Metrics + Chart + Base Target + Slider
-        JPanel leftAndChartPanel = new JPanel(new GridBagLayout());
-
-        // Add leftMetricsPanel to leftAndChartPanel
-        addComponent(leftAndChartPanel, leftMetricsPanel, 0, 0, 1, 0, 0, GridBagConstraints.NORTH,
-                GridBagConstraints.NONE,
-                new Insets(0, 0, 0, 0));
-
-        // Add Chart to leftAndChartPanel
-        GridBagConstraints chartGbc = new GridBagConstraints();
-        chartGbc.gridx = 1;
-        chartGbc.gridy = 0;
-        chartGbc.weightx = 0.0;
-        chartGbc.weighty = 0.0;
-        chartGbc.fill = GridBagConstraints.NONE;
-        chartGbc.anchor = GridBagConstraints.NORTHWEST;
-        chartGbc.insets = new Insets(0, 0, 0, 0);
-        leftAndChartPanel.add(chartPanel, chartGbc);
-
         // Add Pie Chart Panel to statsPanel
-        JPanel rightMetricsPanel = new JPanel(new GridBagLayout());
+        JPanel rightMetricsPanel = new JPanel(
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, wrap 1, gapy 4", "[center]"));
 
         JPanel minersCountPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
         minersCountPanel.setOpaque(false);
@@ -693,10 +642,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
         minersCountPanel.add(new JLabel(" / "));
         minersCountPanel.add(networkMinersCountLabel);
 
-        addComponent(rightMetricsPanel, minersCountPanel, 0, 0, 2, 0, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, new Insets(0, 0, 5, 0));
-        addComponent(rightMetricsPanel, pieChartPanel, 0, 1, 2, 0, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, new Insets(0, 0, 5, 0));
+        rightMetricsPanel.add(minersCountPanel);
+        rightMetricsPanel.add(pieChartPanel);
 
         JPanel legendPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
         legendPanel.setOpaque(false);
@@ -751,36 +698,12 @@ public class BlockGenerationMetricsPanel extends JPanel {
         legendPanel.add(new JLabel(" / "));
         legendPanel.add(networkShareLegendLabel);
 
-        addComponent(rightMetricsPanel, legendPanel, 0, 2, 2, 0, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, new Insets(0, 0, 5, 0));
-        addComponent(rightMetricsPanel, maWindowPanel, 0, 3, 2, 0, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
-
-        // Add leftAndChartPanel to statsPanel
-        GridBagConstraints leftAndChartGbc = new GridBagConstraints();
-        leftAndChartGbc.gridx = 0;
-        leftAndChartGbc.gridy = 0;
-        leftAndChartGbc.anchor = GridBagConstraints.NORTH;
-        statsPanel.add(leftAndChartPanel, leftAndChartGbc);
-
-        GridBagConstraints pieGbc = new GridBagConstraints();
-        pieGbc.gridx = 1;
-        pieGbc.gridy = 0;
-        pieGbc.anchor = GridBagConstraints.NORTH;
-        pieGbc.insets = new Insets(0, 5, 5, 0);
-        statsPanel.add(rightMetricsPanel, pieGbc);
-
-        gbc.gridx = 0;
-        gbc.gridy = 0;
-        gbc.gridwidth = 1;
-        gbc.weightx = 0.0;
-        gbc.fill = GridBagConstraints.NONE;
-        gbc.anchor = GridBagConstraints.NORTH;
-        add(statsPanel, gbc);
+        rightMetricsPanel.add(legendPanel);
+        rightMetricsPanel.add(maWindowPanel);
 
         // --- Miners Table (Center) ---
         JPanel tablePanel = new JPanel(new BorderLayout(0, 0));
-        tablePanel.setBorder(BorderFactory.createLineBorder(Color.GRAY));
+        tablePanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
 
         JPanel headerPanel = new JPanel(new BorderLayout(0, 0));
         headerPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
@@ -805,6 +728,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
         // Filter field
         JPanel filterPanel = new JPanel(new BorderLayout());
+        filterPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
         filterPanel.add(new JLabel("Filter: "), BorderLayout.WEST);
         filterTextField = new JTextField();
         filterPanel.add(filterTextField, BorderLayout.CENTER);
@@ -876,16 +800,16 @@ public class BlockGenerationMetricsPanel extends JPanel {
         });
 
         JScrollPane tableScrollPane = new JScrollPane(minersTable);
+        tableScrollPane.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+        tableScrollPane.setViewportBorder(null);
         tablePanel.add(tableScrollPane, BorderLayout.CENTER);
-        tablePanel.setPreferredSize(new Dimension(250, 240)); // Fixed size to prevent expansion
+        tablePanel.setPreferredSize(new Dimension(250, chartDimension.height)); // Fixed size to prevent expansion
+        tablePanel.setMinimumSize(new Dimension(250, chartDimension.height));
 
-        gbc.gridx = 1;
-        gbc.gridy = 0;
-        gbc.weightx = 1.0;
-        gbc.weighty = 1.0;
-        gbc.fill = GridBagConstraints.BOTH;
-        gbc.insets = new Insets(0, 5, 0, 0);
-        add(tablePanel, gbc);
+        add(leftMetricsPanel, "aligny top");
+        add(chartPanel, "aligny top");
+        add(rightMetricsPanel, "aligny top");
+        add(tablePanel, "grow, aligny top");
     }
 
     private ChartPanel createChartPanel() {
@@ -2129,26 +2053,13 @@ public class BlockGenerationMetricsPanel extends JPanel {
         if (color != null) {
             bar.setBackground(color);
         }
+        bar.setBorder(BorderFactory.createEmptyBorder());
         bar.setPreferredSize(size);
         bar.setMinimumSize(size);
         bar.setStringPainted(true);
         bar.setString(initialString);
         bar.setValue(min);
         return bar;
-    }
-
-    private void addComponent(JPanel panel, Component comp, int x, int y, int gridwidth, int weightx, int weighty,
-            int anchor, int fill, Insets insets) {
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridx = x;
-        gbc.gridy = y;
-        gbc.gridwidth = gridwidth;
-        gbc.weightx = weightx;
-        gbc.weighty = weighty;
-        gbc.anchor = anchor;
-        gbc.fill = fill;
-        gbc.insets = insets;
-        panel.add(comp, gbc);
     }
 
     private void addLabelToggleListener(JLabel label, Consumer<Boolean> onToggleAction) {

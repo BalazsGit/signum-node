@@ -1,5 +1,6 @@
 package brs.gui;
 
+import net.miginfocom.swing.MigLayout;
 import org.jfree.chart.ChartFactory;
 import org.jfree.chart.ChartPanel;
 import org.jfree.chart.JFreeChart;
@@ -7,6 +8,7 @@ import org.jfree.chart.axis.NumberAxis;
 import org.jfree.chart.labels.XYToolTipGenerator;
 import org.jfree.chart.plot.XYPlot;
 import org.jfree.chart.plot.DatasetRenderingOrder;
+import org.jfree.chart.renderer.xy.AbstractXYItemRenderer;
 import org.jfree.chart.renderer.xy.XYLineAndShapeRenderer;
 import org.jfree.chart.renderer.xy.StandardXYBarPainter;
 import org.jfree.chart.renderer.xy.XYBarRenderer;
@@ -183,8 +185,8 @@ public class SynchronizationMetricsPanel extends JPanel {
             progressBarSize1.height);
     private final Dimension progressBarSize2 = new Dimension(150, 20);
 
-    private final Insets labelInsets = new Insets(2, 5, 2, 0);
-    private final Insets barInsets = new Insets(2, 5, 2, 5);
+    private final Insets labelInsets = new Insets(1, 5, 1, 0);
+    private final Insets barInsets = new Insets(1, 5, 1, 5);
 
     private static final Color COLOR_SYSTEM_TX_PER_BLOCK = new Color(64, 64, 192); // Blue-ish
     private static final Color COLOR_ALL_TX_PER_BLOCK = new Color(235, 165, 50); // Orange-ish
@@ -226,6 +228,11 @@ public class SynchronizationMetricsPanel extends JPanel {
     private PerformanceUpdateData lastPerformanceData;
     private SharedBarChartUpdateData lastSharedData;
     private Runnable lastNetSpeedUpdate;
+
+    private JProgressBar syncProgressBarUnverifiedBlocks;
+    private final JFrame parentFrame;
+    private boolean migLayoutDebug = false;
+    private boolean showDebugBorders = false;
 
     // Data Transfer Objects for UI updates
     private static class TimingUpdateData {
@@ -538,7 +545,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         ChartPanel chartPanel = new ChartPanel(chart);
         chartPanel.setPreferredSize(splitChartDimension);
         chartPanel.setMinimumSize(splitChartDimension);
-        chartPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, splitChartDimension.height));
+        chartPanel.setMaximumSize(splitChartDimension);
         chartPanel.setDisplayToolTips(true);
         ToolTipManager.sharedInstance().registerComponent(chartPanel);
         return chartPanel;
@@ -620,7 +627,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         ChartPanel chartPanel = new ChartPanel(chart);
         chartPanel.setPreferredSize(splitChartDimension);
         chartPanel.setMinimumSize(splitChartDimension);
-        chartPanel.setMaximumSize(new Dimension(Integer.MAX_VALUE, splitChartDimension.height));
+        chartPanel.setMaximumSize(splitChartDimension);
         chartPanel.setDisplayToolTips(true);
         ToolTipManager.sharedInstance().registerComponent(chartPanel);
         return chartPanel;
@@ -637,11 +644,9 @@ public class SynchronizationMetricsPanel extends JPanel {
         Map<XYSeries, Point.Double> seriesUpdates = new IdentityHashMap<>();
     }
 
-    private JProgressBar syncProgressBarUnverifiedBlocks;
-    private final JFrame parentFrame;
-
     public SynchronizationMetricsPanel(JFrame parentFrame) {
-        super(new GridBagLayout());
+        setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
+        setLayout(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[grow]", "[top]"));
         try {
             this.parentFrame = parentFrame;
             allTransactionsPerBlockSeries = new XYSeries("All Txs/Block (MA)", true, false); // Orange
@@ -753,15 +758,26 @@ public class SynchronizationMetricsPanel extends JPanel {
     }
 
     private void layoutComponents() {
-        setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
+        JPanel content = new JPanel(new MigLayout(
+                (migLayoutDebug ? "debug, " : "") + "insets 0, alignx center",
+                "[]5![]5![]5![]",
+                "[top]"));
 
         // === Performance Metrics Panel ===
-        JPanel performanceMetricsPanel = new JPanel(new GridBagLayout());
+        JPanel performanceMetricsPanel = new JPanel(
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0", "[grow]5[grow]", "[top]"));
+        if (showDebugBorders) {
+            performanceMetricsPanel.setBorder(BorderFactory.createLineBorder(Color.BLACK));
+        }
 
         // SyncPanel (Progress Bars)
-        JPanel SyncPanel = new JPanel(new GridBagLayout());
-
-        int yPos = 0;
+        JPanel syncPanel = new JPanel(
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx, wrap 2, gapy 4",
+                        "[align right]5[]"));
+        if (showDebugBorders) {
+            syncPanel.setBorder(BorderFactory.createLineBorder(Color.GREEN));
+        }
+        String rowConstraints = "";
 
         // Fork Cache
         tooltip = """
@@ -774,19 +790,14 @@ public class SynchronizationMetricsPanel extends JPanel {
         forkCacheLabel = createLabel("Fork Cache", null, tooltip);
         forkCacheProgressBar = createProgressBar(0, brs.Constants.MAX_ROLLBACK, Color.MAGENTA,
                 "0 / " + brs.Constants.MAX_ROLLBACK, progressBarSize1);
-        addComponent(SyncPanel, forkCacheLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
-                labelInsets);
-        addComponent(SyncPanel, forkCacheProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        syncPanel.add(forkCacheLabel, rowConstraints);
+        syncPanel.add(forkCacheProgressBar, rowConstraints);
 
         // Cache Fullness
         cacheFullnessLabel = createLabel("Download Cache", null, null); // Tooltip is set in init()
         cacheFullnessProgressBar = createProgressBar(0, 100, Color.ORANGE, "0.00 / 0.00 MB | 0%", progressBarSize1);
-        addComponent(SyncPanel, cacheFullnessLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE,
-                labelInsets);
-        addComponent(SyncPanel, cacheFullnessProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        syncPanel.add(cacheFullnessLabel, rowConstraints);
+        syncPanel.add(cacheFullnessProgressBar, rowConstraints);
 
         // Verified / Total Blocks
         tooltip = """
@@ -803,10 +814,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 """;
         JLabel verifLabel = createLabel("Verified / Total Blocks", null, tooltip);
         syncProgressBarDownloadedBlocks = createProgressBar(0, 100, Color.GREEN, "0 / 0 | 0%", progressBarSize1);
-        addComponent(SyncPanel, verifLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
-                labelInsets);
-        addComponent(SyncPanel, syncProgressBarDownloadedBlocks, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        syncPanel.add(verifLabel, rowConstraints);
+        syncPanel.add(syncProgressBarDownloadedBlocks, rowConstraints);
 
         // Unverified Blocks
         tooltip = """
@@ -821,10 +830,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 """;
         JLabel unVerifLabel = createLabel("Unverified Blocks", null, tooltip);
         syncProgressBarUnverifiedBlocks = createProgressBar(0, 1000, Color.GREEN, "0", progressBarSize1);
-        addComponent(SyncPanel, unVerifLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END, GridBagConstraints.NONE,
-                labelInsets);
-        addComponent(SyncPanel, syncProgressBarUnverifiedBlocks, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        syncPanel.add(unVerifLabel, rowConstraints);
+        syncPanel.add(syncProgressBarUnverifiedBlocks, rowConstraints);
 
         // Unconfirmed Transactions
         tooltip = """
@@ -838,16 +845,12 @@ public class SynchronizationMetricsPanel extends JPanel {
                 """;
         JLabel unconfirmedTxsLabel = createLabel("Unconfirmed Txs", null, tooltip);
         unconfirmedTxsProgressBar = createProgressBar(0, 1000, Color.GREEN, "0 / 0", progressBarSize1);
-        addComponent(SyncPanel, unconfirmedTxsLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, unconfirmedTxsProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        syncPanel.add(unconfirmedTxsLabel, rowConstraints);
+        syncPanel.add(unconfirmedTxsProgressBar, rowConstraints);
 
         // Separator
         JSeparator separator1 = new JSeparator(SwingConstants.HORIZONTAL);
-        addComponent(SyncPanel, separator1, 0, yPos++, 2, 1, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.HORIZONTAL,
-                barInsets);
+        syncPanel.add(separator1, "span, growx, gaptop 2, gapbottom 2");
 
         // Blocks/Second (Moving Average)
         tooltip = """
@@ -863,10 +866,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
         blocksPerSecondLabel = createLabel("Blocks/Sec (MA)", COLOR_BLOCKS_PER_SEC, tooltip);
         blocksPerSecondProgressBar = createProgressBar(0, 200, null, "0.00 - max: 0.00", progressBarSize1);
-        addComponent(SyncPanel, blocksPerSecondLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, blocksPerSecondProgressBar, 1, yPos++, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        syncPanel.add(blocksPerSecondLabel, rowConstraints);
+        syncPanel.add(blocksPerSecondProgressBar, rowConstraints);
 
         // All Transactions/Second (Moving Average)
         tooltip = """
@@ -891,10 +892,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
         txPerSecondLabel = createLabel("All Txs/Sec (MA)", COLOR_ALL_TX_PER_SEC, tooltip);
         allTransactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0.00 - max: 0.00", progressBarSize1);
-        addComponent(SyncPanel, txPerSecondLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, allTransactionsPerSecondProgressBar, 1, yPos++, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        syncPanel.add(txPerSecondLabel, rowConstraints);
+        syncPanel.add(allTransactionsPerSecondProgressBar, rowConstraints);
 
         // System Transactions/Second (Moving Average)
         tooltip = """
@@ -908,11 +907,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
         systemTxPerSecondLabel = createLabel("System Txs/Sec (MA)", COLOR_SYSTEM_TX_PER_SEC, tooltip); // LightSkyBlue
         systemTransactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0.00 - max: 0.00", progressBarSize1);
-        addComponent(SyncPanel, systemTxPerSecondLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, systemTransactionsPerSecondProgressBar, 1, yPos++, 1, 0, 0,
-                GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        syncPanel.add(systemTxPerSecondLabel, rowConstraints);
+        syncPanel.add(systemTransactionsPerSecondProgressBar, rowConstraints);
 
         // All Transactions/Block (Moving Average)
         tooltip = """
@@ -936,10 +932,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
         txPerBlockLabel = createLabel("All Txs/Block (MA)", COLOR_ALL_TX_PER_BLOCK, tooltip);
         allTransactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0.00 - max: 0.00", progressBarSize1);
-        addComponent(SyncPanel, txPerBlockLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, allTransactionsPerBlockProgressBar, 1, yPos++, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        syncPanel.add(txPerBlockLabel, rowConstraints);
+        syncPanel.add(allTransactionsPerBlockProgressBar, rowConstraints);
 
         // System Transactions/Block (Moving Average)
         tooltip = """
@@ -953,11 +947,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
         systemTxPerBlockLabel = createLabel("System Txs/Block (MA)", COLOR_SYSTEM_TX_PER_BLOCK, tooltip);
         systemTransactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0.00 - max: 0.00", progressBarSize1);
-        addComponent(SyncPanel, systemTxPerBlockLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, systemTransactionsPerBlockProgressBar, 1, yPos++, 1, 0, 0,
-                GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        syncPanel.add(systemTxPerBlockLabel, rowConstraints);
+        syncPanel.add(systemTransactionsPerBlockProgressBar, rowConstraints);
 
         // ATs/Block (Moving Average)
         tooltip = """
@@ -971,21 +962,20 @@ public class SynchronizationMetricsPanel extends JPanel {
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
         atCountLabel = createLabel("ATs/Block (MA)", COLOR_AT_COUNT_PER_BLOCK, tooltip); // Deep Pink
         atCountsPerBlockProgressBar = createProgressBar(0, 100, null, "0.00 - max: 0.00", progressBarSize1);
-        addComponent(SyncPanel, atCountLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(SyncPanel, atCountsPerBlockProgressBar, 1, yPos++, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        syncPanel.add(atCountLabel, rowConstraints);
+        syncPanel.add(atCountsPerBlockProgressBar, rowConstraints);
 
         // Add SyncPanel to performanceMetricsPanel
-        addComponent(performanceMetricsPanel, SyncPanel, 0, 0, 1, 0, 0, GridBagConstraints.NORTHWEST,
-                GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
+        performanceMetricsPanel.add(syncPanel, "cell 0 0, growy, aligny top");
 
         // Performance chart
-        JPanel performanceChartContainer = new JPanel();
-        performanceChartContainer.setLayout(new BoxLayout(performanceChartContainer, BoxLayout.Y_AXIS));
+        JPanel performanceChartContainer = new JPanel(
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, gap 0"));
+        if (showDebugBorders) {
+            performanceChartContainer.setBorder(BorderFactory.createLineBorder(Color.yellow));
+        }
         performanceChartContainer.add(performanceChartPanel);
-        addComponent(performanceMetricsPanel, performanceChartContainer, 1, 0, 1, 0, 0, GridBagConstraints.NORTHWEST,
-                GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
+        performanceMetricsPanel.add(performanceChartContainer, "cell 1 0, aligny top");
 
         // Add toggle listeners for performance chart
         addToggleListener(blocksPerSecondLabel, performanceChartPanel, "Blocks/Second (MA)");
@@ -996,13 +986,18 @@ public class SynchronizationMetricsPanel extends JPanel {
         // End Performance Metrics Panel
 
         // === Timing Metrics Panel ===
-        JPanel timingMetricsPanel = new JPanel(new GridBagLayout());
+        JPanel timingMetricsPanel = new JPanel(
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0", "[grow]5[grow]", "[]0[]"));
+        if (showDebugBorders) {
+            timingMetricsPanel.setBorder(BorderFactory.createLineBorder(Color.BLACK));
+        }
 
-        JPanel timingInfoPanel = new JPanel(new GridBagLayout());
-        yPos = 0;
-
-        Insets timerLabelInsets = new Insets(2, 5, 0, 0);
-
+        JPanel timingInfoPanel = new JPanel(
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx, wrap 2, gapy 4",
+                        "[align right]5[]"));
+        if (showDebugBorders) {
+            timingInfoPanel.setBorder(BorderFactory.createLineBorder(Color.GREEN));
+        }
         // Push Time
         tooltip = """
                 The moving average of the total time taken to process and push a new block.
@@ -1027,13 +1022,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
         pushTimeLabel = createLabel("Push Time (MA)", COLOR_PUSH_TIME, tooltip);
         pushTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms", progressBarSize1);
-
-        // The toggle slider is now next to the payload bar, so we just add the label
-        // here.
-        addComponent(timingInfoPanel, pushTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(timingInfoPanel, pushTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        timingInfoPanel.add(pushTimeLabel, rowConstraints);
+        timingInfoPanel.add(pushTimeProgressBar, rowConstraints);
 
         // Validation Time
         tooltip = """
@@ -1055,10 +1045,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
         validationTimeLabel = createLabel("Validation Time (MA)", COLOR_VALIDATION_TIME, tooltip);
         validationTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
-        addComponent(timingInfoPanel, validationTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(timingInfoPanel, validationTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        timingInfoPanel.add(validationTimeLabel, rowConstraints);
+        timingInfoPanel.add(validationTimeProgressBar, rowConstraints);
 
         // TX Loop Time
         tooltip = """
@@ -1081,10 +1069,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
         txLoopTimeLabel = createLabel("TX Loop Time (MA)", COLOR_TX_LOOP_TIME, tooltip);
         txLoopTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
-        addComponent(timingInfoPanel, txLoopTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(timingInfoPanel, txLoopTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        timingInfoPanel.add(txLoopTimeLabel, rowConstraints);
+        timingInfoPanel.add(txLoopTimeProgressBar, rowConstraints);
 
         // Housekeeping Time
         tooltip = """
@@ -1105,10 +1091,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
         housekeepingTimeLabel = createLabel("Housekeeping Time (MA)", COLOR_HOUSEKEEPING_TIME, tooltip);
         housekeepingTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
-        addComponent(timingInfoPanel, housekeepingTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(timingInfoPanel, housekeepingTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        timingInfoPanel.add(housekeepingTimeLabel, rowConstraints);
+        timingInfoPanel.add(housekeepingTimeProgressBar, rowConstraints);
 
         // TX Apply Time
         tooltip = """
@@ -1130,10 +1114,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
         txApplyTimeLabel = createLabel("TX Apply Time (MA)", COLOR_TX_APPLY_TIME, tooltip);
         txApplyTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
-        addComponent(timingInfoPanel, txApplyTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(timingInfoPanel, txApplyTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        timingInfoPanel.add(txApplyTimeLabel, rowConstraints);
+        timingInfoPanel.add(txApplyTimeProgressBar, rowConstraints);
 
         // AT Time
         tooltip = """
@@ -1154,10 +1136,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
         atTimeLabel = createLabel("AT Time (MA)", COLOR_AT_TIME, tooltip);
         atTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
-        addComponent(timingInfoPanel, atTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(timingInfoPanel, atTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        timingInfoPanel.add(atTimeLabel, rowConstraints);
+        timingInfoPanel.add(atTimeProgressBar, rowConstraints);
 
         // Subscription Time
         tooltip = """
@@ -1178,10 +1158,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
         subscriptionTimeLabel = createLabel("Subscription Time (MA)", COLOR_SUBSCRIPTION_TIME, tooltip); // Hot pink
         subscriptionTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
-        addComponent(timingInfoPanel, subscriptionTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(timingInfoPanel, subscriptionTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        timingInfoPanel.add(subscriptionTimeLabel, rowConstraints);
+        timingInfoPanel.add(subscriptionTimeProgressBar, rowConstraints);
 
         // Block Apply Time
         tooltip = """
@@ -1202,10 +1180,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
         blockApplyTimeLabel = createLabel("Block Apply Time (MA)", COLOR_BLOCK_APPLY_TIME, tooltip); // Teal
         blockApplyTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
-        addComponent(timingInfoPanel, blockApplyTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(timingInfoPanel, blockApplyTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        timingInfoPanel.add(blockApplyTimeLabel, rowConstraints);
+        timingInfoPanel.add(blockApplyTimeProgressBar, rowConstraints);
 
         // Commit Time
         tooltip = """
@@ -1226,10 +1202,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
         commitTimeLabel = createLabel("Commit Time (MA)", COLOR_COMMIT_TIME, tooltip);
         commitTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
-        addComponent(timingInfoPanel, commitTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(timingInfoPanel, commitTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        timingInfoPanel.add(commitTimeLabel, rowConstraints);
+        timingInfoPanel.add(commitTimeProgressBar, rowConstraints);
 
         // Misc. Time
         tooltip = """
@@ -1250,52 +1224,46 @@ public class SynchronizationMetricsPanel extends JPanel {
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
         miscTimeLabel = createLabel("Misc. Time (MA)", COLOR_MISC_TIME, tooltip);
         miscTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%", progressBarSize1);
-        addComponent(timingInfoPanel, miscTimeLabel, 0, yPos, 1, 0, 0, GridBagConstraints.LINE_END,
-                GridBagConstraints.NONE, labelInsets);
-        addComponent(timingInfoPanel, miscTimeProgressBar, 1, yPos++, 1, 1, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.HORIZONTAL, barInsets);
+        timingInfoPanel.add(miscTimeLabel, rowConstraints);
+        timingInfoPanel.add(miscTimeProgressBar, rowConstraints);
         // --- Payload Fullness Panel (spanning below both columns) ---
-        JPanel payloadPanel = new JPanel(new GridBagLayout());
+        JPanel payloadPanel = new JPanel(
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[align left]rel[grow, fill]"));
         payloadFullnessLabel = createLabel("Payload Fullness (MA)", COLOR_PAYLOAD_FULLNESS, null); // Tooltip is set in
                                                                                                    // init()
         payloadFullnessProgressBar = createProgressBar(0, 100, null,
                 "000.00% - C: 000% (000000 / 0 bytes) - min: 000% - max: 000%", wideProgressBarSize); // by layout
-
-        // Add payloadPanel to timingMetricsPanel, spanning 2 columns
-        addComponent(payloadPanel, payloadFullnessLabel, 0, 0, 1, 0, 0, GridBagConstraints.LINE_START,
-                GridBagConstraints.NONE, timerLabelInsets);
-        addComponent(payloadPanel, payloadFullnessProgressBar, 1, 0, 1, 1, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.HORIZONTAL, timerLabelInsets);
-        addComponent(timingMetricsPanel, payloadPanel, 0, 1, 2, 1, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.HORIZONTAL, new Insets(5, 0, 0, 0));
+        if (showDebugBorders) {
+            payloadPanel.setBorder(BorderFactory.createLineBorder(Color.BLUE));
+        }
+        payloadPanel.add(payloadFullnessLabel, "gapleft 5");
+        payloadPanel.add(payloadFullnessProgressBar, "gapleft 5");
+        timingMetricsPanel.add(payloadPanel, "cell 0 1 2 1, growx, gaptop 4");
 
         // Add timingInfoPanel to timingMetricsPanel
-        addComponent(timingMetricsPanel, timingInfoPanel, 0, 0, 1, 0, 0, GridBagConstraints.NORTHWEST,
-                GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
+        timingMetricsPanel.add(timingInfoPanel, "cell 0 0, growy, aligny top");
 
         // --- Timing Chart Panel ---
-        JPanel timingChartContainer = new JPanel();
-        timingChartContainer.setLayout(new BoxLayout(timingChartContainer, BoxLayout.Y_AXIS));
+        JPanel timingChartContainer = new JPanel(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, gap 0"));
+        if (showDebugBorders) {
+            timingChartContainer.setBorder(BorderFactory.createLineBorder(Color.YELLOW));
+        }
         timingChartContainer.add(timingChartPanel);
-        addComponent(timingMetricsPanel, timingChartContainer, 1, 0, 1, 0, 0, GridBagConstraints.NORTHWEST,
-                GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
+        timingMetricsPanel.add(timingChartContainer, "cell 1 0, aligny top");
         // End Timing Metrics Panel
 
         // --- Net Speed Chart Panel ---
-        JPanel netSpeedChartContainer = new JPanel();
-        netSpeedChartContainer.setLayout(new BoxLayout(netSpeedChartContainer, BoxLayout.Y_AXIS));
-        netSpeedChartContainer.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+        JPanel netSpeedChartContainer = new JPanel(
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, wrap 1, gapy 4", "[center]"));
+        if (showDebugBorders) {
+            netSpeedChartContainer.setBorder(BorderFactory.createLineBorder(Color.RED));
+        }
         netSpeedChartContainer.add(uploadChartPanel);
-        netSpeedChartContainer.add(downloadChartPanel);
-
-        JPanel netSpeedInfoPanel = new JPanel(new GridBagLayout());
-        netSpeedInfoPanel.setBorder(BorderFactory.createEmptyBorder(5, 0, 0, 0));
+        netSpeedChartContainer.add(downloadChartPanel, "gaptop 0");
 
         // Separator3
         JSeparator separator3 = new JSeparator(SwingConstants.HORIZONTAL);
-        addComponent(netSpeedInfoPanel, separator3, 0, 0, 2, 1, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.HORIZONTAL,
-                barInsets);
+        netSpeedChartContainer.add(separator3, "growx, gaptop 5, gapbottom 5");
 
         // --- Upload Speed ---
         JPanel uploadSpeedPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
@@ -1319,8 +1287,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         uploadSpeedProgressBar = createProgressBar(0, MAX_SPEED_BPS, null, "0.00 B/s", progressBarSize2);
         uploadSpeedPanel.add(uploadSpeedLabel);
         uploadSpeedPanel.add(uploadSpeedProgressBar);
-        addComponent(netSpeedInfoPanel, uploadSpeedPanel, 0, 1, 2, 0, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, labelInsets);
+        netSpeedChartContainer.add(uploadSpeedPanel);
 
         // --- Download Speed ---
         JPanel downloadSpeePanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
@@ -1344,8 +1311,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         downloadSpeedProgressBar = createProgressBar(0, MAX_SPEED_BPS, null, "0.00 B/s", progressBarSize2);
         downloadSpeePanel.add(downloadSpeedLabel);
         downloadSpeePanel.add(downloadSpeedProgressBar);
-        addComponent(netSpeedInfoPanel, downloadSpeePanel, 0, 2, 2, 0, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, labelInsets);
+        netSpeedChartContainer.add(downloadSpeePanel);
 
         // --- Combined Volume ---
         JPanel combinedVolumePanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
@@ -1367,8 +1333,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         combinedVolumePanel.add(metricsUploadVolumeLabel);
         combinedVolumePanel.add(new JLabel(" / "));
         combinedVolumePanel.add(metricsDownloadVolumeLabel);
-        addComponent(netSpeedInfoPanel, combinedVolumePanel, 0, 3, 2, 1, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, barInsets);
+        netSpeedChartContainer.add(combinedVolumePanel);
 
         // --- Moving Average Window ---
         JPanel maWindowPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
@@ -1429,7 +1394,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         maWindowPanel.add(Box.createHorizontalStrut(5));
 
         // Zoom controls
-        JPanel zoomPanel = new JPanel(new GridBagLayout());
+        JPanel zoomPanel = new JPanel(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0", "[]5[]"));
         zoomPanel.setOpaque(false);
 
         JLabel zoomInLabel = new JLabel("+");
@@ -1458,33 +1423,26 @@ public class SynchronizationMetricsPanel extends JPanel {
             }
         });
 
-        GridBagConstraints gbcZoom = new GridBagConstraints();
-        gbcZoom.gridx = 0;
-        gbcZoom.gridy = 0;
-        gbcZoom.insets = new Insets(0, 0, 0, 5);
-        zoomPanel.add(zoomOutLabel, gbcZoom);
-        gbcZoom.gridx = 1;
-        zoomPanel.add(zoomInLabel, gbcZoom);
+        zoomPanel.add(zoomOutLabel);
+        zoomPanel.add(zoomInLabel);
         maWindowPanel.add(zoomPanel);
-        addComponent(netSpeedInfoPanel, maWindowPanel, 0, 4, 2, 0, 0, GridBagConstraints.CENTER,
-                GridBagConstraints.NONE, new Insets(2, 0, 2, 0));
-
-        netSpeedChartContainer.add(netSpeedInfoPanel);
-        addComponent(this, netSpeedChartContainer, 3, 0, 1, 1.0, 0, GridBagConstraints.NORTH,
-                GridBagConstraints.HORIZONTAL, new Insets(0, 5, 0, 0));
+        netSpeedChartContainer.add(maWindowPanel);
 
         // Add performanceMetricsPanel to main metrics panel
-        addComponent(this, performanceMetricsPanel, 0, 0, 1, 0, 0, GridBagConstraints.NORTH,
-                GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
+        content.add(performanceMetricsPanel, "cell 0 0, aligny top");
 
         // Vertical Separator
         JSeparator mainVerticalSeparator = new JSeparator(SwingConstants.VERTICAL);
-        addComponent(this, mainVerticalSeparator, 1, 0, 1, 0, 1, GridBagConstraints.CENTER,
-                GridBagConstraints.VERTICAL, new Insets(0, 5, 0, 5));
+        mainVerticalSeparator.setPreferredSize(new Dimension(2, chartDimension.height));
+        mainVerticalSeparator.setMinimumSize(new Dimension(2, chartDimension.height));
+        content.add(mainVerticalSeparator, "cell 1 0, aligny top");
 
         // Add timingMetricsPanel to main metrics panel
-        addComponent(this, timingMetricsPanel, 2, 0, 1, 0, 0, GridBagConstraints.NORTH,
-                GridBagConstraints.NONE, new Insets(0, 0, 0, 0));
+        content.add(timingMetricsPanel, "cell 2 0, aligny top");
+
+        content.add(netSpeedChartContainer, "cell 3 0, aligny top");
+
+        add(content, "growx, alignx center");
         // END Metrics Panel
 
         addToggleListener(pushTimeLabel, timingChartPanel, "Push Time (MA)");
@@ -1612,26 +1570,13 @@ public class SynchronizationMetricsPanel extends JPanel {
     private JProgressBar createProgressBar(int min, int max, Color color, String initialString, Dimension size) {
         JProgressBar bar = new JProgressBar(min, max);
         bar.setBackground(color);
+        bar.setBorder(BorderFactory.createEmptyBorder());
         bar.setPreferredSize(size);
         bar.setMinimumSize(size);
         bar.setStringPainted(true);
         bar.setString(initialString);
         bar.setValue(min);
         return bar;
-    }
-
-    private void addComponent(JPanel panel, Component comp, int x, int y, int gridwidth, double weightx, double weighty,
-            int anchor, int fill, Insets insets) {
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridx = x;
-        gbc.gridy = y;
-        gbc.gridwidth = gridwidth;
-        gbc.weightx = weightx;
-        gbc.weighty = weighty;
-        gbc.anchor = anchor;
-        gbc.fill = fill;
-        gbc.insets = insets;
-        panel.add(comp, gbc);
     }
 
     private void addLabelToggleListener(JLabel label, Consumer<Boolean> onToggleAction) {
@@ -1710,8 +1655,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 XYSeriesCollection seriesCollection = (XYSeriesCollection) dataset;
                 int seriesIndex = seriesCollection.getSeriesIndex(seriesKey);
                 if (seriesIndex >= 0) {
-                    org.jfree.chart.renderer.xy.AbstractXYItemRenderer renderer = (org.jfree.chart.renderer.xy.AbstractXYItemRenderer) plot
-                            .getRenderer(i);
+                    AbstractXYItemRenderer renderer = (AbstractXYItemRenderer) plot.getRenderer(i);
                     if (renderer != null) {
                         renderer.setSeriesVisible(seriesIndex, isVisible);
                         renderer.setSeriesPaint(seriesIndex, isVisible ? originalColor : transparentColor);

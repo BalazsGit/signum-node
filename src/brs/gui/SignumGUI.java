@@ -708,7 +708,9 @@ public class SignumGUI extends JFrame {
         });
 
         pack();
-        setSize(Math.max(topPanel.getPreferredSize().width, metricsPanel.getPreferredSize().width), 800);
+        Insets insets = getInsets();
+        int preferredContentWidth = Math.max(topPanel.getPreferredSize().width, metricsPanel.getPreferredSize().width);
+        setSize(preferredContentWidth + insets.left + insets.right, 800);
         setLocationRelativeTo(null);
         showWindow();
 
