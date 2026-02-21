@@ -346,10 +346,10 @@ public class MinersListDialog extends JFrame {
         }
         updateTableModelData(networkMinersModel, networkMinersData);
 
-        if (nodeMinersTable != null) {
+        if (nodeMinersTable != null && nodeMinersTable.isShowing()) {
             TableUtils.packTableColumns(nodeMinersTable);
         }
-        if (networkMinersTable != null) {
+        if (networkMinersTable != null && networkMinersTable.isShowing()) {
             TableUtils.packTableColumns(networkMinersTable);
         }
     }
