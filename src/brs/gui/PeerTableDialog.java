@@ -13,10 +13,36 @@ import java.awt.event.WindowEvent;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * A dialog window for displaying detailed peer metrics in a tabular format.
+ * <p>
+ * This dialog provides a comprehensive view of peer data, including sorting and
+ * filtering capabilities.
+ * It is designed to show specific metrics (RX, TX, Other) passed from the
+ * {@link PeerMetricsPanel}.
+ * </p>
+ * <p>
+ * The dialog ensures only one instance is visible at a time.
+ * </p>
+ */
 public class PeerTableDialog extends JFrame {
     private static volatile PeerTableDialog instance;
     private JTable table;
 
+    /**
+     * Displays the peer table dialog.
+     * <p>
+     * If a dialog is already open, it is closed and a new one is created with the
+     * provided parameters.
+     * </p>
+     *
+     * @param owner      The owner window of this dialog.
+     * @param title      The title of the dialog window.
+     * @param model      The table model containing the peer data to display.
+     * @param renderer   The cell renderer for formatting the table cells.
+     * @param legendHtml The HTML string for the legend displayed at the top of the
+     *                   dialog.
+     */
     public static void showDialog(Window owner, String title, TableModel model, TableCellRenderer renderer,
             String legendHtml) {
         if (instance != null) {
