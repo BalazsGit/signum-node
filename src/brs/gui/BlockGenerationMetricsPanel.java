@@ -12,8 +12,11 @@ import brs.gui.util.MovingAverage;
 import brs.gui.util.TableUtils;
 import brs.util.Convert;
 import brs.util.DurationFormatter;
+import brs.util.Listener;
 import signumj.entity.SignumAddress;
 import signumj.entity.SignumID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import net.miginfocom.swing.MigLayout;
 import org.jfree.chart.ChartFactory;
@@ -36,6 +39,7 @@ import org.jfree.data.xy.XYSeries;
 import org.jfree.data.xy.XYDataset;
 import org.jfree.data.xy.XYSeriesCollection;
 import javax.swing.*;
+import javax.swing.table.JTableHeader;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.AbstractTableModel;
 import javax.swing.table.DefaultTableModel;
@@ -57,14 +61,30 @@ import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Collections;
+import java.util.AbstractMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+/**
+ * A panel that displays metrics related to block generation (mining).
+ * <p>
+ * This panel provides a comprehensive view of the mining status, including:
+ * <ul>
+ * <li>Current block height, difficulty, and cumulative difficulty.</li>
+ * <li>Historical charts for deadlines, network size, commitment, and miner
+ * counts.</li>
+ * <li>A pie chart visualizing the share of blocks mined by this node versus the
+ * network.</li>
+ * <li>A detailed table of connected miners and their submitted deadlines.</li>
+ * </ul>
+ * </p>
+ */
 @SuppressWarnings("serial")
 public class BlockGenerationMetricsPanel extends JPanel {
 
@@ -101,6 +121,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
     private static final Color COLOR_NETWORK_SHARE_LEGEND = Color.CYAN; // Cyan
 
     private static final BasicStroke CHART_STROKE = new BasicStroke(1.2f);
+
+    private static final Logger logger = LoggerFactory.getLogger(BlockGenerationMetricsPanel.class);
 
     private final JFrame parentFrame;
     private JLabel heightLabel;
@@ -168,8 +190,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
     private volatile BigInteger nodeBestDeadline;
     private volatile int deadlineReceivedCountSinceLastBlock = 0;
     private final List<MinerEntry> currentBlockDeadlines = new CopyOnWriteArrayList<>();
-    private final Map<Integer, LocalBlockInfo> localMinedBlocks = new java.util.concurrent.ConcurrentHashMap<>();
-    private final Map<Integer, List<MinerEntry>> nodeDeadlineHistory = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<Integer, LocalBlockInfo> localMinedBlocks = new ConcurrentHashMap<>();
+    private final Map<Integer, List<MinerEntry>> nodeDeadlineHistory = new ConcurrentHashMap<>();
 
     private final Dimension progressBarSize = new Dimension(350, 20);
     private final Dimension chartDimension = new Dimension(360, 270);
@@ -185,20 +207,50 @@ public class BlockGenerationMetricsPanel extends JPanel {
     private volatile double lastAcceptedDeadline = 0;
     private volatile boolean lastMinedByNode = false;
 
-    private final ExecutorService updateExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private final ExecutorService updateExecutor;
+    private final Object updateLock = new Object();
 
     private final Shape tooltipHitShape = new java.awt.geom.Ellipse2D.Double(-10.0, -10.0, 20.0, 20.0);
 
+    /**
+     * Indicates whether this panel is currently the active/visible tab.
+     * <p>
+     * Used to determine if UI updates should be performed or skipped to save
+     * resources.
+     * Updated via HierarchyListener.
+     * </p>
+     */
     private boolean isTabActive = false;
+
+    /**
+     * Controls whether UI optimization is enabled.
+     * <p>
+     * If {@code true}, UI components (tables, charts, progress bars) are only
+     * updated
+     * when {@link #isTabActive} is true. Background data collection and processing
+     * continue regardless of this setting.
+     * </p>
+     */
     private boolean uiOptimizationEnabled = true;
-    private MinerUpdateData lastMinerData;
-    private PieChartUpdateData lastPieData;
-    private BlockchainUpdateData lastBlockchainData;
-    private BlockUpdateData lastBlockUpdateData;
+    private volatile MinerUpdateData lastMinerData;
+    private volatile PieChartUpdateData lastPieData;
+    private volatile BlockchainUpdateData lastBlockchainData;
+    private volatile BlockUpdateData lastBlockUpdateData;
 
     private boolean migLayoutDebug = false;
 
-    public BlockGenerationMetricsPanel(JFrame parentFrame) {
+    private final Listener<Generator.GeneratorState> nonceSubmittedListener = this::processNonceSubmission;
+    private final Listener<Block> blockPushedListener = this::processBlockPushed;
+    private final Listener<Block> blockPoppedListener = this::onBlockPopped;
+
+    /**
+     * Creates a new BlockGenerationMetricsPanel.
+     *
+     * @param parentFrame    The parent JFrame.
+     * @param sharedExecutor The shared ExecutorService for background tasks.
+     */
+    public BlockGenerationMetricsPanel(JFrame parentFrame, ExecutorService sharedExecutor) {
+        this.updateExecutor = sharedExecutor;
         setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
         setLayout(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[]5![]5![]5![grow]", "[top]"));
         this.parentFrame = parentFrame;
@@ -225,6 +277,9 @@ public class BlockGenerationMetricsPanel extends JPanel {
         }
     }
 
+    /**
+     * Initializes the panel, loads initial data, and registers event listeners.
+     */
     public void init() {
         // Initial update on EDT is fine as listeners aren't active yet
         BlockchainUpdateData data = calculateBlockchainInfo(false);
@@ -255,10 +310,35 @@ public class BlockGenerationMetricsPanel extends JPanel {
         isTabActive = isShowing();
     }
 
+    /**
+     * Cleans up resources used by the panel.
+     */
     public void shutdown() {
-        updateExecutor.shutdown();
+        try {
+            Generator generator = Signum.getGenerator();
+            if (generator != null) {
+                generator.removeListener(nonceSubmittedListener, Generator.Event.NONCE_SUBMITTED);
+            }
+        } catch (Throwable t) {
+            logger.warn("Error removing Generator listeners", t);
+        }
+        try {
+            BlockchainProcessor processor = Signum.getBlockchainProcessor();
+            if (processor != null) {
+                processor.removeListener(blockPushedListener, BlockchainProcessor.Event.BLOCK_PUSHED);
+                processor.removeListener(blockPoppedListener, BlockchainProcessor.Event.BLOCK_MANUAL_POPPED);
+                processor.removeListener(blockPoppedListener, BlockchainProcessor.Event.BLOCK_AUTO_POPPED);
+            }
+        } catch (Throwable t) {
+            logger.warn("Error removing BlockchainProcessor listeners", t);
+        }
     }
 
+    /**
+     * Sets the UI optimization mode.
+     *
+     * @param enabled if true, UI updates are paused when the tab is not active.
+     */
     public void setUiOptimizationEnabled(boolean enabled) {
         this.uiOptimizationEnabled = enabled;
         if (!enabled) {
@@ -266,6 +346,10 @@ public class BlockGenerationMetricsPanel extends JPanel {
         }
     }
 
+    /**
+     * Refreshes all UI components with the latest available data.
+     * Scheduled on the EDT.
+     */
     private void refreshUI() {
         SwingUtilities.invokeLater(() -> {
             if (lastBlockchainData != null)
@@ -567,16 +651,18 @@ public class BlockGenerationMetricsPanel extends JPanel {
             JSlider source = (JSlider) e.getSource();
             int newValue = maWindowValues[source.getValue()];
             updateExecutor.submit(() -> {
-                movingAverageWindow = newValue;
-                baseTargetMA.setWindowSize(movingAverageWindow);
-                minerCountMA.setWindowSize(movingAverageWindow);
-                bestBlockchainDeadlineMA.setWindowSize(movingAverageWindow);
-                bestNodeDeadlineMA.setWindowSize(movingAverageWindow);
-                receivedDeadlineCountMA.setWindowSize(movingAverageWindow);
-                nodeShareMA.setWindowSize(movingAverageWindow);
-                networkMinersMA.setWindowSize(movingAverageWindow);
-                commitmentMA.setWindowSize(movingAverageWindow);
-                networkSizeMA.setWindowSize(movingAverageWindow);
+                synchronized (updateLock) {
+                    movingAverageWindow = newValue;
+                    baseTargetMA.setWindowSize(movingAverageWindow);
+                    minerCountMA.setWindowSize(movingAverageWindow);
+                    bestBlockchainDeadlineMA.setWindowSize(movingAverageWindow);
+                    bestNodeDeadlineMA.setWindowSize(movingAverageWindow);
+                    receivedDeadlineCountMA.setWindowSize(movingAverageWindow);
+                    nodeShareMA.setWindowSize(movingAverageWindow);
+                    networkMinersMA.setWindowSize(movingAverageWindow);
+                    commitmentMA.setWindowSize(movingAverageWindow);
+                    networkSizeMA.setWindowSize(movingAverageWindow);
+                }
             });
         });
         maWindowPanel.add(movingAverageSlider);
@@ -737,7 +823,39 @@ public class BlockGenerationMetricsPanel extends JPanel {
         tablePanel.add(headerPanel, BorderLayout.NORTH);
 
         minersTableModel = new MinersTableModel();
-        minersTable = new JTable(minersTableModel);
+        minersTable = new JTable(minersTableModel) {
+            @Override
+            protected JTableHeader createDefaultTableHeader() {
+                JTableHeader header = super.createDefaultTableHeader();
+                header.addMouseListener(new MouseAdapter() {
+                    final int defaultDismissDelay = ToolTipManager.sharedInstance().getDismissDelay();
+
+                    @Override
+                    public void mouseEntered(MouseEvent e) {
+                        ToolTipManager.sharedInstance().setDismissDelay(60000);
+                    }
+
+                    @Override
+                    public void mouseExited(MouseEvent e) {
+                        ToolTipManager.sharedInstance().setDismissDelay(defaultDismissDelay);
+                    }
+                });
+                return header;
+            }
+        };
+        minersTable.addMouseListener(new MouseAdapter() {
+            final int defaultDismissDelay = ToolTipManager.sharedInstance().getDismissDelay();
+
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                ToolTipManager.sharedInstance().setDismissDelay(60000);
+            }
+
+            @Override
+            public void mouseExited(MouseEvent e) {
+                ToolTipManager.sharedInstance().setDismissDelay(defaultDismissDelay);
+            }
+        });
         minersTable.setFillsViewportHeight(true);
         minersTable.setDefaultRenderer(Object.class, new MinerTableCellRenderer());
         minersTable.setCellSelectionEnabled(true);
@@ -1064,15 +1182,15 @@ public class BlockGenerationMetricsPanel extends JPanel {
     private void initListeners() {
         Generator generator = Signum.getGenerator();
         if (generator != null) {
-            generator.addListener(this::processNonceSubmission, Generator.Event.NONCE_SUBMITTED);
+            generator.addListener(nonceSubmittedListener, Generator.Event.NONCE_SUBMITTED);
         }
 
         BlockchainProcessor processor = Signum.getBlockchainProcessor();
         if (processor != null) {
-            processor.addListener(this::processBlockPushed, BlockchainProcessor.Event.BLOCK_PUSHED);
+            processor.addListener(blockPushedListener, BlockchainProcessor.Event.BLOCK_PUSHED);
 
-            processor.addListener(this::onBlockPopped, BlockchainProcessor.Event.BLOCK_MANUAL_POPPED);
-            processor.addListener(this::onBlockPopped, BlockchainProcessor.Event.BLOCK_AUTO_POPPED);
+            processor.addListener(blockPoppedListener, BlockchainProcessor.Event.BLOCK_MANUAL_POPPED);
+            processor.addListener(blockPoppedListener, BlockchainProcessor.Event.BLOCK_AUTO_POPPED);
         }
     }
 
@@ -1150,63 +1268,79 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 val -> String.format("C: %d | MA: %.0f - max: %.0f", lastCapacityBaseTarget, val, data.maxBaseTarget));
     }
 
+    /**
+     * Handles the submission of a new nonce by a local miner.
+     * Updates the current block deadlines list and refreshes the UI.
+     *
+     * @param state The generator state containing the nonce and deadline.
+     */
     private void processNonceSubmission(Generator.GeneratorState state) {
         updateExecutor.submit(() -> {
-            // --- BACKGROUND WORK ---
-            Block lastBlock = Signum.getBlockchain().getLastBlock();
-            final int nextHeight = (lastBlock != null ? lastBlock.getHeight() : 0) + 1;
-            if (state.getBlock() == nextHeight) {
-                MinerEntry entry = new MinerEntry(state.getAccountId(), state.getDeadline(),
-                        MinerEntry.Type.ACTIVE_LOCAL, nextHeight, System.currentTimeMillis(), 0);
+            synchronized (updateLock) {
+                // --- BACKGROUND WORK ---
+                Block lastBlock = Signum.getBlockchain().getLastBlock();
+                final int nextHeight = (lastBlock != null ? lastBlock.getHeight() : 0) + 1;
+                if (state.getBlock() == nextHeight) {
+                    MinerEntry entry = new MinerEntry(state.getAccountId(), state.getDeadline(),
+                            MinerEntry.Type.ACTIVE_LOCAL, nextHeight, System.currentTimeMillis(), 0);
 
-                deadlineReceivedCountSinceLastBlock++;
-                currentBlockDeadlines.add(entry);
-                nodeDeadlineHistory.computeIfAbsent(nextHeight, k -> new CopyOnWriteArrayList<>()).add(entry);
+                    deadlineReceivedCountSinceLastBlock++;
+                    currentBlockDeadlines.add(entry);
+                    nodeDeadlineHistory.computeIfAbsent(nextHeight, k -> new CopyOnWriteArrayList<>()).add(entry);
 
-                MinerUpdateData minerData = calculateMinerData(false);
-                PieChartUpdateData pieData = calculatePieChartData();
+                    MinerUpdateData minerData = calculateMinerData(false);
+                    PieChartUpdateData pieData = calculatePieChartData();
 
-                // Prepare UI updates
-                SwingUtilities.invokeLater(() -> {
-                    updateMinersUI(minerData);
-                    // updateReceivedDeadlineProgressBar is handled in updateMinersUI via DTO
-                    updatePieChartUI(pieData);
-                    if (minerData.bestDeadline != null) {
-                        updateCurrentNodeDeadlineOnChart(nextHeight, minerData.bestDeadline.doubleValue());
-                    }
-                });
+                    // Prepare UI updates
+                    SwingUtilities.invokeLater(() -> {
+                        updateMinersUI(minerData);
+                        // updateReceivedDeadlineProgressBar is handled in updateMinersUI via DTO
+                        updatePieChartUI(pieData);
+                        if (minerData.bestDeadline != null) {
+                            updateCurrentNodeDeadlineOnChart(nextHeight, minerData.bestDeadline.doubleValue());
+                        }
+                    });
+                }
             }
         });
     }
 
+    /**
+     * Handles the event when a new block is pushed to the blockchain.
+     * Updates historical data, charts, and resets current block state.
+     *
+     * @param lastBlock The new block that was pushed.
+     */
     private void processBlockPushed(Block lastBlock) {
         if (lastBlock != null) {
             updateExecutor.submit(() -> {
-                // --- BACKGROUND WORK ---
-                receivedDeadlineCountMA.add(deadlineReceivedCountSinceLastBlock);
-                // calculateBlockchainInfo(true) updates networkSizeMA and baseTargetMA
-                BlockchainUpdateData blockchainData = calculateBlockchainInfo(lastBlock, true);
+                synchronized (updateLock) {
+                    // --- BACKGROUND WORK ---
+                    receivedDeadlineCountMA.add(deadlineReceivedCountSinceLastBlock);
+                    // calculateBlockchainInfo(true) updates networkSizeMA and baseTargetMA
+                    BlockchainUpdateData blockchainData = calculateBlockchainInfo(lastBlock, true);
 
-                // Calculate chart and state updates
-                BlockUpdateData updateData = calculateBlockUpdate(lastBlock);
+                    // Calculate chart and state updates
+                    BlockUpdateData updateData = calculateBlockUpdate(lastBlock);
 
-                // Calculate miner data BEFORE clearing current deadlines to capture the final
-                // state of the block
-                MinerUpdateData minerData = calculateMinerData(true);
-                PieChartUpdateData pieData = calculatePieChartData();
+                    // Calculate miner data BEFORE clearing current deadlines to capture the final
+                    // state of the block
+                    MinerUpdateData minerData = calculateMinerData(true);
+                    PieChartUpdateData pieData = calculatePieChartData();
 
-                deadlineReceivedCountSinceLastBlock = 0;
-                currentBlockDeadlines.clear();
-                nodeBestDeadline = null; // Reset for next block
+                    deadlineReceivedCountSinceLastBlock = 0;
+                    currentBlockDeadlines.clear();
+                    nodeBestDeadline = null; // Reset for next block
 
-                // --- UI UPDATES ---
-                SwingUtilities.invokeLater(() -> {
-                    updateBlockchainInfoUI(blockchainData);
-                    applyBlockUpdate(updateData);
-                    updateMinersUI(minerData);
-                    updatePieChartUI(pieData);
-                    updateChartRange();
-                });
+                    // --- UI UPDATES ---
+                    SwingUtilities.invokeLater(() -> {
+                        updateBlockchainInfoUI(blockchainData);
+                        applyBlockUpdate(updateData);
+                        updateMinersUI(minerData);
+                        updatePieChartUI(pieData);
+                        updateChartRange();
+                    });
+                }
             });
         }
     }
@@ -1444,6 +1578,11 @@ public class BlockGenerationMetricsPanel extends JPanel {
         return data;
     }
 
+    /**
+     * Applies updates related to a new block to the charts and progress bars.
+     *
+     * @param data The calculated update data for the block.
+     */
     private void applyBlockUpdate(BlockUpdateData data) {
         this.lastBlockUpdateData = data;
         if (data.block == null || data.block.getHeight() <= 1)
@@ -1451,24 +1590,26 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
         Block block = data.block;
 
-        // Update Progress Bars using DTO data
-        updateProgressBar(bestBlockchainDeadlineProgressBar, data.avgBlockchainDeadline, data.maxBlockchainDeadline,
-                val -> String.format("C: %d s | MA: %.0f s - min: %.0f s - max: %.0f s",
-                        (long) lastAcceptedDeadline, val, data.minBlockchainDeadline, data.maxBlockchainDeadline));
+        if (!uiOptimizationEnabled || isTabActive) {
+            // Update Progress Bars using DTO data
+            updateProgressBar(bestBlockchainDeadlineProgressBar, data.avgBlockchainDeadline, data.maxBlockchainDeadline,
+                    val -> String.format("C: %d s | MA: %.0f s - min: %.0f s - max: %.0f s",
+                            (long) lastAcceptedDeadline, val, data.minBlockchainDeadline, data.maxBlockchainDeadline));
 
-        updateProgressBar(nodeShareProgressBar, data.avgNodeShare, data.maxNodeShare,
-                val -> String.format("C: %s | MA: %.2f%% - max: %.2f%%", lastMinedByNode ? "100.00%" : "0.00%", val,
-                        data.maxNodeShare));
+            updateProgressBar(nodeShareProgressBar, data.avgNodeShare, data.maxNodeShare,
+                    val -> String.format("C: %s | MA: %.2f%% - max: %.2f%%", lastMinedByNode ? "100.00%" : "0.00%", val,
+                            data.maxNodeShare));
 
-        updateProgressBar(networkMinersProgressBar, data.avgNetworkMiners, data.maxNetworkMiners,
-                val -> String.format("C: %d | MA: %.0f - max: %.0f", (long) networkMinersMA.getLast(), val,
-                        data.maxNetworkMiners));
-        networkMinersCountLabel.setText(
-                "<html>Network Miners: <font color='" + toHex(COLOR_NETWORK_MINERS) + "'>"
-                        + (long) networkMinersMA.getLast() + "</font></html>");
+            updateProgressBar(networkMinersProgressBar, data.avgNetworkMiners, data.maxNetworkMiners,
+                    val -> String.format("C: %d | MA: %.0f - max: %.0f", (long) networkMinersMA.getLast(), val,
+                            data.maxNetworkMiners));
+            networkMinersCountLabel.setText(
+                    "<html>Network Miners: <font color='" + toHex(COLOR_NETWORK_MINERS) + "'>"
+                            + (long) networkMinersMA.getLast() + "</font></html>");
 
-        updateProgressBar(commitmentProgressBar, data.avgCommitment, data.maxCommitment,
-                val -> String.format("C: %.2f | MA: %.2f - max: %.2f", data.signaPerTB, val, data.maxCommitment));
+            updateProgressBar(commitmentProgressBar, data.avgCommitment, data.maxCommitment,
+                    val -> String.format("C: %.2f | MA: %.2f - max: %.2f", data.signaPerTB, val, data.maxCommitment));
+        }
 
         // Apply Series Updates - ALWAYS update data model to prevent gaps
         data.seriesUpdates.forEach((series, point) -> {
@@ -1524,52 +1665,60 @@ public class BlockGenerationMetricsPanel extends JPanel {
         }
     }
 
+    /**
+     * Handles the event when a block is popped from the blockchain (reorg).
+     * Removes invalid historical data and refreshes the UI.
+     *
+     * @param block The block that was popped.
+     */
     private void onBlockPopped(Block block) {
         int height = block.getHeight();
         updateExecutor.submit(() -> {
-            // --- BACKGROUND WORK ---
-            localMinedBlocks.entrySet().removeIf(e -> e.getKey() > height);
-            recentGenerators.removeIf(entry -> entry.height > height);
-            deadlineReceivedCountSinceLastBlock = 0;
-            currentBlockDeadlines.clear();
-            nodeBestDeadline = null;
+            synchronized (updateLock) {
+                // --- BACKGROUND WORK ---
+                localMinedBlocks.entrySet().removeIf(e -> e.getKey() > height);
+                recentGenerators.removeIf(entry -> entry.height > height);
+                deadlineReceivedCountSinceLastBlock = 0;
+                currentBlockDeadlines.clear();
+                nodeBestDeadline = null;
 
-            // Recalculate state after pop-off
-            BlockchainUpdateData blockchainData = calculateBlockchainInfo(false);
-            MinerUpdateData minerData = calculateMinerData(false);
-            PieChartUpdateData pieData = calculatePieChartData();
+                // Recalculate state after pop-off
+                BlockchainUpdateData blockchainData = calculateBlockchainInfo(false);
+                MinerUpdateData minerData = calculateMinerData(false);
+                PieChartUpdateData pieData = calculatePieChartData();
 
-            // --- UI UPDATES ---
-            SwingUtilities.invokeLater(() -> {
-                lastBlockUpdateData = null;
-                JFreeChart mainChart = chartPanel.getChart();
-                mainChart.getXYPlot().setNotify(false);
-                try {
-                    truncateSeries(acceptedDeadlineSeries, height);
-                    truncateSeries(nodeDeadlineSeries, height);
-                    truncateSeries(minedBlockSeries, height);
-                    truncateSeries(acceptedDeadlineMASeries, height);
-                    truncateSeries(nodeDeadlineMASeries, height);
-                    truncateSeries(networkSizeMASeries, height);
-                    truncateSeries(commitmentMASeries, height);
-                    truncateSeries(baseTargetMASeries, height);
-                    truncateSeries(nodeMinersMASeries, height);
-                    truncateSeries(networkMinersMASeries, height);
-                    truncateSeries(receivedDeadlinesMASeries, height);
-                    truncateSeries(nodeShareMASeries, height);
+                // --- UI UPDATES ---
+                SwingUtilities.invokeLater(() -> {
+                    lastBlockUpdateData = null;
+                    JFreeChart mainChart = chartPanel.getChart();
+                    mainChart.getXYPlot().setNotify(false);
+                    try {
+                        truncateSeries(acceptedDeadlineSeries, height);
+                        truncateSeries(nodeDeadlineSeries, height);
+                        truncateSeries(minedBlockSeries, height);
+                        truncateSeries(acceptedDeadlineMASeries, height);
+                        truncateSeries(nodeDeadlineMASeries, height);
+                        truncateSeries(networkSizeMASeries, height);
+                        truncateSeries(commitmentMASeries, height);
+                        truncateSeries(baseTargetMASeries, height);
+                        truncateSeries(nodeMinersMASeries, height);
+                        truncateSeries(networkMinersMASeries, height);
+                        truncateSeries(receivedDeadlinesMASeries, height);
+                        truncateSeries(nodeShareMASeries, height);
 
-                    updateBlockchainInfoUI(blockchainData);
+                        updateBlockchainInfoUI(blockchainData);
 
-                    updateMinersUI(minerData);
-                    updateProgressBarsFromSeries();
-                    updatePieChartUI(pieData);
-                    updateChartRange();
-                } finally {
-                    if (!uiOptimizationEnabled || isTabActive) {
-                        mainChart.getXYPlot().setNotify(true);
+                        updateMinersUI(minerData);
+                        updateProgressBarsFromSeries();
+                        updatePieChartUI(pieData);
+                        updateChartRange();
+                    } finally {
+                        if (!uiOptimizationEnabled || isTabActive) {
+                            mainChart.getXYPlot().setNotify(true);
+                        }
                     }
-                }
-            });
+                });
+            }
         });
     }
 
@@ -1686,8 +1835,10 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
     private void triggerPieChartUpdate() {
         updateExecutor.submit(() -> {
-            PieChartUpdateData data = calculatePieChartData();
-            SwingUtilities.invokeLater(() -> updatePieChartUI(data));
+            synchronized (updateLock) {
+                PieChartUpdateData data = calculatePieChartData();
+                SwingUtilities.invokeLater(() -> updatePieChartUI(data));
+            }
         });
     }
 
@@ -1750,7 +1901,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
                 for (Map.Entry<Long, Double> entry : sortedShares) {
                     if (entry.getValue() >= threshold) {
-                        data.slices.add(new java.util.AbstractMap.SimpleEntry<>(String.valueOf(entry.getKey()),
+                        data.slices.add(new AbstractMap.SimpleEntry<>(String.valueOf(entry.getKey()),
                                 entry.getValue()));
                     } else {
                         othersShare += entry.getValue();
@@ -1759,15 +1910,25 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 }
                 if (othersCount > 0) {
                     data.slices
-                            .add(new java.util.AbstractMap.SimpleEntry<>("Others (" + othersCount + ")", othersShare));
+                            .add(new AbstractMap.SimpleEntry<>("Others (" + othersCount + ")", othersShare));
                 }
             }
         }
         return data;
     }
 
+    /**
+     * Updates the pie chart showing miner shares.
+     * Respects UI optimization settings.
+     *
+     * @param data The update data for the pie chart.
+     */
     private void updatePieChartUI(PieChartUpdateData data) {
         this.lastPieData = data;
+
+        if (uiOptimizationEnabled && !isTabActive)
+            return;
+
         updateNodeShareLegend(data.nodeSharePercent);
         updateNetworkShareLegend(data.networkSharePercent);
 
@@ -1958,10 +2119,27 @@ public class BlockGenerationMetricsPanel extends JPanel {
         return data;
     }
 
+    /**
+     * Updates the miners table and related progress bars.
+     * Respects UI optimization settings.
+     *
+     * @param data The update data containing miner entries and statistics.
+     */
     private void updateMinersUI(MinerUpdateData data) {
         this.lastMinerData = data;
         if (data == null)
             return;
+
+        if (data.bestDeadline != null) {
+            nodeBestDeadline = data.bestDeadline;
+        }
+
+        boolean deadlinesDialogVisible = MinersDeadlinesDialog.isDialogVisible();
+        boolean listDialogVisible = MinersListDialog.isDialogVisible();
+
+        if (uiOptimizationEnabled && !isTabActive && !deadlinesDialogVisible && !listDialogVisible)
+            return;
+
         minersTableModel.setData(data.entries);
 
         updateProgressBar(minerCountProgressBar, data.avgMiners, data.maxMiners,
@@ -1972,13 +2150,6 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 "<html>Node Miners: <font color='" + toHex(COLOR_ACTIVE_MINER) + "'>" + data.activeMinerCount
                         + "</font> / <font color='" + toHex(COLOR_NODE_MINERS) + "'>"
                         + data.uniqueNodeMiners + "</font></html>");
-
-        if (uiOptimizationEnabled && !isTabActive)
-            return;
-
-        if (data.bestDeadline != null) {
-            nodeBestDeadline = data.bestDeadline;
-        }
 
         String currentBestStr = (data.bestDeadline != null ? data.bestDeadline.longValue() + " s"
                 : "0 s");
@@ -1991,21 +2162,18 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 val -> String.format("C: %d | MA: %.1f - max: %.1f",
                         deadlineReceivedCountSinceLastBlock, val, data.maxReceivedDeadlines));
 
-        for (int i = 0; i < minersTable.getColumnCount(); i++) {
-            String columnName = minersTable.getColumnName(i);
-            if (MinersTableModel.COL_HEIGHT.equals(columnName) || MinersTableModel.COL_DEADLINE.equals(columnName)) {
-                packColumn(minersTable, i, 2);
+        if (minersTable.isShowing()) {
+            for (int i = 0; i < minersTable.getColumnCount(); i++) {
+                String columnName = minersTable.getColumnName(i);
+                if (MinersTableModel.COL_HEIGHT.equals(columnName)
+                        || MinersTableModel.COL_DEADLINE.equals(columnName)) {
+                    TableUtils.packColumn(minersTable, i, 2);
+                }
             }
         }
 
         MinersDeadlinesDialog.packColumns();
         MinersListDialog.updateIfVisible(recentGenerators, nodeDeadlineHistory);
-    }
-
-    static void packTableColumns(JTable table) {
-        for (int i = 0; i < table.getColumnCount(); i++) {
-            packColumn(table, i, 2);
-        }
     }
 
     private JLabel createLabel(String text, Color color, String tooltip) {
@@ -2165,34 +2333,6 @@ public class BlockGenerationMetricsPanel extends JPanel {
         Map<TextAttribute, Object> attributes = new HashMap<>(font.getAttributes());
         attributes.put(TextAttribute.STRIKETHROUGH, visible ? null : TextAttribute.STRIKETHROUGH_ON);
         label.setFont(font.deriveFont(attributes));
-    }
-
-    static void packColumn(JTable table, int vColIndex, int margin) {
-        javax.swing.table.TableColumnModel colModel = table.getColumnModel();
-        javax.swing.table.TableColumn col = colModel.getColumn(vColIndex);
-        int width = 0;
-
-        // Get width of column header
-        javax.swing.table.TableCellRenderer renderer = col.getHeaderRenderer();
-        if (renderer == null) {
-            renderer = table.getTableHeader().getDefaultRenderer();
-        }
-        java.awt.Component comp = renderer.getTableCellRendererComponent(
-                table, col.getHeaderValue(), false, false, 0, 0);
-        width = comp.getPreferredSize().width;
-        int headerWidth = width;
-
-        // Get width of column content
-        for (int r = 0; r < table.getRowCount(); r++) {
-            renderer = table.getCellRenderer(r, vColIndex);
-            comp = renderer.getTableCellRendererComponent(
-                    table, table.getValueAt(r, vColIndex), false, false, r, vColIndex);
-            width = Math.max(width, comp.getPreferredSize().width);
-        }
-
-        width += 2 * margin;
-        col.setMinWidth(headerWidth + 2 * margin);
-        col.setPreferredWidth(width);
     }
 
     private static String toHex(Color color) {
