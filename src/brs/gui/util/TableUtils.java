@@ -6,14 +6,44 @@ import javax.swing.table.TableColumn;
 import javax.swing.table.TableColumnModel;
 import java.awt.Component;
 
+/**
+ * Utility class for handling JTable UI operations.
+ * <p>
+ * This class provides static helper methods to adjust the visual representation
+ * of JTables,
+ * specifically for resizing columns to fit their content.
+ * </p>
+ */
 public class TableUtils {
 
+    /**
+     * Resizes all columns in the given table to fit their content.
+     * <p>
+     * This method iterates through every column in the table and adjusts its width
+     * so that it is wide enough to display the header and the widest cell content
+     * in that column. A default margin of 2 pixels is applied.
+     * </p>
+     *
+     * @param table The JTable whose columns should be resized.
+     */
     public static void packTableColumns(JTable table) {
         for (int i = 0; i < table.getColumnCount(); i++) {
             packColumn(table, i, 2);
         }
     }
 
+    /**
+     * Resizes a specific column in the table to fit its content.
+     * <p>
+     * This method calculates the preferred width of the column header and all cells
+     * within the specified column. It sets the preferred width of the column to the
+     * maximum calculated width plus the specified margin.
+     * </p>
+     *
+     * @param table     The JTable containing the column.
+     * @param vColIndex The index of the column to resize (view index).
+     * @param margin    The margin in pixels to add to the calculated width.
+     */
     public static void packColumn(JTable table, int vColIndex, int margin) {
         TableColumnModel colModel = table.getColumnModel();
         TableColumn col = colModel.getColumn(vColIndex);
