@@ -248,9 +248,7 @@ public class SynchronizationMetricsPanel extends JPanel {
      * </p>
      */
     private boolean uiOptimizationEnabled = true;
-    private volatile TimingUpdateData lastTimingData;
-    private volatile PerformanceUpdateData lastPerformanceData;
-    private volatile SharedBarChartUpdateData lastSharedData;
+    private volatile MetricsUpdateData lastUpdateData;
     private volatile Runnable lastNetSpeedUpdate;
 
     private JProgressBar syncProgressBarUnverifiedBlocks;
@@ -267,7 +265,7 @@ public class SynchronizationMetricsPanel extends JPanel {
     private final Listener<List<? extends Transaction>> unconfirmedTransactionListener = transactions -> onUnconfirmedTransactionCountChanged();
 
     // Data Transfer Objects for UI updates
-    private static class TimingUpdateData {
+    private static class MetricsUpdateData {
         Map<JProgressBar, Runnable> progressBarUpdates = new HashMap<>();
         Map<XYSeries, Point.Double> seriesUpdates = new IdentityHashMap<>();
     }
@@ -665,16 +663,11 @@ public class SynchronizationMetricsPanel extends JPanel {
         return chartPanel;
     }
 
-    private static class PerformanceUpdateData {
-        Map<JProgressBar, Runnable> progressBarUpdates = new HashMap<>();
-        Map<XYSeries, Point.Double> seriesUpdates = new IdentityHashMap<>();
-    }
-
-    // DTO for shared bar chart updates
-    private static class SharedBarChartUpdateData {
-        Map<JProgressBar, Runnable> progressBarUpdates = new HashMap<>();
-        Map<XYSeries, Point.Double> seriesUpdates = new IdentityHashMap<>();
-    }
+    // Removed redundant DTO classes PerformanceUpdateData and
+    // SharedBarChartUpdateData
+    // as they are identical to MetricsUpdateData (formerly TimingUpdateData).
+    // We now use MetricsUpdateData for all update calculations to unify the data
+    // structure.
 
     public SynchronizationMetricsPanel(JFrame parentFrame, ExecutorService sharedExecutor) {
         setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
@@ -785,14 +778,8 @@ public class SynchronizationMetricsPanel extends JPanel {
      */
     private void refreshUI() {
         SwingUtilities.invokeLater(() -> {
-            if (lastTimingData != null) {
-                applyProgressBarUpdates(lastTimingData.progressBarUpdates);
-            }
-            if (lastPerformanceData != null) {
-                applyProgressBarUpdates(lastPerformanceData.progressBarUpdates);
-            }
-            if (lastSharedData != null) {
-                applyProgressBarUpdates(lastSharedData.progressBarUpdates);
+            if (lastUpdateData != null) {
+                applyProgressBarUpdates(lastUpdateData.progressBarUpdates);
             }
             if (lastNetSpeedUpdate != null) {
                 lastNetSpeedUpdate.run();
@@ -1765,9 +1752,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         chartUpdateExecutor.submit(() -> {
             synchronized (updateLock) {
                 SwingUtilities.invokeLater(() -> {
-                    lastTimingData = null;
-                    lastPerformanceData = null;
-                    lastSharedData = null;
+                    lastUpdateData = null;
                     setPerformanceChartsNotification(false);
                     try {
                         truncateSeries(blocksPerSecondSeries, height);
@@ -2105,16 +2090,22 @@ public class SynchronizationMetricsPanel extends JPanel {
     private void updateAllCharts(BlockchainProcessor.PerformanceStats stats) {
         // Run calculations sequentially on the current thread (chartUpdateExecutor)
         try {
-            TimingUpdateData timingData = calculateTimingUpdate(stats);
+            MetricsUpdateData timingData = calculateTimingUpdate(stats);
             // calculateSharedBarChartUpdate updates MovingAverages used by
             // calculatePerformanceUpdate,
             // so order matters here.
-            SharedBarChartUpdateData sharedBarChartData = calculateSharedBarChartUpdate(stats);
-            PerformanceUpdateData performanceData = calculatePerformanceUpdate(stats);
+            MetricsUpdateData sharedBarChartData = calculateSharedBarChartUpdate(stats);
+            MetricsUpdateData performanceData = calculatePerformanceUpdate(stats);
 
-            this.lastTimingData = timingData;
-            this.lastPerformanceData = performanceData;
-            this.lastSharedData = sharedBarChartData;
+            MetricsUpdateData combinedData = new MetricsUpdateData();
+            combinedData.progressBarUpdates.putAll(timingData.progressBarUpdates);
+            combinedData.progressBarUpdates.putAll(sharedBarChartData.progressBarUpdates);
+            combinedData.progressBarUpdates.putAll(performanceData.progressBarUpdates);
+            combinedData.seriesUpdates.putAll(timingData.seriesUpdates);
+            combinedData.seriesUpdates.putAll(sharedBarChartData.seriesUpdates);
+            combinedData.seriesUpdates.putAll(performanceData.seriesUpdates);
+
+            this.lastUpdateData = combinedData;
 
             if (Signum.getBlockchain() != null && stats.height > Signum.getBlockchain().getHeight()) {
                 return;
@@ -2127,14 +2118,10 @@ public class SynchronizationMetricsPanel extends JPanel {
                     setPerformanceChartsNotification(false);
 
                     // Apply series updates (always, to keep history)
-                    applySeriesUpdates(timingData.seriesUpdates);
-                    applySeriesUpdates(performanceData.seriesUpdates);
-                    applySeriesUpdates(sharedBarChartData.seriesUpdates);
+                    applySeriesUpdates(combinedData.seriesUpdates);
 
                     if (!uiOptimizationEnabled || isTabActive) {
-                        applyProgressBarUpdates(timingData.progressBarUpdates);
-                        applyProgressBarUpdates(performanceData.progressBarUpdates);
-                        applyProgressBarUpdates(sharedBarChartData.progressBarUpdates);
+                        applyProgressBarUpdates(combinedData.progressBarUpdates);
                         updateChartRanges();
                     }
                 } finally {
@@ -2225,8 +2212,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 (series, point) -> updateChartSeries(series, point.x, point.y, CHART_HISTORY_SIZE));
     }
 
-    private TimingUpdateData calculateTimingUpdate(BlockchainProcessor.PerformanceStats stats) {
-        TimingUpdateData data = new TimingUpdateData();
+    private MetricsUpdateData calculateTimingUpdate(BlockchainProcessor.PerformanceStats stats) {
+        MetricsUpdateData data = new MetricsUpdateData();
         if (stats == null) {
             return data;
         }
@@ -2354,8 +2341,8 @@ public class SynchronizationMetricsPanel extends JPanel {
         return data;
     }
 
-    private PerformanceUpdateData calculatePerformanceUpdate(BlockchainProcessor.PerformanceStats stats) {
-        PerformanceUpdateData data = new PerformanceUpdateData();
+    private MetricsUpdateData calculatePerformanceUpdate(BlockchainProcessor.PerformanceStats stats) {
+        MetricsUpdateData data = new MetricsUpdateData();
         if (stats == null) {
             return data;
         }
@@ -2419,8 +2406,8 @@ public class SynchronizationMetricsPanel extends JPanel {
         return data;
     }
 
-    private SharedBarChartUpdateData calculateSharedBarChartUpdate(BlockchainProcessor.PerformanceStats stats) {
-        SharedBarChartUpdateData data = new SharedBarChartUpdateData();
+    private MetricsUpdateData calculateSharedBarChartUpdate(BlockchainProcessor.PerformanceStats stats) {
+        MetricsUpdateData data = new MetricsUpdateData();
         if (stats == null) {
             return data;
         }
