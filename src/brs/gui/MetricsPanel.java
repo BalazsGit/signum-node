@@ -6,6 +6,8 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,12 +20,39 @@ public class MetricsPanel extends JTabbedPane {
     private boolean isExpanded = true;
     private final JComponent toggleTab;
 
+    // Dedicated executors for each panel to ensure isolation and prevent starvation
+    private final ExecutorService syncExecutor;
+    private final ExecutorService blockGenExecutor;
+    private final ExecutorService peerExecutor;
+
     private static final Logger LOGGER = LoggerFactory.getLogger(MetricsPanel.class);
 
     public MetricsPanel(JFrame parentFrame) {
-        syncPanel = new SynchronizationMetricsPanel(parentFrame);
-        blockGenPanel = new BlockGenerationMetricsPanel(parentFrame);
-        peerMetricsPanel = new PeerMetricsPanel();
+        // Create dedicated single thread executors for each panel.
+        // This ensures that heavy load on one panel (e.g. PeerMetrics) does not block
+        // updates on other panels (e.g. Sync), providing better UI responsiveness.
+
+        syncExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "Sync-Metrics-Worker");
+            t.setDaemon(true);
+            return t;
+        });
+
+        blockGenExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "BlockGen-Metrics-Worker");
+            t.setDaemon(true);
+            return t;
+        });
+
+        peerExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "Peer-Metrics-Worker");
+            t.setDaemon(true);
+            return t;
+        });
+
+        syncPanel = new SynchronizationMetricsPanel(parentFrame, syncExecutor);
+        blockGenPanel = new BlockGenerationMetricsPanel(parentFrame, blockGenExecutor);
+        peerMetricsPanel = new PeerMetricsPanel(peerExecutor);
 
         // Tabs at the bottom
         setTabPlacement(JTabbedPane.BOTTOM);
@@ -118,6 +147,18 @@ public class MetricsPanel extends JTabbedPane {
             peerMetricsPanel.shutdown();
         } catch (Throwable t) {
             LOGGER.warn("Error shutting down peer metrics panel", t);
+        }
+
+        shutdownExecutor(syncExecutor, "sync");
+        shutdownExecutor(blockGenExecutor, "blockGen");
+        shutdownExecutor(peerExecutor, "peer");
+    }
+
+    private void shutdownExecutor(ExecutorService executor, String name) {
+        try {
+            executor.shutdownNow();
+        } catch (Throwable t) {
+            LOGGER.warn("Error shutting down " + name + " executor", t);
         }
     }
 
