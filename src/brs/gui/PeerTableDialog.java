@@ -5,6 +5,7 @@ import brs.gui.util.TableUtils;
 import javax.swing.*;
 import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableModel;
+import javax.swing.table.JTableHeader;
 import javax.swing.table.TableRowSorter;
 import java.awt.*;
 import java.awt.event.WindowAdapter;
@@ -49,12 +50,53 @@ public class PeerTableDialog extends JFrame {
         JTextField filterTextField = new JTextField();
         filterPanel.add(filterTextField, BorderLayout.CENTER);
 
-        table = new JTable(model);
+        table = new JTable(model) {
+            @Override
+            public String getToolTipText(java.awt.event.MouseEvent e) {
+                String tip = super.getToolTipText(e);
+                return "".equals(tip) ? null : tip;
+            }
+
+            @Override
+            protected JTableHeader createDefaultTableHeader() {
+                JTableHeader header = super.createDefaultTableHeader();
+                header.addMouseListener(new java.awt.event.MouseAdapter() {
+                    final int defaultDismissDelay = ToolTipManager.sharedInstance().getDismissDelay();
+
+                    @Override
+                    public void mouseEntered(java.awt.event.MouseEvent e) {
+                        ToolTipManager.sharedInstance().setDismissDelay(60000);
+                    }
+
+                    @Override
+                    public void mouseExited(java.awt.event.MouseEvent e) {
+                        ToolTipManager.sharedInstance().setDismissDelay(defaultDismissDelay);
+                    }
+                });
+                return header;
+            }
+        };
+        ToolTipManager.sharedInstance().registerComponent(table);
+        table.setToolTipText("");
+        table.addMouseListener(new java.awt.event.MouseAdapter() {
+            final int defaultDismissDelay = ToolTipManager.sharedInstance().getDismissDelay();
+
+            @Override
+            public void mouseEntered(java.awt.event.MouseEvent e) {
+                ToolTipManager.sharedInstance().setDismissDelay(60000);
+            }
+
+            @Override
+            public void mouseExited(java.awt.event.MouseEvent e) {
+                ToolTipManager.sharedInstance().setDismissDelay(defaultDismissDelay);
+            }
+        });
         table.setDefaultRenderer(Object.class, renderer);
         table.setDefaultRenderer(Double.class, renderer);
         table.setDefaultRenderer(Long.class, renderer);
         table.setDefaultRenderer(Integer.class, renderer);
         table.setFillsViewportHeight(true);
+        table.setCellSelectionEnabled(true);
 
         TableRowSorter<TableModel> sorter = new TableRowSorter<TableModel>(model) {
             @Override
@@ -121,5 +163,6 @@ public class PeerTableDialog extends JFrame {
         setContentPane(contentPanel);
         setSize(1200, 700);
         setLocationRelativeTo(owner);
+        TableUtils.packTableColumns(table);
     }
 }
