@@ -99,20 +99,31 @@ public class ShutdownManager {
         if (shutdownState.has("components")) {
             shutdownState.get("components").getAsJsonObject().addProperty(component, "failed");
         }
+        logger.warn("Shutdown of component '{}' failed.", component);
         writeState(); // Write immediately on failure to capture the state
     }
 
     public void finishShutdown() {
-        shutdownState.addProperty("shutdownStatus", "clean");
+        boolean hasFailures = false;
         // Mark any remaining pending components as implicitly successful if we reached
         // the end
         if (shutdownState.has("components")) {
             JsonObject components = shutdownState.get("components").getAsJsonObject();
             for (String component : COMPONENTS) {
-                if ("pending".equals(components.get(component).getAsString())) {
+                if ("failed".equals(components.get(component).getAsString())) {
+                    hasFailures = true;
+                } else if ("pending".equals(components.get(component).getAsString())) {
                     components.addProperty(component, "success");
                 }
             }
+        }
+
+        if (hasFailures) {
+            shutdownState.addProperty("shutdownStatus", "completed_with_errors");
+            logger.warn("Shutdown completed with errors.");
+        } else {
+            shutdownState.addProperty("shutdownStatus", "clean");
+            logger.info("Shutdown completed cleanly.");
         }
         writeState();
     }
