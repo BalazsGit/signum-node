@@ -1695,7 +1695,7 @@ public class PeerMetricsPanel extends JPanel {
             model = otherTableModel;
         }
 
-        if (uiOptimizationEnabled && table != null && !table.isShowing()) {
+        if (uiOptimizationEnabled && (table != null && !table.isShowing()) && !PeerTableDialog.isDialogVisible()) {
             return;
         }
 
@@ -1704,9 +1704,10 @@ public class PeerMetricsPanel extends JPanel {
                     data.updatedType == MetricType.RX ? data.rxPeers
                             : (data.updatedType == MetricType.TX ? data.txPeers : data.otherPeers),
                     data.updatedPeerAddress);
-            if (table != null) {
+            if (table != null && table.isShowing()) {
                 TableUtils.packTableColumns(table);
             }
+            PeerTableDialog.packColumns();
         }
     }
 
