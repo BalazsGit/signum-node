@@ -10,7 +10,13 @@ import java.net.URL;
 
 /**
  * A component that displays a rotating SVG icon.
- * Used to indicate an ongoing background process.
+ * <p>
+ * This component renders an SVG image (specifically "/Signum_node_white.svg")
+ * and rotates it
+ * around its center at a specified speed. It is typically used to indicate an
+ * ongoing
+ * background process or loading state in the UI.
+ * </p>
  */
 public class RotatingSvgIcon extends JComponent {
     private SVGDocument svgDocument;
@@ -18,8 +24,12 @@ public class RotatingSvgIcon extends JComponent {
     private final Timer timer;
 
     /**
-     * Creates a new rotating icon.
-     * 
+     * Creates a new rotating icon with the specified rotation speed.
+     * <p>
+     * The icon is loaded from the classpath resource "/Signum_node_white.svg".
+     * The animation is driven by a Swing Timer.
+     * </p>
+     *
      * @param rotationSpeedHz The rotation speed in Hertz (rotations per second).
      */
     public RotatingSvgIcon(double rotationSpeedHz) {
@@ -38,6 +48,12 @@ public class RotatingSvgIcon extends JComponent {
         });
     }
 
+    /**
+     * Loads the SVG resource from the classpath.
+     * <p>
+     * If the resource cannot be found, an error message is printed to stderr.
+     * </p>
+     */
     private void loadResources() {
         URL svgUrl = getClass().getResource("/Signum_node_white.svg");
         if (svgUrl != null) {
@@ -48,14 +64,39 @@ public class RotatingSvgIcon extends JComponent {
         }
     }
 
+    /**
+     * Starts the rotation animation.
+     * <p>
+     * This method starts the internal timer, causing the icon to rotate.
+     * </p>
+     */
     public void start() {
         timer.start();
     }
 
+    /**
+     * Stops the rotation animation.
+     * <p>
+     * This method stops the internal timer. The icon will remain at its current
+     * rotation angle.
+     * </p>
+     */
     public void stop() {
         timer.stop();
     }
 
+    /**
+     * Paints the component.
+     * <p>
+     * This method handles the rendering of the SVG icon. It applies the current
+     * rotation
+     * transformation and scales the SVG to fit within the component's bounds while
+     * maintaining
+     * aspect ratio. Anti-aliasing is enabled for better visual quality.
+     * </p>
+     *
+     * @param g The {@code Graphics} context to protect.
+     */
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
