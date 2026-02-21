@@ -317,7 +317,9 @@ public class PeersDialog extends JFrame {
 
         public void update(List<Peer> peers, long maxHeight, String latestVersion) {
             tableModel.updateData(peers, maxHeight, latestVersion);
-            TableUtils.packTableColumns(table);
+            if (table.isShowing()) {
+                TableUtils.packTableColumns(table);
+            }
         }
     }
 
