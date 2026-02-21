@@ -5,6 +5,7 @@ import brs.Signum;
 import brs.BlockchainProcessor;
 import brs.peer.Peer;
 import brs.util.Listener;
+import brs.gui.util.TableUtils;
 
 import javax.swing.*;
 import javax.swing.event.DocumentEvent;
@@ -19,6 +20,14 @@ import java.util.List;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+/**
+ * A dialog window that displays information about peers connected to the node.
+ * <p>
+ * It categorizes peers into Active, Connected, Blacklisted, and All Known
+ * groups,
+ * providing details such as address, version, and height.
+ * </p>
+ */
 @SuppressWarnings("serial")
 public class PeersDialog extends JFrame {
 
@@ -50,6 +59,15 @@ public class PeersDialog extends JFrame {
         }
     }
 
+    /**
+     * Displays the peers dialog.
+     * <p>
+     * If the dialog is already open, it brings it to the front. Otherwise, it
+     * creates a new instance.
+     * </p>
+     *
+     * @param owner The parent frame.
+     */
     public static void showPeersDialog(JFrame owner) {
         if (instance == null) {
             synchronized (PeersDialog.class) {
@@ -210,9 +228,42 @@ public class PeersDialog extends JFrame {
             add(filterPanel, BorderLayout.NORTH);
 
             tableModel = new PeersTableModel();
-            table = new JTable(tableModel);
+            table = new JTable(tableModel) {
+                @Override
+                protected JTableHeader createDefaultTableHeader() {
+                    JTableHeader header = super.createDefaultTableHeader();
+                    header.addMouseListener(new java.awt.event.MouseAdapter() {
+                        final int defaultDismissDelay = ToolTipManager.sharedInstance().getDismissDelay();
+
+                        @Override
+                        public void mouseEntered(java.awt.event.MouseEvent e) {
+                            ToolTipManager.sharedInstance().setDismissDelay(60000);
+                        }
+
+                        @Override
+                        public void mouseExited(java.awt.event.MouseEvent e) {
+                            ToolTipManager.sharedInstance().setDismissDelay(defaultDismissDelay);
+                        }
+                    });
+                    return header;
+                }
+            };
+            table.addMouseListener(new java.awt.event.MouseAdapter() {
+                final int defaultDismissDelay = ToolTipManager.sharedInstance().getDismissDelay();
+
+                @Override
+                public void mouseEntered(java.awt.event.MouseEvent e) {
+                    ToolTipManager.sharedInstance().setDismissDelay(60000);
+                }
+
+                @Override
+                public void mouseExited(java.awt.event.MouseEvent e) {
+                    ToolTipManager.sharedInstance().setDismissDelay(defaultDismissDelay);
+                }
+            });
             table.setDefaultRenderer(Object.class, new PeerTableCellRenderer(category));
             table.setFillsViewportHeight(true);
+            table.setCellSelectionEnabled(true);
             table.setAutoCreateRowSorter(true);
 
             // Custom sorter for 3rd click reset
@@ -266,7 +317,7 @@ public class PeersDialog extends JFrame {
 
         public void update(List<Peer> peers, long maxHeight, String latestVersion) {
             tableModel.updateData(peers, maxHeight, latestVersion);
-            BlockGenerationMetricsPanel.packTableColumns(table);
+            TableUtils.packTableColumns(table);
         }
     }
 
