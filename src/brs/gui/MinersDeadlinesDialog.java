@@ -4,15 +4,41 @@ import brs.gui.util.TableUtils;
 
 import javax.swing.*;
 import javax.swing.table.TableRowSorter;
+import javax.swing.table.JTableHeader;
 import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.util.List;
 
+/**
+ * A dialog window that displays the deadlines for all connected miners.
+ * <p>
+ * This dialog provides a detailed table view of the current mining round,
+ * showing:
+ * <ul>
+ * <li>Miner account details (ID, Name, RS Address).</li>
+ * <li>Submitted deadline values.</li>
+ * <li>Submission time and block height.</li>
+ * </ul>
+ * </p>
+ * <p>
+ * The table supports sorting and filtering to help analyze miner performance.
+ * </p>
+ */
 public class MinersDeadlinesDialog extends JFrame {
     private static volatile MinersDeadlinesDialog instance;
     private JTable table;
 
+    /**
+     * Displays the miners deadlines dialog.
+     * <p>
+     * If the dialog is already open, it brings it to the front. Otherwise, it
+     * creates a new instance.
+     * </p>
+     *
+     * @param owner The parent frame.
+     * @param model The table model containing the miner deadline data.
+     */
     public static void showDialog(JFrame owner, BlockGenerationMetricsPanel.MinersTableModel model) {
         if (instance == null) {
             synchronized (MinersDeadlinesDialog.class) {
@@ -28,10 +54,28 @@ public class MinersDeadlinesDialog extends JFrame {
         packColumns();
     }
 
+    /**
+     * Resizes the table columns to fit their content.
+     * <p>
+     * This method delegates to {@link TableUtils#packTableColumns(JTable)} to
+     * adjust
+     * all columns of the deadlines table.
+     * </p>
+     */
     public static void packColumns() {
-        if (instance != null && instance.isVisible() && instance.table != null) {
+        if (instance != null && instance.table != null && instance.table.isShowing()) {
             TableUtils.packTableColumns(instance.table);
         }
+    }
+
+    /**
+     * Checks if the miners deadlines dialog is currently open and visible.
+     *
+     * @return {@code true} if the dialog instance exists and is visible,
+     *         {@code false} otherwise.
+     */
+    public static boolean isDialogVisible() {
+        return instance != null && instance.isVisible();
     }
 
     private MinersDeadlinesDialog(JFrame owner, BlockGenerationMetricsPanel.MinersTableModel model) {
@@ -54,9 +98,42 @@ public class MinersDeadlinesDialog extends JFrame {
         JTextField filterTextField = new JTextField();
         filterPanel.add(filterTextField, BorderLayout.CENTER);
 
-        table = new JTable(model);
+        table = new JTable(model) {
+            @Override
+            protected JTableHeader createDefaultTableHeader() {
+                JTableHeader header = super.createDefaultTableHeader();
+                header.addMouseListener(new java.awt.event.MouseAdapter() {
+                    final int defaultDismissDelay = ToolTipManager.sharedInstance().getDismissDelay();
+
+                    @Override
+                    public void mouseEntered(java.awt.event.MouseEvent e) {
+                        ToolTipManager.sharedInstance().setDismissDelay(60000);
+                    }
+
+                    @Override
+                    public void mouseExited(java.awt.event.MouseEvent e) {
+                        ToolTipManager.sharedInstance().setDismissDelay(defaultDismissDelay);
+                    }
+                });
+                return header;
+            }
+        };
+        table.addMouseListener(new java.awt.event.MouseAdapter() {
+            final int defaultDismissDelay = ToolTipManager.sharedInstance().getDismissDelay();
+
+            @Override
+            public void mouseEntered(java.awt.event.MouseEvent e) {
+                ToolTipManager.sharedInstance().setDismissDelay(60000);
+            }
+
+            @Override
+            public void mouseExited(java.awt.event.MouseEvent e) {
+                ToolTipManager.sharedInstance().setDismissDelay(defaultDismissDelay);
+            }
+        });
         table.setDefaultRenderer(Object.class, new BlockGenerationMetricsPanel.MinerTableCellRenderer());
         table.setFillsViewportHeight(true);
+        table.setCellSelectionEnabled(true);
 
         TableRowSorter<BlockGenerationMetricsPanel.MinersTableModel> sorter = new TableRowSorter<BlockGenerationMetricsPanel.MinersTableModel>(
                 model) {
