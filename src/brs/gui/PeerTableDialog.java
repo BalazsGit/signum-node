@@ -191,4 +191,28 @@ public class PeerTableDialog extends JFrame {
         setLocationRelativeTo(owner);
         TableUtils.packTableColumns(table);
     }
+
+    /**
+     * Resizes the table columns to fit their content.
+     * <p>
+     * This method delegates to {@link TableUtils#packTableColumns(JTable)} to
+     * adjust
+     * all columns of the peer table.
+     * </p>
+     */
+    public static void packColumns() {
+        if (instance != null && instance.table != null && instance.table.isShowing()) {
+            TableUtils.packTableColumns(instance.table);
+        }
+    }
+
+    /**
+     * Checks if the peer table dialog is currently open and visible.
+     *
+     * @return {@code true} if the dialog instance exists and is visible,
+     *         {@code false} otherwise.
+     */
+    public static boolean isDialogVisible() {
+        return instance != null && instance.isVisible();
+    }
 }
