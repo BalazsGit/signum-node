@@ -24,17 +24,22 @@ import java.awt.geom.Ellipse2D;
 import java.util.Date;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
+import brs.Transaction;
+import brs.TransactionProcessor;
+import brs.util.Listener;
 import brs.Signum;
 import brs.gui.util.MovingAverage;
 import brs.Block;
 import brs.BlockchainProcessor;
 import brs.props.Props;
+import brs.Constants;
+import brs.fluxcapacitor.FluxValues;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.awt.*;
 import java.awt.font.TextAttribute;
 import java.text.SimpleDateFormat;
@@ -216,23 +221,50 @@ public class SynchronizationMetricsPanel extends JPanel {
 
     private static final BasicStroke CHART_STROKE = new BasicStroke(1.2f);
 
-    private final ExecutorService chartUpdateExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService chartUpdateExecutor;
+    private final Object updateLock = new Object();
 
     private final Shape tooltipHitShape = new Ellipse2D.Double(-10.0, -10.0, 20.0, 20.0);
 
     private JProgressBar syncProgressBarDownloadedBlocks;
 
+    /**
+     * Indicates whether this panel is currently the active/visible tab.
+     * <p>
+     * Used to determine if UI updates should be performed or skipped to save
+     * resources.
+     * Updated via HierarchyListener.
+     * </p>
+     */
     private boolean isTabActive = false;
+
+    /**
+     * Controls whether UI optimization is enabled.
+     * <p>
+     * If {@code true}, UI components (tables, charts, progress bars) are only
+     * updated
+     * when {@link #isTabActive} is true. Background data collection and processing
+     * continue regardless of this setting.
+     * </p>
+     */
     private boolean uiOptimizationEnabled = true;
-    private TimingUpdateData lastTimingData;
-    private PerformanceUpdateData lastPerformanceData;
-    private SharedBarChartUpdateData lastSharedData;
-    private Runnable lastNetSpeedUpdate;
+    private volatile TimingUpdateData lastTimingData;
+    private volatile PerformanceUpdateData lastPerformanceData;
+    private volatile SharedBarChartUpdateData lastSharedData;
+    private volatile Runnable lastNetSpeedUpdate;
 
     private JProgressBar syncProgressBarUnverifiedBlocks;
     private final JFrame parentFrame;
     private boolean migLayoutDebug = false;
     private boolean showDebugBorders = false;
+
+    // Listeners stored as fields to ensure reliable removal
+    private final Listener<BlockchainProcessor.QueueStatus> queueStatusListener = this::onQueueStatus;
+    private final Listener<Block> forkCacheListener = block -> onForkCacheChanged();
+    private final Listener<Block> netVolumeListener = block -> onNetVolumeChanged();
+    private final Listener<BlockchainProcessor.PerformanceStats> performanceStatsListener = this::onPerformanceStatsUpdated;
+    private final Listener<Block> blockPoppedListener = this::onBlockPopped;
+    private final Listener<List<? extends Transaction>> unconfirmedTransactionListener = transactions -> onUnconfirmedTransactionCountChanged();
 
     // Data Transfer Objects for UI updates
     private static class TimingUpdateData {
@@ -644,8 +676,9 @@ public class SynchronizationMetricsPanel extends JPanel {
         Map<XYSeries, Point.Double> seriesUpdates = new IdentityHashMap<>();
     }
 
-    public SynchronizationMetricsPanel(JFrame parentFrame) {
+    public SynchronizationMetricsPanel(JFrame parentFrame, ExecutorService sharedExecutor) {
         setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
+        this.chartUpdateExecutor = sharedExecutor;
         setLayout(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[grow]", "[top]"));
         try {
             this.parentFrame = parentFrame;
@@ -666,6 +699,9 @@ public class SynchronizationMetricsPanel extends JPanel {
         }
     }
 
+    /**
+     * Initializes the panel, loading configuration and registering listeners.
+     */
     public void init() {
         try {
             oclUnverifiedQueueThreshold = Signum.getPropertyService().getInt(Props.GPU_UNVERIFIED_QUEUE);
@@ -676,7 +712,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 maxUnverifiedQueueSize = oclUnverifiedQueueThreshold;
             }
             maxUnconfirmedTxs = Signum.getPropertyService().getInt(Props.P2P_MAX_UNCONFIRMED_TRANSACTIONS);
-            maxPayloadSize = (Signum.getFluxCapacitor().getValue(brs.fluxcapacitor.FluxValues.MAX_PAYLOAD_LENGTH,
+            maxPayloadSize = (Signum.getFluxCapacitor().getValue(FluxValues.MAX_PAYLOAD_LENGTH,
                     Signum.getBlockchain().getHeight()) / 1024);
             String payloadTooltip = """
                     Shows the percentage of the block's data section (payload) that is filled with transactions. This is a measure of block space utilization and network activity.
@@ -731,6 +767,11 @@ public class SynchronizationMetricsPanel extends JPanel {
         }
     }
 
+    /**
+     * Sets the UI optimization mode.
+     *
+     * @param enabled if true, UI updates are paused when the tab is not active.
+     */
     public void setUiOptimizationEnabled(boolean enabled) {
         this.uiOptimizationEnabled = enabled;
         if (!enabled) {
@@ -738,6 +779,10 @@ public class SynchronizationMetricsPanel extends JPanel {
         }
     }
 
+    /**
+     * Refreshes all UI components with the latest available data.
+     * Scheduled on the EDT.
+     */
     private void refreshUI() {
         SwingUtilities.invokeLater(() -> {
             if (lastTimingData != null) {
@@ -788,8 +833,8 @@ public class SynchronizationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current fork cache size relative to the maximum rollback limit.
                 """;
         forkCacheLabel = createLabel("Fork Cache", null, tooltip);
-        forkCacheProgressBar = createProgressBar(0, brs.Constants.MAX_ROLLBACK, Color.MAGENTA,
-                "0 / " + brs.Constants.MAX_ROLLBACK, progressBarSize1);
+        forkCacheProgressBar = createProgressBar(0, Constants.MAX_ROLLBACK, Color.MAGENTA,
+                "0 / " + Constants.MAX_ROLLBACK, progressBarSize1);
         syncPanel.add(forkCacheLabel, rowConstraints);
         syncPanel.add(forkCacheProgressBar, rowConstraints);
 
@@ -1371,21 +1416,23 @@ public class SynchronizationMetricsPanel extends JPanel {
             JSlider source = (JSlider) e.getSource();
             int newValue = maWindowValues[source.getValue()];
             chartUpdateExecutor.submit(() -> {
-                movingAverageWindow = newValue;
-                blockTimestamps.setWindowSize(movingAverageWindow);
-                allTransactionsPerBlock.setWindowSize(movingAverageWindow);
-                systemTransactionsPerBlock.setWindowSize(movingAverageWindow);
-                pushTimes.setWindowSize(movingAverageWindow);
-                validationTimes.setWindowSize(movingAverageWindow);
-                txLoopTimes.setWindowSize(movingAverageWindow);
-                housekeepingTimes.setWindowSize(movingAverageWindow);
-                txApplyTimes.setWindowSize(movingAverageWindow);
-                commitTimes.setWindowSize(movingAverageWindow);
-                atTimes.setWindowSize(movingAverageWindow);
-                subscriptionTimes.setWindowSize(movingAverageWindow);
-                blockApplyTimes.setWindowSize(movingAverageWindow);
-                miscTimes.setWindowSize(movingAverageWindow);
-                atCountsPerBlock.setWindowSize(movingAverageWindow);
+                synchronized (updateLock) {
+                    movingAverageWindow = newValue;
+                    blockTimestamps.setWindowSize(movingAverageWindow);
+                    allTransactionsPerBlock.setWindowSize(movingAverageWindow);
+                    systemTransactionsPerBlock.setWindowSize(movingAverageWindow);
+                    pushTimes.setWindowSize(movingAverageWindow);
+                    validationTimes.setWindowSize(movingAverageWindow);
+                    txLoopTimes.setWindowSize(movingAverageWindow);
+                    housekeepingTimes.setWindowSize(movingAverageWindow);
+                    txApplyTimes.setWindowSize(movingAverageWindow);
+                    commitTimes.setWindowSize(movingAverageWindow);
+                    atTimes.setWindowSize(movingAverageWindow);
+                    subscriptionTimes.setWindowSize(movingAverageWindow);
+                    blockApplyTimes.setWindowSize(movingAverageWindow);
+                    miscTimes.setWindowSize(movingAverageWindow);
+                    atCountsPerBlock.setWindowSize(movingAverageWindow);
+                }
             });
         });
 
@@ -1480,30 +1527,63 @@ public class SynchronizationMetricsPanel extends JPanel {
     private void initListeners() {
         BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
         if (blockchainProcessor != null) {
-            blockchainProcessor.addQueueStatusListener(this::onQueueStatus);
-            blockchainProcessor.addListener(block -> onForkCacheChanged(),
-                    BlockchainProcessor.Event.FORK_CACHE_CHANGED);
-            blockchainProcessor.addListener(block -> onNetVolumeChanged(),
-                    BlockchainProcessor.Event.NET_VOLUME_CHANGED);
-            blockchainProcessor.addPerformanceStatsListener(this::onPerformanceStatsUpdated);
-            blockchainProcessor.addListener(this::onBlockPopped, BlockchainProcessor.Event.BLOCK_MANUAL_POPPED);
-            blockchainProcessor.addListener(this::onBlockPopped, BlockchainProcessor.Event.BLOCK_AUTO_POPPED);
+            blockchainProcessor.addQueueStatusListener(queueStatusListener);
+            blockchainProcessor.addListener(forkCacheListener, BlockchainProcessor.Event.FORK_CACHE_CHANGED);
+            blockchainProcessor.addListener(netVolumeListener, BlockchainProcessor.Event.NET_VOLUME_CHANGED);
+            blockchainProcessor.addPerformanceStatsListener(performanceStatsListener);
+            blockchainProcessor.addListener(blockPoppedListener, BlockchainProcessor.Event.BLOCK_MANUAL_POPPED);
+            blockchainProcessor.addListener(blockPoppedListener, BlockchainProcessor.Event.BLOCK_AUTO_POPPED);
 
-            brs.TransactionProcessor transactionProcessor = Signum.getTransactionProcessor();
-            transactionProcessor.addListener(transactions -> onUnconfirmedTransactionCountChanged(),
-                    brs.TransactionProcessor.Event.ADDED_UNCONFIRMED_TRANSACTIONS);
-            transactionProcessor.addListener(transactions -> onUnconfirmedTransactionCountChanged(),
-                    brs.TransactionProcessor.Event.REMOVED_UNCONFIRMED_TRANSACTIONS);
+            TransactionProcessor transactionProcessor = Signum.getTransactionProcessor();
+            if (transactionProcessor != null) {
+                transactionProcessor.addListener(unconfirmedTransactionListener,
+                        TransactionProcessor.Event.ADDED_UNCONFIRMED_TRANSACTIONS);
+                transactionProcessor.addListener(unconfirmedTransactionListener,
+                        TransactionProcessor.Event.REMOVED_UNCONFIRMED_TRANSACTIONS);
+            }
         }
     }
 
     public void shutdown() {
-        chartUpdateExecutor.shutdown();
-        if (netSpeedChartUpdater != null) {
-            netSpeedChartUpdater.stop();
+        try {
+            if (netSpeedChartUpdater != null) {
+                netSpeedChartUpdater.stop();
+            }
+        } catch (Throwable t) {
+            LOGGER.warn("Error stopping netSpeedChartUpdater", t);
+        }
+        try {
+            BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+            if (blockchainProcessor != null) {
+                blockchainProcessor.removeQueueStatusListener(queueStatusListener);
+                blockchainProcessor.removeListener(forkCacheListener, BlockchainProcessor.Event.FORK_CACHE_CHANGED);
+                blockchainProcessor.removeListener(netVolumeListener, BlockchainProcessor.Event.NET_VOLUME_CHANGED);
+                blockchainProcessor.removePerformanceStatsListener(performanceStatsListener);
+                blockchainProcessor.removeListener(blockPoppedListener, BlockchainProcessor.Event.BLOCK_MANUAL_POPPED);
+                blockchainProcessor.removeListener(blockPoppedListener, BlockchainProcessor.Event.BLOCK_AUTO_POPPED);
+            }
+        } catch (Throwable t) {
+            LOGGER.warn("Error removing BlockchainProcessor listeners", t);
+        }
+        try {
+            TransactionProcessor transactionProcessor = Signum.getTransactionProcessor();
+            if (transactionProcessor != null) {
+                transactionProcessor.removeListener(unconfirmedTransactionListener,
+                        TransactionProcessor.Event.ADDED_UNCONFIRMED_TRANSACTIONS);
+                transactionProcessor.removeListener(unconfirmedTransactionListener,
+                        TransactionProcessor.Event.REMOVED_UNCONFIRMED_TRANSACTIONS);
+            }
+        } catch (Throwable t) {
+            LOGGER.warn("Error removing TransactionProcessor listeners", t);
         }
     }
 
+    /**
+     * Handles updates to the download queue status.
+     * Updates the cache fullness and verified/unverified block counts.
+     *
+     * @param status The new queue status.
+     */
     public void onQueueStatus(BlockchainProcessor.QueueStatus status) {
         if (status != null) {
             SwingUtilities.invokeLater(() -> updateQueueStatus(status.unverifiedSize,
@@ -1513,15 +1593,19 @@ public class SynchronizationMetricsPanel extends JPanel {
 
     public void onForkCacheChanged() {
         chartUpdateExecutor.submit(() -> {
-            int forkCacheSize = Signum.getBlockchainProcessor().getForkCacheSize();
-            SwingUtilities.invokeLater(() -> updateForkCacheStatus(forkCacheSize));
+            synchronized (updateLock) {
+                int forkCacheSize = Signum.getBlockchainProcessor().getForkCacheSize();
+                SwingUtilities.invokeLater(() -> updateForkCacheStatus(forkCacheSize));
+            }
         });
     }
 
     public void onUnconfirmedTransactionCountChanged() {
         chartUpdateExecutor.submit(() -> {
-            int count = Signum.getTransactionProcessor().getAmountUnconfirmedTransactions();
-            SwingUtilities.invokeLater(() -> updateUnconfirmedTxCount(count));
+            synchronized (updateLock) {
+                int count = Signum.getTransactionProcessor().getAmountUnconfirmedTransactions();
+                SwingUtilities.invokeLater(() -> updateUnconfirmedTxCount(count));
+            }
         });
     }
 
@@ -1531,9 +1615,19 @@ public class SynchronizationMetricsPanel extends JPanel {
         this.downloadedVolume = blockchainProcessor.getDownloadedVolume();
     }
 
+    /**
+     * Handles updates to the performance statistics (block processing times).
+     * Calculates moving averages and schedules UI updates.
+     *
+     * @param stats The performance statistics for the last processed block.
+     */
     public void onPerformanceStatsUpdated(BlockchainProcessor.PerformanceStats stats) {
         if (stats != null) {
-            chartUpdateExecutor.submit(() -> updateAllCharts(stats));
+            chartUpdateExecutor.submit(() -> {
+                synchronized (updateLock) {
+                    updateAllCharts(stats);
+                }
+            });
         }
     }
 
@@ -1669,42 +1763,44 @@ public class SynchronizationMetricsPanel extends JPanel {
     private void onBlockPopped(Block block) {
         int height = block.getHeight();
         chartUpdateExecutor.submit(() -> {
-            SwingUtilities.invokeLater(() -> {
-                lastTimingData = null;
-                lastPerformanceData = null;
-                lastSharedData = null;
-                setPerformanceChartsNotification(false);
-                try {
-                    truncateSeries(blocksPerSecondSeries, height);
-                    truncateSeries(allTransactionsPerSecondSeries, height);
-                    truncateSeries(systemTransactionsPerSecondSeries, height);
-                    truncateSeries(atCountPerBlockSeries, height);
+            synchronized (updateLock) {
+                SwingUtilities.invokeLater(() -> {
+                    lastTimingData = null;
+                    lastPerformanceData = null;
+                    lastSharedData = null;
+                    setPerformanceChartsNotification(false);
+                    try {
+                        truncateSeries(blocksPerSecondSeries, height);
+                        truncateSeries(allTransactionsPerSecondSeries, height);
+                        truncateSeries(systemTransactionsPerSecondSeries, height);
+                        truncateSeries(atCountPerBlockSeries, height);
 
-                    truncateSeries(allTransactionsPerBlockSeries, height);
-                    truncateSeries(systemTransactionsPerBlockSeries, height);
+                        truncateSeries(allTransactionsPerBlockSeries, height);
+                        truncateSeries(systemTransactionsPerBlockSeries, height);
 
-                    truncateSeries(pushTimePerBlockSeries, height);
-                    truncateSeries(validationTimePerBlockSeries, height);
-                    truncateSeries(txLoopTimePerBlockSeries, height);
-                    truncateSeries(housekeepingTimePerBlockSeries, height);
-                    truncateSeries(txApplyTimePerBlockSeries, height);
-                    truncateSeries(atTimePerBlockSeries, height);
-                    truncateSeries(subscriptionTimePerBlockSeries, height);
-                    truncateSeries(blockApplyTimePerBlockSeries, height);
-                    truncateSeries(commitTimePerBlockSeries, height);
-                    truncateSeries(miscTimePerBlockSeries, height);
-                    truncateSeries(payloadFullnessSeries, height);
+                        truncateSeries(pushTimePerBlockSeries, height);
+                        truncateSeries(validationTimePerBlockSeries, height);
+                        truncateSeries(txLoopTimePerBlockSeries, height);
+                        truncateSeries(housekeepingTimePerBlockSeries, height);
+                        truncateSeries(txApplyTimePerBlockSeries, height);
+                        truncateSeries(atTimePerBlockSeries, height);
+                        truncateSeries(subscriptionTimePerBlockSeries, height);
+                        truncateSeries(blockApplyTimePerBlockSeries, height);
+                        truncateSeries(commitTimePerBlockSeries, height);
+                        truncateSeries(miscTimePerBlockSeries, height);
+                        truncateSeries(payloadFullnessSeries, height);
 
-                    if (!uiOptimizationEnabled || isTabActive) {
-                        updateChartRanges();
-                        updateProgressBarsFromSeries();
+                        if (!uiOptimizationEnabled || isTabActive) {
+                            updateChartRanges();
+                            updateProgressBarsFromSeries();
+                        }
+                    } finally {
+                        if (!uiOptimizationEnabled || isTabActive) {
+                            setPerformanceChartsNotification(true);
+                        }
                     }
-                } finally {
-                    if (!uiOptimizationEnabled || isTabActive) {
-                        setPerformanceChartsNotification(true);
-                    }
-                }
-            });
+                });
+            }
         });
     }
 
@@ -1825,7 +1921,7 @@ public class SynchronizationMetricsPanel extends JPanel {
 
     private void updateForkCacheStatus(int forkCacheSize) {
         forkCacheProgressBar.setValue(forkCacheSize);
-        forkCacheProgressBar.setString(forkCacheSize + " / " + brs.Constants.MAX_ROLLBACK);
+        forkCacheProgressBar.setString(forkCacheSize + " / " + Constants.MAX_ROLLBACK);
     }
 
     private void updateUnconfirmedTxCount(int count) {
@@ -1874,51 +1970,60 @@ public class SynchronizationMetricsPanel extends JPanel {
         }
     }
 
+    /**
+     * Updates the network volume and speed charts.
+     * Calculates speeds based on volume deltas and time elapsed.
+     *
+     * @param uploadedVolume   Total uploaded bytes.
+     * @param downloadedVolume Total downloaded bytes.
+     */
     private void updateNetVolumeAndSpeedChart(long uploadedVolume, long downloadedVolume) {
         chartUpdateExecutor.submit(() -> {
-            // --- Calculations on background thread ---
-            long currentTime = System.currentTimeMillis();
-            if (lastNetVolumeUpdateTime == 0) {
+            synchronized (updateLock) {
+                // --- Calculations on background thread ---
+                long currentTime = System.currentTimeMillis();
+                if (lastNetVolumeUpdateTime == 0) {
+                    lastNetVolumeUpdateTime = currentTime;
+                    lastUploadedVolume = uploadedVolume;
+                    lastDownloadedVolume = downloadedVolume;
+                    return;
+                }
+
+                long deltaTime = currentTime - lastNetVolumeUpdateTime;
+                if (deltaTime <= 0) {
+                    return; // Avoid division by zero or negative time intervals
+                }
+
+                long deltaUploaded = uploadedVolume - lastUploadedVolume;
+                long deltaDownloaded = downloadedVolume - lastDownloadedVolume;
+
+                double currentUploadSpeed = (double) deltaUploaded * 1000 / deltaTime; // bytes per second
+                double currentDownloadSpeed = (double) deltaDownloaded * 1000 / deltaTime; // bytes per second
+
+                // Add current speed to history and maintain size
+                uploadSpeeds.add(currentUploadSpeed);
+                downloadSpeeds.add(currentDownloadSpeed);
+
+                int currentWindowSize = Math.min(uploadSpeeds.size(), movingAverageWindow);
+                if (currentWindowSize < 1) {
+                    return;
+                }
+
+                double avgUploadSpeed = uploadSpeeds.getAverage();
+                double avgUploadSpeedMax = uploadSpeeds.getMax();
+                double avgDownloadSpeed = downloadSpeeds.getAverage();
+                double avgDownloadSpeedMax = downloadSpeeds.getMax();
+
                 lastNetVolumeUpdateTime = currentTime;
                 lastUploadedVolume = uploadedVolume;
                 lastDownloadedVolume = downloadedVolume;
-                return;
+
+                // --- UI Updates on EDT ---
+                Runnable updateTask = () -> updateNetSpeedUI(currentTime, uploadedVolume, downloadedVolume,
+                        avgUploadSpeed, avgDownloadSpeed, avgUploadSpeedMax, avgDownloadSpeedMax);
+                this.lastNetSpeedUpdate = updateTask;
+                SwingUtilities.invokeLater(updateTask);
             }
-
-            long deltaTime = currentTime - lastNetVolumeUpdateTime;
-            if (deltaTime <= 0) {
-                return; // Avoid division by zero or negative time intervals
-            }
-
-            long deltaUploaded = uploadedVolume - lastUploadedVolume;
-            long deltaDownloaded = downloadedVolume - lastDownloadedVolume;
-
-            double currentUploadSpeed = (double) deltaUploaded * 1000 / deltaTime; // bytes per second
-            double currentDownloadSpeed = (double) deltaDownloaded * 1000 / deltaTime; // bytes per second
-
-            // Add current speed to history and maintain size
-            uploadSpeeds.add(currentUploadSpeed);
-            downloadSpeeds.add(currentDownloadSpeed);
-
-            int currentWindowSize = Math.min(uploadSpeeds.size(), movingAverageWindow);
-            if (currentWindowSize < 1) {
-                return;
-            }
-
-            double avgUploadSpeed = uploadSpeeds.getAverage();
-            double avgUploadSpeedMax = uploadSpeeds.getMax();
-            double avgDownloadSpeed = downloadSpeeds.getAverage();
-            double avgDownloadSpeedMax = downloadSpeeds.getMax();
-
-            lastNetVolumeUpdateTime = currentTime;
-            lastUploadedVolume = uploadedVolume;
-            lastDownloadedVolume = downloadedVolume;
-
-            // --- UI Updates on EDT ---
-            Runnable updateTask = () -> updateNetSpeedUI(currentTime, uploadedVolume, downloadedVolume,
-                    avgUploadSpeed, avgDownloadSpeed, avgUploadSpeedMax, avgDownloadSpeedMax);
-            this.lastNetSpeedUpdate = updateTask;
-            SwingUtilities.invokeLater(updateTask);
         });
     }
 
@@ -1991,6 +2096,12 @@ public class SynchronizationMetricsPanel extends JPanel {
         return String.format("%.2f %s/s", bytesPerSecond, units[unitIndex]);
     }
 
+    /**
+     * Updates all performance and timing charts based on the provided statistics.
+     * Runs on the background thread to prepare data, then schedules EDT updates.
+     *
+     * @param stats The performance statistics.
+     */
     private void updateAllCharts(BlockchainProcessor.PerformanceStats stats) {
         // Run calculations sequentially on the current thread (chartUpdateExecutor)
         try {
