@@ -930,17 +930,19 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     long start = System.currentTimeMillis();
                     JsonObject response = peer.send(JSON.prepareRequest(milestoneBlockIdsRequest));
                     long end = System.currentTimeMillis();
-                    notifyPeerMetric(new PeerMetric(peer.getPeerAddress(), end - start, 0,
-                            PeerMetric.Type.OTHER));
                     if (response == null) {
+                        notifyPeerMetric(new PeerMetric(peer.getPeerAddress(), end - start, 0, PeerMetric.Type.OTHER));
                         logger.debug("Got null response in getCommonMilestoneBlockId");
                         return 0;
                     }
                     JsonArray milestoneBlockIds = JSON.getAsJsonArray(response.get("milestoneBlockIds"));
                     if (milestoneBlockIds == null) {
+                        notifyPeerMetric(new PeerMetric(peer.getPeerAddress(), end - start, 0, PeerMetric.Type.OTHER));
                         logger.debug("MilestoneArray is null");
                         return 0;
                     }
+                    notifyPeerMetric(new PeerMetric(peer.getPeerAddress(), end - start, milestoneBlockIds.size(),
+                            PeerMetric.Type.OTHER));
                     if (milestoneBlockIds.size() == 0) {
                         return genesisBlockId;
                     }
@@ -978,12 +980,13 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     long start = System.currentTimeMillis();
                     JsonObject response = peer.send(JSON.prepareRequest(request));
                     long end = System.currentTimeMillis();
-                    notifyPeerMetric(new PeerMetric(peer.getPeerAddress(), end - start, 0,
-                            PeerMetric.Type.OTHER));
                     if (response == null) {
+                        notifyPeerMetric(new PeerMetric(peer.getPeerAddress(), end - start, 0, PeerMetric.Type.OTHER));
                         return 0;
                     }
                     JsonArray nextBlockIds = JSON.getAsJsonArray(response.get("nextBlockIds"));
+                    notifyPeerMetric(new PeerMetric(peer.getPeerAddress(), end - start,
+                            nextBlockIds != null ? nextBlockIds.size() : 0, PeerMetric.Type.OTHER));
                     if (nextBlockIds == null || nextBlockIds.size() == 0) {
                         return 0;
                     }
