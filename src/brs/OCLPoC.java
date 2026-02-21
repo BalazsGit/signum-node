@@ -414,27 +414,51 @@ final class OCLPoC {
     static void destroy() {
         synchronized (oclLock) {
             if (program != null) {
-                clReleaseProgram(program);
+                try {
+                    clReleaseProgram(program);
+                } catch (Throwable t) {
+                    logger.error("Error releasing OpenCL program", t);
+                }
                 program = null;
             }
             if (genKernel != null) {
-                clReleaseKernel(genKernel);
+                try {
+                    clReleaseKernel(genKernel);
+                } catch (Throwable t) {
+                    logger.error("Error releasing OpenCL genKernel", t);
+                }
                 genKernel = null;
             }
             if (getKernel != null) {
-                clReleaseKernel(getKernel);
+                try {
+                    clReleaseKernel(getKernel);
+                } catch (Throwable t) {
+                    logger.error("Error releasing OpenCL getKernel", t);
+                }
                 getKernel = null;
             }
             if (getKernel2 != null) {
-                clReleaseKernel(getKernel2);
+                try {
+                    clReleaseKernel(getKernel2);
+                } catch (Throwable t) {
+                    logger.error("Error releasing OpenCL getKernel2", t);
+                }
                 getKernel2 = null;
             }
             if (queue != null) {
-                clReleaseCommandQueue(queue);
+                try {
+                    clReleaseCommandQueue(queue);
+                } catch (Throwable t) {
+                    logger.error("Error releasing OpenCL queue", t);
+                }
                 queue = null;
             }
             if (ctx != null) {
-                clReleaseContext(ctx);
+                try {
+                    clReleaseContext(ctx);
+                } catch (Throwable t) {
+                    logger.error("Error releasing OpenCL context", t);
+                }
                 ctx = null;
             }
         }
