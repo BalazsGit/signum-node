@@ -729,6 +729,26 @@ public class SignumGUI extends JFrame {
         isShuttingDown = true;
         updateTitle();
 
+        // Stop GUI updates and listeners first to prevent access to core components
+        // during shutdown
+        // This ensures that the MetricsPanel executors are stopped before the
+        // DB/Network is closed
+        if (elapsedTimeTimer != null) {
+            try {
+                elapsedTimeTimer.stop();
+            } catch (Throwable t) {
+                LOGGER.warn("Error stopping elapsed time timer", t);
+            }
+        }
+
+        if (metricsPanel != null) {
+            try {
+                metricsPanel.shutdown();
+            } catch (Throwable t) {
+                LOGGER.warn("Error shutting down metrics panel", t);
+            }
+        }
+
         // The main node shutdown is handled by Signum.shutdown()
         // This is the most critical part.
         try {
@@ -741,25 +761,11 @@ public class SignumGUI extends JFrame {
         }
 
         // The rest is GUI resource cleanup. We'll do a best-effort cleanup.
-        if (elapsedTimeTimer != null) {
-            try {
-                elapsedTimeTimer.stop();
-            } catch (Throwable t) {
-                LOGGER.warn("Error stopping elapsed time timer", t);
-            }
-        }
         if (trayIcon != null && SystemTray.isSupported()) {
             try {
                 SystemTray.getSystemTray().remove(trayIcon);
             } catch (Throwable t) {
                 LOGGER.warn("Error removing tray icon", t);
-            }
-        }
-        if (metricsPanel != null) {
-            try {
-                metricsPanel.shutdown();
-            } catch (Throwable t) {
-                LOGGER.warn("Error shutting down metrics panel", t);
             }
         }
 
@@ -888,7 +894,7 @@ public class SignumGUI extends JFrame {
         openPheonixWalletItem.addActionListener(e -> openWebUi("/phoenix"));
         openClassicWalletItem.addActionListener(e -> openWebUi("/classic"));
         showItem.addActionListener(e -> showWindow());
-        shutdownItem.addActionListener(e -> shutdown());
+        shutdownItem.addActionListener(e -> new Thread(this::shutdown).start());
 
         popupMenu.add(openClassicWalletItem);
         popupMenu.add(showItem);
