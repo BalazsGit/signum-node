@@ -10,6 +10,7 @@ import signumj.entity.SignumID;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.JTableHeader;
 import javax.swing.table.TableRowSorter;
 import java.awt.*;
 import java.awt.event.WindowAdapter;
@@ -23,6 +24,21 @@ import java.util.Map;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+/**
+ * A dialog window that displays detailed lists of miners.
+ * <p>
+ * It provides two views:
+ * <ul>
+ * <li><b>Node Miners:</b> Miners connected to this specific node (both
+ * currently active and historically discovered).</li>
+ * <li><b>Network Miners:</b> All miners discovered on the network based on
+ * block history.</li>
+ * </ul>
+ * </p>
+ * <p>
+ * The dialog supports sorting and filtering of the displayed data.
+ * </p>
+ */
 public class MinersListDialog extends JFrame {
     private static volatile MinersListDialog instance;
     private DefaultTableModel nodeMinersModel;
@@ -47,6 +63,22 @@ public class MinersListDialog extends JFrame {
     private static final String COL_LAST_BLOCK_HEIGHT = "Last Block Height";
     private static final String COL_BLOCKS_FOUND = "Blocks Found";
 
+    /**
+     * Displays the miners list dialog.
+     * <p>
+     * If the dialog is already open, it updates the data and brings it to the
+     * front.
+     * Otherwise, it creates a new instance.
+     * </p>
+     *
+     * @param owner       The parent frame.
+     * @param tabIndex    The index of the tab to select initially (0 for Node
+     *                    Miners, 1 for Network Miners).
+     * @param history     The block history used to calculate network miner
+     *                    statistics.
+     * @param nodeHistory The history of deadlines submitted to this node, used for
+     *                    node miner statistics.
+     */
     public static void showDialog(JFrame owner, int tabIndex,
             List<BlockGenerationMetricsPanel.BlockHistoryEntry> history,
             Map<Integer, List<MinerEntry>> nodeHistory) {
@@ -67,11 +99,31 @@ public class MinersListDialog extends JFrame {
         instance.requestFocus();
     }
 
+    /**
+     * Updates the dialog's data if it is currently visible.
+     * <p>
+     * This method is typically called when new block generation data is available
+     * to keep the UI in sync.
+     * </p>
+     *
+     * @param history     The updated block history.
+     * @param nodeHistory The updated node deadline history.
+     */
     public static void updateIfVisible(List<BlockGenerationMetricsPanel.BlockHistoryEntry> history,
             Map<Integer, List<MinerEntry>> nodeHistory) {
         if (instance != null && instance.isVisible()) {
             instance.updateData(history, nodeHistory);
         }
+    }
+
+    /**
+     * Checks if the miners list dialog is currently open and visible.
+     *
+     * @return {@code true} if the dialog instance exists and is visible,
+     *         {@code false} otherwise.
+     */
+    public static boolean isDialogVisible() {
+        return instance != null && instance.isVisible();
     }
 
     private MinersListDialog(JFrame owner) {
@@ -376,7 +428,47 @@ public class MinersListDialog extends JFrame {
         topPanel.add(filterPanel, BorderLayout.SOUTH);
         panel.add(topPanel, BorderLayout.NORTH);
 
-        JTable table = new JTable(model);
+        JTable table = new JTable(model) {
+            @Override
+            public String getToolTipText(java.awt.event.MouseEvent e) {
+                String tip = super.getToolTipText(e);
+                return "".equals(tip) ? null : tip;
+            }
+
+            @Override
+            protected JTableHeader createDefaultTableHeader() {
+                JTableHeader header = super.createDefaultTableHeader();
+                header.addMouseListener(new java.awt.event.MouseAdapter() {
+                    final int defaultDismissDelay = ToolTipManager.sharedInstance().getDismissDelay();
+
+                    @Override
+                    public void mouseEntered(java.awt.event.MouseEvent e) {
+                        ToolTipManager.sharedInstance().setDismissDelay(60000);
+                    }
+
+                    @Override
+                    public void mouseExited(java.awt.event.MouseEvent e) {
+                        ToolTipManager.sharedInstance().setDismissDelay(defaultDismissDelay);
+                    }
+                });
+                return header;
+            }
+        };
+        ToolTipManager.sharedInstance().registerComponent(table);
+        table.setToolTipText("");
+        table.addMouseListener(new java.awt.event.MouseAdapter() {
+            final int defaultDismissDelay = ToolTipManager.sharedInstance().getDismissDelay();
+
+            @Override
+            public void mouseEntered(java.awt.event.MouseEvent e) {
+                ToolTipManager.sharedInstance().setDismissDelay(60000);
+            }
+
+            @Override
+            public void mouseExited(java.awt.event.MouseEvent e) {
+                ToolTipManager.sharedInstance().setDismissDelay(defaultDismissDelay);
+            }
+        });
         table.setFillsViewportHeight(true);
         if (tableConsumer != null) {
             tableConsumer.accept(table);
@@ -491,12 +583,16 @@ public class MinersListDialog extends JFrame {
         public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus,
                 int row, int column) {
             Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+            setToolTipText(null);
 
             if (value instanceof Long) {
                 long val = (Long) value;
-                if (val > 1_000_000) {
-                    setText(formatCount(val));
-                    setToolTipText(String.format("%,d", val));
+                String columnName = table.getColumnName(column);
+                if (COL_DEADLINES.equals(columnName) || COL_BLOCKS_FOUND.equals(columnName)) {
+                    if (val >= 10_000) {
+                        setText(formatCount(val));
+                    }
+                    setToolTipText("<html><b>" + String.format("%,d", val) + "</b></html>");
                 }
             }
 
@@ -520,12 +616,16 @@ public class MinersListDialog extends JFrame {
         public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus,
                 int row, int column) {
             Component c = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+            setToolTipText(null);
 
             if (value instanceof Long) {
                 long val = (Long) value;
-                if (val > 1_000_000) {
-                    setText(formatCount(val));
-                    setToolTipText(String.format("%,d", val));
+                String columnName = table.getColumnName(column);
+                if (COL_BLOCKS_FOUND.equals(columnName)) {
+                    if (val >= 10_000) {
+                        setText(formatCount(val));
+                    }
+                    setToolTipText("<html><b>" + String.format("%,d", val) + "</b></html>");
                 }
             }
 
@@ -544,9 +644,12 @@ public class MinersListDialog extends JFrame {
         if (count > 100_000_000) {
             return "> 100M";
         }
-        if (count < 1_000_000) {
-            return String.valueOf(count);
+        if (count >= 1_000_000) {
+            return String.format("%.1fM", count / 1_000_000.0);
         }
-        return String.format("%.1fM", count / 1_000_000.0);
+        if (count >= 10_000) {
+            return String.format("%.0fk", count / 1000.0);
+        }
+        return String.valueOf(count);
     }
 }
