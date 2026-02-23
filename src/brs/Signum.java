@@ -113,6 +113,7 @@ public final class Signum {
     private static TransactionService transactionService;
     private static SubscriptionService subscriptionService;
     private static AssetExchange assetExchange;
+    private static Generator generator;
 
     private static PropertyService propertyService;
     private static FluxCapacitor fluxCapacitor;
@@ -120,6 +121,8 @@ public final class Signum {
     private static DBCacheManagerImpl dbCacheManager;
 
     private static WebServer webServer;
+
+    private static ShutdownManager shutdownManager;
 
     private static AtomicBoolean isShutdown = new AtomicBoolean(false);
     private static AtomicBoolean nodeStopped = new AtomicBoolean(false);
@@ -161,6 +164,10 @@ public final class Signum {
 
     public static BlockchainProcessor getBlockchainProcessor() {
         return blockchainProcessor;
+    }
+
+    public static Generator getGenerator() {
+        return generator;
     }
 
     public static TransactionProcessorImpl getTransactionProcessor() {
@@ -236,6 +243,15 @@ public final class Signum {
 
         Signum.propertyService = propertyService;
 
+        shutdownManager = new ShutdownManager(propertyService);
+        if (shutdownManager.wasPreviousShutdownDirty()) {
+            logger.warn("Previous shutdown was not clean. Checking database consistency...");
+            // The check and potential recovery will be handled after the blockchain
+            // processor is initialized.
+        } else {
+            logger.info("Previous shutdown was clean.");
+        }
+
         String networkParametersClass = propertyService.getString(Props.NETWORK_PARAMETERS);
         NetworkParameters params = null;
         if (networkParametersClass != null) {
@@ -302,7 +318,7 @@ public final class Signum {
                     fluxCapacitor,
                     blockchain);
 
-            final Generator generator = propertyService.getBoolean(Props.DEV_MOCK_MINING)
+            generator = propertyService.getBoolean(Props.DEV_MOCK_MINING)
                     ? new GeneratorImpl.MockGenerator(
                             propertyService,
                             blockchain,
@@ -573,30 +589,79 @@ public final class Signum {
                 return;
             }
 
+            if (shutdownManager != null) {
+                shutdownManager.startShutdown();
+            }
+
             logger.info("Shutting down...");
             logger.info("Do not force exit or kill the node process.");
 
             if (webServer != null) {
-                webServer.shutdown();
+                try {
+                    webServer.shutdown();
+                } catch (Throwable t) {
+                    if (shutdownManager != null) {
+                        shutdownManager.markFailure("WebServer");
+                    }
+                    logger.error("Error shutting down webServer", t);
+                }
             }
 
             if (blockchainProcessor != null) {
-                blockchainProcessor.shutdown();
+                try {
+                    blockchainProcessor.shutdown();
+                } catch (Throwable t) {
+                    if (shutdownManager != null) {
+                        shutdownManager.markFailure("BlockchainProcessor");
+                    }
+                    logger.error("Error shutting down blockchainProcessor", t);
+                }
             }
 
             if (threadPool != null) {
-                Peers.shutdown(threadPool);
-                threadPool.shutdown();
+                try {
+                    Peers.shutdown(threadPool);
+                } catch (Throwable t) {
+                    if (shutdownManager != null) {
+                        shutdownManager.markFailure("Peers");
+                    }
+                    logger.error("Error shutting down Peers", t);
+                }
+                try {
+                    threadPool.shutdown();
+                } catch (Throwable t) {
+                    if (shutdownManager != null) {
+                        shutdownManager.markFailure("ThreadPool");
+                    }
+                    logger.error("Error shutting down threadPool", t);
+                }
             }
 
             if (!ignoreDbShutdown) {
-                Db.shutdown();
+                try {
+                    Db.shutdown();
+                } catch (Throwable t) {
+                    if (shutdownManager != null) {
+                        shutdownManager.markFailure("Database");
+                    }
+                    logger.error("Error shutting down DB", t);
+                }
             }
 
             if (dbCacheManager != null) {
-                dbCacheManager.close();
+                try {
+                    dbCacheManager.close();
+                } catch (Throwable t) {
+                    if (shutdownManager != null) {
+                        shutdownManager.markFailure("DBCacheManager");
+                    }
+                    logger.error("Error closing dbCacheManager", t);
+                }
             }
 
+            if (shutdownManager != null) {
+                shutdownManager.finishShutdown();
+            }
             logger.info("BRS {} stopped.", VERSION);
             LoggerConfigurator.shutdown();
             nodeStopped.set(true);

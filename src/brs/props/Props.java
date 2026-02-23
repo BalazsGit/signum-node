@@ -101,6 +101,7 @@ public class Props {
 
     public static final Prop<Boolean> MEASUREMENT_ACTIVE = new Prop<>("node.measurementActive", false);
     public static final Prop<String> MEASUREMENT_DIR = new Prop<>("node.measurementDir", "../measurement");
+    public static final Prop<String> SETTINGS_DIR = new Prop<>("node.settingsDir", "../settings");
 
     // Checkpoint block for faster sync from empty database
     public static final Prop<Integer> BRS_CHECKPOINT_HEIGHT = new Prop<>("node.checkPointHeight", 1_418_000);
@@ -265,6 +266,9 @@ public class Props {
             "node.indirectIncomingService.enable", true);
 
     public static final Prop<Boolean> AUTO_POP_OFF_ENABLED = new Prop<>("node.autoPopOff.enable", true);
+
+    public static final Prop<Boolean> AUTO_CONSISTENCY_RESOLVE_ENABLED = new Prop<>(
+            "node.autoConsistencyResolve.enable", true);
 
     public static final Prop<Boolean> ENABLE_AT_DEBUG_LOG = new Prop<>("node.ATDebugLog.enable", false);
 

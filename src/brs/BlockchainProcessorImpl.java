@@ -14,6 +14,7 @@ import brs.db.store.DerivedTableManager;
 import brs.db.store.Stores;
 import brs.fluxcapacitor.FluxValues;
 import brs.peer.Peer;
+import brs.peer.PeerMetric;
 import brs.peer.Peers;
 import brs.props.PropertyService;
 import brs.props.Props;
@@ -30,6 +31,7 @@ import brs.transactionduplicates.TransactionDuplicatesCheckerImpl;
 import brs.unconfirmedtransactions.UnconfirmedTransactionStore;
 import brs.util.Convert;
 import brs.util.DownloadCacheImpl;
+import brs.util.PathUtils;
 import brs.util.JSON;
 import brs.util.Listener;
 import brs.util.DurationFormatter;
@@ -38,6 +40,7 @@ import brs.util.ThreadPool;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileWriter;
@@ -45,6 +48,7 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.lang.management.ManagementFactory;
 import java.nio.file.Path;
+import java.io.BufferedWriter;
 import java.math.BigInteger;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -175,8 +179,27 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private final AtomicBoolean isTrimming = new AtomicBoolean(false);
     private final AtomicBoolean isScanning = new AtomicBoolean(false);
 
+    private final AtomicBoolean isScheduleTrimRequested = new AtomicBoolean(false);
+
+    /**
+     * Tracks the current state of the database consistency resolution process.
+     * This volatile field is updated by the
+     * {@link #autoResolveDatabaseConsistency()} or
+     * {@link #manualResolveDatabaseConsistency()}
+     * method
+     * and read by the GUI and other components to reflect the status.
+     */
+    private volatile ResolutionState resolutionState = ResolutionState.IDLE;
+    /**
+     * Stores the consistency state from the previous check to detect state
+     * transitions.
+     * Used by {@link #checkDatabaseState()} to trigger auto-resolve only when the
+     * state
+     * actually changes to {@link ConsistencyState#INCONSISTENT}.
+     */
     private final AtomicReference<ConsistencyState> consistencyState = new AtomicReference<>(
             ConsistencyState.UNDEFINED);
+    private volatile ConsistencyState previousConsistencyState = ConsistencyState.UNDEFINED;
 
     private final AtomicReference<QueueStatus> queueStatus = new AtomicReference<>();
     private final AtomicReference<PerformanceStats> performanceStats = new AtomicReference<>();
@@ -208,6 +231,47 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private AtomicInteger manualLastPopOffHeight = new AtomicInteger(-1);
     private AtomicInteger autoLastPopOffHeight = new AtomicInteger(-1);
     private AtomicInteger beforeRollbackHeight = new AtomicInteger(0);
+    private volatile PopOffState manualPopOffState = PopOffState.IDLE;
+    private volatile PopOffState autoPopOffState = PopOffState.IDLE;
+
+    private final Listeners<PeerMetric, PeerMetricEvent> peerMetricListeners = new Listeners<>();
+    private final Listeners<PerformanceStats, Event> performanceStatsListeners = new Listeners<>();
+    private final Listeners<QueueStatus, Event> queueStatusListeners = new Listeners<>();
+
+    @Override
+    public void addPeerMetricListener(Listener<PeerMetric> listener) {
+        peerMetricListeners.addListener(listener, PeerMetricEvent.METRIC);
+    }
+
+    @Override
+    public void removePeerMetricListener(Listener<PeerMetric> listener) {
+        peerMetricListeners.removeListener(listener, PeerMetricEvent.METRIC);
+    }
+
+    @Override
+    public void notifyPeerMetric(PeerMetric metric) {
+        peerMetricListeners.notify(metric, PeerMetricEvent.METRIC);
+    }
+
+    @Override
+    public void addPerformanceStatsListener(Listener<PerformanceStats> listener) {
+        performanceStatsListeners.addListener(listener, Event.PERFORMANCE_STATS_UPDATED);
+    }
+
+    @Override
+    public void removePerformanceStatsListener(Listener<PerformanceStats> listener) {
+        performanceStatsListeners.removeListener(listener, Event.PERFORMANCE_STATS_UPDATED);
+    }
+
+    @Override
+    public void addQueueStatusListener(Listener<QueueStatus> listener) {
+        queueStatusListeners.addListener(listener, Event.QUEUE_STATUS_CHANGED);
+    }
+
+    @Override
+    public void removeQueueStatusListener(Listener<QueueStatus> listener) {
+        queueStatusListeners.removeListener(listener, Event.QUEUE_STATUS_CHANGED);
+    }
 
     @Override
     public void shutdown() {
@@ -222,7 +286,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             logger.info("Waiting for database trim to finish before shutdown...");
         }
 
-        if (manualPopOffBlocksCount.get() > 0 || autoPopOffBlocksCount.get() > 0) {
+        if (manualPopOffState == PopOffState.ACTIVE || autoPopOffState == PopOffState.ACTIVE) {
             logger.info("Waiting for pop-off to finish before shutdown...");
         }
 
@@ -231,21 +295,36 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         blockImporterAutoPause.set(true);
         getMoreBlocksLock.writeLock().lock();
         blockImporterLock.writeLock().lock();
+        Throwable firstException = null;
         try {
             synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
 
                 if (logSyncProgressToCsv) {
-                    long currentTime = System.currentTimeMillis();
-                    long deltaTime = currentTime - lastSyncLogTimestamp;
-                    accumulatedSyncTimeMs += deltaTime;
-                    if (isSyncingForLog.get()) {
-                        accumulatedSyncInProgressTimeMs += deltaTime;
+                    try {
+                        long currentTime = System.currentTimeMillis();
+                        long deltaTime = currentTime - lastSyncLogTimestamp;
+                        accumulatedSyncTimeMs += deltaTime;
+                        if (isSyncingForLog.get()) {
+                            accumulatedSyncInProgressTimeMs += deltaTime;
+                        }
+                        writeSyncProgressLog(accumulatedSyncTimeMs, blockchain.getHeight());
+                    } catch (Throwable t) {
+                        logger.error("Error writing sync progress log", t);
+                        if (firstException == null) {
+                            firstException = t;
+                        }
                     }
-                    writeSyncProgressLog(accumulatedSyncTimeMs, blockchain.getHeight());
                 }
 
                 if (measurementActive) {
-                    writeMeasurementLog();
+                    try {
+                        writeMeasurementLog();
+                    } catch (Throwable t) {
+                        logger.error("Error writing measurement log", t);
+                        if (firstException == null) {
+                            firstException = t;
+                        }
+                    }
                 }
 
                 if (measurementLogExecutor != null) {
@@ -270,12 +349,31 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
                 if (getOclVerify()) {
                     logger.info("Destroying OCLPoC instance from BlockchainProcessor.");
-                    OCLPoC.destroy();
+                    try {
+                        OCLPoC.destroy();
+                    } catch (Throwable t) {
+                        logger.error("Error destroying OCLPoC", t);
+                        if (firstException == null) {
+                            firstException = t;
+                        }
+                    }
                 }
+            }
+        } catch (Throwable t) {
+            logger.error("Error during BlockchainProcessor shutdown", t);
+            if (firstException == null) {
+                firstException = t;
             }
         } finally {
             blockImporterLock.writeLock().unlock();
             getMoreBlocksLock.writeLock().unlock();
+        }
+
+        if (firstException != null) {
+            if (firstException instanceof RuntimeException) {
+                throw (RuntimeException) firstException;
+            }
+            throw new RuntimeException("Error during BlockchainProcessor shutdown", firstException);
         }
     }
 
@@ -406,25 +504,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         String finalMeasurementDir;
         if (logSyncProgressToCsv || measurementActive) {
             String configuredPath = propertyService.getString(Props.MEASUREMENT_DIR);
-            Path measurementPath;
             try {
-                Path configuredAsPath = Paths.get(configuredPath);
-                if (configuredAsPath.isAbsolute()) {
-                    measurementPath = configuredAsPath;
-                } else {
-                    // Resolve relative to the application's location
-                    File codeSourceFile = new File(
-                            BlockchainProcessorImpl.class.getProtectionDomain().getCodeSource().getLocation().toURI());
-                    Path applicationBasePath;
-                    if (codeSourceFile.isFile() && codeSourceFile.getName().toLowerCase().endsWith(".jar")) {
-                        // Running from a JAR, base path is the JAR's containing directory
-                        applicationBasePath = codeSourceFile.getParentFile().toPath();
-                    } else {
-                        // Running from IDE, use current working directory as base
-                        applicationBasePath = Paths.get(".").toAbsolutePath().normalize();
-                    }
-                    measurementPath = applicationBasePath.resolve(configuredPath).normalize();
-                }
+                Path measurementPath = PathUtils.resolvePath(configuredPath);
                 finalMeasurementDir = measurementPath.toString();
                 Files.createDirectories(measurementPath);
             } catch (Exception e) {
@@ -562,22 +643,19 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         }
 
         if (trimDerivedTables) {
-            if (blockchain.getHeight() < Constants.MAX_ROLLBACK * 10) {
-                currentTrimHeight.set(0);
-            } else {
-                // Undefined trim height
-                currentTrimHeight.set(-1);
+            loadPersistentState();
+            if (lastTrimHeight.get() == 0) {
+                if (blockchain.getHeight() < Constants.TRIM_PERIOD) {
+                    currentTrimHeight.set(0);
+                } else {
+                    // Undefined trim height
+                    currentTrimHeight.set(-1);
+                }
+                lastTrimHeight.set(0);
             }
-            lastTrimHeight.set(0);
         }
 
-        if (Boolean.FALSE.equals(propertyService.getBoolean(Props.DB_SKIP_CHECK))
-                && checkDatabaseState() != 0) {
-            logger.warn("Database is inconsistent,"
-                    + "try to pop off to block height {} or sync from empty.",
-                    getMinRollbackHeight());
-        }
-
+        initialCleanDatabase();
         Runnable getMoreBlocksThread = new Runnable() {
             private JsonElement getCumulativeDifficultyRequest;
 
@@ -638,7 +716,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                     continue;
                                 }
 
+                                long start = System.currentTimeMillis();
                                 JsonObject response = peer.send(getCumulativeDifficultyRequest);
+                                long end = System.currentTimeMillis();
+                                notifyPeerMetric(new PeerMetric(peer.getPeerAddress(), end - start, 0,
+                                        PeerMetric.Type.OTHER));
                                 if (response == null) {
                                     continue;
                                 }
@@ -845,16 +927,22 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         milestoneBlockIdsRequest.addProperty("lastMilestoneBlockId", lastMilestoneBlockId);
                     }
 
+                    long start = System.currentTimeMillis();
                     JsonObject response = peer.send(JSON.prepareRequest(milestoneBlockIdsRequest));
+                    long end = System.currentTimeMillis();
                     if (response == null) {
+                        notifyPeerMetric(new PeerMetric(peer.getPeerAddress(), end - start, 0, PeerMetric.Type.OTHER));
                         logger.debug("Got null response in getCommonMilestoneBlockId");
                         return 0;
                     }
                     JsonArray milestoneBlockIds = JSON.getAsJsonArray(response.get("milestoneBlockIds"));
                     if (milestoneBlockIds == null) {
+                        notifyPeerMetric(new PeerMetric(peer.getPeerAddress(), end - start, 0, PeerMetric.Type.OTHER));
                         logger.debug("MilestoneArray is null");
                         return 0;
                     }
+                    notifyPeerMetric(new PeerMetric(peer.getPeerAddress(), end - start, milestoneBlockIds.size(),
+                            PeerMetric.Type.OTHER));
                     if (milestoneBlockIds.size() == 0) {
                         return genesisBlockId;
                     }
@@ -889,11 +977,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     JsonObject request = new JsonObject();
                     request.addProperty("requestType", "getNextBlockIds");
                     request.addProperty("blockId", Convert.toUnsignedLong(commonBlockId));
+                    long start = System.currentTimeMillis();
                     JsonObject response = peer.send(JSON.prepareRequest(request));
+                    long end = System.currentTimeMillis();
                     if (response == null) {
+                        notifyPeerMetric(new PeerMetric(peer.getPeerAddress(), end - start, 0, PeerMetric.Type.OTHER));
                         return 0;
                     }
                     JsonArray nextBlockIds = JSON.getAsJsonArray(response.get("nextBlockIds"));
+                    notifyPeerMetric(new PeerMetric(peer.getPeerAddress(), end - start,
+                            nextBlockIds != null ? nextBlockIds.size() : 0, PeerMetric.Type.OTHER));
                     if (nextBlockIds == null || nextBlockIds.size() == 0) {
                         return 0;
                     }
@@ -924,7 +1017,14 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     logger.debug("Getting next Blocks after {} from {}", Convert.toUnsignedLong(curBlockId),
                             peer.getPeerAddress());
                 }
+                long start = System.currentTimeMillis();
                 JsonObject response = peer.send(JSON.prepareRequest(request));
+                long end = System.currentTimeMillis();
+                int blockCount = (response != null && response.get("nextBlocks") != null)
+                        ? JSON.getAsJsonArray(response.get("nextBlocks")).size()
+                        : 0;
+                notifyPeerMetric(new PeerMetric(peer.getPeerAddress(), end - start, blockCount,
+                        PeerMetric.Type.BLOCK_RX));
                 if (response == null) {
                     return null;
                 }
@@ -1194,6 +1294,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     public void onQueueStatusUpdated(QueueStatus newStatus) {
         queueStatus.set(newStatus);
         blockListeners.notify(null, Event.QUEUE_STATUS_CHANGED);
+        queueStatusListeners.notify(newStatus, Event.QUEUE_STATUS_CHANGED);
     }
 
     private void updateAndFireNetVolume() {
@@ -1678,24 +1779,330 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         });
     }
 
+    /**
+     * Checks if the automatic database consistency resolution process is required.
+     * <p>
+     * This method assesses the current state of the database consistency and the
+     * node's configuration
+     * to decide if an automatic recovery attempt is necessary. It ensures that
+     * resolution is not
+     * initiated if other critical blockchain operations (like trimming or pop-off)
+     * are currently in progress.
+     *
+     * @return {@code true} if the conditions for automatic resolution are met,
+     *         {@code false} otherwise.
+     */
+    private boolean isAutoResolutionRequired() {
+
+        // Auto resolution trigger only if no trim or pop-off is ongoing
+        // This avoids conflicts during active recovery operations
+        // Pop-off and trim operations already handle consistency related issues
+        // internally by rolling back erroneous transactions
+        if (isTrimming.get() || manualPopOffState != PopOffState.IDLE || autoPopOffState != PopOffState.IDLE) {
+            return false;
+        }
+
+        // If database consistency state transitions to INCONSISTENT
+        // UNDEFINED -> INCONSISTENT or
+        // CONSISTENT -> INCONSISTENT
+        if (consistencyState.get() == ConsistencyState.INCONSISTENT) {
+            if (previousConsistencyState == ConsistencyState.UNDEFINED
+                    || previousConsistencyState == ConsistencyState.CONSISTENT) {
+                logger.info(
+                        "Database state transitioned from {} to INCONSISTENT.",
+                        previousConsistencyState);
+                if (propertyService.getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED)) {
+                    return true;
+                } else {
+                    logger.info(
+                            "Auto Database Resolution is disabled.");
+                    logger.info(
+                            "Please try to resolve Database manually via the GUI: Database Check -> Start Auto Resolve Database Consistency.");
+                    return false;
+                }
+            } else if (resolutionState == ResolutionState.IDLE
+                    || resolutionState == ResolutionState.SUCCESS) {
+                if (propertyService.getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED)) {
+                    logger.info(
+                            "Database is INCONSISTENT previous Database Resolution state was {}.",
+                            resolutionState);
+                    return true;
+                } else {
+                    logger.info(
+                            "Auto Database Resolution is disabled.");
+                    logger.info(
+                            "Please try to resolve Database manually via the GUI: Database Check -> Start Auto Resolve Database Consistency.");
+                    return false;
+                }
+            } else if (resolutionState == ResolutionState.FAILED) {
+                logger.info("Database is INCONSISTENT and previous Database Resolution state was FAILED.");
+                if (propertyService.getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED)) {
+                    logger.info(
+                            "Automatic consistency resolution will not be attempted again until manual intervention or a successful resolution occurs.");
+                    logger.info("Revalidate, or Resync the node to reset the consistency.");
+                    return false;
+                } else {
+                    logger.info(
+                            "Auto Database Resolution is disabled.");
+                    logger.info(
+                            "Please try to resolve Database manually via the GUI: Database Check -> Start Auto Resolve Database Consistency.");
+                    return false;
+                }
+            } else {
+                logger.error(
+                        "Database became inconsistent. Please try to resolve it manually via the GUI: Database Check -> Start Auto Resolve Database Consistency.");
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Initiates the automatic database consistency resolution process.
+     * <p>
+     * This method attempts to restore database consistency by iteratively popping
+     * off blocks from the
+     * blockchain until a consistent state is reached or a safety limit is
+     * encountered.
+     * <p>
+     * The process follows these steps:
+     * <ol>
+     * <li>Checks if a resolution process is already active to prevent concurrent
+     * executions.</li>
+     * <li>Sets the resolution state to {@link ResolutionState#ACTIVE}.</li>
+     * <li>Verifies the database state; if already consistent, marks as
+     * {@link ResolutionState#SUCCESS}.</li>
+     * <li>Calculates a rollback limit height (based on trim height or max rollback
+     * constants).</li>
+     * <li>Iteratively pops off the last block, rolling back derived tables and
+     * caches, until consistency is restored.</li>
+     * <li>Updates the resolution state to {@link ResolutionState#SUCCESS} upon
+     * recovery, or {@link ResolutionState#FAILED} if the limit is reached.</li>
+     * </ol>
+     *
+     * @see #manualResolveDatabaseConsistency()
+     */
+    @Override
+    public void autoResolveDatabaseConsistency() {
+        if (resolutionState == ResolutionState.ACTIVE) {
+            logger.info("Consistency resolution is already active. Ignoring new request.");
+            return;
+        }
+
+        resolutionState = ResolutionState.ACTIVE;
+        blockListeners.notify(null, Event.CONSISTENCY_RESOLUTION_STARTED);
+        logger.info("Resolving database consistency...");
+
+        if (checkDatabaseState() == 0) {
+            resolutionState = ResolutionState.SUCCESS;
+            blockListeners.notify(null, Event.CONSISTENCY_RESOLUTION_FINISHED);
+            logger.info("Database is already consistent.");
+            return;
+        }
+
+        int limitHeight = getSafeRollbackHeight();
+
+        logger.info("Popping off blocks until consistent or height {}", limitHeight);
+
+        // Initialize GUI tracking variables
+        int startHeight = blockchain.getHeight();
+        beforeRollbackHeight.set(startHeight);
+        autoLastPopOffHeight.set(limitHeight);
+        autoPopOffBlocksCount.set(startHeight - limitHeight);
+        blockListeners.notify(blockchain.getLastBlock(), Event.BLOCK_AUTO_POPPED);
+
+        boolean success = false;
+        try {
+            while (blockchain.getHeight() > limitHeight) {
+                stores.beginTransaction();
+                try {
+                    Block block = popLastBlock();
+                    for (DerivedTable table : derivedTableManager.getDerivedTables()) {
+                        table.rollback(block.getHeight());
+                    }
+                    indirectIncomingService.rollback(block.getHeight());
+                    dbCacheManager.flushCache();
+                    downloadCache.resetCache();
+                    atProcessorCache.reset();
+                    stores.commitTransaction();
+
+                    // Update GUI tracking
+                    autoPopOffBlocksCount.decrementAndGet();
+                    blockListeners.notify(block, Event.BLOCK_AUTO_POPPED);
+                } catch (Exception e) {
+                    logger.error("Error popping off block at height {}", blockchain.getHeight() + 1, e);
+                    stores.rollbackTransaction();
+                    throw e;
+                } finally {
+                    stores.endTransaction();
+                }
+
+                if (checkDatabaseState() == 0) {
+                    logger.info("Database became consistent at height {}", blockchain.getHeight());
+                    success = true;
+                    break;
+                }
+            }
+            if (!success) {
+                logger.warn("Reached limit height {} without restoring consistency.", limitHeight);
+            }
+        } catch (Exception e) {
+            logger.error("Error resolving consistency", e);
+        } finally {
+            resolutionState = success ? ResolutionState.SUCCESS : ResolutionState.FAILED;
+            if (success) {
+                logger.info("Blocks popped off: {}", startHeight - blockchain.getHeight());
+                logger.info("Pop-off height to {} from {}", blockchain.getHeight(), startHeight);
+                logger.info("Database consistent at height {}", blockchain.getHeight());
+                logger.info("Total Mined (Supply)           : {}", lastCheckTotalMined.get());
+                logger.info("Total Effective Balance        : {}", lastCheckTotalEffectiveBalance.get());
+            } else {
+                logger.info("Database consistency resolution failed.");
+            }
+            // Reset GUI tracking variables
+            autoPopOffBlocksCount.set(0);
+            autoLastPopOffHeight.set(-1);
+            blockListeners.notify(blockchain.getLastBlock(), Event.BLOCK_AUTO_POPPED);
+
+            Block block = blockDb.findLastBlock();
+            blockchain.setLastBlock(block);
+            transactionProcessor.requeueAllUnconfirmedTransactions();
+        }
+    }
+
+    /**
+     * Manually triggers the database consistency resolution process.
+     * <p>
+     * This method is designed to be called from an external source (e.g., API or
+     * GUI) to force a
+     * consistency check and resolution attempt. Unlike
+     * {@link #autoResolveDatabaseConsistency()},
+     * this method spawns a new thread to perform the operation asynchronously,
+     * ensuring that the
+     * calling thread is not blocked.
+     * <p>
+     * It explicitly pauses block processing threads (downloader and importer)
+     * before starting the
+     * resolution logic and resumes them afterwards.
+     */
+    @Override
+    public void manualResolveDatabaseConsistency() {
+        if (resolutionState == ResolutionState.ACTIVE) {
+            logger.info("Consistency resolution is already active. Ignoring new request.");
+            return;
+        }
+        resolutionState = ResolutionState.ACTIVE;
+
+        new Thread(() -> {
+            getMoreBlocksAutoPause.set(true);
+            blockImporterAutoPause.set(true);
+            getMoreBlocksLock.writeLock().lock();
+            blockImporterLock.writeLock().lock();
+            try {
+                synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
+                    blockListeners.notify(null, Event.CONSISTENCY_RESOLUTION_STARTED);
+                    logger.info("Resolving database consistency...");
+                    if (checkDatabaseState() == 0) {
+                        resolutionState = ResolutionState.SUCCESS;
+                        blockListeners.notify(null, Event.CONSISTENCY_RESOLUTION_FINISHED);
+                        logger.info("Database is already consistent.");
+                        return;
+                    }
+
+                    int limitHeight = getSafeRollbackHeight();
+
+                    logger.info("Popping off blocks until consistent or height {}", limitHeight);
+
+                    // Initialize GUI tracking variables
+                    int startHeight = blockchain.getHeight();
+                    beforeRollbackHeight.set(startHeight);
+                    autoLastPopOffHeight.set(limitHeight);
+                    autoPopOffBlocksCount.set(startHeight - limitHeight);
+                    blockListeners.notify(blockchain.getLastBlock(), Event.BLOCK_AUTO_POPPED);
+
+                    boolean success = false;
+                    try {
+                        while (blockchain.getHeight() > limitHeight) {
+                            stores.beginTransaction();
+                            try {
+                                Block block = popLastBlock();
+                                for (DerivedTable table : derivedTableManager.getDerivedTables()) {
+                                    table.rollback(block.getHeight());
+                                }
+                                indirectIncomingService.rollback(block.getHeight());
+                                dbCacheManager.flushCache();
+                                downloadCache.resetCache();
+                                atProcessorCache.reset();
+                                stores.commitTransaction();
+
+                                // Update GUI tracking
+                                autoPopOffBlocksCount.decrementAndGet();
+                                blockListeners.notify(block, Event.BLOCK_AUTO_POPPED);
+                            } catch (Exception e) {
+                                logger.error("Error popping off block at height {}", blockchain.getHeight() + 1, e);
+                                stores.rollbackTransaction();
+                                throw e;
+                            } finally {
+                                stores.endTransaction();
+                            }
+
+                            if (checkDatabaseState() == 0) {
+                                logger.info("Database became consistent at height {}", blockchain.getHeight());
+                                success = true;
+                                break;
+                            }
+                        }
+                        if (!success) {
+                            logger.warn("Reached limit height {} without restoring consistency.", limitHeight);
+                        }
+                    } catch (Exception e) {
+                        logger.error("Error resolving consistency", e);
+                    } finally {
+                        resolutionState = success ? ResolutionState.SUCCESS : ResolutionState.FAILED;
+                        if (success) {
+                            logger.info("Blocks popped off: {}", startHeight - blockchain.getHeight());
+                            logger.info("Pop-off height to {} from {}", blockchain.getHeight(), startHeight);
+                            logger.info("Database consistent at height {}", blockchain.getHeight());
+                            logger.info("Total Mined (Supply)           : {}", lastCheckTotalMined.get());
+                            logger.info("Total Effective Balance        : {}", lastCheckTotalEffectiveBalance.get());
+                        } else {
+                            logger.info("Database consistency resolution failed.");
+                        }
+                        // Reset GUI tracking variables
+                        autoPopOffBlocksCount.set(0);
+                        autoLastPopOffHeight.set(-1);
+                        blockListeners.notify(blockchain.getLastBlock(), Event.BLOCK_AUTO_POPPED);
+
+                        Block block = blockDb.findLastBlock();
+                        blockchain.setLastBlock(block);
+                        transactionProcessor.requeueAllUnconfirmedTransactions();
+                    }
+                }
+            } finally {
+                blockImporterLock.writeLock().unlock();
+                getMoreBlocksLock.writeLock().unlock();
+                getMoreBlocksAutoPause.set(false);
+                blockImporterAutoPause.set(false);
+                logger.info("Database consistency resolution finished with state: {}.", resolutionState);
+                blockListeners.notify(null, Event.CONSISTENCY_RESOLUTION_FINISHED);
+            }
+        }).start();
+    }
+
     // Publicly available trim scheduling method
     @Override
     public void scheduleTrim(Block block) {
-        if (isTrimming.get()) {
-            logger.debug("Trim already in progress, skipping schedule for block {}", block.getHeight());
+        if (!isScheduleTrimRequested.compareAndSet(false, true)) {
+            logger.debug("Trim already requested for block {}", block.getHeight());
             return;
         }
         new Thread(() -> scheduleTrimDatabase(block), "TrimDatabaseThread").start();
+        isScheduleTrimRequested.set(false);
     }
 
     // This now runs on its own thread using separate transaction management to
     // calcel trim if needed in case of error
     private void scheduleTrimDatabase(Block block) { // This now runs on its own thread
-        if (!isTrimming.compareAndSet(false, true)) {
-            logger.info("Database trim already running, another request is ignored.");
-            return;
-        }
-
         // Pause block synchronization
         getMoreBlocksAutoPause.set(true);
         blockImporterAutoPause.set(true);
@@ -1704,13 +2111,20 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         blockImporterLock.writeLock().lock();
         if (isShutdown.get()) {
             logger.info("Node is shutting down, database trim aborted.");
-            isTrimming.set(false);
             blockImporterLock.writeLock().unlock();
             getMoreBlocksLock.writeLock().unlock();
             return;
         }
         try {
             synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
+                if (checkDatabaseState() != 0) {
+                    logger.warn("Database is inconsistent. Skipping trim to preserve rollback capability.");
+                    if (isAutoResolutionRequired()) {
+                        autoResolveDatabaseConsistency();
+                    }
+                    return;
+                }
+                isTrimming.set(true);
                 lastTrimHeight.set(Math.max(block.getHeight() - Constants.MAX_ROLLBACK, 0));
                 if (lastTrimHeight.get() > 0) {
                     stores.beginTransaction();
@@ -1748,11 +2162,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                             }
                             currentTrimHeight.set(lastTrimHeight.get());
                             stores.commitTransaction();
+                            savePersistentState();
                         } else {
                             logger.error(
                                     "Database became corrupted during trim. Rolling back changes. Min rollback height is {}",
                                     getMinRollbackHeight());
-                            blockListeners.notify(null, Event.DATABASE_CONSISTENCY_UPDATE);
                             throw new RuntimeException("Database corruption detected after trim.");
                         }
                     } catch (Exception e) {
@@ -1820,11 +2234,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     }
                     currentTrimHeight.set(lastTrimHeight.get());
                     stores.commitTransaction();
+                    savePersistentState();
                 } else {
                     logger.error(
                             "Database became corrupted during trim. Rolling back changes. Min rollback height is {}",
                             getMinRollbackHeight());
-                    blockListeners.notify(null, Event.DATABASE_CONSISTENCY_UPDATE);
                     throw new RuntimeException("Database corruption detected after trim.");
                 }
             } catch (Exception e) {
@@ -1836,6 +2250,65 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 blockListeners.notify(block, Event.TRIM_END);
                 stores.endTransaction();
             }
+        }
+    }
+
+    private void savePersistentState() {
+        Path settingsPath = PathUtils.resolvePath(
+                Paths.get(propertyService.getString(Props.SETTINGS_DIR), "settings.json").toString());
+        try {
+            if (settingsPath.getParent() != null) {
+                Files.createDirectories(settingsPath.getParent());
+            }
+            JsonObject settings = new JsonObject();
+            if (Files.exists(settingsPath)) {
+                try (BufferedReader reader = Files.newBufferedReader(settingsPath)) {
+                    JsonElement parsed = JsonParser.parseReader(reader);
+                    if (parsed.isJsonObject()) {
+                        settings = parsed.getAsJsonObject();
+                    }
+                } catch (Exception e) {
+                    logger.warn("Could not parse existing settings file, creating new one.", e);
+                }
+            }
+
+            if (lastTrimHeight.get() > 0) {
+                settings.addProperty("trimHeight", lastTrimHeight.get());
+            }
+
+            try (BufferedWriter writer = Files.newBufferedWriter(settingsPath)) {
+                writer.write(settings.toString());
+            }
+        } catch (IOException e) {
+            logger.error("Failed to save persistent state to " + settingsPath, e);
+        }
+    }
+
+    private void loadPersistentState() {
+        Path settingsPath = PathUtils.resolvePath(
+                Paths.get(propertyService.getString(Props.SETTINGS_DIR), "settings.json").toString());
+        if (!Files.exists(settingsPath)) {
+            return;
+        }
+        try (BufferedReader reader = Files.newBufferedReader(settingsPath)) {
+            JsonElement parsed = JsonParser.parseReader(reader);
+            if (parsed.isJsonObject()) {
+                JsonObject settings = parsed.getAsJsonObject();
+                if (settings.has("trimHeight")) {
+                    int height = settings.get("trimHeight").getAsInt();
+                    if (height > blockchain.getHeight()) {
+                        logger.warn(
+                                "Persistent trim height {} is higher than current blockchain height {}. Ignoring persistent state.",
+                                height, blockchain.getHeight());
+                    } else {
+                        lastTrimHeight.set(height);
+                        currentTrimHeight.set(height);
+                        logger.info("Loaded persistent trim height: {}", height);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Failed to load persistent state from " + settingsPath, e);
         }
     }
 
@@ -1865,11 +2338,28 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     }
 
     @Override
+    public boolean isTrimming() {
+        return isTrimming.get();
+    }
+
+    @Override
     public int getMinRollbackHeight() {
         int trimHeight = (lastTrimHeight.get() > 0
                 ? lastTrimHeight.get()
                 : Math.max(blockchain.getHeight() - Constants.MAX_ROLLBACK, 0));
         return trimDerivedTables ? trimHeight : 0;
+    }
+
+    @Override
+    public int getSafeRollbackHeight() {
+        if (trimDerivedTables) {
+            if (lastTrimHeight.get() > 0) {
+                return lastTrimHeight.get();
+            } else {
+                return getEstimatedTrimHeight();
+            }
+        }
+        return Math.max(0, blockchain.getHeight() - Constants.MAX_ROLLBACK);
     }
 
     @Override
@@ -1883,8 +2373,29 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     }
 
     @Override
+    public int getEstimatedTrimHeight() {
+        int height = blockchain.getHeight();
+        return height - (height % Constants.TRIM_PERIOD);
+    }
+
+    @Override
     public String getCurrentlyTrimmingTable() {
         return currentlyTrimmingTable.get();
+    }
+
+    @Override
+    public ResolutionState getResolutionState() {
+        return resolutionState;
+    }
+
+    @Override
+    public PopOffState getManualPopOffState() {
+        return manualPopOffState;
+    }
+
+    @Override
+    public PopOffState getAutoPopOffState() {
+        return autoPopOffState;
     }
 
     @Override
@@ -1959,31 +2470,59 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
             long diff = totalMined - totalEffectiveBalance;
 
-            logger.error("  DATABASE INCONSISTENCY DETECTED at height {}", blockchain.getHeight());
-            logger.error("  Total Mined (Supply)         : {}", totalMined);
-            logger.error("  Total Effective Balance      : {}", totalEffectiveBalance);
-            logger.error("  Difference (Mined - Effective) : {}", diff);
-            logger.error("  --------------------------------------------------");
-            logger.error("  Component - Account Balances   : {}", accountBalances);
-            logger.error("  Component - Escrow Balances    : {}", escrowBalances);
-            logger.error("  Calculated Sum (Acc + Escrow): {}", (accountBalances + escrowBalances));
-            logger.error("----------------------------------------------------");
+            // If Auto Resolve is active, log at debug level to reduce spam
+            if (resolutionState == ResolutionState.ACTIVE) {
+                logger.debug("  Database inconsistency detected at height {}", blockchain.getHeight());
+                logger.debug("  Total Mined (Supply)           : {}", totalMined);
+                logger.debug("  Total Effective Balance        : {}", totalEffectiveBalance);
+                logger.debug("  Difference (Mined - Effective) : {}", diff);
+                logger.debug(" --------------------------------------------------");
+                logger.debug("  Component - Account Balances   : {}", accountBalances);
+                logger.debug("  Component - Escrow Balances    : {}", escrowBalances);
+                logger.debug("  Calculated Sum (Acc + Escrow): {}", (accountBalances + escrowBalances));
+                logger.debug("----------------------------------------------------");
+            } else {
+                logger.error("  DATABASE INCONSISTENCY DETECTED at height {}", blockchain.getHeight());
+                logger.error("  Total Mined (Supply)           : {}", totalMined);
+                logger.error("  Total Effective Balance        : {}", totalEffectiveBalance);
+                logger.error("  Difference (Mined - Effective) : {}", diff);
+                logger.error("  --------------------------------------------------");
+                logger.error("  Component - Account Balances   : {}", accountBalances);
+                logger.error("  Component - Escrow Balances    : {}", escrowBalances);
+                logger.error("  Calculated Sum (Acc + Escrow): {}", (accountBalances + escrowBalances));
+                logger.error("----------------------------------------------------");
 
-            logger.warn(
-                    "Block height {}, total mined {}, total effective+burnt {}",
-                    blockchain.getHeight(),
-                    totalMined,
-                    totalEffectiveBalance);
+                logger.warn(
+                        "Block height {}, total mined {}, total effective+burnt {}",
+                        blockchain.getHeight(),
+                        totalMined,
+                        totalEffectiveBalance);
+            }
         }
 
         lastCheckTotalMined.set(totalMined);
         lastCheckTotalEffectiveBalance.set(totalEffectiveBalance);
         lastCheckHeight.set(blockchain.getHeight());
 
-        consistencyState.set(totalMined == totalEffectiveBalance ? ConsistencyState.CONSISTENT
-                : ConsistencyState.INCONSISTENT);
+        // Update previous state for the next check
+        previousConsistencyState = consistencyState.get();
 
-        blockListeners.notify(null, Event.DATABASE_CONSISTENCY_UPDATE);
+        ConsistencyState newConsistencyState = (totalMined == totalEffectiveBalance) ? ConsistencyState.CONSISTENT
+                : ConsistencyState.INCONSISTENT;
+        consistencyState.set(newConsistencyState);
+
+        /**
+         * If the database becomes consistent (e.g. via manual resync or revalidate)
+         * while the resolution state was FAILED, we update it to IDLE to reflect the
+         * recovery.
+         * This ensures the UI and other components see the correct state.
+         */
+        if (newConsistencyState == ConsistencyState.CONSISTENT && resolutionState == ResolutionState.FAILED) {
+            resolutionState = ResolutionState.IDLE;
+            logger.info("Database consistency restored. Resolution state updated to IDLE.");
+        }
+
+        blockListeners.notify(null, Event.DATABASE_CONSISTENCY_UPDATE); // Notify listeners about the state update
 
         if (logger.isDebugEnabled()) {
             logger.debug("Total mined {}, total effective {}", totalMined, totalEffectiveBalance);
@@ -2014,8 +2553,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             long diff = totalMined - totalEffectiveBalance;
 
             logger.error("  DATABASE INCONSISTENCY DETECTED at height {}", blockchain.getHeight());
-            logger.error("  Total Mined (Supply)         : {}", totalMined);
-            logger.error("  Total Effective Balance      : {}", totalEffectiveBalance);
+            logger.error("  Total Mined (Supply)           : {}", totalMined);
+            logger.error("  Total Effective Balance        : {}", totalEffectiveBalance);
             logger.error("  Difference (Mined - Effective) : {}", diff);
             logger.error("  --------------------------------------------------");
             logger.error("  Component - Account Balances   : {}", accountBalances);
@@ -2028,36 +2567,73 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     blockchain.getHeight(),
                     totalMined,
                     totalEffectiveBalance);
+        } else {
+            logger.info("Database is consistent at height {}", blockchain.getHeight());
+            logger.info("Total Mined (Supply)           : {}", totalMined);
+            logger.info("Total Effective Balance        : {}", totalEffectiveBalance);
         }
 
         lastCheckTotalMined.set(totalMined);
         lastCheckTotalEffectiveBalance.set(totalEffectiveBalance);
         lastCheckHeight.set(blockchain.getHeight());
 
-        consistencyState.set(totalMined == totalEffectiveBalance ? ConsistencyState.CONSISTENT
-                : ConsistencyState.INCONSISTENT);
+        // Update previous state for the next check
+        previousConsistencyState = consistencyState.get();
 
-        logger.info("Database state checked at height {}: total mined = {}, total effective+burnt = {}. State: {}",
-                blockchain.getHeight(), totalMined, totalEffectiveBalance,
-                consistencyState.get() == ConsistencyState.CONSISTENT ? "CONSISTENT" : "INCONSISTENT");
+        ConsistencyState newConsistencyState = (totalMined == totalEffectiveBalance) ? ConsistencyState.CONSISTENT
+                : ConsistencyState.INCONSISTENT;
+        consistencyState.set(newConsistencyState);
 
-        blockListeners.notify(null, Event.DATABASE_CONSISTENCY_UPDATE);
-
-        if (logger.isDebugEnabled()) {
-            logger.debug("Total mined {}, total effective {}", totalMined, totalEffectiveBalance);
-            logger.debug("Database consistency state: {}", consistencyState.get());
+        /**
+         * If the database becomes consistent (e.g. via manual resync or revalidate)
+         * while the resolution state was FAILED, we update it to IDLE to reflect the
+         * recovery.
+         * This ensures the UI and other components see the correct state.
+         */
+        if (newConsistencyState == ConsistencyState.CONSISTENT && resolutionState == ResolutionState.FAILED) {
+            resolutionState = ResolutionState.IDLE;
+            logger.info("Database consistency restored. Resolution state updated to IDLE.");
         }
+
+        blockListeners.notify(null, Event.DATABASE_CONSISTENCY_UPDATE); // Notify listeners about the state update
 
         return comparison;
     }
 
+    private void initialCleanDatabase() {
+        logger.info("Initial DatabaseClean popoff 1 block...");
+        if (blockchain.getHeight() > 0) {
+            popOff(1);
+        }
+
+        if (Boolean.FALSE.equals(propertyService.getBoolean(Props.DB_SKIP_CHECK))) {
+            // Check database state and auto-resolve if needed on startup
+            logger.info("Initial database check...");
+            checkDatabaseStateRequest();
+            if (isAutoResolutionRequired()) {
+                logger.info("Database is inconsistent on startup.");
+                manualResolveDatabaseConsistency();
+            }
+        }
+    }
+
+    /**
+     * Public entry point to request a database consistency check.
+     * This method pauses block processing threads, performs the consistency check
+     * using {@link #checkDatabaseState()},
+     * and then resumes the processing threads.
+     *
+     * @return 0 if the database is consistent, otherwise a non-zero value
+     *         indicating inconsistency.
+     */
     public int checkDatabaseStateRequest() {
-        // Pop-off is ongoing database state chack will perform after pop-off is
-        // complete
         if (isTrimming.get()) {
             logger.info("Trim is in progress. Database state check will give results after trim finished.");
         }
-        if (manualPopOffBlocksCount.get() > 0 || autoPopOffBlocksCount.get() > 0) {
+        if (resolutionState == ResolutionState.ACTIVE) {
+            logger.info(
+                    "Database consistency resolution is in progress. Database state check will give results after resolution finished.");
+        } else if (manualPopOffState == PopOffState.ACTIVE || autoPopOffState == PopOffState.ACTIVE) {
             logger.info("Pop-off is in progress. Database state check will give results after pop-off finished.");
         }
 
@@ -2166,8 +2742,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         long txLoopTime = 0;
         long housekeepingTime = 0;
         long commitTime = 0;
-
-        final Map<String, Boolean> referencedTransactionValidityCache = new HashMap<>();
 
         synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
             stores.beginTransaction();
@@ -2402,7 +2976,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     housekeepingTimeMs, txApplyTimeMs, atTimeMs, subscriptionTimeMs, blockApplyTimeMs, commitTimeMs,
                     miscTimeMs, block.getHeight(), allTransactionCount, systemTransactionCount, atCount,
                     block.getPayloadLength(), maxPayloadSize));
-            blockListeners.notify(null, Event.PERFORMANCE_STATS_UPDATED);
+            performanceStatsListeners.notify(performanceStats.get(), Event.PERFORMANCE_STATS_UPDATED);
 
             logger.debug("Successfully pushed {} (height {})", block.getId(), block.getHeight());
             statisticsManager.blockAdded();
@@ -2414,19 +2988,22 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 autoPopOffNumberOfBlocks = 0;
             }
 
-            // Trim after push block if needed
-            if (trimDerivedTables && (block.getHeight() % Constants.MAX_ROLLBACK) == 0) {
+            if ((block.getHeight() % Constants.MAX_ROLLBACK) == 0) {
+                // Check Database consistency at rollback boundaries
                 if (checkDatabaseState() == 0) {
                     // Only trim a consistent database, otherwise it would be impossible to fix it
                     // by roll back
-                    if (block.getHeight() % (Constants.MAX_ROLLBACK * 10) == 0) {
+                    if (trimDerivedTables && block.getHeight() % Constants.TRIM_PERIOD == 0) {
                         // Trim within its own transaction
                         trimDatabase(block);
                     }
                 } else {
-                    lastTrimHeight.set(0);
-                    logger.error("Balance mismatch on the database, please try popping off to block {}",
-                            getMinRollbackHeight());
+                    logger.warn(
+                            "Database is inconsistent at block height {}, skipping trim to preserve rollback capability.",
+                            block.getHeight());
+                    if (isAutoResolutionRequired()) {
+                        autoResolveDatabaseConsistency();
+                    }
                 }
             }
         }
@@ -2511,15 +3088,21 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
     @Override
     public List<Block> popOffTo(int height) {
-        List<Block> blocks = popOffTo(blockchain.getBlockAtHeight(height), null);
-        if (Boolean.FALSE.equals(propertyService.getBoolean(Props.DB_SKIP_CHECK))
-                && checkDatabaseState() != 0) {
-            logger.warn(
-                    "Database is inconsistent,"
-                            + " try to pop off to block height {} or sync from empty.",
-                    getMinRollbackHeight());
+        // We need to acquire locks here because autoResolveDatabaseConsistency assumes
+        // exclusive access, and the private popOffTo releases its locks before
+        // returning.
+        synchronized (downloadCache) {
+            synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
+                List<Block> blocks = popOffTo(blockchain.getBlockAtHeight(height), null);
+                if (Boolean.FALSE.equals(propertyService.getBoolean(Props.DB_SKIP_CHECK))
+                        && checkDatabaseState() != 0) {
+                    if (isAutoResolutionRequired()) {
+                        autoResolveDatabaseConsistency();
+                    }
+                }
+                return blocks;
+            }
         }
-        return blocks;
     }
 
     @Override
@@ -2563,6 +3146,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         Block block = blockchain.getLastBlock();
         try {
             synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
+                manualPopOffState = PopOffState.ACTIVE;
                 if (manualPopOffBlocksCount.get() == 0) {
                     logger.info("No blocks to pop off.");
                     return;
@@ -2685,6 +3269,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             // Get block height from datbase
             block = blockDb.findLastBlock();
             blockchain.setLastBlock(block);
+            manualPopOffState = PopOffState.IDLE;
             blockListeners.notify(block, Event.BLOCK_MANUAL_POPPED);
             blockImporterLock.writeLock().unlock();
             getMoreBlocksLock.writeLock().unlock();
@@ -2719,6 +3304,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
                 Block block = blockchain.getLastBlock();
                 try {
+                    autoPopOffState = PopOffState.ACTIVE;
                     stores.beginTransaction();
                     int blockHeight = block.getHeight();
                     beforeRollbackHeight.set(blockHeight);
@@ -2779,6 +3365,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     blockchain.setLastBlock(block);
                     blockListeners.notify(block, Event.BLOCK_AUTO_POPPED);
                     stores.endTransaction();
+                    autoPopOffState = PopOffState.IDLE;
                 }
             }
         }

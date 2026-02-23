@@ -73,7 +73,7 @@ public final class PeerServlet extends HttpServlet {
         final Map<String, PeerRequestHandler> map = new HashMap<>();
         map.put("addPeers", AddPeers.instance);
         map.put("getCumulativeDifficulty", new GetCumulativeDifficulty(blockchain));
-        map.put("getInfo", new GetInfo(timeService));
+        map.put("getInfo", new GetInfo(timeService, blockchain));
         map.put("getMilestoneBlockIds", new GetMilestoneBlockIds(blockchain));
         map.put("getNextBlockIds", new GetNextBlockIds(blockchain));
         map.put("getBlocksFromHeight", new GetBlocksFromHeight(blockchain));

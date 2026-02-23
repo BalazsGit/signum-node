@@ -1,5 +1,6 @@
 package brs.peer;
 
+import brs.Blockchain;
 import brs.services.TimeService;
 import brs.util.JSON;
 import com.google.gson.JsonElement;
@@ -8,9 +9,11 @@ import com.google.gson.JsonObject;
 final class GetInfo implements PeerServlet.PeerRequestHandler {
 
     private final TimeService timeService;
+    private final Blockchain blockchain;
 
-    GetInfo(TimeService timeService) {
+    GetInfo(TimeService timeService, Blockchain blockchain) {
         this.timeService = timeService;
+        this.blockchain = blockchain;
     }
 
     @Override
@@ -55,6 +58,9 @@ final class GetInfo implements PeerServlet.PeerRequestHandler {
 
         Peers.notifyListeners(peerImpl, Peers.Event.ADDED_ACTIVE_PEER);
 
-        return Peers.myPeerInfoResponse;
+        // Clone the static response and add dynamic height
+        JsonObject response = JSON.cloneJson(Peers.myPeerInfoResponse).getAsJsonObject();
+        response.addProperty("height", blockchain.getHeight());
+        return response;
     }
 }

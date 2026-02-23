@@ -24,6 +24,10 @@ public interface Peer extends Comparable<Peer> {
 
     Version getVersion();
 
+    int getHeight();
+
+    void setHeight(int height);
+
     String getApplication();
 
     String getPlatform();

@@ -21,6 +21,12 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.Icon;
+import javax.swing.JDialog;
+import brs.gui.animations.RotatingSvgIcon;
+import javax.swing.JDialog;
+import com.github.weisj.jsvg.SVGDocument;
+import com.github.weisj.jsvg.parser.SVGLoader;
+import java.awt.geom.Rectangle2D;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
@@ -38,6 +44,7 @@ import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.UIManager;
+import java.net.URL;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,6 +52,7 @@ import org.slf4j.LoggerFactory;
 import brs.Signum;
 import brs.BlockchainProcessor;
 import brs.Constants;
+import brs.gui.util.CustomDrawings;
 import brs.Block;
 import brs.peer.Peer;
 import brs.fluxcapacitor.FluxValues;
@@ -72,27 +80,29 @@ public class SignumGUI extends JFrame {
     private JPanel toolBar = null;
     private JLabel latestBlockHeightLabel = null;
     private JLabel latestBlockTimestampLabel = null;
+    private JLabel elapsedTimeLabel = null;
+    private JSeparator elapsedTimeSeparator = null;
+    private Timer elapsedTimeTimer = null;
+    private long elapsedTimeCounter = 0;
     private JPanel infoPanel;
     private JProgressBar syncProgressBar = null;
     private JScrollPane textScrollPane = null;
     private String programName = null;
     private String version = null;
     private final Color iconColor;
+    private final Color contrastRed = new Color(255, 120, 120);
 
     private JLabel connectedPeersLabel;
     private JLabel peersCountLabel;
     private JLabel blacklistedPeersLabel;
     private JLabel uploadVolumeLabel;
     private JLabel downloadVolumeLabel;
-    private JCheckBox showPopOffCheckbox;
-    private JCheckBox showMetricsCheckbox;
     private JLabel trimHeightLabel;
     private JSeparator trimSeparator;
     private JLabel popOffBlockCountLabel;
     private JLabel popOffBlockHeightLabel;
     private JSeparator popOffSeparator1;
     private JSeparator popOffSeparator2;
-    private boolean showMetrics = false;
     private boolean showPopOff = false;
     private boolean isSyncStopped = false;
     private boolean isShuttingDown = false;
@@ -100,6 +110,7 @@ public class SignumGUI extends JFrame {
     private boolean measurementActive = false;
     private boolean experimentalActive = false;
     private boolean trimEnabled = false;
+    private boolean autoResolveEnabled = false;
 
     private JButton openPhoenixButton;
     private JButton openClassicButton;
@@ -114,16 +125,22 @@ public class SignumGUI extends JFrame {
 
     private MetricsPanel metricsPanel;
 
-    private final JPanel checkboxPanel;
+    private JComponent popOffToggle;
+    private JComponent hamburgerMenu;
     private JLabel measurementLabel;
     private JLabel experimentalLabel;
     private JLabel trimLabel;
+    private JLabel autoResolveLabel;
     private JSeparator measurementSeparator;
     private JSeparator experimentalSeparator;
     private JSeparator trimIconSeparator;
+    private JSeparator autoResolveSeparator;
     private JPanel measurementPanel;
     private JPanel experimentalPanel;
     private JPanel trimPanel;
+    private JPanel autoResolvePanel;
+
+    private final AtomicBoolean isDbCheckRunning = new AtomicBoolean(false);
 
     private final Dimension verticalSeparatorSize = new Dimension(2, 20);
 
@@ -169,26 +186,39 @@ public class SignumGUI extends JFrame {
     private Timer guiTimer;
     private final AtomicBoolean guiTimerStarted = new AtomicBoolean(false);
 
+    private JDialog waitDialog;
+
     private JLabel createLabel(String text, Color color, String tooltip) {
+        return createLabel(text, color, tooltip, null);
+    }
+
+    private JLabel createLabel(String text, Color color, String tooltip, String title) {
         JLabel label = new JLabel(text);
         if (color != null) {
             label.setForeground(color);
         }
         if (tooltip != null) {
-            addInfoTooltip(label, tooltip);
+            String shortTooltip = tooltip.split("\n")[0];
+            label.setToolTipText(shortTooltip);
+            addInfoTooltip(label, tooltip, title);
         }
         return label;
     }
 
-    private void addInfoTooltip(JLabel label, String text) {
+    private void addInfoTooltip(JLabel label, String text, String titleOverride) {
         label.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (SwingUtilities.isRightMouseButton(e)) {
-                    String title = label.getText();
-                    // Remove trailing colon for a cleaner title
-                    if (title.endsWith(":")) {
-                        title = title.substring(0, title.length() - 1);
+                    String title;
+                    if (titleOverride != null) {
+                        title = label.getText() + " " + titleOverride;
+                    } else {
+                        title = label.getText();
+                        // Remove trailing colon for a cleaner title
+                        if (title.endsWith(":")) {
+                            title = title.substring(0, title.length() - 1);
+                        }
                     }
                     // Wrap the text in HTML to control the width of the dialog.
                     String htmlText = "<html><body><p style='width: 300px;'>" + text.replace("\n", "<br>")
@@ -268,12 +298,19 @@ public class SignumGUI extends JFrame {
             public void append(String str) {
                 super.append(str);
 
-                while (getText().split("\n", -1).length > OUTPUT_MAX_LINES) {
-                    int fle = getText().indexOf('\n');
-                    super.replaceRange("", 0, fle + 1);
+                try {
+                    int lineCount = getLineCount();
+                    if (lineCount > OUTPUT_MAX_LINES) {
+                        int endOffset = getLineEndOffset(lineCount - OUTPUT_MAX_LINES - 1);
+                        replaceRange("", 0, endOffset);
+                    }
+                } catch (Exception e) {
+                    // ignore
                 }
-                JScrollBar vertical = textScrollPane.getVerticalScrollBar();
-                vertical.setValue(vertical.getMaximum());
+                if (textScrollPane != null) {
+                    JScrollBar vertical = textScrollPane.getVerticalScrollBar();
+                    vertical.setValue(vertical.getMaximum());
+                }
             }
         };
         iconColor = textArea.getForeground();
@@ -318,6 +355,17 @@ public class SignumGUI extends JFrame {
         latestBlockInfoPanel.add(separator);
         latestBlockInfoPanel.add(latestBlockTimestampLabel);
 
+        elapsedTimeSeparator = new JSeparator(SwingConstants.VERTICAL);
+        elapsedTimeSeparator.setPreferredSize(verticalSeparatorSize);
+        elapsedTimeLabel = new JLabel("Elapsed Time: -");
+        String elapsedTooltip = "Displays the time elapsed in seconds since the last block was generated.\n\n"
+                + "This counter resets every time a new block is received. Since the target block time is 240 seconds (4 minutes), this helps visualize how long it has been since the last network update.";
+        addInfoTooltip(elapsedTimeLabel, elapsedTooltip);
+        elapsedTimeSeparator.setVisible(false);
+        elapsedTimeLabel.setVisible(false);
+        latestBlockInfoPanel.add(elapsedTimeSeparator);
+        latestBlockInfoPanel.add(elapsedTimeLabel);
+
         String blockInfoTooltip = "Displays critical information about the most recent block processed by your node. This includes:\n\n"
                 + "- Latest block: The sequential number of the latest block synchronized by your node.\n"
                 + "- Timestamp: The date and time when the block was generated by a miner.\n\n"
@@ -325,11 +373,14 @@ public class SignumGUI extends JFrame {
         addInfoTooltip(latestBlockHeightLabel, blockInfoTooltip);
         addInfoTooltip(latestBlockTimestampLabel, blockInfoTooltip);
         metricsPanel = new MetricsPanel(this);
+        metricsPanel.setVisible(false);
 
         trimSeparator = new JSeparator(SwingConstants.VERTICAL);
         trimSeparator.setPreferredSize(verticalSeparatorSize);
         String trimTooltip = "The minimum height to which the blockchain can be rolled back. Older data is pruned to save space.\n"
-                + "Trimming occurs every " + (brs.Constants.MAX_ROLLBACK * 10) + " blocks.";
+                + "Trimming occurs every " + brs.Constants.TRIM_PERIOD + " blocks.\n\n"
+                + "If 'est.' (estimated) is shown, the actual trim height is unknown (e.g. after restart),\n"
+                + "so it is calculated based on the trim period.";
         trimHeightLabel = createLabel("Trim height: -", null, trimTooltip);
 
         trimSeparator.setVisible(false);
@@ -347,7 +398,7 @@ public class SignumGUI extends JFrame {
         popOffSeparator2.setPreferredSize(verticalSeparatorSize);
 
         String popOffHeightTooltip = "Displays the target block height after the pop-off operation completes, along with the current block height before the pop-off.\n\nThis information is crucial for understanding the state of your blockchain during a pop-off, which is used to resolve forks or other issues by reverting to a previous state.";
-        popOffBlockHeightLabel = createLabel("Pop-off height: - 🡸 -", null, popOffHeightTooltip);
+        popOffBlockHeightLabel = createLabel("- 🡸 -", null, popOffHeightTooltip);
 
         latestBlockInfoPanel.add(popOffSeparator1);
         latestBlockInfoPanel.add(popOffBlockCountLabel);
@@ -355,35 +406,60 @@ public class SignumGUI extends JFrame {
         latestBlockInfoPanel.add(popOffBlockHeightLabel);
         setPopOffLabelVisible(false);
 
-        // === Add checkboxes to toolBar ===
-        checkboxPanel = new JPanel();
-        checkboxPanel.setLayout(new BoxLayout(checkboxPanel, BoxLayout.Y_AXIS));
+        // === Add toggle to toolBar ===
+        popOffToggle = new JComponent() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                (showPopOff ? CustomDrawings.Chevron.LEFT : CustomDrawings.Chevron.RIGHT)
+                        .draw((Graphics2D) g, getWidth(), getHeight(), iconColor);
+            }
 
-        showPopOffCheckbox = new JCheckBox("Pop off");
-        // showPopOffCheckbox.setHorizontalTextPosition(SwingConstants.LEFT);
-        showPopOffCheckbox.setSelected(showPopOff);
-        showPopOffCheckbox.addActionListener(e -> {
-            showPopOff = showPopOffCheckbox.isSelected();
-            popOff10Button.setVisible(showPopOff);
-            popOff100Button.setVisible(showPopOff);
+            @Override
+            public Dimension getPreferredSize() {
+                return new Dimension(16, 20);
+            }
+
+            @Override
+            public Dimension getMaximumSize() {
+                return getPreferredSize();
+            }
+        };
+        popOffToggle.setToolTipText("Toggle Pop-off buttons");
+        popOffToggle.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                showPopOff = !showPopOff;
+                popOff10Button.setVisible(showPopOff);
+                popOff100Button.setVisible(showPopOff);
+                popOffToggle.repaint();
+            }
         });
 
-        showMetricsCheckbox = new JCheckBox("Metrics");
-        // showMetricsCheckbox.setHorizontalTextPosition(SwingConstants.LEFT);
-        showMetricsCheckbox.setSelected(showMetrics); // default visible
-        showMetricsCheckbox.addActionListener(e -> {
-            showMetrics = showMetricsCheckbox.isSelected();
-            metricsPanel.setVisible(showMetrics);
-        });
+        // Hamburger Menu
+        hamburgerMenu = new JComponent() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                CustomDrawings.HAMBURGER.draw((Graphics2D) g, getWidth(), getHeight(), iconColor);
+            }
 
-        checkboxPanel.add(showPopOffCheckbox);
-        checkboxPanel.add(showMetricsCheckbox);
+            @Override
+            public Dimension getPreferredSize() {
+                return new Dimension(16, 20);
+            }
+
+            @Override
+            public Dimension getMaximumSize() {
+                return getPreferredSize();
+            }
+        };
+        hamburgerMenu.setToolTipText("Menu");
 
         JPanel topPanel = new JPanel();
         topPanel.setLayout(new BoxLayout(topPanel, BoxLayout.Y_AXIS));
         topPanel.add(toolBar);
         topPanel.add(metricsPanel);
-        metricsPanel.setVisible(showMetrics);
 
         // Use GridBagLayout for infoPanel to allow precise vertical alignment
         infoPanel = new JPanel(new GridBagLayout());
@@ -424,12 +500,25 @@ public class SignumGUI extends JFrame {
 
         // --- Peers ---
         JPanel peersPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+
+        MouseAdapter peersMouseAdapter = new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (SwingUtilities.isLeftMouseButton(e) || SwingUtilities.isRightMouseButton(e)) {
+                    PeersDialog.showPeersDialog(SignumGUI.this);
+                }
+            }
+        };
+
         tooltip = "Connected Peers: The number of peers with a stable, established connection to your node.";
-        connectedPeersLabel = createLabel("0", null, tooltip);
+        connectedPeersLabel = new JLabel("0");
+        connectedPeersLabel.setToolTipText(tooltip);
         tooltip = "Total Discovered Peers: The total number of peers your node has ever discovered, including active, disconnected, and blacklisted ones.";
-        peersCountLabel = createLabel("0", null, tooltip); // Represents 'All Known' peers
+        peersCountLabel = new JLabel("0"); // Represents 'All Known' peers
+        peersCountLabel.setToolTipText(tooltip);
         tooltip = "Blacklisted Peers: The number of peers that have been temporarily banned for sending invalid data or other network violations.";
-        blacklistedPeersLabel = createLabel("0", null, tooltip);
+        blacklistedPeersLabel = new JLabel("0");
+        blacklistedPeersLabel.setToolTipText(tooltip);
 
         peersPanel.add(new JLabel("Peers: "));
         peersPanel.add(connectedPeersLabel);
@@ -440,13 +529,15 @@ public class SignumGUI extends JFrame {
         peersPanel.add(new JLabel(")"));
 
         // Add peersPanel
-        peersPanel.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                PeersDialog.showPeersDialog(SignumGUI.this);
-            }
-        });
+        peersPanel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        peersPanel.addMouseListener(peersMouseAdapter);
         peersPanel.setToolTipText("Click to see detailed peer information.");
+
+        for (Component comp : peersPanel.getComponents()) {
+            comp.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            comp.addMouseListener(peersMouseAdapter);
+        }
+
         gbc.gridx = 1;
         infoPanel.add(peersPanel, gbc); // No left inset needed, timePanel provides right spacing
 
@@ -491,11 +582,14 @@ public class SignumGUI extends JFrame {
         measurementPanel.setOpaque(false);
         measurementSeparator = new JSeparator(SwingConstants.VERTICAL);
         measurementSeparator.setPreferredSize(verticalSeparatorSize);
+        measurementSeparator.setMaximumSize(verticalSeparatorSize);
         tooltip = "Performance measurement is active.\n"
                 + "Detailed synchronization data is being collected for each block and saved to:\n"
                 + "- measurement/sync_measurement.csv\n"
-                + "- measurement/sync_progress.csv\n" + "for analysis.";
-        measurementLabel = createLabel("🔬︎ MEAS", null, tooltip);
+                + "- measurement/sync_progress.csv\n" + "for analysis."
+                + "\n\nEnabled by property: node.measurementActive = true";
+        measurementLabel = createLabel("🔬︎", null, tooltip, "MEASUREMENT");
+        measurementLabel.setFont(measurementLabel.getFont().deriveFont(18.0f));
         measurementPanel.setVisible(false);
 
         measurementPanel.add(measurementLabel);
@@ -513,9 +607,12 @@ public class SignumGUI extends JFrame {
         experimentalPanel.setOpaque(false);
         experimentalSeparator = new JSeparator(SwingConstants.VERTICAL);
         experimentalSeparator.setPreferredSize(verticalSeparatorSize);
+        experimentalSeparator.setMaximumSize(verticalSeparatorSize);
         tooltip = "Experimental feature is enabled.\n" + "Simplified data is being collected and saved to:\n"
-                + "- measurement/sync_progress.csv\n" + "for analysis.";
-        experimentalLabel = createLabel("⚗ EXP", null, tooltip);
+                + "- measurement/sync_progress.csv\n" + "for analysis."
+                + "\n\nEnabled by property: node.experimental = true";
+        experimentalLabel = createLabel("⚗", null, tooltip, "EXPERIMENTAL");
+        experimentalLabel.setFont(experimentalLabel.getFont().deriveFont(18.0f));
         experimentalPanel.setVisible(false);
 
         experimentalPanel.add(experimentalLabel);
@@ -533,10 +630,13 @@ public class SignumGUI extends JFrame {
         trimPanel.setOpaque(false);
         trimIconSeparator = new JSeparator(SwingConstants.VERTICAL);
         trimIconSeparator.setPreferredSize(verticalSeparatorSize);
+        trimIconSeparator.setMaximumSize(verticalSeparatorSize);
         tooltip = "Automatic table trimming is active.\n" +
                 "Derived tables are being periodically pruned to save disk space.\n" +
-                "This happens every " + (brs.Constants.MAX_ROLLBACK * 10) + " blocks.";
-        trimLabel = createLabel("✂ TRIM", null, tooltip);
+                "This happens every " + (brs.Constants.MAX_ROLLBACK * 10) + " blocks."
+                + "\n\nEnabled by property: DB.trimDerivedTables = true";
+        trimLabel = createLabel("✂", null, tooltip, "TRIM");
+        trimLabel.setFont(trimLabel.getFont().deriveFont(18.0f));
         trimPanel.setVisible(false);
 
         trimPanel.add(trimLabel);
@@ -548,7 +648,30 @@ public class SignumGUI extends JFrame {
         gbc.gridx = 7;
         infoPanel.add(trimPanel, gbc);
 
+        // --- Auto Resolve ---
+        autoResolvePanel = new JPanel();
+        autoResolvePanel.setLayout(new BoxLayout(autoResolvePanel, BoxLayout.X_AXIS));
+        autoResolvePanel.setOpaque(false);
+        autoResolveSeparator = new JSeparator(SwingConstants.VERTICAL);
+        autoResolveSeparator.setPreferredSize(verticalSeparatorSize);
+        autoResolveSeparator.setMaximumSize(verticalSeparatorSize);
+        tooltip = "Auto-Resolve is enabled.\n" +
+                "If database inconsistency is detected at startup, the node will automatically attempt to resolve it by rolling back blocks."
+                + "\n\nEnabled by property: node.autoConsistencyResolve = true";
+        autoResolveLabel = createLabel("🔧", null, tooltip, "AUTO RESOLVE");
+        autoResolveLabel.setFont(autoResolveLabel.getFont().deriveFont(18.0f));
+        autoResolvePanel.setVisible(false);
+
+        autoResolvePanel.add(autoResolveLabel);
+        autoResolvePanel.add(Box.createHorizontalStrut(5));
+        autoResolvePanel.add(autoResolveSeparator);
+        autoResolvePanel.add(Box.createHorizontalStrut(5));
+
+        // Add autoResolvePanel
         gbc.gridx = 8;
+        infoPanel.add(autoResolvePanel, gbc);
+
+        gbc.gridx = 9;
         gbc.weightx = 1.0; // Allow progress bar to take up remaining horizontal space
         gbc.fill = GridBagConstraints.HORIZONTAL; // Fill horizontally
         infoPanel.add(syncProgressBar, gbc);
@@ -557,10 +680,14 @@ public class SignumGUI extends JFrame {
         bottomPanel.add(infoPanel, BorderLayout.LINE_END);
 
         try {
-            setIconImage(ImageIO.read(getClass().getResourceAsStream(iconLocation)));
+            java.io.InputStream iconStream = getClass().getResourceAsStream(iconLocation);
+            if (iconStream != null) {
+                setIconImage(ImageIO.read(iconStream));
+            }
         } catch (IOException e) {
             e.printStackTrace();
         }
+        initGlassPane();
 
         setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
@@ -571,7 +698,7 @@ public class SignumGUI extends JFrame {
                             "This will stop the node. Are you sure?", "Exit and stop node",
                             JOptionPane.YES_NO_OPTION,
                             JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
-                        shutdown();
+                        new Thread(SignumGUI.this::shutdown).start();
                     }
                 } else {
                     trayIcon.displayMessage("Signum GUI closed", "Note that Signum is still running", MessageType.INFO);
@@ -581,7 +708,9 @@ public class SignumGUI extends JFrame {
         });
 
         pack();
-        setSize(Math.max(topPanel.getPreferredSize().width, metricsPanel.getPreferredSize().width), 800);
+        Insets insets = getInsets();
+        int preferredContentWidth = Math.max(topPanel.getPreferredSize().width, metricsPanel.getPreferredSize().width);
+        setSize(preferredContentWidth + insets.left + insets.right, 800);
         setLocationRelativeTo(null);
         showWindow();
 
@@ -589,19 +718,58 @@ public class SignumGUI extends JFrame {
         new Thread(this::startSignumWithGUI).start();
     }
 
+    private void initGlassPane() {
+        JPanel glassPane = new GlassPane();
+        setGlassPane(glassPane);
+        glassPane.setVisible(true);
+    }
+
     private void shutdown() {
 
         isShuttingDown = true;
         updateTitle();
 
-        Signum.shutdown(false);
+        // Stop GUI updates and listeners first to prevent access to core components
+        // during shutdown
+        // This ensures that the MetricsPanel executors are stopped before the
+        // DB/Network is closed
+        if (elapsedTimeTimer != null) {
+            try {
+                elapsedTimeTimer.stop();
+            } catch (Throwable t) {
+                LOGGER.warn("Error stopping elapsed time timer", t);
+            }
+        }
 
-        if (trayIcon != null && SystemTray.isSupported()) {
-            SystemTray.getSystemTray().remove(trayIcon);
-        }
         if (metricsPanel != null) {
-            metricsPanel.shutdown();
+            try {
+                metricsPanel.shutdown();
+            } catch (Throwable t) {
+                LOGGER.warn("Error shutting down metrics panel", t);
+            }
         }
+
+        // The main node shutdown is handled by Signum.shutdown()
+        // This is the most critical part.
+        try {
+            Signum.shutdown(false);
+        } catch (Throwable t) {
+            // Signum.shutdown() is designed to handle its own errors and logging via
+            // ShutdownManager.
+            // This catch block is a final safeguard.
+            LOGGER.error("Unexpected error during Signum core shutdown", t);
+        }
+
+        // The rest is GUI resource cleanup. We'll do a best-effort cleanup.
+        if (trayIcon != null && SystemTray.isSupported()) {
+            try {
+                SystemTray.getSystemTray().remove(trayIcon);
+            } catch (Throwable t) {
+                LOGGER.warn("Error removing tray icon", t);
+            }
+        }
+
+        // Finally, exit the application.
         System.exit(0);
     }
 
@@ -712,16 +880,21 @@ public class SignumGUI extends JFrame {
 
         // leftButtons.add(restartButton);
         leftButtons.add(shutdownButton);
+        leftButtons.add(popOffToggle);
 
         toolBar.add(leftButtons);
         toolBar.add(Box.createHorizontalGlue());
-        toolBar.add(checkboxPanel);
+        toolBar.add(hamburgerMenu);
+        toolBar.add(Box.createHorizontalStrut(5));
+        JLabel globeLabel = new JLabel("🌍");
+        globeLabel.setFont(globeLabel.getFont().deriveFont(18.0f));
+        toolBar.add(globeLabel);
         toolBar.add(Box.createHorizontalStrut(10));
 
         openPheonixWalletItem.addActionListener(e -> openWebUi("/phoenix"));
         openClassicWalletItem.addActionListener(e -> openWebUi("/classic"));
         showItem.addActionListener(e -> showWindow());
-        shutdownItem.addActionListener(e -> shutdown());
+        shutdownItem.addActionListener(e -> new Thread(this::shutdown).start());
 
         popupMenu.add(openClassicWalletItem);
         popupMenu.add(showItem);
@@ -789,49 +962,229 @@ public class SignumGUI extends JFrame {
         }
     }
 
+    /**
+     * Performs a database consistency check and handles the UI response based on
+     * the result and configuration.
+     * <p>
+     * This method runs on a background thread to avoid blocking the EDT during the
+     * check.
+     * The UI feedback logic handles the following scenarios:
+     * <ul>
+     * <li><b>Consistent:</b> Displays a success message with database
+     * statistics.</li>
+     * <li><b>Inconsistent:</b>
+     * <ul>
+     * <li><b>Auto-Resolve Triggered:</b> If auto-resolve is enabled and this check
+     * triggered it
+     * (state transition to INCONSISTENT), displays an information message that
+     * automatic resolution has started.</li>
+     * <li><b>Already Active:</b> If a resolution process was already running before
+     * this check,
+     * displays a warning that resolution is in progress.</li>
+     * <li><b>Manual Action Required:</b> If auto-resolve is disabled or did not
+     * trigger (e.g., persistent inconsistency),
+     * displays an error dialog offering the user to manually start the resolution
+     * process.</li>
+     * </ul>
+     * </li>
+     * </ul>
+     */
     private void dbCheckAction() {
-        new Thread(() -> {
-            BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
-            final int result = blockchainProcessor.checkDatabaseStateRequest();
-            final int height = blockchainProcessor.getLastCheckHeight();
-            final long totalMined = blockchainProcessor.getLastCheckTotalMined();
-            final double totalMinedSigna = (double) totalMined / Constants.ONE_SIGNA;
-            final long totalEffectiveBalance = blockchainProcessor.getLastCheckTotalEffectiveBalance();
-            final double totalEffectiveBalanceSigna = (double) totalEffectiveBalance / Constants.ONE_SIGNA;
-            final long difference = totalMined - totalEffectiveBalance;
+        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
 
-            SwingUtilities.invokeLater(() -> {
-                String message;
-                Icon icon;
-                if (result == 0) {
-                    message = String.format("Database is consistent at block height %d.\n\n" +
-                            "Total Mined: %,.2f SIGNA (%,d NQT)\n" +
-                            "Total Effective Balance: %,.2f SIGNA (%,d NQT)",
-                            height,
-                            totalMinedSigna, totalMined,
-                            totalEffectiveBalanceSigna, totalEffectiveBalance);
-                    icon = IconFontSwing.buildIcon(FontAwesome.CHECK_CIRCLE, 32, new Color(0, 128, 0));
-                } else {
-                    String inconsistencyType;
-                    if (result > 0) {
-                        inconsistencyType = "Total mined is greater than total effective balance.";
-                    } else {
-                        inconsistencyType = "Total mined is less than total effective balance.";
+        String statusMessage;
+        if (blockchainProcessor.getResolutionState() == BlockchainProcessor.ResolutionState.ACTIVE) {
+            statusMessage = "Auto database resolve ongoing. Database check will run after resolution is finished...";
+        } else if (blockchainProcessor.isTrimming()) {
+            statusMessage = "Trim ongoing. Database check will run after trim is finished...";
+        } else if (blockchainProcessor.getManualPopOffBlocksCount() > 0
+                || blockchainProcessor.getAutoPopOffBlocksCount() > 0) {
+            statusMessage = "Pop-off ongoing. Database check will run after pop-off is finished...";
+        } else {
+            statusMessage = "Database consistency check in progress...";
+        }
+
+        waitDialog = new JDialog(SignumGUI.this, "Database Check", true);
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        JLabel messageLabel = new JLabel(statusMessage);
+        messageLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        panel.add(messageLabel);
+
+        panel.add(Box.createRigidArea(new Dimension(0, 15)));
+
+        final RotatingSvgIcon rotatingIcon = new RotatingSvgIcon(0.5);
+        rotatingIcon.setPreferredSize(new Dimension(64, 64));
+        rotatingIcon.setAlignmentX(Component.CENTER_ALIGNMENT);
+        panel.add(rotatingIcon);
+        rotatingIcon.start();
+
+        waitDialog.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                rotatingIcon.stop();
+            }
+
+            @Override
+            public void windowClosed(WindowEvent e) {
+                rotatingIcon.stop();
+            }
+        });
+
+        waitDialog.setContentPane(panel);
+        waitDialog.pack();
+        waitDialog.setLocationRelativeTo(SignumGUI.this);
+        waitDialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+
+        if (isDbCheckRunning.get()) {
+            waitDialog.setVisible(true);
+            return;
+        }
+
+        isDbCheckRunning.set(true);
+
+        new Thread(() -> {
+            try {
+                // Check if resolution was already active before we requested the check
+                boolean wasResolutionActive = blockchainProcessor
+                        .getResolutionState() == BlockchainProcessor.ResolutionState.ACTIVE;
+
+                final int result = blockchainProcessor.checkDatabaseStateRequest();
+                final int height = blockchainProcessor.getLastCheckHeight();
+                final long totalMined = blockchainProcessor.getLastCheckTotalMined();
+                final long totalEffectiveBalance = blockchainProcessor.getLastCheckTotalEffectiveBalance();
+
+                final int finalLimitHeight = blockchainProcessor.getSafeRollbackHeight();
+                int lastTrimHeight = blockchainProcessor.getLastTrimHeight().get();
+                final int finalLastTrimHeight = lastTrimHeight;
+
+                SwingUtilities.invokeLater(() -> {
+                    if (waitDialog.isDisplayable()) {
+                        rotatingIcon.stop();
+                        waitDialog.dispose();
                     }
-                    message = String.format("Database is INCONSISTENT!\n\n%s\n\n" +
-                            "Total Mined: %,.2f SIGNA (%,d NQT)\n" +
-                            "Total Effective Balance: %,.2f SIGNA (%,d NQT)\n\n" +
-                            "Difference: %,d NQT\n\nCheck logs for more details at block height %d.",
-                            inconsistencyType,
-                            totalMinedSigna, totalMined,
-                            totalEffectiveBalanceSigna, totalEffectiveBalance,
-                            difference, height);
-                    icon = IconFontSwing.buildIcon(FontAwesome.TIMES_CIRCLE, 32, Color.RED);
-                }
-                JOptionPane.showMessageDialog(SignumGUI.this, message, "Database Consistency Check",
-                        JOptionPane.INFORMATION_MESSAGE, icon);
-            });
+                    showDbCheckResult(result, height, totalMined, totalEffectiveBalance, wasResolutionActive,
+                            finalLimitHeight, finalLastTrimHeight);
+                });
+            } catch (Exception e) {
+                LOGGER.error("Error during DB check", e);
+                SwingUtilities.invokeLater(() -> {
+                    if (waitDialog.isDisplayable()) {
+                        rotatingIcon.stop();
+                        waitDialog.dispose();
+                    }
+                    String message = "An error occurred during the database check.";
+                    if (e instanceof IllegalStateException && e.getMessage().contains("already in progress")) {
+                        message = "A database check is already running in the background.";
+                    }
+                    JOptionPane.showMessageDialog(SignumGUI.this, message,
+                            "Error", JOptionPane.ERROR_MESSAGE);
+                });
+            } finally {
+                isDbCheckRunning.set(false);
+            }
         }).start();
+        waitDialog.setVisible(true);
+    }
+
+    private void showDbCheckResult(int result, int height, long totalMined, long totalEffectiveBalance,
+            boolean wasResolutionActive, int limitHeight, int lastTrimHeight) {
+        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        final double totalMinedSigna = (double) totalMined / Constants.ONE_SIGNA;
+        final double totalEffectiveBalanceSigna = (double) totalEffectiveBalance / Constants.ONE_SIGNA;
+        final long difference = totalMined - totalEffectiveBalance;
+
+        String message;
+        Icon icon;
+        if (result == 0) {
+            message = String.format("Database is consistent at block height %d.\n\n" +
+                    "Total Mined: %,.2f SIGNA (%,d NQT)\n" +
+                    "Total Effective Balance: %,.2f SIGNA (%,d NQT)",
+                    height,
+                    totalMinedSigna, totalMined,
+                    totalEffectiveBalanceSigna, totalEffectiveBalance);
+            icon = IconFontSwing.buildIcon(FontAwesome.CHECK_CIRCLE, 32, new Color(0, 128, 0));
+            JOptionPane.showMessageDialog(SignumGUI.this, message, "Database Consistency Check",
+                    JOptionPane.INFORMATION_MESSAGE, icon);
+        } else {
+            String inconsistencyType;
+            if (result > 0) {
+                inconsistencyType = "Total mined is greater than total effective balance.";
+            } else {
+                inconsistencyType = "Total mined is less than total effective balance.";
+            }
+            String infoMessage = String.format("Database is INCONSISTENT!\n\n%s\n\n" +
+                    "Total Mined: %,.2f SIGNA (%,d NQT)\n" +
+                    "Total Effective Balance: %,.2f SIGNA (%,d NQT)\n\n" +
+                    "Difference: %,d NQT\n\nCheck logs for more details at block height %d.",
+                    inconsistencyType,
+                    totalMinedSigna, totalMined,
+                    totalEffectiveBalanceSigna, totalEffectiveBalance,
+                    difference, height);
+
+            String resolveMessage = "This tool can try to automatically resolve the inconsistency by popping off blocks.\n"
+                    + "It will rollback blocks until the database becomes consistent or the safe rollback limit is reached.\n\n"
+                    + "The safe rollback limit is calculated as follows:\n";
+
+            if (trimEnabled) {
+                resolveMessage += "- Trimming enabled. Limit is the last trim height: " + limitHeight + ".\n";
+                if (lastTrimHeight <= 0) {
+                    resolveMessage += "  (Estimated using modulo of current height and trim period "
+                            + Constants.TRIM_PERIOD + ")\n";
+                }
+            } else {
+                resolveMessage += "- Trimming disabled. Limit is " + Constants.MAX_ROLLBACK + " blocks back: "
+                        + limitHeight + ".\n";
+            }
+            resolveMessage += "The process stops if consistency is restored before reaching this limit.";
+
+            icon = IconFontSwing.buildIcon(FontAwesome.EXCLAMATION_TRIANGLE, 32, contrastRed);
+
+            if (blockchainProcessor.getResolutionState() == BlockchainProcessor.ResolutionState.ACTIVE) {
+                String activeMessage;
+                String title;
+                int messageType;
+
+                if (!wasResolutionActive
+                        && Signum.getPropertyService().getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED)) {
+                    activeMessage = "The database is INCONSISTENT.\n\n" +
+                            "An automatic consistency resolution has been started.\n" +
+                            "Please check the logs for progress.";
+                    title = "Automatic Resolution Started";
+                    messageType = JOptionPane.INFORMATION_MESSAGE;
+                } else {
+                    activeMessage = "Consistency resolution is currently IN PROGRESS.\n" +
+                            "Please check the logs for progress.";
+                    title = "Database Consistency Check";
+                    messageType = JOptionPane.WARNING_MESSAGE;
+                }
+
+                Object[] messageContent = { infoMessage, Box.createVerticalStrut(10), new JSeparator(),
+                        Box.createVerticalStrut(10), activeMessage };
+
+                JOptionPane.showMessageDialog(SignumGUI.this, messageContent, title,
+                        messageType, icon);
+                return;
+            }
+
+            Object[] messageContent = {
+                    infoMessage,
+                    Box.createVerticalStrut(10),
+                    new JSeparator(),
+                    Box.createVerticalStrut(10),
+                    resolveMessage
+            };
+
+            Object[] options = { "Start Auto Resolve Database Consistency", "Cancel" };
+            int n = JOptionPane.showOptionDialog(SignumGUI.this, messageContent, "Database Consistency Check",
+                    JOptionPane.YES_NO_OPTION, JOptionPane.ERROR_MESSAGE, icon, options, options[1]);
+
+            if (n == 0) {
+                blockchainProcessor.manualResolveDatabaseConsistency();
+            }
+        }
     }
 
     private void showWindow() {
@@ -921,33 +1274,24 @@ public class SignumGUI extends JFrame {
     public void onPeersUpdated() {
         BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
         Collection<Peer> allPeers = blockchainProcessor.getAllPeers();
-        SwingUtilities.invokeLater(() -> updatePeerCount(allPeers));
+        long connectedCount = allPeers.stream().filter(p -> p.getState() == Peer.State.CONNECTED).count();
+        long allKnownCount = allPeers.size();
+        long blacklistedCount = allPeers.stream().filter(Peer::isBlacklisted).count();
+        SwingUtilities.invokeLater(() -> updatePeerCount(connectedCount, allKnownCount, blacklistedCount));
     }
 
     public void onNetVolumeChanged() {
         BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
-        long newDownloadedVolume = blockchainProcessor.getDownloadedVolume();
+        long uploaded = blockchainProcessor.getUploadedVolume();
+        long downloaded = blockchainProcessor.getDownloadedVolume();
         SwingUtilities.invokeLater(() -> {
-            uploadVolumeLabel.setText("▲ " + formatDataSize(blockchainProcessor.getUploadedVolume()));
-            downloadVolumeLabel.setText("▼ " + formatDataSize(newDownloadedVolume));
-
-            // Initial check for sync status before any timers start, to ensure the
-            // sync_in_progress timer starts correctly.
-            if (Signum.getBlockchain() != null) {
-                Block lastBlock = Signum.getBlockchain().getLastBlock();
-                if (lastBlock != null) {
-                    Date blockDate = Convert.fromEpochTime(lastBlock.getTimestamp());
-                    Date now = new Date();
-                    long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
-                    int missingBlocks = (int) ((now.getTime() - blockDate.getTime()) / (blockTime * 1000));
-                    isSyncing = missingBlocks > 10;
-                }
-            }
+            uploadVolumeLabel.setText("▲ " + formatDataSize(uploaded));
+            downloadVolumeLabel.setText("▼ " + formatDataSize(downloaded));
 
             // Start the GUI timer only once, when the first download volume is received,
             // and if experimental features are enabled in the config.
             if (Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL)
-                    && blockchainProcessor.getDownloadedVolume() > 0
+                    && downloaded > 0
                     && !guiTimerStarted.getAndSet(true)) {
                 startGuiTimer();
             }
@@ -981,10 +1325,10 @@ public class SignumGUI extends JFrame {
 
             if (lastTrimHeight > currentTrimHeight) {
                 if (currentTrimHeight < 0) {
-                    trimHeightLabel.setText(String.format("Trim height: - 🡺 %d", lastTrimHeight));
+                    trimHeightLabel.setText(String.format("- 🡺 %d", lastTrimHeight));
                 } else {
                     trimHeightLabel
-                            .setText(String.format("Trim height: %d 🡺 %d", currentTrimHeight, lastTrimHeight));
+                            .setText(String.format("%d 🡺 %d", currentTrimHeight, lastTrimHeight));
                 }
             }
             trimHeightLabel.setForeground(Color.GREEN);
@@ -992,15 +1336,16 @@ public class SignumGUI extends JFrame {
     }
 
     private void onConsistencyUpdate() {
+        BlockchainProcessor.ConsistencyState state = Signum.getBlockchainProcessor().getConsistencyState();
         SwingUtilities.invokeLater(() -> {
-            BlockchainProcessor.ConsistencyState state = Signum.getBlockchainProcessor().getConsistencyState();
+
             Color color;
             switch (state) {
                 case CONSISTENT:
                     color = Color.GREEN;
                     break;
                 case INCONSISTENT:
-                    color = Color.RED;
+                    color = contrastRed;
                     break;
                 default: // UNDEFINED
                     color = iconColor;
@@ -1012,8 +1357,10 @@ public class SignumGUI extends JFrame {
     private void onBlockPushed(Block block) {
         if (block == null)
             return;
+        int maxPeerHeight = calculateMaxPeerHeight();
+        long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
         SwingUtilities.invokeLater(() -> {
-            updateLatestBlock(block);
+            updateLatestBlock(block, maxPeerHeight, blockTime);
 
             // Start the GUI timer only once, when the first block is pushed,
             // and if experimental features are enabled in the config.
@@ -1024,19 +1371,21 @@ public class SignumGUI extends JFrame {
     }
 
     private void onBlockPopped() {
+        Block lastBlock = Signum.getBlockchain().getLastBlock();
+        int maxPeerHeight = calculateMaxPeerHeight();
+        long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
         SwingUtilities.invokeLater(() -> {
-            updateLatestBlock(Signum.getBlockchain().getLastBlock());
+            updateLatestBlock(lastBlock, maxPeerHeight, blockTime);
         });
     }
 
     private void onManualPopOffProgress() {
+        int remaining = Signum.getBlockchainProcessor().getManualPopOffBlocksCount();
+        int blockHeight = Signum.getBlockchainProcessor().getBeforeRollbackHeight();
+        int targetHeight = Signum.getBlockchainProcessor().getManualLastPopOffHeight();
         SwingUtilities.invokeLater(() -> {
-            int remaining = Signum.getBlockchainProcessor().getManualPopOffBlocksCount();
-            int blockHeight = Signum.getBlockchainProcessor().getBeforeRollbackHeight();
-            int targetHeight = Signum.getBlockchainProcessor().getManualLastPopOffHeight();
             popOffBlockCountLabel.setText("Pop off blocks: " + remaining);
-            popOffBlockHeightLabel.setText("Pop-off height: "
-                    + (targetHeight < 0 ? "-" : targetHeight) + " 🡸 " + blockHeight);
+            popOffBlockHeightLabel.setText(targetHeight < 0 ? "-" : targetHeight + " 🡸 " + blockHeight);
             if (remaining > 0) {
                 popOffBlockCountLabel.setForeground(Color.YELLOW);
                 popOffBlockHeightLabel.setForeground(Color.YELLOW);
@@ -1049,19 +1398,29 @@ public class SignumGUI extends JFrame {
     }
 
     private void onAutoPopOffProgress() {
+        int remaining = Signum.getBlockchainProcessor().getAutoPopOffBlocksCount();
+        int blockHeight = Signum.getBlockchainProcessor().getBeforeRollbackHeight();
+        int targetHeight = Signum.getBlockchainProcessor().getAutoLastPopOffHeight();
         SwingUtilities.invokeLater(() -> {
-            int remaining = Signum.getBlockchainProcessor().getAutoPopOffBlocksCount();
-            int blockHeight = Signum.getBlockchainProcessor().getBeforeRollbackHeight();
-            int targetHeight = Signum.getBlockchainProcessor().getAutoLastPopOffHeight();
             popOffBlockCountLabel.setText("Pop off blocks: " + remaining);
-            popOffBlockHeightLabel.setText("Auto pop-off height: "
-                    + (targetHeight < 0 ? "-" : targetHeight) + " 🡸 " + blockHeight);
-            if (remaining > 0) {
-                popOffBlockCountLabel.setForeground(Color.ORANGE);
-                popOffBlockHeightLabel.setForeground(Color.ORANGE);
+            popOffBlockHeightLabel.setText(targetHeight < 0 ? "-" : targetHeight + " 🡸 " + blockHeight);
+
+            if (Signum.getBlockchainProcessor().getResolutionState() == BlockchainProcessor.ResolutionState.ACTIVE) {
+                if (remaining > 0) {
+                    popOffBlockCountLabel.setForeground(contrastRed);
+                    popOffBlockHeightLabel.setForeground(contrastRed);
+                } else {
+                    popOffBlockCountLabel.setForeground(iconColor);
+                    popOffBlockHeightLabel.setForeground(iconColor);
+                }
             } else {
-                popOffBlockCountLabel.setForeground(iconColor);
-                popOffBlockHeightLabel.setForeground(iconColor);
+                if (remaining > 0) {
+                    popOffBlockCountLabel.setForeground(Color.ORANGE);
+                    popOffBlockHeightLabel.setForeground(Color.ORANGE);
+                } else {
+                    popOffBlockCountLabel.setForeground(iconColor);
+                    popOffBlockHeightLabel.setForeground(iconColor);
+                }
             }
             setPopOffLabelVisible(remaining > 0);
         });
@@ -1081,20 +1440,27 @@ public class SignumGUI extends JFrame {
 
             // Now that properties are loaded, set the correct values for the GUI
             showPopOff = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
-            showMetrics = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
             measurementActive = Signum.getPropertyService().getBoolean(Props.MEASUREMENT_ACTIVE);
             experimentalActive = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
             trimEnabled = Signum.getPropertyService().getBoolean(Props.DB_TRIM_DERIVED_TABLES);
+            autoResolveEnabled = Signum.getPropertyService().getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED);
+
+            Block lastBlock = Signum.getBlockchain().getLastBlock();
+            int maxPeerHeight = calculateMaxPeerHeight();
+            BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+            Collection<Peer> allPeers = blockchainProcessor.getAllPeers();
+            long connectedCount = allPeers.stream().filter(p -> p.getState() == Peer.State.CONNECTED).count();
+            long allKnownCount = allPeers.size();
+            long blacklistedCount = allPeers.stream().filter(Peer::isBlacklisted).count();
+            long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
 
             try {
                 SwingUtilities.invokeLater(() -> {
                     metricsPanel.init();
+                    metricsPanel.setVisible(true);
                     showTrayIcon();
                     // Sync checkbox states with loaded properties
-                    showPopOffCheckbox.setSelected(showPopOff);
-                    showMetricsCheckbox.setSelected(showMetrics);
-                    // Sync panel visibility with loaded properties
-                    metricsPanel.setVisible(showMetrics);
+                    popOffToggle.repaint();
 
                     if (measurementActive) {
                         measurementPanel.setVisible(true);
@@ -1115,13 +1481,19 @@ public class SignumGUI extends JFrame {
                         trimSeparator.setVisible(false);
                     }
 
+                    if (autoResolveEnabled) {
+                        autoResolvePanel.setVisible(true);
+                    } else {
+                        autoResolvePanel.setVisible(false);
+                    }
+
                     onTrimHeightChanged();
                     onConsistencyUpdate();
+                    onManualPopOffProgress();
+                    onAutoPopOffProgress();
 
-                    updateLatestBlock(Signum.getBlockchain().getLastBlock());
-                    BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
-                    Collection<Peer> allPeers = blockchainProcessor.getAllPeers();
-                    updatePeerCount(allPeers);
+                    updateLatestBlock(lastBlock, maxPeerHeight, blockTime);
+                    updatePeerCount(connectedCount, allKnownCount, blacklistedCount);
                 });
 
                 updateTitle();
@@ -1129,7 +1501,6 @@ public class SignumGUI extends JFrame {
                 initListeners();
                 if (Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL)) {
                     // Initialize timers from the log file.
-                    BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
                     if (blockchainProcessor != null) {
                         this.guiAccumulatedSyncTimeMs = blockchainProcessor.getAccumulatedSyncTimeMs();
                         this.guiAccumulatedSyncInProgressTimeMs = blockchainProcessor
@@ -1199,18 +1570,44 @@ public class SignumGUI extends JFrame {
         }
     }
 
-    private void updateLatestBlock(Block block) {
+    private void updateLatestBlock(Block block, int maxPeerHeight, long blockTime) {
         if (block == null) {
             return;
         }
         Date blockDate = Convert.fromEpochTime(block.getTimestamp());
+
+        int missingBlocks;
+        if (maxPeerHeight > 0) {
+            // We have peers, use their height as the source of truth.
+            missingBlocks = Math.max(0, maxPeerHeight - block.getHeight());
+        } else {
+            // No peers, fall back to time-based estimation.
+            Date now = new Date();
+            long secondsSinceLastBlock = (now.getTime() - blockDate.getTime()) / 1000;
+            missingBlocks = secondsSinceLastBlock > 0 ? (int) (secondsSinceLastBlock / blockTime) : 0;
+        }
+
+        boolean isEffectivelySynced = missingBlocks == 0;
+
+        elapsedTimeLabel.setVisible(isEffectivelySynced);
+        elapsedTimeSeparator.setVisible(isEffectivelySynced);
+
+        if (isEffectivelySynced) {
+            elapsedTimeCounter = (System.currentTimeMillis() - blockDate.getTime()) / 1000;
+            if (elapsedTimeCounter < 0) {
+                elapsedTimeCounter = 0;
+            }
+            elapsedTimeLabel.setText("Elapsed Time: " + elapsedTimeCounter + "s");
+        } else {
+            elapsedTimeCounter = 0;
+        }
+
+        if (elapsedTimeTimer == null) {
+            elapsedTimeTimer = new Timer(1000, e -> updateElapsedTime());
+            elapsedTimeTimer.start();
+        }
         latestBlockHeightLabel.setText("Latest block: " + block.getHeight());
         latestBlockTimestampLabel.setText("Timestamp: " + DATE_FORMAT.format(blockDate));
-
-        Date now = new Date();
-        long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
-
-        int missingBlocks = (int) ((now.getTime() - blockDate.getTime()) / (blockTime * 1000));
 
         // Start syncing if more than 10 block times behind, stop if 1 or less.
         // This is more reliable than peer height difference, especially at startup.
@@ -1220,9 +1617,17 @@ public class SignumGUI extends JFrame {
             isSyncing = false;
         }
 
-        if (missingBlocks < 0) {
-            missingBlocks = 0;
+        String tooltipText = "Synchronized";
+        if (missingBlocks > 0) {
+            tooltipText = "Estimated blocks behind: " + missingBlocks;
         }
+
+        if (maxPeerHeight > block.getHeight()) {
+            tooltipText = "Network Height: " + maxPeerHeight + " (Behind: " + (maxPeerHeight - block.getHeight()) + ")";
+        } else if (maxPeerHeight > 0 && missingBlocks == 0) {
+            tooltipText = "Synchronized (Network Height: " + maxPeerHeight + ")";
+        }
+        syncProgressBar.setToolTipText(tooltipText);
 
         float prog = 0;
         int totalBlocks = block.getHeight() + missingBlocks;
@@ -1241,14 +1646,36 @@ public class SignumGUI extends JFrame {
         syncProgressBar.setString(String.format("%.2f %%", prog));
     }
 
+    private int calculateMaxPeerHeight() {
+        try {
+            return Signum.getBlockchainProcessor().getAllPeers().stream()
+                    .filter(p -> p.getState() == Peer.State.CONNECTED)
+                    .mapToInt(p -> (int) p.getHeight())
+                    .max()
+                    .orElse(0);
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private void updateElapsedTime() {
+        if (!elapsedTimeLabel.isVisible()) {
+            return;
+        }
+        elapsedTimeCounter++;
+        elapsedTimeLabel.setText("Elapsed Time: " + elapsedTimeCounter + "s");
+    }
+
     private void onTrimHeightChanged() {
+        int currentTrimHeight = Signum.getBlockchainProcessor().getCurrentTrimHeight().get();
+        int estimatedTrimHeight = (currentTrimHeight == -1) ? Signum.getBlockchainProcessor().getEstimatedTrimHeight()
+                : 0;
         SwingUtilities.invokeLater(() -> {
-            int currentTrimHeight = Signum.getBlockchainProcessor().getCurrentTrimHeight().get();
 
             if (currentTrimHeight != -1) {
                 trimHeightLabel.setText("Trim height: " + currentTrimHeight);
             } else {
-                trimHeightLabel.setText("Trim height: -");
+                trimHeightLabel.setText("Trim height: est. " + estimatedTrimHeight);
             }
             trimHeightLabel.setForeground(iconColor);
         });
@@ -1281,11 +1708,7 @@ public class SignumGUI extends JFrame {
         JOptionPane.showMessageDialog(this, htmlText, title, JOptionPane.PLAIN_MESSAGE);
     }
 
-    private void updatePeerCount(Collection<Peer> peers) {
-        long connectedCount = peers.stream().filter(p -> p.getState() == Peer.State.CONNECTED).count();
-        long allKnownCount = peers.size();
-        long blacklistedCount = peers.stream().filter(Peer::isBlacklisted).count();
-
+    private void updatePeerCount(long connectedCount, long allKnownCount, long blacklistedCount) {
         // The label previously for 'connected' now shows 'active' peers.
         connectedPeersLabel.setText(String.valueOf(connectedCount));
         peersCountLabel.setText(String.valueOf(allKnownCount));
@@ -1326,12 +1749,15 @@ public class SignumGUI extends JFrame {
     private static class TextAreaOutputStream extends OutputStream {
         private final JTextArea textArea;
         private final PrintStream actualOutput;
-
-        private StringBuilder lineBuilder = new StringBuilder();
+        private final StringBuilder buffer = new StringBuilder();
+        private final Timer timer;
 
         private TextAreaOutputStream(JTextArea textArea, PrintStream actualOutput) {
             this.textArea = textArea;
             this.actualOutput = actualOutput;
+            this.timer = new Timer(500, e -> flush());
+            this.timer.setRepeats(true);
+            this.timer.start();
         }
 
         @Override
@@ -1349,15 +1775,21 @@ public class SignumGUI extends JFrame {
             writeString(new String(b, off, len));
         }
 
-        private void writeString(String string) {
-            lineBuilder.append(string);
-            String line = lineBuilder.toString();
-            if (line.contains("\n")) {
-                actualOutput.print(line);
-                if (textArea != null)
-                    SwingUtilities.invokeLater(() -> textArea.append(line));
-                lineBuilder.delete(0, lineBuilder.length());
+        private synchronized void writeString(String string) {
+            actualOutput.print(string);
+            buffer.append(string);
+        }
+
+        @Override
+        public void flush() {
+            String text;
+            synchronized (this) {
+                if (buffer.length() == 0)
+                    return;
+                text = buffer.toString();
+                buffer.setLength(0);
             }
+            textArea.append(text);
         }
     }
 

@@ -10,56 +10,66 @@ import org.ehcache.config.CacheConfiguration;
 import org.ehcache.config.builders.CacheConfigurationBuilder;
 import org.ehcache.config.builders.CacheManagerBuilder;
 import org.ehcache.config.builders.ResourcePoolsBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.Map;
 
 public class DBCacheManagerImpl {
 
-  private final CacheManager cacheManager;
+    private static final Logger logger = LoggerFactory.getLogger(DBCacheManagerImpl.class);
 
-  private final StatisticsManagerImpl statisticsManager;
+    private final CacheManager cacheManager;
 
-  private final boolean statisticsEnabled;
+    private final StatisticsManagerImpl statisticsManager;
 
-  private final HashMap<String, CacheConfiguration<SignumKey, ?>> caches = new HashMap<>();
+    private final boolean statisticsEnabled;
 
-  public DBCacheManagerImpl(StatisticsManagerImpl statisticsManager) {
-    this.statisticsManager = statisticsManager;
-    statisticsEnabled = true;
+    private final HashMap<String, CacheConfiguration<SignumKey, ?>> caches = new HashMap<>();
 
-    caches.put("account", CacheConfigurationBuilder.newCacheConfigurationBuilder(SignumKey.class, Account.class,
-        ResourcePoolsBuilder.heap(8192*4)).build());
-    caches.put("account_balance", CacheConfigurationBuilder.newCacheConfigurationBuilder(SignumKey.class, Account.Balance.class,
-        ResourcePoolsBuilder.heap(8192*4)).build());
+    public DBCacheManagerImpl(StatisticsManagerImpl statisticsManager) {
+        this.statisticsManager = statisticsManager;
+        statisticsEnabled = true;
 
-    CacheManagerBuilder<CacheManager> cacheBuilder = CacheManagerBuilder.newCacheManagerBuilder();
-    for (Map.Entry<String, CacheConfiguration<SignumKey, ?>> cache : caches.entrySet()) {
-      cacheBuilder = cacheBuilder.withCache(cache.getKey(), cache.getValue());
+        caches.put("account", CacheConfigurationBuilder.newCacheConfigurationBuilder(SignumKey.class, Account.class,
+                ResourcePoolsBuilder.heap(8192 * 4)).build());
+        caches.put("account_balance",
+                CacheConfigurationBuilder.newCacheConfigurationBuilder(SignumKey.class, Account.Balance.class,
+                        ResourcePoolsBuilder.heap(8192 * 4)).build());
+
+        CacheManagerBuilder<CacheManager> cacheBuilder = CacheManagerBuilder.newCacheManagerBuilder();
+        for (Map.Entry<String, CacheConfiguration<SignumKey, ?>> cache : caches.entrySet()) {
+            cacheBuilder = cacheBuilder.withCache(cache.getKey(), cache.getValue());
+        }
+        cacheManager = cacheBuilder.build(true);
     }
-    cacheManager = cacheBuilder.build(true);
-  }
 
-  public void close() {
-    if ( cacheManager.getStatus().equals(Status.AVAILABLE) ) {
-      cacheManager.close();
+    public void close() {
+        if (cacheManager.getStatus().equals(Status.AVAILABLE)) {
+            try {
+                cacheManager.close();
+            } catch (Throwable t) {
+                logger.error("Failed to close DBCacheManager", t);
+                throw new RuntimeException("Failed to close DBCacheManager", t);
+            }
+        }
     }
-  }
 
-  private <V> Cache<SignumKey, V> getEHCache(String name, Class<V> valueClass) {
-    return cacheManager.getCache(name, SignumKey.class, valueClass);
-  }
-
-  public <V> Cache<SignumKey, V> getCache(String name, Class<V> valueClass) {
-    Cache<SignumKey, V> cache = getEHCache(name, valueClass);
-    return statisticsEnabled ? new StatisticsCache<>(cache, name, statisticsManager) : cache;
-  }
-
-  public void flushCache() {
-    for (Map.Entry<String, CacheConfiguration<SignumKey, ?>> cacheEntry : caches.entrySet()) {
-      Cache<?,?> cache = getEHCache(cacheEntry.getKey(), cacheEntry.getValue().getValueType());
-      if ( cache != null )
-        cache.clear();
+    private <V> Cache<SignumKey, V> getEHCache(String name, Class<V> valueClass) {
+        return cacheManager.getCache(name, SignumKey.class, valueClass);
     }
-  }
+
+    public <V> Cache<SignumKey, V> getCache(String name, Class<V> valueClass) {
+        Cache<SignumKey, V> cache = getEHCache(name, valueClass);
+        return statisticsEnabled ? new StatisticsCache<>(cache, name, statisticsManager) : cache;
+    }
+
+    public void flushCache() {
+        for (Map.Entry<String, CacheConfiguration<SignumKey, ?>> cacheEntry : caches.entrySet()) {
+            Cache<?, ?> cache = getEHCache(cacheEntry.getKey(), cacheEntry.getValue().getValueType());
+            if (cache != null)
+                cache.clear();
+        }
+    }
 }

@@ -186,13 +186,30 @@ public final class WebServerImpl implements WebServer {
             return;
         }
 
-        try {
-            if (eventNotifier != null) {
+        Throwable firstException = null;
+
+        if (eventNotifier != null) {
+            try {
                 eventNotifier.shutdown();
+            } catch (Throwable t) {
+                logger.error("Failed to shut down event notifier", t);
+                if (firstException == null) {
+                    firstException = t;
+                }
             }
+        }
+
+        try {
             jettyServer.stop();
         } catch (Exception e) {
-            logger.info("Failed to stop API server", e);
+            logger.error("Failed to stop Jetty server", e);
+            if (firstException == null) {
+                firstException = e;
+            }
+        }
+
+        if (firstException != null) {
+            throw new RuntimeException("Web server shutdown failed", firstException);
         }
     }
 

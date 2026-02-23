@@ -28,6 +28,8 @@ import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
@@ -61,6 +63,7 @@ final class PeerImpl implements Peer {
     private final AtomicLong downloadedVolume = new AtomicLong();
     private final AtomicLong uploadedVolume = new AtomicLong();
     private final AtomicInteger lastUpdated = new AtomicInteger();
+    private final AtomicInteger height = new AtomicInteger();
     private byte[] lastDownloadedTransactionsDigest;
     private final Object lastDownloadedTransactionsLock = new Object();
 
@@ -68,8 +71,8 @@ final class PeerImpl implements Peer {
         this.peerAddress = peerAddress;
         this.announcedAddress.set(announcedAddress);
         try {
-            this.port.set(new URL(Constants.HTTP + announcedAddress).getPort());
-        } catch (MalformedURLException ignored) {
+            this.port.set(new URI(Constants.HTTP + announcedAddress).toURL().getPort());
+        } catch (MalformedURLException | URISyntaxException ignored) {
             // Do nothing, ignore it all
         }
         this.state.set(State.NON_CONNECTED);
@@ -103,6 +106,9 @@ final class PeerImpl implements Peer {
         } else if (state != State.NON_CONNECTED) {
             this.state.set(state);
             Peers.notifyListeners(this, Peers.Event.CHANGED_ACTIVE_PEER);
+        } else {
+            this.state.set(state);
+            Peers.notifyListeners(this, Peers.Event.DEACTIVATE);
         }
     }
 
@@ -142,6 +148,16 @@ final class PeerImpl implements Peer {
             uploadedVolume.addAndGet(volume);
         }
         Peers.notifyListeners(this, Peers.Event.UPLOADED_VOLUME);
+    }
+
+    @Override
+    public int getHeight() {
+        return height.get();
+    }
+
+    @Override
+    public void setHeight(int height) {
+        this.height.set(height);
     }
 
     @Override
@@ -358,7 +374,7 @@ final class PeerImpl implements Peer {
                 buf.append(Signum.getPropertyService().getInt(Props.P2P_PORT));
             }
             buf.append("/burst");
-            URL url = new URL(buf.toString());
+            URL url = new URI(buf.toString()).toURL();
 
             if (Peers.communicationLoggingMask != 0) {
                 StringWriter stringWriter = new StringWriter();
@@ -413,6 +429,13 @@ final class PeerImpl implements Peer {
                         response = JSON.getAsJsonObject(JSON.parse(reader));
                     }
                 }
+                if (response != null) {
+                    if (response.has("blockchainHeight")) {
+                        setHeight(response.get("blockchainHeight").getAsInt());
+                    } else if (response.has("height")) {
+                        setHeight(response.get("height").getAsInt());
+                    }
+                }
                 updateDownloadedVolume(cis.getCount());
             } else {
 
@@ -429,7 +452,7 @@ final class PeerImpl implements Peer {
                 response = error("Peer responded with HTTP " + connection.getResponseCode());
             }
 
-        } catch (RuntimeException | IOException e) {
+        } catch (RuntimeException | IOException | URISyntaxException e) {
             if (!isConnectionException(e)) {
                 logger.debug("Error sending JSON request", e);
             }

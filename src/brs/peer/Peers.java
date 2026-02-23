@@ -587,7 +587,13 @@ public final class Peers {
                 if (peer == null) {
                     return;
                 }
+                long start = System.currentTimeMillis();
                 JsonObject response = peer.send(getPeersRequest);
+                long end = System.currentTimeMillis();
+                if (Signum.getBlockchainProcessor() != null) {
+                    Signum.getBlockchainProcessor().notifyPeerMetric(new PeerMetric(peer.getPeerAddress(),
+                            end - start, 0, PeerMetric.Type.OTHER));
+                }
                 if (response == null) {
                     return;
                 }
@@ -636,37 +642,89 @@ public final class Peers {
     };
 
     public static void shutdown(ThreadPool threadPool) {
+        Throwable firstException = null;
         if (Init.peerServer != null) {
             try {
                 Init.peerServer.stop();
-            } catch (Exception e) {
-                logger.info("Failed to stop peer server", e);
+            } catch (Throwable e) {
+                logger.error("Failed to stop peer server", e);
+                if (firstException == null) {
+                    firstException = e;
+                }
             }
         }
         if (Init.gateway != null) {
             try {
                 Init.gateway.deletePortMapping(Init.port, "TCP");
-            } catch (Exception e) {
-                logger.info("Failed to remove UPNP rule from gateway", e);
+            } catch (Throwable e) {
+                logger.error("Failed to remove UPNP rule from gateway", e);
+                if (firstException == null) {
+                    firstException = e;
+                }
             }
         }
         if (dumpPeersVersion != null) {
-            StringBuilder buf = new StringBuilder();
-            for (Map.Entry<String, String> entry : announcedAddresses.entrySet()) {
-                Peer peer = peers.get(entry.getValue());
-                if (peer != null && peer.getState() == Peer.State.CONNECTED && peer.shareAddress()
-                        && !peer.isBlacklisted()
-                        && peer.getVersion() != null
-                        && peer.getVersion().toString().startsWith(dumpPeersVersion)) {
-                    buf.append("('").append(entry.getKey()).append("'), ");
+            try {
+                StringBuilder buf = new StringBuilder();
+                for (Map.Entry<String, String> entry : announcedAddresses.entrySet()) {
+                    Peer peer = peers.get(entry.getValue());
+                    if (peer != null && peer.getState() == Peer.State.CONNECTED && peer.shareAddress()
+                            && !peer.isBlacklisted()
+                            && peer.getVersion() != null
+                            && peer.getVersion().toString().startsWith(dumpPeersVersion)) {
+                        buf.append("('").append(entry.getKey()).append("'), ");
+                    }
                 }
-            }
-            if (logger.isInfoEnabled()) {
-                logger.info(buf.toString());
+                if (logger.isInfoEnabled()) {
+                    logger.info(buf.toString());
+                }
+            } catch (Throwable e) {
+                logger.error("Failed to dump peers version", e);
+                if (firstException == null) {
+                    firstException = e;
+                }
             }
         }
 
-        threadPool.shutdownExecutor(sendBlocksToPeersService);
+        try {
+            threadPool.shutdownExecutor(sendBlocksToPeersService);
+        } catch (Throwable e) {
+            logger.error("Failed to shutdown sendBlocksToPeersService", e);
+            if (firstException == null) {
+                firstException = e;
+            }
+        }
+        try {
+            threadPool.shutdownExecutor(blocksSendingService);
+        } catch (Throwable e) {
+            logger.error("Failed to shutdown blocksSendingService", e);
+            if (firstException == null) {
+                firstException = e;
+            }
+        }
+        try {
+            threadPool.shutdownExecutor(utReceivingService);
+        } catch (Throwable e) {
+            logger.error("Failed to shutdown utReceivingService", e);
+            if (firstException == null) {
+                firstException = e;
+            }
+        }
+        try {
+            threadPool.shutdownExecutor(utSendingService);
+        } catch (Throwable e) {
+            logger.error("Failed to shutdown utSendingService", e);
+            if (firstException == null) {
+                firstException = e;
+            }
+        }
+
+        if (firstException != null) {
+            if (firstException instanceof RuntimeException) {
+                throw (RuntimeException) firstException;
+            }
+            throw new RuntimeException("Error during Peers shutdown", firstException);
+        }
     }
 
     public static boolean removeListener(Listener<Peer> listener, Event eventType) {
@@ -795,7 +853,17 @@ public final class Peers {
             for (final Peer peer : peers.values()) {
 
                 if (peerEligibleForSending(peer, false)) {
-                    Future<JsonObject> futureResponse = sendBlocksToPeersService.submit(() -> peer.send(jsonRequest));
+                    Future<JsonObject> futureResponse = sendBlocksToPeersService.submit(() -> {
+                        long start = System.currentTimeMillis();
+                        JsonObject response = peer.send(jsonRequest);
+                        long end = System.currentTimeMillis();
+                        if (Signum.getBlockchainProcessor() != null) {
+                            Signum.getBlockchainProcessor().notifyPeerMetric(
+                                    new PeerMetric(peer.getPeerAddress(), end - start, 0,
+                                            PeerMetric.Type.BLOCK_TX));
+                        }
+                        return response;
+                    });
                     expectedResponses.add(futureResponse);
                 }
                 if (expectedResponses.size() >= Peers.sendToPeersLimit - successful) {
@@ -831,7 +899,16 @@ public final class Peers {
     private static final ExecutorService utReceivingService = Executors.newCachedThreadPool();
 
     public static CompletableFuture<JsonObject> readUnconfirmedTransactionsNonBlocking(Peer peer) {
-        return CompletableFuture.supplyAsync(() -> peer.send(getUnconfirmedTransactionsRequest), utReceivingService);
+        return CompletableFuture.supplyAsync(() -> {
+            long start = System.currentTimeMillis();
+            JsonObject response = peer.send(getUnconfirmedTransactionsRequest);
+            long end = System.currentTimeMillis();
+            if (Signum.getBlockchainProcessor() != null) {
+                Signum.getBlockchainProcessor().notifyPeerMetric(new PeerMetric(peer.getPeerAddress(),
+                        end - start, 0, PeerMetric.Type.OTHER));
+            }
+            return response;
+        }, utReceivingService);
     }
 
     private static final ExecutorService utSendingService = Executors.newCachedThreadPool();
