@@ -1,7 +1,14 @@
 package brs.gui;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.awt.*;
 import java.awt.TrayIcon.MessageType;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
@@ -11,6 +18,9 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.Collection;
 import java.util.Date;
@@ -28,6 +38,7 @@ import com.github.weisj.jsvg.SVGDocument;
 import com.github.weisj.jsvg.parser.SVGLoader;
 import java.awt.geom.Rectangle2D;
 import javax.swing.JButton;
+import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
@@ -38,12 +49,20 @@ import javax.swing.JProgressBar;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.JSeparator;
-import javax.swing.JTextArea;
+import javax.swing.JTextField;
+import javax.swing.JTextPane;
 import javax.swing.LookAndFeel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.UIManager;
+import javax.swing.JPopupMenu;
+import javax.swing.text.DefaultCaret;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.Element;
+import javax.swing.text.SimpleAttributeSet;
+import javax.swing.text.StyleConstants;
+import javax.swing.text.StyledDocument;
 import java.net.URL;
 
 import org.slf4j.Logger;
@@ -121,13 +140,16 @@ public class SignumGUI extends JFrame {
     private JButton dbCheckButton;
     private JButton syncButton;
     private JButton shutdownButton;
-    // private JButton restartButton;
+    private JButton restartButton;
 
     private MetricsPanel metricsPanel;
 
     private JComponent popOffToggle;
     private JComponent hamburgerMenu;
     private JLabel measurementLabel;
+    private JPanel commandPanel;
+    private boolean showCommandInput = false;
+    private JCheckBoxMenuItem showCommandItem;
     private JLabel experimentalLabel;
     private JLabel trimLabel;
     private JLabel autoResolveLabel;
@@ -293,30 +315,14 @@ public class SignumGUI extends JFrame {
             }
         }
         IconFontSwing.register(FontAwesome.getIconFont());
-        JTextArea textArea = new JTextArea() {
-            @Override
-            public void append(String str) {
-                super.append(str);
-
-                try {
-                    int lineCount = getLineCount();
-                    if (lineCount > OUTPUT_MAX_LINES) {
-                        int endOffset = getLineEndOffset(lineCount - OUTPUT_MAX_LINES - 1);
-                        replaceRange("", 0, endOffset);
-                    }
-                } catch (Exception e) {
-                    // ignore
-                }
-                if (textScrollPane != null) {
-                    JScrollBar vertical = textScrollPane.getVerticalScrollBar();
-                    vertical.setValue(vertical.getMaximum());
-                }
-            }
-        };
-        iconColor = textArea.getForeground();
-        textArea.setEditable(false);
-        sendJavaOutputToTextArea(textArea);
-        textScrollPane = new JScrollPane(textArea);
+        JTextPane textPane = new JTextPane();
+        textPane.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 14));
+        iconColor = textPane.getForeground();
+        DefaultCaret caret = (DefaultCaret) textPane.getCaret();
+        caret.setUpdatePolicy(DefaultCaret.ALWAYS_UPDATE);
+        textPane.setEditable(false);
+        sendJavaOutputToTextArea(textPane);
+        textScrollPane = new JScrollPane(textPane);
         JPanel content = new JPanel(new BorderLayout());
         content.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
         setContentPane(content);
@@ -329,6 +335,74 @@ public class SignumGUI extends JFrame {
         JPanel bottomPanel = new JPanel(new BorderLayout());
         bottomPanel.setBorder(BorderFactory.createEmptyBorder(2, 2, 2, 2));
         content.add(bottomPanel, BorderLayout.PAGE_END);
+
+        // Command Input Panel
+        commandPanel = new JPanel(new BorderLayout(0, 0));
+        commandPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
+        JComponent commandLabel = new JComponent() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                CustomDrawings.COMMAND_SYMBOL.draw((Graphics2D) g, getWidth(), getHeight(), iconColor);
+            }
+
+            @Override
+            public Dimension getPreferredSize() {
+                return new Dimension(24, 24);
+            }
+        };
+        commandLabel.setToolTipText("Command Input");
+        JTextField commandField = new JTextField();
+        commandField.setToolTipText("Enter node command (e.g. .help, .stop, .resume)");
+        JButton sendCommandButton = new JButton("Send");
+
+        ActionListener sendAction = e -> {
+            String cmd = commandField.getText().trim();
+            if (!cmd.isEmpty()) {
+                LOGGER.info("Executing command: " + cmd);
+                new Thread(() -> Signum.processCommand(cmd)).start();
+                commandField.setText("");
+            }
+        };
+        commandField.addActionListener(sendAction);
+        sendCommandButton.addActionListener(sendAction);
+
+        JLabel helpLabel = new JLabel("?");
+        helpLabel.setToolTipText("Command Help");
+        helpLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        helpLabel.setBorder(BorderFactory.createEmptyBorder(0, 5, 0, 5));
+        String commandHelpText = "<html><b>Available Commands:</b><br>" +
+                "<ul>" +
+                "<li><b>.help</b> - Displays available commands in the log.</li>" +
+                "<li><b>.stop</b> - Stops blockchain synchronization.</li>" +
+                "<li><b>.resume</b> - Resumes blockchain synchronization.</li>" +
+                "<li><b>.restart</b> - Restarts the node application.</li>" +
+                "<li><b>.shutdown</b> - Gracefully shuts down the node.</li>" +
+                "<li><b>.autoresolve</b> - Triggers manual database consistency resolution.</li>" +
+                "<li><b>.trim</b> - Schedules a database trim.</li>" +
+                "<li><b>.dbcheck</b> - Performs a database consistency check.</li>" +
+                "<li><b>.popoff &lt;n&gt;</b> - Pops off the last n blocks (e.g., .popoff 10).</li>" +
+                "</ul>" +
+                "Enter a command in the text field and click 'Send' or press Enter.</html>";
+
+        helpLabel.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                JOptionPane.showMessageDialog(SignumGUI.this, commandHelpText, "Command Usage",
+                        JOptionPane.INFORMATION_MESSAGE);
+            }
+        });
+
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
+        buttonPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+        buttonPanel.add(helpLabel);
+        buttonPanel.add(sendCommandButton);
+
+        commandPanel.add(commandLabel, BorderLayout.WEST);
+        commandPanel.add(commandField, BorderLayout.CENTER);
+        commandPanel.add(buttonPanel, BorderLayout.EAST);
+        bottomPanel.add(commandPanel, BorderLayout.NORTH);
+        commandPanel.setVisible(showCommandInput);
 
         syncProgressBar = new JProgressBar(0, 100);
         syncProgressBar.setStringPainted(true);
@@ -455,6 +529,21 @@ public class SignumGUI extends JFrame {
             }
         };
         hamburgerMenu.setToolTipText("Menu");
+        JPopupMenu menu = new JPopupMenu();
+        showCommandItem = new JCheckBoxMenuItem("Show Command Input");
+        showCommandItem.setSelected(showCommandInput);
+        showCommandItem.addActionListener(e -> {
+            showCommandInput = showCommandItem.isSelected();
+            commandPanel.setVisible(showCommandInput);
+        });
+        menu.add(showCommandItem);
+        hamburgerMenu.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                menu.show(hamburgerMenu, hamburgerMenu.getWidth() - menu.getPreferredSize().width,
+                        hamburgerMenu.getHeight());
+            }
+        });
 
         JPanel topPanel = new JPanel();
         topPanel.setLayout(new BoxLayout(topPanel, BoxLayout.Y_AXIS));
@@ -698,7 +787,7 @@ public class SignumGUI extends JFrame {
                             "This will stop the node. Are you sure?", "Exit and stop node",
                             JOptionPane.YES_NO_OPTION,
                             JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
-                        new Thread(SignumGUI.this::shutdown).start();
+                        shutdown();
                     }
                 } else {
                     trayIcon.displayMessage("Signum GUI closed", "Note that Signum is still running", MessageType.INFO);
@@ -725,52 +814,72 @@ public class SignumGUI extends JFrame {
     }
 
     private void shutdown() {
+        JDialog shutdownDialog = new JDialog(this, "Shutting down", true);
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
 
-        isShuttingDown = true;
-        updateTitle();
+        JLabel messageLabel = new JLabel("Please wait, Signum is shutting down...");
+        messageLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        panel.add(messageLabel);
 
-        // Stop GUI updates and listeners first to prevent access to core components
-        // during shutdown
-        // This ensures that the MetricsPanel executors are stopped before the
-        // DB/Network is closed
-        if (elapsedTimeTimer != null) {
-            try {
-                elapsedTimeTimer.stop();
-            } catch (Throwable t) {
-                LOGGER.warn("Error stopping elapsed time timer", t);
+        panel.add(Box.createRigidArea(new Dimension(0, 15)));
+
+        final RotatingSvgIcon rotatingIcon = new RotatingSvgIcon(0.5);
+        rotatingIcon.setPreferredSize(new Dimension(64, 64));
+        rotatingIcon.setAlignmentX(Component.CENTER_ALIGNMENT);
+        panel.add(rotatingIcon);
+        rotatingIcon.start();
+
+        shutdownDialog.setContentPane(panel);
+        shutdownDialog.pack();
+        shutdownDialog.setLocationRelativeTo(this);
+        shutdownDialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
+
+        shutdownDialog.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowOpened(WindowEvent e) {
+                new Thread(() -> {
+                    saveGuiSettings();
+                    isShuttingDown = true;
+                    updateTitle();
+
+                    if (elapsedTimeTimer != null) {
+                        try {
+                            elapsedTimeTimer.stop();
+                        } catch (Throwable t) {
+                            LOGGER.warn("Error stopping elapsed time timer", t);
+                        }
+                    }
+
+                    if (metricsPanel != null) {
+                        try {
+                            metricsPanel.shutdown();
+                        } catch (Throwable t) {
+                            LOGGER.warn("Error shutting down metrics panel", t);
+                        }
+                    }
+
+                    try {
+                        Signum.shutdown(false);
+                    } catch (Throwable t) {
+                        LOGGER.error("Unexpected error during Signum core shutdown", t);
+                    }
+
+                    if (trayIcon != null && SystemTray.isSupported()) {
+                        try {
+                            SystemTray.getSystemTray().remove(trayIcon);
+                        } catch (Throwable t) {
+                            LOGGER.warn("Error removing tray icon", t);
+                        }
+                    }
+
+                    System.exit(0);
+                }).start();
             }
-        }
+        });
 
-        if (metricsPanel != null) {
-            try {
-                metricsPanel.shutdown();
-            } catch (Throwable t) {
-                LOGGER.warn("Error shutting down metrics panel", t);
-            }
-        }
-
-        // The main node shutdown is handled by Signum.shutdown()
-        // This is the most critical part.
-        try {
-            Signum.shutdown(false);
-        } catch (Throwable t) {
-            // Signum.shutdown() is designed to handle its own errors and logging via
-            // ShutdownManager.
-            // This catch block is a final safeguard.
-            LOGGER.error("Unexpected error during Signum core shutdown", t);
-        }
-
-        // The rest is GUI resource cleanup. We'll do a best-effort cleanup.
-        if (trayIcon != null && SystemTray.isSupported()) {
-            try {
-                SystemTray.getSystemTray().remove(trayIcon);
-            } catch (Throwable t) {
-                LOGGER.warn("Error removing tray icon", t);
-            }
-        }
-
-        // Finally, exit the application.
-        System.exit(0);
+        shutdownDialog.setVisible(true);
     }
 
     private void showTrayIcon() {
@@ -806,10 +915,8 @@ public class SignumGUI extends JFrame {
                 IconFontSwing.buildIcon(FontAwesome.DATABASE, 18, iconColor));
         syncButton = new JButton("Stop Sync",
                 IconFontSwing.buildIcon(FontAwesome.PAUSE, 18, iconColor));
-        /*
-         * restartButton = new JButton("Restart",
-         * IconFontSwing.buildIcon(FontAwesome.REFRESH, 18, iconColor));
-         */
+        restartButton = new JButton("Restart",
+                IconFontSwing.buildIcon(FontAwesome.REFRESH, 18, iconColor));
         shutdownButton = new JButton("Shutdown",
                 IconFontSwing.buildIcon(FontAwesome.POWER_OFF, 18, iconColor));
         // TODO: find a way to actually store permanently the max block available to
@@ -830,6 +937,8 @@ public class SignumGUI extends JFrame {
                 "Performs a manual consistency check on the database to ensure data integrity.");
         addInfoTooltip(syncButton,
                 "Toggles the synchronization process. 'Pause Sync' pauses the downloading and processing of new blocks. 'Resume Sync' continues the process.");
+        addInfoTooltip(restartButton,
+                "Restarts the Signum node application. This is useful for applying configuration changes or reloading the application. A confirmation dialog will be shown before restarting.");
         addInfoTooltip(shutdownButton,
                 "Safely stops the Signum node application. This ensures all data is saved correctly and prevents potential database corruption. A confirmation dialog will be shown before shutting down.");
 
@@ -848,17 +957,14 @@ public class SignumGUI extends JFrame {
 
         syncButton.addActionListener(e -> syncButtonAction());
         shutdownButton.addActionListener(e -> shutdownAction());
-        /*
-         * restartButton.addActionListener(e -> {
-         * 
-         * if (JOptionPane.showConfirmDialog(SignumGUI.this,
-         * "This will restart the node. Are you sure?", "Restart node",
-         * JOptionPane.YES_NO_OPTION,
-         * JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
-         * restart();
-         * }
-         * });
-         */
+        restartButton.addActionListener(e -> {
+            if (JOptionPane.showConfirmDialog(SignumGUI.this,
+                    "This will restart the node. Are you sure?", "Restart node",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
+                restart();
+            }
+        });
 
         if (phoenixIndex.isFile() && phoenixIndex.exists()) {
             leftButtons.add(openPhoenixButton);
@@ -878,7 +984,7 @@ public class SignumGUI extends JFrame {
         leftButtons.add(dbCheckButton);
         leftButtons.add(syncButton);
 
-        // leftButtons.add(restartButton);
+        leftButtons.add(restartButton);
         leftButtons.add(shutdownButton);
         leftButtons.add(popOffToggle);
 
@@ -894,7 +1000,7 @@ public class SignumGUI extends JFrame {
         openPheonixWalletItem.addActionListener(e -> openWebUi("/phoenix"));
         openClassicWalletItem.addActionListener(e -> openWebUi("/classic"));
         showItem.addActionListener(e -> showWindow());
-        shutdownItem.addActionListener(e -> new Thread(this::shutdown).start());
+        shutdownItem.addActionListener(e -> shutdown());
 
         popupMenu.add(openClassicWalletItem);
         popupMenu.add(showItem);
@@ -958,7 +1064,7 @@ public class SignumGUI extends JFrame {
                 "This will stop the node. Are you sure?", "Shutdown Node",
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
-            new Thread(this::shutdown).start();
+            shutdown();
         }
     }
 
@@ -1031,6 +1137,57 @@ public class SignumGUI extends JFrame {
             public void windowClosed(WindowEvent e) {
                 rotatingIcon.stop();
             }
+
+            @Override
+            public void windowOpened(WindowEvent e) {
+                if (isDbCheckRunning.get()) {
+                    return;
+                }
+                isDbCheckRunning.set(true);
+
+                new Thread(() -> {
+                    try {
+                        // Check if resolution was already active before we requested the check
+                        boolean wasResolutionActive = blockchainProcessor
+                                .getResolutionState() == BlockchainProcessor.ResolutionState.ACTIVE;
+
+                        final int result = blockchainProcessor.checkDatabaseStateRequest();
+                        final int height = blockchainProcessor.getLastCheckHeight();
+                        final long totalMined = blockchainProcessor.getLastCheckTotalMined();
+                        final long totalEffectiveBalance = blockchainProcessor.getLastCheckTotalEffectiveBalance();
+
+                        final int finalLimitHeight = blockchainProcessor.getSafeRollbackHeight();
+                        int lastTrimHeight = blockchainProcessor.getLastTrimHeight().get();
+                        final int finalLastTrimHeight = lastTrimHeight;
+
+                        SwingUtilities.invokeLater(() -> {
+                            if (waitDialog.isDisplayable()) {
+                                rotatingIcon.stop();
+                                waitDialog.dispose();
+                            }
+                            showDbCheckResult(result, height, totalMined, totalEffectiveBalance, wasResolutionActive,
+                                    finalLimitHeight, finalLastTrimHeight);
+                        });
+                    } catch (Exception ex) {
+                        LOGGER.error("Error during DB check", ex);
+                        SwingUtilities.invokeLater(() -> {
+                            if (waitDialog.isDisplayable()) {
+                                rotatingIcon.stop();
+                                waitDialog.dispose();
+                            }
+                            String message = "An error occurred during the database check.";
+                            if (ex instanceof IllegalStateException
+                                    && ex.getMessage().contains("already in progress")) {
+                                message = "A database check is already running in the background.";
+                            }
+                            JOptionPane.showMessageDialog(SignumGUI.this, message,
+                                    "Error", JOptionPane.ERROR_MESSAGE);
+                        });
+                    } finally {
+                        isDbCheckRunning.set(false);
+                    }
+                }).start();
+            }
         });
 
         waitDialog.setContentPane(panel);
@@ -1043,49 +1200,6 @@ public class SignumGUI extends JFrame {
             return;
         }
 
-        isDbCheckRunning.set(true);
-
-        new Thread(() -> {
-            try {
-                // Check if resolution was already active before we requested the check
-                boolean wasResolutionActive = blockchainProcessor
-                        .getResolutionState() == BlockchainProcessor.ResolutionState.ACTIVE;
-
-                final int result = blockchainProcessor.checkDatabaseStateRequest();
-                final int height = blockchainProcessor.getLastCheckHeight();
-                final long totalMined = blockchainProcessor.getLastCheckTotalMined();
-                final long totalEffectiveBalance = blockchainProcessor.getLastCheckTotalEffectiveBalance();
-
-                final int finalLimitHeight = blockchainProcessor.getSafeRollbackHeight();
-                int lastTrimHeight = blockchainProcessor.getLastTrimHeight().get();
-                final int finalLastTrimHeight = lastTrimHeight;
-
-                SwingUtilities.invokeLater(() -> {
-                    if (waitDialog.isDisplayable()) {
-                        rotatingIcon.stop();
-                        waitDialog.dispose();
-                    }
-                    showDbCheckResult(result, height, totalMined, totalEffectiveBalance, wasResolutionActive,
-                            finalLimitHeight, finalLastTrimHeight);
-                });
-            } catch (Exception e) {
-                LOGGER.error("Error during DB check", e);
-                SwingUtilities.invokeLater(() -> {
-                    if (waitDialog.isDisplayable()) {
-                        rotatingIcon.stop();
-                        waitDialog.dispose();
-                    }
-                    String message = "An error occurred during the database check.";
-                    if (e instanceof IllegalStateException && e.getMessage().contains("already in progress")) {
-                        message = "A database check is already running in the background.";
-                    }
-                    JOptionPane.showMessageDialog(SignumGUI.this, message,
-                            "Error", JOptionPane.ERROR_MESSAGE);
-                });
-            } finally {
-                isDbCheckRunning.set(false);
-            }
-        }).start();
         waitDialog.setVisible(true);
     }
 
@@ -1205,11 +1319,43 @@ public class SignumGUI extends JFrame {
         new Thread(() -> Signum.getBlockchainProcessor().popOff(count)).start();
     }
 
-    /*
-     * private void restart() {
-     * new Thread(() -> Signum.restart()).start();
-     * }
-     */
+    private void restart() {
+        LOGGER.info("Restarting node...");
+
+        JDialog restartDialog = new JDialog(this, "Restarting", true);
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        JLabel messageLabel = new JLabel("Please wait, Signum is restarting...");
+        messageLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+        panel.add(messageLabel);
+
+        panel.add(Box.createRigidArea(new Dimension(0, 15)));
+
+        final RotatingSvgIcon rotatingIcon = new RotatingSvgIcon(0.5);
+        rotatingIcon.setPreferredSize(new Dimension(64, 64));
+        rotatingIcon.setAlignmentX(Component.CENTER_ALIGNMENT);
+        panel.add(rotatingIcon);
+        rotatingIcon.start();
+
+        restartDialog.setContentPane(panel);
+        restartDialog.pack();
+        restartDialog.setLocationRelativeTo(this);
+        restartDialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
+
+        restartDialog.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowOpened(WindowEvent e) {
+                new Thread(() -> {
+                    saveGuiSettings();
+                    signum.Launcher.restart();
+                }).start();
+            }
+        });
+
+        restartDialog.setVisible(true);
+    }
 
     private void editConf() {
         File file = new File(Signum.CONF_FOLDER, Signum.PROPERTIES_NAME);
@@ -1437,6 +1583,7 @@ public class SignumGUI extends JFrame {
         try {
             // signum.init();
             Signum.main(args);
+            loadGuiSettings();
 
             // Now that properties are loaded, set the correct values for the GUI
             showPopOff = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
@@ -1456,6 +1603,10 @@ public class SignumGUI extends JFrame {
 
             try {
                 SwingUtilities.invokeLater(() -> {
+                    if (showCommandItem != null)
+                        showCommandItem.setSelected(showCommandInput);
+                    if (commandPanel != null)
+                        commandPanel.setVisible(showCommandInput);
                     metricsPanel.init();
                     metricsPanel.setVisible(true);
                     showTrayIcon();
@@ -1708,6 +1859,53 @@ public class SignumGUI extends JFrame {
         JOptionPane.showMessageDialog(this, htmlText, title, JOptionPane.PLAIN_MESSAGE);
     }
 
+    private void loadGuiSettings() {
+        try {
+            String settingsDir = Signum.getPropertyService().getString(Props.SETTINGS_DIR);
+            Path settingsPath = brs.util.PathUtils.resolvePath(Paths.get(settingsDir, "gui-settings.json").toString());
+            if (Files.exists(settingsPath)) {
+                try (java.io.BufferedReader reader = Files.newBufferedReader(settingsPath)) {
+                    JsonElement parsed = JsonParser.parseReader(reader);
+                    if (parsed.isJsonObject()) {
+                        JsonObject settings = parsed.getAsJsonObject();
+                        if (settings.has("showCommandInput")) {
+                            showCommandInput = settings.get("showCommandInput").getAsBoolean();
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Could not load GUI settings", e);
+        }
+    }
+
+    private void saveGuiSettings() {
+        try {
+            String settingsDir = Signum.getPropertyService().getString(Props.SETTINGS_DIR);
+            Path settingsPath = brs.util.PathUtils.resolvePath(Paths.get(settingsDir, "gui-settings.json").toString());
+            if (settingsPath.getParent() != null) {
+                Files.createDirectories(settingsPath.getParent());
+            }
+            JsonObject settings = new JsonObject();
+            if (Files.exists(settingsPath)) {
+                try (java.io.BufferedReader reader = Files.newBufferedReader(settingsPath)) {
+                    JsonElement parsed = JsonParser.parseReader(reader);
+                    if (parsed.isJsonObject()) {
+                        settings = parsed.getAsJsonObject();
+                    }
+                } catch (Exception e) {
+                }
+            }
+            settings.addProperty("showCommandInput", showCommandInput);
+            try (java.io.BufferedWriter writer = Files.newBufferedWriter(settingsPath)) {
+                Gson gson = new GsonBuilder().setPrettyPrinting().create();
+                writer.write(gson.toJson(settings));
+            }
+        } catch (Exception e) {
+            LOGGER.error("Failed to save GUI settings", e);
+        }
+    }
+
     private void updatePeerCount(long connectedCount, long allKnownCount, long blacklistedCount) {
         // The label previously for 'connected' now shows 'active' peers.
         connectedPeersLabel.setText(String.valueOf(connectedCount));
@@ -1734,9 +1932,9 @@ public class SignumGUI extends JFrame {
             trayIcon.setToolTip(trayIcon.getToolTip() + " (STOPPED)");
     }
 
-    private void sendJavaOutputToTextArea(JTextArea textArea) {
-        System.setOut(new PrintStream(new TextAreaOutputStream(textArea, System.out)));
-        System.setErr(new PrintStream(new TextAreaOutputStream(textArea, System.err)));
+    private void sendJavaOutputToTextArea(JTextPane textPane) {
+        System.setOut(new PrintStream(new TextAreaOutputStream(textPane, System.out, false)));
+        System.setErr(new PrintStream(new TextAreaOutputStream(textPane, System.err, true)));
     }
 
     private void showMessage(String message) {
@@ -1747,14 +1945,16 @@ public class SignumGUI extends JFrame {
     }
 
     private static class TextAreaOutputStream extends OutputStream {
-        private final JTextArea textArea;
+        private final JTextPane textPane;
         private final PrintStream actualOutput;
         private final StringBuilder buffer = new StringBuilder();
         private final Timer timer;
+        private final boolean isError;
 
-        private TextAreaOutputStream(JTextArea textArea, PrintStream actualOutput) {
-            this.textArea = textArea;
+        private TextAreaOutputStream(JTextPane textPane, PrintStream actualOutput, boolean isError) {
+            this.textPane = textPane;
             this.actualOutput = actualOutput;
+            this.isError = isError;
             this.timer = new Timer(500, e -> flush());
             this.timer.setRepeats(true);
             this.timer.start();
@@ -1789,7 +1989,53 @@ public class SignumGUI extends JFrame {
                 text = buffer.toString();
                 buffer.setLength(0);
             }
-            textArea.append(text);
+            append(text);
+        }
+
+        private void append(String text) {
+            StyledDocument doc = textPane.getStyledDocument();
+            String[] lines = text.split("(?<=\\n)");
+
+            for (String line : lines) {
+                SimpleAttributeSet attrs = new SimpleAttributeSet();
+                Color color = null;
+
+                if (line.contains("ERROR") || line.contains("SEVERE")) {
+                    color = new Color(255, 100, 100);
+                } else if (line.contains("WARN") || line.contains("WARNING")) {
+                    color = new Color(255, 200, 100);
+                } else if (line.contains("TRACE") || line.contains("FINER") || line.contains("FINEST")) {
+                    color = new Color(150, 150, 150);
+                } else if (line.contains("DEBUG") || line.contains("FINE")) {
+                    color = new Color(180, 180, 180);
+                } else if (line.contains("CONFIG")) {
+                    color = new Color(100, 200, 200);
+                } else if (isError && !line.contains("INFO")) {
+                    color = new Color(255, 100, 100);
+                }
+
+                if (color != null) {
+                    StyleConstants.setForeground(attrs, color);
+                } else {
+                    StyleConstants.setForeground(attrs, UIManager.getColor("text"));
+                }
+
+                try {
+                    doc.insertString(doc.getLength(), line, attrs);
+                } catch (BadLocationException e) {
+                    // ignore
+                }
+            }
+
+            Element root = doc.getDefaultRootElement();
+            while (root.getElementCount() > OUTPUT_MAX_LINES) {
+                try {
+                    Element firstLine = root.getElement(0);
+                    doc.remove(0, firstLine.getEndOffset());
+                } catch (BadLocationException e) {
+                    break;
+                }
+            }
         }
     }
 
