@@ -82,7 +82,7 @@ public final class Peers {
     static Set<String> knownBlacklistedPeers;
 
     private static int connectWellKnownFirst;
-    private static boolean connectWellKnownFinished;
+    private static final AtomicBoolean connectWellKnownFinished = new AtomicBoolean(false);
 
     static Set<String> rebroadcastPeers;
 
@@ -196,7 +196,7 @@ public final class Peers {
         }
 
         connectWellKnownFirst = propertyService.getInt(Props.P2P_NUM_BOOTSTRAP_CONNECTIONS);
-        connectWellKnownFinished = (connectWellKnownFirst == 0);
+        connectWellKnownFinished.set(connectWellKnownFirst == 0);
 
         List<String> knownBlacklistedPeersList = propertyService.getStringList(Props.P2P_BLACKLISTED_PEERS);
         if (knownBlacklistedPeersList.isEmpty()) {
@@ -979,7 +979,7 @@ public final class Peers {
     }
 
     public static Peer getAnyPeer(Peer.State state) {
-        if (!connectWellKnownFinished) {
+        if (!connectWellKnownFinished.get()) {
             int wellKnownConnected = 0;
             for (Peer peer : peers.values()) {
                 if (peer.isWellKnown() && peer.getState() == Peer.State.CONNECTED) {
@@ -987,8 +987,9 @@ public final class Peers {
                 }
             }
             if (wellKnownConnected >= connectWellKnownFirst) {
-                connectWellKnownFinished = true;
-                logger.info("Finished connecting to {} well known peers.", connectWellKnownFirst);
+                if (connectWellKnownFinished.compareAndSet(false, true)) {
+                    logger.info("Finished connecting to {} well known peers.", connectWellKnownFirst);
+                }
             }
         }
 
@@ -1003,7 +1004,8 @@ public final class Peers {
         List<Peer> selectedPeers = new ArrayList<>();
         for (Peer peer : peers.values()) {
             if (!peer.isBlacklisted() && peer.getState() == state && peer.shareAddress()
-                    && (connectWellKnownFinished || peer.getState() == Peer.State.CONNECTED || peer.isWellKnown())) {
+                    && (connectWellKnownFinished.get() || peer.getState() == Peer.State.CONNECTED
+                            || peer.isWellKnown())) {
                 selectedPeers.add(peer);
             }
         }

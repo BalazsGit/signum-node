@@ -45,21 +45,25 @@ public class ShutdownManager {
         if (Files.exists(stateFilePath)) {
             try (BufferedReader reader = Files.newBufferedReader(stateFilePath)) {
                 JsonObject previousState = JsonParser.parseReader(reader).getAsJsonObject();
-                if (previousState.has("shutdownStatus")
-                        && !"clean".equals(previousState.get("shutdownStatus").getAsString())) {
-                    this.wasDirty = true;
-                    logger.warn("Previous shutdown was not clean. Status: {}",
-                            previousState.get("shutdownStatus").getAsString());
-                    if (previousState.has("components")) {
-                        logger.warn("Component states: {}", previousState.get("components").toString());
+                if (previousState.has("shutdownStatus")) {
+                    String status = previousState.get("shutdownStatus").getAsString();
+                    if (!"clean".equals(status)) {
+                        this.wasDirty = true;
+                        logger.warn("Previous shutdown was not clean. Status: {}", status);
+                        if (previousState.has("components")) {
+                            logger.warn("Component states: {}", previousState.get("components").toString());
+                        }
+                    } else {
+                        logger.info("Previous shutdown was clean. Status: {}", status);
                     }
                 }
             } catch (Exception e) {
                 logger.error("Could not read or parse previous shutdown state file. Assuming dirty shutdown.", e);
                 this.wasDirty = true;
             }
+        } else {
+            logger.info("No previous shutdown state file found. Assuming clean start.");
         }
-        // If file doesn't exist, we assume it was a clean shutdown or first run.
     }
 
     public boolean wasPreviousShutdownDirty() {

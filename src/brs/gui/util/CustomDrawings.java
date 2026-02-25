@@ -198,4 +198,25 @@ public class CustomDrawings {
             g2.fillRect(0, yOffset + i * (barHeight + spacing), w, barHeight);
         }
     };
+
+    /**
+     * Draws a command symbol (chevron pointing right followed by a colon).
+     */
+    public static final Symbol COMMAND_SYMBOL = (g2, w, h, color) -> {
+        g2.setColor(color);
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+
+        int cy = h / 2;
+        int cx = w / 2;
+
+        Path2D.Double path = new Path2D.Double();
+        path.moveTo(cx - 5, cy - 4);
+        path.lineTo(cx, cy);
+        path.lineTo(cx - 5, cy + 4);
+        g2.draw(path);
+
+        g2.fillOval(cx + 3, cy - 3, 2, 2);
+        g2.fillOval(cx + 3, cy + 2, 2, 2);
+    };
 }

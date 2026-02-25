@@ -45,6 +45,7 @@ import brs.services.impl.TransactionServiceImpl;
 import brs.statistics.StatisticsManagerImpl;
 import brs.util.DownloadCacheImpl;
 import brs.util.LoggerConfigurator;
+import brs.util.PathUtils;
 import brs.util.ThreadPool;
 import brs.util.Time;
 import brs.web.api.http.common.APITransactionManager;
@@ -59,6 +60,8 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -79,7 +82,7 @@ public final class Signum {
     public static final Version VERSION = Version.parse("v3.9.6");
     public static final String APPLICATION = "BRS";
 
-    public static final String CONF_FOLDER = "./conf";
+    public static final String CONF_FOLDER = "../conf";
     public static final String DEFAULT_PROPERTIES_NAME = "node-default.properties";
     public static final String PROPERTIES_NAME = "node.properties";
 
@@ -100,7 +103,7 @@ public final class Signum {
                     .longOpt("help")
                     .build());
 
-    private static final Logger logger = LoggerFactory.getLogger(Signum.class);
+    private static Logger logger = LoggerFactory.getLogger(Signum.class);
 
     private static Stores stores;
     private static Dbs dbs;
@@ -126,24 +129,28 @@ public final class Signum {
 
     private static AtomicBoolean isShutdown = new AtomicBoolean(false);
     private static AtomicBoolean nodeStopped = new AtomicBoolean(false);
+    private static AtomicBoolean isInitialized = new AtomicBoolean(false); // New flag for initialization
 
     private static PropertyService loadProperties(String confFolder) {
         logger.info("Initializing Signum Node version {}", VERSION);
 
-        logger.info("Configurations from folder {}", confFolder);
+        Path confPath = PathUtils.resolvePath(confFolder);
+        logger.info("Configurations from folder {}", confPath);
 
         CaselessProperties defaultProperties = new CaselessProperties();
-        File defaultPropsFile = new File(confFolder, DEFAULT_PROPERTIES_NAME);
+        File defaultPropsFile = confPath.resolve(DEFAULT_PROPERTIES_NAME).toFile();
         try (Reader reader = new InputStreamReader(new FileInputStream(defaultPropsFile), StandardCharsets.UTF_8)) {
+            logger.info("Loading default properties from {}", defaultPropsFile.getAbsolutePath());
             defaultProperties.load(reader);
         } catch (IOException e) {
             throw new RuntimeException("Error loading " + DEFAULT_PROPERTIES_NAME, e);
         }
 
         CaselessProperties properties = new CaselessProperties(defaultProperties);
-        File propsFile = new File(confFolder, PROPERTIES_NAME);
+        File propsFile = confPath.resolve(PROPERTIES_NAME).toFile();
         if (propsFile.exists()) {
             try (Reader reader = new InputStreamReader(new FileInputStream(propsFile), StandardCharsets.UTF_8)) {
+                logger.info("Loading custom user properties from {}", propsFile.getAbsolutePath());
                 properties.load(reader);
             } catch (IOException e) {
                 logger.info("Custom user properties file {} not loaded", PROPERTIES_NAME, e);
@@ -228,29 +235,50 @@ public final class Signum {
     public static void initShutdown() {
         isShutdown.set(false);
         nodeStopped.set(false);
+        isInitialized.set(false); // Reset initialization flag on shutdown init
     }
 
     public static void init(CaselessProperties customProperties) {
-        loadWallet(new PropertyServiceImpl(customProperties));
+        if (isInitialized.compareAndSet(false, true)) {
+            loadWallet(new PropertyServiceImpl(customProperties));
+        } else {
+            logger.warn("Signum node already initialized. Skipping re-initialization.");
+        }
     }
 
     private static void init(String confFolder) {
-        loadWallet(loadProperties(confFolder));
+        if (isInitialized.compareAndSet(false, true)) { // Ensure init runs only once
+            // 1. Initialize logging system (apply logging.properties)
+            try {
+                List<String> loggingStatus = LoggerConfigurator.init(confFolder);
+                logger = LoggerFactory.getLogger(Signum.class);
+                for (String status : loggingStatus) {
+                    if (status.startsWith("WARN:")) {
+                        logger.warn(status.substring(5).trim());
+                    } else if (status.startsWith("INFO:")) {
+                        logger.info(status.substring(5).trim());
+                    } else {
+                        logger.info(status);
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("Error initializing logging: " + e.getMessage());
+                e.printStackTrace();
+            }
+
+            // 2. Load properties (logs will appear on configured output)
+            PropertyService propertyService = loadProperties(confFolder);
+
+            loadWallet(propertyService);
+        } else {
+            logger.warn("Signum node already initialized. Skipping re-initialization.");
+        }
     }
 
     private static void loadWallet(PropertyService propertyService) {
-        LoggerConfigurator.init();
-
         Signum.propertyService = propertyService;
 
         shutdownManager = new ShutdownManager(propertyService);
-        if (shutdownManager.wasPreviousShutdownDirty()) {
-            logger.warn("Previous shutdown was not clean. Checking database consistency...");
-            // The check and potential recovery will be handled after the blockchain
-            // processor is initialized.
-        } else {
-            logger.info("Previous shutdown was clean.");
-        }
 
         String networkParametersClass = propertyService.getString(Props.NETWORK_PARAMETERS);
         NetworkParameters params = null;
@@ -276,6 +304,7 @@ public final class Signum {
 
             // Address prefix and coin name
             SignumUtils.setAddressPrefix(propertyService.getString(Props.ADDRESS_PREFIX));
+            // TODO: change to coin name
             SignumUtils.addAddressPrefix("BURST");
             SignumUtils.setValueSuffix(propertyService.getString(Props.VALUE_SUFIX));
 
@@ -514,7 +543,10 @@ public final class Signum {
             logger.error(e.getMessage(), e);
             System.exit(1);
         }
-        (new Thread(Signum::commandHandler)).start();
+        Thread consoleThread = new Thread(Signum::commandHandler);
+        consoleThread.setName("Console Command Handler");
+        consoleThread.setDaemon(true);
+        consoleThread.start();
     }
 
     private static void addBlockchainListeners(
@@ -548,23 +580,56 @@ public final class Signum {
         try {
             String command;
             while ((command = reader.readLine()) != null) {
-                logger.debug("received command: >{}<", command);
-                if (command.equals(".shutdown")) {
-                    shutdown(false);
-                    System.exit(0);
-                } else if (command.startsWith(".popoff ")) {
-                    Pattern r = Pattern.compile("^\\.popoff (\\d+)$");
-                    Matcher m = r.matcher(command);
-                    if (m.find()) {
-                        int numBlocks = Integer.parseInt(m.group(1));
-                        if (numBlocks > 0) {
-                            blockchainProcessor.popOffTo(blockchain.getHeight() - numBlocks);
-                        }
-                    }
-                }
+                processCommand(command);
             }
         } catch (IOException e) {
             // ignore
+        }
+    }
+
+    public static void processCommand(String command) {
+        logger.debug("received command: >{}<", command);
+        if (command.equals(".shutdown")) {
+            shutdown(false);
+            System.exit(0);
+        } else if (command.equals(".restart")) {
+            signum.Launcher.restart();
+        } else if (command.equals(".autoresolve")) {
+            blockchainProcessor.manualResolveDatabaseConsistency();
+        } else if (command.equals(".stop")) {
+            blockchainProcessor.setGetMoreBlocksPause(true);
+            blockchainProcessor.setBlockImporterPause(true);
+            logger.info("Blockchain synchronization stopped.");
+        } else if (command.equals(".resume")) {
+            blockchainProcessor.setGetMoreBlocksPause(false);
+            blockchainProcessor.setBlockImporterPause(false);
+            logger.info("Blockchain synchronization resumed.");
+        } else if (command.equals(".trim")) {
+            blockchainProcessor.scheduleTrim(blockchain.getLastBlock());
+        } else if (command.equals(".dbcheck")) {
+            blockchainProcessor.checkDatabaseStateRequest();
+        } else if (command.equals(".help")) {
+            logger.info("Available commands:");
+            logger.info("  .shutdown     - Gracefully shuts down the node.");
+            logger.info("  .restart      - Restarts the node application.");
+            logger.info("  .stop         - Stops blockchain synchronization.");
+            logger.info("  .resume       - Resumes blockchain synchronization.");
+            logger.info("  .autoresolve  - Triggers manual database consistency resolution.");
+            logger.info("  .trim         - Schedules a database trim.");
+            logger.info("  .dbcheck      - Performs a database consistency check.");
+            logger.info("  .popoff <n>   - Pops off the last n blocks from the blockchain (e.g., .popoff 10).");
+            logger.info("  .help         - Displays this help message.");
+        } else if (command.startsWith(".popoff ")) {
+            Pattern r = Pattern.compile("^\\.popoff (\\d+)$");
+            Matcher m = r.matcher(command);
+            if (m.find()) {
+                int numBlocks = Integer.parseInt(m.group(1));
+                if (numBlocks > 0) {
+                    blockchainProcessor.popOffTo(blockchain.getHeight() - numBlocks);
+                }
+            }
+        } else if (!command.trim().isEmpty()) {
+            logger.info("Unknown command: \"{}\". Type .help to see the list of available commands.", command);
         }
     }
 
