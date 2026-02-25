@@ -148,8 +148,11 @@ public class SignumGUI extends JFrame {
     private JComponent hamburgerMenu;
     private JLabel measurementLabel;
     private JPanel commandPanel;
+    private JPanel topPanel;
     private boolean showCommandInput = false;
+    private boolean showMetricsPanel = true;
     private JCheckBoxMenuItem showCommandItem;
+    private JCheckBoxMenuItem showMetricsItem;
     private JLabel experimentalLabel;
     private JLabel trimLabel;
     private JLabel autoResolveLabel;
@@ -537,6 +540,12 @@ public class SignumGUI extends JFrame {
             commandPanel.setVisible(showCommandInput);
         });
         menu.add(showCommandItem);
+        showMetricsItem = new JCheckBoxMenuItem("Show Metrics Panel");
+        showMetricsItem.setSelected(showMetricsPanel);
+        showMetricsItem.addActionListener(e -> {
+            updateMetricsPanelState(showMetricsItem.isSelected());
+        });
+        menu.add(showMetricsItem);
         hamburgerMenu.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
@@ -545,7 +554,7 @@ public class SignumGUI extends JFrame {
             }
         });
 
-        JPanel topPanel = new JPanel();
+        topPanel = new JPanel();
         topPanel.setLayout(new BoxLayout(topPanel, BoxLayout.Y_AXIS));
         topPanel.add(toolBar);
         topPanel.add(metricsPanel);
@@ -1607,8 +1616,20 @@ public class SignumGUI extends JFrame {
                         showCommandItem.setSelected(showCommandInput);
                     if (commandPanel != null)
                         commandPanel.setVisible(showCommandInput);
-                    metricsPanel.init();
-                    metricsPanel.setVisible(true);
+
+                    if (showMetricsItem != null) {
+                        showMetricsItem.setSelected(showMetricsPanel);
+                    }
+
+                    if (showMetricsPanel) {
+                        metricsPanel.init();
+                        metricsPanel.setVisible(true);
+                    } else {
+                        metricsPanel.shutdown();
+                        topPanel.remove(metricsPanel);
+                        metricsPanel = null;
+                    }
+
                     showTrayIcon();
                     // Sync checkbox states with loaded properties
                     popOffToggle.repaint();
@@ -1679,6 +1700,26 @@ public class SignumGUI extends JFrame {
             onBrsStopped();
         }
 
+    }
+
+    private void updateMetricsPanelState(boolean show) {
+        showMetricsPanel = show;
+        if (show) {
+            if (metricsPanel == null) {
+                metricsPanel = new MetricsPanel(this);
+                topPanel.add(metricsPanel);
+                metricsPanel.init();
+                metricsPanel.setVisible(true);
+            }
+        } else {
+            if (metricsPanel != null) {
+                metricsPanel.shutdown();
+                topPanel.remove(metricsPanel);
+                metricsPanel = null;
+            }
+        }
+        topPanel.revalidate();
+        topPanel.repaint();
     }
 
     private void updateTimeLabelVisibility() {
@@ -1871,6 +1912,9 @@ public class SignumGUI extends JFrame {
                         if (settings.has("showCommandInput")) {
                             showCommandInput = settings.get("showCommandInput").getAsBoolean();
                         }
+                        if (settings.has("showMetricsPanel")) {
+                            showMetricsPanel = settings.get("showMetricsPanel").getAsBoolean();
+                        }
                     }
                 }
             }
@@ -1897,6 +1941,7 @@ public class SignumGUI extends JFrame {
                 }
             }
             settings.addProperty("showCommandInput", showCommandInput);
+            settings.addProperty("showMetricsPanel", showMetricsPanel);
             try (java.io.BufferedWriter writer = Files.newBufferedWriter(settingsPath)) {
                 Gson gson = new GsonBuilder().setPrettyPrinting().create();
                 writer.write(gson.toJson(settings));
