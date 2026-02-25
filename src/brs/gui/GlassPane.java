@@ -25,11 +25,11 @@ public class GlassPane extends JPanel {
         this.baseAlpha = 0.01f;
         this.currentAlpha = this.baseAlpha;
         setOpaque(false);
+        setFocusable(false);
 
         loadResources();
 
         this.timer = createTimer();
-        this.timer.start();
     }
 
     private void loadResources() {
@@ -47,6 +47,10 @@ public class GlassPane extends JPanel {
         if (!breathing) {
             this.currentAlpha = baseAlpha;
             repaint();
+            timer.stop();
+        } else {
+            setVisible(true);
+            timer.start();
         }
     }
 
@@ -62,6 +66,7 @@ public class GlassPane extends JPanel {
 
     public void fadeIn() {
         this.currentAlpha = 0f;
+        setVisible(true);
         Timer fadeTimer = new Timer(20, null);
         fadeTimer.addActionListener(e -> {
             currentAlpha += 0.005f;
