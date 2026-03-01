@@ -8,6 +8,7 @@ import brs.crypto.Crypto;
 import brs.db.BlockDb;
 import brs.db.DerivedTable;
 import brs.db.TransactionDb;
+import brs.db.sql.Db;
 import brs.db.cache.DBCacheManagerImpl;
 import brs.db.store.BlockchainStore;
 import brs.db.store.DerivedTableManager;
@@ -48,10 +49,10 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.lang.management.ManagementFactory;
 import java.nio.file.Path;
-import java.io.BufferedWriter;
-import java.math.BigInteger;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
+import java.io.BufferedWriter;
+import java.math.BigInteger;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.nio.file.Files;
@@ -123,6 +124,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private final DBCacheManagerImpl dbCacheManager;
     private final IndirectIncomingService indirectIncomingService;
     private final long genesisBlockId;
+    private final String dbType;
+    private final String dbVersion;
     private final AtomicBoolean isShutdown = new AtomicBoolean(false);
 
     private final boolean logSyncProgressToCsv;
@@ -494,6 +497,29 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         this.measurementActive = propertyService.getBoolean(Props.MEASUREMENT_ACTIVE);
         this.logSyncProgressToCsv = propertyService.getBoolean(Props.EXPERIMENTAL);
 
+        // Determine DB Type and Version
+        String dbUrl = propertyService.getString(Props.DB_URL);
+        String determinedDbType = "Unknown";
+        if (dbUrl != null) {
+            if (dbUrl.contains(":sqlite:")) {
+                determinedDbType = "SQLite";
+            } else if (dbUrl.contains(":mariadb:")) {
+                determinedDbType = "MariaDB";
+            } else if (dbUrl.contains(":postgresql:")) {
+                determinedDbType = "PostgreSQL";
+            }
+        }
+        this.dbType = determinedDbType;
+
+        String determinedDbVersion = "N/A";
+        try (Connection con = Db.getConnection()) {
+            DatabaseMetaData metaData = con.getMetaData();
+            determinedDbVersion = metaData.getDatabaseProductVersion();
+        } catch (SQLException e) {
+            logger.warn("Could not get database version", e);
+        }
+        this.dbVersion = determinedDbVersion;
+
         if (this.measurementActive || this.logSyncProgressToCsv) {
             // A single-threaded executor ensures that log entries are written in order.
             this.measurementLogExecutor = Executors.newSingleThreadExecutor();
@@ -690,7 +716,12 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         try {
 
                             // Keep the download cache below the rollback limit
-                            int cacheHeight = downloadCache.getLastBlock().getHeight();
+                            Block lastCachedBlock = downloadCache.getLastBlock();
+                            if (lastCachedBlock == null) {
+                                downloadCache.resetCache();
+                                return;
+                            }
+                            int cacheHeight = lastCachedBlock.getHeight();
                             if (Signum.getFluxCapacitor().getValue(FluxValues.POC_PLUS, cacheHeight)
                                     && cacheHeight - blockchain.getHeight() > Constants.MAX_ROLLBACK / 2) {
                                 logger.debug("GetMoreBlocks, skip download, wait for other threads to catch up");
@@ -1370,28 +1401,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 writer.println("Total RAM (MB);N/A");
             }
 
-            String dbUrl = propertyService.getString(Props.DB_URL);
-            String dbType = "unknown";
-            if (dbUrl != null) {
-                if (dbUrl.contains(":sqlite:")) {
-                    dbType = "SQLite";
-                } else if (dbUrl.contains(":mariadb:")) {
-                    dbType = "MariaDB";
-                } else if (dbUrl.contains(":postgresql:")) {
-                    dbType = "PostgreSQL";
-                }
-            }
             writer.println("Database Type;" + dbType);
-
-            String dbUsername = propertyService.getString(Props.DB_USERNAME);
-            String dbPassword = propertyService.getString(Props.DB_PASSWORD);
-            try (Connection con = DriverManager.getConnection(dbUrl, dbUsername, dbPassword)) {
-                DatabaseMetaData metaData = con.getMetaData();
-                writer.println("Database Version;" + metaData.getDatabaseProductVersion());
-            } catch (SQLException e) {
-                writer.println("Database Version;N/A");
-                logger.warn("Could not get database version", e);
-            }
+            writer.println("Database Version;" + dbVersion);
             writer.println(";;"); // Separator line
         } catch (Exception e) {
             logger.error("Failed to write system info to log", e);
@@ -1930,7 +1941,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     autoPopOffBlocksCount.decrementAndGet();
                     blockListeners.notify(block, Event.BLOCK_AUTO_POPPED);
                 } catch (Exception e) {
-                    logger.error("Error popping off block at height {}", blockchain.getHeight() + 1, e);
+                    logger.error("Error popping off block at height {}", blockchain.getHeight(), e);
                     stores.rollbackTransaction();
                     throw e;
                 } finally {
@@ -2396,6 +2407,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     @Override
     public PopOffState getAutoPopOffState() {
         return autoPopOffState;
+    }
+
+    @Override
+    public String getDbType() {
+        return dbType;
+    }
+
+    @Override
+    public String getDbVersion() {
+        return dbVersion;
     }
 
     @Override
@@ -3216,7 +3237,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     // Get block height from datbase
                     block = blockDb.findLastBlock();
                     blockchain.setLastBlock(block);
-                    logger.error("Error occured during pop-off.", e);
+                    logger.error("Error occurred during pop-off at height {}.", block.getHeight(), e);
                     logger.error("Cacelling pop-off process to prevent database consistency.");
                     logger.error("Setting blockchain height back to {}.", block.getHeight());
                 } catch (Error e) {
@@ -3378,6 +3399,26 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             throw new RuntimeException("Cannot pop off genesis block");
         }
         Block previousBlock = blockDb.findBlock(block.getPreviousBlockId());
+        if (previousBlock == null) {
+            logger.warn(
+                    "Block {} at height {} has no parent block in database (id: {}). Deleting orphan block to restore chain continuity.",
+                    block.getStringId(), block.getHeight(), Convert.toUnsignedLong(block.getPreviousBlockId()));
+
+            // Delete the orphan block
+            blockDb.deleteBlocksFrom(block.getId());
+
+            // Find the new last block from DB
+            previousBlock = blockDb.findLastBlock();
+            if (previousBlock == null) {
+                throw new RuntimeException("Recovery failed: No blocks left in database after deleting orphan.");
+            }
+            // Force set the last block, bypassing the check against the old last block
+            blockchain.setLastBlock(previousBlock);
+
+            List<Transaction> txs = block.getTransactions();
+            txs.forEach(Transaction::unsetBlock);
+            return previousBlock;
+        }
         List<Transaction> txs = block.getTransactions();
         blockchain.setLastBlock(block, previousBlock);
         txs.forEach(Transaction::unsetBlock);
