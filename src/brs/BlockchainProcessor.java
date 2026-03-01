@@ -225,6 +225,10 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     PopOffState getAutoPopOffState();
 
+    String getDbType();
+
+    String getDbVersion();
+
     void processPeerBlock(JsonObject request, Peer peer) throws SignumException;
 
     void fullReset();
