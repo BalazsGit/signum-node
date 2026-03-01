@@ -60,6 +60,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -85,6 +86,8 @@ public final class Signum {
     public static final String CONF_FOLDER = "../conf";
     public static final String DEFAULT_PROPERTIES_NAME = "node-default.properties";
     public static final String PROPERTIES_NAME = "node.properties";
+    public static final String DEFAULT_LOGGING_PROPERTIES_NAME = "logging-default.properties";
+    public static final String LOGGING_PROPERTIES_NAME = "logging.properties";
 
     public static final Option CONF_FOLDER_OPTION = Option.builder("c")
             .longOpt("config")
@@ -248,10 +251,19 @@ public final class Signum {
 
     private static void init(String confFolder) {
         if (isInitialized.compareAndSet(false, true)) { // Ensure init runs only once
+            Path confPath = PathUtils.resolvePath(confFolder);
+
+            // Check and copy default logging properties if missing
+            boolean createdLoggingProps = ensureConfigFileExists(confPath, DEFAULT_LOGGING_PROPERTIES_NAME,
+                    LOGGING_PROPERTIES_NAME);
+
             // 1. Initialize logging system (apply logging.properties)
             try {
                 List<String> loggingStatus = LoggerConfigurator.init(confFolder);
                 logger = LoggerFactory.getLogger(Signum.class);
+                if (createdLoggingProps) {
+                    logger.info("Created {} from default configuration.", LOGGING_PROPERTIES_NAME);
+                }
                 for (String status : loggingStatus) {
                     if (status.startsWith("WARN:")) {
                         logger.warn(status.substring(5).trim());
@@ -266,6 +278,12 @@ public final class Signum {
                 e.printStackTrace();
             }
 
+            // Check and copy default node properties if missing
+            boolean createdNodeProps = ensureConfigFileExists(confPath, DEFAULT_PROPERTIES_NAME, PROPERTIES_NAME);
+            if (createdNodeProps) {
+                logger.info("Created {} from default configuration.", PROPERTIES_NAME);
+            }
+
             // 2. Load properties (logs will appear on configured output)
             PropertyService propertyService = loadProperties(confFolder);
 
@@ -273,6 +291,23 @@ public final class Signum {
         } else {
             logger.warn("Signum node already initialized. Skipping re-initialization.");
         }
+    }
+
+    private static boolean ensureConfigFileExists(Path confPath, String defaultFileName, String targetFileName) {
+        Path targetFile = confPath.resolve(targetFileName);
+        if (!Files.exists(targetFile)) {
+            Path defaultFile = confPath.resolve(defaultFileName);
+            if (Files.exists(defaultFile)) {
+                try {
+                    Files.copy(defaultFile, targetFile);
+                    return true;
+                } catch (IOException e) {
+                    System.err.println(
+                            "Failed to copy " + defaultFileName + " to " + targetFileName + ": " + e.getMessage());
+                }
+            }
+        }
+        return false;
     }
 
     private static void loadWallet(PropertyService propertyService) {
