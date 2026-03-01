@@ -402,6 +402,8 @@ public class SignumGUI extends JFrame {
         JButton helpButton = new JButton(IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, 16, Color.LIGHT_GRAY));
         helpButton.setBorderPainted(false);
         helpButton.setContentAreaFilled(false);
+        helpButton.setFocusPainted(false);
+        helpButton.setBorder(BorderFactory.createEmptyBorder());
         helpButton.setToolTipText("Command Help");
         helpButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
