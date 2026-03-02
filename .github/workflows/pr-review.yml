@@ -38,7 +38,7 @@ jobs:
 
       - name: Download PR metadata (automatic trigger)
         if: github.event_name == 'workflow_run'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: pr-metadata
           run-id: ${{ github.event.workflow_run.id }}
