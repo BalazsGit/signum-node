@@ -317,7 +317,8 @@ public final class Signum {
 
         String networkParametersClass = propertyService.getString(Props.NETWORK_PARAMETERS);
         NetworkParameters params = null;
-        if (networkParametersClass != null) {
+        if (networkParametersClass != null && !networkParametersClass.trim().isEmpty()
+                && !"null".equalsIgnoreCase(networkParametersClass)) {
             try {
                 params = (NetworkParameters) Class
                         .forName(networkParametersClass)
@@ -325,8 +326,7 @@ public final class Signum {
                         .newInstance();
                 propertyService.setNetworkParameters(params);
             } catch (Exception e) {
-                logger.error(e.getMessage(), e);
-                System.exit(1);
+                throw new RuntimeException("Failed to load network parameters class: " + networkParametersClass, e);
             }
         }
 
@@ -575,8 +575,8 @@ public final class Signum {
             logger.info("Signum Multiverse {} started successfully.", VERSION);
             logger.info("Running network: {}", propertyService.getString(Props.NETWORK_NAME));
         } catch (Exception e) {
-            logger.error(e.getMessage(), e);
-            System.exit(1);
+            logger.error("Failed to initialize Signum node", e);
+            throw new RuntimeException("Failed to initialize Signum node", e);
         }
         Thread consoleThread = new Thread(Signum::commandHandler);
         consoleThread.setName("Console Command Handler");
@@ -707,17 +707,6 @@ public final class Signum {
                 }
             }
 
-            if (blockchainProcessor != null) {
-                try {
-                    blockchainProcessor.shutdown();
-                } catch (Throwable t) {
-                    if (shutdownManager != null) {
-                        shutdownManager.markFailure("BlockchainProcessor");
-                    }
-                    logger.error("Error shutting down blockchainProcessor", t);
-                }
-            }
-
             if (threadPool != null) {
                 try {
                     Peers.shutdown(threadPool);
@@ -734,6 +723,17 @@ public final class Signum {
                         shutdownManager.markFailure("ThreadPool");
                     }
                     logger.error("Error shutting down threadPool", t);
+                }
+            }
+
+            if (blockchainProcessor != null) {
+                try {
+                    blockchainProcessor.shutdown();
+                } catch (Throwable t) {
+                    if (shutdownManager != null) {
+                        shutdownManager.markFailure("BlockchainProcessor");
+                    }
+                    logger.error("Error shutting down blockchainProcessor", t);
                 }
             }
 
