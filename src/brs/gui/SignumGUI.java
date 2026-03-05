@@ -1057,7 +1057,10 @@ public class SignumGUI extends JFrame {
         getContentPane().validate();
 
         try {
-            String newIconLocation = Signum.getPropertyService().getString(Props.ICON_LOCATION);
+            String newIconLocation = iconLocation;
+            if (Signum.getPropertyService() != null) {
+                newIconLocation = Signum.getPropertyService().getString(Props.ICON_LOCATION);
+            }
             if (!newIconLocation.equals(iconLocation)) {
                 // update the icon
                 iconLocation = newIconLocation;
@@ -1364,6 +1367,10 @@ public class SignumGUI extends JFrame {
 
     private void popOff(int count) {
         // LOGGER.info("Pop off requested, this can take a while...");
+        if (Signum.getBlockchainProcessor() == null) {
+            showMessage("Blockchain processor not initialized.");
+            return;
+        }
         new Thread(() -> Signum.getBlockchainProcessor().popOff(count)).start();
     }
 
@@ -1737,6 +1744,7 @@ public class SignumGUI extends JFrame {
             LOGGER.error(FAILED_TO_START_MESSAGE, t);
             showMessage(FAILED_TO_START_MESSAGE);
             onBrsStopped();
+            SwingUtilities.invokeLater(this::showTrayIcon);
         }
 
     }
@@ -1755,16 +1763,19 @@ public class SignumGUI extends JFrame {
         backButton.addActionListener(e -> cardLayout.show(mainCardPanel, VIEW_CONSOLE));
         leftHeader.add(backButton);
 
+        JPanel rightHeader = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
+        rightHeader.setOpaque(false);
+
         if ("node.properties".equals(fileName)) {
             JButton switchBtn = new JButton("Switch to Logger Configuration",
                     IconFontSwing.buildIcon(FontAwesome.EXCHANGE, 16, iconColor));
             switchBtn.addActionListener(e -> cardLayout.show(mainCardPanel, VIEW_LOGGER_PROPS));
-            leftHeader.add(switchBtn);
+            rightHeader.add(switchBtn);
         } else if ("logging.properties".equals(fileName)) {
             JButton switchBtn = new JButton("Switch to Node Configuration",
                     IconFontSwing.buildIcon(FontAwesome.EXCHANGE, 16, iconColor));
             switchBtn.addActionListener(e -> cardLayout.show(mainCardPanel, VIEW_NODE_PROPS));
-            leftHeader.add(switchBtn);
+            rightHeader.add(switchBtn);
         }
 
         JLabel titleLabel = new JLabel(title, SwingConstants.CENTER);
@@ -1772,14 +1783,7 @@ public class SignumGUI extends JFrame {
 
         header.add(leftHeader, BorderLayout.WEST);
         header.add(titleLabel, BorderLayout.CENTER);
-        // Add a dummy component to the right to balance the layout if needed,
-        // but BorderLayout.CENTER usually looks good enough.
-        // To perfectly center, we would need a dummy component of the same size as
-        // backButton on the EAST.
-        JPanel dummy = new JPanel();
-        dummy.setPreferredSize(backButton.getPreferredSize());
-        dummy.setOpaque(false);
-        header.add(dummy, BorderLayout.EAST);
+        header.add(rightHeader, BorderLayout.EAST);
 
         panel.add(header, BorderLayout.NORTH);
 
