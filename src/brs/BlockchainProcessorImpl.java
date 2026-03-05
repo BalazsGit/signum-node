@@ -1242,6 +1242,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             int queueThreshold = oclVerify ? oclUnverifiedQueue : 0;
 
             while (!Thread.interrupted() && ThreadPool.running.get()) {
+                if (isShutdown.get()) {
+                    return;
+                }
                 int unVerified = downloadCache.getUnverifiedSize();
                 if (unVerified > queueThreshold) { // Is there anything to verify
                     if (unVerified >= oclUnverifiedQueue && oclVerify) { // should we use Ocl?
