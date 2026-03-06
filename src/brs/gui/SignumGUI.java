@@ -42,6 +42,7 @@ import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
+import javax.swing.JMenuItem;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -67,6 +68,8 @@ import java.net.URL;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.DefaultParser;
 
 import brs.Signum;
 import brs.BlockchainProcessor;
@@ -148,8 +151,16 @@ public class SignumGUI extends JFrame {
     private JComponent hamburgerMenu;
     private JLabel measurementLabel;
     private JPanel commandPanel;
+    private JPanel topPanel;
+    private JPanel mainCardPanel;
+    private CardLayout cardLayout;
+    private static final String VIEW_CONSOLE = "CONSOLE";
+    private static final String VIEW_NODE_PROPS = "NODE_PROPS";
+    private static final String VIEW_LOGGER_PROPS = "LOGGER_PROPS";
     private boolean showCommandInput = false;
+    private boolean showMetricsPanel = true;
     private JCheckBoxMenuItem showCommandItem;
+    private JCheckBoxMenuItem showMetricsItem;
     private JLabel experimentalLabel;
     private JLabel trimLabel;
     private JLabel autoResolveLabel;
@@ -314,6 +325,17 @@ public class SignumGUI extends JFrame {
                 e.printStackTrace();
             }
         }
+
+        String confFolder = Signum.CONF_FOLDER;
+        try {
+            CommandLine cmd = new DefaultParser().parse(Signum.CLI_OPTIONS, args);
+            if (cmd.hasOption(Signum.CONF_FOLDER_OPTION.getOpt())) {
+                confFolder = cmd.getOptionValue(Signum.CONF_FOLDER_OPTION.getOpt());
+            }
+        } catch (Exception e) {
+            LOGGER.error("Error parsing command line arguments for config folder", e);
+        }
+
         IconFontSwing.register(FontAwesome.getIconFont());
         JTextPane textPane = new JTextPane();
         textPane.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 14));
@@ -323,9 +345,19 @@ public class SignumGUI extends JFrame {
         textPane.setEditable(false);
         sendJavaOutputToTextArea(textPane);
         textScrollPane = new JScrollPane(textPane);
+        textScrollPane.setPreferredSize(new Dimension(900, 500));
         JPanel content = new JPanel(new BorderLayout());
         content.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-        setContentPane(content);
+
+        cardLayout = new CardLayout();
+        mainCardPanel = new JPanel(cardLayout);
+        mainCardPanel.add(content, VIEW_CONSOLE);
+
+        mainCardPanel.add(createPropertiesPanel("Node Configuration", "node.properties", confFolder), VIEW_NODE_PROPS);
+        mainCardPanel.add(createPropertiesPanel("Logger Configuration", "logging.properties", confFolder),
+                VIEW_LOGGER_PROPS);
+
+        setContentPane(mainCardPanel);
 
         toolBar = new JPanel();
         toolBar.setLayout(new BoxLayout(toolBar, BoxLayout.X_AXIS));
@@ -367,10 +399,14 @@ public class SignumGUI extends JFrame {
         commandField.addActionListener(sendAction);
         sendCommandButton.addActionListener(sendAction);
 
-        JLabel helpLabel = new JLabel("?");
-        helpLabel.setToolTipText("Command Help");
-        helpLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        helpLabel.setBorder(BorderFactory.createEmptyBorder(0, 5, 0, 5));
+        JButton helpButton = new JButton(IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, 16, Color.LIGHT_GRAY));
+        helpButton.setBorderPainted(false);
+        helpButton.setContentAreaFilled(false);
+        helpButton.setFocusPainted(false);
+        helpButton.setBorder(BorderFactory.createEmptyBorder());
+        helpButton.setToolTipText("Command Help");
+        helpButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
         String commandHelpText = "<html><b>Available Commands:</b><br>" +
                 "<ul>" +
                 "<li><b>.help</b> - Displays available commands in the log.</li>" +
@@ -385,17 +421,14 @@ public class SignumGUI extends JFrame {
                 "</ul>" +
                 "Enter a command in the text field and click 'Send' or press Enter.</html>";
 
-        helpLabel.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                JOptionPane.showMessageDialog(SignumGUI.this, commandHelpText, "Command Usage",
-                        JOptionPane.INFORMATION_MESSAGE);
-            }
+        helpButton.addActionListener(e -> {
+            JOptionPane.showMessageDialog(SignumGUI.this, commandHelpText, "Command Usage",
+                    JOptionPane.INFORMATION_MESSAGE);
         });
 
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
         buttonPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-        buttonPanel.add(helpLabel);
+        buttonPanel.add(helpButton);
         buttonPanel.add(sendCommandButton);
 
         commandPanel.add(commandLabel, BorderLayout.WEST);
@@ -537,6 +570,21 @@ public class SignumGUI extends JFrame {
             commandPanel.setVisible(showCommandInput);
         });
         menu.add(showCommandItem);
+        showMetricsItem = new JCheckBoxMenuItem("Show Metrics Panel");
+        showMetricsItem.setSelected(showMetricsPanel);
+        showMetricsItem.addActionListener(e -> {
+            updateMetricsPanelState(showMetricsItem.isSelected());
+        });
+        menu.add(showMetricsItem);
+
+        menu.addSeparator();
+        JMenuItem nodePropsItem = new JMenuItem("Node Configuration");
+        nodePropsItem.addActionListener(e -> cardLayout.show(mainCardPanel, VIEW_NODE_PROPS));
+        menu.add(nodePropsItem);
+        JMenuItem loggerPropsItem = new JMenuItem("Logger Configuration");
+        loggerPropsItem.addActionListener(e -> cardLayout.show(mainCardPanel, VIEW_LOGGER_PROPS));
+        menu.add(loggerPropsItem);
+
         hamburgerMenu.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
@@ -545,7 +593,7 @@ public class SignumGUI extends JFrame {
             }
         });
 
-        JPanel topPanel = new JPanel();
+        topPanel = new JPanel();
         topPanel.setLayout(new BoxLayout(topPanel, BoxLayout.Y_AXIS));
         topPanel.add(toolBar);
         topPanel.add(metricsPanel);
@@ -1009,7 +1057,10 @@ public class SignumGUI extends JFrame {
         getContentPane().validate();
 
         try {
-            String newIconLocation = Signum.getPropertyService().getString(Props.ICON_LOCATION);
+            String newIconLocation = iconLocation;
+            if (Signum.getPropertyService() != null) {
+                newIconLocation = Signum.getPropertyService().getString(Props.ICON_LOCATION);
+            }
             if (!newIconLocation.equals(iconLocation)) {
                 // update the icon
                 iconLocation = newIconLocation;
@@ -1316,10 +1367,14 @@ public class SignumGUI extends JFrame {
 
     private void popOff(int count) {
         // LOGGER.info("Pop off requested, this can take a while...");
+        if (Signum.getBlockchainProcessor() == null) {
+            showMessage("Blockchain processor not initialized.");
+            return;
+        }
         new Thread(() -> Signum.getBlockchainProcessor().popOff(count)).start();
     }
 
-    private void restart() {
+    void restart() {
         LOGGER.info("Restarting node...");
 
         JDialog restartDialog = new JDialog(this, "Restarting", true);
@@ -1471,10 +1526,10 @@ public class SignumGUI extends JFrame {
 
             if (lastTrimHeight > currentTrimHeight) {
                 if (currentTrimHeight < 0) {
-                    trimHeightLabel.setText(String.format("- 🡺 %d", lastTrimHeight));
+                    trimHeightLabel.setText(String.format("Trim height: - 🡺 %d", lastTrimHeight));
                 } else {
                     trimHeightLabel
-                            .setText(String.format("%d 🡺 %d", currentTrimHeight, lastTrimHeight));
+                            .setText(String.format("Trim height: %d 🡺 %d", currentTrimHeight, lastTrimHeight));
                 }
             }
             trimHeightLabel.setForeground(Color.GREEN);
@@ -1607,8 +1662,20 @@ public class SignumGUI extends JFrame {
                         showCommandItem.setSelected(showCommandInput);
                     if (commandPanel != null)
                         commandPanel.setVisible(showCommandInput);
-                    metricsPanel.init();
-                    metricsPanel.setVisible(true);
+
+                    if (showMetricsItem != null) {
+                        showMetricsItem.setSelected(showMetricsPanel);
+                    }
+
+                    if (showMetricsPanel) {
+                        metricsPanel.init();
+                        metricsPanel.setVisible(true);
+                    } else {
+                        metricsPanel.shutdown();
+                        topPanel.remove(metricsPanel);
+                        metricsPanel = null;
+                    }
+
                     showTrayIcon();
                     // Sync checkbox states with loaded properties
                     popOffToggle.repaint();
@@ -1677,8 +1744,84 @@ public class SignumGUI extends JFrame {
             LOGGER.error(FAILED_TO_START_MESSAGE, t);
             showMessage(FAILED_TO_START_MESSAGE);
             onBrsStopped();
+            SwingUtilities.invokeLater(this::showTrayIcon);
         }
 
+    }
+
+    private JPanel createPropertiesPanel(String title, String fileName, String confFolder) {
+        JPanel panel = new JPanel(new BorderLayout());
+
+        JPanel header = new JPanel(new BorderLayout());
+        header.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+
+        JPanel leftHeader = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+        leftHeader.setOpaque(false);
+
+        JButton backButton = new JButton("Back to Console",
+                IconFontSwing.buildIcon(FontAwesome.ARROW_LEFT, 16, iconColor));
+        backButton.addActionListener(e -> cardLayout.show(mainCardPanel, VIEW_CONSOLE));
+        leftHeader.add(backButton);
+
+        JPanel rightHeader = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
+        rightHeader.setOpaque(false);
+
+        if ("node.properties".equals(fileName)) {
+            JButton switchBtn = new JButton("Switch to Logger Configuration",
+                    IconFontSwing.buildIcon(FontAwesome.EXCHANGE, 16, iconColor));
+            switchBtn.addActionListener(e -> cardLayout.show(mainCardPanel, VIEW_LOGGER_PROPS));
+            rightHeader.add(switchBtn);
+        } else if ("logging.properties".equals(fileName)) {
+            JButton switchBtn = new JButton("Switch to Node Configuration",
+                    IconFontSwing.buildIcon(FontAwesome.EXCHANGE, 16, iconColor));
+            switchBtn.addActionListener(e -> cardLayout.show(mainCardPanel, VIEW_NODE_PROPS));
+            rightHeader.add(switchBtn);
+        }
+
+        JLabel titleLabel = new JLabel(title, SwingConstants.CENTER);
+        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 16f));
+
+        header.add(leftHeader, BorderLayout.WEST);
+        header.add(titleLabel, BorderLayout.CENTER);
+        header.add(rightHeader, BorderLayout.EAST);
+
+        panel.add(header, BorderLayout.NORTH);
+
+        JComponent content;
+        if ("node.properties".equals(fileName)) {
+            content = new NodeConfigurationPanel(this::restart, confFolder);
+        } else if ("logging.properties".equals(fileName)) {
+            content = new LoggerConfigurationPanel(this::restart, confFolder);
+        } else {
+            JTextPane infoPane = new JTextPane();
+            infoPane.setEditable(false);
+            infoPane.setText("Settings for " + fileName + " will be displayed here.\n\n" +
+                    "TODO: Implement property editor with documentation support.");
+            content = new JScrollPane(infoPane);
+        }
+        panel.add(content, BorderLayout.CENTER);
+
+        return panel;
+    }
+
+    private void updateMetricsPanelState(boolean show) {
+        showMetricsPanel = show;
+        if (show) {
+            if (metricsPanel == null) {
+                metricsPanel = new MetricsPanel(this);
+                topPanel.add(metricsPanel);
+                metricsPanel.init();
+                metricsPanel.setVisible(true);
+            }
+        } else {
+            if (metricsPanel != null) {
+                metricsPanel.shutdown();
+                topPanel.remove(metricsPanel);
+                metricsPanel = null;
+            }
+        }
+        topPanel.revalidate();
+        topPanel.repaint();
     }
 
     private void updateTimeLabelVisibility() {
@@ -1706,9 +1849,24 @@ public class SignumGUI extends JFrame {
      * }
      */
 
-    private void updateTitle() {
+    void updateTitle() {
         String networkName = Signum.getPropertyService().getString(Props.NETWORK_NAME);
-        String title = this.programName + " [" + networkName + "] " + this.version;
+
+        StringBuilder titleBuilder = new StringBuilder();
+        titleBuilder.append(this.programName + " [" + networkName + "] " + this.version);
+
+        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        if (blockchainProcessor != null) {
+            String dbType = blockchainProcessor.getDbType();
+            String dbVersion = blockchainProcessor.getDbVersion();
+            titleBuilder.append(" - [").append(dbType);
+            if (dbVersion != null && !dbVersion.isEmpty() && !"N/A".equals(dbVersion)) {
+                titleBuilder.append(" ").append(dbVersion);
+            }
+            titleBuilder.append("]");
+        }
+
+        String title = titleBuilder.toString();
         if (isSyncStopped) {
             title += " (Sync paused)";
         } else if (isShuttingDown) {
@@ -1871,6 +2029,9 @@ public class SignumGUI extends JFrame {
                         if (settings.has("showCommandInput")) {
                             showCommandInput = settings.get("showCommandInput").getAsBoolean();
                         }
+                        if (settings.has("showMetricsPanel")) {
+                            showMetricsPanel = settings.get("showMetricsPanel").getAsBoolean();
+                        }
                     }
                 }
             }
@@ -1897,6 +2058,7 @@ public class SignumGUI extends JFrame {
                 }
             }
             settings.addProperty("showCommandInput", showCommandInput);
+            settings.addProperty("showMetricsPanel", showMetricsPanel);
             try (java.io.BufferedWriter writer = Files.newBufferedWriter(settingsPath)) {
                 Gson gson = new GsonBuilder().setPrettyPrinting().create();
                 writer.write(gson.toJson(settings));
@@ -2036,6 +2198,7 @@ public class SignumGUI extends JFrame {
                     break;
                 }
             }
+            textPane.setCaretPosition(doc.getLength());
         }
     }
 
