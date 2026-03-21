@@ -46,141 +46,100 @@ public class CustomDrawings {
     }
 
     /**
-     * Abstract base class for symbols that can be rotated based on a
-     * {@link Direction}.
+     * A wrapper class that takes a base Symbol and rotates it according to a given
+     * Direction.
      */
-    public static abstract class RotatableSymbol implements Symbol {
-        private final Direction direction;
+    private static class RotatedSymbol implements Symbol {
+        private final Symbol baseSymbol;
+        private final double angle;
+        private final boolean swapDimensions;
 
         /**
-         * Constructs a rotatable symbol pointing in the specified direction.
+         * Creates a new rotated symbol.
          *
-         * @param direction The direction the symbol should point to.
+         * @param baseSymbol The symbol to rotate.
+         * @param direction  The direction to rotate to.
          */
-        protected RotatableSymbol(Direction direction) {
-            this.direction = direction;
-        }
-
-        /**
-         * Draws the symbol, applying rotation based on the configured direction.
-         * <p>
-         * This method handles the coordinate transformation and rotation logic,
-         * delegating the actual shape drawing to
-         * {@link #drawBaseShape(Graphics2D, int, int, int)}.
-         * </p>
-         *
-         * @param g2    The graphics context.
-         * @param w     The width of the area.
-         * @param h     The height of the area.
-         * @param color The color to draw with.
-         */
-        @Override
-        public void draw(Graphics2D g2, int w, int h, Color color) {
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g2.setColor(color);
-            g2.setStroke(new BasicStroke(1.5f));
-
-            int padding = 4;
-            if (w <= padding * 2 || h <= padding * 2) {
-                return;
-            }
-
-            AffineTransform oldTransform = g2.getTransform();
-            g2.translate(w / 2.0, h / 2.0);
-
-            double angle = 0;
-            int drawW = w;
-            int drawH = h;
-
+        RotatedSymbol(Symbol baseSymbol, Direction direction) {
+            this.baseSymbol = baseSymbol;
             switch (direction) {
-                case UP:
-                    angle = 0;
-                    break;
                 case RIGHT:
-                    angle = Math.PI / 2;
-                    drawW = h;
-                    drawH = w;
+                    this.angle = Math.PI / 2;
+                    this.swapDimensions = true;
                     break;
                 case DOWN:
-                    angle = Math.PI;
+                    this.angle = Math.PI;
+                    this.swapDimensions = false;
                     break;
                 case LEFT:
-                    angle = -Math.PI / 2;
-                    drawW = h;
-                    drawH = w;
+                    this.angle = -Math.PI / 2;
+                    this.swapDimensions = true;
+                    break;
+                case UP:
+                default:
+                    this.angle = 0;
+                    this.swapDimensions = false;
                     break;
             }
-
-            g2.rotate(angle);
-            drawBaseShape(g2, drawW, drawH, padding);
-            g2.setTransform(oldTransform);
         }
 
-        /**
-         * Draws the base shape of the symbol assuming an UP orientation.
-         *
-         * @param g2      The graphics context.
-         * @param w       The width of the drawing area (possibly swapped if rotated).
-         * @param h       The height of the drawing area (possibly swapped if rotated).
-         * @param padding The padding to apply.
-         */
-        protected abstract void drawBaseShape(Graphics2D g2, int w, int h, int padding);
+        @Override
+        public void draw(Graphics2D g2, int w, int h, Color color) {
+            AffineTransform oldTransform = g2.getTransform();
+            try {
+                g2.translate(w / 2.0, h / 2.0);
+                g2.rotate(angle);
+
+                int drawW = swapDimensions ? h : w;
+                int drawH = swapDimensions ? w : h;
+
+                // Translate back to origin for the base symbol to draw correctly
+                g2.translate(-drawW / 2.0, -drawH / 2.0);
+
+                baseSymbol.draw(g2, drawW, drawH, color);
+            } finally {
+                g2.setTransform(oldTransform);
+            }
+        }
     }
 
     /**
-     * Draws a chevron (arrowhead) character.
-     * <p>
-     * This character is typically used to indicate a collapsible panel or a
-     * direction.
-     * It looks like a 'V' shape.
-     * </p>
+     * The base symbol for a chevron, pointing up by default.
      */
-    public static class Chevron extends RotatableSymbol {
-        /** A chevron pointing up. */
-        public static final Chevron UP = new Chevron(Direction.UP);
-        /** A chevron pointing down. */
-        public static final Chevron DOWN = new Chevron(Direction.DOWN);
-        /** A chevron pointing left. */
-        public static final Chevron LEFT = new Chevron(Direction.LEFT);
-        /** A chevron pointing right. */
-        public static final Chevron RIGHT = new Chevron(Direction.RIGHT);
+    private static final Symbol BASE_CHEVRON = (g2, w, h, color) -> {
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2.setColor(color);
+        g2.setStroke(new BasicStroke(1.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
 
-        private Chevron(Direction direction) {
-            super(direction);
+        int padding = 4;
+        if (w <= padding * 2 || h <= padding * 2) {
+            return;
         }
 
-        /**
-         * Retrieves the Chevron instance corresponding to the given direction.
-         *
-         * @param direction The desired direction.
-         * @return The Chevron instance for that direction.
-         */
-        public static Chevron get(Direction direction) {
-            switch (direction) {
-                case UP:
-                    return UP;
-                case DOWN:
-                    return DOWN;
-                case LEFT:
-                    return LEFT;
-                case RIGHT:
-                    return RIGHT;
-                default:
-                    return UP;
-            }
-        }
+        // Make the chevron flatter (wider angle) by reducing its height relative to the
+        // container.
+        // A divisor of 3.0 makes the chevron's width roughly 3 times its height in a
+        // square container.
+        double arrowHeight = (h - padding * 2.0) / 3.0;
+        double halfSpanY = arrowHeight / 2.0;
 
-        @Override
-        protected void drawBaseShape(Graphics2D g2, int w, int h, int padding) {
-            double arrowHeight = (h - padding * 2) / 2.0;
-            double halfSpanX = (w - padding * 2) / 2.0;
-            double halfSpanY = arrowHeight / 2.0;
+        Path2D.Double path = new Path2D.Double();
+        path.moveTo(padding, h / 2.0 + halfSpanY);
+        path.lineTo(w / 2.0, h / 2.0 - halfSpanY);
+        path.lineTo(w - padding, h / 2.0 + halfSpanY);
+        g2.draw(path);
+    };
 
-            Path2D.Double path = new Path2D.Double();
-            path.moveTo(-halfSpanX, halfSpanY);
-            path.lineTo(0, -halfSpanY);
-            path.lineTo(halfSpanX, halfSpanY);
-            g2.draw(path);
+    /**
+     * A collection of pre-rotated Chevron symbols.
+     */
+    public static final class Chevron {
+        public static final Symbol UP = BASE_CHEVRON;
+        public static final Symbol DOWN = new RotatedSymbol(BASE_CHEVRON, Direction.DOWN);
+        public static final Symbol LEFT = new RotatedSymbol(BASE_CHEVRON, Direction.LEFT);
+        public static final Symbol RIGHT = new RotatedSymbol(BASE_CHEVRON, Direction.RIGHT);
+
+        private Chevron() {
         }
     }
 
