@@ -199,8 +199,11 @@ public class MetricsPanel extends JTabbedPane {
     private void updateWrapperHeight(JPanel wrapper, JComponent content, Integer height) {
         if (height == null) {
             wrapper.setPreferredSize(null);
+            wrapper.setMinimumSize(null);
         } else {
-            wrapper.setPreferredSize(new Dimension(content.getPreferredSize().width, height));
+            Dimension d = new Dimension(content.getPreferredSize().width, height);
+            wrapper.setPreferredSize(d);
+            wrapper.setMinimumSize(d);
         }
     }
 
