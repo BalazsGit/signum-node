@@ -8,6 +8,8 @@ import brs.Generator;
 import brs.Signum;
 import brs.fluxcapacitor.FluxValues;
 import brs.gui.util.CustomDrawings;
+import brs.gui.util.ContextMenuUtils;
+import brs.gui.util.CustomDrawingIcon;
 import brs.gui.util.MovingAverage;
 import brs.gui.util.TableUtils;
 import brs.util.Convert;
@@ -38,6 +40,8 @@ import org.jfree.chart.ui.RectangleInsets;
 import org.jfree.data.xy.XYSeries;
 import org.jfree.data.xy.XYDataset;
 import org.jfree.data.xy.XYSeriesCollection;
+import javax.swing.table.TableColumn;
+import javax.swing.border.TitledBorder;
 import javax.swing.*;
 import javax.swing.table.JTableHeader;
 import javax.swing.table.DefaultTableCellRenderer;
@@ -104,23 +108,9 @@ public class BlockGenerationMetricsPanel extends JPanel {
     private static final int AXIS_COUNTS = 4;
     private static final int AXIS_SHARE = 5;
 
-    private static final Color COLOR_NETWORK_SIZE = Color.WHITE; // White
-    private static final Color COLOR_COMMITMENT = new Color(220, 130, 255); // Lighter Purple
-    private static final Color COLOR_BASE_TARGET = Color.YELLOW; // Yellow
-    private static final Color COLOR_NODE_MINERS = new Color(50, 205, 50); // Lime Green
-    private static final Color COLOR_NETWORK_MINERS = new Color(0, 80, 0); // Even Darker Green
-    private static final Color COLOR_ACTIVE_MINER = new Color(218, 165, 32); // Goldenrod
-    private static final Color COLOR_DEADLINES_RX = Color.PINK; // Pink
-    private static final Color COLOR_NODE_SHARE = Color.GREEN; // Green
-    private static final Color COLOR_NODE_DEADLINE = COLOR_ACTIVE_MINER; // Goldenrod
-    private static final Color COLOR_CHAIN_DEADLINE = new Color(0, 100, 0); // Dark Green
-    private static final Color COLOR_CHAIN_DEADLINE_MA = COLOR_CHAIN_DEADLINE.brighter(); // Brighter Dark Green
-    private static final Color COLOR_NODE_DEADLINE_MA = COLOR_NODE_MINERS.darker(); // Darker Lime Green
-    private static final Color COLOR_MINED_BLOCK = COLOR_NODE_MINERS; // Lime Green
-    private static final Color COLOR_NODE_SHARE_LEGEND = Color.GREEN; // Green
-    private static final Color COLOR_NETWORK_SHARE_LEGEND = Color.CYAN; // Cyan
-
     private static final BasicStroke CHART_STROKE = new BasicStroke(1.2f);
+
+    private static final int[] MA_WINDOW_VALUES = { 10, 100, 200, 300, 400, 500 };
 
     private static final Logger logger = LoggerFactory.getLogger(BlockGenerationMetricsPanel.class);
 
@@ -148,9 +138,6 @@ public class BlockGenerationMetricsPanel extends JPanel {
     private final Map<Long, Color> minerColors = new HashMap<>();
     private final List<Color> colorPalette = new ArrayList<>();
     private int nextColorIndex = 0;
-    private static final Color OTHERS_COLOR = Color.LIGHT_GRAY;
-    private static final Color WAITING_COLOR = Color.DARK_GRAY;
-    private static final Color FILTERED_OUT_COLOR = Color.DARK_GRAY;
 
     private volatile boolean showNodeShare = true;
     private volatile boolean showNetworkShare = true;
@@ -192,10 +179,6 @@ public class BlockGenerationMetricsPanel extends JPanel {
     private final List<MinerEntry> currentBlockDeadlines = new CopyOnWriteArrayList<>();
     private final Map<Integer, LocalBlockInfo> localMinedBlocks = new ConcurrentHashMap<>();
     private final Map<Integer, List<MinerEntry>> nodeDeadlineHistory = new ConcurrentHashMap<>();
-
-    private final Dimension progressBarSize = new Dimension(350, 20);
-    private final Dimension chartDimension = new Dimension(360, 270);
-    private final Dimension pieChartDimension = new Dimension(300, 180);
     private final Insets labelInsets = new Insets(2, 5, 2, 0);
 
     private DefaultPieDataset pieDataset;
@@ -435,8 +418,10 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current MA value relative to the maximum observed MA value.
                 """
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE);
-        JLabel networkSizeLabel = createLabel("Network Size (MA):", COLOR_NETWORK_SIZE, networkSizeTooltip);
-        networkSizeProgressBar = createProgressBar(0, 100, null, "C: 0 B | MA: 0 B - max: 0 B", progressBarSize);
+        JLabel networkSizeLabel = createLabel("Network Size (MA):", "blockgen.network.size",
+                networkSizeTooltip);
+        networkSizeProgressBar = createProgressBar(0, 100, null, "C: 0 B | MA: 0 B - max: 0 B",
+                GuiConstants.PROGRESS_BAR_SIZE_LARGE);
         addToggleListener(networkSizeLabel, chartPanel, "Network Size (MA)");
         leftMetricsPanel.add(networkSizeLabel);
         leftMetricsPanel.add(networkSizeProgressBar);
@@ -455,8 +440,10 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current MA value relative to the maximum observed MA value.
                 """
                 .formatted(CHART_HISTORY_SIZE, movingAverageWindow, movingAverageWindow, CHART_HISTORY_SIZE);
-        JLabel commitmentLabel = createLabel("Commitment (MA):", COLOR_COMMITMENT, commitmentTooltip);
-        commitmentProgressBar = createProgressBar(0, 100, null, "C: 0.00 | MA: 0.00 - max: 0.00", progressBarSize);
+        JLabel commitmentLabel = createLabel("Commitment (MA):", "blockgen.commitment",
+                commitmentTooltip);
+        commitmentProgressBar = createProgressBar(0, 100, null, "C: 0.00 | MA: 0.00 - max: 0.00",
+                GuiConstants.PROGRESS_BAR_SIZE_LARGE);
         addToggleListener(commitmentLabel, chartPanel, "Commitment (MA)");
         leftMetricsPanel.add(commitmentLabel);
         leftMetricsPanel.add(commitmentProgressBar);
@@ -482,9 +469,11 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current MA Base Target relative to the maximum observed MA Base Target.
                 """
                 .formatted(movingAverageWindow, movingAverageWindow, CHART_HISTORY_SIZE);
-        baseTargetLabel = createLabel("Base Target (MA):", COLOR_BASE_TARGET, baseTargetTooltip);
+        baseTargetLabel = createLabel("Base Target (MA):", "blockgen.base.target",
+                baseTargetTooltip);
         addToggleListener(baseTargetLabel, chartPanel, "Base Target (MA)");
-        baseTargetProgressBar = createProgressBar(0, 100, null, "C: 0 | MA: 0 - max: 0", progressBarSize);
+        baseTargetProgressBar = createProgressBar(0, 100, null, "C: 0 | MA: 0 - max: 0",
+                GuiConstants.PROGRESS_BAR_SIZE_LARGE);
         leftMetricsPanel.add(baseTargetLabel);
         leftMetricsPanel.add(baseTargetProgressBar);
 
@@ -501,10 +490,10 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 - max: Maximum Moving Average share percentage observed in the chart history (last %d blocks).
                 - Bar length: Indicates the current MA share relative to the maximum observed MA share.
                 """.formatted(movingAverageWindow, movingAverageWindow, CHART_HISTORY_SIZE);
-        JLabel nodeShareLabel = createLabel("Node Share (MA)", COLOR_NODE_SHARE, nodeShareTooltip); // Keep as is
+        JLabel nodeShareLabel = createLabel("Node Share (MA)", "blockgen.node.share", nodeShareTooltip);
         addToggleListener(nodeShareLabel, chartPanel, "Node Share (MA)");
         nodeShareProgressBar = createProgressBar(0, 100, null, "C: 0.00% | MA: 0.00% - max: 0.00%",
-                progressBarSize);
+                GuiConstants.PROGRESS_BAR_SIZE_LARGE);
         leftMetricsPanel.add(nodeShareLabel);
         leftMetricsPanel.add(nodeShareProgressBar);
 
@@ -522,11 +511,12 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 - max: Maximum Moving Average of discovered miners observed in the chart history.
                 - Bar length: Indicates the current MA discovered miner count relative to the maximum observed MA.
                 """
-                .formatted(CHART_HISTORY_SIZE, movingAverageWindow); // Keep as is
-        JLabel minerCountLabel = createLabel("Node Miners (MA)", COLOR_NODE_MINERS, minerCountTooltip);
+                .formatted(CHART_HISTORY_SIZE, movingAverageWindow);
+        JLabel minerCountLabel = createLabel("Node Miners (MA)", "blockgen.node.miners",
+                minerCountTooltip);
         addToggleListener(minerCountLabel, chartPanel, "Node Miners (MA)");
         minerCountProgressBar = createProgressBar(0, 100, null, "C: 0 / 0 | MA: 0.0 - min: 0.0 - max: 0.0",
-                progressBarSize);
+                GuiConstants.PROGRESS_BAR_SIZE_LARGE);
         leftMetricsPanel.add(minerCountLabel);
         leftMetricsPanel.add(minerCountProgressBar);
 
@@ -541,10 +531,12 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 - max: Maximum Moving Average of the unique generator count observed in the chart history (last %d blocks).
                 - Bar length: Indicates the current MA value relative to the maximum observed MA value.
                 """
-                .formatted(CHART_HISTORY_SIZE, movingAverageWindow, CHART_HISTORY_SIZE); // Keep as is
-        JLabel networkMinersLabel = createLabel("Network Miners (MA)", COLOR_NETWORK_MINERS, networkMinersTooltip);
+                .formatted(CHART_HISTORY_SIZE, movingAverageWindow, CHART_HISTORY_SIZE);
+        JLabel networkMinersLabel = createLabel("Network Miners (MA)", "blockgen.network.miners",
+                networkMinersTooltip);
         addToggleListener(networkMinersLabel, chartPanel, "Network Miners (MA)");
-        networkMinersProgressBar = createProgressBar(0, 100, null, "C: 0 | MA: 0 - max: 0", progressBarSize);
+        networkMinersProgressBar = createProgressBar(0, 100, null, "C: 0 | MA: 0 - max: 0",
+                GuiConstants.PROGRESS_BAR_SIZE_LARGE);
         leftMetricsPanel.add(networkMinersLabel);
         leftMetricsPanel.add(networkMinersProgressBar);
 
@@ -561,12 +553,11 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 - max: Maximum Moving Average of received deadlines observed in the chart history (last %d blocks).
                 - Bar length: Indicates the current MA value relative to the maximum observed MA value.
                 """.formatted(movingAverageWindow, movingAverageWindow, CHART_HISTORY_SIZE);
-        JLabel receivedDeadlineCountLabel = createLabel("Deadlines Rx (MA)", COLOR_DEADLINES_RX, deadlinesRxTooltip); // Keep
-                                                                                                                      // as
-                                                                                                                      // is
+        JLabel receivedDeadlineCountLabel = createLabel("Deadlines Rx (MA)", "blockgen.deadlines.rx",
+                deadlinesRxTooltip);
         addToggleListener(receivedDeadlineCountLabel, chartPanel, "Deadlines Rx (MA)");
         receivedDeadlineCountProgressBar = createProgressBar(0, 100, null, "C: 0 | MA: 0.0 - max: 0.0",
-                progressBarSize);
+                GuiConstants.PROGRESS_BAR_SIZE_LARGE);
         leftMetricsPanel.add(receivedDeadlineCountLabel);
         leftMetricsPanel.add(receivedDeadlineCountProgressBar);
 
@@ -583,11 +574,11 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current MA value relative to the maximum observed MA value.
                 """
                 .formatted(movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
-        JLabel bestNodeDeadlineLabel = createLabel("Best Deadline (Node)", COLOR_NODE_DEADLINE,
+        JLabel bestNodeDeadlineLabel = createLabel("Best Deadline (Node)", "blockgen.active.miner",
                 bestNodeDeadlineTooltip);
         addToggleListener(bestNodeDeadlineLabel, chartPanel, "Node Deadline", "Node Deadline (MA)", "Mined Block");
         bestNodeDeadlineProgressBar = createProgressBar(0, 100, null, "C: 0 s | MA: 0 s - min: 0 s - max: 0 s",
-                progressBarSize);
+                GuiConstants.PROGRESS_BAR_SIZE_LARGE);
         leftMetricsPanel.add(bestNodeDeadlineLabel);
         leftMetricsPanel.add(bestNodeDeadlineProgressBar);
 
@@ -606,102 +597,13 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 - Bar length: Indicates the current MA value relative to the maximum observed MA value.
                 """
                 .formatted(movingAverageWindow, movingAverageWindow, CHART_HISTORY_SIZE, CHART_HISTORY_SIZE);
-        JLabel bestBlockchainDeadlineLabel = createLabel("Best Deadline (Chain)", COLOR_CHAIN_DEADLINE,
+        JLabel bestBlockchainDeadlineLabel = createLabel("Best Deadline (Chain)", "blockgen.chain.deadline",
                 bestChainDeadlineTooltip);
         addToggleListener(bestBlockchainDeadlineLabel, chartPanel, "Accepted Deadline", "Accepted Deadline (MA)");
         bestBlockchainDeadlineProgressBar = createProgressBar(0, 100, null, "C: 0 s | MA: 0 s - min: 0 s - max: 0 s",
-                progressBarSize);
+                GuiConstants.PROGRESS_BAR_SIZE_LARGE);
         leftMetricsPanel.add(bestBlockchainDeadlineLabel);
         leftMetricsPanel.add(bestBlockchainDeadlineProgressBar);
-
-        // --- Moving Average Window Slider ---
-        JPanel maWindowPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
-        maWindowPanel.setOpaque(false);
-        String maWindowTooltip = """
-                The size of the sliding window (in blocks) used to calculate the Moving Average (MA) for the displayed metrics.
-
-                A larger window provides a smoother trend, while a smaller window is more responsive to recent changes.
-                """;
-        JLabel maWindowLabel = createLabel("MA Window", null, maWindowTooltip);
-        maWindowPanel.add(maWindowLabel);
-
-        final int[] maWindowValues = { 10, 100, 200, 300, 400, 500 };
-        int initialSliderValue = 1; // Default to 100
-        for (int i = 0; i < maWindowValues.length; i++) {
-            if (movingAverageWindow == maWindowValues[i]) {
-                initialSliderValue = i;
-                break;
-            }
-        }
-
-        JSlider movingAverageSlider = new JSlider(JSlider.HORIZONTAL, 0, maWindowValues.length - 1, initialSliderValue);
-        movingAverageSlider.setMajorTickSpacing(1);
-        movingAverageSlider.setPaintTicks(true);
-        movingAverageSlider.setSnapToTicks(true);
-        movingAverageSlider.setPreferredSize(new Dimension(150, 40));
-
-        java.util.Hashtable<Integer, JLabel> labelTable = new java.util.Hashtable<>();
-        for (int i = 0; i < maWindowValues.length; i++) {
-            labelTable.put(i, new JLabel(String.valueOf(maWindowValues[i])));
-        }
-        movingAverageSlider.setLabelTable(labelTable);
-        movingAverageSlider.setPaintLabels(true);
-
-        movingAverageSlider.addChangeListener(e -> {
-            JSlider source = (JSlider) e.getSource();
-            int newValue = maWindowValues[source.getValue()];
-            updateExecutor.submit(() -> {
-                synchronized (updateLock) {
-                    movingAverageWindow = newValue;
-                    baseTargetMA.setWindowSize(movingAverageWindow);
-                    minerCountMA.setWindowSize(movingAverageWindow);
-                    bestBlockchainDeadlineMA.setWindowSize(movingAverageWindow);
-                    bestNodeDeadlineMA.setWindowSize(movingAverageWindow);
-                    receivedDeadlineCountMA.setWindowSize(movingAverageWindow);
-                    nodeShareMA.setWindowSize(movingAverageWindow);
-                    networkMinersMA.setWindowSize(movingAverageWindow);
-                    commitmentMA.setWindowSize(movingAverageWindow);
-                    networkSizeMA.setWindowSize(movingAverageWindow);
-                }
-            });
-        });
-        maWindowPanel.add(movingAverageSlider);
-
-        maWindowPanel.add(Box.createHorizontalStrut(5));
-
-        // Zoom controls
-        JPanel zoomPanel = new JPanel(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0", "[]5[]"));
-        zoomPanel.setOpaque(false);
-
-        JLabel zoomInLabel = new JLabel("+");
-        zoomInLabel.setFont(zoomInLabel.getFont().deriveFont(Font.BOLD, 18f));
-        zoomInLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        zoomInLabel.setToolTipText("Zoom In: Decrease chart range");
-        zoomInLabel.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                if (SwingUtilities.isLeftMouseButton(e)) {
-                    zoomIn();
-                }
-            }
-        });
-
-        JLabel zoomOutLabel = new JLabel("\u2212");
-        zoomOutLabel.setFont(zoomOutLabel.getFont().deriveFont(Font.BOLD, 18f));
-        zoomOutLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        zoomOutLabel.setToolTipText("Zoom Out: Increase chart range");
-        zoomOutLabel.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                if (SwingUtilities.isLeftMouseButton(e)) {
-                    zoomOut();
-                }
-            }
-        });
-
-        zoomPanel.add(zoomOutLabel);
-        zoomPanel.add(zoomInLabel);
-        maWindowPanel.add(zoomPanel);
 
         // Add Pie Chart Panel to statsPanel
         JPanel rightMetricsPanel = new JPanel(
@@ -710,18 +612,22 @@ public class BlockGenerationMetricsPanel extends JPanel {
         JPanel minersCountPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
         minersCountPanel.setOpaque(false);
         nodeMinersCountLabel = new JLabel(
-                "<html>Node Miners: <font color='" + toHex(COLOR_ACTIVE_MINER) + "'>0</font> / <font color='" // Active
-                                                                                                              // miners
-                                                                                                              // (y)
-                                                                                                              // remains
-                                                                                                              // Goldenrod
-                        + toHex(COLOR_NODE_MINERS) + "'>0</font></html>"); // Total unique node miners (z) uses new
-                                                                           // COLOR_NODE_MINERS
+                "<html>Node Miners: <font color='" + toHex(GuiColors.getBlockGenActiveMiner())
+                        + "'>0</font> / <font color='" // Active
+                        // miners
+                        // (y)
+                        // remains
+                        // Goldenrod
+                        + toHex(GuiColors.getBlockGenNodeMiners()) + "'>0</font></html>"); // Total unique node miners
+                                                                                           // (z)
+                                                                                           // uses new
+        // COLOR_NODE_MINERS
         addMinerListListener(nodeMinersCountLabel, 0);
 
         networkMinersCountLabel = new JLabel(
-                "<html>Network Miners: <font color='" + toHex(COLOR_NETWORK_MINERS) + "'>0</font></html>"); // Uses new
-                                                                                                            // COLOR_NETWORK_MINERS
+                "<html>Network Miners: <font color='" + toHex(GuiColors.getBlockGenNetworkMiners())
+                        + "'>0</font></html>"); // Uses new
+        // COLOR_NETWORK_MINERS
         addMinerListListener(networkMinersCountLabel, 1);
 
         minersCountPanel.add(nodeMinersCountLabel);
@@ -734,8 +640,14 @@ public class BlockGenerationMetricsPanel extends JPanel {
         JPanel legendPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
         legendPanel.setOpaque(false);
 
-        nodeShareLegendLabel = new JLabel("Node Share: 0.00%");
-        nodeShareLegendLabel.setForeground(COLOR_NODE_SHARE_LEGEND);
+        nodeShareLegendLabel = new JLabel("Node Share: 0.00%") {
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                updateLabelStrikethrough(this, showNodeShare);
+            }
+        };
+        nodeShareLegendLabel.setForeground(GuiColors.getBlockGenNodeShareLegend());
         String nodeShareLegendTooltip = """
                 The percentage of blocks mined by this node's connected miners relative to the total blocks in the chart history.
 
@@ -744,21 +656,27 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 - <span style='color:%s'>&#9632;</span> slices in the pie chart represent blocks mined by this node.
                 - Clicking this label toggles the visibility of local miners in the pie chart.
                 """
-                .formatted(CHART_HISTORY_SIZE, toHex(COLOR_NODE_SHARE_LEGEND));
-        addInfoTooltip(nodeShareLegendLabel, nodeShareLegendTooltip);
+                .formatted(CHART_HISTORY_SIZE, toHex(GuiColors.getBlockGenNodeShareLegend())); // colorKey is null
+        ContextMenuUtils.addInfoTooltip(parentFrame, nodeShareLegendLabel, nodeShareLegendTooltip, null);
         nodeShareLegendLabel.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (SwingUtilities.isLeftMouseButton(e)) {
                     showNodeShare = !showNodeShare;
-                    updateNodeShareLegend();
+                    nodeShareLegendLabel.updateUI();
                     triggerPieChartUpdate();
                 }
             }
         });
 
-        networkShareLegendLabel = new JLabel("Network Share: 0.00%");
-        networkShareLegendLabel.setForeground(COLOR_NETWORK_SHARE_LEGEND);
+        networkShareLegendLabel = new JLabel("Network Share: 0.00%") {
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                updateLabelStrikethrough(this, showNetworkShare);
+            }
+        };
+        networkShareLegendLabel.setForeground(GuiColors.getBlockGenNetworkShareLegend());
         String networkShareTooltip = """
                 The percentage of blocks mined by other nodes in the network relative to the total blocks in the chart history.
 
@@ -767,14 +685,14 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 - <span style='color:%s'>&#9632;</span> slices in the pie chart represent blocks mined by other nodes.
                 - Clicking this label toggles the visibility of remote miners in the pie chart.
                 """
-                .formatted(CHART_HISTORY_SIZE, toHex(COLOR_NETWORK_SHARE_LEGEND));
-        addInfoTooltip(networkShareLegendLabel, networkShareTooltip);
+                .formatted(CHART_HISTORY_SIZE, toHex(GuiColors.getBlockGenNetworkShareLegend())); // colorKey is null
+        ContextMenuUtils.addInfoTooltip(parentFrame, networkShareLegendLabel, networkShareTooltip, null);
         networkShareLegendLabel.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (SwingUtilities.isLeftMouseButton(e)) {
                     showNetworkShare = !showNetworkShare;
-                    updateNetworkShareLegend();
+                    networkShareLegendLabel.updateUI();
                     triggerPieChartUpdate();
                 }
             }
@@ -785,45 +703,81 @@ public class BlockGenerationMetricsPanel extends JPanel {
         legendPanel.add(networkShareLegendLabel);
 
         rightMetricsPanel.add(legendPanel);
-        rightMetricsPanel.add(maWindowPanel);
+        rightMetricsPanel.add(createControlsPanel());
 
         // --- Miners Table (Center) ---
         JPanel tablePanel = new JPanel(new BorderLayout(0, 0));
-        tablePanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+        TitledBorder titledBorder = BorderFactory.createTitledBorder("Miners & Deadlines");
+        tablePanel.setBorder(titledBorder);
 
-        JPanel headerPanel = new JPanel(new BorderLayout(0, 0));
-        headerPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-
-        JLabel tableTitleLabel = new JLabel("Miners & Deadlines");
-        tableTitleLabel.setHorizontalAlignment(SwingConstants.LEFT);
-        tableTitleLabel.setFont(UIManager.getFont("TitledBorder.font"));
-        if (tableTitleLabel.getFont() == null) {
-            tableTitleLabel.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
-        }
-        tableTitleLabel.setForeground(UIManager.getColor("TitledBorder.titleColor"));
-        tableTitleLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        tableTitleLabel.addMouseListener(new MouseAdapter() {
+        MouseAdapter titleMouseAdapter = new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
-                if (SwingUtilities.isLeftMouseButton(e) || SwingUtilities.isRightMouseButton(e)) {
+                if ((SwingUtilities.isLeftMouseButton(e) || SwingUtilities.isRightMouseButton(e)) && isTitleHit(e)) {
                     MinersDeadlinesDialog.showDialog(parentFrame, minersTableModel);
                 }
             }
-        });
-        headerPanel.add(tableTitleLabel, BorderLayout.NORTH);
+
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                if (isTitleHit(e)) {
+                    tablePanel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                } else {
+                    tablePanel.setCursor(Cursor.getDefaultCursor());
+                }
+            }
+
+            private boolean isTitleHit(MouseEvent e) {
+                Insets insets = tablePanel.getInsets();
+                if (e.getY() < insets.top) {
+                    Font font = titledBorder.getTitleFont();
+                    if (font == null)
+                        font = UIManager.getFont("TitledBorder.font");
+                    if (font == null)
+                        font = UIManager.getFont("Label.font");
+                    if (font == null)
+                        font = tablePanel.getFont();
+                    if (font == null)
+                        return false;
+
+                    FontMetrics fm = tablePanel.getFontMetrics(font);
+                    int titleWidth = fm.stringWidth(titledBorder.getTitle());
+                    return e.getX() >= 0 && e.getX() <= titleWidth + 30;
+                }
+                return false;
+            }
+        };
+        tablePanel.addMouseListener(titleMouseAdapter);
+        tablePanel.addMouseMotionListener(titleMouseAdapter);
 
         // Filter field
         JPanel filterPanel = new JPanel(new BorderLayout());
-        filterPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
+        filterPanel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
         filterPanel.add(new JLabel("Filter: "), BorderLayout.WEST);
         filterTextField = new JTextField();
         filterPanel.add(filterTextField, BorderLayout.CENTER);
 
-        headerPanel.add(filterPanel, BorderLayout.SOUTH);
-        tablePanel.add(headerPanel, BorderLayout.NORTH);
+        tablePanel.add(filterPanel, BorderLayout.NORTH);
 
         minersTableModel = new MinersTableModel();
         minersTable = new JTable(minersTableModel) {
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                // Re-apply the custom renderer after L&F change, as super.updateUI() resets
+                // default renderers.
+                setDefaultRenderer(Object.class, new MinerTableCellRenderer());
+                // Also re-apply column-specific settings that might be reset
+                try {
+                    TableColumn ioColumn = getColumn(MinersTableModel.COL_IO);
+                    ioColumn.setPreferredWidth(30);
+                    ioColumn.setMinWidth(30);
+                    ioColumn.setMaxWidth(30);
+                } catch (IllegalArgumentException e) {
+                    // Column might not exist during initial setup, ignore.
+                }
+            }
+
             @Override
             protected JTableHeader createDefaultTableHeader() {
                 JTableHeader header = super.createDefaultTableHeader();
@@ -870,6 +824,9 @@ public class BlockGenerationMetricsPanel extends JPanel {
             public void mouseClicked(MouseEvent e) {
                 if (SwingUtilities.isRightMouseButton(e)) {
                     showLegendPopup(e);
+                } else if (e.getClickCount() == 2 && SwingUtilities.isLeftMouseButton(e)) {
+                    // Open dialog on double click since title label is gone
+                    MinersDeadlinesDialog.showDialog(parentFrame, minersTableModel);
                 }
             }
         });
@@ -919,15 +876,120 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
         JScrollPane tableScrollPane = new JScrollPane(minersTable);
         tableScrollPane.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-        tableScrollPane.setViewportBorder(null);
+        tableScrollPane.setViewportBorder(null); // NOSONAR
         tablePanel.add(tableScrollPane, BorderLayout.CENTER);
-        tablePanel.setPreferredSize(new Dimension(250, chartDimension.height)); // Fixed size to prevent expansion
-        tablePanel.setMinimumSize(new Dimension(250, chartDimension.height));
+        tablePanel.setPreferredSize(new Dimension(250, GuiConstants.CHART_DIMENSION_LARGE.height)); // Fixed size to
+                                                                                                    // prevent
+                                                                                                    // expansion
+        tablePanel.setMinimumSize(new Dimension(250, GuiConstants.CHART_DIMENSION_LARGE.height));
 
         add(leftMetricsPanel, "aligny top");
         add(chartPanel, "aligny top");
         add(rightMetricsPanel, "aligny top");
         add(tablePanel, "grow, aligny top");
+    }
+
+    private JPanel createControlsPanel() {
+        JPanel maWindowPanel = new JPanel(new MigLayout("insets 0", "[][grow, center][]"));
+        maWindowPanel.setOpaque(false);
+        String maWindowTooltip = """
+                The size of the sliding window (in blocks) used to calculate the Moving Average (MA) for the displayed metrics.
+
+                A larger window provides a smoother trend, while a smaller window is more responsive to recent changes.
+                """;
+        JLabel maWindowLabel = createLabel("MA Window", null, maWindowTooltip);
+
+        int initialSliderValue = 1; // Default to 100
+        for (int i = 0; i < MA_WINDOW_VALUES.length; i++) {
+            if (movingAverageWindow == MA_WINDOW_VALUES[i]) {
+                initialSliderValue = i;
+                break;
+            }
+        }
+        JSlider movingAverageSlider = new JSlider(JSlider.HORIZONTAL, 0, MA_WINDOW_VALUES.length - 1,
+                initialSliderValue);
+        movingAverageSlider.setMajorTickSpacing(1);
+        movingAverageSlider.setPaintTicks(true);
+        movingAverageSlider.setSnapToTicks(true);
+
+        java.util.Hashtable<Integer, JLabel> labelTable = new java.util.Hashtable<>();
+        for (int i = 0; i < MA_WINDOW_VALUES.length; i++) {
+            labelTable.put(i, new JLabel(String.valueOf(MA_WINDOW_VALUES[i])));
+        }
+        movingAverageSlider.setLabelTable(labelTable);
+        movingAverageSlider.setPaintLabels(true);
+
+        movingAverageSlider.addPropertyChangeListener("UI", e -> {
+            SwingUtilities.invokeLater(() -> {
+                // To force a full recalculation of label sizes and positions on L&F change,
+                // we nullify the label table and then set a completely new one.
+                // This is more robust than just calling revalidate().
+                movingAverageSlider.setLabelTable(null);
+                java.util.Hashtable<Integer, JLabel> newLabelTable = new java.util.Hashtable<>();
+                for (int i = 0; i < MA_WINDOW_VALUES.length; i++) {
+                    newLabelTable.put(i, new JLabel(String.valueOf(MA_WINDOW_VALUES[i])));
+                }
+                movingAverageSlider.setLabelTable(newLabelTable);
+            });
+        });
+
+        movingAverageSlider.addChangeListener(e -> {
+            JSlider source = (JSlider) e.getSource();
+            int newValue = MA_WINDOW_VALUES[source.getValue()];
+            updateExecutor.submit(() -> {
+                synchronized (updateLock) {
+                    movingAverageWindow = newValue;
+                    baseTargetMA.setWindowSize(movingAverageWindow);
+                    minerCountMA.setWindowSize(movingAverageWindow);
+                    bestBlockchainDeadlineMA.setWindowSize(movingAverageWindow);
+                    bestNodeDeadlineMA.setWindowSize(movingAverageWindow);
+                    receivedDeadlineCountMA.setWindowSize(movingAverageWindow);
+                    nodeShareMA.setWindowSize(movingAverageWindow);
+                    networkMinersMA.setWindowSize(movingAverageWindow);
+                    commitmentMA.setWindowSize(movingAverageWindow);
+                    networkSizeMA.setWindowSize(movingAverageWindow);
+                }
+            });
+        });
+
+        // Zoom controls
+        JPanel zoomPanel = new JPanel(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0", "[]5[]"));
+        zoomPanel.setOpaque(false);
+
+        JLabel zoomInLabel = new JLabel("+");
+        zoomInLabel.setFont(zoomInLabel.getFont().deriveFont(Font.BOLD, 18f));
+        zoomInLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        zoomInLabel.setToolTipText("Zoom In: Decrease chart range");
+        zoomInLabel.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (SwingUtilities.isLeftMouseButton(e)) {
+                    zoomIn();
+                }
+            }
+        });
+
+        JLabel zoomOutLabel = new JLabel("\u2212");
+        zoomOutLabel.setFont(zoomOutLabel.getFont().deriveFont(Font.BOLD, 18f));
+        zoomOutLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        zoomOutLabel.setToolTipText("Zoom Out: Increase chart range");
+        zoomOutLabel.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (SwingUtilities.isLeftMouseButton(e)) {
+                    zoomOut();
+                }
+            }
+        });
+
+        zoomPanel.add(zoomOutLabel);
+        zoomPanel.add(zoomInLabel);
+
+        maWindowPanel.add(maWindowLabel);
+        maWindowPanel.add(movingAverageSlider, "w " + GuiConstants.SLIDER_WIDTH + "!");
+        maWindowPanel.add(zoomPanel);
+
+        return maWindowPanel;
     }
 
     private ChartPanel createChartPanel() {
@@ -981,10 +1043,11 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 null, null, null, null);
 
         XYPlot plot = chart.getXYPlot();
+        plot.setOutlineVisible(false);
         plot.setDatasetRenderingOrder(DatasetRenderingOrder.FORWARD);
         plot.getDomainAxis().setLowerMargin(0.0);
         plot.getDomainAxis().setUpperMargin(0.0);
-        plot.setBackgroundPaint(Color.DARK_GRAY);
+        plot.setBackgroundPaint(UIManager.getColor("Table.background"));
         plot.setDomainGridlinesVisible(false);
         plot.setRangeGridlinesVisible(false);
         plot.getDomainAxis().setTickLabelsVisible(false);
@@ -1019,9 +1082,9 @@ public class BlockGenerationMetricsPanel extends JPanel {
         barRenderer.setMargin(0.0); // As per SyncPanel settings
 
         Map<String, Paint> barPaints = new HashMap<>();
-        barPaints.put("Accepted Deadline", COLOR_CHAIN_DEADLINE);
-        barPaints.put("Node Deadline", COLOR_NODE_DEADLINE);
-        barPaints.put("Mined Block", COLOR_MINED_BLOCK);
+        barPaints.put("Accepted Deadline", GuiColors.getBlockGenChainDeadline());
+        barPaints.put("Node Deadline", GuiColors.getBlockGenActiveMiner());
+        barPaints.put("Mined Block", GuiColors.getBlockGenNodeMiners());
         assignSeriesPaints(barRenderer, barDataset, barPaints);
         barRenderer.setDefaultToolTipGenerator(new BlockChartToolTipGenerator());
 
@@ -1033,8 +1096,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
         XYLineAndShapeRenderer timeMaRenderer = new XYLineAndShapeRenderer(true, false);
 
         Map<String, Paint> timeMaPaints = new HashMap<>();
-        timeMaPaints.put("Accepted Deadline (MA)", COLOR_CHAIN_DEADLINE_MA);
-        timeMaPaints.put("Node Deadline (MA)", COLOR_NODE_DEADLINE_MA);
+        timeMaPaints.put("Accepted Deadline (MA)", GuiColors.getBlockGenChainDeadlineMa());
+        timeMaPaints.put("Node Deadline (MA)", GuiColors.getBlockGenNodeDeadlineMa());
 
         configureLineRenderer(timeMaRenderer, timeMaDataset, timeMaPaints);
         plot.setRenderer(DATASET_DEADLINE_MA, timeMaRenderer);
@@ -1044,7 +1107,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
         plot.setDataset(DATASET_NETWORK_SIZE, netSizeDataset);
         XYLineAndShapeRenderer netSizeRenderer = new XYLineAndShapeRenderer(true, false);
         Map<String, Paint> netSizePaints = new HashMap<>();
-        netSizePaints.put(networkSizeMASeries.getKey().toString(), COLOR_NETWORK_SIZE);
+        netSizePaints.put(networkSizeMASeries.getKey().toString(), GuiColors.getBlockGenNetworkSize());
         configureLineRenderer(netSizeRenderer, netSizeDataset, netSizePaints);
         plot.setRenderer(DATASET_NETWORK_SIZE, netSizeRenderer);
         plot.mapDatasetToRangeAxis(DATASET_NETWORK_SIZE, AXIS_NETWORK_SIZE);
@@ -1053,7 +1116,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
         plot.setDataset(DATASET_COMMITMENT, commitmentDataset);
         XYLineAndShapeRenderer commitmentRenderer = new XYLineAndShapeRenderer(true, false);
         Map<String, Paint> commitmentPaints = new HashMap<>();
-        commitmentPaints.put(commitmentMASeries.getKey().toString(), COLOR_COMMITMENT);
+        commitmentPaints.put(commitmentMASeries.getKey().toString(), GuiColors.getBlockGenCommitment());
         configureLineRenderer(commitmentRenderer, commitmentDataset, commitmentPaints);
         plot.setRenderer(DATASET_COMMITMENT, commitmentRenderer);
         plot.mapDatasetToRangeAxis(DATASET_COMMITMENT, AXIS_COMMITMENT);
@@ -1062,7 +1125,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
         plot.setDataset(DATASET_BASE_TARGET, baseTargetDataset);
         XYLineAndShapeRenderer baseTargetRenderer = new XYLineAndShapeRenderer(true, false);
         Map<String, Paint> baseTargetPaints = new HashMap<>();
-        baseTargetPaints.put(baseTargetMASeries.getKey().toString(), COLOR_BASE_TARGET);
+        baseTargetPaints.put(baseTargetMASeries.getKey().toString(), GuiColors.getBlockGenBaseTarget());
         configureLineRenderer(baseTargetRenderer, baseTargetDataset, baseTargetPaints);
         plot.setRenderer(DATASET_BASE_TARGET, baseTargetRenderer);
         plot.mapDatasetToRangeAxis(DATASET_BASE_TARGET, AXIS_BASE_TARGET);
@@ -1072,9 +1135,9 @@ public class BlockGenerationMetricsPanel extends JPanel {
         XYLineAndShapeRenderer countsRenderer = new XYLineAndShapeRenderer(true, false);
 
         Map<String, Paint> countsPaints = new HashMap<>();
-        countsPaints.put("Node Miners (MA)", COLOR_NODE_MINERS); // Uses new COLOR_NODE_MINERS
-        countsPaints.put("Network Miners (MA)", COLOR_NETWORK_MINERS); // Uses new COLOR_NETWORK_MINERS
-        countsPaints.put("Deadlines Rx (MA)", COLOR_DEADLINES_RX);
+        countsPaints.put("Node Miners (MA)", GuiColors.getBlockGenNodeMiners()); // Uses new COLOR_NODE_MINERS
+        countsPaints.put("Network Miners (MA)", GuiColors.getBlockGenNetworkMiners()); // Uses new COLOR_NETWORK_MINERS
+        countsPaints.put("Deadlines Rx (MA)", GuiColors.getBlockGenDeadlinesRx());
 
         configureLineRenderer(countsRenderer, countsDataset, countsPaints);
         plot.setRenderer(DATASET_COUNTS, countsRenderer);
@@ -1084,7 +1147,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
         plot.setDataset(DATASET_SHARE, shareDataset);
         XYLineAndShapeRenderer shareRenderer = new XYLineAndShapeRenderer(true, false);
         Map<String, Paint> sharePaints = new HashMap<>();
-        sharePaints.put(nodeShareMASeries.getKey().toString(), COLOR_NODE_SHARE);
+        sharePaints.put(nodeShareMASeries.getKey().toString(), GuiColors.getBlockGenNodeShare());
         configureLineRenderer(shareRenderer, shareDataset, sharePaints);
         plot.setRenderer(DATASET_SHARE, shareRenderer);
         plot.mapDatasetToRangeAxis(DATASET_SHARE, AXIS_SHARE);
@@ -1097,12 +1160,62 @@ public class BlockGenerationMetricsPanel extends JPanel {
         chart.setBorderVisible(false);
 
         ChartPanel cp = new ChartPanel(chart);
-        cp.setPreferredSize(chartDimension);
-        cp.setMinimumSize(chartDimension);
-        cp.setMaximumSize(chartDimension);
+        cp.setPreferredSize(GuiConstants.CHART_DIMENSION_LARGE);
+        cp.setMinimumSize(GuiConstants.CHART_DIMENSION_LARGE);
+        cp.setMaximumSize(GuiConstants.CHART_DIMENSION_LARGE);
         cp.setDisplayToolTips(true);
         ToolTipManager.sharedInstance().registerComponent(cp);
         return cp;
+    }
+
+    private void updateChartColors() {
+        if (chartPanel == null)
+            return;
+
+        XYPlot plot = chartPanel.getChart().getXYPlot();
+        plot.setBackgroundPaint(UIManager.getColor("Table.background"));
+
+        // Bar Renderer
+        XYBarRenderer barRenderer = (XYBarRenderer) plot.getRenderer(DATASET_DEADLINE_BARS);
+        if (barRenderer != null) {
+            barRenderer.setSeriesPaint(0, GuiColors.getBlockGenNodeMiners()); // Mined Block
+            barRenderer.setSeriesPaint(1, GuiColors.getBlockGenChainDeadline()); // Accepted Deadline
+            barRenderer.setSeriesPaint(2, GuiColors.getBlockGenActiveMiner()); // Node Deadline
+        }
+
+        // Line Renderers
+        XYLineAndShapeRenderer timeMaRenderer = (XYLineAndShapeRenderer) plot.getRenderer(DATASET_DEADLINE_MA);
+        if (timeMaRenderer != null) {
+            timeMaRenderer.setSeriesPaint(0, GuiColors.getBlockGenChainDeadlineMa());
+            timeMaRenderer.setSeriesPaint(1, GuiColors.getBlockGenNodeDeadlineMa());
+        }
+
+        XYLineAndShapeRenderer netSizeRenderer = (XYLineAndShapeRenderer) plot.getRenderer(DATASET_NETWORK_SIZE);
+        if (netSizeRenderer != null) {
+            netSizeRenderer.setSeriesPaint(0, GuiColors.getBlockGenNetworkSize());
+        }
+
+        XYLineAndShapeRenderer commitmentRenderer = (XYLineAndShapeRenderer) plot.getRenderer(DATASET_COMMITMENT);
+        if (commitmentRenderer != null) {
+            commitmentRenderer.setSeriesPaint(0, GuiColors.getBlockGenCommitment());
+        }
+
+        XYLineAndShapeRenderer baseTargetRenderer = (XYLineAndShapeRenderer) plot.getRenderer(DATASET_BASE_TARGET);
+        if (baseTargetRenderer != null) {
+            baseTargetRenderer.setSeriesPaint(0, GuiColors.getBlockGenBaseTarget());
+        }
+
+        XYLineAndShapeRenderer countsRenderer = (XYLineAndShapeRenderer) plot.getRenderer(DATASET_COUNTS);
+        if (countsRenderer != null) {
+            countsRenderer.setSeriesPaint(0, GuiColors.getBlockGenNodeMiners());
+            countsRenderer.setSeriesPaint(1, GuiColors.getBlockGenNetworkMiners());
+            countsRenderer.setSeriesPaint(2, GuiColors.getBlockGenDeadlinesRx());
+        }
+
+        XYLineAndShapeRenderer shareRenderer = (XYLineAndShapeRenderer) plot.getRenderer(DATASET_SHARE);
+        if (shareRenderer != null) {
+            shareRenderer.setSeriesPaint(0, GuiColors.getBlockGenNodeShare());
+        }
     }
 
     private void assignSeriesPaints(org.jfree.chart.renderer.xy.XYItemRenderer renderer, XYSeriesCollection dataset,
@@ -1153,9 +1266,9 @@ public class BlockGenerationMetricsPanel extends JPanel {
         plot.setInteriorGap(0.02);
 
         ChartPanel cp = new ChartPanel(chart);
-        cp.setPreferredSize(pieChartDimension);
-        cp.setMinimumSize(pieChartDimension);
-        cp.setMaximumSize(pieChartDimension);
+        cp.setPreferredSize(GuiConstants.PIE_CHART_DIMENSION);
+        cp.setMinimumSize(GuiConstants.PIE_CHART_DIMENSION);
+        cp.setMaximumSize(GuiConstants.PIE_CHART_DIMENSION);
         cp.setDisplayToolTips(true);
         ToolTipManager.sharedInstance().registerComponent(cp);
         cp.setOpaque(false);
@@ -1170,7 +1283,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
         JLabel label = new JLabel("<html><b>" + title + ":</b> " + initialValue + "</html>");
         label.setHorizontalAlignment(SwingConstants.CENTER);
         if (tooltip != null) {
-            addInfoTooltip(label, tooltip);
+            ContextMenuUtils.addInfoTooltip(parentFrame, label, tooltip, null);
         }
         return label;
     }
@@ -1603,9 +1716,9 @@ public class BlockGenerationMetricsPanel extends JPanel {
             updateProgressBar(networkMinersProgressBar, data.avgNetworkMiners, data.maxNetworkMiners,
                     val -> String.format("C: %d | MA: %.0f - max: %.0f", (long) networkMinersMA.getLast(), val,
                             data.maxNetworkMiners));
-            networkMinersCountLabel.setText(
-                    "<html>Network Miners: <font color='" + toHex(COLOR_NETWORK_MINERS) + "'>"
-                            + (long) networkMinersMA.getLast() + "</font></html>");
+            networkMinersCountLabel.setText("<html>Network Miners: <font color='"
+                    + toHex(GuiColors.getBlockGenNetworkMiners()) + "'>"
+                    + (long) networkMinersMA.getLast() + "</font></html>");
 
             updateProgressBar(commitmentProgressBar, data.avgCommitment, data.maxCommitment,
                     val -> String.format("C: %.2f | MA: %.2f - max: %.2f", data.signaPerTB, val, data.maxCommitment));
@@ -1953,11 +2066,11 @@ public class BlockGenerationMetricsPanel extends JPanel {
             for (Object keyObject : pieDataset.getKeys()) {
                 String key = (String) keyObject;
                 if (key.startsWith("Others")) {
-                    plot.setSectionPaint(key, OTHERS_COLOR);
+                    plot.setSectionPaint(key, GuiColors.getBlockGenPieOthers());
                 } else if ("Waiting for blocks...".equals(key)) {
-                    plot.setSectionPaint(key, WAITING_COLOR);
+                    plot.setSectionPaint(key, GuiColors.getBlockGenPieWaiting());
                 } else if ("Filtered out".equals(key)) {
-                    plot.setSectionPaint(key, FILTERED_OUT_COLOR);
+                    plot.setSectionPaint(key, GuiColors.getBlockGenPieFiltered());
                 } else {
                     try {
                         long generatorId = Long.parseLong(key);
@@ -2146,10 +2259,11 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 val -> String.format("C: %d / %d | MA: %.1f - min: %.1f - max: %.1f", data.activeMinerCount,
                         data.uniqueNodeMiners, val, data.minMiners, data.maxMiners));
 
-        nodeMinersCountLabel.setText(
-                "<html>Node Miners: <font color='" + toHex(COLOR_ACTIVE_MINER) + "'>" + data.activeMinerCount
-                        + "</font> / <font color='" + toHex(COLOR_NODE_MINERS) + "'>"
-                        + data.uniqueNodeMiners + "</font></html>");
+        nodeMinersCountLabel.setText("<html>Node Miners: <font color='" + toHex(GuiColors.getBlockGenActiveMiner())
+                + "'>"
+                + data.activeMinerCount
+                + "</font> / <font color='" + toHex(GuiColors.getBlockGenNodeMiners()) + "'>"
+                + data.uniqueNodeMiners + "</font></html>");
 
         String currentBestStr = (data.bestDeadline != null ? data.bestDeadline.longValue() + " s"
                 : "0 s");
@@ -2176,32 +2290,40 @@ public class BlockGenerationMetricsPanel extends JPanel {
         MinersListDialog.updateIfVisible(recentGenerators, nodeDeadlineHistory);
     }
 
-    private JLabel createLabel(String text, Color color, String tooltip) {
-        JLabel label = new JLabel(text);
-        if (color != null) {
-            label.setForeground(color);
-        }
-        if (tooltip != null) {
-            addInfoTooltip(label, tooltip);
-        }
-        return label;
-    }
-
-    private void addInfoTooltip(JLabel label, String text) {
-        label.addMouseListener(new MouseAdapter() {
+    private JLabel createLabel(String text, String colorKey, String tooltip) {
+        // Using an anonymous inner class to override updateUI, making the label
+        // theme-aware.
+        JLabel label = new JLabel(text) {
             @Override
-            public void mouseClicked(MouseEvent e) {
-                if (SwingUtilities.isRightMouseButton(e)) {
-                    String title = label.getText();
-                    if (title.endsWith(":")) {
-                        title = title.substring(0, title.length() - 1);
+            public void updateUI() {
+                super.updateUI();
+                // Re-apply color from palette on UI update, ensuring it stays in sync with
+                // theme changes.
+                if (colorKey != null) {
+                    setForeground(ColorPaletteManager.getColor(colorKey));
+                }
+                // Re-apply strikethrough if this is a toggle-able label
+                Object visibleProp = getClientProperty("visible");
+                if (visibleProp instanceof Boolean) {
+                    boolean isVisible = (Boolean) visibleProp;
+                    Font font = getFont();
+                    Map<TextAttribute, Object> attributes = new HashMap<>(font.getAttributes());
+                    if (!isVisible) {
+                        attributes.put(TextAttribute.STRIKETHROUGH, TextAttribute.STRIKETHROUGH_ON);
+                    } else {
+                        attributes.remove(TextAttribute.STRIKETHROUGH);
                     }
-                    String htmlText = "<html><body><p style='width: 300px;'>" + text.replace("\n", "<br>")
-                            + "</p></body></html>";
-                    JOptionPane.showMessageDialog(parentFrame, htmlText, title, JOptionPane.PLAIN_MESSAGE);
+                    setFont(new javax.swing.plaf.FontUIResource(font.deriveFont(attributes)));
                 }
             }
-        });
+        };
+        if (colorKey != null) {
+            label.setForeground(ColorPaletteManager.getColor(colorKey));
+        }
+        if (tooltip != null) {
+            ContextMenuUtils.addInfoTooltip(parentFrame, label, tooltip, colorKey);
+        }
+        return label;
     }
 
     private void addMinerListListener(JLabel label, int tabIndex) {
@@ -2224,19 +2346,44 @@ public class BlockGenerationMetricsPanel extends JPanel {
         bar.setBorder(BorderFactory.createEmptyBorder());
         bar.setPreferredSize(size);
         bar.setMinimumSize(size);
-        bar.setStringPainted(true);
         bar.setString(initialString);
         bar.setValue(min);
+        setupProgressBarFont(bar);
+        allProgressBars.add(bar);
         return bar;
+    }
+
+    private static void setupProgressBarFont(JProgressBar bar) {
+        bar.setFont(UIManager.getFont("Label.font"));
+        bar.setStringPainted(true);
+    }
+
+    private final List<JProgressBar> allProgressBars = new ArrayList<>();
+
+    @Override
+    public void updateUI() {
+        super.updateUI();
+        if (allProgressBars != null) {
+            for (JProgressBar bar : allProgressBars) {
+                setupProgressBarFont(bar);
+            }
+        }
+        // After a Look and Feel change, chart colors are not automatically updated.
+        // We need to manually re-apply them from the ColorPaletteManager.
+        if (chartPanel != null) {
+            updateChartColors();
+        }
+        if (pieChartPanel != null) {
+            // Re-calculating data also re-applies colors.
+            PieChartUpdateData data = calculatePieChartData();
+            if (data != null) {
+                updatePieChartUI(data);
+            }
+        }
     }
 
     private void addLabelToggleListener(JLabel label, Consumer<Boolean> onToggleAction) {
         label.putClientProperty("visible", true);
-        final Font originalFont = label.getFont();
-        // Create a strikethrough version of the font to indicate a disabled state
-        final Map<TextAttribute, Object> attributes = new HashMap<>(originalFont.getAttributes());
-        attributes.put(TextAttribute.STRIKETHROUGH, TextAttribute.STRIKETHROUGH_ON);
-        final Font strikethroughFont = originalFont.deriveFont(attributes);
 
         label.addMouseListener(new MouseAdapter() {
             @Override
@@ -2246,8 +2393,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
                     boolean isVisible = !((boolean) label.getClientProperty("visible"));
                     label.putClientProperty("visible", isVisible);
 
-                    // Update the label's font to show the state
-                    label.setFont(isVisible ? originalFont : strikethroughFont);
+                    // Trigger a UI update on the label to re-apply font and style
+                    label.updateUI();
 
                     // Perform the specific toggle action
                     onToggleAction.accept(isVisible);
@@ -2310,17 +2457,9 @@ public class BlockGenerationMetricsPanel extends JPanel {
         });
     }
 
-    private void updateNodeShareLegend() {
-        updateLabelStrikethrough(nodeShareLegendLabel, showNodeShare);
-    }
-
     private void updateNodeShareLegend(double percent) {
         nodeShareLegendLabel.setText(String.format("Node Share: %.2f%%", percent));
         updateLabelStrikethrough(nodeShareLegendLabel, showNodeShare);
-    }
-
-    private void updateNetworkShareLegend() {
-        updateLabelStrikethrough(networkShareLegendLabel, showNetworkShare);
     }
 
     private void updateNetworkShareLegend(double percent) {
@@ -2332,7 +2471,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
         Font font = label.getFont();
         Map<TextAttribute, Object> attributes = new HashMap<>(font.getAttributes());
         attributes.put(TextAttribute.STRIKETHROUGH, visible ? null : TextAttribute.STRIKETHROUGH_ON);
-        label.setFont(font.deriveFont(attributes));
+        label.setFont(new javax.swing.plaf.FontUIResource(font.deriveFont(attributes)));
     }
 
     private static String toHex(Color color) {
@@ -2364,11 +2503,11 @@ public class BlockGenerationMetricsPanel extends JPanel {
         return "<html><body style='width: 350px'>" +
                 "<h3>Table Legend & Information</h3>" +
                 "<b>Row Colors (Text):</b><br>" +
-                "<span style='color:" + toHex(COLOR_NODE_MINERS)
+                "<span style='color:" + toHex(GuiColors.getBlockGenNodeMiners())
                 + "'>&#9632;</span> <b>Light Green:</b> Local Block (Mined by this node)<br>" +
-                "<span style='color:" + toHex(COLOR_CHAIN_DEADLINE)
+                "<span style='color:" + toHex(GuiColors.getBlockGenChainDeadline())
                 + "'>&#9632;</span> <b>Dark Green:</b> Remote Block (Mined by the network)<br>" +
-                "<span style='color:" + toHex(COLOR_ACTIVE_MINER)
+                "<span style='color:" + toHex(GuiColors.getBlockGenActiveMiner())
                 + "'>&#9632;</span> <b>Goldenrod:</b> Active Deadline (Submitted to this node)<br><br>"
                 +
                 "<b>Indicators (" + MinersTableModel.COL_IO + " Column):</b><br>" +
@@ -2574,41 +2713,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
         }
     }
 
-    private static class ChevronIcon implements Icon {
-        private final CustomDrawings.Chevron chevron;
-        private final Color color;
-        private final int width;
-        private final int height;
-
-        public ChevronIcon(CustomDrawings.Chevron chevron, Color color, int width, int height) {
-            this.chevron = chevron;
-            this.color = color;
-            this.width = width;
-            this.height = height;
-        }
-
-        @Override
-        public void paintIcon(Component c, Graphics g, int x, int y) {
-            Graphics2D g2d = (Graphics2D) g.create();
-            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g2d.translate(x, y);
-            chevron.draw(g2d, width, height, color);
-            g2d.dispose();
-        }
-
-        @Override
-        public int getIconWidth() {
-            return width;
-        }
-
-        @Override
-        public int getIconHeight() {
-            return height;
-        }
-    }
-
     // --- Custom Renderer ---
-    static class MinerTableCellRenderer extends DefaultTableCellRenderer {
+    static class MinerTableCellRenderer extends DefaultTableCellRenderer implements javax.swing.plaf.UIResource {
         @Override
         public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus,
                 int row, int column) {
@@ -2624,14 +2730,14 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 switch (entry.type) {
                     case WINNER_LOCAL: // Uses new COLOR_NODE_MINERS
                     case HISTORY_LOCAL: // Uses new COLOR_NODE_MINERS
-                        c.setForeground(COLOR_NODE_MINERS); // Lime Green (Light Green)
+                        c.setForeground(GuiColors.getBlockGenNodeMiners()); // Lime Green (Light Green)
                         break;
                     case WINNER_REMOTE:
                     case HISTORY_REMOTE:
-                        c.setForeground(COLOR_CHAIN_DEADLINE); // Dark Green
+                        c.setForeground(GuiColors.getBlockGenChainDeadline()); // Dark Green
                         break;
                     case ACTIVE_LOCAL:
-                        c.setForeground(COLOR_ACTIVE_MINER); // Goldenrod (Readable Yellow)
+                        c.setForeground(GuiColors.getBlockGenActiveMiner()); // Goldenrod (Readable Yellow)
                         break;
                     default:
                         c.setForeground(table.getForeground());
@@ -2646,10 +2752,10 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 setText("");
                 if (entry.type == MinerEntry.Type.WINNER_LOCAL || entry.type == MinerEntry.Type.HISTORY_LOCAL
                         || entry.type == MinerEntry.Type.ACTIVE_LOCAL) {
-                    setIcon(new ChevronIcon(CustomDrawings.Chevron.UP, c.getForeground(), 22, 22));
+                    setIcon(new CustomDrawingIcon(CustomDrawings.Chevron.UP, c.getForeground()));
                 } else if (entry.type == MinerEntry.Type.WINNER_REMOTE
                         || entry.type == MinerEntry.Type.HISTORY_REMOTE) {
-                    setIcon(new ChevronIcon(CustomDrawings.Chevron.DOWN, c.getForeground(), 22, 22));
+                    setIcon(new CustomDrawingIcon(CustomDrawings.Chevron.DOWN, c.getForeground()));
                 } else {
                     setIcon(null);
                 }

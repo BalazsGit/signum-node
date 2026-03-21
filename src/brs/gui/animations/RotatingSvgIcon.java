@@ -1,5 +1,6 @@
 package brs.gui.animations;
 
+import brs.gui.GuiResources;
 import com.github.weisj.jsvg.SVGDocument;
 import com.github.weisj.jsvg.parser.SVGLoader;
 
@@ -55,12 +56,12 @@ public class RotatingSvgIcon extends JComponent {
      * </p>
      */
     private void loadResources() {
-        URL svgUrl = getClass().getResource("/Signum_node_white.svg");
+        URL svgUrl = getClass().getClassLoader().getResource(GuiResources.SIGNUM_NODE_WHITE_SVG);
         if (svgUrl != null) {
             SVGLoader loader = new SVGLoader();
             this.svgDocument = loader.load(svgUrl);
         } else {
-            System.err.println("SVG not found: /Signum_node_white.svg");
+            System.err.println("SVG not found: " + GuiResources.SIGNUM_NODE_WHITE_SVG);
         }
     }
 
