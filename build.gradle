@@ -76,6 +76,15 @@ dependencies {
     implementation 'com.github.weisj:jsvg:2.0.0'
     implementation 'com.miglayout:miglayout-swing:11.4.2'
 
+    implementation 'com.formdev:flatlaf-extras:3.7'
+    implementation 'com.formdev:flatlaf-swingx:3.7'
+    implementation 'com.formdev:flatlaf-fonts-inter:4.1'
+    implementation 'com.formdev:flatlaf:3.7'
+    implementation 'com.formdev:flatlaf-intellij-themes:3.7'
+    implementation 'com.formdev:flatlaf-fonts-jetbrains-mono:2.304'
+    implementation 'com.formdev:flatlaf-fonts-roboto:2.137'
+    implementation 'com.formdev:flatlaf-fonts-roboto-mono:3.000'
+
     testImplementation("org.junit.platform:junit-platform-engine:6.0.3")
     testImplementation("org.junit.platform:junit-platform-launcher:6.0.3")
     testImplementation("org.junit.jupiter:junit-jupiter-api:6.0.3")
