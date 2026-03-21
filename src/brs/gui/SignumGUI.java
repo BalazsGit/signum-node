@@ -286,10 +286,27 @@ public class SignumGUI extends JFrame {
         // 1b. Ensure all common UI fonts are linked to the active font
         updateCommonFontKeys(UIManager.getFont("defaultFont"));
 
+        // Capture window sizes before update to prevent auto-resizing (packing)
+        // behavior
+        // of some Look and Feels or decoration switches.
+        Map<Window, Dimension> windowSizes = new HashMap<>();
+        for (Window w : Window.getWindows()) {
+            if (w.isDisplayable()) {
+                windowSizes.put(w, w.getSize());
+            }
+        }
+
         // 2. Animate Look and Feel change
         FlatAnimatedLafChange.showSnapshot();
         FlatLaf.updateUI();
         FlatAnimatedLafChange.hideSnapshotWithAnimation();
+
+        // Restore window sizes
+        for (Map.Entry<Window, Dimension> entry : windowSizes.entrySet()) {
+            if (entry.getKey().isDisplayable()) {
+                entry.getKey().setSize(entry.getValue());
+            }
+        }
 
         // 3. Manually trigger updates for components that need more than a standard
         // updateUI().
@@ -881,23 +898,41 @@ public class SignumGUI extends JFrame {
         sendJavaOutputToTextArea(textPane);
         textScrollPane = new JScrollPane(textPane);
         textScrollPane.getVerticalScrollBar().setUnitIncrement(16);
-        textScrollPane.setPreferredSize(new Dimension(900, 500));
+
         JPanel content = new JPanel(new BorderLayout());
         content.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
 
         cardLayout = new CardLayout();
-        mainCardPanel = new JPanel(cardLayout);
+        mainCardPanel = new JPanel(cardLayout) {
+            @Override
+            public Dimension getPreferredSize() {
+                // If the panel is visible, prefer the current size to prevent
+                // auto-resizing/growth
+                // during LookAndFeel changes (especially when switching to themes with larger
+                // decorations like Nimbus).
+                if (isShowing()) {
+                    return getSize();
+                }
+                // Default initial size
+                return new Dimension(900, 500);
+            }
+        };
         mainCardPanel.add(content, VIEW_CONSOLE);
 
-        mainCardPanel.add(new NodeConfigurationPanel(this::restart, this.confFolder,
+        NodeConfigurationPanel nodeConfigPanel = new NodeConfigurationPanel(this::restart, this.confFolder,
                 () -> cardLayout.show(mainCardPanel, VIEW_CONSOLE),
-                () -> cardLayout.show(mainCardPanel, VIEW_LOGGER_PROPS)), VIEW_NODE_PROPS);
-        mainCardPanel.add(new LoggerConfigurationPanel(this::restart, this.confFolder,
+                () -> cardLayout.show(mainCardPanel, VIEW_LOGGER_PROPS));
+        mainCardPanel.add(nodeConfigPanel, VIEW_NODE_PROPS);
+
+        LoggerConfigurationPanel loggerConfigPanel = new LoggerConfigurationPanel(this::restart, this.confFolder,
                 () -> cardLayout.show(mainCardPanel, VIEW_CONSOLE),
-                () -> cardLayout.show(mainCardPanel, VIEW_NODE_PROPS)), VIEW_LOGGER_PROPS);
-        mainCardPanel.add(
-                new LookAndFeelPanel(this::restart, confFolder, () -> cardLayout.show(mainCardPanel, VIEW_CONSOLE)),
-                VIEW_LAF_PROPS);
+                () -> cardLayout.show(mainCardPanel, VIEW_NODE_PROPS));
+        mainCardPanel.add(loggerConfigPanel, VIEW_LOGGER_PROPS);
+
+        LookAndFeelPanel lafPanel = new LookAndFeelPanel(this::restart, confFolder,
+                () -> cardLayout.show(mainCardPanel, VIEW_CONSOLE));
+        mainCardPanel.add(lafPanel, VIEW_LAF_PROPS);
+
         setContentPane(mainCardPanel);
 
         toolBar = new JPanel(new BorderLayout());
