@@ -1,0 +1,4 @@
+{
+  "name": "Spacegray Specific Palette",
+  "_comment": "This file provides theme-specific color overrides for the 'Spacegray' Look and Feel. Colors defined here will be merged on top of the base 'flat-dark.palette.json'. Example: \"peer.connected\": \"#00FF00\""
+}

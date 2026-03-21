@@ -1,0 +1,4 @@
+{
+  "name": "NimbusLookAndFeel Specific Palette",
+  "_comment": "This file provides theme-specific color overrides for the 'NimbusLookAndFeel'. Colors defined here will be merged on top of the base 'nimbus.palette.json'. You only need to add keys for colors you want to change. Example: \"peer.connected\": \"#00FF00\""
+}

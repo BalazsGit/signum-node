@@ -1,0 +1,4 @@
+{
+  "name": "Arc - Orange Specific Palette",
+  "_comment": "This file provides theme-specific color overrides for the 'Arc - Orange' Look and Feel. Colors defined here will be merged on top of the base 'flat-light.palette.json'. Example: \"peer.connected\": \"#00AA00\""
+}
