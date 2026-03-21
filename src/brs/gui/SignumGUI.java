@@ -1260,7 +1260,7 @@ public class SignumGUI extends JFrame {
         menuPanelWrapper = new JPanel(new BorderLayout());
 
         JScrollPane scrollPane = new JScrollPane(leftButtons);
-        scrollPane.setBorder(null);
+        scrollPane.setBorder(BorderFactory.createEmptyBorder());
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
 
         // Listener to adjust bottom padding when scrollbar appears/disappears to
