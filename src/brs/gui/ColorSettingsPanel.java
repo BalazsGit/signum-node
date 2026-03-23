@@ -1,11 +1,14 @@
 package brs.gui;
 
+import brs.gui.util.HelpButton;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
 
 import javax.swing.*;
 import javax.swing.SwingUtilities;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.awt.*;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -22,6 +25,10 @@ public class ColorSettingsPanel extends JPanel {
     private final Map<String, JLabel> valueLabels = new HashMap<>();
     private final Map<String, JLabel> keyLabels = new HashMap<>();
     private final List<String> allColorKeys;
+    private final List<ColorRow> allColorRows = new ArrayList<>();
+    private JPanel searchResultsPanel;
+    private CardLayout contentCardLayout;
+    private JPanel contentContainer;
 
     public ColorSettingsPanel() {
         super(new BorderLayout());
@@ -43,6 +50,33 @@ public class ColorSettingsPanel extends JPanel {
     }
 
     private void initUI() {
+        // Search Panel
+        JPanel searchPanel = new JPanel(new MigLayout("insets 5 10 5 5, fillx", "[][grow]", "[]"));
+        searchPanel.add(new JLabel("Search Colors:"));
+        JTextField searchField = new JTextField();
+        searchField.putClientProperty("JTextField.placeholderText", "Type to filter colors...");
+        styleTextField(searchField);
+        searchPanel.add(searchField, "growx");
+
+        searchField.getDocument().addDocumentListener(new DocumentListener() {
+            public void insertUpdate(DocumentEvent e) {
+                filterProperties(searchField.getText());
+            }
+
+            public void removeUpdate(DocumentEvent e) {
+                filterProperties(searchField.getText());
+            }
+
+            public void changedUpdate(DocumentEvent e) {
+                filterProperties(searchField.getText());
+            }
+        });
+
+        add(searchPanel, BorderLayout.NORTH);
+
+        contentCardLayout = new CardLayout();
+        contentContainer = new JPanel(contentCardLayout);
+
         JTabbedPane tabbedPane = new JTabbedPane();
 
         // Group keys by prefix
@@ -63,7 +97,15 @@ public class ColorSettingsPanel extends JPanel {
         createColorTab(tabbedPane, "GUI", groupedKeys.getOrDefault("GUI", Collections.emptyList()),
                 "General GUI element colors.");
 
-        add(tabbedPane, BorderLayout.CENTER);
+        contentContainer.add(tabbedPane, "TABS");
+
+        searchResultsPanel = new JPanel(new MigLayout("insets 10, gapx 15", "[][][][]", ""));
+        JScrollPane searchScrollPane = new JScrollPane(searchResultsPanel);
+        searchScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        searchScrollPane.getVerticalScrollBar().setUnitIncrement(16);
+        contentContainer.add(searchScrollPane, "SEARCH");
+
+        add(contentContainer, BorderLayout.CENTER);
 
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         JButton applyButton = new JButton("Apply Changes");
@@ -105,20 +147,23 @@ public class ColorSettingsPanel extends JPanel {
         JPanel mainPanel = new JPanel(new MigLayout("insets 10, gapx 15", "[][][][]", ""));
 
         for (String key : keys) {
+            ColorRow row = new ColorRow(key, mainPanel);
             JLabel keyLabel = new JLabel(key);
             mainPanel.add(keyLabel, "align label");
             keyLabels.put(key, keyLabel);
+            row.keyLabel = keyLabel;
 
             JPanel colorPreview = new JPanel();
             colorPreview.setBorder(BorderFactory.createLineBorder(Color.GRAY));
             colorPreview.setPreferredSize(new Dimension(100, 25));
             mainPanel.add(colorPreview);
             previewPanels.put(key, colorPreview);
+            row.previewPanel = colorPreview;
 
             JLabel valueLabel = new JLabel();
-            valueLabel.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
             mainPanel.add(valueLabel);
             valueLabels.put(key, valueLabel);
+            row.valueLabel = valueLabel;
 
             JButton editButton = new JButton("Edit...");
             editButton.addActionListener(e -> {
@@ -164,6 +209,8 @@ public class ColorSettingsPanel extends JPanel {
                 }
             });
             mainPanel.add(editButton, "wrap");
+            row.editButton = editButton;
+            allColorRows.add(row);
         }
 
         JScrollPane scrollPane = new JScrollPane(mainPanel);
@@ -174,12 +221,8 @@ public class ColorSettingsPanel extends JPanel {
         JPanel tabComponent = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
         tabComponent.setOpaque(false);
         tabComponent.add(new JLabel(title));
-        JButton helpButton = new JButton(
-                IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, 12, GuiColors.getHelpIcon()));
+        JButton helpButton = new HelpButton();
         helpButton.setToolTipText("Click for more info");
-        helpButton.setBorder(null);
-        helpButton.setContentAreaFilled(false);
-        helpButton.setFocusPainted(false);
         helpButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         helpButton.addActionListener(e -> {
             JOptionPane.showMessageDialog(this,
@@ -223,6 +266,58 @@ public class ColorSettingsPanel extends JPanel {
         } else {
             return String.format("#%02X%02X%02X%02X", color.getAlpha(), color.getRed(), color.getGreen(),
                     color.getBlue());
+        }
+    }
+
+    private void filterProperties(String text) {
+        boolean isSearch = text != null && !text.trim().isEmpty();
+
+        if (isSearch) {
+            searchResultsPanel.removeAll();
+            String lowerText = text.toLowerCase();
+
+            for (ColorRow row : allColorRows) {
+                if (row.key.toLowerCase().contains(lowerText)) {
+                    searchResultsPanel.add(row.keyLabel, "align label");
+                    searchResultsPanel.add(row.previewPanel);
+                    searchResultsPanel.add(row.valueLabel);
+                    searchResultsPanel.add(row.editButton, "wrap");
+                }
+            }
+            contentCardLayout.show(contentContainer, "SEARCH");
+        } else {
+            for (ColorRow row : allColorRows) {
+                row.originalParent.add(row.keyLabel, "align label");
+                row.originalParent.add(row.previewPanel);
+                row.originalParent.add(row.valueLabel);
+                row.originalParent.add(row.editButton, "wrap");
+            }
+            contentCardLayout.show(contentContainer, "TABS");
+        }
+        revalidate();
+        repaint();
+    }
+
+    private void styleTextField(JComponent field) {
+        if (field instanceof JTextField || field instanceof JPasswordField) {
+            field.setFont(UIManager.getFont("TextField.font"));
+            field.setBorder(BorderFactory.createCompoundBorder(
+                    UIManager.getBorder("TextField.border"),
+                    BorderFactory.createEmptyBorder(4, 6, 4, 6)));
+        }
+    }
+
+    private static class ColorRow {
+        final String key;
+        final JPanel originalParent;
+        JLabel keyLabel;
+        JPanel previewPanel;
+        JLabel valueLabel;
+        JButton editButton;
+
+        ColorRow(String key, JPanel originalParent) {
+            this.key = key;
+            this.originalParent = originalParent;
         }
     }
 }
