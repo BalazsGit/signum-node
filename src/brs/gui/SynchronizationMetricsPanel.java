@@ -4,6 +4,8 @@ import brs.gui.util.ContextMenuUtils;
 import net.miginfocom.swing.MigLayout;
 import org.jfree.chart.ChartFactory;
 import org.jfree.chart.ChartPanel;
+import jiconfont.icons.font_awesome.FontAwesome;
+import jiconfont.swing.IconFontSwing;
 import org.jfree.chart.JFreeChart;
 import org.jfree.chart.axis.NumberAxis;
 import org.jfree.chart.labels.XYToolTipGenerator;
@@ -1317,7 +1319,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 """
                 .formatted(movingAverageWindow * netSpeedUpdateTime / 1000,
                         SPEED_HISTORY_SIZE * netSpeedUpdateTime / 1000, SPEED_HISTORY_SIZE * netSpeedUpdateTime / 1000);
-        uploadSpeedLabel = createLabel("▲ Speed (MA)", tooltip, "sync.upload.speed");
+        uploadSpeedLabel = createLabel("Speed (MA)", tooltip, "sync.upload.speed", FontAwesome.ARROW_UP);
         uploadSpeedProgressBar = createProgressBar(0, MAX_SPEED_BPS, null, "0.00 B/s",
                 GuiConstants.PROGRESS_BAR_SIZE_SMALL);
         uploadSpeedPanel.add(uploadSpeedLabel);
@@ -1342,7 +1344,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 """
                 .formatted(movingAverageWindow * netSpeedUpdateTime / 1000,
                         SPEED_HISTORY_SIZE * netSpeedUpdateTime / 1000, SPEED_HISTORY_SIZE * netSpeedUpdateTime / 1000);
-        downloadSpeedLabel = createLabel("▼ Speed (MA)", tooltip, "sync.download.speed");
+        downloadSpeedLabel = createLabel("Speed (MA)", tooltip, "sync.download.speed", FontAwesome.ARROW_DOWN);
         downloadSpeedProgressBar = createProgressBar(0, MAX_SPEED_BPS, null, "0.00 B/s",
                 GuiConstants.PROGRESS_BAR_SIZE_SMALL);
         downloadSpeePanel.add(downloadSpeedLabel);
@@ -1359,11 +1361,11 @@ public class SynchronizationMetricsPanel extends JPanel {
         tooltip = """
                 The total amount of data uploaded to the network during this session.
                 """;
-        metricsUploadVolumeLabel = createLabel("", tooltip, "sync.upload.volume");
+        metricsUploadVolumeLabel = createLabel("", tooltip, "sync.upload.volume", FontAwesome.ARROW_UP);
         tooltip = """
                 The total amount of data downloaded from the network during this session.
                 """;
-        metricsDownloadVolumeLabel = createLabel("", tooltip, "sync.download.volume");
+        metricsDownloadVolumeLabel = createLabel("", tooltip, "sync.download.volume", FontAwesome.ARROW_DOWN);
 
         combinedVolumePanel.add(volumeTitleLabel);
         combinedVolumePanel.add(metricsUploadVolumeLabel);
@@ -1638,6 +1640,10 @@ public class SynchronizationMetricsPanel extends JPanel {
     }
 
     private JLabel createLabel(String text, String tooltip, String colorKey) {
+        return createLabel(text, tooltip, colorKey, null);
+    }
+
+    private JLabel createLabel(String text, String tooltip, String colorKey, FontAwesome icon) {
         // Using an anonymous inner class to override updateUI, making the label
         // theme-aware.
         JLabel label = new JLabel(text) {
@@ -1647,7 +1653,11 @@ public class SynchronizationMetricsPanel extends JPanel {
                 // Re-apply color from palette on UI update, ensuring it stays in sync with
                 // theme changes.
                 if (colorKey != null) {
-                    setForeground(ColorPaletteManager.getColor(colorKey));
+                    Color color = ColorPaletteManager.getColor(colorKey);
+                    setForeground(color);
+                    if (icon != null) {
+                        setIcon(IconFontSwing.buildIcon(icon, GuiConstants.getHelpIconSize(), color));
+                    }
                 }
                 // Re-apply strikethrough if this is a toggle-able label
                 Object visibleProp = getClientProperty("visible");
@@ -1666,6 +1676,10 @@ public class SynchronizationMetricsPanel extends JPanel {
         };
         if (colorKey != null) {
             label.setForeground(ColorPaletteManager.getColor(colorKey));
+        }
+        if (colorKey != null && icon != null) {
+            label.setIcon(IconFontSwing.buildIcon(icon, GuiConstants.getHelpIconSize(),
+                    ColorPaletteManager.getColor(colorKey)));
         }
         if (tooltip != null) {
             ContextMenuUtils.addInfoTooltip(parentFrame, label, tooltip, colorKey);
@@ -2154,10 +2168,10 @@ public class SynchronizationMetricsPanel extends JPanel {
                 return;
 
             if (metricsUploadVolumeLabel != null) {
-                metricsUploadVolumeLabel.setText("▲ " + formatDataSize(uploadedVolume));
+                metricsUploadVolumeLabel.setText(formatDataSize(uploadedVolume));
             }
             if (metricsDownloadVolumeLabel != null) {
-                metricsDownloadVolumeLabel.setText("▼ " + formatDataSize(downloadedVolume));
+                metricsDownloadVolumeLabel.setText(formatDataSize(downloadedVolume));
             }
 
             updateProgressBar(uploadSpeedProgressBar, avgUploadSpeed, avgUploadSpeedMax, this::formatDataRate);
