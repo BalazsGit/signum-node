@@ -151,7 +151,7 @@ public final class ContextMenuUtils {
         });
     }
 
-    private static void showColorChooserDialog(Component parent, String key) {
+    public static void showColorChooserDialog(Component parent, String key) {
         LookAndFeelPanel lafPanel = LookAndFeelPanel.getInstance();
         if (lafPanel == null) {
             JOptionPane.showMessageDialog(parent, "Look and Feel settings are not available.", "Error",
