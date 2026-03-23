@@ -308,7 +308,6 @@ public final class GuiColors {
      * @return The color for help icons.
      */
     public static Color getHelpIcon() {
-        Color c = UIManager.getColor("Label.disabledForeground");
-        return c != null ? c : Color.LIGHT_GRAY;
+        return ColorPaletteManager.getColor("gui.help.icon");
     }
 }
