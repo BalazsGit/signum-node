@@ -2,6 +2,7 @@ package brs.gui;
 
 import brs.props.Props;
 import brs.util.PathUtils;
+import brs.gui.util.HelpButton;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
@@ -49,6 +50,10 @@ public class LoggerConfigurationPanel extends JPanel {
     private CardLayout contentCardLayout;
     private JPanel contentContainer;
     private JComponent verticalFiller;
+    private JLabel titleLabel;
+    private JButton resetBtn;
+    private JButton resetAppliedBtn;
+    private JButton saveBtn;
 
     public LoggerConfigurationPanel(Runnable restartAction, String confFolder, Runnable backAction,
             Runnable switchAction) {
@@ -101,7 +106,7 @@ public class LoggerConfigurationPanel extends JPanel {
         });
         rightHeader.add(switchBtn);
 
-        JLabel titleLabel = new JLabel("Logger Configuration", SwingConstants.CENTER);
+        titleLabel = new JLabel("Logger Configuration", SwingConstants.CENTER);
         titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 16f));
 
         header.add(leftHeader, BorderLayout.WEST);
@@ -123,7 +128,7 @@ public class LoggerConfigurationPanel extends JPanel {
 
         profileComboBox = new JComboBox<>();
         profileComboBox.setEditable(false);
-        profileComboBox.setPreferredSize(new Dimension(200, 25));
+        profileComboBox.setPrototypeDisplayValue("XXXXXXXXXXXXXXXXXXXX");
         profilePanel.add(profileComboBox);
 
         JButton loadProfileBtn = new JButton("Load Profile");
@@ -164,12 +169,7 @@ public class LoggerConfigurationPanel extends JPanel {
             deleteProfileBtn.setEnabled(!isDefault);
         });
 
-        JButton helpBtn = new JButton(
-                IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, GuiConstants.getHelpIconSize(),
-                        GuiColors.getHelpIcon()));
-        helpBtn.setBorder(BorderFactory.createEmptyBorder());
-        helpBtn.setContentAreaFilled(false);
-        helpBtn.setFocusPainted(false);
+        JButton helpBtn = new HelpButton();
         helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         helpBtn.setToolTipText("Click for more info about Configuration Profiles");
         helpBtn.addActionListener(e -> showProfileHelp());
@@ -291,13 +291,13 @@ public class LoggerConfigurationPanel extends JPanel {
         // Button panel
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
 
-        JButton resetBtn = new JButton("Reset to Saved Configuration");
+        resetBtn = new JButton("Reset to Saved Configuration");
         resetBtn.setFont(resetBtn.getFont().deriveFont(Font.BOLD));
         resetBtn.setIcon(
                 IconFontSwing.buildIcon(FontAwesome.UNDO, GuiConstants.getHelpIconSize(), GuiColors.getButtonIcon()));
         resetBtn.addActionListener(e -> resetToCurrent());
 
-        JButton resetAppliedBtn = new JButton("Reset to Applied Configuration");
+        resetAppliedBtn = new JButton("Reset to Applied Configuration");
         resetAppliedBtn.setFont(resetAppliedBtn.getFont().deriveFont(Font.BOLD));
         resetAppliedBtn.setIcon(
                 IconFontSwing.buildIcon(FontAwesome.HISTORY, GuiConstants.getHelpIconSize(),
@@ -349,7 +349,7 @@ public class LoggerConfigurationPanel extends JPanel {
             }
         });
 
-        JButton saveBtn = new JButton("Save Configuration");
+        saveBtn = new JButton("Save Configuration");
         saveBtn.setFont(saveBtn.getFont().deriveFont(Font.BOLD));
         saveBtn.setIcon(
                 IconFontSwing.buildIcon(FontAwesome.FLOPPY_O, GuiConstants.getHelpIconSize(),
@@ -377,12 +377,7 @@ public class LoggerConfigurationPanel extends JPanel {
         buttonPanel.add(saveBtn);
         buttonPanel.add(deleteConfigFileBtn);
 
-        JButton buttonBarHelpBtn = new JButton(
-                IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, GuiConstants.getHelpIconSize(),
-                        GuiColors.getHelpIcon()));
-        buttonBarHelpBtn.setBorder(BorderFactory.createEmptyBorder());
-        buttonBarHelpBtn.setContentAreaFilled(false);
-        buttonBarHelpBtn.setFocusPainted(false);
+        JButton buttonBarHelpBtn = new HelpButton();
         buttonBarHelpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         String buttonBarHelpText = "<html><body style='width: 350px'>"
                 + "<h2>Button Functions</h2>"
@@ -406,6 +401,29 @@ public class LoggerConfigurationPanel extends JPanel {
         bottomContainer.add(new JSeparator(SwingConstants.HORIZONTAL), BorderLayout.NORTH);
         bottomContainer.add(bottomPanel, BorderLayout.CENTER);
         add(bottomContainer, BorderLayout.SOUTH);
+    }
+
+    @Override
+    public void updateUI() {
+        super.updateUI();
+        // Re-apply derived fonts
+        if (titleLabel != null) {
+            titleLabel.setFont(UIManager.getFont("Label.font").deriveFont(Font.BOLD, 16f));
+        }
+        if (resetBtn != null) {
+            resetBtn.setFont(UIManager.getFont("Button.font").deriveFont(Font.BOLD));
+        }
+        if (resetAppliedBtn != null) {
+            resetAppliedBtn.setFont(UIManager.getFont("Button.font").deriveFont(Font.BOLD));
+        }
+        if (saveBtn != null) {
+            saveBtn.setFont(UIManager.getFont("Button.font").deriveFont(Font.BOLD));
+        }
+
+        // Re-style input fields
+        if (allPropertyRows != null) {
+            allPropertyRows.forEach(row -> styleTextField(row.input));
+        }
     }
 
     private void filterProperties(String text) {
@@ -458,10 +476,12 @@ public class LoggerConfigurationPanel extends JPanel {
     }
 
     private void styleTextField(JComponent field) {
-        field.setFont(UIManager.getFont("TextField.font"));
-        field.setBorder(BorderFactory.createCompoundBorder(
-                UIManager.getBorder("TextField.border"),
-                BorderFactory.createEmptyBorder(4, 6, 4, 6)));
+        if (field instanceof JTextField) {
+            field.setFont(UIManager.getFont("TextField.font"));
+            field.setBorder(BorderFactory.createCompoundBorder(
+                    UIManager.getBorder("TextField.border"),
+                    BorderFactory.createEmptyBorder(4, 6, 4, 6)));
+        }
     }
 
     private void fixComponentSize(JComponent comp) {
@@ -1004,12 +1024,7 @@ public class LoggerConfigurationPanel extends JPanel {
         updateColor(inputComponent, propertyKey, defaultValue);
 
         // Help Button
-        JButton helpBtn = new JButton(
-                IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, GuiConstants.getHelpIconSize(),
-                        GuiColors.getHelpIcon()));
-        helpBtn.setBorder(BorderFactory.createEmptyBorder());
-        helpBtn.setContentAreaFilled(false);
-        helpBtn.setFocusPainted(false);
+        JButton helpBtn = new HelpButton();
         helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         helpBtn.setToolTipText("Click for more info");
         helpBtn.addActionListener(e -> showHelp(labelText, propertyKey));
