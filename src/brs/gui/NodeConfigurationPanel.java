@@ -4,6 +4,7 @@ import brs.crypto.Crypto;
 import brs.props.Prop;
 import brs.props.Props;
 import brs.util.Convert;
+import brs.gui.util.HelpButton;
 import brs.util.PathUtils;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -53,6 +54,10 @@ public class NodeConfigurationPanel extends JPanel {
     private JPanel searchResultsPanel;
     private CardLayout contentCardLayout;
     private JPanel contentContainer;
+    private JLabel titleLabel;
+    private JButton resetBtn;
+    private JButton resetAppliedBtn;
+    private JButton saveBtn;
 
     public NodeConfigurationPanel(Runnable restartAction, String confFolder, Runnable backAction,
             Runnable switchAction) {
@@ -106,7 +111,7 @@ public class NodeConfigurationPanel extends JPanel {
         });
         rightHeader.add(switchBtn);
 
-        JLabel titleLabel = new JLabel("Node Configuration", SwingConstants.CENTER);
+        titleLabel = new JLabel("Node Configuration", SwingConstants.CENTER);
         titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 16f));
 
         header.add(leftHeader, BorderLayout.WEST);
@@ -128,7 +133,7 @@ public class NodeConfigurationPanel extends JPanel {
 
         profileComboBox = new JComboBox<>();
         profileComboBox.setEditable(false);
-        profileComboBox.setPreferredSize(new Dimension(200, 25));
+        profileComboBox.setPrototypeDisplayValue("XXXXXXXXXXXXXXXXXXXX");
         profilePanel.add(profileComboBox);
 
         JButton loadProfileBtn = new JButton("Load Profile");
@@ -169,12 +174,7 @@ public class NodeConfigurationPanel extends JPanel {
             deleteProfileBtn.setEnabled(!isDefault);
         });
 
-        JButton helpBtn = new JButton(
-                IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, GuiConstants.getHelpIconSize(),
-                        GuiColors.getHelpIcon()));
-        helpBtn.setBorder(BorderFactory.createEmptyBorder());
-        helpBtn.setContentAreaFilled(false);
-        helpBtn.setFocusPainted(false);
+        JButton helpBtn = new HelpButton();
         helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         helpBtn.setToolTipText("Click for more info about Configuration Profiles");
         helpBtn.addActionListener(e -> showProfileHelp());
@@ -457,13 +457,13 @@ public class NodeConfigurationPanel extends JPanel {
         // Button panel
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
 
-        JButton resetBtn = new JButton("Reset to Saved Configuration");
+        resetBtn = new JButton("Reset to Saved Configuration");
         resetBtn.setFont(resetBtn.getFont().deriveFont(Font.BOLD));
         resetBtn.setIcon(
                 IconFontSwing.buildIcon(FontAwesome.UNDO, GuiConstants.getHelpIconSize(), GuiColors.getButtonIcon()));
         resetBtn.addActionListener(e -> resetToCurrent());
 
-        JButton resetAppliedBtn = new JButton("Reset to Applied Configuration");
+        resetAppliedBtn = new JButton("Reset to Applied Configuration");
         resetAppliedBtn.setFont(resetAppliedBtn.getFont().deriveFont(Font.BOLD));
         resetAppliedBtn.setIcon(
                 IconFontSwing.buildIcon(FontAwesome.HISTORY, GuiConstants.getHelpIconSize(),
@@ -515,7 +515,7 @@ public class NodeConfigurationPanel extends JPanel {
             }
         });
 
-        JButton saveBtn = new JButton("Save Configuration");
+        saveBtn = new JButton("Save Configuration");
         saveBtn.setFont(saveBtn.getFont().deriveFont(Font.BOLD));
         saveBtn.setIcon(
                 IconFontSwing.buildIcon(FontAwesome.FLOPPY_O, GuiConstants.getHelpIconSize(),
@@ -543,12 +543,7 @@ public class NodeConfigurationPanel extends JPanel {
         buttonPanel.add(saveBtn);
         buttonPanel.add(deleteConfigFileBtn);
 
-        JButton buttonBarHelpBtn = new JButton(
-                IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, GuiConstants.getHelpIconSize(),
-                        GuiColors.getHelpIcon()));
-        buttonBarHelpBtn.setBorder(BorderFactory.createEmptyBorder());
-        buttonBarHelpBtn.setContentAreaFilled(false);
-        buttonBarHelpBtn.setFocusPainted(false);
+        JButton buttonBarHelpBtn = new HelpButton();
         buttonBarHelpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         String buttonBarHelpText = "<html><body style='width: 350px'>"
                 + "<h2>Button Functions</h2>"
@@ -572,6 +567,29 @@ public class NodeConfigurationPanel extends JPanel {
         bottomContainer.add(new JSeparator(SwingConstants.HORIZONTAL), BorderLayout.NORTH);
         bottomContainer.add(bottomPanel, BorderLayout.CENTER);
         add(bottomContainer, BorderLayout.SOUTH);
+    }
+
+    @Override
+    public void updateUI() {
+        super.updateUI();
+        // Re-apply derived fonts using the new base font from the LookAndFeel
+        if (titleLabel != null) {
+            titleLabel.setFont(UIManager.getFont("Label.font").deriveFont(Font.BOLD, 16f));
+        }
+        if (resetBtn != null) {
+            resetBtn.setFont(UIManager.getFont("Button.font").deriveFont(Font.BOLD));
+        }
+        if (resetAppliedBtn != null) {
+            resetAppliedBtn.setFont(UIManager.getFont("Button.font").deriveFont(Font.BOLD));
+        }
+        if (saveBtn != null) {
+            saveBtn.setFont(UIManager.getFont("Button.font").deriveFont(Font.BOLD));
+        }
+
+        // Re-style input fields (borders and fonts)
+        if (allPropertyRows != null) {
+            allPropertyRows.forEach(row -> styleTextField(row.input));
+        }
     }
 
     private void filterProperties(String text) {
@@ -1181,12 +1199,7 @@ public class NodeConfigurationPanel extends JPanel {
         propertyComponents.put(prop.getName(), inputComponent);
 
         // Help Button
-        JButton helpBtn = new JButton(
-                IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, GuiConstants.getHelpIconSize(),
-                        GuiColors.getHelpIcon()));
-        helpBtn.setBorder(BorderFactory.createEmptyBorder());
-        helpBtn.setContentAreaFilled(false);
-        helpBtn.setFocusPainted(false);
+        JButton helpBtn = new HelpButton();
         helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         helpBtn.setToolTipText("Click for more info");
         helpBtn.addActionListener(e -> showHelp(prop, labelText));
@@ -1245,12 +1258,7 @@ public class NodeConfigurationPanel extends JPanel {
         panel.add(passwordField, row.inputConstraints);
 
         // Help Button
-        JButton helpBtn = new JButton(
-                IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, GuiConstants.getHelpIconSize(),
-                        GuiColors.getHelpIcon()));
-        helpBtn.setBorder(BorderFactory.createEmptyBorder());
-        helpBtn.setContentAreaFilled(false);
-        helpBtn.setFocusPainted(false);
+        JButton helpBtn = new HelpButton();
         helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         helpBtn.setToolTipText("Click for more info");
         helpBtn.addActionListener(e -> showHelp(prop, labelText));
@@ -1354,12 +1362,7 @@ public class NodeConfigurationPanel extends JPanel {
         }
 
         // Help Button
-        JButton helpBtn = new JButton(
-                IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, GuiConstants.getHelpIconSize(),
-                        GuiColors.getHelpIcon()));
-        helpBtn.setBorder(BorderFactory.createEmptyBorder());
-        helpBtn.setContentAreaFilled(false);
-        helpBtn.setFocusPainted(false);
+        JButton helpBtn = new HelpButton();
         helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         helpBtn.setToolTipText("Click for more info");
         helpBtn.addActionListener(e -> showHelp(prop, labelText));
@@ -1528,10 +1531,12 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void styleTextField(JComponent field) {
-        field.setFont(UIManager.getFont("TextField.font"));
-        field.setBorder(BorderFactory.createCompoundBorder(
-                UIManager.getBorder("TextField.border"),
-                BorderFactory.createEmptyBorder(4, 6, 4, 6)));
+        if (field instanceof JTextField || field instanceof JPasswordField) {
+            field.setFont(UIManager.getFont("TextField.font"));
+            field.setBorder(BorderFactory.createCompoundBorder(
+                    UIManager.getBorder("TextField.border"),
+                    BorderFactory.createEmptyBorder(4, 6, 4, 6)));
+        }
     }
 
     private void fixComponentSize(JComponent comp) {
