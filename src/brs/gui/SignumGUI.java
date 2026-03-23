@@ -87,6 +87,7 @@ import brs.Signum;
 import brs.BlockchainProcessor;
 import brs.Constants;
 import brs.gui.util.CustomDrawings;
+import brs.gui.util.HelpButton;
 import brs.gui.util.CustomDrawingComponent;
 import brs.Block;
 import brs.peer.Peer;
@@ -94,6 +95,7 @@ import brs.fluxcapacitor.FluxValues;
 import brs.props.PropertyService;
 import brs.props.Props;
 import brs.util.DurationFormatter;
+import brs.util.Listener;
 import brs.util.Convert;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
@@ -277,7 +279,7 @@ public class SignumGUI extends JFrame {
     public static void updateAllUIs() {
         Map<String, Color> overrides = new HashMap<>();
         if (LookAndFeelPanel.getInstance() != null && LookAndFeelPanel.getInstance().getColorSettingsPanel() != null) {
-            overrides = LookAndFeelPanel.getInstance().getColorSettingsPanel().getCurrentOverrides();
+            overrides = new HashMap<>(LookAndFeelPanel.getInstance().getColorSettingsPanel().getCurrentOverrides());
         }
 
         // 1. Update the color palette based on the current theme and overrides
@@ -334,6 +336,30 @@ public class SignumGUI extends JFrame {
         updatePopOffToggleIcon();
         updateDbCheckButtonIcon();
         updateTimeLabelIcons();
+        updateVolumeLabelIcons();
+
+        if (menuPanel != null) {
+            SwingUtilities.updateComponentTreeUI(menuPanel);
+            menuPanel.setBackground(UIManager.getColor("PopupMenu.background"));
+            menuPanel.setBorder(UIManager.getBorder("PopupMenu.border"));
+        }
+        if (menuPanelWrapper != null) {
+            SwingUtilities.updateComponentTreeUI(menuPanelWrapper);
+        }
+        if (commandPanel != null) {
+            SwingUtilities.updateComponentTreeUI(commandPanel);
+        }
+    }
+
+    private void updateVolumeLabelIcons() {
+        if (uploadVolumeLabel != null) {
+            uploadVolumeLabel.setIcon(IconFontSwing.buildIcon(FontAwesome.ARROW_UP, GuiConstants.getHelpIconSize(),
+                    GuiColors.getButtonIcon()));
+        }
+        if (downloadVolumeLabel != null) {
+            downloadVolumeLabel.setIcon(IconFontSwing.buildIcon(FontAwesome.ARROW_DOWN, GuiConstants.getHelpIconSize(),
+                    GuiColors.getButtonIcon()));
+        }
     }
 
     public static void setupLegacyNimbus() {
@@ -545,7 +571,7 @@ public class SignumGUI extends JFrame {
 
         if (isMenuExpanded) {
             // Calculate position relative to layered pane
-            int menuWidth = 250;
+            int menuWidth = Math.max(250, menuPanel.getPreferredSize().width);
             Point p = menuButton.getLocationOnScreen();
             SwingUtilities.convertPointFromScreen(p, getLayeredPane());
             int x = p.x + menuButton.getWidth() - menuWidth;
@@ -947,7 +973,7 @@ public class SignumGUI extends JFrame {
         popOff10Button = new JButton("Pop off 10 blocks");
         popOff100Button = new JButton("Pop off 100 blocks");
         dbCheckButton = new JButton("Database check");
-        syncButton = new JButton("Stop Sync");
+        syncButton = new JButton("Pause Sync");
         restartButton = new JButton("Restart");
         shutdownButton = new JButton("Shutdown");
 
@@ -1045,39 +1071,34 @@ public class SignumGUI extends JFrame {
 
             @Override
             public Dimension getPreferredSize() {
-                return new Dimension(24, 24);
+                int size = Math.round(GuiConstants.getToolBarIconSize());
+                return new Dimension(size, size);
             }
         };
         commandLabel.setToolTipText("Command Input");
         JTextField commandField = new JTextField();
-        commandField.setToolTipText("Enter node command (e.g. .help, .stop, .resume)");
+        commandField.setToolTipText("Enter node command (e.g. .help, .pause, .resume)");
         JButton sendCommandButton = new JButton("Send");
 
         ActionListener sendAction = e -> {
             String cmd = commandField.getText().trim();
             if (!cmd.isEmpty()) {
                 LOGGER.info("Executing command: " + cmd);
+                // Let the core handle all commands. The GUI will update via listeners.
                 new Thread(() -> Signum.processCommand(cmd)).start();
                 commandField.setText("");
             }
         };
         commandField.addActionListener(sendAction);
         sendCommandButton.addActionListener(sendAction);
-
-        JButton helpButton = new JButton(
-                IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, GuiConstants.getHelpIconSize(),
-                        GuiColors.getHelpIcon()));
-        helpButton.setBorderPainted(false);
-        helpButton.setContentAreaFilled(false);
-        helpButton.setFocusPainted(false);
-        helpButton.setBorder(BorderFactory.createEmptyBorder());
+        JButton helpButton = new HelpButton();
         helpButton.setToolTipText("Command Help");
         helpButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
         String commandHelpText = "<html><b>Available Commands:</b><br>" +
                 "<ul>" +
                 "<li><b>.help</b> - Displays available commands in the log.</li>" +
-                "<li><b>.stop</b> - Stops blockchain synchronization.</li>" +
+                "<li><b>.pause</b> - Pauses blockchain synchronization.</li>" +
                 "<li><b>.resume</b> - Resumes blockchain synchronization.</li>" +
                 "<li><b>.restart</b> - Restarts the node application.</li>" +
                 "<li><b>.shutdown</b> - Gracefully shuts down the node.</li>" +
@@ -1425,11 +1446,13 @@ public class SignumGUI extends JFrame {
 
         // Upload
         tooltip = "The total amount of data your node has uploaded to other peers since the application started. This data primarily consists of blocks and transactions that you are sharing with the rest of the network, contributing to its health and decentralization.";
-        uploadVolumeLabel = createLabel("▲ 0 MB", null, tooltip);
+        uploadVolumeLabel = createLabel("0 MB", null, tooltip);
 
         // Download
         tooltip = "The total amount of data your node has downloaded from other peers since the application started. This data includes blocks and transactions required to synchronize your local copy of the blockchain with the network.";
-        downloadVolumeLabel = createLabel("▼ 0 MB", null, tooltip);
+        downloadVolumeLabel = createLabel("0 MB", null, tooltip);
+
+        updateVolumeLabelIcons();
 
         volumePanel.add(uploadVolumeLabel);
         volumePanel.add(new JLabel(" / "));
@@ -1785,26 +1808,9 @@ public class SignumGUI extends JFrame {
     }
 
     private void syncButtonAction() {
-        isSyncStopped = !isSyncStopped;
-        if (isSyncStopped) {
-            Signum.getBlockchainProcessor().setGetMoreBlocksPause(true);
-            Signum.getBlockchainProcessor().setBlockImporterPause(true);
-            syncButton.setText("Resume Sync");
-            syncButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PLAY, GuiConstants.getToolBarIconSize(), iconColor));
-            if (guiTimer != null) {
-                guiTimer.stop();
-            }
-        } else {
-            Signum.getBlockchainProcessor().setGetMoreBlocksPause(false);
-            Signum.getBlockchainProcessor().setBlockImporterPause(false);
-            syncButton.setText("Pause Sync");
-            syncButton
-                    .setIcon(IconFontSwing.buildIcon(FontAwesome.PAUSE, GuiConstants.getToolBarIconSize(), iconColor));
-            if (guiTimer != null) {
-                guiTimer.start();
-            }
-        }
-        updateTitle();
+        // The UI will update via the onSyncStateChanged listener when the core
+        // processes the change.
+        Signum.getBlockchainProcessor().setSyncPaused(!isSyncStopped);
     }
 
     private void shutdownAction() {
@@ -2160,6 +2166,7 @@ public class SignumGUI extends JFrame {
         blockchainProcessor.addListener(block -> onManualPopOffProgress(),
                 BlockchainProcessor.Event.BLOCK_MANUAL_POPPED);
         blockchainProcessor.addListener(block -> onAutoPopOffProgress(), BlockchainProcessor.Event.BLOCK_AUTO_POPPED);
+        blockchainProcessor.addSyncStateListener(this::onSyncStateChanged);
 
         if (trimEnabled) {
             blockchainProcessor.addListener(block -> onTrimStart(),
@@ -2185,8 +2192,8 @@ public class SignumGUI extends JFrame {
         long uploaded = blockchainProcessor.getUploadedVolume();
         long downloaded = blockchainProcessor.getDownloadedVolume();
         SwingUtilities.invokeLater(() -> {
-            uploadVolumeLabel.setText("▲ " + formatDataSize(uploaded));
-            downloadVolumeLabel.setText("▼ " + formatDataSize(downloaded));
+            uploadVolumeLabel.setText(formatDataSize(uploaded));
+            downloadVolumeLabel.setText(formatDataSize(downloaded));
 
             // Start the GUI timer only once, when the first download volume is received,
             // and if experimental features are enabled in the config.
@@ -2329,6 +2336,31 @@ public class SignumGUI extends JFrame {
         popOffBlockCountLabel.setVisible(isVisible);
         popOffSeparator2.setVisible(isVisible);
         popOffBlockHeightLabel.setVisible(isVisible);
+    }
+
+    private void onSyncStateChanged(Boolean isPaused) {
+        SwingUtilities.invokeLater(() -> {
+            if (isSyncStopped == isPaused) {
+                return; // No change
+            }
+            isSyncStopped = isPaused;
+            if (isSyncStopped) {
+                syncButton.setText("Resume Sync");
+                syncButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PLAY, GuiConstants.getToolBarIconSize(),
+                        GuiColors.getButtonIcon()));
+                if (guiTimer != null) {
+                    guiTimer.stop();
+                }
+            } else {
+                syncButton.setText("Pause Sync");
+                syncButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PAUSE, GuiConstants.getToolBarIconSize(),
+                        GuiColors.getButtonIcon()));
+                if (guiTimer != null) {
+                    guiTimer.start();
+                }
+            }
+            updateTitle();
+        });
     }
 
     public void startSignumWithGUI() {
