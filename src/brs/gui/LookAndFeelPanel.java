@@ -2,6 +2,7 @@ package brs.gui;
 
 import brs.props.Props;
 import brs.util.PathUtils;
+import brs.gui.util.HelpButton;
 import brs.gui.laf.FlatLafPanel;
 import brs.gui.laf.LookAndFeelsComboBox;
 import brs.gui.laf.FlatLafPrefs;
@@ -45,6 +46,7 @@ public class LookAndFeelPanel extends JPanel {
     private final Runnable backAction;
     private JComboBox<String> profileComboBox;
     private ColorSettingsPanel colorSettingsPanel;
+    private JLabel titleLabel;
 
     public static LookAndFeelPanel getInstance() {
         return instance;
@@ -82,7 +84,7 @@ public class LookAndFeelPanel extends JPanel {
         });
         leftHeader.add(backButton);
 
-        JLabel titleLabel = new JLabel("Look and Feel Settings", SwingConstants.CENTER);
+        titleLabel = new JLabel("Look and Feel Settings", SwingConstants.CENTER);
         titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 16f));
 
         header.add(leftHeader, BorderLayout.WEST);
@@ -95,7 +97,7 @@ public class LookAndFeelPanel extends JPanel {
 
         profileComboBox = new JComboBox<>();
         profileComboBox.setEditable(false);
-        profileComboBox.setPreferredSize(new Dimension(200, 25));
+        profileComboBox.setPrototypeDisplayValue("XXXXXXXXXXXXXXXXXXXX");
         profilePanel.add(profileComboBox);
 
         JButton loadProfileBtn = new JButton("Load Profile");
@@ -136,12 +138,7 @@ public class LookAndFeelPanel extends JPanel {
             deleteProfileBtn.setEnabled(!isDefault);
         });
 
-        JButton helpBtn = new JButton(
-                IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, GuiConstants.getHelpIconSize(),
-                        GuiColors.getHelpIcon()));
-        helpBtn.setBorder(BorderFactory.createEmptyBorder());
-        helpBtn.setContentAreaFilled(false);
-        helpBtn.setFocusPainted(false);
+        JButton helpBtn = new HelpButton();
         helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         helpBtn.setToolTipText("Click for more info about Look and Feel Profiles");
         helpBtn.addActionListener(e -> showProfileHelp());
@@ -174,6 +171,14 @@ public class LookAndFeelPanel extends JPanel {
         tabbedPane.addTab("Color Settings", colorSettingsPanel);
 
         add(tabbedPane, BorderLayout.CENTER);
+    }
+
+    @Override
+    public void updateUI() {
+        super.updateUI();
+        if (titleLabel != null) {
+            titleLabel.setFont(UIManager.getFont("Label.font").deriveFont(Font.BOLD, 16f));
+        }
     }
 
     public JComboBox<String> getProfileComboBox() {
