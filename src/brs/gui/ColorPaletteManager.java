@@ -146,6 +146,7 @@ public final class ColorPaletteManager {
         colors.put("sync.download.speed", new Color(0, 100, 0));
         colors.put("gui.contrast.red", new Color(255, 120, 120));
         colors.put("gui.status.consistent", new Color(0, 128, 0));
+        colors.put("gui.help.icon", new Color(128, 128, 128));
         return new ColorPalette("Default", colors);
     }
 
