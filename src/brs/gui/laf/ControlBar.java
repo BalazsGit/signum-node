@@ -30,7 +30,6 @@ import javax.swing.UIManager.LookAndFeelInfo;
 import javax.swing.plaf.metal.MetalLookAndFeel;
 import javax.swing.plaf.nimbus.NimbusLookAndFeel;
 import com.formdev.flatlaf.*;
-import com.formdev.flatlaf.extras.FlatAnimatedLafChange;
 import com.formdev.flatlaf.themes.FlatMacDarkLaf;
 import com.formdev.flatlaf.themes.FlatMacLightLaf;
 import com.formdev.flatlaf.util.LoggingFacade;
@@ -94,6 +93,18 @@ class ControlBar
         }
 
         lookAndFeelComboBox.setModel(lafModel);
+
+        lookAndFeelComboBox.setRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                    boolean isSelected, boolean cellHasFocus) {
+                super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                if (value instanceof LookAndFeelInfo) {
+                    setText(((LookAndFeelInfo) value).getName());
+                }
+                return this;
+            }
+        });
 
         UIManager.addPropertyChangeListener(e -> {
             if ("lookAndFeel".equals(e.getPropertyName())) {
@@ -248,8 +259,6 @@ class ControlBar
 
         EventQueue.invokeLater(() -> {
             try {
-                FlatAnimatedLafChange.showSnapshot();
-
                 if (lafClassName.contains("NimbusLookAndFeel")) {
                     SignumGUI.setupLegacyNimbus();
                 }
@@ -262,8 +271,7 @@ class ControlBar
                     UIManager.put("defaultFont", null);
 
                 // update all components
-                FlatLaf.updateUI();
-                FlatAnimatedLafChange.hideSnapshotWithAnimation();
+                SignumGUI.updateAllUIs();
 
                 // increase size of frame if necessary
                 Window window = SwingUtilities.windowForComponent(this);
