@@ -240,6 +240,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private final Listeners<PeerMetric, PeerMetricEvent> peerMetricListeners = new Listeners<>();
     private final Listeners<PerformanceStats, Event> performanceStatsListeners = new Listeners<>();
     private final Listeners<QueueStatus, Event> queueStatusListeners = new Listeners<>();
+    private final Listeners<Boolean, Event> syncStateListeners = new Listeners<>();
 
     @Override
     public void addPeerMetricListener(Listener<PeerMetric> listener) {
@@ -274,6 +275,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     @Override
     public void removeQueueStatusListener(Listener<QueueStatus> listener) {
         queueStatusListeners.removeListener(listener, Event.QUEUE_STATUS_CHANGED);
+    }
+
+    @Override
+    public void addSyncStateListener(Listener<Boolean> listener) {
+        syncStateListeners.addListener(listener, Event.SYNC_STATE_CHANGED);
+    }
+
+    @Override
+    public void removeSyncStateListener(Listener<Boolean> listener) {
+        syncStateListeners.removeListener(listener, Event.SYNC_STATE_CHANGED);
     }
 
     @Override
@@ -2463,6 +2474,18 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     @Override
     public void setBlockImporterPause(boolean blockImporterPause) {
         this.blockImporterPause.set(blockImporterPause);
+    }
+
+    @Override
+    public void setSyncPaused(boolean paused) {
+        setGetMoreBlocksPause(paused);
+        setBlockImporterPause(paused);
+        syncStateListeners.notify(paused, Event.SYNC_STATE_CHANGED);
+        if (paused) {
+            logger.info("Blockchain synchronization paused.");
+        } else {
+            logger.info("Blockchain synchronization resumed.");
+        }
     }
 
     void setGetMoreBlocks(boolean getMoreBlocks) {
