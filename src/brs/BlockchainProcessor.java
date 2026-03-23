@@ -101,6 +101,7 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
         BEFORE_BLOCK_APPLY, AFTER_BLOCK_APPLY, DATABASE_CONSISTENCY_UPDATE,
         CONSISTENCY_RESOLUTION_STARTED, CONSISTENCY_RESOLUTION_FINISHED,
         PEERS_UPDATED, NET_VOLUME_CHANGED, QUEUE_STATUS_CHANGED, FORK_CACHE_CHANGED, PERFORMANCE_STATS_UPDATED,
+        SYNC_STATE_CHANGED,
         TRIM_START, TRIM_END
     }
 
@@ -237,6 +238,8 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     void setBlockImporterPause(boolean blockImporterPause);
 
+    void setSyncPaused(boolean paused);
+
     void generateBlock(String secretPhrase, byte[] publicKey, Long nonce)
             throws BlockNotAcceptedException;
 
@@ -267,6 +270,10 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
     void addQueueStatusListener(Listener<QueueStatus> listener);
 
     void removeQueueStatusListener(Listener<QueueStatus> listener);
+
+    void addSyncStateListener(Listener<Boolean> listener);
+
+    void removeSyncStateListener(Listener<Boolean> listener);
 
     class BlockNotAcceptedException extends SignumException {
 
