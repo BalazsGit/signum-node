@@ -1,0 +1,4 @@
+{
+  "name": "Gradianto Midnight Blue Specific Palette",
+  "_comment": "This file provides theme-specific color overrides for the 'Gradianto Midnight Blue' Look and Feel. Colors defined here will be merged on top of the base 'flat-dark.palette.json'. Example: \"peer.connected\": \"#00FF00\""
+}

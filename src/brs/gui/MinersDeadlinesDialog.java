@@ -3,6 +3,7 @@ package brs.gui;
 import brs.gui.util.TableUtils;
 
 import javax.swing.*;
+import javax.swing.table.TableColumn;
 import javax.swing.table.TableRowSorter;
 import javax.swing.table.JTableHeader;
 import java.awt.*;
@@ -89,16 +90,31 @@ public class MinersDeadlinesDialog extends JFrame {
             }
         });
 
-        JPanel contentPanel = new JPanel(new BorderLayout(0, 0));
+        JPanel contentPanel = new JPanel(new BorderLayout(0, 5));
         contentPanel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
         JPanel filterPanel = new JPanel(new BorderLayout(5, 5));
-        filterPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
         filterPanel.add(new JLabel("Filter:"), BorderLayout.WEST);
         JTextField filterTextField = new JTextField();
         filterPanel.add(filterTextField, BorderLayout.CENTER);
 
         table = new JTable(model) {
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                setDefaultRenderer(Object.class, new BlockGenerationMetricsPanel.MinerTableCellRenderer());
+                try {
+                    TableColumn ioColumn = getColumn(BlockGenerationMetricsPanel.MinersTableModel.COL_IO);
+                    if (ioColumn != null) {
+                        ioColumn.setPreferredWidth(30);
+                        ioColumn.setMinWidth(30);
+                        ioColumn.setMaxWidth(30);
+                    }
+                } catch (IllegalArgumentException e) {
+                    // column might not be ready
+                }
+            }
+
             @Override
             protected JTableHeader createDefaultTableHeader() {
                 JTableHeader header = super.createDefaultTableHeader();
@@ -191,9 +207,10 @@ public class MinersDeadlinesDialog extends JFrame {
         legendPane.setBackground(UIManager.getColor("Panel.background"));
 
         JScrollPane legendScrollPane = new JScrollPane(legendPane);
-        legendScrollPane.setPreferredSize(new Dimension(0, 180));
+        legendScrollPane.setPreferredSize(new Dimension(0, 200));
+        legendScrollPane.setBorder(BorderFactory.createTitledBorder("Legend & Information"));
 
-        JPanel topPanel = new JPanel(new BorderLayout());
+        JPanel topPanel = new JPanel(new BorderLayout(0, 5));
         topPanel.add(legendScrollPane, BorderLayout.CENTER);
         topPanel.add(filterPanel, BorderLayout.SOUTH);
 

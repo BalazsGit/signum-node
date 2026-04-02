@@ -85,16 +85,16 @@ public class PeersDialog extends JFrame {
     private PeersDialog(JFrame owner) {
         super("Peer Information");
 
-        JPanel mainPanel = new JPanel(new BorderLayout(5, 5));
-        mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        JPanel mainPanel = new JPanel(new BorderLayout(0, 5));
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
         JEditorPane legendArea = new JEditorPane();
         legendArea.setContentType("text/html");
         legendArea.setEditable(false);
         legendArea.setBackground(UIManager.getColor("Panel.background"));
-        String greenHex = String.format("#%06x", Color.GREEN.getRGB() & 0xFFFFFF);
-        String yellowHex = String.format("#%06x", Color.YELLOW.getRGB() & 0xFFFFFF);
-        String redHex = String.format("#%06x", Color.RED.getRGB() & 0xFFFFFF);
+        String greenHex = toHex(GuiColors.getPeerConnected());
+        String yellowHex = toHex(GuiColors.getPeerDisconnected());
+        String redHex = toHex(GuiColors.getPeerBlacklisted());
         legendArea.setText(
                 "<html><body style='font-family: sans-serif; font-size: 11px;'>" +
                         "<b>Peers:</b> Active / All Known (BL: Blacklisted)<br>" +
@@ -116,7 +116,12 @@ public class PeersDialog extends JFrame {
                         "<li><b>- / empty:</b> The peer did not provide a version. This may happen with very old clients.</li>"
                         + "</ul>" +
                         "</body></html>");
-        mainPanel.add(legendArea, BorderLayout.NORTH);
+        legendArea.setCaretPosition(0);
+
+        JScrollPane legendScrollPane = new JScrollPane(legendArea);
+        legendScrollPane.setPreferredSize(new Dimension(0, 200));
+        legendScrollPane.setBorder(BorderFactory.createTitledBorder("Legend & Information"));
+        mainPanel.add(legendScrollPane, BorderLayout.NORTH);
 
         tabbedPane = new JTabbedPane();
 
@@ -144,6 +149,10 @@ public class PeersDialog extends JFrame {
         pack();
         setLocationRelativeTo(owner);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+    }
+
+    private static String toHex(Color color) {
+        return String.format("#%02x%02x%02x", color.getRed(), color.getGreen(), color.getBlue());
     }
 
     private void updateTabs() {
@@ -218,10 +227,11 @@ public class PeersDialog extends JFrame {
         private final JTable table;
 
         public PeerTabPanel(PeerCategory category) {
-            super(new BorderLayout(5, 5));
-            setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+            super(new BorderLayout(0, 0));
+            setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
 
             JPanel filterPanel = new JPanel(new BorderLayout(5, 5));
+            filterPanel.setBorder(BorderFactory.createEmptyBorder(5, 0, 5, 0));
             filterPanel.add(new JLabel("Filter:"), BorderLayout.WEST);
             filterField = new JTextField();
             filterPanel.add(filterField, BorderLayout.CENTER);
@@ -229,6 +239,13 @@ public class PeersDialog extends JFrame {
 
             tableModel = new PeersTableModel();
             table = new JTable(tableModel) {
+                @Override
+                public void updateUI() {
+                    super.updateUI();
+                    setDefaultRenderer(Object.class, new PeerTableCellRenderer(category));
+                    setDefaultRenderer(Long.class, new PeerTableCellRenderer(category));
+                }
+
                 @Override
                 protected JTableHeader createDefaultTableHeader() {
                     JTableHeader header = super.createDefaultTableHeader();
@@ -262,6 +279,7 @@ public class PeersDialog extends JFrame {
                 }
             });
             table.setDefaultRenderer(Object.class, new PeerTableCellRenderer(category));
+            table.setDefaultRenderer(Long.class, new PeerTableCellRenderer(category));
             table.setFillsViewportHeight(true);
             table.setCellSelectionEnabled(true);
             table.setAutoCreateRowSorter(true);
@@ -394,7 +412,7 @@ public class PeersDialog extends JFrame {
         }
     }
 
-    public static class PeerTableCellRenderer extends DefaultTableCellRenderer {
+    public static class PeerTableCellRenderer extends DefaultTableCellRenderer implements javax.swing.plaf.UIResource {
         private final PeerCategory category;
 
         public PeerTableCellRenderer(PeerCategory category) {
@@ -410,11 +428,13 @@ public class PeersDialog extends JFrame {
 
             if (!isSelected) {
                 component.setBackground(table.getBackground());
-                Color foregroundColor = Color.GREEN;
+                Color foregroundColor;
                 if (peer.isBlacklisted()) {
-                    foregroundColor = Color.RED;
+                    foregroundColor = GuiColors.getPeerBlacklisted();
                 } else if (peer.getState() == Peer.State.NON_CONNECTED || peer.getState() == Peer.State.DISCONNECTED) {
-                    foregroundColor = Color.YELLOW;
+                    foregroundColor = GuiColors.getPeerDisconnected();
+                } else {
+                    foregroundColor = GuiColors.getPeerConnected(); // Green for connected
                 }
                 component.setForeground(foregroundColor);
 
@@ -423,15 +443,15 @@ public class PeersDialog extends JFrame {
                 if (PeersTableModel.COL_VERSION.equals(columnName)) { // Version
                     String version = peer.getVersion() != null ? peer.getVersion().toString() : "";
                     if (PeersDialog.compareVersions(version, model.getLatestVersion()) < 0) {
-                        component.setForeground(Color.YELLOW);
+                        component.setForeground(GuiColors.getPeerOutdatedVersion());
                     } else {
-                        component.setForeground(Color.GREEN);
+                        component.setForeground(GuiColors.getPeerUpToDateVersion());
                     }
                 } else if (PeersTableModel.COL_HEIGHT.equals(columnName)) { // Height
                     if (peer.getHeight() < model.getMaxHeight()) {
-                        component.setForeground(Color.YELLOW);
+                        component.setForeground(GuiColors.getPeerOutdatedHeight());
                     } else {
-                        component.setForeground(Color.GREEN);
+                        component.setForeground(GuiColors.getPeerUpToDateHeight());
                     }
                 } else {
                     // Address and State keep the status color

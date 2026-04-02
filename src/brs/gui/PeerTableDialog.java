@@ -71,7 +71,7 @@ public class PeerTableDialog extends JFrame {
         contentPanel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
         JPanel filterPanel = new JPanel(new BorderLayout(5, 5));
-        filterPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
+        filterPanel.setBorder(BorderFactory.createEmptyBorder(5, 0, 5, 0));
         filterPanel.add(new JLabel("Filter:"), BorderLayout.WEST);
         JTextField filterTextField = new JTextField();
         filterPanel.add(filterTextField, BorderLayout.CENTER);
@@ -175,7 +175,8 @@ public class PeerTableDialog extends JFrame {
         legendPane.setBackground(UIManager.getColor("Panel.background"));
 
         JScrollPane legendScrollPane = new JScrollPane(legendPane);
-        legendScrollPane.setPreferredSize(new Dimension(0, 180));
+        legendScrollPane.setPreferredSize(new Dimension(0, 200));
+        legendScrollPane.setBorder(BorderFactory.createTitledBorder("Legend & Information"));
 
         JPanel topPanel = new JPanel(new BorderLayout());
         topPanel.add(legendScrollPane, BorderLayout.CENTER);

@@ -1,10 +1,16 @@
 package brs.gui;
 
+import com.formdev.flatlaf.FlatDarkLaf;
+import com.formdev.flatlaf.FlatLaf;
+import com.formdev.flatlaf.util.SystemInfo;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import java.util.HashMap;
+import java.io.ByteArrayOutputStream;
+import java.util.Map;
 import java.awt.*;
 import java.awt.TrayIcon.MessageType;
 import java.awt.event.ActionEvent;
@@ -18,12 +24,14 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.Collection;
 import java.util.Date;
+import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.imageio.ImageIO;
@@ -40,8 +48,10 @@ import java.awt.geom.Rectangle2D;
 import javax.swing.JButton;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JCheckBox;
+import javax.swing.UIDefaults;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
+import javax.swing.JLayeredPane;
 import javax.swing.JMenuItem;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -58,6 +68,10 @@ import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.UIManager;
 import javax.swing.JPopupMenu;
+import javax.swing.UIDefaults;
+import javax.swing.plaf.FontUIResource;
+import java.util.Set;
+import java.util.HashSet;
 import javax.swing.text.DefaultCaret;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.Element;
@@ -75,27 +89,372 @@ import brs.Signum;
 import brs.BlockchainProcessor;
 import brs.Constants;
 import brs.gui.util.CustomDrawings;
+import brs.gui.util.HelpButton;
+import brs.gui.util.CustomDrawingComponent;
 import brs.Block;
 import brs.peer.Peer;
 import brs.fluxcapacitor.FluxValues;
 import brs.props.PropertyService;
 import brs.props.Props;
 import brs.util.DurationFormatter;
+import brs.util.Listener;
 import brs.util.Convert;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
+import net.miginfocom.swing.MigLayout;
 
 @SuppressWarnings("serial")
 public class SignumGUI extends JFrame {
     private static final String FAILED_TO_START_MESSAGE = "Signum caught exception while starting";
+    private static SignumGUI instance;
     private static final String UNEXPECTED_EXIT_MESSAGE = "Signum Quit unexpectedly! Exit code ";
 
     public static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("HH:mm:ss yyyy-MM-dd");
 
     private static final int OUTPUT_MAX_LINES = 500;
 
+    private static final int ANIMATION_DURATION_MS = 250;
+
     private static final Logger LOGGER = LoggerFactory.getLogger(SignumGUI.class);
+
+    private static final ByteArrayOutputStream EARLY_LOG_BUFFER = new ByteArrayOutputStream();
+    private static final ByteArrayOutputStream EARLY_ERR_BUFFER = new ByteArrayOutputStream();
+    private static PrintStream ORIGINAL_OUT;
+    private static PrintStream ORIGINAL_ERR;
     private static String[] args;
+
+    static {
+        // Enable and set duration for theme transition animations early
+        System.setProperty("flatlaf.lafChangeAnimationDuration", "400");
+    }
+
+    private static Font activeCustomFont;
+    private static Font activeConsoleFont;
+
+    public static Font getActiveCustomFont() {
+        return activeCustomFont;
+    }
+
+    public static Font getActiveConsoleFont() {
+        return activeConsoleFont != null ? activeConsoleFont : activeCustomFont;
+    }
+
+    private static Path getGuiSettingsPath(String[] args) {
+        String confFolder = Signum.CONF_FOLDER;
+        try {
+            CommandLine cmd = new DefaultParser().parse(Signum.CLI_OPTIONS, args);
+            if (cmd.hasOption(Signum.CONF_FOLDER_OPTION.getOpt())) {
+                confFolder = cmd.getOptionValue(Signum.CONF_FOLDER_OPTION.getOpt());
+            }
+        } catch (Exception e) {
+            LOGGER.error("Error parsing command line arguments for config folder", e);
+        }
+
+        String settingsDir = Props.SETTINGS_DIR.getDefaultValue();
+        Path nodePropsFile = brs.util.PathUtils.resolvePath(confFolder).resolve("node.properties");
+        if (Files.exists(nodePropsFile)) {
+            try (java.io.FileInputStream in = new java.io.FileInputStream(nodePropsFile.toFile())) {
+                Properties nodeProps = new Properties();
+                nodeProps.load(in);
+                settingsDir = nodeProps.getProperty(Props.SETTINGS_DIR.getName(), settingsDir);
+            } catch (Exception e) {
+                // ignore
+            }
+        }
+        return brs.util.PathUtils.resolvePath(settingsDir).resolve("gui-settings.json");
+    }
+
+    private static void loadLookAndFeelSettings(String[] args) {
+        Path settingsPath = getGuiSettingsPath(args);
+        String themeClassName = FlatDarkLaf.class.getName(); // Default theme
+        Map<String, Color> colorOverrides = null;
+        Font fontToApply = null;
+        Font consoleFontToApply = null;
+
+        if (Files.exists(settingsPath)) {
+            try (java.io.BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
+                JsonElement parsed = JsonParser.parseReader(reader);
+                if (parsed.isJsonObject()) {
+                    JsonObject settings = parsed.getAsJsonObject();
+                    String lastProfileName = null;
+
+                    if (settings.has("lastSelectedLafProfile")) {
+                        lastProfileName = settings.get("lastSelectedLafProfile").getAsString();
+                    }
+
+                    if (settings.has("enableGPU") && settings.get("enableGPU").getAsBoolean()) {
+                        System.setProperty("sun.java2d.opengl", "true");
+                    }
+
+                    if (lastProfileName != null && settings.has("lookAndFeelProfiles")) {
+                        JsonObject profiles = settings.getAsJsonObject("lookAndFeelProfiles");
+                        if (profiles.has(lastProfileName)) {
+                            JsonObject profileSettings = profiles.getAsJsonObject(lastProfileName);
+                            if (profileSettings.has("theme")) {
+                                themeClassName = profileSettings.get("theme").getAsString();
+                            }
+                            if (profileSettings.has("font")) {
+                                JsonObject fontSettings = profileSettings.getAsJsonObject("font");
+                                String family = fontSettings.get("family").getAsString();
+                                int style = fontSettings.get("style").getAsInt();
+                                int size = fontSettings.get("size").getAsInt();
+                                fontToApply = new Font(family, style, size);
+                            }
+                            if (profileSettings.has("consoleFont")) {
+                                JsonObject fontSettings = profileSettings.getAsJsonObject("consoleFont");
+                                String family = fontSettings.get("family").getAsString();
+                                int style = fontSettings.get("style").getAsInt();
+                                int size = fontSettings.get("size").getAsInt();
+                                consoleFontToApply = new Font(family, style, size);
+                            }
+                            if (profileSettings.has("colorOverrides")) {
+                                colorOverrides = parseColorOverrides(profileSettings.getAsJsonObject("colorOverrides"));
+                            }
+                        }
+                    } else if (settings.has("lookAndFeelSettings")) { // Fallback to old structure
+                        JsonObject lafSettings = settings.getAsJsonObject("lookAndFeelSettings");
+                        if (lafSettings.has("theme")) {
+                            themeClassName = lafSettings.get("theme").getAsString();
+                        }
+                        if (lafSettings.has("font")) {
+                            JsonObject fontSettings = lafSettings.getAsJsonObject("font");
+                            String family = fontSettings.get("family").getAsString();
+                            int style = fontSettings.get("style").getAsInt();
+                            int size = fontSettings.get("size").getAsInt();
+                            fontToApply = new Font(family, style, size);
+                        }
+                        if (lafSettings.has("consoleFont")) {
+                            JsonObject fontSettings = lafSettings.getAsJsonObject("consoleFont");
+                            String family = fontSettings.get("family").getAsString();
+                            int style = fontSettings.get("style").getAsInt();
+                            int size = fontSettings.get("size").getAsInt();
+                            consoleFontToApply = new Font(family, style, size);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                LOGGER.warn("Could not load Look and Feel settings, using default.", e);
+            }
+        }
+
+        // Register custom defaults source for FlatLaf (accent colors, etc.)
+        String packageName = GuiResources.FLATLAF_RESOURCE_PATH;
+        if (packageName.endsWith("/")) {
+            packageName = packageName.substring(0, packageName.length() - 1);
+        }
+        FlatLaf.registerCustomDefaultsSource(packageName);
+
+        try {
+            UIManager.setLookAndFeel(themeClassName);
+            updateCommonFontKeys(fontToApply);
+            updateCommonConsoleFontKeys(consoleFontToApply);
+            ColorPaletteManager.updatePalette(colorOverrides);
+        } catch (Exception e) {
+            LOGGER.error("Failed to set Look and Feel, falling back to FlatDarkLaf.", e);
+            FlatDarkLaf.setup();
+            ColorPaletteManager.updatePalette(colorOverrides);
+        }
+    }
+
+    public static void updateCommonFontKeys(Font font) {
+        activeCustomFont = font;
+        GuiFontManager.updateUIManager(font);
+    }
+
+    public static void updateCommonConsoleFontKeys(Font font) {
+        activeConsoleFont = font;
+    }
+
+    /**
+     * Recursively applies a font to all components in a container.
+     * Used as a fallback for LookAndFeels that don't correctly respond to UIManager
+     * key updates on live components.
+     */
+    private static void applyFontRecursively(Component comp, Font font) {
+        GuiFontManager.applyFontToTree(comp, font);
+    }
+
+    private static Map<String, Color> parseColorOverrides(JsonObject overridesJson) {
+        if (overridesJson == null) {
+            return null;
+        }
+        Map<String, Color> overrides = new HashMap<>();
+        for (Map.Entry<String, JsonElement> entry : overridesJson.entrySet()) {
+            try {
+                overrides.put(entry.getKey(), Color.decode(entry.getValue().getAsString()));
+            } catch (NumberFormatException e) {
+                LOGGER.warn("Invalid color override format for key '{}': {}", entry.getKey(),
+                        entry.getValue().getAsString());
+            }
+        }
+        return overrides;
+    }
+
+    /**
+     * A general method to update the entire GUI after a Look and Feel or theme
+     * change.
+     * This method handles:
+     * 1. Reloading the color palette based on the current theme and user overrides.
+     * 2. Calling FlatLaf.updateUI() to update all standard Swing components.
+     * 3. Triggering custom update logic for components with derived properties
+     * (e.g., font-sized icons).
+     */
+    public static void updateAllUIs() {
+        Map<String, Color> overrides = new HashMap<>();
+        if (LookAndFeelPanel.getInstance() != null && LookAndFeelPanel.getInstance().getColorSettingsPanel() != null) {
+            overrides = new HashMap<>(LookAndFeelPanel.getInstance().getColorSettingsPanel().getCurrentOverrides());
+        }
+
+        LookAndFeel laf = UIManager.getLookAndFeel();
+        LOGGER.info("Updating all UIs. Current LookAndFeel: {} ({})", laf.getName(), laf.getClass().getName());
+        logCurrentFonts("UI fonts BEFORE palette and font update");
+
+        // 1. Update the color palette based on the current theme and overrides
+        ColorPaletteManager.updatePalette(overrides);
+
+        // 1b. Ensure all common UI fonts are linked to the active font
+        updateCommonFontKeys(activeCustomFont);
+
+        // Capture window sizes before update to prevent auto-resizing (packing)
+        // behavior
+        // of some Look and Feels or decoration switches.
+        Map<Window, Dimension> windowSizes = new HashMap<>();
+        for (Window w : Window.getWindows()) {
+            if (w.isDisplayable()) {
+                windowSizes.put(w, w.getSize());
+            }
+        }
+
+        if (laf instanceof FlatLaf) {
+            // FlatLaf.updateUI() internally handles the animated transition and updates all
+            // windows efficiently.
+            FlatLaf.updateUI();
+        } else {
+            // Manual update for non-FlatLaf themes (like Nimbus)
+            for (Window window : Window.getWindows()) {
+                if (window.isDisplayable()) {
+                    LOGGER.info("Refreshing window: {} ({})", window.getName(), window.getClass().getSimpleName());
+                    SwingUtilities.updateComponentTreeUI(window);
+
+                    // Force font application for Standard L&F (excluding Nimbus per user request)
+                    if (activeCustomFont != null) {
+                        applyFontRecursively(window, activeCustomFont);
+                    }
+                }
+            }
+        }
+
+        // Restore window sizes ONLY for non-FlatLaf themes (like Nimbus).
+        // FlatLaf handles its own UI updates smoothly. Calling setSize during
+        // a FlatLaf animation phase can cause flickering or cancel the transition.
+        if (!(laf instanceof FlatLaf)) {
+            for (Window window : Window.getWindows()) {
+                if (window.isDisplayable() && windowSizes.containsKey(window)) {
+                    window.setSize(windowSizes.get(window));
+                }
+            }
+        }
+
+        // 3. Specialized component updates
+        if (instance != null) {
+            // Console font and content update
+            if (instance.textScrollPane != null) {
+                JTextPane tp = (JTextPane) instance.textScrollPane.getViewport().getView();
+                Font consoleFont = getActiveConsoleFont();
+                if (tp != null && consoleFont != null) {
+                    tp.setFont(consoleFont);
+                    // Update existing text in the StyledDocument
+                    StyledDocument doc = tp.getStyledDocument();
+                    SimpleAttributeSet attrs = new SimpleAttributeSet();
+                    StyleConstants.setFontFamily(attrs, consoleFont.getFamily());
+                    StyleConstants.setFontSize(attrs, consoleFont.getSize());
+                    doc.setCharacterAttributes(0, doc.getLength(), attrs, false);
+                }
+            }
+            instance.updateCustomComponents();
+        }
+
+        logCurrentFonts("UI fonts AFTER update");
+    }
+
+    /**
+     * Logs the current state of key UI fonts for debugging purposes.
+     */
+    private static void logCurrentFonts(String title) {
+        String[] keys = { "Label.font", "Button.font", "TextField.font", "TextPane.font",
+                "Table.font", "TableHeader.font", "TitledBorder.font", "defaultFont" };
+        StringBuilder sb = new StringBuilder(title).append(":");
+        for (String key : keys) {
+            Font f = UIManager.getFont(key);
+            if (f != null) {
+                sb.append("\n  ").append(key).append(": ").append(f.getFamily()).append(" ").append(f.getSize())
+                        .append(" (").append(f.getClass().getSimpleName()).append(")");
+            } else {
+                sb.append("\n  ").append(key).append(": null");
+            }
+        }
+        LOGGER.info(sb.toString());
+    }
+
+    private void updateCustomComponents() {
+        updateToolBarIcons();
+        updatePopOffToggleIcon();
+        updateDbCheckButtonIcon();
+        updateTimeLabelIcons();
+        updateVolumeLabelIcons();
+
+        LookAndFeel laf = UIManager.getLookAndFeel();
+        boolean isFlatLaf = laf instanceof FlatLaf;
+
+        if (menuPanel != null) {
+            SwingUtilities.updateComponentTreeUI(menuPanel);
+            menuPanel.setBackground(UIManager.getColor("PopupMenu.background"));
+            menuPanel.setBorder(UIManager.getBorder("PopupMenu.border"));
+            if (!isFlatLaf && activeCustomFont != null) {
+                applyFontRecursively(menuPanel, activeCustomFont);
+            }
+        }
+        if (menuPanelWrapper != null) {
+            SwingUtilities.updateComponentTreeUI(menuPanelWrapper);
+            if (!isFlatLaf && activeCustomFont != null) {
+                applyFontRecursively(menuPanelWrapper, activeCustomFont);
+            }
+        }
+        if (commandPanel != null) {
+            SwingUtilities.updateComponentTreeUI(commandPanel);
+            if (!isFlatLaf && activeCustomFont != null) {
+                applyFontRecursively(commandPanel, activeCustomFont);
+            }
+        }
+    }
+
+    private void updateVolumeLabelIcons() {
+        if (uploadVolumeLabel != null) {
+            uploadVolumeLabel.setIcon(IconFontSwing.buildIcon(FontAwesome.ARROW_UP, GuiConstants.getHelpIconSize(),
+                    GuiColors.getButtonIcon()));
+        }
+        if (downloadVolumeLabel != null) {
+            downloadVolumeLabel.setIcon(IconFontSwing.buildIcon(FontAwesome.ARROW_DOWN, GuiConstants.getHelpIconSize(),
+                    GuiColors.getButtonIcon()));
+        }
+    }
+
+    public static void setupLegacyNimbus() {
+        UIManager.put("control", new Color(128, 128, 128));
+        UIManager.put("info", new Color(128, 128, 128));
+        UIManager.put("nimbusBase", new Color(18, 30, 49));
+        UIManager.put("nimbusAlertYellow", new Color(248, 187, 0));
+        UIManager.put("nimbusDisabledText", new Color(90, 90, 90));
+        UIManager.put("nimbusFocus", new Color(115, 164, 209));
+        UIManager.put("nimbusGreen", new Color(176, 179, 50));
+        UIManager.put("nimbusInfoBlue", new Color(66, 139, 221));
+        UIManager.put("nimbusLightBackground", new Color(18, 30, 49));
+        UIManager.put("nimbusOrange", new Color(191, 98, 4));
+        UIManager.put("nimbusRed", new Color(169, 46, 34));
+        UIManager.put("nimbusSelectedText", new Color(255, 255, 255));
+        UIManager.put("nimbusSelectionBackground", new Color(104, 93, 156));
+        UIManager.put("text", new Color(230, 230, 230));
+    }
 
     private String iconLocation;
     private TrayIcon trayIcon = null;
@@ -111,8 +470,8 @@ public class SignumGUI extends JFrame {
     private JScrollPane textScrollPane = null;
     private String programName = null;
     private String version = null;
+    private final String confFolder;
     private final Color iconColor;
-    private final Color contrastRed = new Color(255, 120, 120);
 
     private JLabel connectedPeersLabel;
     private JLabel peersCountLabel;
@@ -126,6 +485,18 @@ public class SignumGUI extends JFrame {
     private JSeparator popOffSeparator1;
     private JSeparator popOffSeparator2;
     private boolean showPopOff = false;
+    private JPanel popOffButtonsPanel;
+    private Timer popOffAnimator;
+    private int popOffPanelWidth = -1;
+
+    private JButton popOff10Button;
+    private JButton popOff100Button;
+    private JButton dbCheckButton;
+    private JButton syncButton;
+    private JButton shutdownButton;
+    private JButton restartButton;
+    private Color dbConsistencyColor;
+
     private boolean isSyncStopped = false;
     private boolean isShuttingDown = false;
 
@@ -138,17 +509,14 @@ public class SignumGUI extends JFrame {
     private JButton openClassicButton;
     private JButton openApiButton;
     private JButton editConfButton;
-    private JButton popOff10Button;
-    private JButton popOff100Button;
-    private JButton dbCheckButton;
-    private JButton syncButton;
-    private JButton shutdownButton;
-    private JButton restartButton;
 
     private MetricsPanel metricsPanel;
+    private JPanel metricsPanelWrapper;
+    private Timer metricsPanelAnimator;
 
-    private JComponent popOffToggle;
-    private JComponent hamburgerMenu;
+    private CustomDrawingComponent popOffToggle;
+    private JButton menuButton;
+    private JButton globeButton;
     private JLabel measurementLabel;
     private JPanel commandPanel;
     private JPanel topPanel;
@@ -157,35 +525,29 @@ public class SignumGUI extends JFrame {
     private static final String VIEW_CONSOLE = "CONSOLE";
     private static final String VIEW_NODE_PROPS = "NODE_PROPS";
     private static final String VIEW_LOGGER_PROPS = "LOGGER_PROPS";
+    private static final String VIEW_LAF_PROPS = "LAF_PROPS";
     private boolean showCommandInput = false;
     private boolean showMetricsPanel = true;
-    private JCheckBoxMenuItem showCommandItem;
-    private JCheckBoxMenuItem showMetricsItem;
+    private JCheckBox showCommandItem;
+    private JCheckBox enableGpuItem;
+    private JCheckBox showMetricsItem;
     private JLabel experimentalLabel;
+    private JPanel commandPanelWrapper;
+    private Timer commandPanelAnimator;
+    private JPanel menuPanelWrapper;
+    private JPanel menuPanel;
+    private Timer menuPanelAnimator;
+    private boolean isMenuExpanded = false;
+
     private JLabel trimLabel;
     private JLabel autoResolveLabel;
     private JSeparator measurementSeparator;
     private JSeparator experimentalSeparator;
     private JSeparator trimIconSeparator;
     private JSeparator autoResolveSeparator;
-    private JPanel measurementPanel;
-    private JPanel experimentalPanel;
-    private JPanel trimPanel;
-    private JPanel autoResolvePanel;
+    private boolean enableGPU = false;
 
     private final AtomicBoolean isDbCheckRunning = new AtomicBoolean(false);
-
-    private final Dimension verticalSeparatorSize = new Dimension(2, 20);
-
-    private Dimension progressBarSize2 = new Dimension(150, 20);
-
-    /**
-     * Panel to hold the time tracking labels. Only visible when experimental
-     * features are enabled.
-     */
-    private JPanel timePanel;
-
-    private JSeparator timeSeparator;
 
     /**
      * Label to display the total elapsed time since the GUI was started.
@@ -195,6 +557,9 @@ public class SignumGUI extends JFrame {
      * Label to display the accumulated time spent syncing the blockchain.
      */
     private JLabel syncInProgressTimeLabel;
+
+    private JSeparator timeSeparator;
+
     /**
      * Stores the total elapsed time in milliseconds, updated by the GUI timer.
      */
@@ -212,7 +577,7 @@ public class SignumGUI extends JFrame {
     /**
      * Label for the separator between time labels.
      */
-    private JLabel timeSeparatorLabel;
+    private JSeparator innerTimeSeparator;
     /**
      * Timer to update the GUI time labels every second.
      */
@@ -226,10 +591,16 @@ public class SignumGUI extends JFrame {
     }
 
     private JLabel createLabel(String text, Color color, String tooltip, String title) {
-        JLabel label = new JLabel(text);
-        if (color != null) {
-            label.setForeground(color);
-        }
+        JLabel label = new JLabel(text) { // Anonymous inner class to handle UI updates
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                // Re-apply custom color after Look and Feel change
+                if (color != null) {
+                    setForeground(color);
+                }
+            }
+        };
         if (tooltip != null) {
             String shortTooltip = tooltip.split("\n")[0];
             label.setToolTipText(shortTooltip);
@@ -239,17 +610,23 @@ public class SignumGUI extends JFrame {
     }
 
     private void addInfoTooltip(JLabel label, String text, String titleOverride) {
+        if (text != null) {
+            String shortTooltip = text.split("\n")[0];
+            label.setToolTipText(shortTooltip);
+        }
         label.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (SwingUtilities.isRightMouseButton(e)) {
                     String title;
+                    String labelText = label.getText();
                     if (titleOverride != null) {
-                        title = label.getText() + " " + titleOverride;
+                        title = (labelText != null && !labelText.isEmpty()) ? labelText + " " + titleOverride
+                                : titleOverride;
                     } else {
-                        title = label.getText();
+                        title = labelText != null ? labelText : "";
                         // Remove trailing colon for a cleaner title
-                        if (title.endsWith(":")) {
+                        if (title != null && title.endsWith(":")) {
                             title = title.substring(0, title.length() - 1);
                         }
                     }
@@ -262,7 +639,309 @@ public class SignumGUI extends JFrame {
         });
     }
 
+    private void toggleMenu() {
+        if (menuPanelAnimator != null && menuPanelAnimator.isRunning()) {
+            return;
+        }
+
+        isMenuExpanded = !isMenuExpanded;
+
+        if (isMenuExpanded) {
+            // Calculate position relative to layered pane
+            int menuWidth = Math.max(250, menuPanel.getPreferredSize().width);
+            Point p = menuButton.getLocationOnScreen();
+            SwingUtilities.convertPointFromScreen(p, getLayeredPane());
+            int x = p.x + menuButton.getWidth() - menuWidth;
+            int y = p.y + menuButton.getHeight();
+
+            menuPanelWrapper.setBounds(x, y, menuWidth, 0);
+            getLayeredPane().add(menuPanelWrapper, JLayeredPane.POPUP_LAYER);
+
+            menuPanelWrapper.add(menuPanel, BorderLayout.CENTER);
+            menuPanel.setVisible(true);
+
+            int targetHeight = menuPanel.getPreferredSize().height;
+
+            menuPanelAnimator = new Timer(10, new ActionListener() {
+                final long startTime = System.currentTimeMillis();
+                final int duration = ANIMATION_DURATION_MS;
+
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    long elapsed = System.currentTimeMillis() - startTime;
+                    float progress = Math.min(1.0f, (float) elapsed / duration);
+                    progress = 1.0f - (float) Math.pow(1.0f - progress, 3);
+
+                    int h = (int) (targetHeight * progress);
+                    menuPanelWrapper.setSize(menuWidth, h);
+                    menuPanelWrapper.revalidate();
+                    menuPanelWrapper.repaint();
+
+                    if (progress >= 1.0f) {
+                        ((Timer) e.getSource()).stop();
+                        menuPanelWrapper.setSize(menuWidth, targetHeight);
+                        menuPanelWrapper.revalidate();
+                    }
+                }
+            });
+            menuPanelAnimator.start();
+        } else {
+            final int startHeight = menuPanelWrapper.getHeight();
+            final int menuWidth = menuPanelWrapper.getWidth();
+
+            menuPanelAnimator = new Timer(10, new ActionListener() {
+                final long startTime = System.currentTimeMillis();
+                final int duration = ANIMATION_DURATION_MS;
+
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    long elapsed = System.currentTimeMillis() - startTime;
+                    float progress = Math.min(1.0f, (float) elapsed / duration);
+                    progress = 1.0f - (float) Math.pow(1.0f - progress, 3);
+
+                    int h = (int) (startHeight * (1.0f - progress));
+                    menuPanelWrapper.setSize(menuWidth, h);
+                    menuPanelWrapper.revalidate();
+                    menuPanelWrapper.repaint();
+
+                    if (progress >= 1.0f) {
+                        ((Timer) e.getSource()).stop();
+                        menuPanelWrapper.removeAll();
+                        getLayeredPane().remove(menuPanelWrapper);
+                        getLayeredPane().repaint();
+                    }
+                }
+            });
+            menuPanelAnimator.start();
+        }
+    }
+
+    private void togglePopOffButtons() {
+        if (popOffAnimator != null && popOffAnimator.isRunning()) {
+            return; // Don't start a new animation if one is running
+        }
+
+        showPopOff = !showPopOff;
+        updatePopOffToggleIcon();
+
+        // Calculate target dimensions
+        Dimension naturalSize = popOffButtonsPanel.getLayout().preferredLayoutSize(popOffButtonsPanel);
+        final int targetWidth = naturalSize.width;
+        final int targetHeight = Math.max(naturalSize.height, 25);
+        Container parent = popOffButtonsPanel.getParent();
+
+        if (showPopOff) {
+            // Opening
+            popOffButtonsPanel.setVisible(true);
+            popOffButtonsPanel.setPreferredSize(new Dimension(0, targetHeight));
+            if (parent != null) {
+                parent.revalidate();
+                parent.repaint();
+            }
+
+            popOffAnimator = new Timer(10, new ActionListener() {
+                final long startTime = System.currentTimeMillis();
+                final int duration = ANIMATION_DURATION_MS;
+
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    long elapsed = System.currentTimeMillis() - startTime;
+                    float progress = Math.min(1.0f, (float) elapsed / duration);
+                    progress = 1.0f - (float) Math.pow(1.0f - progress, 3); // Ease out
+
+                    int w = (int) (targetWidth * progress);
+                    popOffButtonsPanel.setPreferredSize(new Dimension(w, targetHeight));
+                    if (parent != null) {
+                        parent.revalidate();
+                        parent.repaint();
+                    }
+
+                    if (progress >= 1.0f) {
+                        ((Timer) e.getSource()).stop();
+                        popOffButtonsPanel.setPreferredSize(null); // Reset to natural size
+                        if (parent != null)
+                            parent.revalidate();
+                    }
+                }
+            });
+            popOffAnimator.start();
+        } else {
+            // Closing
+            final int startWidth = popOffButtonsPanel.getWidth();
+
+            popOffAnimator = new Timer(10, new ActionListener() {
+                final long startTime = System.currentTimeMillis();
+                final int duration = ANIMATION_DURATION_MS;
+
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    long elapsed = System.currentTimeMillis() - startTime;
+                    float progress = Math.min(1.0f, (float) elapsed / duration);
+                    progress = 1.0f - (float) Math.pow(1.0f - progress, 3); // Ease out
+
+                    int w = (int) (startWidth * (1.0f - progress));
+                    popOffButtonsPanel.setPreferredSize(new Dimension(w, targetHeight));
+                    if (parent != null) {
+                        parent.revalidate();
+                        parent.repaint();
+                    }
+
+                    if (progress >= 1.0f) {
+                        ((Timer) e.getSource()).stop();
+                        popOffButtonsPanel.setPreferredSize(new Dimension(0, targetHeight));
+                        popOffButtonsPanel.setVisible(false);
+                        if (parent != null)
+                            parent.revalidate();
+                    }
+                }
+            });
+            popOffAnimator.start();
+        }
+    }
+
+    private void toggleCommandPanel() {
+        if (commandPanelAnimator != null && commandPanelAnimator.isRunning()) {
+            return;
+        }
+
+        showCommandInput = !showCommandInput;
+        showCommandItem.setSelected(showCommandInput);
+
+        Runnable scrollToBottom = () -> {
+            if (textScrollPane != null) {
+                JScrollBar vertical = textScrollPane.getVerticalScrollBar();
+                if (vertical != null) {
+                    vertical.setValue(vertical.getMaximum());
+                }
+            }
+        };
+
+        if (showCommandInput) {
+            commandPanelWrapper.add(commandPanel, BorderLayout.CENTER);
+            commandPanel.setVisible(true);
+
+            commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), 0));
+            if (commandPanelWrapper.getParent() instanceof JComponent) {
+                ((JComponent) commandPanelWrapper.getParent()).revalidate();
+                ((JComponent) commandPanelWrapper.getParent()).repaint();
+            }
+
+            int targetHeight = commandPanel.getPreferredSize().height;
+
+            commandPanelAnimator = new Timer(10, new ActionListener() {
+                final long startTime = System.currentTimeMillis();
+                final int duration = ANIMATION_DURATION_MS;
+
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    long elapsed = System.currentTimeMillis() - startTime;
+                    float progress = Math.min(1.0f, (float) elapsed / duration);
+                    progress = 1.0f - (float) Math.pow(1.0f - progress, 3); // Ease out
+
+                    int h = (int) (targetHeight * progress);
+                    commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), h));
+
+                    if (commandPanelWrapper.getParent() instanceof JComponent) {
+                        ((JComponent) commandPanelWrapper.getParent()).revalidate();
+                        ((JComponent) commandPanelWrapper.getParent()).repaint();
+                    }
+
+                    scrollToBottom.run();
+
+                    if (progress >= 1.0f) {
+                        ((Timer) e.getSource()).stop();
+                        commandPanelWrapper.setPreferredSize(null);
+                        if (commandPanelWrapper.getParent() instanceof JComponent) {
+                            ((JComponent) commandPanelWrapper.getParent()).revalidate();
+                        }
+                        SwingUtilities.invokeLater(scrollToBottom);
+                    }
+                }
+            });
+            commandPanelAnimator.start();
+        } else {
+            final int startHeight = commandPanelWrapper.getHeight();
+
+            commandPanelAnimator = new Timer(10, new ActionListener() {
+                final long startTime = System.currentTimeMillis();
+                final int duration = ANIMATION_DURATION_MS;
+
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    long elapsed = System.currentTimeMillis() - startTime;
+                    float progress = Math.min(1.0f, (float) elapsed / duration);
+                    progress = 1.0f - (float) Math.pow(1.0f - progress, 3); // Ease out
+
+                    int h = (int) (startHeight * (1.0f - progress));
+                    commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), h));
+
+                    if (commandPanelWrapper.getParent() instanceof JComponent) {
+                        ((JComponent) commandPanelWrapper.getParent()).revalidate();
+                        ((JComponent) commandPanelWrapper.getParent()).repaint();
+                    }
+
+                    scrollToBottom.run();
+
+                    if (progress >= 1.0f) {
+                        ((Timer) e.getSource()).stop();
+                        commandPanelWrapper.removeAll();
+                        commandPanelWrapper.setPreferredSize(new Dimension(0, 0));
+                        if (commandPanelWrapper.getParent() instanceof JComponent) {
+                            ((JComponent) commandPanelWrapper.getParent()).revalidate();
+                        }
+                        SwingUtilities.invokeLater(scrollToBottom);
+                    }
+                }
+            });
+            commandPanelAnimator.start();
+        }
+    }
+
+    public static SignumGUI getInstance() {
+        return instance;
+    }
+
+    public void showLookAndFeelSettings() {
+        cardLayout.show(mainCardPanel, VIEW_LAF_PROPS);
+    }
+
     public static void main(String[] args) {
+        // Set default log format for early logs (before LoggerConfigurator takes over)
+        System.setProperty("java.util.logging.SimpleFormatter.format", "[%4$s] %1$tF %1$tT %3$s - %5$s%6$s%n");
+
+        // Capture early logs before GUI is initialized
+        ORIGINAL_OUT = System.out;
+        ORIGINAL_ERR = System.err;
+
+        System.setOut(new PrintStream(new OutputStream() {
+            @Override
+            public void write(int b) throws IOException {
+                ORIGINAL_OUT.write(b);
+                EARLY_LOG_BUFFER.write(b);
+            }
+
+            @Override
+            public void write(byte[] b, int off, int len) throws IOException {
+                ORIGINAL_OUT.write(b, off, len);
+                EARLY_LOG_BUFFER.write(b, off, len);
+            }
+        }, true));
+
+        System.setErr(new PrintStream(new OutputStream() {
+            @Override
+            public void write(int b) throws IOException {
+                ORIGINAL_ERR.write(b);
+                EARLY_ERR_BUFFER.write(b);
+            }
+
+            @Override
+            public void write(byte[] b, int off, int len) throws IOException {
+                ORIGINAL_ERR.write(b, off, len);
+                EARLY_ERR_BUFFER.write(b, off, len);
+            }
+        }, true));
+
+        SignumGUI.loadLookAndFeelSettings(args);
         new SignumGUI("Signum Node", Props.ICON_LOCATION.getDefaultValue(), Signum.VERSION.toString(), args);
     }
 
@@ -287,80 +966,169 @@ public class SignumGUI extends JFrame {
             System.err.println("SecurityManager not supported, skipping setup");
         }
         SignumGUI.args = args;
+        instance = this;
         this.programName = programName;
         this.version = version;
         setTitle(programName + " " + version);
         this.iconLocation = iconLocation;
 
-        Class<?> lafc = null;
-        try {
-            lafc = Class.forName("com.sun.java.swing.plaf.nimbus.NimbusLookAndFeel");
-        } catch (Exception e) {
-        }
-        if (lafc == null) {
-            try {
-                lafc = Class.forName("javax.swing.plaf.nimbus.NimbusLookAndFeel");
-            } catch (Exception e) {
-            }
-        }
-        if (lafc != null) {
-            try {
-                UIManager.put("control", new Color(128, 128, 128));
-                UIManager.put("info", new Color(128, 128, 128));
-                UIManager.put("nimbusBase", new Color(18, 30, 49));
-                UIManager.put("nimbusAlertYellow", new Color(248, 187, 0));
-                UIManager.put("nimbusDisabledText", new Color(90, 90, 90));
-                UIManager.put("nimbusFocus", new Color(115, 164, 209));
-                UIManager.put("nimbusGreen", new Color(176, 179, 50));
-                UIManager.put("nimbusInfoBlue", new Color(66, 139, 221));
-                UIManager.put("nimbusLightBackground", new Color(18, 30, 49));
-                UIManager.put("nimbusOrange", new Color(191, 98, 4));
-                UIManager.put("nimbusRed", new Color(169, 46, 34));
-                UIManager.put("nimbusSelectedText", new Color(255, 255, 255));
-                UIManager.put("nimbusSelectionBackground", new Color(104, 93, 156));
-                UIManager.put("text", new Color(230, 230, 230));
-                LookAndFeel laf = (LookAndFeel) lafc.getConstructor().newInstance();
-                UIManager.setLookAndFeel(laf);
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
+        IconFontSwing.register(FontAwesome.getIconFont());
 
-        String confFolder = Signum.CONF_FOLDER;
+        String localConfFolder = Signum.CONF_FOLDER;
         try {
             CommandLine cmd = new DefaultParser().parse(Signum.CLI_OPTIONS, args);
             if (cmd.hasOption(Signum.CONF_FOLDER_OPTION.getOpt())) {
-                confFolder = cmd.getOptionValue(Signum.CONF_FOLDER_OPTION.getOpt());
+                localConfFolder = cmd.getOptionValue(Signum.CONF_FOLDER_OPTION.getOpt());
             }
         } catch (Exception e) {
             LOGGER.error("Error parsing command line arguments for config folder", e);
         }
+        this.confFolder = localConfFolder;
 
         IconFontSwing.register(FontAwesome.getIconFont());
         JTextPane textPane = new JTextPane();
-        textPane.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 14));
+        Font consoleFont = UIManager.getFont("TextPane.font");
+        if (consoleFont == null) {
+            consoleFont = new Font(Font.MONOSPACED, Font.PLAIN, 14);
+        }
+        textPane.setFont(consoleFont);
         iconColor = textPane.getForeground();
+        this.dbConsistencyColor = GuiColors.getButtonIcon();
         DefaultCaret caret = (DefaultCaret) textPane.getCaret();
         caret.setUpdatePolicy(DefaultCaret.ALWAYS_UPDATE);
         textPane.setEditable(false);
+        flushEarlyLogs(textPane);
         sendJavaOutputToTextArea(textPane);
         textScrollPane = new JScrollPane(textPane);
-        textScrollPane.setPreferredSize(new Dimension(900, 500));
+        textScrollPane.getVerticalScrollBar().setUnitIncrement(16);
+
         JPanel content = new JPanel(new BorderLayout());
         content.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
 
         cardLayout = new CardLayout();
-        mainCardPanel = new JPanel(cardLayout);
+        mainCardPanel = new JPanel(cardLayout) {
+            @Override
+            public Dimension getPreferredSize() {
+                // If the panel is visible, prefer the current size to prevent
+                // auto-resizing/growth
+                // during LookAndFeel changes (especially when switching to themes with larger
+                // decorations like Nimbus).
+                if (isShowing()) {
+                    return getSize();
+                }
+                // Default initial size
+                return new Dimension(900, 500);
+            }
+        };
         mainCardPanel.add(content, VIEW_CONSOLE);
 
-        mainCardPanel.add(createPropertiesPanel("Node Configuration", "node.properties", confFolder), VIEW_NODE_PROPS);
-        mainCardPanel.add(createPropertiesPanel("Logger Configuration", "logging.properties", confFolder),
-                VIEW_LOGGER_PROPS);
+        NodeConfigurationPanel nodeConfigPanel = new NodeConfigurationPanel(this::restart, this.confFolder,
+                () -> cardLayout.show(mainCardPanel, VIEW_CONSOLE),
+                () -> cardLayout.show(mainCardPanel, VIEW_LOGGER_PROPS));
+        mainCardPanel.add(nodeConfigPanel, VIEW_NODE_PROPS);
+
+        LoggerConfigurationPanel loggerConfigPanel = new LoggerConfigurationPanel(this::restart, this.confFolder,
+                () -> cardLayout.show(mainCardPanel, VIEW_CONSOLE),
+                () -> cardLayout.show(mainCardPanel, VIEW_NODE_PROPS));
+        mainCardPanel.add(loggerConfigPanel, VIEW_LOGGER_PROPS);
+
+        LookAndFeelPanel lafPanel = new LookAndFeelPanel(this::restart, confFolder,
+                () -> cardLayout.show(mainCardPanel, VIEW_CONSOLE));
+        mainCardPanel.add(lafPanel, VIEW_LAF_PROPS);
 
         setContentPane(mainCardPanel);
 
-        toolBar = new JPanel();
-        toolBar.setLayout(new BoxLayout(toolBar, BoxLayout.X_AXIS));
+        toolBar = new JPanel(new BorderLayout());
+
+        JPanel leftButtons = new JPanel(new MigLayout("insets 0, gap 5, hidemode 3, aligny top"));
+        leftButtons.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+
+        openPhoenixButton = new JButton("Phoenix Wallet");
+        openClassicButton = new JButton("Classic Wallet");
+        openApiButton = new JButton("API doc");
+        editConfButton = new JButton("Edit conf file");
+        popOff10Button = new JButton("Pop off 10 blocks");
+        popOff100Button = new JButton("Pop off 100 blocks");
+        dbCheckButton = new JButton("Database check");
+        syncButton = new JButton("Pause Sync");
+        restartButton = new JButton("Restart");
+        shutdownButton = new JButton("Shutdown");
+
+        updateToolBarIcons();
+        updateDbCheckButtonIcon();
+
+        addInfoTooltip(openPhoenixButton, "Opens the modern Phoenix Wallet in your default web browser.");
+        addInfoTooltip(openClassicButton, "Opens the Classic Wallet in your default web browser.");
+        addInfoTooltip(openApiButton, "Opens the interactive API documentation in your default web browser.");
+        addInfoTooltip(editConfButton,
+                "Opens the node's configuration file (node.properties or node-default.properties) in your default text editor for easy modification.");
+        addInfoTooltip(popOff10Button,
+                "Removes the last 10 blocks from your local blockchain. This can help resolve a local fork if your node is stuck.");
+        addInfoTooltip(popOff100Button,
+                "Removes the last 100 blocks from your local blockchain. Use this if a smaller pop-off does not resolve a fork.");
+        addInfoTooltip(dbCheckButton,
+                "Performs a manual consistency check on the database to ensure data integrity.");
+        addInfoTooltip(syncButton,
+                "Toggles the synchronization process. 'Pause Sync' pauses the downloading and processing of new blocks. 'Resume Sync' continues the process.");
+        addInfoTooltip(restartButton,
+                "Restarts the Signum node application. This is useful for applying configuration changes or reloading the application. A confirmation dialog will be shown before restarting.");
+        addInfoTooltip(shutdownButton,
+                "Safely stops the Signum node application. This ensures all data is saved correctly and prevents potential database corruption. A confirmation dialog will be shown before shutting down.");
+
+        openPhoenixButton.addActionListener(e -> openWebUi("/phoenix"));
+        openClassicButton.addActionListener(e -> openWebUi("/classic"));
+        openApiButton.addActionListener(e -> openWebUi("/api-doc"));
+        editConfButton.addActionListener(e -> editConf());
+        popOff10Button.addActionListener(e -> popOff(10));
+        popOff100Button.addActionListener(e -> popOff(100));
+
+        File phoenixIndex = new File("html/ui/phoenix/index.html");
+        File classicIndex = new File("html/ui/classic/index.html");
+
+        dbCheckButton.addActionListener(e -> dbCheckAction());
+
+        syncButton.addActionListener(e -> syncButtonAction());
+        shutdownButton.addActionListener(e -> shutdownAction());
+        restartButton.addActionListener(e -> {
+            if (JOptionPane.showConfirmDialog(SignumGUI.this,
+                    "This will restart the node. Are you sure?", "Restart node",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
+                restart();
+            }
+        });
+
+        if (phoenixIndex.isFile() && phoenixIndex.exists()) {
+            leftButtons.add(openPhoenixButton);
+        }
+        if (classicIndex.isFile() && classicIndex.exists()) {
+            leftButtons.add(openClassicButton);
+        }
+        leftButtons.add(editConfButton);
+        leftButtons.add(openApiButton);
+
+        popOffButtonsPanel = new JPanel() {
+            @Override
+            protected void paintChildren(Graphics g) {
+                Graphics g2 = g.create();
+                g2.setClip(0, 0, getWidth(), getHeight());
+                super.paintChildren(g2);
+                g2.dispose();
+            }
+        };
+        popOffButtonsPanel.setLayout(new BoxLayout(popOffButtonsPanel, BoxLayout.X_AXIS));
+        popOffButtonsPanel.setOpaque(false);
+        popOffButtonsPanel.setMinimumSize(new Dimension(0, 0));
+        popOffButtonsPanel.add(popOff10Button);
+        popOffButtonsPanel.add(Box.createHorizontalStrut(5));
+        popOffButtonsPanel.add(popOff100Button);
+        leftButtons.add(popOffButtonsPanel);
+
+        leftButtons.add(dbCheckButton);
+        leftButtons.add(syncButton);
+
+        leftButtons.add(restartButton);
+        leftButtons.add(shutdownButton);
 
         content.add(toolBar, BorderLayout.PAGE_START);
 
@@ -375,42 +1143,39 @@ public class SignumGUI extends JFrame {
             @Override
             protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
-                CustomDrawings.COMMAND_SYMBOL.draw((Graphics2D) g, getWidth(), getHeight(), iconColor);
+                CustomDrawings.COMMAND_SYMBOL.draw((Graphics2D) g, getWidth(), getHeight(), GuiColors.getButtonIcon());
             }
 
             @Override
             public Dimension getPreferredSize() {
-                return new Dimension(24, 24);
+                int size = Math.round(GuiConstants.getToolBarIconSize());
+                return new Dimension(size, size);
             }
         };
         commandLabel.setToolTipText("Command Input");
         JTextField commandField = new JTextField();
-        commandField.setToolTipText("Enter node command (e.g. .help, .stop, .resume)");
+        commandField.setToolTipText("Enter node command (e.g. .help, .pause, .resume)");
         JButton sendCommandButton = new JButton("Send");
 
         ActionListener sendAction = e -> {
             String cmd = commandField.getText().trim();
             if (!cmd.isEmpty()) {
                 LOGGER.info("Executing command: " + cmd);
+                // Let the core handle all commands. The GUI will update via listeners.
                 new Thread(() -> Signum.processCommand(cmd)).start();
                 commandField.setText("");
             }
         };
         commandField.addActionListener(sendAction);
         sendCommandButton.addActionListener(sendAction);
-
-        JButton helpButton = new JButton(IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, 16, Color.LIGHT_GRAY));
-        helpButton.setBorderPainted(false);
-        helpButton.setContentAreaFilled(false);
-        helpButton.setFocusPainted(false);
-        helpButton.setBorder(BorderFactory.createEmptyBorder());
+        JButton helpButton = new HelpButton();
         helpButton.setToolTipText("Command Help");
         helpButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
         String commandHelpText = "<html><b>Available Commands:</b><br>" +
                 "<ul>" +
                 "<li><b>.help</b> - Displays available commands in the log.</li>" +
-                "<li><b>.stop</b> - Stops blockchain synchronization.</li>" +
+                "<li><b>.pause</b> - Pauses blockchain synchronization.</li>" +
                 "<li><b>.resume</b> - Resumes blockchain synchronization.</li>" +
                 "<li><b>.restart</b> - Restarts the node application.</li>" +
                 "<li><b>.shutdown</b> - Gracefully shuts down the node.</li>" +
@@ -428,17 +1193,18 @@ public class SignumGUI extends JFrame {
 
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
         buttonPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-        buttonPanel.add(helpButton);
         buttonPanel.add(sendCommandButton);
+        buttonPanel.add(helpButton);
 
         commandPanel.add(commandLabel, BorderLayout.WEST);
         commandPanel.add(commandField, BorderLayout.CENTER);
         commandPanel.add(buttonPanel, BorderLayout.EAST);
-        bottomPanel.add(commandPanel, BorderLayout.NORTH);
-        commandPanel.setVisible(showCommandInput);
 
+        commandPanelWrapper = new JPanel(new BorderLayout());
+        bottomPanel.add(commandPanelWrapper, BorderLayout.NORTH);
         syncProgressBar = new JProgressBar(0, 100);
         syncProgressBar.setStringPainted(true);
+        syncProgressBar.setFont(UIManager.getFont("Label.font"));
         String syncTooltipText = "Indicates the synchronization progress of the blockchain, displayed as a percentage. This value is calculated by comparing your node's current block height to the estimated highest block height known in the network.\n\nA value of 100% means your node is fully synchronized and has the complete, up-to-date ledger. During synchronization, this bar will gradually fill as the node downloads and processes blocks.";
         syncProgressBar.addMouseListener(new MouseAdapter() {
             @Override
@@ -451,26 +1217,29 @@ public class SignumGUI extends JFrame {
                 }
             }
         });
+        syncProgressBar.setPreferredSize(GuiConstants.PROGRESS_BAR_SIZE_SMALL);
+        syncProgressBar.setMaximumSize(GuiConstants.PROGRESS_BAR_SIZE_SMALL);
+        syncProgressBar.setMinimumSize(GuiConstants.PROGRESS_BAR_SIZE_SMALL);
 
-        JPanel latestBlockInfoPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 2));
+        JPanel latestBlockInfoPanel = new JPanel(new MigLayout("insets 0, hidemode 3, gap 0"));
         latestBlockHeightLabel = new JLabel("Latest block: -");
         latestBlockTimestampLabel = new JLabel("Timestamp: -");
         JSeparator separator = new JSeparator(SwingConstants.VERTICAL);
-        separator.setPreferredSize(verticalSeparatorSize);
+        separator.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
 
         latestBlockInfoPanel.add(latestBlockHeightLabel);
-        latestBlockInfoPanel.add(separator);
+        latestBlockInfoPanel.add(separator, "gapleft 5, gapright 5");
         latestBlockInfoPanel.add(latestBlockTimestampLabel);
 
         elapsedTimeSeparator = new JSeparator(SwingConstants.VERTICAL);
-        elapsedTimeSeparator.setPreferredSize(verticalSeparatorSize);
+        elapsedTimeSeparator.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
         elapsedTimeLabel = new JLabel("Elapsed Time: -");
         String elapsedTooltip = "Displays the time elapsed in seconds since the last block was generated.\n\n"
                 + "This counter resets every time a new block is received. Since the target block time is 240 seconds (4 minutes), this helps visualize how long it has been since the last network update.";
         addInfoTooltip(elapsedTimeLabel, elapsedTooltip);
         elapsedTimeSeparator.setVisible(false);
         elapsedTimeLabel.setVisible(false);
-        latestBlockInfoPanel.add(elapsedTimeSeparator);
+        latestBlockInfoPanel.add(elapsedTimeSeparator, "gapleft 5, gapright 5");
         latestBlockInfoPanel.add(elapsedTimeLabel);
 
         String blockInfoTooltip = "Displays critical information about the most recent block processed by your node. This includes:\n\n"
@@ -481,9 +1250,11 @@ public class SignumGUI extends JFrame {
         addInfoTooltip(latestBlockTimestampLabel, blockInfoTooltip);
         metricsPanel = new MetricsPanel(this);
         metricsPanel.setVisible(false);
+        metricsPanelWrapper = new JPanel(new BorderLayout());
+        metricsPanelWrapper.add(metricsPanel, BorderLayout.CENTER);
 
         trimSeparator = new JSeparator(SwingConstants.VERTICAL);
-        trimSeparator.setPreferredSize(verticalSeparatorSize);
+        trimSeparator.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
         String trimTooltip = "The minimum height to which the blockchain can be rolled back. Older data is pruned to save space.\n"
                 + "Trimming occurs every " + brs.Constants.TRIM_PERIOD + " blocks.\n\n"
                 + "If 'est.' (estimated) is shown, the actual trim height is unknown (e.g. after restart),\n"
@@ -492,148 +1263,213 @@ public class SignumGUI extends JFrame {
 
         trimSeparator.setVisible(false);
         trimHeightLabel.setVisible(false);
-        latestBlockInfoPanel.add(trimSeparator);
+        latestBlockInfoPanel.add(trimSeparator, "gapleft 5, gapright 5");
         latestBlockInfoPanel.add(trimHeightLabel);
 
         popOffSeparator1 = new JSeparator(SwingConstants.VERTICAL);
-        popOffSeparator1.setPreferredSize(verticalSeparatorSize);
+        popOffSeparator1.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
 
         String popOffCountTooltip = "Shows the number of blocks remaining to be removed from the blockchain during a 'pop-off' operation.\n\nThis counter appears only when a pop-off is in progress and helps monitor its advancement.";
         popOffBlockCountLabel = createLabel("Pop off blocks: 0", null, popOffCountTooltip);
 
         popOffSeparator2 = new JSeparator(SwingConstants.VERTICAL);
-        popOffSeparator2.setPreferredSize(verticalSeparatorSize);
+        popOffSeparator2.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
 
         String popOffHeightTooltip = "Displays the target block height after the pop-off operation completes, along with the current block height before the pop-off.\n\nThis information is crucial for understanding the state of your blockchain during a pop-off, which is used to resolve forks or other issues by reverting to a previous state.";
         popOffBlockHeightLabel = createLabel("- 🡸 -", null, popOffHeightTooltip);
 
-        latestBlockInfoPanel.add(popOffSeparator1);
+        latestBlockInfoPanel.add(popOffSeparator1, "gapleft 5, gapright 5");
         latestBlockInfoPanel.add(popOffBlockCountLabel);
-        latestBlockInfoPanel.add(popOffSeparator2);
+        latestBlockInfoPanel.add(popOffSeparator2, "gapleft 5, gapright 5");
         latestBlockInfoPanel.add(popOffBlockHeightLabel);
         setPopOffLabelVisible(false);
 
         // === Add toggle to toolBar ===
-        popOffToggle = new JComponent() {
-            @Override
-            protected void paintComponent(Graphics g) {
-                super.paintComponent(g);
-                (showPopOff ? CustomDrawings.Chevron.LEFT : CustomDrawings.Chevron.RIGHT)
-                        .draw((Graphics2D) g, getWidth(), getHeight(), iconColor);
-            }
+        popOffToggle = new CustomDrawingComponent(
+                showPopOff ? CustomDrawings.Chevron.LEFT : CustomDrawings.Chevron.RIGHT);
+        updatePopOffToggleIcon();
 
-            @Override
-            public Dimension getPreferredSize() {
-                return new Dimension(16, 20);
-            }
-
-            @Override
-            public Dimension getMaximumSize() {
-                return getPreferredSize();
-            }
-        };
         popOffToggle.setToolTipText("Toggle Pop-off buttons");
+        popOffToggle.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         popOffToggle.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
-                showPopOff = !showPopOff;
-                popOff10Button.setVisible(showPopOff);
-                popOff100Button.setVisible(showPopOff);
-                popOffToggle.repaint();
+                togglePopOffButtons();
             }
         });
+
+        popOffButtonsPanel.addHierarchyListener(new java.awt.event.HierarchyListener() {
+            @Override
+            public void hierarchyChanged(java.awt.event.HierarchyEvent e) {
+                if ((e.getChangeFlags() & java.awt.event.HierarchyEvent.SHOWING_CHANGED) != 0
+                        && popOffButtonsPanel.isShowing()) {
+                    // One-time setup when the panel is first shown
+                    if (popOffPanelWidth < 0) {
+                        popOffPanelWidth = popOffButtonsPanel.getPreferredSize().width;
+                        if (!showPopOff) {
+                            popOffButtonsPanel
+                                    .setPreferredSize(new Dimension(0, Math.max(popOffButtonsPanel.getHeight(), 25)));
+                            popOffButtonsPanel.setVisible(false);
+                            toolBar.revalidate();
+                        }
+                    }
+                    // Remove listener to avoid re-running
+                    popOffButtonsPanel.removeHierarchyListener(this);
+                }
+            }
+        });
+
+        popOffToggle.addPropertyChangeListener("UI", e -> SwingUtilities.invokeLater(this::updatePopOffToggleIcon));
 
         // Hamburger Menu
-        hamburgerMenu = new JComponent() {
-            @Override
-            protected void paintComponent(Graphics g) {
-                super.paintComponent(g);
-                CustomDrawings.HAMBURGER.draw((Graphics2D) g, getWidth(), getHeight(), iconColor);
-            }
+        menuButton = new JButton(IconFontSwing.buildIcon(FontAwesome.BARS, GuiConstants.getToolBarIconSize(),
+                GuiColors.getButtonIcon()));
+        menuButton.setToolTipText("Menu");
+        menuButton.addActionListener(e -> toggleMenu());
 
-            @Override
-            public Dimension getPreferredSize() {
-                return new Dimension(16, 20);
-            }
+        // Menu Panel setup
+        menuPanel = new JPanel(new MigLayout("insets 10 15 10 15, fillx, wrap 1", "[grow]"));
+        menuPanel.setBackground(UIManager.getColor("PopupMenu.background"));
+        menuPanel.setBorder(UIManager.getBorder("PopupMenu.border"));
 
-            @Override
-            public Dimension getMaximumSize() {
-                return getPreferredSize();
-            }
-        };
-        hamburgerMenu.setToolTipText("Menu");
-        JPopupMenu menu = new JPopupMenu();
-        showCommandItem = new JCheckBoxMenuItem("Show Command Input");
+        showCommandItem = new JCheckBox("Show Command Input");
         showCommandItem.setSelected(showCommandInput);
-        showCommandItem.addActionListener(e -> {
-            showCommandInput = showCommandItem.isSelected();
-            commandPanel.setVisible(showCommandInput);
-        });
-        menu.add(showCommandItem);
-        showMetricsItem = new JCheckBoxMenuItem("Show Metrics Panel");
+        showCommandItem.addActionListener(e -> toggleCommandPanel());
+        menuPanel.add(showCommandItem);
+
+        showMetricsItem = new JCheckBox("Show Metrics Panel");
         showMetricsItem.setSelected(showMetricsPanel);
         showMetricsItem.addActionListener(e -> {
             updateMetricsPanelState(showMetricsItem.isSelected());
         });
-        menu.add(showMetricsItem);
+        menuPanel.add(showMetricsItem);
 
-        menu.addSeparator();
-        JMenuItem nodePropsItem = new JMenuItem("Node Configuration");
-        nodePropsItem.addActionListener(e -> cardLayout.show(mainCardPanel, VIEW_NODE_PROPS));
-        menu.add(nodePropsItem);
-        JMenuItem loggerPropsItem = new JMenuItem("Logger Configuration");
-        loggerPropsItem.addActionListener(e -> cardLayout.show(mainCardPanel, VIEW_LOGGER_PROPS));
-        menu.add(loggerPropsItem);
+        enableGpuItem = new JCheckBox("Enable GPU Acceleration");
+        enableGpuItem.setToolTipText("Enables OpenGL pipeline for smoother rendering. Requires restart.");
+        enableGpuItem.setSelected(enableGPU);
+        enableGpuItem.addActionListener(e -> {
+            enableGPU = enableGpuItem.isSelected();
+            JOptionPane.showMessageDialog(SignumGUI.this,
+                    "Changes to GPU acceleration will take effect after restart.", "Restart Required",
+                    JOptionPane.INFORMATION_MESSAGE);
+        });
+        menuPanel.add(enableGpuItem);
 
-        hamburgerMenu.addMouseListener(new MouseAdapter() {
+        menuPanel.add(new JSeparator(), "growx, gapy 5");
+
+        JButton nodePropsItem = new JButton("Node Configuration");
+        nodePropsItem.setHorizontalAlignment(SwingConstants.LEFT);
+        nodePropsItem.setBorderPainted(false);
+        nodePropsItem.setContentAreaFilled(false);
+        nodePropsItem.setFocusPainted(false);
+        nodePropsItem.addActionListener(e -> {
+            cardLayout.show(mainCardPanel, VIEW_NODE_PROPS);
+            toggleMenu();
+        });
+        menuPanel.add(nodePropsItem, "growx");
+
+        JButton loggerPropsItem = new JButton("Logger Configuration");
+        loggerPropsItem.setHorizontalAlignment(SwingConstants.LEFT);
+        loggerPropsItem.setBorderPainted(false);
+        loggerPropsItem.setContentAreaFilled(false);
+        loggerPropsItem.setFocusPainted(false);
+        loggerPropsItem.addActionListener(e -> {
+            cardLayout.show(mainCardPanel, VIEW_LOGGER_PROPS);
+            toggleMenu();
+        });
+        menuPanel.add(loggerPropsItem, "growx");
+
+        JButton lafPropsItem = new JButton("Look and Feel Settings");
+        lafPropsItem.setHorizontalAlignment(SwingConstants.LEFT);
+        lafPropsItem.setBorderPainted(false);
+        lafPropsItem.setContentAreaFilled(false);
+        lafPropsItem.setFocusPainted(false);
+        lafPropsItem.addActionListener(e -> {
+            cardLayout.show(mainCardPanel, VIEW_LAF_PROPS);
+            toggleMenu();
+        });
+        menuPanel.add(lafPropsItem, "growx");
+
+        menuPanelWrapper = new JPanel(new BorderLayout());
+
+        JScrollPane scrollPane = new JScrollPane(leftButtons);
+        scrollPane.setBorder(BorderFactory.createEmptyBorder());
+        scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
+
+        // Listener to adjust bottom padding when scrollbar appears/disappears to
+        // prevent overlay
+        JScrollBar hBar = scrollPane.getHorizontalScrollBar();
+        hBar.addComponentListener(new java.awt.event.ComponentAdapter() {
             @Override
-            public void mouseClicked(MouseEvent e) {
-                menu.show(hamburgerMenu, hamburgerMenu.getWidth() - menu.getPreferredSize().width,
-                        hamburgerMenu.getHeight());
+            public void componentShown(java.awt.event.ComponentEvent e) {
+                leftButtons.setBorder(BorderFactory.createEmptyBorder(5, 5, hBar.getHeight(), 5));
+                toolBar.revalidate();
+                SwingUtilities.invokeLater(() -> hBar.setValue(hBar.getMaximum()));
+            }
+
+            @Override
+            public void componentHidden(java.awt.event.ComponentEvent e) {
+                leftButtons.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+                toolBar.revalidate();
             }
         });
 
-        topPanel = new JPanel();
-        topPanel.setLayout(new BoxLayout(topPanel, BoxLayout.Y_AXIS));
-        topPanel.add(toolBar);
-        topPanel.add(metricsPanel);
+        scrollPane.addComponentListener(new java.awt.event.ComponentAdapter() {
+            @Override
+            public void componentResized(java.awt.event.ComponentEvent e) {
+                if (hBar.isShowing()) {
+                    SwingUtilities.invokeLater(() -> hBar.setValue(hBar.getMaximum()));
+                }
+            }
+        });
 
-        // Use GridBagLayout for infoPanel to allow precise vertical alignment
-        infoPanel = new JPanel(new GridBagLayout());
+        toolBar.add(scrollPane, BorderLayout.CENTER);
+
+        JPanel rightIconsPanel = new JPanel(new MigLayout("insets 5 5 5 10, gap 5, aligny top"));
+        globeButton = new JButton(IconFontSwing.buildIcon(FontAwesome.GLOBE, GuiConstants.getToolBarIconSize(),
+                GuiColors.getButtonIcon()));
+        rightIconsPanel.add(globeButton);
+        rightIconsPanel.add(menuButton);
+        toolBar.add(rightIconsPanel, BorderLayout.EAST);
+
+        leftButtons.add(popOffToggle);
+
+        // Use MigLayout for better dynamic resizing support
+        topPanel = new JPanel(new MigLayout("insets 0, gap 0, fillx, wrap 1", "[grow]", "[]0[]"));
+        topPanel.add(toolBar, "growx");
+        topPanel.add(metricsPanelWrapper, "growx");
+
+        // Use MigLayout for infoPanel to allow precise vertical alignment
+        infoPanel = new JPanel(
+                new MigLayout("insets 0, fillx, hidemode 3, gap 0", "[][][][][][][][][][][][][][grow]", "[]"));
 
         content.add(topPanel, BorderLayout.NORTH);
         content.add(textScrollPane, BorderLayout.CENTER);
 
         // --- Time Labels ---
         String tooltip;
-        timePanel = new JPanel();
-        timePanel.setLayout(new BoxLayout(timePanel, BoxLayout.X_AXIS));
-        timePanel.setOpaque(false);
         String timeTooltip = "Displays the total elapsed time since the node application was started.";
         totalTimeLabel = createLabel("0s", null, timeTooltip);
         String syncTimeTooltip = "Displays the total time the node has spent in synchronization mode. The timer is active only when the blockchain is more than 10 blocks behind the network.";
         syncInProgressTimeLabel = createLabel("0s", null, syncTimeTooltip);
 
+        updateTimeLabelIcons();
+
         timeSeparator = new JSeparator(SwingConstants.VERTICAL);
-        timeSeparator.setPreferredSize(verticalSeparatorSize);
-        timeSeparatorLabel = new JLabel(" / ");
+        timeSeparator.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
+        innerTimeSeparator = new JSeparator(SwingConstants.VERTICAL);
+        innerTimeSeparator.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
 
-        timePanel.add(totalTimeLabel);
-        timePanel.add(timeSeparatorLabel);
-        timePanel.add(syncInProgressTimeLabel);
-        timePanel.add(Box.createHorizontalStrut(5));
-        timePanel.add(timeSeparator);
-        timePanel.add(Box.createHorizontalStrut(5));
-        timePanel.setVisible(false); // Visibility controlled by experimental features
+        // Visibility initially false, controlled by experimental features
+        totalTimeLabel.setVisible(false);
+        innerTimeSeparator.setVisible(false);
+        syncInProgressTimeLabel.setVisible(false);
+        timeSeparator.setVisible(false);
 
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.gridy = 0; // All components in the same row
-        gbc.anchor = GridBagConstraints.CENTER; // Vertically center all components
-        gbc.insets = new Insets(0, 0, 0, 0); // Default no padding
-
-        // Add timePanel
-        gbc.gridx = 0;
-        infoPanel.add(timePanel, gbc);
+        infoPanel.add(totalTimeLabel);
+        infoPanel.add(innerTimeSeparator, "gapleft 5, gapright 5");
+        infoPanel.add(syncInProgressTimeLabel);
+        infoPanel.add(timeSeparator, "gapleft 5, gapright 5");
 
         // --- Peers ---
         JPanel peersPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
@@ -675,143 +1511,106 @@ public class SignumGUI extends JFrame {
             comp.addMouseListener(peersMouseAdapter);
         }
 
-        gbc.gridx = 1;
-        infoPanel.add(peersPanel, gbc); // No left inset needed, timePanel provides right spacing
+        infoPanel.add(peersPanel);
 
         // Add separator after peersPanel
-        gbc.gridx = 2;
-        gbc.insets = new Insets(0, 5, 0, 5); // Spacing around separator
         JSeparator peersSeparator = new JSeparator(SwingConstants.VERTICAL);
-        peersSeparator.setPreferredSize(verticalSeparatorSize);
-        infoPanel.add(peersSeparator, gbc);
-        gbc.insets = new Insets(0, 0, 0, 0); // Reset insets
+        peersSeparator.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
+        infoPanel.add(peersSeparator, "gapleft 5, gapright 5");
 
         // --- Volume ---
         JPanel volumePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
 
         // Upload
         tooltip = "The total amount of data your node has uploaded to other peers since the application started. This data primarily consists of blocks and transactions that you are sharing with the rest of the network, contributing to its health and decentralization.";
-        uploadVolumeLabel = createLabel("▲ 0 MB", null, tooltip);
+        uploadVolumeLabel = createLabel("0 MB", null, tooltip);
 
         // Download
         tooltip = "The total amount of data your node has downloaded from other peers since the application started. This data includes blocks and transactions required to synchronize your local copy of the blockchain with the network.";
-        downloadVolumeLabel = createLabel("▼ 0 MB", null, tooltip);
+        downloadVolumeLabel = createLabel("0 MB", null, tooltip);
+
+        updateVolumeLabelIcons();
 
         volumePanel.add(uploadVolumeLabel);
         volumePanel.add(new JLabel(" / "));
         volumePanel.add(downloadVolumeLabel);
 
         // Add volumePanel
-        gbc.gridx = 3;
-        infoPanel.add(volumePanel, gbc);
+        infoPanel.add(volumePanel);
 
         // Add separator after volumePanel
-        gbc.gridx = 4;
-        gbc.insets = new Insets(0, 5, 0, 5);
         JSeparator volumeSeparator = new JSeparator(SwingConstants.VERTICAL);
-        volumeSeparator.setPreferredSize(verticalSeparatorSize);
-        infoPanel.add(volumeSeparator, gbc);
-        gbc.insets = new Insets(0, 0, 0, 0);
+        volumeSeparator.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
+        infoPanel.add(volumeSeparator, "gapleft 5, gapright 5");
 
         // --- Measurement ---
-        measurementPanel = new JPanel();
-        measurementPanel.setLayout(new BoxLayout(measurementPanel, BoxLayout.X_AXIS));
-        measurementPanel.setOpaque(false);
         measurementSeparator = new JSeparator(SwingConstants.VERTICAL);
-        measurementSeparator.setPreferredSize(verticalSeparatorSize);
-        measurementSeparator.setMaximumSize(verticalSeparatorSize);
+        measurementSeparator.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
+        measurementSeparator.setMaximumSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
         tooltip = "Performance measurement is active.\n"
                 + "Detailed synchronization data is being collected for each block and saved to:\n"
                 + "- measurement/sync_measurement.csv\n"
                 + "- measurement/sync_progress.csv\n" + "for analysis."
                 + "\n\nEnabled by property: node.measurementActive = true";
-        measurementLabel = createLabel("🔬︎", null, tooltip, "MEASUREMENT");
-        measurementLabel.setFont(measurementLabel.getFont().deriveFont(18.0f));
-        measurementPanel.setVisible(false);
+        measurementLabel = new JLabel(IconFontSwing.buildIcon(FontAwesome.FLASK, GuiConstants.getToolBarIconSize(),
+                GuiColors.getButtonIcon()));
+        addInfoTooltip(measurementLabel, tooltip, "MEASUREMENT");
+        measurementLabel.setVisible(false);
+        measurementSeparator.setVisible(false);
 
-        measurementPanel.add(measurementLabel);
-        measurementPanel.add(Box.createHorizontalStrut(5));
-        measurementPanel.add(measurementSeparator);
-        measurementPanel.add(Box.createHorizontalStrut(5));
-
-        // Add measurementPanel
-        gbc.gridx = 5;
-        infoPanel.add(measurementPanel, gbc);
+        infoPanel.add(measurementLabel);
+        infoPanel.add(measurementSeparator, "gapleft 5, gapright 5");
 
         // --- Experimental ---
-        experimentalPanel = new JPanel();
-        experimentalPanel.setLayout(new BoxLayout(experimentalPanel, BoxLayout.X_AXIS));
-        experimentalPanel.setOpaque(false);
         experimentalSeparator = new JSeparator(SwingConstants.VERTICAL);
-        experimentalSeparator.setPreferredSize(verticalSeparatorSize);
-        experimentalSeparator.setMaximumSize(verticalSeparatorSize);
+        experimentalSeparator.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
+        experimentalSeparator.setMaximumSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
         tooltip = "Experimental feature is enabled.\n" + "Simplified data is being collected and saved to:\n"
                 + "- measurement/sync_progress.csv\n" + "for analysis."
                 + "\n\nEnabled by property: node.experimental = true";
-        experimentalLabel = createLabel("⚗", null, tooltip, "EXPERIMENTAL");
-        experimentalLabel.setFont(experimentalLabel.getFont().deriveFont(18.0f));
-        experimentalPanel.setVisible(false);
+        experimentalLabel = new JLabel(
+                IconFontSwing.buildIcon(FontAwesome.COG, GuiConstants.getToolBarIconSize(), GuiColors.getButtonIcon()));
+        addInfoTooltip(experimentalLabel, tooltip, "EXPERIMENTAL");
+        experimentalLabel.setVisible(false);
+        experimentalSeparator.setVisible(false);
 
-        experimentalPanel.add(experimentalLabel);
-        experimentalPanel.add(Box.createHorizontalStrut(5));
-        experimentalPanel.add(experimentalSeparator);
-        experimentalPanel.add(Box.createHorizontalStrut(5));
-
-        // Add experimentalPanel
-        gbc.gridx = 6;
-        infoPanel.add(experimentalPanel, gbc);
+        infoPanel.add(experimentalLabel);
+        infoPanel.add(experimentalSeparator, "gapleft 5, gapright 5");
 
         // --- Trim ---
-        trimPanel = new JPanel();
-        trimPanel.setLayout(new BoxLayout(trimPanel, BoxLayout.X_AXIS));
-        trimPanel.setOpaque(false);
         trimIconSeparator = new JSeparator(SwingConstants.VERTICAL);
-        trimIconSeparator.setPreferredSize(verticalSeparatorSize);
-        trimIconSeparator.setMaximumSize(verticalSeparatorSize);
-        tooltip = "Automatic table trimming is active.\n" +
+        trimIconSeparator.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
+        trimIconSeparator.setMaximumSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
+        tooltip = "Automatic table trimming is active (DB.trimDerivedTables = true).\n" +
                 "Derived tables are being periodically pruned to save disk space.\n" +
                 "This happens every " + (brs.Constants.MAX_ROLLBACK * 10) + " blocks."
                 + "\n\nEnabled by property: DB.trimDerivedTables = true";
-        trimLabel = createLabel("✂", null, tooltip, "TRIM");
-        trimLabel.setFont(trimLabel.getFont().deriveFont(18.0f));
-        trimPanel.setVisible(false);
+        trimLabel = new JLabel(IconFontSwing.buildIcon(FontAwesome.SCISSORS, GuiConstants.getToolBarIconSize(),
+                GuiColors.getButtonIcon()));
+        addInfoTooltip(trimLabel, tooltip, "TRIM");
+        trimLabel.setVisible(false);
+        trimIconSeparator.setVisible(false);
 
-        trimPanel.add(trimLabel);
-        trimPanel.add(Box.createHorizontalStrut(5));
-        trimPanel.add(trimIconSeparator);
-        trimPanel.add(Box.createHorizontalStrut(5));
-
-        // Add trimPanel
-        gbc.gridx = 7;
-        infoPanel.add(trimPanel, gbc);
+        infoPanel.add(trimLabel);
+        infoPanel.add(trimIconSeparator, "gapleft 5, gapright 5");
 
         // --- Auto Resolve ---
-        autoResolvePanel = new JPanel();
-        autoResolvePanel.setLayout(new BoxLayout(autoResolvePanel, BoxLayout.X_AXIS));
-        autoResolvePanel.setOpaque(false);
         autoResolveSeparator = new JSeparator(SwingConstants.VERTICAL);
-        autoResolveSeparator.setPreferredSize(verticalSeparatorSize);
-        autoResolveSeparator.setMaximumSize(verticalSeparatorSize);
+        autoResolveSeparator.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
+        autoResolveSeparator.setMaximumSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
         tooltip = "Auto-Resolve is enabled.\n" +
                 "If database inconsistency is detected at startup, the node will automatically attempt to resolve it by rolling back blocks."
                 + "\n\nEnabled by property: node.autoConsistencyResolve = true";
-        autoResolveLabel = createLabel("🔧", null, tooltip, "AUTO RESOLVE");
-        autoResolveLabel.setFont(autoResolveLabel.getFont().deriveFont(18.0f));
-        autoResolvePanel.setVisible(false);
+        autoResolveLabel = new JLabel(IconFontSwing.buildIcon(FontAwesome.WRENCH, GuiConstants.getToolBarIconSize(),
+                GuiColors.getButtonIcon()));
+        addInfoTooltip(autoResolveLabel, tooltip, "AUTO RESOLVE");
+        autoResolveLabel.setVisible(false);
+        autoResolveSeparator.setVisible(false);
 
-        autoResolvePanel.add(autoResolveLabel);
-        autoResolvePanel.add(Box.createHorizontalStrut(5));
-        autoResolvePanel.add(autoResolveSeparator);
-        autoResolvePanel.add(Box.createHorizontalStrut(5));
+        infoPanel.add(autoResolveLabel);
+        infoPanel.add(autoResolveSeparator, "gapleft 5, gapright 5");
 
-        // Add autoResolvePanel
-        gbc.gridx = 8;
-        infoPanel.add(autoResolvePanel, gbc);
-
-        gbc.gridx = 9;
-        gbc.weightx = 1.0; // Allow progress bar to take up remaining horizontal space
-        gbc.fill = GridBagConstraints.HORIZONTAL; // Fill horizontally
-        infoPanel.add(syncProgressBar, gbc);
+        infoPanel.add(syncProgressBar, "growx");
 
         bottomPanel.add(latestBlockInfoPanel, BorderLayout.CENTER);
         bottomPanel.add(infoPanel, BorderLayout.LINE_END);
@@ -850,6 +1649,36 @@ public class SignumGUI extends JFrame {
         setSize(preferredContentWidth + insets.left + insets.right, 800);
         setLocationRelativeTo(null);
         showWindow();
+
+        // Close menu when clicking outside
+        Toolkit.getDefaultToolkit().addAWTEventListener(event -> {
+            if (isMenuExpanded && event instanceof MouseEvent) {
+                MouseEvent me = (MouseEvent) event;
+                if (me.getID() == MouseEvent.MOUSE_PRESSED) {
+                    if (menuPanelWrapper != null && menuPanelWrapper.isShowing() && menuButton != null
+                            && menuButton.isShowing()) {
+                        try {
+                            Point p = me.getLocationOnScreen();
+                            Point menuLoc = menuPanelWrapper.getLocationOnScreen();
+                            Rectangle menuRect = new Rectangle(menuLoc, menuPanelWrapper.getSize());
+
+                            Point btnLoc = menuButton.getLocationOnScreen();
+                            Rectangle btnRect = new Rectangle(btnLoc, menuButton.getSize());
+
+                            // If clicked outside menu and outside menu button, close it
+                            if (!menuRect.contains(p) && !btnRect.contains(p)) {
+                                toggleMenu();
+                            }
+                        } catch (IllegalComponentStateException e) {
+                            // Component might be hidden during check
+                        }
+                    }
+                }
+            }
+        }, AWTEvent.MOUSE_EVENT_MASK);
+
+        // Finalize custom component states (icons, fonts for Nimbus, etc.)
+        updateCustomComponents();
 
         // Start BRS
         new Thread(this::startSignumWithGUI).start();
@@ -930,6 +1759,75 @@ public class SignumGUI extends JFrame {
         shutdownDialog.setVisible(true);
     }
 
+    private void updateToolBarIcons() {
+        Color currentIconColor = GuiColors.getButtonIcon();
+        float iconSize = GuiConstants.getToolBarIconSize();
+
+        if (openPhoenixButton != null)
+            openPhoenixButton.setIcon(IconFontSwing.buildIcon(FontAwesome.FIRE, iconSize, currentIconColor));
+        if (openClassicButton != null)
+            openClassicButton.setIcon(IconFontSwing.buildIcon(FontAwesome.WINDOW_RESTORE, iconSize, currentIconColor));
+        if (openApiButton != null)
+            openApiButton.setIcon(IconFontSwing.buildIcon(FontAwesome.BOOK, iconSize, currentIconColor));
+        if (editConfButton != null)
+            editConfButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PENCIL, iconSize, currentIconColor));
+        if (popOff10Button != null)
+            popOff10Button.setIcon(IconFontSwing.buildIcon(FontAwesome.STEP_BACKWARD, iconSize, currentIconColor));
+        if (popOff100Button != null)
+            popOff100Button.setIcon(IconFontSwing.buildIcon(FontAwesome.BACKWARD, iconSize, currentIconColor));
+        if (syncButton != null) {
+            syncButton.setIcon(IconFontSwing.buildIcon(isSyncStopped ? FontAwesome.PLAY : FontAwesome.PAUSE, iconSize,
+                    currentIconColor));
+        }
+        if (restartButton != null)
+            restartButton.setIcon(IconFontSwing.buildIcon(FontAwesome.REFRESH, iconSize, currentIconColor));
+        if (shutdownButton != null)
+            shutdownButton.setIcon(IconFontSwing.buildIcon(FontAwesome.POWER_OFF, iconSize, currentIconColor));
+
+        if (measurementLabel != null)
+            measurementLabel.setIcon(IconFontSwing.buildIcon(FontAwesome.FLASK, GuiConstants.getToolBarIconSize(),
+                    GuiColors.getButtonIcon()));
+        if (experimentalLabel != null)
+            experimentalLabel.setIcon(IconFontSwing.buildIcon(FontAwesome.COG, GuiConstants.getToolBarIconSize(),
+                    GuiColors.getButtonIcon()));
+        if (trimLabel != null)
+            trimLabel.setIcon(IconFontSwing.buildIcon(FontAwesome.SCISSORS, GuiConstants.getToolBarIconSize(),
+                    GuiColors.getButtonIcon()));
+        if (autoResolveLabel != null)
+            autoResolveLabel.setIcon(IconFontSwing.buildIcon(FontAwesome.WRENCH, GuiConstants.getToolBarIconSize(),
+                    GuiColors.getButtonIcon()));
+
+        if (menuButton != null)
+            menuButton.setIcon(IconFontSwing.buildIcon(FontAwesome.BARS, iconSize, currentIconColor));
+
+        if (globeButton != null)
+            globeButton.setIcon(
+                    IconFontSwing.buildIcon(FontAwesome.GLOBE, GuiConstants.getToolBarIconSize(), currentIconColor));
+    }
+
+    private void updatePopOffToggleIcon() {
+        if (popOffToggle != null)
+            popOffToggle.setDrawing(showPopOff ? CustomDrawings.Chevron.LEFT : CustomDrawings.Chevron.RIGHT);
+    }
+
+    private void updateDbCheckButtonIcon() {
+        if (dbCheckButton != null) {
+            dbCheckButton.setIcon(IconFontSwing.buildIcon(FontAwesome.DATABASE, GuiConstants.getToolBarIconSize(),
+                    dbConsistencyColor));
+        }
+    }
+
+    private void updateTimeLabelIcons() {
+        if (totalTimeLabel != null) {
+            totalTimeLabel.setIcon(IconFontSwing.buildIcon(FontAwesome.CLOCK_O, GuiConstants.getHelpIconSize(),
+                    GuiColors.getButtonIcon()));
+        }
+        if (syncInProgressTimeLabel != null) {
+            syncInProgressTimeLabel.setIcon(IconFontSwing.buildIcon(FontAwesome.REFRESH, GuiConstants.getHelpIconSize(),
+                    GuiColors.getButtonIcon()));
+        }
+    }
+
     private void showTrayIcon() {
         if (trayIcon == null) { // Don't start running in tray twice
             trayIcon = createTrayIcon();
@@ -939,111 +1837,12 @@ public class SignumGUI extends JFrame {
     private TrayIcon createTrayIcon() {
         PopupMenu popupMenu = new PopupMenu();
 
-        JPanel leftButtons = new JPanel(new FlowLayout(FlowLayout.LEFT));
-
         MenuItem openPheonixWalletItem = new MenuItem("Phoenix Wallet");
         MenuItem openClassicWalletItem = new MenuItem("Classic Wallet");
-        MenuItem openApiItem = new MenuItem("API doc");
         MenuItem showItem = new MenuItem("Show the node window");
         MenuItem shutdownItem = new MenuItem("Shutdown the node");
 
-        openPhoenixButton = new JButton(openPheonixWalletItem.getLabel(),
-                IconFontSwing.buildIcon(FontAwesome.FIRE, 18, iconColor));
-        openClassicButton = new JButton(openClassicWalletItem.getLabel(),
-                IconFontSwing.buildIcon(FontAwesome.WINDOW_RESTORE, 18, iconColor));
-        openApiButton = new JButton(openApiItem.getLabel(),
-                IconFontSwing.buildIcon(FontAwesome.BOOK, 18, iconColor));
-        editConfButton = new JButton("Edit conf file",
-                IconFontSwing.buildIcon(FontAwesome.PENCIL, 18, iconColor));
-        popOff10Button = new JButton("Pop off 10 blocks",
-                IconFontSwing.buildIcon(FontAwesome.STEP_BACKWARD, 18, iconColor));
-        popOff100Button = new JButton("Pop off 100 blocks",
-                IconFontSwing.buildIcon(FontAwesome.BACKWARD, 18, iconColor));
-        dbCheckButton = new JButton("Database check",
-                IconFontSwing.buildIcon(FontAwesome.DATABASE, 18, iconColor));
-        syncButton = new JButton("Stop Sync",
-                IconFontSwing.buildIcon(FontAwesome.PAUSE, 18, iconColor));
-        restartButton = new JButton("Restart",
-                IconFontSwing.buildIcon(FontAwesome.REFRESH, 18, iconColor));
-        shutdownButton = new JButton("Shutdown",
-                IconFontSwing.buildIcon(FontAwesome.POWER_OFF, 18, iconColor));
-        // TODO: find a way to actually store permanently the max block available to
-        // pop-off, otherwise we can break it
-        // JButton popOffMaxButton = new JButton("Pop off max",
-        // IconFontSwing.buildIcon(FontAwesome.FAST_BACKWARD, 18, iconColor));
-
-        addInfoTooltip(openPhoenixButton, "Opens the modern Phoenix Wallet in your default web browser.");
-        addInfoTooltip(openClassicButton, "Opens the Classic Wallet in your default web browser.");
-        addInfoTooltip(openApiButton, "Opens the interactive API documentation in your default web browser.");
-        addInfoTooltip(editConfButton,
-                "Opens the node's configuration file (node.properties or node-default.properties) in your default text editor for easy modification.");
-        addInfoTooltip(popOff10Button,
-                "Removes the last 10 blocks from your local blockchain. This can help resolve a local fork if your node is stuck.");
-        addInfoTooltip(popOff100Button,
-                "Removes the last 100 blocks from your local blockchain. Use this if a smaller pop-off does not resolve a fork.");
-        addInfoTooltip(dbCheckButton,
-                "Performs a manual consistency check on the database to ensure data integrity.");
-        addInfoTooltip(syncButton,
-                "Toggles the synchronization process. 'Pause Sync' pauses the downloading and processing of new blocks. 'Resume Sync' continues the process.");
-        addInfoTooltip(restartButton,
-                "Restarts the Signum node application. This is useful for applying configuration changes or reloading the application. A confirmation dialog will be shown before restarting.");
-        addInfoTooltip(shutdownButton,
-                "Safely stops the Signum node application. This ensures all data is saved correctly and prevents potential database corruption. A confirmation dialog will be shown before shutting down.");
-
-        openPhoenixButton.addActionListener(e -> openWebUi("/phoenix"));
-        openClassicButton.addActionListener(e -> openWebUi("/classic"));
-        openApiButton.addActionListener(e -> openWebUi("/api-doc"));
-        editConfButton.addActionListener(e -> editConf());
-        popOff10Button.addActionListener(e -> popOff(10));
-        popOff100Button.addActionListener(e -> popOff(100));
-        // popOffMaxButton.addActionListener(e -> popOff(0));
-
         File phoenixIndex = new File("html/ui/phoenix/index.html");
-        File classicIndex = new File("html/ui/classic/index.html");
-
-        dbCheckButton.addActionListener(e -> dbCheckAction());
-
-        syncButton.addActionListener(e -> syncButtonAction());
-        shutdownButton.addActionListener(e -> shutdownAction());
-        restartButton.addActionListener(e -> {
-            if (JOptionPane.showConfirmDialog(SignumGUI.this,
-                    "This will restart the node. Are you sure?", "Restart node",
-                    JOptionPane.YES_NO_OPTION,
-                    JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
-                restart();
-            }
-        });
-
-        if (phoenixIndex.isFile() && phoenixIndex.exists()) {
-            leftButtons.add(openPhoenixButton);
-        }
-        if (classicIndex.isFile() && classicIndex.exists()) {
-            leftButtons.add(openClassicButton);
-        }
-        leftButtons.add(editConfButton);
-        leftButtons.add(openApiButton);
-
-        leftButtons.add(popOff10Button);
-        popOff10Button.setVisible(showPopOff);
-        leftButtons.add(popOff100Button);
-        popOff100Button.setVisible(showPopOff);
-        // leftButtons.add(popOffMaxButton);
-
-        leftButtons.add(dbCheckButton);
-        leftButtons.add(syncButton);
-
-        leftButtons.add(restartButton);
-        leftButtons.add(shutdownButton);
-        leftButtons.add(popOffToggle);
-
-        toolBar.add(leftButtons);
-        toolBar.add(Box.createHorizontalGlue());
-        toolBar.add(hamburgerMenu);
-        toolBar.add(Box.createHorizontalStrut(5));
-        JLabel globeLabel = new JLabel("🌍");
-        globeLabel.setFont(globeLabel.getFont().deriveFont(18.0f));
-        toolBar.add(globeLabel);
-        toolBar.add(Box.createHorizontalStrut(10));
 
         openPheonixWalletItem.addActionListener(e -> openWebUi("/phoenix"));
         openClassicWalletItem.addActionListener(e -> openWebUi("/classic"));
@@ -1089,25 +1888,9 @@ public class SignumGUI extends JFrame {
     }
 
     private void syncButtonAction() {
-        isSyncStopped = !isSyncStopped;
-        if (isSyncStopped) {
-            Signum.getBlockchainProcessor().setGetMoreBlocksPause(true);
-            Signum.getBlockchainProcessor().setBlockImporterPause(true);
-            syncButton.setText("Resume Sync");
-            syncButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PLAY, 18, iconColor));
-            if (guiTimer != null) {
-                guiTimer.stop();
-            }
-        } else {
-            Signum.getBlockchainProcessor().setGetMoreBlocksPause(false);
-            Signum.getBlockchainProcessor().setBlockImporterPause(false);
-            syncButton.setText("Pause Sync");
-            syncButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PAUSE, 18, iconColor));
-            if (guiTimer != null) {
-                guiTimer.start();
-            }
-        }
-        updateTitle();
+        // The UI will update via the onSyncStateChanged listener when the core
+        // processes the change.
+        Signum.getBlockchainProcessor().setSyncPaused(!isSyncStopped);
     }
 
     private void shutdownAction() {
@@ -1270,7 +2053,8 @@ public class SignumGUI extends JFrame {
                     height,
                     totalMinedSigna, totalMined,
                     totalEffectiveBalanceSigna, totalEffectiveBalance);
-            icon = IconFontSwing.buildIcon(FontAwesome.CHECK_CIRCLE, 32, new Color(0, 128, 0));
+            icon = IconFontSwing.buildIcon(FontAwesome.CHECK_CIRCLE, GuiConstants.ICON_SIZE_DIALOG,
+                    new Color(0, 128, 0));
             JOptionPane.showMessageDialog(SignumGUI.this, message, "Database Consistency Check",
                     JOptionPane.INFORMATION_MESSAGE, icon);
         } else {
@@ -1305,7 +2089,8 @@ public class SignumGUI extends JFrame {
             }
             resolveMessage += "The process stops if consistency is restored before reaching this limit.";
 
-            icon = IconFontSwing.buildIcon(FontAwesome.EXCLAMATION_TRIANGLE, 32, contrastRed);
+            icon = IconFontSwing.buildIcon(FontAwesome.EXCLAMATION_TRIANGLE, GuiConstants.ICON_SIZE_DIALOG,
+                    GuiColors.getContrastRed());
 
             if (blockchainProcessor.getResolutionState() == BlockchainProcessor.ResolutionState.ACTIVE) {
                 String activeMessage;
@@ -1413,23 +2198,23 @@ public class SignumGUI extends JFrame {
     }
 
     private void editConf() {
-        File file = new File(Signum.CONF_FOLDER, Signum.PROPERTIES_NAME);
-        if (!file.exists()) {
-            file = new File(Signum.CONF_FOLDER, Signum.DEFAULT_PROPERTIES_NAME);
-            if (!file.exists()) {
-                file = new File(Signum.DEFAULT_PROPERTIES_NAME);
-            }
+        Path path = brs.util.PathUtils.resolvePath(confFolder).resolve(Signum.PROPERTIES_NAME);
+        if (!Files.exists(path)) {
+            path = brs.util.PathUtils.resolvePath(confFolder).resolve(Signum.DEFAULT_PROPERTIES_NAME);
         }
 
+        File file = path.toFile();
+
         if (!file.exists()) {
-            JOptionPane.showMessageDialog(this, "Could not find conf file: " + Signum.DEFAULT_PROPERTIES_NAME,
+            JOptionPane.showMessageDialog(this,
+                    "Could not find conf file: " + Signum.PROPERTIES_NAME + " or " + Signum.DEFAULT_PROPERTIES_NAME,
                     "File not found", JOptionPane.ERROR_MESSAGE);
             return;
         }
         try {
             Desktop.getDesktop().open(file);
         } catch (IOException e) {
-            LOGGER.error("Could not edit conf file", e);
+            LOGGER.error("Could not open conf file with default editor", e);
         }
     }
 
@@ -1461,6 +2246,7 @@ public class SignumGUI extends JFrame {
         blockchainProcessor.addListener(block -> onManualPopOffProgress(),
                 BlockchainProcessor.Event.BLOCK_MANUAL_POPPED);
         blockchainProcessor.addListener(block -> onAutoPopOffProgress(), BlockchainProcessor.Event.BLOCK_AUTO_POPPED);
+        blockchainProcessor.addSyncStateListener(this::onSyncStateChanged);
 
         if (trimEnabled) {
             blockchainProcessor.addListener(block -> onTrimStart(),
@@ -1486,8 +2272,8 @@ public class SignumGUI extends JFrame {
         long uploaded = blockchainProcessor.getUploadedVolume();
         long downloaded = blockchainProcessor.getDownloadedVolume();
         SwingUtilities.invokeLater(() -> {
-            uploadVolumeLabel.setText("▲ " + formatDataSize(uploaded));
-            downloadVolumeLabel.setText("▼ " + formatDataSize(downloaded));
+            uploadVolumeLabel.setText(formatDataSize(uploaded));
+            downloadVolumeLabel.setText(formatDataSize(downloaded));
 
             // Start the GUI timer only once, when the first download volume is received,
             // and if experimental features are enabled in the config.
@@ -1503,14 +2289,14 @@ public class SignumGUI extends JFrame {
         guiTimer = new Timer(1000, e -> {
             if (Signum.getBlockchain() != null && Signum.getBlockchainProcessor() != null) {
                 guiAccumulatedSyncTimeMs += 1000;
-                totalTimeLabel.setText("🕒 " + DurationFormatter.format(guiAccumulatedSyncTimeMs,
+                totalTimeLabel.setText(DurationFormatter.format(guiAccumulatedSyncTimeMs,
                         DurationFormatter.Unit.YEAR, DurationFormatter.Unit.SECOND));
 
                 if (isSyncing) {
                     guiAccumulatedSyncInProgressTimeMs += 1000;
                 }
                 syncInProgressTimeLabel
-                        .setText("🔄 " + DurationFormatter.format(guiAccumulatedSyncInProgressTimeMs,
+                        .setText(DurationFormatter.format(guiAccumulatedSyncInProgressTimeMs,
                                 DurationFormatter.Unit.YEAR, DurationFormatter.Unit.SECOND));
                 updateTimeLabelVisibility();
             }
@@ -1539,19 +2325,17 @@ public class SignumGUI extends JFrame {
     private void onConsistencyUpdate() {
         BlockchainProcessor.ConsistencyState state = Signum.getBlockchainProcessor().getConsistencyState();
         SwingUtilities.invokeLater(() -> {
-
-            Color color;
             switch (state) {
                 case CONSISTENT:
-                    color = Color.GREEN;
+                    dbConsistencyColor = GuiColors.getStatusConsistent();
                     break;
                 case INCONSISTENT:
-                    color = contrastRed;
+                    dbConsistencyColor = GuiColors.getContrastRed();
                     break;
                 default: // UNDEFINED
-                    color = iconColor;
+                    dbConsistencyColor = GuiColors.getButtonIcon();
             }
-            dbCheckButton.setIcon(IconFontSwing.buildIcon(FontAwesome.DATABASE, 18, color));
+            updateDbCheckButtonIcon();
         });
     }
 
@@ -1608,8 +2392,8 @@ public class SignumGUI extends JFrame {
 
             if (Signum.getBlockchainProcessor().getResolutionState() == BlockchainProcessor.ResolutionState.ACTIVE) {
                 if (remaining > 0) {
-                    popOffBlockCountLabel.setForeground(contrastRed);
-                    popOffBlockHeightLabel.setForeground(contrastRed);
+                    popOffBlockCountLabel.setForeground(GuiColors.getContrastRed());
+                    popOffBlockHeightLabel.setForeground(GuiColors.getContrastRed());
                 } else {
                     popOffBlockCountLabel.setForeground(iconColor);
                     popOffBlockHeightLabel.setForeground(iconColor);
@@ -1632,6 +2416,31 @@ public class SignumGUI extends JFrame {
         popOffBlockCountLabel.setVisible(isVisible);
         popOffSeparator2.setVisible(isVisible);
         popOffBlockHeightLabel.setVisible(isVisible);
+    }
+
+    private void onSyncStateChanged(Boolean isPaused) {
+        SwingUtilities.invokeLater(() -> {
+            if (isSyncStopped == isPaused) {
+                return; // No change
+            }
+            isSyncStopped = isPaused;
+            if (isSyncStopped) {
+                syncButton.setText("Resume Sync");
+                syncButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PLAY, GuiConstants.getToolBarIconSize(),
+                        GuiColors.getButtonIcon()));
+                if (guiTimer != null) {
+                    guiTimer.stop();
+                }
+            } else {
+                syncButton.setText("Pause Sync");
+                syncButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PAUSE, GuiConstants.getToolBarIconSize(),
+                        GuiColors.getButtonIcon()));
+                if (guiTimer != null) {
+                    guiTimer.start();
+                }
+            }
+            updateTitle();
+        });
     }
 
     public void startSignumWithGUI() {
@@ -1658,13 +2467,20 @@ public class SignumGUI extends JFrame {
 
             try {
                 SwingUtilities.invokeLater(() -> {
-                    if (showCommandItem != null)
+                    if (showCommandItem != null) {
                         showCommandItem.setSelected(showCommandInput);
-                    if (commandPanel != null)
-                        commandPanel.setVisible(showCommandInput);
+                    }
+                    if (showCommandInput) {
+                        commandPanelWrapper.add(commandPanel, BorderLayout.CENTER);
+                    } else {
+                        commandPanelWrapper.setPreferredSize(new Dimension(0, 0));
+                    }
 
                     if (showMetricsItem != null) {
                         showMetricsItem.setSelected(showMetricsPanel);
+                    }
+                    if (enableGpuItem != null) {
+                        enableGpuItem.setSelected(enableGPU);
                     }
 
                     if (showMetricsPanel) {
@@ -1672,37 +2488,57 @@ public class SignumGUI extends JFrame {
                         metricsPanel.setVisible(true);
                     } else {
                         metricsPanel.shutdown();
-                        topPanel.remove(metricsPanel);
+                        metricsPanelWrapper.removeAll();
                         metricsPanel = null;
+                        metricsPanelWrapper.setPreferredSize(new Dimension(0, 0));
+                        metricsPanelWrapper.revalidate();
                     }
 
                     showTrayIcon();
                     // Sync checkbox states with loaded properties
-                    popOffToggle.repaint();
+                    updatePopOffToggleIcon();
+
+                    if (showPopOff) {
+                        popOffButtonsPanel.setVisible(true);
+                        popOffButtonsPanel.setPreferredSize(null);
+                    } else {
+                        Dimension natural = popOffButtonsPanel.getLayout().preferredLayoutSize(popOffButtonsPanel);
+                        popOffButtonsPanel.setPreferredSize(new Dimension(0, Math.max(natural.height, 25)));
+                        popOffButtonsPanel.setVisible(false);
+                    }
+                    toolBar.revalidate();
 
                     if (measurementActive) {
-                        measurementPanel.setVisible(true);
+                        measurementLabel.setVisible(true);
+                        measurementSeparator.setVisible(true);
                     }
 
                     if (experimentalActive) {
-                        experimentalPanel.setVisible(true);
-                        timePanel.setVisible(true);
+                        experimentalLabel.setVisible(true);
+                        experimentalSeparator.setVisible(true);
+                        // Initial time label visibility is handled by updateTimeLabelVisibility later
+                        syncInProgressTimeLabel.setVisible(true);
+                        timeSeparator.setVisible(true);
                     }
 
                     if (trimEnabled) {
-                        trimPanel.setVisible(true);
+                        trimLabel.setVisible(true);
+                        trimIconSeparator.setVisible(true);
                         trimHeightLabel.setVisible(true);
                         trimSeparator.setVisible(true);
                     } else {
-                        trimPanel.setVisible(false);
+                        trimLabel.setVisible(false);
+                        trimIconSeparator.setVisible(false);
                         trimHeightLabel.setVisible(false);
                         trimSeparator.setVisible(false);
                     }
 
                     if (autoResolveEnabled) {
-                        autoResolvePanel.setVisible(true);
+                        autoResolveLabel.setVisible(true);
+                        autoResolveSeparator.setVisible(true);
                     } else {
-                        autoResolvePanel.setVisible(false);
+                        autoResolveLabel.setVisible(false);
+                        autoResolveSeparator.setVisible(false);
                     }
 
                     onTrimHeightChanged();
@@ -1726,10 +2562,10 @@ public class SignumGUI extends JFrame {
                     }
                     // Update labels with initial values from log file
                     SwingUtilities.invokeLater(() -> {
-                        totalTimeLabel.setText("🕒 " + DurationFormatter.format(guiAccumulatedSyncTimeMs,
+                        totalTimeLabel.setText(DurationFormatter.format(guiAccumulatedSyncTimeMs,
                                 DurationFormatter.Unit.YEAR, DurationFormatter.Unit.SECOND));
                         syncInProgressTimeLabel
-                                .setText("🔄 " + DurationFormatter.format(guiAccumulatedSyncInProgressTimeMs,
+                                .setText(DurationFormatter.format(guiAccumulatedSyncInProgressTimeMs,
                                         DurationFormatter.Unit.YEAR, DurationFormatter.Unit.SECOND));
                         updateTimeLabelVisibility(); // Initial visibility check
                     });
@@ -1749,85 +2585,95 @@ public class SignumGUI extends JFrame {
 
     }
 
-    private JPanel createPropertiesPanel(String title, String fileName, String confFolder) {
-        JPanel panel = new JPanel(new BorderLayout());
-
-        JPanel header = new JPanel(new BorderLayout());
-        header.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
-
-        JPanel leftHeader = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
-        leftHeader.setOpaque(false);
-
-        JButton backButton = new JButton("Back to Console",
-                IconFontSwing.buildIcon(FontAwesome.ARROW_LEFT, 16, iconColor));
-        backButton.addActionListener(e -> cardLayout.show(mainCardPanel, VIEW_CONSOLE));
-        leftHeader.add(backButton);
-
-        JPanel rightHeader = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
-        rightHeader.setOpaque(false);
-
-        if ("node.properties".equals(fileName)) {
-            JButton switchBtn = new JButton("Switch to Logger Configuration",
-                    IconFontSwing.buildIcon(FontAwesome.EXCHANGE, 16, iconColor));
-            switchBtn.addActionListener(e -> cardLayout.show(mainCardPanel, VIEW_LOGGER_PROPS));
-            rightHeader.add(switchBtn);
-        } else if ("logging.properties".equals(fileName)) {
-            JButton switchBtn = new JButton("Switch to Node Configuration",
-                    IconFontSwing.buildIcon(FontAwesome.EXCHANGE, 16, iconColor));
-            switchBtn.addActionListener(e -> cardLayout.show(mainCardPanel, VIEW_NODE_PROPS));
-            rightHeader.add(switchBtn);
-        }
-
-        JLabel titleLabel = new JLabel(title, SwingConstants.CENTER);
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 16f));
-
-        header.add(leftHeader, BorderLayout.WEST);
-        header.add(titleLabel, BorderLayout.CENTER);
-        header.add(rightHeader, BorderLayout.EAST);
-
-        panel.add(header, BorderLayout.NORTH);
-
-        JComponent content;
-        if ("node.properties".equals(fileName)) {
-            content = new NodeConfigurationPanel(this::restart, confFolder);
-        } else if ("logging.properties".equals(fileName)) {
-            content = new LoggerConfigurationPanel(this::restart, confFolder);
-        } else {
-            JTextPane infoPane = new JTextPane();
-            infoPane.setEditable(false);
-            infoPane.setText("Settings for " + fileName + " will be displayed here.\n\n" +
-                    "TODO: Implement property editor with documentation support.");
-            content = new JScrollPane(infoPane);
-        }
-        panel.add(content, BorderLayout.CENTER);
-
-        return panel;
-    }
-
     private void updateMetricsPanelState(boolean show) {
+        if (metricsPanelAnimator != null && metricsPanelAnimator.isRunning()) {
+            return;
+        }
+
         showMetricsPanel = show;
         if (show) {
             if (metricsPanel == null) {
                 metricsPanel = new MetricsPanel(this);
-                topPanel.add(metricsPanel);
                 metricsPanel.init();
                 metricsPanel.setVisible(true);
+                metricsPanelWrapper.add(metricsPanel, BorderLayout.CENTER);
             }
+
+            // Prepare for animation: Start from 0 height
+            metricsPanelWrapper.setPreferredSize(new Dimension(metricsPanelWrapper.getWidth(), 0));
+            metricsPanelWrapper.revalidate();
+
+            // Calculate target height
+            int targetHeight = metricsPanel.getPreferredSize().height;
+
+            metricsPanelAnimator = new Timer(10, new ActionListener() {
+                final long startTime = System.currentTimeMillis();
+                final int duration = ANIMATION_DURATION_MS;
+
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    long elapsed = System.currentTimeMillis() - startTime;
+                    float progress = Math.min(1.0f, (float) elapsed / duration);
+                    // Ease out: 1 - (1 - t)^3
+                    progress = 1.0f - (float) Math.pow(1.0f - progress, 3);
+
+                    int h = (int) (targetHeight * progress);
+                    metricsPanelWrapper.setPreferredSize(new Dimension(metricsPanelWrapper.getWidth(), h));
+                    metricsPanelWrapper.revalidate();
+
+                    if (progress >= 1.0f) {
+                        ((Timer) e.getSource()).stop();
+                        metricsPanelWrapper.setPreferredSize(null); // Reset to allow dynamic resizing
+                        metricsPanelWrapper.revalidate();
+                    }
+                }
+            });
+            metricsPanelAnimator.start();
         } else {
             if (metricsPanel != null) {
-                metricsPanel.shutdown();
-                topPanel.remove(metricsPanel);
-                metricsPanel = null;
+                final int startHeight = metricsPanelWrapper.getHeight();
+
+                metricsPanelAnimator = new Timer(10, new ActionListener() {
+                    final long startTime = System.currentTimeMillis();
+                    final int duration = ANIMATION_DURATION_MS;
+
+                    @Override
+                    public void actionPerformed(ActionEvent e) {
+                        long elapsed = System.currentTimeMillis() - startTime;
+                        float progress = Math.min(1.0f, (float) elapsed / duration);
+                        // Ease out
+                        progress = 1.0f - (float) Math.pow(1.0f - progress, 3);
+
+                        int h = (int) (startHeight * (1.0f - progress));
+                        metricsPanelWrapper.setPreferredSize(new Dimension(metricsPanelWrapper.getWidth(), h));
+                        metricsPanelWrapper.revalidate();
+
+                        if (progress >= 1.0f) {
+                            ((Timer) e.getSource()).stop();
+                            metricsPanel.shutdown();
+                            metricsPanelWrapper.removeAll();
+                            metricsPanel = null;
+                            metricsPanelWrapper.setPreferredSize(new Dimension(0, 0));
+                            metricsPanelWrapper.revalidate();
+                        }
+                    }
+                });
+                metricsPanelAnimator.start();
             }
         }
-        topPanel.revalidate();
-        topPanel.repaint();
     }
 
     private void updateTimeLabelVisibility() {
+        if (!Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL)) {
+            totalTimeLabel.setVisible(false);
+            innerTimeSeparator.setVisible(false);
+            syncInProgressTimeLabel.setVisible(false);
+            timeSeparator.setVisible(false);
+            return;
+        }
         boolean showTotalTime = guiAccumulatedSyncTimeMs != guiAccumulatedSyncInProgressTimeMs;
         totalTimeLabel.setVisible(showTotalTime);
-        timeSeparatorLabel.setVisible(showTotalTime);
+        innerTimeSeparator.setVisible(showTotalTime);
     }
 
     /**
@@ -1949,9 +2795,6 @@ public class SignumGUI extends JFrame {
             prog = 100.0f;
         }
         syncProgressBar.setValue((int) prog);
-        syncProgressBar.setPreferredSize(progressBarSize2);
-        syncProgressBar.setMaximumSize(progressBarSize2);
-        syncProgressBar.setMinimumSize(progressBarSize2);
         syncProgressBar.setString(String.format("%.2f %%", prog));
     }
 
@@ -2032,6 +2875,9 @@ public class SignumGUI extends JFrame {
                         if (settings.has("showMetricsPanel")) {
                             showMetricsPanel = settings.get("showMetricsPanel").getAsBoolean();
                         }
+                        if (settings.has("enableGPU")) {
+                            enableGPU = settings.get("enableGPU").getAsBoolean();
+                        }
                     }
                 }
             }
@@ -2059,6 +2905,7 @@ public class SignumGUI extends JFrame {
             }
             settings.addProperty("showCommandInput", showCommandInput);
             settings.addProperty("showMetricsPanel", showMetricsPanel);
+            settings.addProperty("enableGPU", enableGPU);
             try (java.io.BufferedWriter writer = Files.newBufferedWriter(settingsPath)) {
                 Gson gson = new GsonBuilder().setPrettyPrinting().create();
                 writer.write(gson.toJson(settings));
@@ -2094,9 +2941,37 @@ public class SignumGUI extends JFrame {
             trayIcon.setToolTip(trayIcon.getToolTip() + " (STOPPED)");
     }
 
+    private void flushEarlyLogs(JTextPane textPane) {
+        // Use a dummy stream for actualOutput to prevent duplication to console,
+        // as these logs were already printed to ORIGINAL_OUT/ERR during capture.
+        PrintStream dummyStream = new PrintStream(new OutputStream() {
+            @Override
+            public void write(int b) {
+            }
+        });
+
+        if (EARLY_LOG_BUFFER.size() > 0) {
+            // Pass false to disable timer, we flush immediately
+            TextAreaOutputStream taos = new TextAreaOutputStream(textPane, dummyStream, false, false);
+            taos.write(EARLY_LOG_BUFFER.toByteArray());
+            taos.flush();
+        }
+        if (EARLY_ERR_BUFFER.size() > 0) {
+            TextAreaOutputStream taos = new TextAreaOutputStream(textPane, dummyStream, true, false);
+            taos.write(EARLY_ERR_BUFFER.toByteArray());
+            taos.flush();
+        }
+        // Release memory
+        EARLY_LOG_BUFFER.reset();
+        EARLY_ERR_BUFFER.reset();
+    }
+
     private void sendJavaOutputToTextArea(JTextPane textPane) {
-        System.setOut(new PrintStream(new TextAreaOutputStream(textPane, System.out, false)));
-        System.setErr(new PrintStream(new TextAreaOutputStream(textPane, System.err, true)));
+        // Revert to original streams + GUI capture (removes the buffering layer)
+        PrintStream out = ORIGINAL_OUT != null ? ORIGINAL_OUT : System.out;
+        PrintStream err = ORIGINAL_ERR != null ? ORIGINAL_ERR : System.err;
+        System.setOut(new PrintStream(new TextAreaOutputStream(textPane, out, false)));
+        System.setErr(new PrintStream(new TextAreaOutputStream(textPane, err, true)));
     }
 
     private void showMessage(String message) {
@@ -2114,12 +2989,20 @@ public class SignumGUI extends JFrame {
         private final boolean isError;
 
         private TextAreaOutputStream(JTextPane textPane, PrintStream actualOutput, boolean isError) {
+            this(textPane, actualOutput, isError, true);
+        }
+
+        private TextAreaOutputStream(JTextPane textPane, PrintStream actualOutput, boolean isError, boolean useTimer) {
             this.textPane = textPane;
             this.actualOutput = actualOutput;
             this.isError = isError;
-            this.timer = new Timer(500, e -> flush());
-            this.timer.setRepeats(true);
-            this.timer.start();
+            if (useTimer) {
+                this.timer = new Timer(500, e -> flush());
+                this.timer.setRepeats(true);
+                this.timer.start();
+            } else {
+                this.timer = null;
+            }
         }
 
         @Override
@@ -2176,10 +3059,15 @@ public class SignumGUI extends JFrame {
                     color = new Color(255, 100, 100);
                 }
 
+                // Apply the active custom font to new lines being appended to the console
+                Font activeFont = SignumGUI.getActiveConsoleFont();
+                if (activeFont != null) {
+                    StyleConstants.setFontFamily(attrs, activeFont.getFamily());
+                    StyleConstants.setFontSize(attrs, activeFont.getSize());
+                }
+
                 if (color != null) {
                     StyleConstants.setForeground(attrs, color);
-                } else {
-                    StyleConstants.setForeground(attrs, UIManager.getColor("text"));
                 }
 
                 try {

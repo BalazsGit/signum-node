@@ -26,19 +26,18 @@ public class GlassPane extends JPanel {
         this.currentAlpha = this.baseAlpha;
         setOpaque(false);
         setFocusable(false);
-
         loadResources();
 
         this.timer = createTimer();
     }
 
     private void loadResources() {
-        URL svgUrl = getClass().getResource("/Signum_node_white.svg");
+        URL svgUrl = getClass().getClassLoader().getResource(GuiResources.SIGNUM_NODE_WHITE_SVG);
         if (svgUrl != null) {
             SVGLoader loader = new SVGLoader();
             this.svgDocument = loader.load(svgUrl);
         } else {
-            System.err.println("SVG not found: /Signum_node_white.svg");
+            System.err.println("SVG not found: " + GuiResources.SIGNUM_NODE_WHITE_SVG);
         }
     }
 
@@ -82,7 +81,7 @@ public class GlassPane extends JPanel {
     private Timer createTimer() {
         return new Timer(50, e -> {
             if (breathing) {
-                float step = 0.001f;
+                float step = 0.01f;
                 if (fadingIn) {
                     currentAlpha += step;
                     if (currentAlpha >= baseAlpha * 1.5f)
@@ -92,6 +91,7 @@ public class GlassPane extends JPanel {
                     if (currentAlpha <= baseAlpha * 0.8f)
                         fadingIn = true;
                 }
+                rotation += Math.toRadians(5);
                 repaint();
             }
         });

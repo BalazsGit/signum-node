@@ -2,6 +2,7 @@ package brs.gui;
 
 import brs.BlockchainProcessor;
 import brs.peer.PeerMetric;
+import brs.gui.util.ContextMenuUtils;
 import brs.util.Listener;
 import brs.Signum;
 import brs.gui.util.MovingAverage;
@@ -34,6 +35,7 @@ import javax.swing.table.AbstractTableModel;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableRowSorter;
 import javax.swing.border.Border;
+import javax.swing.border.TitledBorder;
 import java.awt.*;
 import java.awt.geom.Ellipse2D;
 import java.text.SimpleDateFormat;
@@ -65,21 +67,7 @@ public class PeerMetricsPanel extends JPanel {
     private static final int AXIS_LINES = 0;
     private static final int AXIS_BARS = 1;
 
-    private static final Color COLOR_OTHER_RESPONSE_TIME = new Color(160, 85, 230); // More vivid Magenta
-    private static final Color COLOR_BLACKLISTED_PEERS = new Color(255, 100, 100); // Lighter Red for better contrast
-    private static final Color COLOR_MIN_RESPONSE_TIME = new Color(80, 170, 50); // Contrast Green
-    private static final Color COLOR_MAX_RESPONSE_TIME = new Color(160, 0, 0); // Darker Red
-
-    private static final Color COLOR_RX_RESPONSE_TIME = new Color(0, 100, 0); // Dark Green
-    private static final Color COLOR_RX_COUNT = Color.GREEN; // Green
-    private static final Color COLOR_TX_RESPONSE_TIME = Color.ORANGE; // Orange
-    private static final Color COLOR_TX_COUNT = new Color(70, 130, 255); // Lighter Blue
-
-    private static final Color COLOR_OTHER_COUNT = new Color(255, 215, 0); // Gold
-
-    private static final Color COLOR_CONNECTED_PEERS = Color.GREEN; // Green
-    private static final Color COLOR_ACTIVE_PEERS = Color.CYAN; // Cyan
-    private static final Color COLOR_ALL_PEERS = new Color(230, 230, 230); // Slightly Gray
+    private static final int[] MA_WINDOW_VALUES = { 10, 100, 200, 300, 400, 500 };
 
     private static final BasicStroke CHART_STROKE = new BasicStroke(1.2f);
 
@@ -162,10 +150,6 @@ public class PeerMetricsPanel extends JPanel {
     private PeersTableModel otherTableModel;
     private JTabbedPane overviewTablesPane;
 
-    private final Dimension progressBarSize = new Dimension(350, 20);
-    private final Dimension chartDimension = new Dimension(320, 240);
-    private final Dimension tableDimension = new Dimension(250, chartDimension.height);
-
     private final List<PeersDialog.PeerTabPanel> overviewPeerPanels = new ArrayList<>();
     private final List<PeersDialog.PeerCategory> overviewPeerCategories = new ArrayList<>();
 
@@ -230,15 +214,19 @@ public class PeerMetricsPanel extends JPanel {
     private boolean otherDirty = false;
     private String lastRxPeer = null;
     private String lastTxPeer = null;
+    private final JFrame parentFrame;
     private String lastOtherPeer = null;
+
+    private final List<JProgressBar> allProgressBars = new ArrayList<>();
 
     private boolean migLayoutDebug = false;
 
     private final Listener<PeerMetric> peerMetricListener = this::onPeerMetric;
     private final Listener<brs.Block> peersUpdatedListener = this::onPeersUpdated;
 
-    public PeerMetricsPanel(ExecutorService sharedExecutor) {
+    public PeerMetricsPanel(JFrame parentFrame, ExecutorService sharedExecutor) {
         this.chartUpdateExecutor = sharedExecutor;
+        this.parentFrame = parentFrame;
         initUI();
     }
 
@@ -394,8 +382,8 @@ public class PeerMetricsPanel extends JPanel {
                 "Block Rx Resp Time (MA)", "Block Rx Count (MA)",
                 rxResponseTimeTooltip, rxCountTooltip,
                 rxResponseTimeSeries, rxCountSeries,
+                "peer.rx.response.time", "peer.rx.count",
                 rxAbsMinSeries, rxAbsMaxSeries,
-                COLOR_RX_RESPONSE_TIME, COLOR_RX_COUNT,
                 MetricType.RX));
 
         // TX Tab
@@ -417,8 +405,8 @@ public class PeerMetricsPanel extends JPanel {
                 "Block Tx Resp Time (MA)", "Block Tx Count (MA)",
                 txResponseTimeTooltip, txCountTooltip,
                 txResponseTimeSeries, txCountSeries,
+                "peer.tx.response.time", "peer.tx.count",
                 txAbsMinSeries, txAbsMaxSeries,
-                COLOR_TX_RESPONSE_TIME, COLOR_TX_COUNT,
                 MetricType.TX));
 
         // Other Tab
@@ -438,8 +426,8 @@ public class PeerMetricsPanel extends JPanel {
                 "Other Comm. Resp Time (MA)", "Other Comm. Items (MA)",
                 otherResponseTimeTooltip, otherCountTooltip,
                 otherResponseTimeSeries, otherCountSeries,
+                "peer.other.response.time", "peer.other.count",
                 otherAbsMinSeries, otherAbsMaxSeries,
-                COLOR_OTHER_RESPONSE_TIME, COLOR_OTHER_COUNT,
                 MetricType.OTHER));
 
         tabbedPane.addChangeListener(e -> {
@@ -457,16 +445,19 @@ public class PeerMetricsPanel extends JPanel {
         JPanel metricsOverview = new JPanel(
                 new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, wrap 1, gapy 4", "[fill, 300!]"));
 
-        JLabel connectedLabel = createLabel("Connected", COLOR_CONNECTED_PEERS, "Number of currently connected peers.");
+        JLabel connectedLabel = createLabel("Connected", "peer.connected",
+                "Number of currently connected peers.");
         addMetricRow(metricsOverview, connectedLabel, connectedPeersBar);
 
-        JLabel activeLabel = createLabel("Active", COLOR_ACTIVE_PEERS, "Number of active peers (communicating).");
+        JLabel activeLabel = createLabel("Active", "peer.active",
+                "Number of active peers (communicating).");
         addMetricRow(metricsOverview, activeLabel, activePeersBar);
 
-        JLabel allLabel = createLabel("All Known", COLOR_ALL_PEERS, "Total number of known peers.");
+        JLabel allLabel = createLabel("All Known", "peer.all", "Total number of known peers.");
         addMetricRow(metricsOverview, allLabel, allPeersBar);
 
-        JLabel blacklistedLabel = createLabel("Blacklisted", COLOR_BLACKLISTED_PEERS, "Number of blacklisted peers.");
+        JLabel blacklistedLabel = createLabel("Blacklisted", "peer.blacklisted",
+                "Number of blacklisted peers.");
         addMetricRow(metricsOverview, blacklistedLabel, blacklistedPeersBar);
 
         overviewChartPanel = createOverviewChartPanel();
@@ -480,34 +471,54 @@ public class PeerMetricsPanel extends JPanel {
 
         // Right Side: Tables
         JPanel tablesWrapper = new JPanel(new BorderLayout());
-        tablesWrapper.setBorder(TABLE_PANEL_BORDER);
+        TitledBorder titledBorder = BorderFactory.createTitledBorder("Peers");
+        tablesWrapper.setBorder(titledBorder);
 
-        JPanel headerPanel = new JPanel(new BorderLayout());
-        headerPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-
-        JLabel peersTitleLabel = new JLabel("Peers");
-        peersTitleLabel.setFont(UIManager.getFont("TitledBorder.font"));
-        if (peersTitleLabel.getFont() == null) {
-            peersTitleLabel.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
-        }
-        peersTitleLabel.setForeground(UIManager.getColor("TitledBorder.titleColor"));
-        peersTitleLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        peersTitleLabel.addMouseListener(new MouseAdapter() {
+        MouseAdapter titleMouseAdapter = new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
-                if (SwingUtilities.isLeftMouseButton(e) || SwingUtilities.isRightMouseButton(e)) {
+                if ((SwingUtilities.isLeftMouseButton(e) || SwingUtilities.isRightMouseButton(e)) && isTitleHit(e)) {
                     Window window = SwingUtilities.getWindowAncestor(PeerMetricsPanel.this);
                     if (window instanceof JFrame) {
                         PeersDialog.showPeersDialog((JFrame) window);
                     }
                 }
             }
-        });
-        headerPanel.add(peersTitleLabel, BorderLayout.WEST);
-        tablesWrapper.add(headerPanel, BorderLayout.NORTH);
 
-        tablesWrapper.setPreferredSize(tableDimension);
-        tablesWrapper.setMinimumSize(tableDimension);
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                if (isTitleHit(e)) {
+                    tablesWrapper.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                } else {
+                    tablesWrapper.setCursor(Cursor.getDefaultCursor());
+                }
+            }
+
+            private boolean isTitleHit(MouseEvent e) {
+                Insets insets = tablesWrapper.getInsets();
+                if (e.getY() < insets.top) {
+                    Font font = titledBorder.getTitleFont();
+                    if (font == null)
+                        font = UIManager.getFont("TitledBorder.font");
+                    if (font == null)
+                        font = UIManager.getFont("Label.font");
+                    if (font == null)
+                        font = tablesWrapper.getFont();
+                    if (font == null)
+                        return false;
+
+                    FontMetrics fm = tablesWrapper.getFontMetrics(font);
+                    int titleWidth = fm.stringWidth(titledBorder.getTitle());
+                    return e.getX() >= 0 && e.getX() <= titleWidth + 30;
+                }
+                return false;
+            }
+        };
+        tablesWrapper.addMouseListener(titleMouseAdapter);
+        tablesWrapper.addMouseMotionListener(titleMouseAdapter);
+
+        tablesWrapper.setPreferredSize(new Dimension(250, GuiConstants.CHART_DIMENSION_MEDIUM.height));
+        tablesWrapper.setMinimumSize(new Dimension(250, GuiConstants.CHART_DIMENSION_MEDIUM.height));
 
         overviewTablesPane = new JTabbedPane();
         overviewTablesPane.setBorder(BorderFactory.createEmptyBorder());
@@ -646,8 +657,7 @@ public class PeerMetricsPanel extends JPanel {
             String responseTimeLabel, String countLabel,
             String responseTimeTooltip, String countTooltip,
             XYSeries responseTimeSeries, XYSeries countSeries,
-            XYSeries absMinSeries, XYSeries absMaxSeries,
-            Color lineColor, Color barColor,
+            String responseTimeColorKey, String countColorKey, XYSeries absMinSeries, XYSeries absMaxSeries,
             MetricType type) {
 
         JPanel panel = new JPanel(
@@ -657,17 +667,8 @@ public class PeerMetricsPanel extends JPanel {
         JPanel metricsPanel = new JPanel(
                 new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, wrap 1, gapy 4", "[fill, 300!]"));
 
-        JLabel lLabel = createLabel(responseTimeLabel, lineColor, responseTimeTooltip);
-        JLabel cLabel = createLabel(countLabel, barColor, countTooltip);
-
-        JLabel tableTitleLabel = new JLabel(sectionTitle);
-        tableTitleLabel.setHorizontalAlignment(SwingConstants.LEFT);
-        tableTitleLabel.setFont(UIManager.getFont("TitledBorder.font"));
-        if (tableTitleLabel.getFont() == null) {
-            tableTitleLabel.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
-        }
-        tableTitleLabel.setForeground(UIManager.getColor("TitledBorder.titleColor"));
-        tableTitleLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        JLabel lLabel = createLabel(responseTimeLabel, responseTimeColorKey, responseTimeTooltip);
+        JLabel cLabel = createLabel(countLabel, countColorKey, countTooltip);
 
         addMetricRow(metricsPanel, cLabel, countBar);
         addMetricRow(metricsPanel, lLabel, responseTimeBar);
@@ -676,7 +677,8 @@ public class PeerMetricsPanel extends JPanel {
                 + " operations.\n\n"
                 +
                 "Displays: Current (C) | min - max over history.";
-        JLabel absMaxLabel = createLabel("Abs Max Resp Time", COLOR_MAX_RESPONSE_TIME, absMaxTooltip);
+        ;
+        JLabel absMaxLabel = createLabel("Abs Max Resp Time", "peer.max.response.time", absMaxTooltip);
         JProgressBar absMaxResponseTimeBar = createProgressBar("C: 0 | min: 0 - max: 0");
         addMetricRow(metricsPanel, absMaxLabel, absMaxResponseTimeBar);
 
@@ -684,7 +686,7 @@ public class PeerMetricsPanel extends JPanel {
                 + " operations.\n\n"
                 +
                 "Displays: Current (C) | min - max over history.";
-        JLabel absMinLabel = createLabel("Abs Min Resp Time", COLOR_MIN_RESPONSE_TIME, absMinTooltip);
+        JLabel absMinLabel = createLabel("Abs Min Resp Time", "peer.min.response.time", absMinTooltip);
         JProgressBar absMinResponseTimeBar = createProgressBar("C: 0 | min: 0 - max: 0");
         addMetricRow(metricsPanel, absMinLabel, absMinResponseTimeBar);
 
@@ -694,20 +696,20 @@ public class PeerMetricsPanel extends JPanel {
         absMaxResponseTimeBar.putClientProperty("metricType", type);
         absMaxResponseTimeBar.putClientProperty("isMin", false);
 
-        MovingAverage[] mas;
+        MovingAverage[] movingAverages;
         if (type == MetricType.RX) {
-            mas = new MovingAverage[] { rxResponseTimeMA, rxBlockCountMA };
+            movingAverages = new MovingAverage[] { rxResponseTimeMA, rxBlockCountMA };
         } else if (type == MetricType.TX) {
-            mas = new MovingAverage[] { txResponseTimeMA, txBlockCountMA };
+            movingAverages = new MovingAverage[] { txResponseTimeMA, txBlockCountMA };
         } else {
-            mas = new MovingAverage[] { otherResponseTimeMA, otherItemCountMA };
+            movingAverages = new MovingAverage[] { otherResponseTimeMA, otherItemCountMA };
         }
 
-        JPanel sliderPanel = createControlsPanel(type, mas);
-        metricsPanel.add(sliderPanel, "growx");
+        JPanel sliderPanel = createControlsPanel(type, movingAverages);
+        metricsPanel.add(sliderPanel, "align center, grow 0");
 
-        ChartPanel chartPanel = createChartPanel(responseTimeSeries, countSeries, absMinSeries, absMaxSeries, lineColor,
-                barColor);
+        ChartPanel chartPanel = createChartPanel(responseTimeSeries, countSeries, absMinSeries, absMaxSeries,
+                responseTimeColorKey, countColorKey);
         chartPanels.put(type, chartPanel);
         zoomRanges.put(type, HISTORY_SIZE);
         addToggleListener(lLabel, chartPanel, responseTimeSeries.getKey().toString());
@@ -720,7 +722,21 @@ public class PeerMetricsPanel extends JPanel {
 
         // Table Section (Center)
         PeersTableModel model = new PeersTableModel(type);
+        final PeerMetricTableCellRenderer renderer = new PeerMetricTableCellRenderer(responseTimeColorKey,
+                countColorKey);
         JTable table = new JTable(model) {
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                // Re-apply the custom renderer after L&F change, as super.updateUI() resets
+                // default renderers.
+                // We set it for all relevant types to ensure consistent coloring.
+                setDefaultRenderer(Object.class, renderer);
+                setDefaultRenderer(Double.class, renderer);
+                setDefaultRenderer(Long.class, renderer);
+                setDefaultRenderer(Integer.class, renderer);
+            }
+
             @Override
             public String getToolTipText(MouseEvent e) {
                 String tip = super.getToolTipText(e);
@@ -771,28 +787,65 @@ public class PeerMetricsPanel extends JPanel {
         TableRowSorter<PeersTableModel> sorter = setupTable(table, model);
 
         JPanel tablePanel = new JPanel(new BorderLayout(0, 0));
-        tablePanel.setBorder(TABLE_PANEL_BORDER);
+        TitledBorder titledBorder = BorderFactory.createTitledBorder(sectionTitle);
+        tablePanel.setBorder(titledBorder);
 
-        JPanel headerPanel = new JPanel(new BorderLayout(0, 0));
-        headerPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+        MouseAdapter titleMouseAdapter = new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if ((SwingUtilities.isLeftMouseButton(e) || SwingUtilities.isRightMouseButton(e)) && isTitleHit(e)) {
+                    String legend = getLegendHtml(type, responseTimeColorKey, countColorKey);
+                    PeerTableDialog.showDialog(SwingUtilities.getWindowAncestor(PeerMetricsPanel.this), sectionTitle,
+                            model, renderer, legend);
+                }
+            }
 
-        headerPanel.add(tableTitleLabel, BorderLayout.NORTH);
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                if (isTitleHit(e)) {
+                    tablePanel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                } else {
+                    tablePanel.setCursor(Cursor.getDefaultCursor());
+                }
+            }
+
+            private boolean isTitleHit(MouseEvent e) {
+                Insets insets = tablePanel.getInsets();
+                if (e.getY() < insets.top) {
+                    Font font = titledBorder.getTitleFont();
+                    if (font == null)
+                        font = UIManager.getFont("TitledBorder.font");
+                    if (font == null)
+                        font = UIManager.getFont("Label.font");
+                    if (font == null)
+                        font = tablePanel.getFont();
+                    if (font == null)
+                        return false;
+
+                    FontMetrics fm = tablePanel.getFontMetrics(font);
+                    int titleWidth = fm.stringWidth(titledBorder.getTitle());
+                    return e.getX() >= 0 && e.getX() <= titleWidth + 30;
+                }
+                return false;
+            }
+        };
+        tablePanel.addMouseListener(titleMouseAdapter);
+        tablePanel.addMouseMotionListener(titleMouseAdapter);
 
         JPanel filterPanel = new JPanel(new BorderLayout());
-        filterPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
+        filterPanel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
         filterPanel.add(new JLabel("Filter: "), BorderLayout.WEST);
         JTextField filterTextField = new JTextField();
         filterPanel.add(filterTextField, BorderLayout.CENTER);
 
-        headerPanel.add(filterPanel, BorderLayout.SOUTH);
-        tablePanel.add(headerPanel, BorderLayout.NORTH);
+        tablePanel.add(filterPanel, BorderLayout.NORTH);
 
         JScrollPane scrollPane = new JScrollPane(table);
-        scrollPane.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-        scrollPane.setViewportBorder(null);
+        scrollPane.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0)); // NOSONAR
+        scrollPane.setViewportBorder(null); // NOSONAR
         tablePanel.add(scrollPane, BorderLayout.CENTER);
-        tablePanel.setPreferredSize(tableDimension);
-        tablePanel.setMinimumSize(tableDimension);
+        tablePanel.setPreferredSize(new Dimension(250, GuiConstants.CHART_DIMENSION_MEDIUM.height));
+        tablePanel.setMinimumSize(new Dimension(250, GuiConstants.CHART_DIMENSION_MEDIUM.height));
 
         filterTextField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             public void changedUpdate(javax.swing.event.DocumentEvent e) {
@@ -844,75 +897,65 @@ public class PeerMetricsPanel extends JPanel {
             this.otherResponseTimeBar.putClientProperty("absMaxBar", absMaxResponseTimeBar);
         }
 
-        // Setup renderer and click listener
-        PeerMetricTableCellRenderer renderer = new PeerMetricTableCellRenderer(lineColor, barColor);
-        table.setDefaultRenderer(Object.class, renderer);
-        table.setDefaultRenderer(Double.class, renderer);
-        table.setDefaultRenderer(Long.class, renderer);
-        table.setDefaultRenderer(Integer.class, renderer);
-
-        tableTitleLabel.addMouseListener(new MouseAdapter() {
-            @Override
-            public void mouseClicked(MouseEvent e) {
-                if (SwingUtilities.isLeftMouseButton(e)) {
-                    String legend = getLegendHtml(type, lineColor, barColor);
-                    PeerTableDialog.showDialog(SwingUtilities.getWindowAncestor(PeerMetricsPanel.this), sectionTitle,
-                            model, renderer, legend);
-                }
-            }
-        });
-
         panel.add(tablePanel, "grow, aligny top");
 
         return panel;
     }
 
-    private JPanel createControlsPanel(MetricType type, MovingAverage... mas) {
-        JPanel maWindowPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
+    private JPanel createControlsPanel(MetricType metricType, MovingAverage... movingAveragesToUpdate) {
+        JPanel maWindowPanel = new JPanel(new MigLayout("insets 0", "[][grow, center][]"));
         maWindowPanel.setOpaque(false);
         String maWindowTooltip = "The number of recent data points used to calculate the moving average (MA) for the displayed metrics.\n"
                 +
                 "A larger window produces a smoother but less responsive trend, while a smaller window reacts more quickly to recent changes.";
         JLabel maWindowLabel = createLabel("MA Window", null, maWindowTooltip);
-        maWindowPanel.add(maWindowLabel);
 
-        final int[] maWindowValues = { 10, 100, 200, 300, 400, 500 };
         int currentWindow = movingAverageWindow;
         int initialSliderValue = 1; // Default to 100
-        for (int i = 0; i < maWindowValues.length; i++) {
-            if (currentWindow == maWindowValues[i]) {
+        for (int i = 0; i < MA_WINDOW_VALUES.length; i++) {
+            if (currentWindow == MA_WINDOW_VALUES[i]) {
                 initialSliderValue = i;
                 break;
             }
         }
-
-        JSlider movingAverageSlider = new JSlider(JSlider.HORIZONTAL, 0, maWindowValues.length - 1, initialSliderValue);
+        JSlider movingAverageSlider = new JSlider(JSlider.HORIZONTAL, 0, MA_WINDOW_VALUES.length - 1,
+                initialSliderValue);
         movingAverageSlider.setMajorTickSpacing(1);
         movingAverageSlider.setPaintTicks(true);
         movingAverageSlider.setSnapToTicks(true);
-        movingAverageSlider.setPreferredSize(new Dimension(150, 40));
 
         java.util.Hashtable<Integer, JLabel> labelTable = new java.util.Hashtable<>();
-        for (int i = 0; i < maWindowValues.length; i++) {
-            labelTable.put(i, new JLabel(String.valueOf(maWindowValues[i])));
+        for (int i = 0; i < MA_WINDOW_VALUES.length; i++) {
+            labelTable.put(i, new JLabel(String.valueOf(MA_WINDOW_VALUES[i])));
         }
         movingAverageSlider.setLabelTable(labelTable);
         movingAverageSlider.setPaintLabels(true);
 
+        movingAverageSlider.addPropertyChangeListener("UI", e -> {
+            SwingUtilities.invokeLater(() -> {
+                // To force a full recalculation of label sizes and positions on L&F change,
+                // we nullify the label table and then set a completely new one.
+                // This is more robust than just calling revalidate().
+                movingAverageSlider.setLabelTable(null);
+                java.util.Hashtable<Integer, JLabel> newLabelTable = new java.util.Hashtable<>();
+                for (int i = 0; i < MA_WINDOW_VALUES.length; i++) {
+                    newLabelTable.put(i, new JLabel(String.valueOf(MA_WINDOW_VALUES[i])));
+                }
+                movingAverageSlider.setLabelTable(newLabelTable);
+            });
+        });
+
         movingAverageSlider.addChangeListener(e -> {
             JSlider source = (JSlider) e.getSource();
-            int newValue = maWindowValues[source.getValue()];
+            int newValue = MA_WINDOW_VALUES[source.getValue()];
             chartUpdateExecutor.submit(() -> {
                 synchronized (updateLock) {
-                    for (MovingAverage ma : mas) {
+                    for (MovingAverage ma : movingAveragesToUpdate) {
                         ma.setWindowSize(newValue);
                     }
                 }
             });
         });
-        maWindowPanel.add(movingAverageSlider);
-
-        maWindowPanel.add(Box.createHorizontalStrut(5));
 
         // Zoom controls
         JPanel zoomPanel = new JPanel(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0", "[]5[]"));
@@ -926,7 +969,7 @@ public class PeerMetricsPanel extends JPanel {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (SwingUtilities.isLeftMouseButton(e)) {
-                    zoomIn(type);
+                    zoomIn(metricType);
                 }
             }
         });
@@ -939,13 +982,16 @@ public class PeerMetricsPanel extends JPanel {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (SwingUtilities.isLeftMouseButton(e)) {
-                    zoomOut(type);
+                    zoomOut(metricType);
                 }
             }
         });
 
         zoomPanel.add(zoomOutLabel);
         zoomPanel.add(zoomInLabel);
+
+        maWindowPanel.add(maWindowLabel);
+        maWindowPanel.add(movingAverageSlider, "w " + GuiConstants.SLIDER_WIDTH + "!");
         maWindowPanel.add(zoomPanel);
 
         return maWindowPanel;
@@ -1012,11 +1058,52 @@ public class PeerMetricsPanel extends JPanel {
     private JProgressBar createProgressBar(String initialString) {
         JProgressBar bar = new JProgressBar(0, 100);
         bar.setBorder(BorderFactory.createEmptyBorder());
-        bar.setPreferredSize(progressBarSize);
+        bar.setPreferredSize(GuiConstants.PROGRESS_BAR_SIZE_LARGE);
         bar.setMinimumSize(new Dimension(150, 20));
-        bar.setStringPainted(true);
         bar.setString(initialString);
+        setupProgressBarFont(bar);
+        allProgressBars.add(bar);
         return bar;
+    }
+
+    private static void setupProgressBarFont(JProgressBar bar) {
+        GuiFontManager.setupProgressBar(bar, null);
+    }
+
+    @Override
+    public void updateUI() {
+        super.updateUI();
+        if (allProgressBars != null) {
+            for (JProgressBar bar : allProgressBars) {
+                setupProgressBarFont(bar);
+            }
+        }
+        // After a Look and Feel change, chart colors are not automatically updated.
+        // We need to manually re-apply them from the ColorPaletteManager.
+        if (chartPanels != null && !chartPanels.isEmpty()) {
+            updateChartColors();
+        }
+        if (overviewChartPanel != null) {
+            updateOverviewChartColors();
+        }
+        updateChartFonts();
+    }
+
+    private void updateChartFonts() {
+        Font font = UIManager.getFont("Label.font");
+        if (font == null)
+            return;
+
+        // Ensure chartPanels is initialized and not empty before iterating
+        if (chartPanels != null && !chartPanels.isEmpty()) {
+            for (ChartPanel cp : chartPanels.values()) {
+                GuiFontManager.applyFontToChart(cp.getChart(), font);
+            }
+        }
+        // Ensure overviewChartPanel is initialized before applying font
+        if (overviewChartPanel != null) {
+            GuiFontManager.applyFontToChart(overviewChartPanel.getChart(), font);
+        }
     }
 
     private void addMetricRow(JPanel panel, JLabel label, JProgressBar bar) {
@@ -1029,8 +1116,9 @@ public class PeerMetricsPanel extends JPanel {
     }
 
     private ChartPanel createChartPanel(XYSeries lineSeries, XYSeries barSeries, XYSeries absMinSeries,
-            XYSeries absMaxSeries, Color lineColor, Color barColor) {
-        XYSeriesCollection lineDataset = new XYSeriesCollection(lineSeries);
+            XYSeries absMaxSeries, String lineColorKey, String barColorKey) {
+        XYSeriesCollection lineDataset = new XYSeriesCollection();
+        lineDataset.addSeries(lineSeries);
         lineDataset.addSeries(absMinSeries);
         lineDataset.addSeries(absMaxSeries);
         XYSeriesCollection barDataset = new XYSeriesCollection(barSeries);
@@ -1040,7 +1128,8 @@ public class PeerMetricsPanel extends JPanel {
                 null, null, null, null);
 
         XYPlot plot = chart.getXYPlot();
-        plot.setBackgroundPaint(Color.DARK_GRAY);
+        plot.setOutlineVisible(false);
+        plot.setBackgroundPaint(UIManager.getColor("Table.background"));
         plot.setDomainGridlinesVisible(false);
         plot.setRangeGridlinesVisible(false);
         plot.getDomainAxis().setTickLabelsVisible(false);
@@ -1078,7 +1167,7 @@ public class PeerMetricsPanel extends JPanel {
         barRenderer.setBarPainter(new StandardXYBarPainter());
         barRenderer.setShadowVisible(false);
         barRenderer.setMargin(0.0);
-        barRenderer.setSeriesPaint(0, barColor);
+        barRenderer.setSeriesPaint(0, ColorPaletteManager.getColor(barColorKey));
         barRenderer.setDefaultToolTipGenerator(new PeerChartToolTipGenerator());
         plot.setRenderer(DATASET_BARS, barRenderer);
 
@@ -1089,9 +1178,9 @@ public class PeerMetricsPanel extends JPanel {
         XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, false);
 
         Map<String, Color> lineColors = new HashMap<>();
-        lineColors.put(lineSeries.getKey().toString(), lineColor);
-        lineColors.put(absMinSeries.getKey().toString(), COLOR_MIN_RESPONSE_TIME);
-        lineColors.put(absMaxSeries.getKey().toString(), COLOR_MAX_RESPONSE_TIME);
+        lineColors.put(lineSeries.getKey().toString(), ColorPaletteManager.getColor(lineColorKey));
+        lineColors.put(absMinSeries.getKey().toString(), GuiColors.getPeerMinResponseTime());
+        lineColors.put(absMaxSeries.getKey().toString(), GuiColors.getPeerMaxResponseTime());
 
         configureLineRenderer(lineRenderer, lineDataset, lineColors);
         plot.setRenderer(DATASET_LINES, lineRenderer);
@@ -1104,13 +1193,67 @@ public class PeerMetricsPanel extends JPanel {
         chart.setBorderVisible(false);
 
         ChartPanel chartPanel = new ChartPanel(chart);
-        chartPanel.setPreferredSize(chartDimension);
-        chartPanel.setMinimumSize(chartDimension);
-        chartPanel.setMaximumSize(chartDimension);
+        chartPanel.setPreferredSize(GuiConstants.CHART_DIMENSION_MEDIUM);
+        chartPanel.setMinimumSize(GuiConstants.CHART_DIMENSION_MEDIUM);
+        chartPanel.setMaximumSize(GuiConstants.CHART_DIMENSION_MEDIUM);
         chartPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
         chartPanel.setDisplayToolTips(true);
         ToolTipManager.sharedInstance().registerComponent(chartPanel);
         return chartPanel;
+    }
+
+    private void updateChartColors() {
+        updateMetricChartColors(MetricType.RX, "peer.rx.response.time", "peer.rx.count");
+        updateMetricChartColors(MetricType.TX, "peer.tx.response.time", "peer.tx.count");
+        updateMetricChartColors(MetricType.OTHER, "peer.other.response.time", "peer.other.count");
+    }
+
+    private void updateOverviewChartColors() {
+        if (overviewChartPanel == null)
+            return;
+
+        XYPlot plot = overviewChartPanel.getChart().getXYPlot();
+        plot.setBackgroundPaint(UIManager.getColor("Table.background"));
+
+        // Bar renderer for "All" series
+        XYBarRenderer barRenderer = (XYBarRenderer) plot.getRenderer(DATASET_BARS);
+        if (barRenderer != null) {
+            barRenderer.setSeriesPaint(0, GuiColors.getPeerAll());
+        }
+
+        // Line renderer for other series
+        XYLineAndShapeRenderer lineRenderer = (XYLineAndShapeRenderer) plot.getRenderer(DATASET_LINES);
+        if (lineRenderer != null) {
+            // This relies on the order they were added in createOverviewChartPanel:
+            // connectedSeries, activeSeries, blacklistedSeries
+            lineRenderer.setSeriesPaint(0, GuiColors.getPeerConnected());
+            lineRenderer.setSeriesPaint(1, GuiColors.getPeerActive());
+            lineRenderer.setSeriesPaint(2, GuiColors.getPeerBlacklisted());
+        }
+    }
+
+    private void updateMetricChartColors(MetricType type, String lineColorKey, String barColorKey) {
+        ChartPanel chartPanel = chartPanels.get(type);
+        if (chartPanel == null) {
+            return;
+        }
+        XYPlot plot = chartPanel.getChart().getXYPlot();
+        plot.setBackgroundPaint(UIManager.getColor("Table.background"));
+
+        // Bar renderer
+        XYBarRenderer barRenderer = (XYBarRenderer) plot.getRenderer(DATASET_BARS);
+        if (barRenderer != null) {
+            barRenderer.setSeriesPaint(0, ColorPaletteManager.getColor(barColorKey));
+        }
+
+        // Line renderer
+        XYLineAndShapeRenderer lineRenderer = (XYLineAndShapeRenderer) plot.getRenderer(DATASET_LINES);
+        if (lineRenderer != null) {
+            // Order: lineSeries, absMinSeries, absMaxSeries
+            lineRenderer.setSeriesPaint(0, ColorPaletteManager.getColor(lineColorKey));
+            lineRenderer.setSeriesPaint(1, GuiColors.getPeerMinResponseTime());
+            lineRenderer.setSeriesPaint(2, GuiColors.getPeerMaxResponseTime());
+        }
     }
 
     private ChartPanel createOverviewChartPanel() {
@@ -1127,7 +1270,8 @@ public class PeerMetricsPanel extends JPanel {
 
         JFreeChart chart = ChartFactory.createXYLineChart(null, null, null, null);
         XYPlot plot = chart.getXYPlot();
-        plot.setBackgroundPaint(Color.DARK_GRAY);
+        plot.setOutlineVisible(false);
+        plot.setBackgroundPaint(UIManager.getColor("Table.background"));
         plot.setDomainGridlinesVisible(false);
         plot.setRangeGridlinesVisible(false);
         plot.getDomainAxis().setTickLabelsVisible(false);
@@ -1154,7 +1298,7 @@ public class PeerMetricsPanel extends JPanel {
         barRenderer.setBarPainter(new StandardXYBarPainter());
         barRenderer.setShadowVisible(false);
         barRenderer.setMargin(0.0);
-        barRenderer.setSeriesPaint(0, COLOR_ALL_PEERS);
+        barRenderer.setSeriesPaint(0, GuiColors.getPeerAll());
         barRenderer.setDefaultToolTipGenerator(new PeerChartToolTipGenerator());
         plot.setDataset(DATASET_BARS, barDataset);
         plot.setRenderer(DATASET_BARS, barRenderer);
@@ -1163,9 +1307,9 @@ public class PeerMetricsPanel extends JPanel {
         // Renderer 1: Lines
         XYLineAndShapeRenderer lineRenderer = new XYLineAndShapeRenderer(true, false);
         Map<String, Color> overviewColors = new HashMap<>();
-        overviewColors.put(connectedSeries.getKey().toString(), COLOR_CONNECTED_PEERS);
-        overviewColors.put(activeSeries.getKey().toString(), COLOR_ACTIVE_PEERS);
-        overviewColors.put(blacklistedSeries.getKey().toString(), COLOR_BLACKLISTED_PEERS);
+        overviewColors.put(connectedSeries.getKey().toString(), GuiColors.getPeerConnected());
+        overviewColors.put(activeSeries.getKey().toString(), GuiColors.getPeerActive());
+        overviewColors.put(blacklistedSeries.getKey().toString(), GuiColors.getPeerBlacklisted());
 
         configureLineRenderer(lineRenderer, lineDataset, overviewColors);
         plot.setDataset(DATASET_LINES, lineDataset);
@@ -1177,9 +1321,9 @@ public class PeerMetricsPanel extends JPanel {
         chart.setBorderVisible(false);
 
         ChartPanel chartPanel = new ChartPanel(chart);
-        chartPanel.setPreferredSize(chartDimension);
-        chartPanel.setMinimumSize(chartDimension);
-        chartPanel.setMaximumSize(chartDimension);
+        chartPanel.setPreferredSize(GuiConstants.CHART_DIMENSION_MEDIUM);
+        chartPanel.setMinimumSize(GuiConstants.CHART_DIMENSION_MEDIUM);
+        chartPanel.setMaximumSize(GuiConstants.CHART_DIMENSION_MEDIUM);
         chartPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
         chartPanel.setDisplayToolTips(true);
         ToolTipManager.sharedInstance().registerComponent(chartPanel);
@@ -1711,43 +1855,34 @@ public class PeerMetricsPanel extends JPanel {
         }
     }
 
-    private JLabel createLabel(String text, Color color, String tooltip) {
-        JLabel label = new JLabel(text);
-        if (color != null) {
-            if (color.getAlpha() < 255) {
-                color = new Color(color.getRed(), color.getGreen(), color.getBlue());
-            }
-            label.setForeground(color);
-        }
-        if (tooltip != null) {
-            addInfoTooltip(label, tooltip);
-        }
-        return label;
-    }
-
-    private void addInfoTooltip(JLabel label, String text) {
-        label.addMouseListener(new MouseAdapter() {
+    private JLabel createLabel(String text, String colorKey, String tooltip) {
+        // Using an anonymous inner class to override updateUI, making the label
+        // theme-aware.
+        JLabel label = new JLabel(text) {
             @Override
-            public void mouseClicked(MouseEvent e) {
-                if (SwingUtilities.isRightMouseButton(e)) {
-                    String title = label.getText();
-                    if (title.endsWith(":")) {
-                        title = title.substring(0, title.length() - 1);
-                    }
-                    String htmlText = "<html><body><p style='width: 300px;'>" + text.replace("\n", "<br>")
-                            + "</p></body></html>";
-                    JOptionPane.showMessageDialog(PeerMetricsPanel.this, htmlText, title, JOptionPane.PLAIN_MESSAGE);
+            public void updateUI() {
+                super.updateUI();
+                // Re-apply color from palette on UI update, ensuring it stays in sync with
+                // theme changes.
+                if (colorKey != null) {
+                    setForeground(ColorPaletteManager.getColor(colorKey));
+                }
+                // Re-apply strikethrough if this is a toggle-able label
+                Object visibleProp = getClientProperty("visible");
+                if (visibleProp instanceof Boolean) {
+                    GuiFontManager.updateLabelStrikethrough(this, (Boolean) visibleProp);
                 }
             }
-        });
+        };
+        if (colorKey != null) {
+            label.setForeground(ColorPaletteManager.getColor(colorKey));
+        }
+        ContextMenuUtils.addInfoTooltip(parentFrame, label, tooltip, colorKey);
+        return label;
     }
 
     private void addLabelToggleListener(JLabel label, Consumer<Boolean> onToggleAction) {
         label.putClientProperty("visible", true);
-        final Font originalFont = label.getFont();
-        final Map<TextAttribute, Object> attributes = new HashMap<>(originalFont.getAttributes());
-        attributes.put(TextAttribute.STRIKETHROUGH, TextAttribute.STRIKETHROUGH_ON);
-        final Font strikethroughFont = originalFont.deriveFont(attributes);
 
         label.addMouseListener(new MouseAdapter() {
             @Override
@@ -1757,8 +1892,8 @@ public class PeerMetricsPanel extends JPanel {
                     boolean isVisible = !((boolean) label.getClientProperty("visible"));
                     label.putClientProperty("visible", isVisible);
 
-                    // Update the label's font to show the state
-                    label.setFont(isVisible ? originalFont : strikethroughFont);
+                    // Trigger a UI update on the label to re-apply font and style
+                    label.updateUI();
 
                     // Perform the specific toggle action
                     onToggleAction.accept(isVisible);
@@ -2495,13 +2630,13 @@ public class PeerMetricsPanel extends JPanel {
         }
     }
 
-    private class PeerMetricTableCellRenderer extends DefaultTableCellRenderer {
-        private final Color metricColor;
-        private final Color countColor;
+    private class PeerMetricTableCellRenderer extends DefaultTableCellRenderer implements javax.swing.plaf.UIResource {
+        private final String metricColorKey;
+        private final String countColorKey;
 
-        PeerMetricTableCellRenderer(Color metricColor, Color countColor) {
-            this.metricColor = metricColor;
-            this.countColor = countColor;
+        PeerMetricTableCellRenderer(String metricColorKey, String countColorKey) {
+            this.metricColorKey = metricColorKey;
+            this.countColorKey = countColorKey;
         }
 
         @Override
@@ -2532,26 +2667,29 @@ public class PeerMetricsPanel extends JPanel {
             if (!isSelected) {
                 c.setBackground(table.getBackground());
 
-                int modelRow = table.convertRowIndexToModel(row);
                 PeersTableModel model = (PeersTableModel) table.getModel();
+                int modelRow = table.convertRowIndexToModel(row);
+                if (modelRow < 0 || modelRow >= model.getRowCount()) {
+                    return c; // Avoid index out of bounds if table is updating
+                }
                 PeerStatsSnapshot snapshot = model.getSnapshotAt(modelRow);
 
-                Color fg = metricColor;
+                Color fg = ColorPaletteManager.getColor(metricColorKey);
                 if (snapshot != null && snapshot.address.equals(model.lastUpdatedPeer)) {
-                    fg = countColor;
+                    fg = ColorPaletteManager.getColor(countColorKey);
                 }
 
                 if (snapshot != null && snapshot.isBlacklisted) {
-                    fg = Color.RED;
+                    fg = GuiColors.getPeerBlacklisted();
                 } else if (snapshot != null && snapshot.isYellowState) {
-                    fg = Color.YELLOW;
+                    fg = GuiColors.getPeerDisconnected();
                 }
 
                 String columnName = table.getColumnName(column);
                 boolean isOutdated = snapshot != null && snapshot.isOutdated;
 
                 if (isOutdated && COL_VERSION.equals(columnName)) {
-                    c.setForeground(Color.YELLOW);
+                    c.setForeground(GuiColors.getPeerOutdatedVersion());
                 } else {
                     c.setForeground(fg);
                 }
@@ -2561,9 +2699,9 @@ public class PeerMetricsPanel extends JPanel {
                         if (value instanceof Double) {
                             double val = (Double) value;
                             if (Math.abs(val - model.minAvgResponseTime) < 0.0001) {
-                                c.setForeground(COLOR_MIN_RESPONSE_TIME);
+                                c.setForeground(GuiColors.getPeerMinResponseTime());
                             } else if (Math.abs(val - model.maxAvgResponseTime) < 0.0001) {
-                                c.setForeground(COLOR_MAX_RESPONSE_TIME);
+                                c.setForeground(GuiColors.getPeerMaxResponseTime());
                             }
                         }
                     }
@@ -2571,9 +2709,9 @@ public class PeerMetricsPanel extends JPanel {
                         if (value instanceof Long) {
                             long val = (Long) value;
                             if (val == model.minMinResponseTime) {
-                                c.setForeground(COLOR_MIN_RESPONSE_TIME);
+                                c.setForeground(GuiColors.getPeerMinResponseTime());
                             } else if (val == model.maxMinResponseTime) {
-                                c.setForeground(COLOR_MAX_RESPONSE_TIME);
+                                c.setForeground(GuiColors.getPeerMaxResponseTime());
                             }
                         }
                     }
@@ -2581,9 +2719,9 @@ public class PeerMetricsPanel extends JPanel {
                         if (value instanceof Long) {
                             long val = (Long) value;
                             if (val == model.minMaxResponseTime) {
-                                c.setForeground(COLOR_MIN_RESPONSE_TIME);
+                                c.setForeground(GuiColors.getPeerMinResponseTime());
                             } else if (val == model.maxMaxResponseTime) {
-                                c.setForeground(COLOR_MAX_RESPONSE_TIME);
+                                c.setForeground(GuiColors.getPeerMaxResponseTime());
                             }
                         }
                     }
@@ -2591,9 +2729,9 @@ public class PeerMetricsPanel extends JPanel {
                         if (value instanceof Long) {
                             long val = (Long) value;
                             if (val == model.minLastResponseTime) {
-                                c.setForeground(COLOR_MIN_RESPONSE_TIME);
+                                c.setForeground(GuiColors.getPeerMinResponseTime());
                             } else if (val == model.maxLastResponseTime) {
-                                c.setForeground(COLOR_MAX_RESPONSE_TIME);
+                                c.setForeground(GuiColors.getPeerMaxResponseTime());
                             }
                         }
                     }
@@ -2603,11 +2741,11 @@ public class PeerMetricsPanel extends JPanel {
         }
     }
 
-    private String getLegendHtml(MetricType type, Color metricColor, Color countColor) {
-        String hexColor = toHex(metricColor);
-        String countHexColor = toHex(countColor);
-        String minHexColor = toHex(COLOR_MIN_RESPONSE_TIME);
-        String maxHexColor = toHex(COLOR_MAX_RESPONSE_TIME);
+    private String getLegendHtml(MetricType type, String metricColorKey, String countColorKey) {
+        String hexColor = toHex(ColorPaletteManager.getColor(metricColorKey));
+        String countHexColor = toHex(ColorPaletteManager.getColor(countColorKey));
+        String minHexColor = toHex(GuiColors.getPeerMinResponseTime());
+        String maxHexColor = toHex(GuiColors.getPeerMaxResponseTime());
         StringBuilder sb = new StringBuilder();
         sb.append("<html><body style='font-family: sans-serif; font-size: 10px;'>");
         sb.append("<h3>").append(type).append(" Metrics Legend</h3>");

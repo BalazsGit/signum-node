@@ -12,6 +12,7 @@ import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.JTableHeader;
 import javax.swing.table.TableRowSorter;
+import javax.swing.table.TableCellRenderer;
 import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
@@ -46,10 +47,6 @@ public class MinersListDialog extends JFrame {
     private JTable nodeMinersTable;
     private JTable networkMinersTable;
     private JTabbedPane tabbedPane;
-
-    private static final Color COLOR_ACTIVE_MINER = new Color(218, 165, 32); // Goldenrod
-    private static final Color COLOR_DISCOVERED_NODE_MINER = new Color(50, 205, 50); // Lime Green
-    private static final Color COLOR_DISCOVERED_NETWORK_MINER = new Color(0, 100, 0); // Dark Green
 
     private static final String COL_STATUS = "Status";
     private static final String COL_ADDRESS = "Address";
@@ -176,22 +173,21 @@ public class MinersListDialog extends JFrame {
             }
         };
 
-        JPanel mainPanel = new JPanel(new BorderLayout(5, 5));
-        mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        JPanel mainPanel = new JPanel(new BorderLayout(0, 0));
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
         tabbedPane = new JTabbedPane();
 
         tabbedPane.addTab("Node Miners (Active/Discovered)",
-                createMinersTablePanel(nodeMinersModel, getNodeMinersLegend(), table -> {
-                    nodeMinersTable = table;
-                    nodeMinersTable.setDefaultRenderer(Object.class, new NodeMinerTableCellRenderer(COL_STATUS));
-                }));
+                createMinersTablePanel(nodeMinersModel, getNodeMinersLegend(),
+                        new NodeMinerTableCellRenderer(COL_STATUS), table -> {
+                            nodeMinersTable = table;
+                        }));
 
         tabbedPane.addTab("Network Miners (Discovered)",
                 createMinersTablePanel(networkMinersModel, getNetworkMinersLegend(),
-                        table -> {
+                        new NetworkMinerTableCellRenderer(), table -> {
                             networkMinersTable = table;
-                            networkMinersTable.setDefaultRenderer(Object.class, new NetworkMinerTableCellRenderer());
                         }));
 
         mainPanel.add(tabbedPane, BorderLayout.CENTER);
@@ -205,10 +201,10 @@ public class MinersListDialog extends JFrame {
         return "<html><body style='font-family: sans-serif; font-size: 10px;'>" +
                 "<h3>Node Miners Legend</h3>" +
                 "<ul>" +
-                "<li><span style='color:" + toHex(COLOR_ACTIVE_MINER)
+                "<li><span style='color:" + toHex(GuiColors.getBlockGenActiveMiner())
                 + "'>&#9632;</span> <b>Active:</b> Miners connected to this node that submitted a nonce for the <b>current</b> block generation cycle.</li>"
                 +
-                "<li><span style='color:" + toHex(COLOR_DISCOVERED_NODE_MINER)
+                "<li><span style='color:" + toHex(GuiColors.getBlockGenNodeMiners())
                 + "'>&#9632;</span> <b>Discovered:</b> Miners connected to this node that were active in the recent history (last "
                 +
                 BlockGenerationMetricsPanel.CHART_HISTORY_SIZE + " blocks) but not currently active.</li>" +
@@ -238,7 +234,7 @@ public class MinersListDialog extends JFrame {
         return "<html><body style='font-family: sans-serif; font-size: 10px;'>" +
                 "<h3>Network Miners Legend</h3>" +
                 "<ul>" +
-                "<li><span style='color:" + toHex(COLOR_DISCOVERED_NETWORK_MINER)
+                "<li><span style='color:" + toHex(GuiColors.getBlockGenNetworkMiners())
                 + "'>&#9632;</span> <b>Discovered:</b> Unique miners that forged blocks in the recent history (last " +
                 BlockGenerationMetricsPanel.CHART_HISTORY_SIZE + " blocks).</li>" +
                 "</ul>" +
@@ -403,9 +399,10 @@ public class MinersListDialog extends JFrame {
                 lastDeadline, stats.lastBlockHeight, blocksFound };
     }
 
-    private JPanel createMinersTablePanel(DefaultTableModel model, String legendHtml, Consumer<JTable> tableConsumer) {
-        JPanel panel = new JPanel(new BorderLayout(5, 5));
-        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+    private JPanel createMinersTablePanel(DefaultTableModel model, String legendHtml, TableCellRenderer renderer,
+            Consumer<JTable> tableConsumer) {
+        JPanel panel = new JPanel(new BorderLayout(0, 5));
+        panel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
 
         JEditorPane legendPane = new JEditorPane();
         legendPane.setContentType("text/html");
@@ -415,7 +412,7 @@ public class MinersListDialog extends JFrame {
         legendPane.setBackground(UIManager.getColor("Panel.background"));
 
         JScrollPane legendScrollPane = new JScrollPane(legendPane);
-        legendScrollPane.setPreferredSize(new Dimension(0, 140));
+        legendScrollPane.setPreferredSize(new Dimension(0, 200));
         legendScrollPane.setBorder(BorderFactory.createTitledBorder("Legend & Information"));
 
         JPanel filterPanel = new JPanel(new BorderLayout(5, 5));
@@ -423,12 +420,21 @@ public class MinersListDialog extends JFrame {
         JTextField filterField = new JTextField();
         filterPanel.add(filterField, BorderLayout.CENTER);
 
-        JPanel topPanel = new JPanel(new BorderLayout(5, 5));
+        JPanel topPanel = new JPanel(new BorderLayout(0, 5));
         topPanel.add(legendScrollPane, BorderLayout.CENTER);
         topPanel.add(filterPanel, BorderLayout.SOUTH);
         panel.add(topPanel, BorderLayout.NORTH);
 
         JTable table = new JTable(model) {
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                if (renderer != null) {
+                    setDefaultRenderer(Object.class, renderer);
+                    setDefaultRenderer(Long.class, renderer);
+                }
+            }
+
             @Override
             public String getToolTipText(java.awt.event.MouseEvent e) {
                 String tip = super.getToolTipText(e);
@@ -470,9 +476,9 @@ public class MinersListDialog extends JFrame {
             }
         });
         table.setFillsViewportHeight(true);
-        if (tableConsumer != null) {
-            tableConsumer.accept(table);
-        }
+        table.setDefaultRenderer(Object.class, renderer);
+        table.setDefaultRenderer(Long.class, renderer);
+
         table.setAutoCreateRowSorter(true);
         table.setCellSelectionEnabled(true);
 
@@ -518,6 +524,10 @@ public class MinersListDialog extends JFrame {
                 }
             }
         });
+
+        if (tableConsumer != null) {
+            tableConsumer.accept(table);
+        }
 
         panel.add(new JScrollPane(table), BorderLayout.CENTER);
         return panel;
@@ -572,7 +582,8 @@ public class MinersListDialog extends JFrame {
         }
     }
 
-    private static class NodeMinerTableCellRenderer extends javax.swing.table.DefaultTableCellRenderer {
+    private static class NodeMinerTableCellRenderer extends javax.swing.table.DefaultTableCellRenderer
+            implements javax.swing.plaf.UIResource {
         private final String statusColumnName;
 
         public NodeMinerTableCellRenderer(String statusColumnName) {
@@ -601,17 +612,18 @@ public class MinersListDialog extends JFrame {
                 String status = (String) table.getValueAt(row, statusIndex);
                 if ("Active".equals(status)) {
                     c.setBackground(table.getBackground());
-                    c.setForeground(COLOR_ACTIVE_MINER);
+                    c.setForeground(GuiColors.getBlockGenActiveMiner());
                 } else {
                     c.setBackground(table.getBackground());
-                    c.setForeground(COLOR_DISCOVERED_NODE_MINER);
+                    c.setForeground(GuiColors.getBlockGenNodeMiners());
                 }
             }
             return c;
         }
     }
 
-    private static class NetworkMinerTableCellRenderer extends javax.swing.table.DefaultTableCellRenderer {
+    private static class NetworkMinerTableCellRenderer extends javax.swing.table.DefaultTableCellRenderer
+            implements javax.swing.plaf.UIResource {
         @Override
         public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus,
                 int row, int column) {
@@ -630,7 +642,7 @@ public class MinersListDialog extends JFrame {
             }
 
             if (!isSelected) {
-                c.setForeground(COLOR_DISCOVERED_NETWORK_MINER);
+                c.setForeground(GuiColors.getBlockGenNetworkMiners());
             }
             return c;
         }

@@ -631,14 +631,10 @@ public final class Signum {
             signum.Launcher.restart();
         } else if (command.equals(".autoresolve")) {
             blockchainProcessor.manualResolveDatabaseConsistency();
-        } else if (command.equals(".stop")) {
-            blockchainProcessor.setGetMoreBlocksPause(true);
-            blockchainProcessor.setBlockImporterPause(true);
-            logger.info("Blockchain synchronization stopped.");
+        } else if (command.equals(".pause") || command.equals(".stop")) {
+            blockchainProcessor.setSyncPaused(true);
         } else if (command.equals(".resume")) {
-            blockchainProcessor.setGetMoreBlocksPause(false);
-            blockchainProcessor.setBlockImporterPause(false);
-            logger.info("Blockchain synchronization resumed.");
+            blockchainProcessor.setSyncPaused(false);
         } else if (command.equals(".trim")) {
             blockchainProcessor.scheduleTrim(blockchain.getLastBlock());
         } else if (command.equals(".dbcheck")) {
@@ -647,7 +643,7 @@ public final class Signum {
             logger.info("Available commands:");
             logger.info("  .shutdown     - Gracefully shuts down the node.");
             logger.info("  .restart      - Restarts the node application.");
-            logger.info("  .stop         - Stops blockchain synchronization.");
+            logger.info("  .pause        - Pauses blockchain synchronization.");
             logger.info("  .resume       - Resumes blockchain synchronization.");
             logger.info("  .autoresolve  - Triggers manual database consistency resolution.");
             logger.info("  .trim         - Schedules a database trim.");

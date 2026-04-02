@@ -4,10 +4,12 @@ import brs.crypto.Crypto;
 import brs.props.Prop;
 import brs.props.Props;
 import brs.util.Convert;
+import brs.gui.util.HelpButton;
 import brs.util.PathUtils;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
@@ -43,14 +45,27 @@ public class NodeConfigurationPanel extends JPanel {
     private final Map<String, String> helpTexts = new HashMap<>();
     private final Map<String, String> defaultValues = new HashMap<>();
     private final Runnable restartAction;
+    private final Runnable backAction;
+    private final Runnable switchAction;
     private final String confFolder;
     private final Path propertiesFile;
     private JComboBox<String> profileComboBox;
+    private final java.util.List<PropertyRow> allPropertyRows = new ArrayList<>();
+    private JPanel searchResultsPanel;
+    private CardLayout contentCardLayout;
+    private JPanel contentContainer;
+    private JLabel titleLabel;
+    private JButton resetBtn;
+    private JButton resetAppliedBtn;
+    private JButton saveBtn;
 
-    public NodeConfigurationPanel(Runnable restartAction, String confFolder) {
+    public NodeConfigurationPanel(Runnable restartAction, String confFolder, Runnable backAction,
+            Runnable switchAction) {
         super(new BorderLayout());
         this.restartAction = restartAction;
         this.confFolder = confFolder;
+        this.backAction = backAction;
+        this.switchAction = switchAction;
         this.propertiesFile = PathUtils.resolvePath(confFolder).resolve("node.properties");
 
         // Ensure properties file exists and load it
@@ -71,6 +86,46 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void initUI() {
+        JPanel header = new JPanel(new BorderLayout());
+        header.setBorder(new EmptyBorder(5, 5, 5, 5));
+
+        JPanel leftHeader = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+        leftHeader.setOpaque(false);
+        JButton backButton = new JButton("Back to Console",
+                IconFontSwing.buildIcon(FontAwesome.ARROW_LEFT, GuiConstants.getHelpIconSize(),
+                        UIManager.getColor("Label.foreground")));
+        backButton.addActionListener(e -> {
+            if (backAction != null)
+                backAction.run();
+        });
+        leftHeader.add(backButton);
+
+        JPanel rightHeader = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
+        rightHeader.setOpaque(false);
+        JButton switchBtn = new JButton("Switch to Logger Configuration",
+                IconFontSwing.buildIcon(FontAwesome.EXCHANGE, GuiConstants.getHelpIconSize(),
+                        UIManager.getColor("Label.foreground")));
+        switchBtn.addActionListener(e -> {
+            if (switchAction != null)
+                switchAction.run();
+        });
+        rightHeader.add(switchBtn);
+
+        titleLabel = new JLabel("Node Configuration", SwingConstants.CENTER);
+        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 16f));
+
+        header.add(leftHeader, BorderLayout.WEST);
+        header.add(titleLabel, BorderLayout.CENTER);
+        header.add(rightHeader, BorderLayout.EAST);
+
+        JPanel topContainer = new JPanel(new BorderLayout());
+        topContainer.add(header, BorderLayout.CENTER);
+        topContainer.add(new JSeparator(SwingConstants.HORIZONTAL), BorderLayout.SOUTH);
+
+        add(topContainer, BorderLayout.NORTH);
+
+        JPanel bodyPanel = new JPanel(new BorderLayout());
+
         // --- Profile Panel ---
         JPanel profilePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
         profilePanel.setBorder(new EmptyBorder(5, 10, 5, 5));
@@ -78,35 +133,87 @@ public class NodeConfigurationPanel extends JPanel {
 
         profileComboBox = new JComboBox<>();
         profileComboBox.setEditable(false);
-        profileComboBox.setPreferredSize(new Dimension(200, 25));
+        profileComboBox.setPrototypeDisplayValue("XXXXXXXXXXXXXXXXXXXX");
         profilePanel.add(profileComboBox);
 
         JButton loadProfileBtn = new JButton("Load Profile");
-        loadProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.FOLDER_OPEN, 16, Color.BLACK));
+        loadProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.FOLDER_OPEN, GuiConstants.getHelpIconSize(),
+                GuiColors.getButtonIcon()));
         loadProfileBtn.setToolTipText("Load selected profile");
         loadProfileBtn.addActionListener(e -> loadProfile((String) profileComboBox.getSelectedItem()));
         profilePanel.add(loadProfileBtn);
 
         JButton saveProfileBtn = new JButton("Save Profile");
-        saveProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.FLOPPY_O, 16, Color.BLACK));
+        saveProfileBtn.setIcon(
+                IconFontSwing.buildIcon(FontAwesome.FLOPPY_O, GuiConstants.getHelpIconSize(),
+                        GuiColors.getButtonIcon()));
         saveProfileBtn.setToolTipText("Save Configuration Profile");
-        saveProfileBtn.addActionListener(e -> saveProfile((String) profileComboBox.getSelectedItem()));
+        saveProfileBtn.addActionListener(e -> saveProfile());
         profilePanel.add(saveProfileBtn);
 
-        JButton helpBtn = new JButton(IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, 16, Color.LIGHT_GRAY));
-        helpBtn.setBorder(BorderFactory.createEmptyBorder());
-        helpBtn.setContentAreaFilled(false);
-        helpBtn.setFocusPainted(false);
+        JButton renameProfileBtn = new JButton("Rename Profile");
+        renameProfileBtn.setIcon(
+                IconFontSwing.buildIcon(FontAwesome.PENCIL_SQUARE_O, GuiConstants.getHelpIconSize(),
+                        GuiColors.getButtonIcon()));
+        renameProfileBtn.setToolTipText("Rename selected profile");
+        renameProfileBtn.addActionListener(e -> renameProfile((String) profileComboBox.getSelectedItem()));
+        profilePanel.add(renameProfileBtn);
+
+        JButton deleteProfileBtn = new JButton("Delete Profile");
+        deleteProfileBtn.setIcon(
+                IconFontSwing.buildIcon(FontAwesome.TRASH_O, GuiConstants.getHelpIconSize(),
+                        GuiColors.getButtonIcon()));
+        deleteProfileBtn.setToolTipText("Delete selected profile");
+        deleteProfileBtn.addActionListener(e -> deleteProfile((String) profileComboBox.getSelectedItem()));
+        profilePanel.add(deleteProfileBtn);
+
+        profileComboBox.addActionListener(e -> {
+            String selected = (String) profileComboBox.getSelectedItem();
+            boolean isDefault = "Default".equals(selected);
+            renameProfileBtn.setEnabled(!isDefault);
+            deleteProfileBtn.setEnabled(!isDefault);
+        });
+
+        JButton helpBtn = new HelpButton();
         helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         helpBtn.setToolTipText("Click for more info about Configuration Profiles");
         helpBtn.addActionListener(e -> showProfileHelp());
         profilePanel.add(helpBtn);
 
         loadProfiles(profileComboBox);
-        add(profilePanel, BorderLayout.NORTH);
+
+        // --- Search Panel ---
+        JPanel searchPanel = new JPanel(new MigLayout("insets 5 10 5 5, fillx", "[][grow]", "[]"));
+        searchPanel.add(new JLabel("Search Configuration:"));
+        JTextField searchField = new JTextField();
+        searchField.putClientProperty("JTextField.placeholderText", "Type to filter properties...");
+        styleTextField(searchField);
+        searchPanel.add(searchField, "growx");
+
+        searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                filterProperties(searchField.getText());
+            }
+
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                filterProperties(searchField.getText());
+            }
+
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                filterProperties(searchField.getText());
+            }
+        });
+
+        JPanel northPanel = new JPanel(new BorderLayout());
+        northPanel.add(profilePanel, BorderLayout.NORTH);
+        northPanel.add(searchPanel, BorderLayout.SOUTH);
+        bodyPanel.add(northPanel, BorderLayout.NORTH);
 
         JTabbedPane tabbedPane = new JTabbedPane();
-        tabbedPane.setBorder(new JScrollPane().getBorder());
+        // No border around the tabbed pane itself
+
+        // Clear list before rebuilding UI (in case of re-init)
+        allPropertyRows.clear();
 
         // --- API Server Settings ---
         JPanel apiPanel = createCategoryPanel();
@@ -322,7 +429,18 @@ public class NodeConfigurationPanel extends JPanel {
         finalizeCategoryPanel(netPanel);
         tabbedPane.addTab("Network Constants", createScrollPane(netPanel));
 
-        add(tabbedPane, BorderLayout.CENTER);
+        // --- Content Container (CardLayout for Tabs vs Search Results) ---
+        contentCardLayout = new CardLayout();
+        contentContainer = new JPanel(contentCardLayout);
+
+        contentContainer.add(tabbedPane, "TABS");
+
+        searchResultsPanel = new JPanel(new MigLayout("fillx, insets 10, gap 5", "[][grow]", ""));
+        JScrollPane searchScrollPane = createScrollPane(searchResultsPanel);
+        contentContainer.add(searchScrollPane, "SEARCH");
+
+        bodyPanel.add(contentContainer, BorderLayout.CENTER);
+        add(bodyPanel, BorderLayout.CENTER);
 
         // --- Bottom Panel with Buttons and File Path ---
         JPanel bottomPanel = new JPanel(new BorderLayout(10, 0));
@@ -333,28 +451,43 @@ public class NodeConfigurationPanel extends JPanel {
 
         // File path field
         JLabel pathLabel = new JLabel("Configuration File: " + propertiesFile.toAbsolutePath().toString());
-        pathLabel.setForeground(Color.LIGHT_GRAY);
+        pathLabel.setForeground(GuiColors.getFaintText());
         bottomPanel.add(pathLabel, BorderLayout.CENTER);
 
         // Button panel
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
 
-        JButton resetBtn = new JButton("Reset to Saved Configuration");
+        resetBtn = new JButton("Reset to Saved Configuration");
         resetBtn.setFont(resetBtn.getFont().deriveFont(Font.BOLD));
-        resetBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.UNDO, 16, Color.BLACK));
+        resetBtn.setIcon(
+                IconFontSwing.buildIcon(FontAwesome.UNDO, GuiConstants.getHelpIconSize(), GuiColors.getButtonIcon()));
         resetBtn.addActionListener(e -> resetToCurrent());
 
-        JButton resetAppliedBtn = new JButton("Reset to Applied Configuration");
+        resetAppliedBtn = new JButton("Reset to Applied Configuration");
         resetAppliedBtn.setFont(resetAppliedBtn.getFont().deriveFont(Font.BOLD));
-        resetAppliedBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.HISTORY, 16, Color.BLACK));
+        resetAppliedBtn.setIcon(
+                IconFontSwing.buildIcon(FontAwesome.HISTORY, GuiConstants.getHelpIconSize(),
+                        GuiColors.getButtonIcon()));
         resetAppliedBtn.addActionListener(e -> resetToApplied());
 
-        JButton resetToDefaultBtn = new JButton("Reset to Default Configuration");
-        resetToDefaultBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.TRASH_O, 16, Color.BLACK));
-        resetToDefaultBtn.addActionListener(e -> {
+        JButton resetToAppDefaultsBtn = new JButton("Reset to Application Defaults");
+        resetToAppDefaultsBtn.setToolTipText(
+                "Resets all settings on this form to their initial application defaults, ignoring saved files or profiles.");
+        resetToAppDefaultsBtn.setIcon(
+                IconFontSwing.buildIcon(FontAwesome.REFRESH, GuiConstants.getHelpIconSize(),
+                        GuiColors.getButtonIcon()));
+        resetToAppDefaultsBtn.addActionListener(e -> resetToHardcodedDefaults());
+
+        JButton deleteConfigFileBtn = new JButton("Delete Config File");
+        deleteConfigFileBtn.setToolTipText(
+                "Deletes the content of the node.properties file to reset to application defaults on next restart.");
+        deleteConfigFileBtn.setIcon(
+                IconFontSwing.buildIcon(FontAwesome.TRASH_O, GuiConstants.getHelpIconSize(),
+                        GuiColors.getButtonIcon()));
+        deleteConfigFileBtn.addActionListener(e -> {
             int choice = JOptionPane.showConfirmDialog(this,
                     "This will delete the content of the configuration file (" + propertiesFile.getFileName()
-                            + ").\nAre you sure you want to proceed?",
+                            + ").\nThis action cannot be undone. Are you sure you want to proceed?",
                     "Confirm Deletion",
                     JOptionPane.YES_NO_OPTION,
                     JOptionPane.WARNING_MESSAGE);
@@ -382,12 +515,14 @@ public class NodeConfigurationPanel extends JPanel {
             }
         });
 
-        JButton saveBtn = new JButton("Save Configuration");
+        saveBtn = new JButton("Save Configuration");
         saveBtn.setFont(saveBtn.getFont().deriveFont(Font.BOLD));
-        saveBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.FLOPPY_O, 16, Color.BLACK));
+        saveBtn.setIcon(
+                IconFontSwing.buildIcon(FontAwesome.FLOPPY_O, GuiConstants.getHelpIconSize(),
+                        GuiColors.getButtonIcon()));
         saveBtn.addActionListener(e -> {
             performSave();
-            Object[] options = { "Restart and Apply Changes", "Cancel" };
+            Object[] options = { "OK", "Restart and Apply Changes" };
             int result = JOptionPane.showOptionDialog(this,
                     "Configuration saved successfully!",
                     "Success",
@@ -395,7 +530,7 @@ public class NodeConfigurationPanel extends JPanel {
                     JOptionPane.INFORMATION_MESSAGE,
                     null, options, options[0]);
 
-            if (result == 0) { // "Restart and Apply Changes"
+            if (result == 1) { // "Restart and Apply Changes"
                 if (restartAction != null) {
                     restartAction.run();
                 }
@@ -404,14 +539,103 @@ public class NodeConfigurationPanel extends JPanel {
 
         buttonPanel.add(resetAppliedBtn);
         buttonPanel.add(resetBtn);
-        buttonPanel.add(resetToDefaultBtn);
+        buttonPanel.add(resetToAppDefaultsBtn);
         buttonPanel.add(saveBtn);
+        buttonPanel.add(deleteConfigFileBtn);
+
+        JButton buttonBarHelpBtn = new HelpButton();
+        buttonBarHelpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        String buttonBarHelpText = "<html><body style='width: 350px'>"
+                + "<h2>Button Functions</h2>"
+                + "<ul>"
+                + "<li><b>Reset to Applied Configuration:</b> Reverts all settings on this form to the values that were active when the application was last started.</li>"
+                + "<li><b>Reset to Saved Configuration:</b> Reverts all settings on this form to the values currently saved in the <code>node.properties</code> file.</li>"
+                + "<li><b>Reset to Application Defaults:</b> Resets all settings on this form to their initial application defaults, ignoring any saved files or profiles.</li>"
+                + "<li><b>Save Configuration:</b> Saves the current settings to the <code>node.properties</code> file. A restart is required for changes to take effect.</li>"
+                + "<li><b>Delete Config File:</b> Deletes the content of the <code>node.properties</code> file. This will cause the application to use default settings on the next restart.</li>"
+                + "</ul>"
+                + "</body></html>";
+        buttonBarHelpBtn.setToolTipText("Click for more info about the buttons");
+        buttonBarHelpBtn
+                .addActionListener(e -> JOptionPane.showMessageDialog(this, buttonBarHelpText, "Button Functions",
+                        JOptionPane.INFORMATION_MESSAGE));
+        buttonPanel.add(buttonBarHelpBtn);
+
         bottomPanel.add(buttonPanel, BorderLayout.EAST);
-        add(bottomPanel, BorderLayout.SOUTH);
+
+        JPanel bottomContainer = new JPanel(new BorderLayout());
+        bottomContainer.add(new JSeparator(SwingConstants.HORIZONTAL), BorderLayout.NORTH);
+        bottomContainer.add(bottomPanel, BorderLayout.CENTER);
+        add(bottomContainer, BorderLayout.SOUTH);
+    }
+
+    @Override
+    public void updateUI() {
+        super.updateUI();
+        // Re-apply derived fonts using the new base font from the LookAndFeel
+        if (titleLabel != null) {
+            titleLabel.setFont(GuiFontManager.getBoldDefaultFont());
+        }
+        if (resetBtn != null) {
+            resetBtn.setFont(GuiFontManager.getBoldDefaultFont());
+        }
+        if (resetAppliedBtn != null) {
+            resetAppliedBtn.setFont(GuiFontManager.getBoldDefaultFont());
+        }
+        if (saveBtn != null) {
+            saveBtn.setFont(GuiFontManager.getBoldDefaultFont());
+        }
+
+        // Re-style input fields (borders and fonts)
+        if (allPropertyRows != null) {
+            allPropertyRows.forEach(row -> {
+                if (row.input != null)
+                    styleTextField(row.input);
+            });
+        }
+    }
+
+    private void filterProperties(String text) {
+        boolean isSearch = text != null && !text.trim().isEmpty();
+
+        if (isSearch) {
+            searchResultsPanel.removeAll();
+            String lowerText = text.toLowerCase();
+
+            for (PropertyRow row : allPropertyRows) {
+                if (row.prop.getName().toLowerCase().contains(lowerText) ||
+                        row.labelText.toLowerCase().contains(lowerText)) {
+
+                    searchResultsPanel.add(row.label, "align label");
+                    searchResultsPanel.add(row.input, "split 2, growx, height pref!");
+                    if (row.extra != null) {
+                        searchResultsPanel.add(row.extra, row.extraConstraints);
+                    }
+                    searchResultsPanel.add(row.help, "wrap");
+                    searchResultsPanel.add(row.separator, "span, growx, wrap, gaptop 2, gapbottom 2");
+                }
+            }
+            contentCardLayout.show(contentContainer, "SEARCH");
+        } else {
+            // Restore components to their original panels in order
+            for (PropertyRow row : allPropertyRows) {
+                row.originalParent.add(row.label, row.labelConstraints);
+                row.originalParent.add(row.input, row.inputConstraints);
+                if (row.extra != null) {
+                    row.originalParent.add(row.extra, row.extraConstraints);
+                }
+                row.originalParent.add(row.help, row.helpConstraints);
+                row.originalParent.add(row.separator, row.separatorConstraints);
+            }
+            contentCardLayout.show(contentContainer, "TABS");
+        }
+        revalidate();
+        repaint();
     }
 
     private void loadProfiles(JComboBox<String> comboBox) {
         try {
+            comboBox.addItem("Default");
             Path settingsPath = getGuiSettingsPath();
             if (Files.exists(settingsPath)) {
                 try (BufferedReader reader = Files.newBufferedReader(settingsPath)) {
@@ -422,8 +646,12 @@ public class NodeConfigurationPanel extends JPanel {
                             comboBox.addItem(profileName);
                         }
                     }
-                    if (settings.has("lastSelectedProfile")) {
-                        comboBox.setSelectedItem(settings.get("lastSelectedProfile").getAsString());
+                    String lastProfile = null;
+                    if (settings.has("lastSelectedNodeProfile")) {
+                        lastProfile = settings.get("lastSelectedNodeProfile").getAsString();
+                    }
+                    if (lastProfile != null) {
+                        comboBox.setSelectedItem(lastProfile);
                     }
                 }
             }
@@ -432,10 +660,12 @@ public class NodeConfigurationPanel extends JPanel {
         }
     }
 
-    private void saveProfile(String profileName) {
+    private void saveProfile() {
+        String currentProfile = (String) profileComboBox.getSelectedItem();
+        String suggestedName = ("Default".equals(currentProfile) || currentProfile == null) ? "" : currentProfile;
         String name = (String) JOptionPane.showInputDialog(this, "Enter profile name:", "Save Profile",
-                JOptionPane.PLAIN_MESSAGE, null, null, profileName);
-        if (name == null || name.trim().isEmpty())
+                JOptionPane.PLAIN_MESSAGE, null, null, suggestedName);
+        if (name == null || name.trim().isEmpty() || "Default".equalsIgnoreCase(name.trim()))
             return;
 
         try {
@@ -447,6 +677,11 @@ public class NodeConfigurationPanel extends JPanel {
                 }
             } else {
                 settings = new JsonObject();
+            }
+
+            // Cleanup old key for backward compatibility
+            if (settings.has("lastSelectedProfile")) {
+                settings.remove("lastSelectedProfile");
             }
 
             if (!settings.has("nodeConfigurationProfiles")) {
@@ -472,7 +707,7 @@ public class NodeConfigurationPanel extends JPanel {
             }
 
             profiles.add(name, profileData);
-            settings.addProperty("lastSelectedProfile", name);
+            settings.addProperty("lastSelectedNodeProfile", name);
 
             if (Files.notExists(settingsPath.getParent())) {
                 Files.createDirectories(settingsPath.getParent());
@@ -507,8 +742,38 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void loadProfile(String profileName) {
-        if (profileName == null || profileName.trim().isEmpty())
+        if (profileName == null || profileName.trim().isEmpty()) {
             return;
+        }
+
+        if ("Default".equals(profileName)) {
+            resetToHardcodedDefaults();
+            // Save "Default" as the last selected profile
+            try {
+                Path settingsPath = getGuiSettingsPath();
+                JsonObject settings;
+                if (Files.exists(settingsPath)) {
+                    try (BufferedReader reader = Files.newBufferedReader(settingsPath)) {
+                        settings = JsonParser.parseReader(reader).getAsJsonObject();
+                    } catch (Exception e) {
+                        settings = new JsonObject();
+                    }
+                } else {
+                    settings = new JsonObject();
+                }
+                // Cleanup old key for backward compatibility
+                if (settings.has("lastSelectedProfile")) {
+                    settings.remove("lastSelectedProfile");
+                }
+                settings.addProperty("lastSelectedNodeProfile", "Default");
+                try (BufferedWriter writer = Files.newBufferedWriter(settingsPath)) {
+                    new GsonBuilder().setPrettyPrinting().create().toJson(settings, writer);
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            return;
+        }
         try {
             Path settingsPath = getGuiSettingsPath();
             if (Files.exists(settingsPath)) {
@@ -525,7 +790,11 @@ public class NodeConfigurationPanel extends JPanel {
                             updateUIFromProperties(props);
 
                             // Update last selected
-                            settings.addProperty("lastSelectedProfile", profileName);
+                            // Cleanup old key for backward compatibility
+                            if (settings.has("lastSelectedProfile")) {
+                                settings.remove("lastSelectedProfile");
+                            }
+                            settings.addProperty("lastSelectedNodeProfile", profileName);
                             try (BufferedWriter writer = Files.newBufferedWriter(settingsPath)) {
                                 Gson gson = new GsonBuilder().setPrettyPrinting().create();
                                 writer.write(gson.toJson(settings));
@@ -541,15 +810,163 @@ public class NodeConfigurationPanel extends JPanel {
         }
     }
 
+    public void renameProfile(String oldProfileName) {
+        if (oldProfileName == null || oldProfileName.trim().isEmpty()) {
+            JOptionPane.showMessageDialog(this, "No profile selected to rename.", "Rename Profile",
+                    JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        String newProfileName = (String) JOptionPane.showInputDialog(
+                this,
+                "Enter new name for profile '" + oldProfileName + "':",
+                "Rename Profile",
+                JOptionPane.PLAIN_MESSAGE,
+                null,
+                null,
+                oldProfileName);
+
+        if (newProfileName == null || newProfileName.trim().isEmpty() || newProfileName.equals(oldProfileName)
+                || "Default".equalsIgnoreCase(newProfileName.trim())) {
+            return; // User cancelled or entered the same name
+        }
+
+        try {
+            Path settingsPath = getGuiSettingsPath();
+            JsonObject settings;
+            if (Files.exists(settingsPath)) {
+                try (BufferedReader reader = Files.newBufferedReader(settingsPath)) {
+                    settings = JsonParser.parseReader(reader).getAsJsonObject();
+                }
+            } else {
+                JOptionPane.showMessageDialog(this, "Settings file not found.", "Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            if (!settings.has("nodeConfigurationProfiles")) {
+                JOptionPane.showMessageDialog(this, "No profiles found in settings file.", "Error",
+                        JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            JsonObject profiles = settings.getAsJsonObject("nodeConfigurationProfiles");
+
+            if (profiles.has(newProfileName)) {
+                JOptionPane.showMessageDialog(this, "A profile with the name '" + newProfileName + "' already exists.",
+                        "Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            if (profiles.has(oldProfileName)) {
+                JsonElement profileData = profiles.remove(oldProfileName);
+                profiles.add(newProfileName, profileData);
+
+                // Update last selected profile, handling backward compatibility
+                boolean updated = false;
+                if (settings.has("lastSelectedNodeProfile")
+                        && settings.get("lastSelectedNodeProfile").getAsString().equals(oldProfileName)) {
+                    settings.addProperty("lastSelectedNodeProfile", newProfileName);
+                    updated = true;
+                }
+                if (settings.has("lastSelectedProfile")
+                        && settings.get("lastSelectedProfile").getAsString().equals(oldProfileName)) {
+                    settings.remove("lastSelectedProfile");
+                    if (!updated)
+                        settings.addProperty("lastSelectedNodeProfile", newProfileName);
+                }
+
+                try (BufferedWriter writer = Files.newBufferedWriter(settingsPath)) {
+                    Gson gson = new GsonBuilder().setPrettyPrinting().create();
+                    writer.write(gson.toJson(settings));
+                }
+
+                // Update combobox
+                profileComboBox.removeItem(oldProfileName);
+                profileComboBox.addItem(newProfileName);
+                profileComboBox.setSelectedItem(newProfileName);
+
+                JOptionPane.showMessageDialog(this,
+                        "Profile '" + oldProfileName + "' renamed to '" + newProfileName + "' successfully.", "Success",
+                        JOptionPane.INFORMATION_MESSAGE);
+            } else {
+                JOptionPane.showMessageDialog(this, "Profile '" + oldProfileName + "' not found.", "Error",
+                        JOptionPane.ERROR_MESSAGE);
+            }
+
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, "Error renaming profile: " + e.getMessage(), "Error",
+                    JOptionPane.ERROR_MESSAGE);
+            e.printStackTrace();
+        }
+    }
+
+    private void deleteProfile(String profileName) {
+        if (profileName == null || profileName.trim().isEmpty()) {
+            return;
+        }
+        if ("Default".equals(profileName)) {
+            JOptionPane.showMessageDialog(this, "The 'Default' profile cannot be deleted.", "Action Not Allowed",
+                    JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        int choice = JOptionPane.showConfirmDialog(this,
+                "Are you sure you want to delete profile '" + profileName + "'?",
+                "Confirm Deletion",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE);
+        if (choice != JOptionPane.YES_OPTION) {
+            return;
+        }
+
+        try {
+            Path settingsPath = getGuiSettingsPath();
+            if (Files.exists(settingsPath)) {
+                JsonObject settings;
+                try (BufferedReader reader = Files.newBufferedReader(settingsPath)) {
+                    settings = JsonParser.parseReader(reader).getAsJsonObject();
+                }
+
+                if (settings.has("nodeConfigurationProfiles")) {
+                    JsonObject profiles = settings.getAsJsonObject("nodeConfigurationProfiles");
+                    if (profiles.has(profileName)) {
+                        profiles.remove(profileName);
+                        if (settings.has("lastSelectedNodeProfile")
+                                && settings.get("lastSelectedNodeProfile").getAsString().equals(profileName)) {
+                            settings.remove("lastSelectedNodeProfile");
+                        }
+                        if (settings.has("lastSelectedProfile") // Backward compatibility
+                                && settings.get("lastSelectedProfile").getAsString().equals(profileName)) {
+                            settings.remove("lastSelectedProfile");
+                        }
+                        try (BufferedWriter writer = Files.newBufferedWriter(settingsPath)) {
+                            Gson gson = new GsonBuilder().setPrettyPrinting().create();
+                            writer.write(gson.toJson(settings));
+                        }
+                        profileComboBox.removeItem(profileName);
+                        JOptionPane.showMessageDialog(this, "Profile '" + profileName + "' deleted successfully.",
+                                "Success", JOptionPane.INFORMATION_MESSAGE);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, "Error deleting profile: " + e.getMessage(), "Error",
+                    JOptionPane.ERROR_MESSAGE);
+            e.printStackTrace();
+        }
+    }
+
     private void showProfileHelp() {
         String message = "<html><body style='width: 350px'>" +
                 "<h2>Configuration Profiles</h2>" +
                 "<p>Configuration Profiles allow you to save and load different sets of node configurations.</p>" +
                 "<ul>" +
-                "<li><b>Save Profile</b>: Saves the current settings from all tabs into a named profile. If you use an existing profile name, it will be overwritten after confirmation.</li>"
-                +
                 "<li><b>Load Profile</b>: Loads the settings from the selected profile in the dropdown, updating the fields in all tabs.</li>"
                 +
+                "<li><b>Save Profile</b>: Saves the current settings from all tabs into a named profile. If you use an existing profile name, it will be overwritten after confirmation.</li>"
+                +
+                "<li><b>Rename Profile</b>: Renames the currently selected profile.</li>" +
+                "<li><b>Delete Profile</b>: Deletes the currently selected profile after confirmation.</li>" +
                 "</ul>" +
                 "<p>Profiles are stored in the <code>gui-settings.json</code> file in your settings directory.</p>" +
                 "</body></html>";
@@ -684,8 +1101,11 @@ public class NodeConfigurationPanel extends JPanel {
 
     private void addProperty(JPanel panel, Prop<?> prop, String labelText, String[] options, boolean editable) {
         // Label
+        PropertyRow row = new PropertyRow(prop, labelText, panel);
         JLabel label = new JLabel(labelText + ":");
-        panel.add(label, "align label");
+        row.label = label;
+        row.labelConstraints = "align label";
+        panel.add(label, row.labelConstraints);
 
         // Input Component
         String currentValue = currentProperties.getProperty(prop.getName());
@@ -732,12 +1152,12 @@ public class NodeConfigurationPanel extends JPanel {
                     if (applied == null)
                         applied = getSafeDefault(prop);
 
-                    if (value != null && value.toString().equals(applied)) {
-                        c.setForeground(new Color(0, 128, 0));
-                    } else if (value != null && value.toString().equals(current)) {
-                        c.setForeground(Color.YELLOW);
+                    if (value != null && value.toString().equals(applied)) { // NOSONAR
+                        c.setForeground(GuiColors.getApplied());
+                    } else if (value != null && value.toString().equals(current)) { // NOSONAR
+                        c.setForeground(GuiColors.getSaved());
                     } else {
-                        c.setForeground(UIManager.getColor("text"));
+                        c.setForeground(GuiColors.getUnsaved());
                     }
                     return c;
                 }
@@ -773,28 +1193,39 @@ public class NodeConfigurationPanel extends JPanel {
 
         updateColor(inputComponent, prop.getName(), getSafeDefault(prop));
         if (inputComponent instanceof JCheckBox) {
-            panel.add(inputComponent, "split 2, height pref!");
+            row.inputConstraints = "split 2, height pref!";
+            panel.add(inputComponent, row.inputConstraints);
         } else {
-            panel.add(inputComponent, "split 2, growx, height pref!");
+            row.inputConstraints = "split 2, growx, height pref!";
+            panel.add(inputComponent, row.inputConstraints);
         }
         propertyComponents.put(prop.getName(), inputComponent);
 
         // Help Button
-        JButton helpBtn = new JButton(IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, 16, Color.LIGHT_GRAY));
-        helpBtn.setBorder(BorderFactory.createEmptyBorder());
-        helpBtn.setContentAreaFilled(false);
-        helpBtn.setFocusPainted(false);
+        JButton helpBtn = new HelpButton();
         helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         helpBtn.setToolTipText("Click for more info");
         helpBtn.addActionListener(e -> showHelp(prop, labelText));
-        panel.add(helpBtn, "wrap");
-        panel.add(new JSeparator(), "span, growx, wrap, gaptop 2, gapbottom 2");
+
+        row.input = inputComponent;
+        row.help = helpBtn;
+        row.helpConstraints = "wrap";
+        row.separator = new JSeparator();
+        row.separatorConstraints = "span, growx, wrap, gaptop 2, gapbottom 2";
+
+        panel.add(helpBtn, row.helpConstraints);
+        panel.add(row.separator, row.separatorConstraints);
+
+        allPropertyRows.add(row);
     }
 
     private void addPasswordProperty(JPanel panel, Prop<String> prop, String labelText) {
         // Label
+        PropertyRow row = new PropertyRow(prop, labelText, panel);
         JLabel label = new JLabel(labelText + ":");
-        panel.add(label, "align label");
+        row.label = label;
+        row.labelConstraints = "align label";
+        panel.add(label, row.labelConstraints);
 
         // Input Component
         String currentValue = currentProperties.getProperty(prop.getName());
@@ -826,34 +1257,44 @@ public class NodeConfigurationPanel extends JPanel {
             }
         });
         updateColor(passwordField, prop.getName(), getSafeDefault(prop));
-        panel.add(passwordField, "split 2, growx, height pref!");
+        row.inputConstraints = "split 2, growx, height pref!";
+        panel.add(passwordField, row.inputConstraints);
 
         // Help Button
-        JButton helpBtn = new JButton(IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, 16, Color.LIGHT_GRAY));
-        helpBtn.setBorder(BorderFactory.createEmptyBorder());
-        helpBtn.setContentAreaFilled(false);
-        helpBtn.setFocusPainted(false);
+        JButton helpBtn = new HelpButton();
         helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         helpBtn.setToolTipText("Click for more info");
         helpBtn.addActionListener(e -> showHelp(prop, labelText));
-        panel.add(helpBtn, "wrap");
+        row.help = helpBtn;
+        row.helpConstraints = "wrap";
+        panel.add(helpBtn, row.helpConstraints);
 
         // Show/Hide Checkbox
         JCheckBox showPass = new JCheckBox("Show Password");
         showPass.addActionListener(e -> {
             passwordField.setEchoChar(showPass.isSelected() ? (char) 0 : defaultEchoChar);
         });
-        panel.add(showPass, "skip 1, wrap");
+        row.extra = showPass;
+        row.extraConstraints = "skip 1, wrap";
+        panel.add(showPass, row.extraConstraints);
 
-        panel.add(new JSeparator(), "span, growx, wrap, gaptop 2, gapbottom 2");
+        row.separator = new JSeparator();
+        row.separatorConstraints = "span, growx, wrap, gaptop 2, gapbottom 2";
+        panel.add(row.separator, row.separatorConstraints);
 
         valueSuppliers.put(prop.getName(), () -> new String(passwordField.getPassword()));
         propertyComponents.put(prop.getName(), passwordField);
+
+        row.input = passwordField;
+        allPropertyRows.add(row);
     }
 
     private void addListProperty(JPanel panel, Prop<String> prop, String labelText) {
+        PropertyRow row = new PropertyRow(prop, labelText, panel);
         JLabel label = new JLabel(labelText + ":");
-        panel.add(label, "align label, aligny top");
+        row.label = label;
+        row.labelConstraints = "align label, aligny top";
+        panel.add(label, row.labelConstraints);
 
         String currentValue = currentProperties.getProperty(prop.getName());
         if (currentValue == null) {
@@ -899,7 +1340,9 @@ public class NodeConfigurationPanel extends JPanel {
             wrapper.setOpaque(false);
             wrapper.add(scrollPane, BorderLayout.CENTER);
 
-            JButton convertBtn = new JButton(IconFontSwing.buildIcon(FontAwesome.MAGIC, 16, Color.LIGHT_GRAY));
+            JButton convertBtn = new JButton(
+                    IconFontSwing.buildIcon(FontAwesome.MAGIC, GuiConstants.getHelpIconSize(),
+                            GuiColors.getHelpIcon()));
             convertBtn.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
             convertBtn.setContentAreaFilled(false);
             convertBtn.setFocusPainted(false);
@@ -912,22 +1355,29 @@ public class NodeConfigurationPanel extends JPanel {
             btnContainer.add(convertBtn);
             wrapper.add(btnContainer, BorderLayout.SOUTH);
 
-            panel.add(wrapper, "split 2, growx, hmin 80");
+            row.inputConstraints = "split 2, growx, hmin 80";
+            panel.add(wrapper, row.inputConstraints);
+            propertyComponents.put(prop.getName(), wrapper); // Store wrapper for visibility handling
         } else {
-            panel.add(scrollPane, "split 2, growx, hmin 80");
+            row.inputConstraints = "split 2, growx, hmin 80";
+            panel.add(scrollPane, row.inputConstraints);
+            propertyComponents.put(prop.getName(), scrollPane);
         }
-        propertyComponents.put(prop.getName(), scrollPane);
 
         // Help Button
-        JButton helpBtn = new JButton(IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE, 16, Color.LIGHT_GRAY));
-        helpBtn.setBorder(BorderFactory.createEmptyBorder());
-        helpBtn.setContentAreaFilled(false);
-        helpBtn.setFocusPainted(false);
+        JButton helpBtn = new HelpButton();
         helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         helpBtn.setToolTipText("Click for more info");
         helpBtn.addActionListener(e -> showHelp(prop, labelText));
-        panel.add(helpBtn, "wrap, aligny top");
-        panel.add(new JSeparator(), "span, growx, wrap, gaptop 2, gapbottom 2");
+        row.help = helpBtn;
+        row.helpConstraints = "wrap, aligny top";
+        panel.add(helpBtn, row.helpConstraints);
+        row.separator = new JSeparator();
+        row.separatorConstraints = "span, growx, wrap, gaptop 2, gapbottom 2";
+        panel.add(row.separator, row.separatorConstraints);
+
+        row.input = propertyComponents.get(prop.getName());
+        allPropertyRows.add(row);
 
         valueSuppliers.put(prop.getName(), () -> normalizeListValue(textArea.getText(), "\n"));
     }
@@ -1084,10 +1534,12 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void styleTextField(JComponent field) {
-        field.setFont(UIManager.getFont("TextField.font"));
-        field.setBorder(BorderFactory.createCompoundBorder(
-                UIManager.getBorder("TextField.border"),
-                BorderFactory.createEmptyBorder(4, 6, 4, 6)));
+        if (field instanceof JTextField || field instanceof JPasswordField) {
+            field.setFont(UIManager.getFont("TextField.font"));
+            field.setBorder(BorderFactory.createCompoundBorder(
+                    UIManager.getBorder("TextField.border"),
+                    BorderFactory.createEmptyBorder(4, 6, 4, 6)));
+        }
     }
 
     private void fixComponentSize(JComponent comp) {
@@ -1129,14 +1581,14 @@ public class NodeConfigurationPanel extends JPanel {
                     || "on".equalsIgnoreCase(current); // NOSONAR
             boolean appliedBool = "true".equalsIgnoreCase(applied) || "yes".equalsIgnoreCase(applied)
                     || "1".equals(applied) || "on".equalsIgnoreCase(applied); // NOSONAR
-            boolean valBool = Boolean.parseBoolean(value);
+            boolean valBool = "true".equalsIgnoreCase(value);
 
             if (valBool == appliedBool)
-                target.setForeground(new Color(0, 128, 0));
+                target.setForeground(GuiColors.getApplied());
             else if (valBool == curBool)
-                target.setForeground(Color.YELLOW);
+                target.setForeground(GuiColors.getSaved());
             else {
-                target.setForeground(UIManager.getColor("text"));
+                target.setForeground(GuiColors.getUnsaved());
             }
             return;
         } else if (comp instanceof JComboBox) {
@@ -1160,11 +1612,11 @@ public class NodeConfigurationPanel extends JPanel {
 
         Color color;
         if (value.equals(applied)) {
-            color = new Color(0, 128, 0);
+            color = GuiColors.getApplied();
         } else if (value.equals(current)) {
-            color = Color.YELLOW;
+            color = GuiColors.getSaved();
         } else {
-            color = UIManager.getColor("text");
+            color = GuiColors.getUnsaved();
         }
 
         if (target instanceof JTextPane) {
@@ -1181,13 +1633,9 @@ public class NodeConfigurationPanel extends JPanel {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 0));
         panel.setBorder(new EmptyBorder(0, 0, 5, 0));
 
-        Color defaultColor = UIManager.getColor("text");
-        if (defaultColor == null)
-            defaultColor = Color.BLACK;
-
-        panel.add(createLegendItem(defaultColor, "Unsaved values"));
-        panel.add(createLegendItem(Color.YELLOW, "Saved values"));
-        panel.add(createLegendItem(new Color(0, 128, 0), "Applied values"));
+        panel.add(createLegendItem(GuiColors.getUnsaved(), "Unsaved values"));
+        panel.add(createLegendItem(GuiColors.getSaved(), "Saved values"));
+        panel.add(createLegendItem(GuiColors.getApplied(), "Applied values"));
 
         return panel;
     }
@@ -1285,6 +1733,28 @@ public class NodeConfigurationPanel extends JPanel {
                 }
             }
         }
+    }
+
+    private void resetToHardcodedDefaults() {
+        for (Map.Entry<String, JComponent> entry : propertyComponents.entrySet()) {
+            String key = entry.getKey();
+            JComponent comp = entry.getValue();
+            String defaultValue = defaultValues.get(key); // This is the hardcoded default
+
+            if (comp instanceof JCheckBox) {
+                ((JCheckBox) comp).setSelected(Boolean.parseBoolean(defaultValue));
+            } else if (comp instanceof JComboBox) {
+                ((JComboBox<?>) comp).setSelectedItem(defaultValue);
+            } else if (comp instanceof javax.swing.text.JTextComponent) {
+                ((javax.swing.text.JTextComponent) comp).setText(defaultValue);
+            } else if (comp instanceof JScrollPane
+                    && ((JScrollPane) comp).getViewport().getView() instanceof JTextArea) {
+                ((JTextArea) ((JScrollPane) comp).getViewport().getView()).setText(defaultValue.replace(";", "\n"));
+            }
+            updateColor(comp, key, defaultValue);
+        }
+        JOptionPane.showMessageDialog(this, "All settings have been reset to their application defaults.",
+                "Reset Complete", JOptionPane.INFORMATION_MESSAGE);
     }
 
     private void showHelp(Prop<?> prop, String labelText) {
@@ -1808,7 +2278,11 @@ public class NodeConfigurationPanel extends JPanel {
 
         helpTexts.put(Props.EXPERIMENTAL.getName(),
                 "Enables experimental features that are not yet stable."
-                        + "<br>Use with caution.");
+                        + "<br>Use with caution."
+                        + "<br><br><b>Enabled Features:</b>"
+                        + "<ul>"
+                        + "<li><b>Time Tracking:</b> Displays <b>Total Time</b> (time since node start) and <b>Sync In Progress</b> (time spent actively syncing blocks) in the footer.</li>"
+                        + "</ul>");
 
         helpTexts.put(Props.MEASUREMENT_ACTIVE.getName(),
                 "Enables performance measurement and logging to CSV files in the 'measurement' directory.");
@@ -2119,5 +2593,32 @@ public class NodeConfigurationPanel extends JPanel {
 
         helpTexts.put(Props.DEV_NEXT_FORK_BLOCK_HEIGHT.getName(),
                 "The block height for the next development fork." + networkWarning);
+    }
+
+    private static class PropertyRow {
+        final Prop<?> prop;
+        final String labelText;
+        final JPanel originalParent;
+
+        JLabel label;
+        String labelConstraints;
+
+        JComponent input;
+        String inputConstraints;
+
+        JComponent extra; // Checkbox, MagicWand, etc.
+        String extraConstraints;
+
+        JButton help;
+        String helpConstraints;
+
+        JSeparator separator;
+        String separatorConstraints;
+
+        PropertyRow(Prop<?> prop, String labelText, JPanel originalParent) {
+            this.prop = prop;
+            this.labelText = labelText;
+            this.originalParent = originalParent;
+        }
     }
 }

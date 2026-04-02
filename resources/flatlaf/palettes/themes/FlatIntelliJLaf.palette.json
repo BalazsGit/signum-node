@@ -1,0 +1,4 @@
+{
+  "name": "FlatIntelliJLaf Specific Palette",
+  "_comment": "This file provides theme-specific color overrides for the 'FlatIntelliJLaf' Look and Feel. Colors defined here will be merged on top of the base 'flat-light.palette.json'. You only need to add keys for colors you want to change. Example: \"peer.connected\": \"#00AA00\""
+}
