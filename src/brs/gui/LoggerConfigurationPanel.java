@@ -406,23 +406,30 @@ public class LoggerConfigurationPanel extends JPanel {
     @Override
     public void updateUI() {
         super.updateUI();
-        // Re-apply derived fonts
+        // Re-apply derived fonts using central manager
         if (titleLabel != null) {
-            titleLabel.setFont(UIManager.getFont("Label.font").deriveFont(Font.BOLD, 16f));
+            titleLabel.setFont(GuiFontManager.getBoldDefaultFont());
         }
         if (resetBtn != null) {
-            resetBtn.setFont(UIManager.getFont("Button.font").deriveFont(Font.BOLD));
+            resetBtn.setFont(GuiFontManager.getBoldDefaultFont());
         }
         if (resetAppliedBtn != null) {
-            resetAppliedBtn.setFont(UIManager.getFont("Button.font").deriveFont(Font.BOLD));
+            resetAppliedBtn.setFont(GuiFontManager.getBoldDefaultFont());
         }
         if (saveBtn != null) {
-            saveBtn.setFont(UIManager.getFont("Button.font").deriveFont(Font.BOLD));
+            saveBtn.setFont(GuiFontManager.getBoldDefaultFont());
         }
 
         // Re-style input fields
         if (allPropertyRows != null) {
-            allPropertyRows.forEach(row -> styleTextField(row.input));
+            for (PropertyRow row : allPropertyRows) {
+                if (row.propertyKey == null && row.label != null) {
+                    row.label.setFont(UIManager.getFont("Label.font").deriveFont(Font.BOLD));
+                }
+                if (row.input != null) {
+                    styleTextField(row.input);
+                }
+            }
         }
     }
 
@@ -1208,7 +1215,7 @@ public class LoggerConfigurationPanel extends JPanel {
     private void addSectionHeader(JPanel panel, String title, boolean isFirst) {
         PropertyRow row = new PropertyRow(null, title, panel);
         JLabel label = new JLabel(title);
-        label.setFont(new Font(label.getFont().getName(), Font.BOLD, 14));
+        label.setFont(UIManager.getFont("Label.font").deriveFont(Font.BOLD));
         label.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, GuiColors.getSeparator()));
 
         row.label = label;

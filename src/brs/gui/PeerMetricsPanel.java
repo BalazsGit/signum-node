@@ -1067,8 +1067,7 @@ public class PeerMetricsPanel extends JPanel {
     }
 
     private static void setupProgressBarFont(JProgressBar bar) {
-        bar.setFont(UIManager.getFont("Label.font"));
-        bar.setStringPainted(true);
+        GuiFontManager.setupProgressBar(bar, null);
     }
 
     @Override
@@ -1086,6 +1085,24 @@ public class PeerMetricsPanel extends JPanel {
         }
         if (overviewChartPanel != null) {
             updateOverviewChartColors();
+        }
+        updateChartFonts();
+    }
+
+    private void updateChartFonts() {
+        Font font = UIManager.getFont("Label.font");
+        if (font == null)
+            return;
+
+        // Ensure chartPanels is initialized and not empty before iterating
+        if (chartPanels != null && !chartPanels.isEmpty()) {
+            for (ChartPanel cp : chartPanels.values()) {
+                GuiFontManager.applyFontToChart(cp.getChart(), font);
+            }
+        }
+        // Ensure overviewChartPanel is initialized before applying font
+        if (overviewChartPanel != null) {
+            GuiFontManager.applyFontToChart(overviewChartPanel.getChart(), font);
         }
     }
 
@@ -1853,15 +1870,7 @@ public class PeerMetricsPanel extends JPanel {
                 // Re-apply strikethrough if this is a toggle-able label
                 Object visibleProp = getClientProperty("visible");
                 if (visibleProp instanceof Boolean) {
-                    boolean isVisible = (Boolean) visibleProp;
-                    Font font = getFont();
-                    Map<TextAttribute, Object> attributes = new HashMap<>(font.getAttributes());
-                    if (!isVisible) {
-                        attributes.put(TextAttribute.STRIKETHROUGH, TextAttribute.STRIKETHROUGH_ON);
-                    } else {
-                        attributes.remove(TextAttribute.STRIKETHROUGH);
-                    }
-                    setFont(new javax.swing.plaf.FontUIResource(font.deriveFont(attributes)));
+                    GuiFontManager.updateLabelStrikethrough(this, (Boolean) visibleProp);
                 }
             }
         };

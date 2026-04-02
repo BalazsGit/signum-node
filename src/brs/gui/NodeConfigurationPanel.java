@@ -574,21 +574,24 @@ public class NodeConfigurationPanel extends JPanel {
         super.updateUI();
         // Re-apply derived fonts using the new base font from the LookAndFeel
         if (titleLabel != null) {
-            titleLabel.setFont(UIManager.getFont("Label.font").deriveFont(Font.BOLD, 16f));
+            titleLabel.setFont(GuiFontManager.getBoldDefaultFont());
         }
         if (resetBtn != null) {
-            resetBtn.setFont(UIManager.getFont("Button.font").deriveFont(Font.BOLD));
+            resetBtn.setFont(GuiFontManager.getBoldDefaultFont());
         }
         if (resetAppliedBtn != null) {
-            resetAppliedBtn.setFont(UIManager.getFont("Button.font").deriveFont(Font.BOLD));
+            resetAppliedBtn.setFont(GuiFontManager.getBoldDefaultFont());
         }
         if (saveBtn != null) {
-            saveBtn.setFont(UIManager.getFont("Button.font").deriveFont(Font.BOLD));
+            saveBtn.setFont(GuiFontManager.getBoldDefaultFont());
         }
 
         // Re-style input fields (borders and fonts)
         if (allPropertyRows != null) {
-            allPropertyRows.forEach(row -> styleTextField(row.input));
+            allPropertyRows.forEach(row -> {
+                if (row.input != null)
+                    styleTextField(row.input);
+            });
         }
     }
 

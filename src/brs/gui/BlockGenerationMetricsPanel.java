@@ -644,7 +644,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
             @Override
             public void updateUI() {
                 super.updateUI();
-                updateLabelStrikethrough(this, showNodeShare);
+                GuiFontManager.updateLabelStrikethrough(this, showNodeShare);
             }
         };
         nodeShareLegendLabel.setForeground(GuiColors.getBlockGenNodeShareLegend());
@@ -673,7 +673,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
             @Override
             public void updateUI() {
                 super.updateUI();
-                updateLabelStrikethrough(this, showNetworkShare);
+                GuiFontManager.updateLabelStrikethrough(this, showNetworkShare);
             }
         };
         networkShareLegendLabel.setForeground(GuiColors.getBlockGenNetworkShareLegend());
@@ -2305,15 +2305,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 // Re-apply strikethrough if this is a toggle-able label
                 Object visibleProp = getClientProperty("visible");
                 if (visibleProp instanceof Boolean) {
-                    boolean isVisible = (Boolean) visibleProp;
-                    Font font = getFont();
-                    Map<TextAttribute, Object> attributes = new HashMap<>(font.getAttributes());
-                    if (!isVisible) {
-                        attributes.put(TextAttribute.STRIKETHROUGH, TextAttribute.STRIKETHROUGH_ON);
-                    } else {
-                        attributes.remove(TextAttribute.STRIKETHROUGH);
-                    }
-                    setFont(new javax.swing.plaf.FontUIResource(font.deriveFont(attributes)));
+                    GuiFontManager.updateLabelStrikethrough(this, (Boolean) visibleProp);
                 }
             }
         };
@@ -2341,21 +2333,16 @@ public class BlockGenerationMetricsPanel extends JPanel {
     private JProgressBar createProgressBar(int min, int max, Color color, String initialString, Dimension size) {
         JProgressBar bar = new JProgressBar(min, max);
         if (color != null) {
-            bar.setBackground(color);
+            bar.setForeground(color);
         }
         bar.setBorder(BorderFactory.createEmptyBorder());
         bar.setPreferredSize(size);
         bar.setMinimumSize(size);
         bar.setString(initialString);
         bar.setValue(min);
-        setupProgressBarFont(bar);
+        GuiFontManager.setupProgressBar(bar, null);
         allProgressBars.add(bar);
         return bar;
-    }
-
-    private static void setupProgressBarFont(JProgressBar bar) {
-        bar.setFont(UIManager.getFont("Label.font"));
-        bar.setStringPainted(true);
     }
 
     private final List<JProgressBar> allProgressBars = new ArrayList<>();
@@ -2365,7 +2352,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
         super.updateUI();
         if (allProgressBars != null) {
             for (JProgressBar bar : allProgressBars) {
-                setupProgressBarFont(bar);
+                GuiFontManager.setupProgressBar(bar, null);
             }
         }
         // After a Look and Feel change, chart colors are not automatically updated.
@@ -2379,6 +2366,21 @@ public class BlockGenerationMetricsPanel extends JPanel {
             if (data != null) {
                 updatePieChartUI(data);
             }
+        }
+        updateChartFonts();
+    }
+
+    private void updateChartFonts() {
+        Font font = UIManager.getFont("Label.font");
+        if (font == null)
+            return;
+
+        if (chartPanel != null && chartPanel.getChart() != null) {
+            GuiFontManager.applyFontToChart(chartPanel.getChart(), font);
+        }
+
+        if (pieChartPanel != null && pieChartPanel.getChart() != null) {
+            GuiFontManager.applyFontToChart(pieChartPanel.getChart(), font);
         }
     }
 
@@ -2459,19 +2461,12 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
     private void updateNodeShareLegend(double percent) {
         nodeShareLegendLabel.setText(String.format("Node Share: %.2f%%", percent));
-        updateLabelStrikethrough(nodeShareLegendLabel, showNodeShare);
+        GuiFontManager.updateLabelStrikethrough(nodeShareLegendLabel, showNodeShare);
     }
 
     private void updateNetworkShareLegend(double percent) {
         networkShareLegendLabel.setText(String.format("Network Share: %.2f%%", percent));
-        updateLabelStrikethrough(networkShareLegendLabel, showNetworkShare);
-    }
-
-    private void updateLabelStrikethrough(JLabel label, boolean visible) {
-        Font font = label.getFont();
-        Map<TextAttribute, Object> attributes = new HashMap<>(font.getAttributes());
-        attributes.put(TextAttribute.STRIKETHROUGH, visible ? null : TextAttribute.STRIKETHROUGH_ON);
-        label.setFont(new javax.swing.plaf.FontUIResource(font.deriveFont(attributes)));
+        GuiFontManager.updateLabelStrikethrough(networkShareLegendLabel, showNetworkShare);
     }
 
     private static String toHex(Color color) {

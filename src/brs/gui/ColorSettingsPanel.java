@@ -1,6 +1,7 @@
 package brs.gui;
 
 import brs.gui.util.HelpButton;
+import com.formdev.flatlaf.extras.FlatAnimatedLafChange;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
@@ -29,9 +30,12 @@ public class ColorSettingsPanel extends JPanel {
     private JPanel searchResultsPanel;
     private CardLayout contentCardLayout;
     private JPanel contentContainer;
+    private final Map<String, String> descriptions = new HashMap<>();
 
     public ColorSettingsPanel() {
         super(new BorderLayout());
+
+        initDescriptions();
 
         // Get all possible color keys from the default palette
         this.allColorKeys = new ArrayList<>(ColorPaletteManager.getAllKeys());
@@ -110,19 +114,98 @@ public class ColorSettingsPanel extends JPanel {
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         JButton applyButton = new JButton("Apply Changes");
         applyButton.addActionListener(e -> {
+            FlatAnimatedLafChange.showSnapshot();
             ColorPaletteManager.applyOverrides(currentOverrides);
+            FlatAnimatedLafChange.hideSnapshotWithAnimation();
         });
         buttonPanel.add(applyButton);
 
         JButton resetButton = new JButton("Reset to Profile Defaults");
         resetButton.addActionListener(e -> {
+            FlatAnimatedLafChange.showSnapshot();
             currentOverrides.clear();
             currentOverrides.putAll(loadedProfileOverrides);
             ColorPaletteManager.applyOverrides(currentOverrides);
+            FlatAnimatedLafChange.hideSnapshotWithAnimation();
         });
         buttonPanel.add(resetButton);
 
         add(buttonPanel, BorderLayout.SOUTH);
+    }
+
+    private void initDescriptions() {
+        descriptions.put("applied",
+                "Color used to indicate settings that are currently active/applied in configuration panels.");
+        descriptions.put("saved",
+                "Color used to indicate settings that are saved in the configuration file but may not be currently applied.");
+
+        // Peer Metrics
+        descriptions.put("peer.disconnected", "Color for peers that are currently disconnected.");
+        descriptions.put("peer.outdated.version", "Color indicating a peer running an outdated version.");
+        descriptions.put("peer.up-to-date.version", "Color indicating a peer running the latest version.");
+        descriptions.put("peer.outdated.height", "Color indicating a peer that is behind in block height.");
+        descriptions.put("peer.up-to-date.height", "Color indicating a peer that is fully synced.");
+        descriptions.put("peer.other.response.time", "Chart line color for 'Other' request response times.");
+        descriptions.put("peer.blacklisted", "Color for blacklisted peers.");
+        descriptions.put("peer.min.response.time", "Chart line color for minimum response time.");
+        descriptions.put("peer.max.response.time", "Chart line color for maximum response time.");
+        descriptions.put("peer.rx.response.time", "Chart line color for Received (RX) block response time.");
+        descriptions.put("peer.rx.count", "Chart bar color for Received (RX) block count.");
+        descriptions.put("peer.tx.response.time", "Chart line color for Transmitted (TX) block response time.");
+        descriptions.put("peer.tx.count", "Chart bar color for Transmitted (TX) block count.");
+        descriptions.put("peer.other.count", "Chart bar color for 'Other' request count.");
+        descriptions.put("peer.connected", "Color indicating a connected peer state.");
+        descriptions.put("peer.active", "Color indicating an active peer (communicating).");
+        descriptions.put("peer.all", "Color representing all known peers in charts.");
+
+        // Block Generation
+        descriptions.put("blockgen.network.size", "Chart line color for estimated network size.");
+        descriptions.put("blockgen.commitment", "Chart line color for network commitment (SIGNA/TB).");
+        descriptions.put("blockgen.base.target", "Chart line color for base target.");
+        descriptions.put("blockgen.node.miners", "Chart line color for total miners connected to this node.");
+        descriptions.put("blockgen.network.miners", "Chart line color for estimated total network miners.");
+        descriptions.put("blockgen.active.miner",
+                "Color for active miners (submitted nonce recently) in charts and tables.");
+        descriptions.put("blockgen.deadlines.rx", "Chart line color for received deadlines count.");
+        descriptions.put("blockgen.node.share", "Chart line color for this node's share of mined blocks.");
+        descriptions.put("blockgen.chain.deadline", "Chart bar color for the accepted chain deadline.");
+        descriptions.put("blockgen.chain.deadline.ma",
+                "Chart line color for the moving average of accepted chain deadlines.");
+        descriptions.put("blockgen.node.deadline.ma",
+                "Chart line color for the moving average of this node's best deadlines.");
+        descriptions.put("blockgen.node.share.legend", "Color for the 'Node Share' legend label.");
+        descriptions.put("blockgen.network.share.legend", "Color for the 'Network Share' legend label.");
+        descriptions.put("blockgen.pie.others", "Pie chart slice color for 'Others' category.");
+        descriptions.put("blockgen.pie.waiting", "Pie chart slice color when waiting for blocks.");
+        descriptions.put("blockgen.pie.filtered", "Pie chart slice color for filtered data.");
+
+        // Synchronization
+        descriptions.put("sync.system.tx.per.block", "Chart bar color for system transactions per block.");
+        descriptions.put("sync.all.tx.per.block", "Chart bar color for all transactions per block.");
+        descriptions.put("sync.upload.volume", "Chart fill color for upload volume.");
+        descriptions.put("sync.download.volume", "Chart fill color for download volume.");
+        descriptions.put("sync.push.time", "Chart line color for block push time.");
+        descriptions.put("sync.validation.time", "Chart line color for validation time.");
+        descriptions.put("sync.tx.loop.time", "Chart line color for transaction loop time.");
+        descriptions.put("sync.housekeeping.time", "Chart line color for housekeeping time.");
+        descriptions.put("sync.tx.apply.time", "Chart line color for transaction application time.");
+        descriptions.put("sync.at.time", "Chart line color for AT processing time.");
+        descriptions.put("sync.subscription.time", "Chart line color for subscription processing time.");
+        descriptions.put("sync.block.apply.time", "Chart line color for block application time.");
+        descriptions.put("sync.commit.time", "Chart line color for database commit time.");
+        descriptions.put("sync.misc.time", "Chart line color for miscellaneous processing time.");
+        descriptions.put("sync.payload.fullness", "Chart line color for payload fullness percentage.");
+        descriptions.put("sync.blocks.per.sec", "Chart line color for blocks processed per second.");
+        descriptions.put("sync.all.tx.per.sec", "Chart line color for all transactions processed per second.");
+        descriptions.put("sync.system.tx.per.sec", "Chart line color for system transactions processed per second.");
+        descriptions.put("sync.at.count.per.block", "Chart line color for ATs per block.");
+        descriptions.put("sync.upload.speed", "Chart line color for upload speed.");
+        descriptions.put("sync.download.speed", "Chart line color for download speed.");
+
+        // GUI
+        descriptions.put("gui.contrast.red", "Used for high-contrast error messages or alerts.");
+        descriptions.put("gui.status.consistent", "Used to indicate a consistent state (e.g. DB consistent).");
+        descriptions.put("gui.help.icon", "Color of the question mark help icons.");
     }
 
     private String getCategoryForKey(String key) {
@@ -144,7 +227,7 @@ public class ColorSettingsPanel extends JPanel {
             return;
         }
 
-        JPanel mainPanel = new JPanel(new MigLayout("insets 10, gapx 15", "[][][][]", ""));
+        JPanel mainPanel = new JPanel(new MigLayout("insets 10, gapx 15", "[][][][][]", ""));
 
         for (String key : keys) {
             ColorRow row = new ColorRow(key, mainPanel);
@@ -208,8 +291,20 @@ public class ColorSettingsPanel extends JPanel {
                     ColorPaletteManager.applyOverrides(currentOverrides);
                 }
             });
-            mainPanel.add(editButton, "wrap");
+            mainPanel.add(editButton);
             row.editButton = editButton;
+
+            JButton rowHelpButton = new HelpButton();
+            rowHelpButton.setToolTipText("What is this?");
+            rowHelpButton.addActionListener(e -> {
+                String desc = descriptions.getOrDefault(key, "No description available for " + key);
+                JOptionPane.showMessageDialog(this,
+                        "<html><body style='width:300px;'><p>" + desc + "</p></body></html>",
+                        "Color Information: " + key, JOptionPane.INFORMATION_MESSAGE);
+            });
+            mainPanel.add(rowHelpButton, "wrap");
+            row.helpButton = rowHelpButton;
+
             allColorRows.add(row);
         }
 
@@ -281,7 +376,8 @@ public class ColorSettingsPanel extends JPanel {
                     searchResultsPanel.add(row.keyLabel, "align label");
                     searchResultsPanel.add(row.previewPanel);
                     searchResultsPanel.add(row.valueLabel);
-                    searchResultsPanel.add(row.editButton, "wrap");
+                    searchResultsPanel.add(row.editButton);
+                    searchResultsPanel.add(row.helpButton, "wrap");
                 }
             }
             contentCardLayout.show(contentContainer, "SEARCH");
@@ -290,7 +386,8 @@ public class ColorSettingsPanel extends JPanel {
                 row.originalParent.add(row.keyLabel, "align label");
                 row.originalParent.add(row.previewPanel);
                 row.originalParent.add(row.valueLabel);
-                row.originalParent.add(row.editButton, "wrap");
+                row.originalParent.add(row.editButton);
+                row.originalParent.add(row.helpButton, "wrap");
             }
             contentCardLayout.show(contentContainer, "TABS");
         }
@@ -314,6 +411,7 @@ public class ColorSettingsPanel extends JPanel {
         JPanel previewPanel;
         JLabel valueLabel;
         JButton editButton;
+        JButton helpButton;
 
         ColorRow(String key, JPanel originalParent) {
             this.key = key;

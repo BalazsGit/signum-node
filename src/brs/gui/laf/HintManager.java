@@ -106,7 +106,7 @@ class HintManager {
             if (UIManager.getLookAndFeel() instanceof FlatLaf)
                 setBackground(UIManager.getColor("HintPanel.backgroundColor"));
             else {
-                // using nonUIResource() because otherwise Nimbus does not fill the background
+                // using nonUIResource() to ensure background is filled on standard LaFs
                 setBackground(FlatUIUtils.nonUIResource(UIManager.getColor("info")));
             }
 

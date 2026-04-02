@@ -2,7 +2,6 @@ package brs.gui;
 
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLaf;
-import com.formdev.flatlaf.extras.FlatAnimatedLafChange;
 import com.formdev.flatlaf.util.SystemInfo;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -49,6 +48,7 @@ import java.awt.geom.Rectangle2D;
 import javax.swing.JButton;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JCheckBox;
+import javax.swing.UIDefaults;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLayeredPane;
@@ -70,6 +70,8 @@ import javax.swing.UIManager;
 import javax.swing.JPopupMenu;
 import javax.swing.UIDefaults;
 import javax.swing.plaf.FontUIResource;
+import java.util.Set;
+import java.util.HashSet;
 import javax.swing.text.DefaultCaret;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.Element;
@@ -121,6 +123,22 @@ public class SignumGUI extends JFrame {
     private static PrintStream ORIGINAL_ERR;
     private static String[] args;
 
+    static {
+        // Enable and set duration for theme transition animations early
+        System.setProperty("flatlaf.lafChangeAnimationDuration", "400");
+    }
+
+    private static Font activeCustomFont;
+    private static Font activeConsoleFont;
+
+    public static Font getActiveCustomFont() {
+        return activeCustomFont;
+    }
+
+    public static Font getActiveConsoleFont() {
+        return activeConsoleFont != null ? activeConsoleFont : activeCustomFont;
+    }
+
     private static Path getGuiSettingsPath(String[] args) {
         String confFolder = Signum.CONF_FOLDER;
         try {
@@ -150,6 +168,8 @@ public class SignumGUI extends JFrame {
         Path settingsPath = getGuiSettingsPath(args);
         String themeClassName = FlatDarkLaf.class.getName(); // Default theme
         Map<String, Color> colorOverrides = null;
+        Font fontToApply = null;
+        Font consoleFontToApply = null;
 
         if (Files.exists(settingsPath)) {
             try (java.io.BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
@@ -178,9 +198,14 @@ public class SignumGUI extends JFrame {
                                 String family = fontSettings.get("family").getAsString();
                                 int style = fontSettings.get("style").getAsInt();
                                 int size = fontSettings.get("size").getAsInt();
-                                Font font = new Font(family, style, size);
-                                UIManager.put("defaultFont", font);
-                                updateCommonFontKeys(font);
+                                fontToApply = new Font(family, style, size);
+                            }
+                            if (profileSettings.has("consoleFont")) {
+                                JsonObject fontSettings = profileSettings.getAsJsonObject("consoleFont");
+                                String family = fontSettings.get("family").getAsString();
+                                int style = fontSettings.get("style").getAsInt();
+                                int size = fontSettings.get("size").getAsInt();
+                                consoleFontToApply = new Font(family, style, size);
                             }
                             if (profileSettings.has("colorOverrides")) {
                                 colorOverrides = parseColorOverrides(profileSettings.getAsJsonObject("colorOverrides"));
@@ -196,9 +221,14 @@ public class SignumGUI extends JFrame {
                             String family = fontSettings.get("family").getAsString();
                             int style = fontSettings.get("style").getAsInt();
                             int size = fontSettings.get("size").getAsInt();
-                            Font font = new Font(family, style, size);
-                            UIManager.put("defaultFont", font);
-                            updateCommonFontKeys(font);
+                            fontToApply = new Font(family, style, size);
+                        }
+                        if (lafSettings.has("consoleFont")) {
+                            JsonObject fontSettings = lafSettings.getAsJsonObject("consoleFont");
+                            String family = fontSettings.get("family").getAsString();
+                            int style = fontSettings.get("style").getAsInt();
+                            int size = fontSettings.get("size").getAsInt();
+                            consoleFontToApply = new Font(family, style, size);
                         }
                     }
                 }
@@ -215,10 +245,9 @@ public class SignumGUI extends JFrame {
         FlatLaf.registerCustomDefaultsSource(packageName);
 
         try {
-            if (themeClassName.contains("NimbusLookAndFeel")) {
-                setupLegacyNimbus();
-            }
             UIManager.setLookAndFeel(themeClassName);
+            updateCommonFontKeys(fontToApply);
+            updateCommonConsoleFontKeys(consoleFontToApply);
             ColorPaletteManager.updatePalette(colorOverrides);
         } catch (Exception e) {
             LOGGER.error("Failed to set Look and Feel, falling back to FlatDarkLaf.", e);
@@ -227,28 +256,22 @@ public class SignumGUI extends JFrame {
         }
     }
 
-    private static void updateCommonFontKeys(Font font) {
-        String[] fontKeys = {
-                "ProgressBar.font", "Label.font", "Button.font", "CheckBox.font",
-                "RadioButton.font", "ComboBox.font", "TextField.font",
-                "TextArea.font", "PasswordField.font", "TextPane.font",
-                "EditorPane.font", "TitledBorder.font", "Table.font", "TableHeader.font",
-                "ToolTip.font", "Tree.font", "List.font", "Menu.font", "MenuItem.font",
-                "CheckBoxMenuItem.font", "RadioButtonMenuItem.font" };
+    public static void updateCommonFontKeys(Font font) {
+        activeCustomFont = font;
+        GuiFontManager.updateUIManager(font);
+    }
 
-        if (font == null) {
-            // If font is null, reset to Look and Feel defaults
-            UIDefaults defaults = UIManager.getLookAndFeelDefaults();
-            for (String key : fontKeys) {
-                UIManager.put(key, defaults.getFont(key));
-            }
-            return;
-        }
+    public static void updateCommonConsoleFontKeys(Font font) {
+        activeConsoleFont = font;
+    }
 
-        FontUIResource uiFont = (font instanceof FontUIResource) ? (FontUIResource) font : new FontUIResource(font);
-        for (String key : fontKeys) {
-            UIManager.put(key, uiFont);
-        }
+    /**
+     * Recursively applies a font to all components in a container.
+     * Used as a fallback for LookAndFeels that don't correctly respond to UIManager
+     * key updates on live components.
+     */
+    private static void applyFontRecursively(Component comp, Font font) {
+        GuiFontManager.applyFontToTree(comp, font);
     }
 
     private static Map<String, Color> parseColorOverrides(JsonObject overridesJson) {
@@ -282,11 +305,15 @@ public class SignumGUI extends JFrame {
             overrides = new HashMap<>(LookAndFeelPanel.getInstance().getColorSettingsPanel().getCurrentOverrides());
         }
 
+        LookAndFeel laf = UIManager.getLookAndFeel();
+        LOGGER.info("Updating all UIs. Current LookAndFeel: {} ({})", laf.getName(), laf.getClass().getName());
+        logCurrentFonts("UI fonts BEFORE palette and font update");
+
         // 1. Update the color palette based on the current theme and overrides
         ColorPaletteManager.updatePalette(overrides);
 
         // 1b. Ensure all common UI fonts are linked to the active font
-        updateCommonFontKeys(UIManager.getFont("defaultFont"));
+        updateCommonFontKeys(activeCustomFont);
 
         // Capture window sizes before update to prevent auto-resizing (packing)
         // behavior
@@ -298,37 +325,75 @@ public class SignumGUI extends JFrame {
             }
         }
 
-        // 2. Animate Look and Feel change
-        FlatAnimatedLafChange.showSnapshot();
-        FlatLaf.updateUI();
-        FlatAnimatedLafChange.hideSnapshotWithAnimation();
+        if (laf instanceof FlatLaf) {
+            // FlatLaf.updateUI() internally handles the animated transition and updates all
+            // windows efficiently.
+            FlatLaf.updateUI();
+        } else {
+            // Manual update for non-FlatLaf themes (like Nimbus)
+            for (Window window : Window.getWindows()) {
+                if (window.isDisplayable()) {
+                    LOGGER.info("Refreshing window: {} ({})", window.getName(), window.getClass().getSimpleName());
+                    SwingUtilities.updateComponentTreeUI(window);
 
-        // Restore window sizes
-        for (Map.Entry<Window, Dimension> entry : windowSizes.entrySet()) {
-            if (entry.getKey().isDisplayable()) {
-                entry.getKey().setSize(entry.getValue());
+                    // Force font application for Standard L&F (excluding Nimbus per user request)
+                    if (activeCustomFont != null) {
+                        applyFontRecursively(window, activeCustomFont);
+                    }
+                }
             }
         }
 
-        // 3. Manually trigger updates for components that need more than a standard
-        // updateUI().
+        // Restore window sizes ONLY for non-FlatLaf themes (like Nimbus).
+        // FlatLaf handles its own UI updates smoothly. Calling setSize during
+        // a FlatLaf animation phase can cause flickering or cancel the transition.
+        if (!(laf instanceof FlatLaf)) {
+            for (Window window : Window.getWindows()) {
+                if (window.isDisplayable() && windowSizes.containsKey(window)) {
+                    window.setSize(windowSizes.get(window));
+                }
+            }
+        }
+
+        // 3. Specialized component updates
         if (instance != null) {
-            // Manually update console font
+            // Console font and content update
             if (instance.textScrollPane != null) {
                 JTextPane tp = (JTextPane) instance.textScrollPane.getViewport().getView();
-                if (tp != null) {
-                    tp.setFont(UIManager.getFont("TextPane.font"));
+                Font consoleFont = getActiveConsoleFont();
+                if (tp != null && consoleFont != null) {
+                    tp.setFont(consoleFont);
+                    // Update existing text in the StyledDocument
+                    StyledDocument doc = tp.getStyledDocument();
+                    SimpleAttributeSet attrs = new SimpleAttributeSet();
+                    StyleConstants.setFontFamily(attrs, consoleFont.getFamily());
+                    StyleConstants.setFontSize(attrs, consoleFont.getSize());
+                    doc.setCharacterAttributes(0, doc.getLength(), attrs, false);
                 }
             }
             instance.updateCustomComponents();
         }
 
-        // 4. Also update any open dialogs that might have custom components
-        for (Window window : Window.getWindows()) {
-            if (window instanceof JDialog && window.isShowing()) {
-                SwingUtilities.updateComponentTreeUI(window);
+        logCurrentFonts("UI fonts AFTER update");
+    }
+
+    /**
+     * Logs the current state of key UI fonts for debugging purposes.
+     */
+    private static void logCurrentFonts(String title) {
+        String[] keys = { "Label.font", "Button.font", "TextField.font", "TextPane.font",
+                "Table.font", "TableHeader.font", "TitledBorder.font", "defaultFont" };
+        StringBuilder sb = new StringBuilder(title).append(":");
+        for (String key : keys) {
+            Font f = UIManager.getFont(key);
+            if (f != null) {
+                sb.append("\n  ").append(key).append(": ").append(f.getFamily()).append(" ").append(f.getSize())
+                        .append(" (").append(f.getClass().getSimpleName()).append(")");
+            } else {
+                sb.append("\n  ").append(key).append(": null");
             }
         }
+        LOGGER.info(sb.toString());
     }
 
     private void updateCustomComponents() {
@@ -338,16 +403,28 @@ public class SignumGUI extends JFrame {
         updateTimeLabelIcons();
         updateVolumeLabelIcons();
 
+        LookAndFeel laf = UIManager.getLookAndFeel();
+        boolean isFlatLaf = laf instanceof FlatLaf;
+
         if (menuPanel != null) {
             SwingUtilities.updateComponentTreeUI(menuPanel);
             menuPanel.setBackground(UIManager.getColor("PopupMenu.background"));
             menuPanel.setBorder(UIManager.getBorder("PopupMenu.border"));
+            if (!isFlatLaf && activeCustomFont != null) {
+                applyFontRecursively(menuPanel, activeCustomFont);
+            }
         }
         if (menuPanelWrapper != null) {
             SwingUtilities.updateComponentTreeUI(menuPanelWrapper);
+            if (!isFlatLaf && activeCustomFont != null) {
+                applyFontRecursively(menuPanelWrapper, activeCustomFont);
+            }
         }
         if (commandPanel != null) {
             SwingUtilities.updateComponentTreeUI(commandPanel);
+            if (!isFlatLaf && activeCustomFont != null) {
+                applyFontRecursively(commandPanel, activeCustomFont);
+            }
         }
     }
 
@@ -1599,6 +1676,9 @@ public class SignumGUI extends JFrame {
                 }
             }
         }, AWTEvent.MOUSE_EVENT_MASK);
+
+        // Finalize custom component states (icons, fonts for Nimbus, etc.)
+        updateCustomComponents();
 
         // Start BRS
         new Thread(this::startSignumWithGUI).start();
@@ -2977,6 +3057,13 @@ public class SignumGUI extends JFrame {
                     color = new Color(100, 200, 200);
                 } else if (isError && !line.contains("INFO")) {
                     color = new Color(255, 100, 100);
+                }
+
+                // Apply the active custom font to new lines being appended to the console
+                Font activeFont = SignumGUI.getActiveConsoleFont();
+                if (activeFont != null) {
+                    StyleConstants.setFontFamily(attrs, activeFont.getFamily());
+                    StyleConstants.setFontSize(attrs, activeFont.getSize());
                 }
 
                 if (color != null) {

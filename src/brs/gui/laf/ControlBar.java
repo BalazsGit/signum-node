@@ -28,8 +28,8 @@ import java.awt.event.WindowEvent;
 import javax.swing.*;
 import javax.swing.UIManager.LookAndFeelInfo;
 import javax.swing.plaf.metal.MetalLookAndFeel;
-import javax.swing.plaf.nimbus.NimbusLookAndFeel;
 import com.formdev.flatlaf.*;
+import com.formdev.flatlaf.extras.FlatAnimatedLafChange;
 import com.formdev.flatlaf.themes.FlatMacDarkLaf;
 import com.formdev.flatlaf.themes.FlatMacLightLaf;
 import com.formdev.flatlaf.util.LoggingFacade;
@@ -77,7 +77,8 @@ class ControlBar
             String name = lookAndFeel.getName();
             String className = lookAndFeel.getClassName();
             if (className.equals("com.sun.java.swing.plaf.windows.WindowsClassicLookAndFeel") ||
-                    className.equals("com.sun.java.swing.plaf.motif.MotifLookAndFeel"))
+                    className.equals("com.sun.java.swing.plaf.motif.MotifLookAndFeel") ||
+                    className.toLowerCase().contains("nimbus"))
                 continue;
 
             if ((SystemInfo.isWindows && className.equals("com.sun.java.swing.plaf.windows.WindowsLookAndFeel")) ||
@@ -86,8 +87,6 @@ class ControlBar
                 name += " (F9)";
             else if (className.equals(MetalLookAndFeel.class.getName()))
                 name += " (F12)";
-            else if (className.equals(NimbusLookAndFeel.class.getName()))
-                name = "Legacy Theme (Nimbus) (F11)";
 
             lafModel.addElement(new LookAndFeelInfo(name, className));
         }
@@ -157,7 +156,6 @@ class ControlBar
             registerSwitchToLookAndFeel(KeyEvent.VK_F9, "com.apple.laf.AquaLookAndFeel");
         else if (SystemInfo.isLinux)
             registerSwitchToLookAndFeel(KeyEvent.VK_F9, "com.sun.java.swing.plaf.gtk.GTKLookAndFeel");
-        registerSwitchToLookAndFeel(KeyEvent.VK_F11, NimbusLookAndFeel.class.getName());
         registerSwitchToLookAndFeel(KeyEvent.VK_F12, MetalLookAndFeel.class.getName());
 
         // register Alt+UP and Alt+DOWN to switch to previous/next theme
@@ -259,16 +257,10 @@ class ControlBar
 
         EventQueue.invokeLater(() -> {
             try {
-                if (lafClassName.contains("NimbusLookAndFeel")) {
-                    SignumGUI.setupLegacyNimbus();
-                }
+                FlatAnimatedLafChange.showSnapshot();
 
                 // change look and feel
                 UIManager.setLookAndFeel(lafClassName);
-
-                // clear custom default font when switching to non-FlatLaf LaF
-                if (!(UIManager.getLookAndFeel() instanceof FlatLaf))
-                    UIManager.put("defaultFont", null);
 
                 // update all components
                 SignumGUI.updateAllUIs();
@@ -279,6 +271,7 @@ class ControlBar
                     window.pack();
                 }
 
+                FlatAnimatedLafChange.hideSnapshotWithAnimation();
             } catch (Exception ex) {
                 LoggingFacade.INSTANCE.logSevere(null, ex);
             }

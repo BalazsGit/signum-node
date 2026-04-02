@@ -179,8 +179,6 @@ public final class ColorPaletteManager {
         // 1. Determine base palette (light/dark)
         if (laf instanceof FlatLaf) {
             basePaletteName = ((FlatLaf) laf).isDark() ? "flat-dark" : "flat-light";
-        } else if (laf.getName().toLowerCase().contains("nimbus")) {
-            basePaletteName = "nimbus";
         } else {
             basePaletteName = "default";
         }
@@ -285,7 +283,7 @@ public final class ColorPaletteManager {
             activePalette = baseThemePalette;
         }
         // Force a UI update to apply the new colors everywhere
-        FlatLaf.updateUI();
+        SignumGUI.updateAllUIs();
     }
 
     /**

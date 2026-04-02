@@ -29,6 +29,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.prefs.Preferences;
 import javax.swing.*;
+import javax.swing.plaf.FontUIResource;
 import javax.swing.text.DefaultEditorKit;
 import com.formdev.flatlaf.FlatClientProperties;
 import com.formdev.flatlaf.FlatDarculaLaf;
@@ -70,6 +71,8 @@ public class FlatLafPanel
     private final String[] availableFontFamilyNames;
     private int initialFontMenuItemCount = -1;
     private Runnable closeAction;
+    private Font customFont;
+    private Font customConsoleFont;
 
     public FlatLafPanel() {
         super(new BorderLayout());
@@ -119,6 +122,34 @@ public class FlatLafPanel
         this.closeAction = closeAction;
     }
 
+    @Override
+    public void updateUI() {
+        super.updateUI();
+        customFont = SignumGUI.getActiveCustomFont();
+        customConsoleFont = SignumGUI.getActiveConsoleFont();
+        if (themesPanel != null) {
+            Font fontToApply = customFont != null ? customFont : UIManager.getFont("Label.font");
+
+            // Force the themesPanel to use the current font
+            themesPanel.setFont(fontToApply);
+
+            // Attempt to find the internal JList (assuming it's within a JScrollPane)
+            // and set its font directly to ensure the renderer picks it up.
+            for (Component comp : themesPanel.getComponents()) {
+                if (comp instanceof JScrollPane) {
+                    Component view = ((JScrollPane) comp).getViewport().getView();
+                    if (view instanceof JList) {
+                        ((JList<?>) view).setFont(fontToApply);
+                        ((JList<?>) view).updateUI(); // Force update of the list's UI and renderer
+                        break;
+                    }
+                }
+            }
+            // Propagate UI update to all sub-components of themesPanel
+            SwingUtilities.updateComponentTreeUI(themesPanel);
+        }
+    }
+
     public void dispose() {
         FlatUIDefaultsInspector.hide();
     }
@@ -126,7 +157,7 @@ public class FlatLafPanel
     private void showHints() {
         Hint fontMenuHint = new Hint(
                 "Use 'Font' menu to increase/decrease font size or try different fonts.",
-                fontMenu, SwingConstants.BOTTOM, "hint.fontMenu", null);
+                globalFontMenu, SwingConstants.BOTTOM, "hint.fontMenu", null);
 
         Hint optionsMenuHint = new Hint(
                 "Use 'Options' menu to try out various FlatLaf options.",
@@ -406,69 +437,191 @@ public class FlatLafPanel
             FlatLaf.updateUI();
     }
 
-    private void fontFamilyChanged(ActionEvent e) {
-        String fontFamily = e.getActionCommand();
+    private void selectMoreFonts(ActionEvent e, boolean isConsole) {
+        Font targetFont = isConsole ? customConsoleFont : customFont;
+        if (targetFont == null)
+            targetFont = UIManager.getFont("Label.font");
 
+        String currentFamily = targetFont.getFamily();
+        Font originalFont = targetFont;
+
+        JList<String> list = new JList<>(availableFontFamilyNames);
+        list.setSelectedValue(currentFamily, true);
+        list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        list.setCellRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected,
+                    boolean cellHasFocus) {
+                String fontFamily = (String) value;
+                String text = "<html>" + fontFamily + " - <span style=\"font-family:'" + fontFamily
+                        + "'\">font example</span></html>";
+                return super.getListCellRendererComponent(list, text, index, isSelected, cellHasFocus);
+            }
+        });
+
+        list.addListSelectionListener(ev -> {
+            if (!ev.getValueIsAdjusting() && list.getSelectedValue() != null) {
+                applyFont(list.getSelectedValue(), list, isConsole);
+            }
+        });
+
+        int result = JOptionPane.showConfirmDialog(this, new JScrollPane(list),
+                "Select " + (isConsole ? "Console" : "Global") + " Font Family",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+
+        if (result != JOptionPane.OK_OPTION) {
+            resetFont(originalFont, isConsole);
+        }
+    }
+
+    private void applyFont(String fontFamily, Component invoker, boolean isConsole) {
         FlatAnimatedLafChange.showSnapshot();
 
-        Font font = UIManager.getFont("defaultFont");
+        Font font = isConsole ? customConsoleFont : customFont;
+        if (font == null)
+            font = UIManager.getFont("Label.font");
         Font newFont = FontUtils.getCompositeFont(fontFamily, font.getStyle(), font.getSize());
-        UIManager.put("defaultFont", newFont);
 
-        SignumGUI.updateAllUIs();
+        if (isConsole) {
+            customConsoleFont = newFont;
+            SignumGUI.updateCommonConsoleFontKeys(newFont);
+        } else {
+            customFont = newFont;
+            applyCustomFont(newFont);
+        }
+
+        if (invoker != null && invoker.isShowing()) {
+            Window optionPaneDialog = SwingUtilities.windowForComponent(invoker);
+            for (Window window : Window.getWindows()) {
+                if (window == optionPaneDialog)
+                    continue;
+                SwingUtilities.updateComponentTreeUI(window);
+            }
+        } else {
+            SignumGUI.updateAllUIs();
+        }
+
+        updateFontMenuItems();
         FlatAnimatedLafChange.hideSnapshotWithAnimation();
+    }
+
+    private void applyCustomFont(Font font) {
+        customFont = font;
+        SignumGUI.updateCommonFontKeys(font);
+    }
+
+    private void resetFont(Font font, boolean isConsole) {
+        FlatAnimatedLafChange.showSnapshot();
+        if (isConsole) {
+            customConsoleFont = font;
+            SignumGUI.updateCommonConsoleFontKeys(font);
+        } else {
+            customFont = font;
+            applyCustomFont(font);
+        }
+        SignumGUI.updateAllUIs();
+        updateFontMenuItems();
+        FlatAnimatedLafChange.hideSnapshotWithAnimation();
+    }
+
+    private void fontFamilyChanged(ActionEvent e) {
+        boolean isConsole = Boolean.TRUE.equals(((JComponent) e.getSource()).getClientProperty("isConsole"));
+        applyFont(e.getActionCommand(), null, isConsole);
     }
 
     private void fontSizeChanged(ActionEvent e) {
         String fontSizeStr = e.getActionCommand();
+        boolean isConsole = Boolean.TRUE.equals(((JComponent) e.getSource()).getClientProperty("isConsole"));
 
-        Font font = UIManager.getFont("defaultFont");
+        Font font = isConsole ? customConsoleFont : customFont;
+        if (font == null)
+            font = UIManager.getFont("Label.font");
         Font newFont = font.deriveFont((float) Integer.parseInt(fontSizeStr));
-        UIManager.put("defaultFont", newFont);
+
+        if (isConsole) {
+            customConsoleFont = newFont;
+            SignumGUI.updateCommonConsoleFontKeys(newFont);
+        } else {
+            customFont = newFont;
+            applyCustomFont(newFont);
+        }
 
         SignumGUI.updateAllUIs();
+        updateFontMenuItems();
     }
 
-    private void restoreFont() {
-        UIManager.put("defaultFont", null);
+    private void restoreFont(boolean isConsole) {
+        if (isConsole) {
+            customConsoleFont = null;
+            SignumGUI.updateCommonConsoleFontKeys(null);
+        } else {
+            customFont = null;
+            SignumGUI.updateCommonFontKeys(null);
+        }
         updateFontMenuItems();
         SignumGUI.updateAllUIs();
     }
 
-    private void incrFont() {
-        Font font = UIManager.getFont("defaultFont");
+    private void incrFont(boolean isConsole) {
+        Font font = isConsole ? customConsoleFont : customFont;
+        if (font == null)
+            font = UIManager.getFont("Label.font");
         Font newFont = font.deriveFont((float) (font.getSize() + 1));
-        UIManager.put("defaultFont", newFont);
+        if (isConsole) {
+            customConsoleFont = newFont;
+            SignumGUI.updateCommonConsoleFontKeys(newFont);
+        } else {
+            customFont = newFont;
+            applyCustomFont(newFont);
+        }
 
         updateFontMenuItems();
         SignumGUI.updateAllUIs();
     }
 
-    private void decrFont() {
-        Font font = UIManager.getFont("defaultFont");
+    private void decrFont(boolean isConsole) {
+        Font font = isConsole ? customConsoleFont : customFont;
+        if (font == null)
+            font = UIManager.getFont("Label.font");
         Font newFont = font.deriveFont((float) Math.max(font.getSize() - 1, 10));
-        UIManager.put("defaultFont", newFont);
+        if (isConsole) {
+            customConsoleFont = newFont;
+            SignumGUI.updateCommonConsoleFontKeys(newFont);
+        } else {
+            customFont = newFont;
+            applyCustomFont(newFont);
+        }
 
         updateFontMenuItems();
         SignumGUI.updateAllUIs();
     }
 
     void updateFontMenuItems() {
-        if (initialFontMenuItemCount < 0)
-            initialFontMenuItemCount = fontMenu.getItemCount();
-        else {
-            // remove old font items
-            for (int i = fontMenu.getItemCount() - 1; i >= initialFontMenuItemCount; i--)
-                fontMenu.remove(i);
-        }
+        populateFontMenu(globalFontMenu, false);
+        populateFontMenu(consoleFontMenu, true);
+    }
 
-        // get current font
-        Font currentFont = UIManager.getFont("Label.font");
+    private void populateFontMenu(JMenu menu, boolean isConsole) {
+        menu.removeAll();
+
+        Font currentFont = isConsole ? SignumGUI.getActiveConsoleFont() : UIManager.getFont("Label.font");
         String currentFamily = currentFont.getFamily();
         String currentSize = Integer.toString(currentFont.getSize());
 
+        JMenuItem restoreItem = new JMenuItem("Restore Default");
+        restoreItem.addActionListener(e -> restoreFont(isConsole));
+        menu.add(restoreItem);
+
+        JMenuItem incrItem = new JMenuItem("Increase Size");
+        incrItem.addActionListener(e -> incrFont(isConsole));
+        menu.add(incrItem);
+
+        JMenuItem decrItem = new JMenuItem("Decrease Size");
+        decrItem.addActionListener(e -> decrFont(isConsole));
+        menu.add(decrItem);
+
         // add font families
-        fontMenu.addSeparator();
+        menu.addSeparator();
         ArrayList<String> families = new ArrayList<>(Arrays.asList(
                 "Arial", "Cantarell", "Comic Sans MS", "DejaVu Sans",
                 "Dialog", "Inter", "Liberation Sans", "Noto Sans", "Open Sans", "Roboto",
@@ -484,34 +637,37 @@ public class FlatLafPanel
 
             JCheckBoxMenuItem item = new JCheckBoxMenuItem(family);
             item.setSelected(family.equals(currentFamily));
+            item.putClientProperty("isConsole", isConsole);
             item.addActionListener(this::fontFamilyChanged);
-            fontMenu.add(item);
+            menu.add(item);
 
             familiesGroup.add(item);
         }
 
+        // Add "More Fonts..."
+        JMenuItem moreFontsItem = new JMenuItem("More Fonts...");
+        moreFontsItem.addActionListener(e -> selectMoreFonts(e, isConsole));
+        menu.add(moreFontsItem);
+
         // add font sizes
-        fontMenu.addSeparator();
-        ArrayList<String> sizes = new ArrayList<>(Arrays.asList(
-                "10", "11", "12", "14", "16", "18", "20", "24", "28"));
+        menu.addSeparator();
+        ArrayList<String> sizes = new ArrayList<>();
+        for (int i = 10; i <= 24; i++)
+            sizes.add(String.valueOf(i));
         if (!sizes.contains(currentSize))
             sizes.add(currentSize);
-        sizes.sort(String.CASE_INSENSITIVE_ORDER);
+        sizes.sort((s1, s2) -> Integer.compare(Integer.parseInt(s1), Integer.parseInt(s2)));
 
         ButtonGroup sizesGroup = new ButtonGroup();
         for (String size : sizes) {
             JCheckBoxMenuItem item = new JCheckBoxMenuItem(size);
             item.setSelected(size.equals(currentSize));
+            item.putClientProperty("isConsole", isConsole);
             item.addActionListener(this::fontSizeChanged);
-            fontMenu.add(item);
+            menu.add(item);
 
             sizesGroup.add(item);
         }
-
-        // enabled/disable items
-        boolean enabled = UIManager.getLookAndFeel() instanceof FlatLaf;
-        for (Component item : fontMenu.getMenuComponents())
-            item.setEnabled(enabled);
     }
 
     // the real colors are defined in
@@ -551,8 +707,15 @@ public class FlatLafPanel
         });
 
         UIManager.addPropertyChangeListener(e -> {
-            if ("lookAndFeel".equals(e.getPropertyName()))
+            if ("lookAndFeel".equals(e.getPropertyName())) {
+                if (customFont != null) {
+                    SwingUtilities.invokeLater(() -> {
+                        applyCustomFont(customFont);
+                        SignumGUI.updateAllUIs();
+                    });
+                }
                 updateAccentColorButtons();
+            }
         });
         updateAccentColorButtons();
     }
@@ -572,8 +735,10 @@ public class FlatLafPanel
 
         Class<? extends LookAndFeel> lafClass = UIManager.getLookAndFeel().getClass();
         try {
+            FlatAnimatedLafChange.showSnapshot();
             FlatLaf.setup(lafClass.getDeclaredConstructor().newInstance());
             FlatLaf.updateUI();
+            FlatAnimatedLafChange.hideSnapshotWithAnimation();
         } catch (Exception ex) {
             LoggingFacade.INSTANCE.logSevere(null, ex);
         }
@@ -665,7 +830,8 @@ public class FlatLafPanel
         JMenuItem resetZoomMenuItem = new JMenuItem();
         JMenuItem incrZoomMenuItem = new JMenuItem();
         JMenuItem decrZoomMenuItem = new JMenuItem();
-        fontMenu = new JMenu();
+        globalFontMenu = new JMenu();
+        consoleFontMenu = new JMenu();
         JMenuItem restoreFontMenuItem = new JMenuItem();
         JMenuItem incrFontMenuItem = new JMenuItem();
         JMenuItem decrFontMenuItem = new JMenuItem();
@@ -972,32 +1138,17 @@ public class FlatLafPanel
             }
             menuBar.add(zoomMenu);
 
-            // ======== fontMenu ========
+            // ======== globalFontMenu ========
             {
-                fontMenu.setText("Font");
-
-                // ---- restoreFontMenuItem ----
-                restoreFontMenuItem.setText("Restore Font");
-                restoreFontMenuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_0,
-                        Toolkit.getDefaultToolkit().getMenuShortcutKeyMask() | KeyEvent.ALT_DOWN_MASK));
-                restoreFontMenuItem.addActionListener(e -> restoreFont());
-                fontMenu.add(restoreFontMenuItem);
-
-                // ---- incrFontMenuItem ----
-                incrFontMenuItem.setText("Increase Font Size");
-                incrFontMenuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_PLUS,
-                        Toolkit.getDefaultToolkit().getMenuShortcutKeyMask() | KeyEvent.ALT_DOWN_MASK));
-                incrFontMenuItem.addActionListener(e -> incrFont());
-                fontMenu.add(incrFontMenuItem);
-
-                // ---- decrFontMenuItem ----
-                decrFontMenuItem.setText("Decrease Font Size");
-                decrFontMenuItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_MINUS,
-                        Toolkit.getDefaultToolkit().getMenuShortcutKeyMask() | KeyEvent.ALT_DOWN_MASK));
-                decrFontMenuItem.addActionListener(e -> decrFont());
-                fontMenu.add(decrFontMenuItem);
+                globalFontMenu.setText("Global Font");
             }
-            menuBar.add(fontMenu);
+            menuBar.add(globalFontMenu);
+
+            // ======== consoleFontMenu ========
+            {
+                consoleFontMenu.setText("Console Font");
+            }
+            menuBar.add(consoleFontMenu);
 
             // ======== optionsMenu ========
             {
@@ -1284,7 +1435,8 @@ public class FlatLafPanel
     private JMenu scrollingPopupMenu;
     private JMenuItem htmlMenuItem;
     private JMenu zoomMenu;
-    private JMenu fontMenu;
+    private JMenu globalFontMenu;
+    private JMenu consoleFontMenu;
     private JMenu optionsMenu;
     private JCheckBoxMenuItem windowDecorationsCheckBoxMenuItem;
     private JCheckBoxMenuItem menuBarEmbeddedCheckBoxMenuItem;

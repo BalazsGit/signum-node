@@ -1662,15 +1662,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 // Re-apply strikethrough if this is a toggle-able label
                 Object visibleProp = getClientProperty("visible");
                 if (visibleProp instanceof Boolean) {
-                    boolean isVisible = (Boolean) visibleProp;
-                    Font font = getFont();
-                    Map<TextAttribute, Object> attributes = new HashMap<>(font.getAttributes());
-                    if (!isVisible) {
-                        attributes.put(TextAttribute.STRIKETHROUGH, TextAttribute.STRIKETHROUGH_ON);
-                    } else {
-                        attributes.remove(TextAttribute.STRIKETHROUGH);
-                    }
-                    setFont(new javax.swing.plaf.FontUIResource(font.deriveFont(attributes)));
+                    GuiFontManager.updateLabelStrikethrough(this, (Boolean) visibleProp);
                 }
             }
         };
@@ -1703,8 +1695,7 @@ public class SynchronizationMetricsPanel extends JPanel {
     }
 
     private static void setupProgressBarFont(JProgressBar bar) {
-        bar.setFont(UIManager.getFont("Label.font"));
-        bar.setStringPainted(true);
+        GuiFontManager.setupProgressBar(bar, null);
     }
 
     @Override
@@ -1716,6 +1707,26 @@ public class SynchronizationMetricsPanel extends JPanel {
             }
         }
         updateChartColors();
+        updateChartFonts();
+    }
+
+    private void updateChartFonts() {
+        Font font = UIManager.getFont("Label.font");
+        if (font == null)
+            return;
+
+        if (performanceChartPanel != null) {
+            GuiFontManager.applyFontToChart(performanceChartPanel.getChart(), font);
+        }
+        if (timingChartPanel != null) {
+            GuiFontManager.applyFontToChart(timingChartPanel.getChart(), font);
+        }
+        if (uploadChartPanel != null) {
+            GuiFontManager.applyFontToChart(uploadChartPanel.getChart(), font);
+        }
+        if (downloadChartPanel != null) {
+            GuiFontManager.applyFontToChart(downloadChartPanel.getChart(), font);
+        }
     }
 
     private void updateChartColors() {

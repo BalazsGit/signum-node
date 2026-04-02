@@ -25,8 +25,6 @@ import net.miginfocom.swing.MigLayout;
 import javax.swing.*;
 import javax.swing.UIManager.LookAndFeelInfo;
 import javax.swing.border.EmptyBorder;
-import javax.swing.plaf.metal.MetalLookAndFeel;
-import javax.swing.plaf.nimbus.NimbusLookAndFeel;
 import java.awt.*;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -236,6 +234,15 @@ public class LookAndFeelPanel extends JPanel {
                 lafSettings.add("font", fontSettings);
             }
 
+            Font consoleFont = SignumGUI.getActiveConsoleFont();
+            if (consoleFont != null && !consoleFont.equals(font)) {
+                JsonObject consoleFontSettings = new JsonObject();
+                consoleFontSettings.addProperty("family", consoleFont.getFamily());
+                consoleFontSettings.addProperty("style", consoleFont.getStyle());
+                consoleFontSettings.addProperty("size", consoleFont.getSize());
+                lafSettings.add("consoleFont", consoleFontSettings);
+            }
+
             Map<String, Color> overrides = colorSettingsPanel.getCurrentOverrides();
             if (overrides != null && !overrides.isEmpty()) {
                 JsonObject overridesJson = new JsonObject();
@@ -421,6 +428,8 @@ public class LookAndFeelPanel extends JPanel {
                         JsonObject profiles = settings.getAsJsonObject("lookAndFeelProfiles");
                         if (profiles.has(profileName)) {
                             JsonObject lafSettings = profiles.getAsJsonObject(profileName);
+                            FlatAnimatedLafChange.showSnapshot();
+
                             Map<String, Color> colorOverrides = null;
 
                             // Apply settings
@@ -434,9 +443,6 @@ public class LookAndFeelPanel extends JPanel {
                             }
 
                             if (themeClassName != null) {
-                                if (themeClassName.contains("NimbusLookAndFeel")) {
-                                    SignumGUI.setupLegacyNimbus();
-                                }
                                 UIManager.setLookAndFeel(themeClassName);
                             }
 
@@ -446,11 +452,22 @@ public class LookAndFeelPanel extends JPanel {
                                 int style = fontSettings.get("style").getAsInt();
                                 int size = fontSettings.get("size").getAsInt();
                                 Font font = new Font(family, style, size);
-                                UIManager.put("defaultFont", font);
+                                SignumGUI.updateCommonFontKeys(font);
+                            }
+
+                            if (lafSettings.has("consoleFont")) {
+                                JsonObject fontSettings = lafSettings.getAsJsonObject("consoleFont");
+                                String family = fontSettings.get("family").getAsString();
+                                int style = fontSettings.get("style").getAsInt();
+                                int size = fontSettings.get("size").getAsInt();
+                                Font font = new Font(family, style, size);
+                                SignumGUI.updateCommonConsoleFontKeys(font);
                             }
 
                             SignumGUI.updateAllUIs();
                             colorSettingsPanel.setProfileOverrides(colorOverrides);
+
+                            FlatAnimatedLafChange.hideSnapshotWithAnimation();
 
                             // Update last selected
                             settings.addProperty("lastSelectedLafProfile", profileName);
@@ -475,6 +492,7 @@ public class LookAndFeelPanel extends JPanel {
 
     private void resetToDefault() {
         try {
+            FlatAnimatedLafChange.showSnapshot();
             // Reset to a known default theme, e.g., FlatDarkLaf
             UIManager.setLookAndFeel(FlatDarkLaf.class.getName());
             // Reset font
@@ -483,6 +501,7 @@ public class LookAndFeelPanel extends JPanel {
             ColorPaletteManager.updatePalette(null);
             colorSettingsPanel.setProfileOverrides(null);
             SignumGUI.updateAllUIs();
+            FlatAnimatedLafChange.hideSnapshotWithAnimation();
             JOptionPane.showMessageDialog(this, "Settings have been reset to the default theme.", "Reset to Default",
                     JOptionPane.INFORMATION_MESSAGE);
         } catch (Exception e) {
