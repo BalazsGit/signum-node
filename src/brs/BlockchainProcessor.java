@@ -277,10 +277,16 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     class BlockNotAcceptedException extends SignumException {
 
-        BlockNotAcceptedException(String message) {
+        public BlockNotAcceptedException(String message) {
             super(message);
         }
 
+        /**
+         * @return true if the rejection depends on local database state (e.g. balances)
+         */
+        public boolean isStateRelated() {
+            return false;
+        }
     }
 
     class TransactionNotAcceptedException extends BlockNotAcceptedException {
@@ -296,6 +302,32 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
             return transaction;
         }
 
+        @Override
+        public boolean isStateRelated() {
+            return true;
+        }
+    }
+
+    class GenerationSignatureException extends BlockNotAcceptedException {
+        public GenerationSignatureException(String message) {
+            super(message);
+        }
+
+        @Override
+        public boolean isStateRelated() {
+            return true;
+        }
+    }
+
+    class ConsensusMismatchException extends BlockNotAcceptedException {
+        public ConsensusMismatchException(String message) {
+            super(message);
+        }
+
+        @Override
+        public boolean isStateRelated() {
+            return true;
+        }
     }
 
     class BlockOutOfOrderException extends BlockNotAcceptedException {
