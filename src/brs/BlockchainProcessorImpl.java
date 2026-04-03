@@ -897,7 +897,23 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                     }
                                     lastBlock = block;
                                 } catch (BlockOutOfOrderException e) {
-                                    logger.info(e.toString() + " - autoflushing cache to get rid of it", e);
+                                    logger.warn(
+                                            "Structural inconsistency during download: {} - possible local state gap.",
+                                            e.getMessage());
+                                    if (!saveInCache) {
+                                        // Trigger aggressive recovery if a structural gap is encountered while
+                                        // downloading a better fork.
+                                        // This implies our local database is missing historical blocks required for
+                                        // consensus.
+                                        logger.error(
+                                                "Structural gap detected while processing fork. Initiating recovery at common ancestor (height: {}).",
+                                                commonBlockId);
+                                        Block forkBlock = blockchain.getBlock(commonBlockId);
+                                        if (forkBlock != null) {
+                                            popOffTo(forkBlock, null);
+                                            transactionProcessor.requeueAllUnconfirmedTransactions();
+                                        }
+                                    }
                                     downloadCache.resetCache();
                                     return;
                                 } catch (RuntimeException | SignumException.ValidationException e) {
@@ -1251,9 +1267,22 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                     } catch (BlockNotAcceptedException e) {
-                        logger.error("Block not accepted", e);
-                        blacklistClean(currentBlock, e, "found invalid pull/push data during importing the block");
+                    logger.warn("Failed to import block {} (height {}): {}", 
+                            currentBlock.getStringId(), currentBlock.getHeight(), e.getMessage());
+                    
+                    if (e.isStateRelated()) {
+                        // Automated trap handling: if the error depends on our local state, 
+                        // our current tip is likely inconsistent. Perform aggressive recovery.
+                        logger.error("Local state inconsistency detected during import. Initiating aggressive recovery at height {}.", 
+                                lastBlock.getHeight());
+                        
+                        popOffTo(lastBlock, null);
+                        transactionProcessor.requeueAllUnconfirmedTransactions();
+                        logger.info("Recovery initiated. The node will attempt to re-sync from a cleaner state.");
+                    } else {
+                        blacklistClean(currentBlock, e, "found objectively invalid data during block import");
                         autoPopOff(currentBlock.getHeight());
+                    }
                         break;
                     }
                 } catch (Exception exception) {
