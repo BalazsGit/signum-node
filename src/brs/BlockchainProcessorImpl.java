@@ -1132,8 +1132,37 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                     } catch (InterruptedException e) {
                                         Thread.currentThread().interrupt();
                                     } catch (BlockNotAcceptedException e) {
-                                        peer.blacklist(e, "during processing a fork");
-                                        break;
+                                        logger.warn(
+                                                "Failed to push block {} (height {}) from peer {} during fork processing: {}",
+                                                block.getStringId(), block.getHeight(), peer.getAnnouncedAddress(),
+                                                e.getMessage());
+
+                                        if (e.isStateRelated()) {
+                                            // TRAP SCENARIO: The peer's chain has better CD, but our local state
+                                            // prevents us from accepting it. We assume our local state is inconsistent.
+                                            logger.error(
+                                                    "Local state is likely inconsistent with a better chain. Initiating aggressive recovery at height {}.",
+                                                    forkBlock.getHeight());
+
+                                            // Aggressive rollback to common ancestor. Reset caches and don't restore
+                                            // our "bad" fork.
+                                            popOffTo(forkBlock, null);
+                                            transactionProcessor.requeueAllUnconfirmedTransactions();
+                                            logger.info(
+                                                    "Recovery initiated. Node will attempt to re-sync from a clean state.");
+
+                                            // Return immediately to bypass the 'restore chain' logic below.
+                                            return;
+                                        } else {
+                                            // MALICIOUS/OBJECTIVE ERROR: The block is objectively invalid (bad
+                                            // signature, etc.)
+                                            // This is the peer's fault. We blacklist them and continue to restore our
+                                            // own chain.
+                                            peer.blacklist(e,
+                                                    "sent objectively invalid block data during fork processing");
+                                            break; // Exit the block pushing loop and fall through to restore our
+                                                   // original chain.
+                                        }
                                     }
                                 }
                             }
@@ -2828,7 +2857,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     throw new BlockNotAcceptedException("Duplicate block or invalid id for block " + block.getHeight());
                 }
                 if (!blockService.verifyGenerationSignature(block)) {
-                    throw new BlockNotAcceptedException(
+                    throw new GenerationSignatureException(
                             "Generation signature verification failed for block " + block.getHeight());
                 }
                 if (!blockService.verifyBlockSignature(block)) {
@@ -3087,7 +3116,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             atBlock = AtController.validateATs(block.getBlockAts(), blockchain.getHeight(), block.getGeneratorId());
             atEndTime = System.nanoTime();
         } catch (AtException e) {
-            throw new BlockNotAcceptedException(
+            throw new ConsensusMismatchException(
                     "ats are not matching at block height " + blockchain.getHeight() + " (" + e + ")");
         }
         atTimeNanos = atEndTime > 0 ? atEndTime - atStartTime : 0;
@@ -3104,11 +3133,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         subscriptionTimeNanos = (System.nanoTime() - start);
 
         if (remainingAmount != null && remainingAmount != calculatedRemainingAmount) {
-            throw new BlockNotAcceptedException(
+            throw new ConsensusMismatchException(
                     "Calculated remaining amount doesn't add up for block " + block.getHeight());
         }
         if (remainingFee != null && remainingFee != calculatedRemainingFee) {
-            throw new BlockNotAcceptedException(
+            throw new ConsensusMismatchException(
                     "Calculated remaining fee doesn't add up for block " + block.getHeight());
         }
 
