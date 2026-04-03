@@ -282,7 +282,33 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
         }
 
         /**
-         * @return true if the rejection depends on local database state (e.g. balances)
+         * Indicates whether the validation failure is linked to the local node's state.
+         *
+         * <p>
+         * This method allows the blockchain processor to differentiate between two
+         * types of errors during fork processing:
+         * </p>
+         * <ul>
+         * <li><b>Objective Errors (false):</b> Violations that are independent of the
+         * local database,
+         * such as invalid cryptographic signatures or protocol version mismatches.
+         * These typically
+         * originate from a faulty or malicious peer, leading to a blacklist
+         * action.</li>
+         *
+         * <li><b>Subjective/State Errors (true):</b> Failures that depend on local
+         * data, such as
+         * insufficient account balances, incorrect PoC commitments, or structural gaps
+         * in the local
+         * ledger. These indicate that the local node's state is likely out of sync or
+         * inconsistent
+         * with the network consensus, triggering an automated recovery (rollback)
+         * instead of
+         * blacklisting the peer.</li>
+         * </ul>
+         *
+         * @return {@code true} if the rejection is due to local state inconsistency;
+         *         {@code false} otherwise.
          */
         public boolean isStateRelated() {
             return false;
@@ -334,6 +360,11 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
         public BlockOutOfOrderException(String message) {
             super(message);
+        }
+
+        @Override
+        public boolean isStateRelated() {
+            return true;
         }
 
     }
