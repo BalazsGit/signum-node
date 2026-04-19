@@ -4,6 +4,7 @@ import brs.crypto.Crypto;
 import brs.props.Prop;
 import brs.props.Props;
 import brs.util.Convert;
+import brs.gui.util.GuiUtils;
 import brs.gui.util.HelpButton;
 import brs.util.PathUtils;
 import com.google.gson.Gson;
@@ -63,6 +64,9 @@ public class NodeConfigurationPanel extends JPanel {
     private JButton applyProfileBtn;
     private JButton renameProfileBtn;
     private JButton deleteProfileBtn;
+    private JButton newProfileBtn;
+    private JButton reloadProfileBtn;
+    private JButton refreshProfilesBtn;
     private JPanel contentContainer;
     private JLabel titleLabel;
     private String runningProfileName;
@@ -110,7 +114,7 @@ public class NodeConfigurationPanel extends JPanel {
         this.categoryTabbedPane = new JTabbedPane();
         // Initialize buttons early to avoid NullPointerException in listeners during UI
         // construction
-        this.saveProfileBtn = new JButton("Save Profile");
+        this.saveProfileBtn = new JButton("Save Profile As");
         this.applyProfileBtn = new JButton("Apply Profile");
 
         initHelpTexts();
@@ -164,13 +168,14 @@ public class NodeConfigurationPanel extends JPanel {
         JPanel bodyPanel = new JPanel(new BorderLayout());
 
         // --- Profile Panel ---
-        JPanel profilePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+        JPanel profilePanel = new JPanel(new MigLayout("insets 0, gap 5"));
         profilePanel.setBorder(new EmptyBorder(5, 10, 5, 5));
         profilePanel.add(new JLabel("Configuration Profile:"));
 
         profileComboBox = new JComboBox<>();
         profileComboBox.setEditable(false);
         profileComboBox.setPrototypeDisplayValue("XXXXXXXXXXXXXXXXXXXX");
+        fixComponentSize(profileComboBox);
         profilePanel.add(profileComboBox);
 
         profileComboBox.setRenderer(new DefaultListCellRenderer() {
@@ -196,56 +201,38 @@ public class NodeConfigurationPanel extends JPanel {
             }
         });
 
-        JButton newProfileBtn = new JButton("New Profile");
-        newProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.FILE_O, GuiConstants.getHelpIconSize(),
-                GuiColors.getButtonIcon()));
+        newProfileBtn = new JButton("New Profile");
         newProfileBtn.setToolTipText("Create a new profile with application defaults");
         newProfileBtn.addActionListener(e -> createNewProfile());
         profilePanel.add(newProfileBtn);
 
-        saveProfileBtn.setIcon(
-                IconFontSwing.buildIcon(FontAwesome.FLOPPY_O, GuiConstants.getHelpIconSize(),
-                        GuiColors.getButtonIcon()));
         saveProfileBtn.setToolTipText("Save Configuration Profile");
         saveProfileBtn.addActionListener(e -> saveProfile());
         profilePanel.add(saveProfileBtn);
 
-        applyProfileBtn.setIcon(
-                IconFontSwing.buildIcon(FontAwesome.CHECK_CIRCLE_O, GuiConstants.getHelpIconSize(),
-                        GuiColors.getButtonIcon()));
         applyProfileBtn.setToolTipText("Apply selected profile to the node");
         applyProfileBtn.addActionListener(e -> applyProfile());
         profilePanel.add(applyProfileBtn);
 
-        renameProfileBtn.setIcon(
-                IconFontSwing.buildIcon(FontAwesome.PENCIL_SQUARE_O, GuiConstants.getHelpIconSize(),
-                        GuiColors.getButtonIcon()));
         renameProfileBtn.setToolTipText("Rename selected profile");
         renameProfileBtn.addActionListener(e -> renameProfile((String) profileComboBox.getSelectedItem()));
         profilePanel.add(renameProfileBtn);
 
-        deleteProfileBtn.setIcon(
-                IconFontSwing.buildIcon(FontAwesome.TRASH_O, GuiConstants.getHelpIconSize(),
-                        GuiColors.getButtonIcon()));
         deleteProfileBtn.setToolTipText("Delete selected profile");
         deleteProfileBtn.addActionListener(e -> deleteProfile((String) profileComboBox.getSelectedItem()));
         profilePanel.add(deleteProfileBtn);
 
-        JButton reloadProfileBtn = new JButton("Reload Profile");
-        reloadProfileBtn.setIcon(
-                IconFontSwing.buildIcon(FontAwesome.RECYCLE, GuiConstants.getHelpIconSize(),
-                        GuiColors.getButtonIcon()));
+        reloadProfileBtn = new JButton("Reload Profile");
         reloadProfileBtn.setToolTipText("Reload settings from the current profile file on disk");
         reloadProfileBtn.addActionListener(e -> reloadProfile());
         profilePanel.add(reloadProfileBtn);
 
-        JButton refreshProfilesBtn = new JButton("Refresh Profiles");
-        refreshProfilesBtn.setIcon(
-                IconFontSwing.buildIcon(FontAwesome.REFRESH, GuiConstants.getHelpIconSize(),
-                        GuiColors.getButtonIcon()));
+        refreshProfilesBtn = new JButton("Refresh Profiles");
         refreshProfilesBtn.setToolTipText("Refresh the list of available profiles from the disk");
         refreshProfilesBtn.addActionListener(e -> refreshProfileList());
         profilePanel.add(refreshProfilesBtn);
+
+        updateProfileButtonsUI();
 
         profileComboBox.addActionListener(e -> {
             if (isProgrammaticChange)
@@ -262,7 +249,16 @@ public class NodeConfigurationPanel extends JPanel {
         helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         helpBtn.setToolTipText("View detailed information about configuration profile management");
         helpBtn.addActionListener(e -> showProfileHelp());
-        profilePanel.add(helpBtn);
+        profilePanel.add(helpBtn); // Add help button
+
+        JScrollPane profileScrollPane = new JScrollPane(profilePanel);
+        profileScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        profileScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
+        profileScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        profileScrollPane.setOpaque(false);
+        profileScrollPane.getViewport().setOpaque(false);
+
+        GuiUtils.addHorizontalScrollPadding(profileScrollPane, profilePanel, new Insets(5, 10, 5, 5));
 
         refreshProfileList();
 
@@ -295,7 +291,7 @@ public class NodeConfigurationPanel extends JPanel {
         });
 
         JPanel northPanel = new JPanel(new BorderLayout());
-        northPanel.add(profilePanel, BorderLayout.NORTH);
+        northPanel.add(profileScrollPane, BorderLayout.NORTH);
         northPanel.add(searchPanel, BorderLayout.SOUTH);
         bodyPanel.add(northPanel, BorderLayout.NORTH);
 
@@ -565,12 +561,52 @@ public class NodeConfigurationPanel extends JPanel {
             titleLabel.setFont(GuiFontManager.getBoldDefaultFont());
         }
 
-        // Re-style input fields (borders and fonts)
+        // Re-style and re-size input fields (borders and fonts)
         if (allPropertyRows != null) {
             allPropertyRows.forEach(row -> {
-                if (row.input != null)
+                if (row.input != null) {
                     styleTextField(row.input);
+                    fixComponentSize(row.input);
+                }
             });
+        }
+        updateProfileButtonsUI();
+    }
+
+    private void updateProfileButtonsUI() {
+        float iconSize = GuiConstants.getHelpIconSize();
+        Color iconColor = GuiColors.getButtonIcon();
+
+        if (profileComboBox != null)
+            fixComponentSize(profileComboBox);
+
+        if (newProfileBtn != null) {
+            newProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.FILE_O, iconSize, iconColor));
+            fixComponentSize(newProfileBtn);
+        }
+        if (saveProfileBtn != null) {
+            saveProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.FLOPPY_O, iconSize, iconColor));
+            fixComponentSize(saveProfileBtn);
+        }
+        if (applyProfileBtn != null) {
+            applyProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.CHECK_CIRCLE_O, iconSize, iconColor));
+            fixComponentSize(applyProfileBtn);
+        }
+        if (renameProfileBtn != null) {
+            renameProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.PENCIL_SQUARE_O, iconSize, iconColor));
+            fixComponentSize(renameProfileBtn);
+        }
+        if (deleteProfileBtn != null) {
+            deleteProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.TRASH_O, iconSize, iconColor));
+            fixComponentSize(deleteProfileBtn);
+        }
+        if (reloadProfileBtn != null) {
+            reloadProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.RECYCLE, iconSize, iconColor));
+            fixComponentSize(reloadProfileBtn);
+        }
+        if (refreshProfilesBtn != null) {
+            refreshProfilesBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.REFRESH, iconSize, iconColor));
+            fixComponentSize(refreshProfilesBtn);
         }
     }
 
@@ -602,6 +638,13 @@ public class NodeConfigurationPanel extends JPanel {
             }
             contentCardLayout.show(contentContainer, "SEARCH");
         } else {
+            // Clear original parents first to ensure correct ordering and no leftovers like
+            // pushy labels at the top
+            Set<JPanel> parents = allPropertyRows.stream()
+                    .map(row -> row.originalParent)
+                    .collect(Collectors.toSet());
+            parents.forEach(JPanel::removeAll);
+
             // Restore components to their original panels in order
             for (PropertyRow row : allPropertyRows) {
                 row.originalParent.add(row.label, row.labelConstraints);
@@ -612,6 +655,10 @@ public class NodeConfigurationPanel extends JPanel {
                 row.originalParent.add(row.help, row.helpConstraints);
                 row.originalParent.add(row.separator, row.separatorConstraints);
             }
+
+            // Re-add vertical fillers
+            parents.forEach(p -> p.add(new JLabel(), "pushy"));
+
             contentCardLayout.show(contentContainer, "TABS");
         }
         revalidate();
@@ -680,48 +727,120 @@ public class NodeConfigurationPanel extends JPanel {
         }
     }
 
-    private void saveProfile() {
+    private boolean saveProfile() {
         String currentProfile = (String) profileComboBox.getSelectedItem();
         String suggestedName = (currentProfile == null || "node-default".equals(currentProfile)) ? "" : currentProfile;
-        String name = (String) JOptionPane.showInputDialog(this, "Enter profile name:", "Save Profile",
-                JOptionPane.PLAIN_MESSAGE, null, null, suggestedName);
-        if (name == null || name.trim().isEmpty() || "node-default".equalsIgnoreCase(name.trim()))
-            return;
 
-        try {
-            Path targetFile = resolveProfilePath(name + ".properties");
-            if (Files.exists(targetFile)) {
-                int choice = JOptionPane.showConfirmDialog(this,
-                        "Profile '" + name + "' already exists. Do you want to overwrite it?",
-                        "Confirm Overwrite",
-                        JOptionPane.YES_NO_OPTION,
-                        JOptionPane.WARNING_MESSAGE);
-                if (choice != JOptionPane.YES_OPTION) {
-                    return;
-                }
+        JTextField nameField = new JTextField(suggestedName);
+        JLabel errorLabel = new JLabel("Saving as system profile is not allowed.");
+        errorLabel.setForeground(GuiColors.getContrastRed());
+        errorLabel.setVisible(false);
+
+        JPanel panel = new JPanel(new MigLayout("wrap 1, fillx, insets 0", "[grow]", "[]5[]"));
+        panel.add(new JLabel("Enter profile name:"));
+        panel.add(nameField, "growx");
+        panel.add(errorLabel, "hidemode 3");
+
+        JButton saveBtn = new JButton("Save");
+        JButton discardBtn = new JButton("Discard");
+        JButton cancelBtn = new JButton("Cancel");
+        Object[] options = { saveBtn, discardBtn, cancelBtn };
+
+        JOptionPane pane = new JOptionPane(panel, JOptionPane.PLAIN_MESSAGE, JOptionPane.YES_NO_CANCEL_OPTION, null,
+                options, saveBtn);
+        JDialog dialog = pane.createDialog(this, "Save Profile As");
+
+        saveBtn.addActionListener(e -> {
+            pane.setValue(saveBtn);
+            dialog.setVisible(false);
+        });
+        discardBtn.addActionListener(e -> {
+            pane.setValue(discardBtn);
+            dialog.setVisible(false);
+        });
+        cancelBtn.addActionListener(e -> {
+            pane.setValue(cancelBtn);
+            dialog.setVisible(false);
+        });
+
+        nameField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            private void validate() {
+                String text = nameField.getText().trim();
+                boolean isReserved = "node-default".equalsIgnoreCase(text) || "node".equalsIgnoreCase(text);
+                errorLabel.setVisible(isReserved);
+                saveBtn.setEnabled(!isReserved && !text.isEmpty());
             }
 
-            Properties propsToSave = getPropertiesFromUI();
-            savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                validate();
+            }
 
-            refreshProfileList();
-            profileComboBox.setSelectedItem(name);
-            updateProfileComboBoxColor();
-            this.loadedProfileName = name;
-            this.currentProperties.clear();
-            this.currentProperties.putAll(propsToSave);
-            this.propertiesFile = targetFile;
-            updateTitle();
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                validate();
+            }
 
-            updateDirtyStatus();
-            refreshUIColors();
-            JOptionPane.showMessageDialog(this,
-                    "Profile '" + name + "' saved successfully. A restart is required for changes to take full effect.",
-                    "Success", JOptionPane.INFORMATION_MESSAGE);
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(this, "Error saving profile: " + e.getMessage(), "Error",
-                    JOptionPane.ERROR_MESSAGE);
-            e.printStackTrace();
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                validate();
+            }
+        });
+
+        try {
+            while (true) {
+                pane.setValue(JOptionPane.UNINITIALIZED_VALUE);
+                dialog.setVisible(true);
+                Object value = pane.getValue();
+
+                if (value == saveBtn) {
+                    String name = nameField.getText().trim();
+                    try {
+                        Path targetFile = resolveProfilePath(name + ".properties");
+                        if (Files.exists(targetFile)) {
+                            int choice = JOptionPane.showConfirmDialog(this,
+                                    "Profile '" + name + "' already exists. Do you want to overwrite it?",
+                                    "Override profile settings",
+                                    JOptionPane.YES_NO_OPTION,
+                                    JOptionPane.WARNING_MESSAGE);
+                            if (choice != JOptionPane.YES_OPTION) {
+                                continue;
+                            }
+                        }
+
+                        Properties propsToSave = getPropertiesFromUI();
+                        savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
+
+                        refreshProfileList();
+                        profileComboBox.setSelectedItem(name);
+                        updateProfileComboBoxColor();
+                        this.loadedProfileName = name;
+                        this.currentProperties.clear();
+                        this.currentProperties.putAll(propsToSave);
+                        this.propertiesFile = targetFile;
+                        updateTitle();
+
+                        updateDirtyStatus();
+                        refreshUIColors();
+                        JOptionPane.showMessageDialog(this,
+                                "Profile '" + name
+                                        + "' saved successfully. A restart is required for changes to take effect.",
+                                "Success", JOptionPane.INFORMATION_MESSAGE);
+                        return true;
+                    } catch (Exception e) {
+                        JOptionPane.showMessageDialog(this, "Error saving profile: " + e.getMessage(), "Error",
+                                JOptionPane.ERROR_MESSAGE);
+                        e.printStackTrace();
+                    }
+                } else if (value == discardBtn) {
+                    isProgrammaticChange = true;
+                    updateUIFromProperties(currentProperties);
+                    updateDirtyStatus();
+                    isProgrammaticChange = false;
+                    return false;
+                } else {
+                    return false;
+                }
+            }
+        } finally {
+            dialog.dispose();
         }
     }
 
@@ -731,53 +850,110 @@ public class NodeConfigurationPanel extends JPanel {
             return;
         }
 
-        if (hasUnsavedChanges()) {
+        checkUnsavedChangesAndProceed(
+                () -> {
+                    Path targetFile = resolveProfilePath(profileName + ".properties");
+                    if (Files.exists(targetFile)) {
+                        Properties loaded = new Properties();
+                        try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
+                            isProgrammaticChange = true;
+                            loaded.load(in);
+                            currentProperties.clear();
+                            currentProperties.putAll(loaded);
+                            updateUIFromProperties(loaded);
+                            this.propertiesFile = targetFile;
+                            this.loadedProfileName = profileName;
+                            updateTitle();
+                            updateDirtyStatus();
+                            isProgrammaticChange = false;
+                            updateProfileComboBoxColor();
+                        } catch (Exception e) {
+                            JOptionPane.showMessageDialog(this, "Error loading profile file: " + e.getMessage(),
+                                    "Error",
+                                    JOptionPane.ERROR_MESSAGE);
+                            // Revert to headless if loading fails
+                            isProgrammaticChange = true;
+                            profileComboBox.setSelectedItem("node");
+                            loadProfile("node-default");
+                            isProgrammaticChange = false;
+                        }
+                    }
+                },
+                () -> profileComboBox.setSelectedItem(loadedProfileName));
+    }
+
+    public boolean checkUnsavedChangesAndProceed(Runnable onProceed, Runnable onCancel) {
+        String report = getUnsavedChangesReport();
+        if (report == null) {
+            if (onProceed != null)
+                onProceed.run();
+            return true;
+        }
+
+        Object[] message = {
+                "You have unsaved changes in profile '" + loadedProfileName + "'.",
+                report,
+                "What would you like to do?"
+        };
+        Object[] options = { "Save Profile As", "Discard", "Cancel" };
+        int result = JOptionPane.showOptionDialog(this, message, "Unsaved Changes",
+                JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE,
+                null, options, options[0]);
+
+        if (result == JOptionPane.YES_OPTION) {
+            if (saveProfile()) {
+                if (onProceed != null)
+                    onProceed.run();
+                return true;
+            }
+            return false;
+        } else if (result == JOptionPane.NO_OPTION) {
             isProgrammaticChange = true;
-            String message = "You have unsaved changes in profile '" + loadedProfileName
-                    + "'. Would you like to save them?";
-            Object[] options = { "Save", "Discard", "Cancel" };
-            int result = JOptionPane.showOptionDialog(this, message, "Unsaved Changes",
-                    JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE,
-                    null, options, options[0]);
-
-            if (result == JOptionPane.YES_OPTION) {
-                performSave();
-            } else if (result == JOptionPane.CANCEL_OPTION || result == JOptionPane.CLOSED_OPTION) {
-                isProgrammaticChange = true;
-                profileComboBox.setSelectedItem(loadedProfileName);
-                isProgrammaticChange = false;
-                return;
-            }
+            updateUIFromProperties(currentProperties);
+            updateDirtyStatus();
             isProgrammaticChange = false;
+            if (onProceed != null)
+                onProceed.run();
+            return true;
+        } else {
+            if (onCancel != null)
+                onCancel.run();
+            return false;
         }
+    }
 
-        Path targetFile;
-        targetFile = resolveProfilePath(profileName + ".properties");
+    private String getUnsavedChangesReport() {
+        StringBuilder report = new StringBuilder(
+                "<html><b>Unsaved changes in Node Configuration (Profile: '" + loadedProfileName + "'):</b><ul>");
+        boolean changesFound = false;
+        for (PropertyRow row : allPropertyRows) {
+            if (isRowDirty(row)) {
+                changesFound = true;
+                String savedValue = currentProperties.getProperty(row.prop.getName());
+                if (savedValue == null)
+                    savedValue = getSafeDefault(row.prop);
+                String newValue = valueSuppliers.get(row.prop.getName()).get();
 
-        if (Files.exists(targetFile)) {
-            Properties loaded = new Properties();
-            try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
-                isProgrammaticChange = true;
-                loaded.load(in);
-                currentProperties.clear();
-                currentProperties.putAll(loaded);
-                updateUIFromProperties(loaded);
-                this.propertiesFile = targetFile;
-                this.loadedProfileName = profileName;
-                updateTitle();
-                updateDirtyStatus();
-                isProgrammaticChange = false;
-                updateProfileComboBoxColor();
-            } catch (Exception e) {
-                JOptionPane.showMessageDialog(this, "Error loading profile file: " + e.getMessage(), "Error",
-                        JOptionPane.ERROR_MESSAGE);
-                // Revert to headless if loading fails
-                isProgrammaticChange = true;
-                profileComboBox.setSelectedItem("node");
-                loadProfile("node-default");
-                isProgrammaticChange = false;
+                boolean isList = (row.input instanceof JScrollPane) ||
+                        (row.input instanceof JPanel && Props.BRS_PK_CHECKS.getName().equals(row.prop.getName()));
+
+                String displaySaved = savedValue;
+                String displayNew = newValue;
+
+                if (isList) {
+                    displaySaved = normalizeListValue(savedValue, ";");
+                    displayNew = normalizeListValue(newValue, "\n");
+                }
+
+                report.append("<li>").append(row.labelText).append(": '")
+                        .append(displaySaved.length() > 50 ? displaySaved.substring(0, 47) + "..." : displaySaved)
+                        .append("' &rarr; '")
+                        .append(displayNew.length() > 50 ? displayNew.substring(0, 47) + "..." : displayNew)
+                        .append("'</li>");
             }
         }
+        report.append("</ul></html>");
+        return changesFound ? report.toString() : null;
     }
 
     private void reloadProfile() {
@@ -814,54 +990,56 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void createNewProfile() {
-        String name = (String) JOptionPane.showInputDialog(this, "Enter new profile name:", "New Profile",
-                JOptionPane.PLAIN_MESSAGE, null, null, "");
-        if (name == null || name.trim().isEmpty() || "node-default".equalsIgnoreCase(name.trim()))
-            return;
+        checkUnsavedChangesAndProceed(() -> {
+            String name = (String) JOptionPane.showInputDialog(this, "Enter new profile name:", "New Profile",
+                    JOptionPane.PLAIN_MESSAGE, null, null, "");
+            if (name == null || name.trim().isEmpty() || "node-default".equalsIgnoreCase(name.trim()))
+                return;
 
-        Path targetFile = resolveProfilePath(name + ".properties");
-        if (Files.exists(targetFile)) {
-            JOptionPane.showMessageDialog(this, "Profile '" + name + "' already exists.", "Error",
-                    JOptionPane.ERROR_MESSAGE);
-            return;
-        }
-
-        isProgrammaticChange = true;
-        for (Map.Entry<String, JComponent> entry : propertyComponents.entrySet()) {
-            String key = entry.getKey();
-            JComponent comp = entry.getValue();
-            String defaultValue = defaultValues.get(key);
-
-            if (comp instanceof JCheckBox) {
-                ((JCheckBox) comp).setSelected(Boolean.parseBoolean(defaultValue));
-            } else if (comp instanceof JComboBox) {
-                ((JComboBox<?>) comp).setSelectedItem(defaultValue);
-            } else if (comp instanceof javax.swing.text.JTextComponent) {
-                ((javax.swing.text.JTextComponent) comp).setText(defaultValue);
-            } else if (comp instanceof JScrollPane
-                    && ((JScrollPane) comp).getViewport().getView() instanceof JTextArea) {
-                ((JTextArea) ((JScrollPane) comp).getViewport().getView()).setText(defaultValue.replace(";", "\n"));
+            Path targetFile = resolveProfilePath(name + ".properties");
+            if (Files.exists(targetFile)) {
+                JOptionPane.showMessageDialog(this, "Profile '" + name + "' already exists.", "Error",
+                        JOptionPane.ERROR_MESSAGE);
+                return;
             }
-        }
-        isProgrammaticChange = false;
 
-        try {
-            Properties propsToSave = getPropertiesFromUI();
-            savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
+            isProgrammaticChange = true;
+            for (Map.Entry<String, JComponent> entry : propertyComponents.entrySet()) {
+                String key = entry.getKey();
+                JComponent comp = entry.getValue();
+                String defaultValue = defaultValues.get(key);
 
-            this.loadedProfileName = name; // Update early to prevent redundant load prompts during refresh
-            refreshProfileList();
-            profileComboBox.setSelectedItem(name);
-            this.currentProperties.clear();
-            this.currentProperties.putAll(propsToSave);
-            this.propertiesFile = targetFile;
-            updateDirtyStatus();
-            updateUIFromProperties(propsToSave);
-            updateProfileComboBoxColor();
-        } catch (IOException e) {
-            JOptionPane.showMessageDialog(this, "Error creating profile: " + e.getMessage(), "Error",
-                    JOptionPane.ERROR_MESSAGE);
-        }
+                if (comp instanceof JCheckBox) {
+                    ((JCheckBox) comp).setSelected(Boolean.parseBoolean(defaultValue));
+                } else if (comp instanceof JComboBox) {
+                    ((JComboBox<?>) comp).setSelectedItem(defaultValue);
+                } else if (comp instanceof javax.swing.text.JTextComponent) {
+                    ((javax.swing.text.JTextComponent) comp).setText(defaultValue);
+                } else if (comp instanceof JScrollPane
+                        && ((JScrollPane) comp).getViewport().getView() instanceof JTextArea) {
+                    ((JTextArea) ((JScrollPane) comp).getViewport().getView()).setText(defaultValue.replace(";", "\n"));
+                }
+            }
+            isProgrammaticChange = false;
+
+            try {
+                Properties propsToSave = getPropertiesFromUI();
+                savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
+
+                this.loadedProfileName = name; // Update early to prevent redundant load prompts during refresh
+                refreshProfileList();
+                profileComboBox.setSelectedItem(name);
+                this.currentProperties.clear();
+                this.currentProperties.putAll(propsToSave);
+                this.propertiesFile = targetFile;
+                updateDirtyStatus();
+                updateUIFromProperties(propsToSave);
+                updateProfileComboBoxColor();
+            } catch (IOException e) {
+                JOptionPane.showMessageDialog(this, "Error creating profile: " + e.getMessage(), "Error",
+                        JOptionPane.ERROR_MESSAGE);
+            }
+        }, null);
     }
 
     private void updateProfileButtonStates() {
@@ -1108,7 +1286,12 @@ public class NodeConfigurationPanel extends JPanel {
                     categoryTabbedPane.setTitleAt(i, title.substring(0, title.length() - 2));
             }
         }
-        saveProfileBtn.setText(overallDirty ? "Save Profile *" : "Save Profile");
+        saveProfileBtn.setText(overallDirty ? "Save Profile As *" : "Save Profile As");
+
+        fixComponentSize(saveProfileBtn);
+        if (saveProfileBtn.getParent() != null) {
+            saveProfileBtn.getParent().revalidate();
+        }
     }
 
     private void applyProfile() {
@@ -1116,25 +1299,8 @@ public class NodeConfigurationPanel extends JPanel {
         if (selected == null)
             return;
 
-        if (hasUnsavedChanges()) {
-            int result = JOptionPane.showOptionDialog(this,
-                    "You have unsaved changes in profile '" + loadedProfileName
-                            + "'. Would you like to save them before applying?",
-                    "Unsaved Changes",
-                    JOptionPane.YES_NO_CANCEL_OPTION,
-                    JOptionPane.QUESTION_MESSAGE,
-                    null, new Object[] { "Save", "Discard", "Cancel" }, "Save");
-
-            if (result == JOptionPane.YES_OPTION) {
-                performSave();
-            } else if (result == JOptionPane.NO_OPTION) {
-                isProgrammaticChange = true;
-                updateUIFromProperties(currentProperties);
-                updateDirtyStatus();
-                isProgrammaticChange = false;
-            } else if (result == JOptionPane.CANCEL_OPTION || result == JOptionPane.CLOSED_OPTION) {
-                return;
-            }
+        if (!checkUnsavedChangesAndProceed(null, null)) {
+            return;
         }
 
         String message = "Apply profile '" + selected + "'?";
@@ -1161,27 +1327,12 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void handleBack() {
-        if (hasUnsavedChanges()) {
-            String message = "You have unsaved changes. Would you like to save them before leaving?";
-            Object[] options = { "Save", "Discard", "Cancel" };
-            int result = JOptionPane.showOptionDialog(this, message, "Unsaved Changes",
-                    JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE,
-                    null, options, options[0]);
-            if (result == JOptionPane.YES_OPTION) {
-                performSave();
-                if (backAction != null)
-                    backAction.run();
-            } else if (result == JOptionPane.NO_OPTION) {
-                isProgrammaticChange = true;
-                updateUIFromProperties(currentProperties);
-                updateDirtyStatus();
-                isProgrammaticChange = false;
-                if (backAction != null)
-                    backAction.run();
-            }
-        } else if (backAction != null) {
-            backAction.run();
-        }
+        checkUnsavedChangesAndProceed(
+                () -> {
+                    if (backAction != null)
+                        backAction.run();
+                },
+                null);
     }
 
     private Path getProfileMetadataPath() {
@@ -1838,11 +1989,21 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void fixComponentSize(JComponent comp) {
-        JTextField dummy = new JTextField("Prototype");
-        styleTextField(dummy);
+        comp.setPreferredSize(null);
+        comp.setMinimumSize(null);
+        // Use a button with an icon as reference to ensure perfect alignment with
+        // toolbar buttons
+        JButton dummy = new JButton("P",
+                IconFontSwing.buildIcon(FontAwesome.CIRCLE, GuiConstants.getHelpIconSize(), Color.BLACK));
         Dimension pref = dummy.getPreferredSize();
-        comp.setPreferredSize(new Dimension(comp.getPreferredSize().width, pref.height));
-        comp.setMinimumSize(new Dimension(comp.getMinimumSize().width, pref.height));
+        Dimension currentPref = comp.getPreferredSize();
+
+        // Ensure height is at least as tall as a button, but allow it to grow if the
+        // font
+        // requires it. Added a small vertical padding to prevent text clipping.
+        int targetHeight = Math.max(currentPref.height, pref.height) + 2;
+        comp.setPreferredSize(new Dimension(currentPref.width + 2, targetHeight));
+        comp.setMinimumSize(new Dimension(currentPref.width + 2, targetHeight));
     }
 
     private String getSafeDefault(Prop<?> prop) {
