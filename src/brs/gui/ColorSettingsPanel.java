@@ -29,6 +29,9 @@ public class ColorSettingsPanel extends JPanel {
     private final List<ColorRow> allColorRows = new ArrayList<>();
     private JPanel searchResultsPanel;
     private CardLayout contentCardLayout;
+    private JTabbedPane innerTabbedPane;
+    private Runnable onChangeListener;
+    private final Map<String, Integer> categoryToTabIndex = new HashMap<>();
     private JPanel contentContainer;
     private final Map<String, String> descriptions = new HashMap<>();
 
@@ -43,6 +46,10 @@ public class ColorSettingsPanel extends JPanel {
 
         initUI();
         refreshAllColorRows();
+    }
+
+    public void setOnChangeListener(Runnable listener) {
+        this.onChangeListener = listener;
     }
 
     @Override
@@ -81,27 +88,28 @@ public class ColorSettingsPanel extends JPanel {
         contentCardLayout = new CardLayout();
         contentContainer = new JPanel(contentCardLayout);
 
-        JTabbedPane tabbedPane = new JTabbedPane();
+        innerTabbedPane = new JTabbedPane();
 
         // Group keys by prefix
         Map<String, List<String>> groupedKeys = allColorKeys.stream()
                 .collect(Collectors.groupingBy(this::getCategoryForKey));
 
         // Create tabs for each category
-        createColorTab(tabbedPane, "General", groupedKeys.getOrDefault("General", Collections.emptyList()),
+        createColorTab(innerTabbedPane, "General", groupedKeys.getOrDefault("General", Collections.emptyList()),
                 "General application colors for UI feedback.");
-        createColorTab(tabbedPane, "Peer Metrics", groupedKeys.getOrDefault("Peer Metrics", Collections.emptyList()),
+        createColorTab(innerTabbedPane, "Peer Metrics",
+                groupedKeys.getOrDefault("Peer Metrics", Collections.emptyList()),
                 "Colors used in the Peer Metrics panel for charts and tables.");
-        createColorTab(tabbedPane, "Block Generation",
+        createColorTab(innerTabbedPane, "Block Generation",
                 groupedKeys.getOrDefault("Block Generation", Collections.emptyList()),
                 "Colors used in the Block Generation panel for charts, pies, and tables.");
-        createColorTab(tabbedPane, "Synchronization",
+        createColorTab(innerTabbedPane, "Synchronization",
                 groupedKeys.getOrDefault("Synchronization", Collections.emptyList()),
                 "Colors used in the Synchronization panel for performance and timing charts.");
-        createColorTab(tabbedPane, "GUI", groupedKeys.getOrDefault("GUI", Collections.emptyList()),
+        createColorTab(innerTabbedPane, "GUI", groupedKeys.getOrDefault("GUI", Collections.emptyList()),
                 "General GUI element colors.");
 
-        contentContainer.add(tabbedPane, "TABS");
+        contentContainer.add(innerTabbedPane, "TABS");
 
         searchResultsPanel = new JPanel(new MigLayout("insets 10, gapx 15", "[][][][]", ""));
         JScrollPane searchScrollPane = new JScrollPane(searchResultsPanel);
@@ -126,6 +134,9 @@ public class ColorSettingsPanel extends JPanel {
             currentOverrides.clear();
             currentOverrides.putAll(loadedProfileOverrides);
             ColorPaletteManager.applyOverrides(currentOverrides);
+            if (onChangeListener != null) {
+                onChangeListener.run();
+            }
             FlatAnimatedLafChange.hideSnapshotWithAnimation();
         });
         buttonPanel.add(resetButton);
@@ -222,6 +233,10 @@ public class ColorSettingsPanel extends JPanel {
         }
     }
 
+    private boolean objectsEqual(Object a, Object b) {
+        return (a == b) || (a != null && a.equals(b));
+    }
+
     private void createColorTab(JTabbedPane tabbedPane, String title, List<String> keys, String helpText) {
         if (keys.isEmpty()) {
             return;
@@ -261,6 +276,10 @@ public class ColorSettingsPanel extends JPanel {
 
                         // Directly update the color preview on this panel for immediate feedback.
                         updateColorRow(key, previewColor);
+                        updateTabDirtyStatus();
+                        if (onChangeListener != null) {
+                            onChangeListener.run();
+                        }
 
                         // To provide a live preview across the entire application (e.g., in tables),
                         // we need to trigger a UI update. A simple repaint() is often insufficient
@@ -328,14 +347,54 @@ public class ColorSettingsPanel extends JPanel {
 
         tabbedPane.addTab(title, scrollPane);
         tabbedPane.setTabComponentAt(tabbedPane.getTabCount() - 1, tabComponent);
+        categoryToTabIndex.put(title, tabbedPane.getTabCount() - 1);
+    }
+
+    private void updateTabDirtyStatus() {
+        if (innerTabbedPane == null)
+            return;
+
+        Map<String, Boolean> categoryDirty = new HashMap<>();
+        for (String key : allColorKeys) {
+            String category = getCategoryForKey(key);
+            boolean isDirty = !objectsEqual(currentOverrides.get(key), loadedProfileOverrides.get(key));
+            if (isDirty) {
+                categoryDirty.put(category, true);
+            }
+        }
+
+        categoryToTabIndex.forEach((category, index) -> {
+            String title = innerTabbedPane.getTitleAt(index);
+            if (title.endsWith(" *"))
+                title = title.substring(0, title.length() - 2);
+
+            if (categoryDirty.getOrDefault(category, false)) {
+                innerTabbedPane.setTitleAt(index, title + " *");
+            } else {
+                innerTabbedPane.setTitleAt(index, title);
+            }
+        });
     }
 
     private void updateColorRow(String key, Color color) {
-        previewPanels.get(key).setBackground(color);
-        keyLabels.get(key).setForeground(color);
-        valueLabels.get(key).setForeground(color);
-        valueLabels.get(key).setText(String.format("%s (R:%d,G:%d,B:%d,A:%d)",
-                toHexString(color), color.getRed(), color.getGreen(), color.getBlue(), color.getAlpha()));
+        JPanel preview = previewPanels.get(key);
+        if (preview != null)
+            preview.setBackground(color);
+
+        boolean isDirty = !objectsEqual(currentOverrides.get(key), loadedProfileOverrides.get(key));
+
+        JLabel kLabel = keyLabels.get(key);
+        if (kLabel != null) {
+            kLabel.setText(isDirty ? key + " *" : key);
+            kLabel.setForeground(color);
+        }
+
+        JLabel vLabel = valueLabels.get(key);
+        if (vLabel != null) {
+            vLabel.setForeground(color);
+            vLabel.setText(String.format("%s (R:%d,G:%d,B:%d,A:%d)",
+                    toHexString(color), color.getRed(), color.getGreen(), color.getBlue(), color.getAlpha()));
+        }
     }
 
     public void refreshAllColorRows() {
@@ -343,6 +402,7 @@ public class ColorSettingsPanel extends JPanel {
             Color color = ColorPaletteManager.getColor(key);
             updateColorRow(key, color);
         }
+        updateTabDirtyStatus();
     }
 
     public void setProfileOverrides(Map<String, Color> overrides) {
