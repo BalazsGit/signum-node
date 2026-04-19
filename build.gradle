@@ -166,8 +166,18 @@ tasks.register('dist', Zip) {
         include "${baseNodeFileName}-all.jar"
         rename { "${baseNodeFileName}.jar" }
     }
-    into('conf') { from "conf/node-default.properties" }
-    into('conf') { from "conf/logging-default.properties" }
+
+    doFirst {
+        // Ensure an empty file exists to be copied as node.properties and logging.properties
+        def emptyFile = file("$buildDir/empty.properties")
+        emptyFile.parentFile.mkdirs()
+        emptyFile.write('')
+    }
+
+    from(file("$buildDir/empty.properties")) { into "conf/node"; rename { "node.properties" } }
+    from(file("$buildDir/empty.properties")) { into "conf/logging"; rename { "logging.properties" } }
+    from("conf/node-default.properties") { into "conf/node" } // Copy default properties from root to subfolder
+    from("conf/logging-default.properties") { into "conf/logging" } // Copy default properties from root to subfolder
     into('html') { from "html" }
     from "LICENSE.txt"
     from "README.md"
@@ -284,8 +294,17 @@ tasks.register('zipWinExe', Zip) {
         include "**/*"
     }
 
-    into('conf') { from "conf/node-default.properties" }
-    into('conf') { from "conf/logging-default.properties" }
+    doFirst {
+        // Ensure an empty file exists to be copied as node.properties and logging.properties
+        def emptyFile = file("$buildDir/empty.properties")
+        emptyFile.parentFile.mkdirs()
+        emptyFile.write('')
+    }
+
+    from(file("$buildDir/empty.properties")) { into "conf/node"; rename { "node.properties" } }
+    from(file("$buildDir/empty.properties")) { into "conf/logging"; rename { "logging.properties" } }
+    from("conf/node-default.properties") { into "conf/node" } // Copy default properties from root to subfolder
+    from("conf/logging-default.properties") { into "conf/logging" } // Copy default properties from root to subfolder
     into('html') { from "html" }
     from "LICENSE.txt"
     from "README.md"
