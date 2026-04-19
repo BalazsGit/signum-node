@@ -23,6 +23,9 @@ import java.util.Set;
 public class GuiFontManager {
     private static final Logger LOGGER = LoggerFactory.getLogger(GuiFontManager.class);
 
+    private static Font lastGlobalFont;
+    private static Font lastConsoleFont;
+
     /**
      * Updates UIManager font keys and applies them to the current theme.
      * If not using FlatLaf, it "locks" the font by using a plain Font instead of
@@ -33,24 +36,45 @@ public class GuiFontManager {
         boolean isFlatLaf = laf instanceof FlatLaf;
 
         if (font != null) {
-            LOGGER.info("Updating UIManager font keys. Target font: {} ({})", font, font.getClass().getName());
+            if (lastGlobalFont != null && !lastGlobalFont.equals(font)) {
+                LOGGER.info("Global font changed from {} {} to {} {}",
+                        lastGlobalFont.getFamily(), lastGlobalFont.getSize(), font.getFamily(), font.getSize());
+            } else if (lastGlobalFont == null) {
+                LOGGER.info("Setting global font to {} {}", font.getFamily(), font.getSize());
+            }
+            lastGlobalFont = font;
         } else {
-            LOGGER.info("Clearing custom UIManager font keys.");
+            LOGGER.info("Clearing custom global font settings.");
+            lastGlobalFont = null;
         }
 
-        // For Nimbus/Standard L&F, we use a plain Font to prevent the L&F from
-        // overriding it later.
-        Object fontValue = (font == null) ? null
-                : (isFlatLaf ? new FontUIResource(font)
-                        : new Font(font.getFamily(), font.getStyle(), font.getSize()));
+        if (font == null) {
+            // Clear custom global font settings from UIManager to allow L&F defaults to be
+            // used.
+            UIManager.put("defaultFont", null);
+            for (Object key : UIManager.getDefaults().keySet().toArray()) {
+                if (key instanceof String && isFontKey((String) key)) {
+                    UIManager.put(key, null);
+                }
+            }
+            return;
+        }
+
+        Font baseFont = font;
+
+        // Always use FontUIResource to allow standard Swing UI updates without
+        // "locking" the font
+        FontUIResource fontValue = new FontUIResource(baseFont);
 
         UIManager.put("defaultFont", fontValue);
 
         UIDefaults defaults = UIManager.getLookAndFeelDefaults();
-        Set<Object> keys = new HashSet<>(defaults.keySet());
-        keys.addAll(UIManager.getDefaults().keySet());
-        int count = 0;
+        // Use toArray to avoid ConcurrentModificationException if the UI is updating in
+        // another thread
+        Object[] keys = defaults.keySet().toArray();
+        Object[] uiKeys = UIManager.getDefaults().keySet().toArray();
 
+        int count = 0;
         for (Object key : keys) {
             if (key instanceof String) {
                 String k = (String) key;
@@ -61,7 +85,65 @@ public class GuiFontManager {
                 }
             }
         }
-        LOGGER.info("Updated {} font keys in UIManager.", count);
+        for (Object key : uiKeys) {
+            if (key instanceof String) {
+                String k = (String) key;
+                String low = k.toLowerCase();
+                if (low.endsWith(".font") || low.contains("font") || low.equals("defaultfont")) {
+                    UIManager.put(k, fontValue);
+                    count++;
+                }
+            }
+        }
+    }
+
+    private static boolean isFontKey(String key) {
+        String low = key.toLowerCase();
+        return low.endsWith(".font") || low.contains("font") || low.equals("defaultfont");
+    }
+
+    /**
+     * Updates only the console-specific font settings in the UIManager.
+     * This allows the console to have a different font from the rest of the UI.
+     */
+    public static void updateConsoleFont(Font font) {
+        if (font != null) {
+            if (lastConsoleFont != null && !lastConsoleFont.equals(font)) {
+                LOGGER.info("Console font changed from {} {} to {} {}",
+                        lastConsoleFont.getFamily(), lastConsoleFont.getSize(), font.getFamily(), font.getSize());
+            } else if (lastConsoleFont == null) {
+                LOGGER.info("Setting console font to {} {}", font.getFamily(), font.getSize());
+            }
+            lastConsoleFont = font;
+        } else {
+            LOGGER.info("Clearing custom console font settings.");
+            lastConsoleFont = null;
+            String[] consoleKeys = {
+                    "TextPane.font",
+                    "TextArea.font",
+                    "EditorPane.font",
+                    "Monospaced.font"
+            };
+            for (String key : consoleKeys) {
+                UIManager.put(key, null);
+            }
+            return;
+        }
+
+        // Always use FontUIResource for consistency and proper theme scaling
+        FontUIResource fontValue = new FontUIResource(font);
+
+        // Update keys that specifically affect text panes and console areas
+        String[] consoleKeys = {
+                "TextPane.font",
+                "TextArea.font",
+                "EditorPane.font",
+                "Monospaced.font"
+        };
+
+        for (String key : consoleKeys) {
+            UIManager.put(key, fontValue);
+        }
     }
 
     /**
@@ -71,16 +153,11 @@ public class GuiFontManager {
         if (comp == null || font == null)
             return;
 
-        boolean isFlatLaf = UIManager.getLookAndFeel() instanceof FlatLaf;
-        Font fontToApply = isFlatLaf ? new FontUIResource(font)
-                : new Font(font.getFamily(), font.getStyle(), font.getSize());
+        // Use UIResource to prevent the font from being "locked" against future theme
+        // changes
+        Font fontToApply = (font instanceof FontUIResource) ? font : new FontUIResource(font);
 
         comp.setFont(fontToApply);
-
-        if (!(comp instanceof JPanel) && !(comp instanceof Box) && !(comp instanceof JLayeredPane)) {
-            LOGGER.info("Applied font {} to {} [{}]", fontToApply.getSize(), comp.getClass().getSimpleName(),
-                    (comp.getName() != null ? comp.getName() : "unnamed"));
-        }
 
         if (comp instanceof JComponent) {
             JComponent jc = (JComponent) comp;
@@ -104,6 +181,17 @@ public class GuiFontManager {
             for (Component child : ((Container) comp).getComponents()) {
                 applyFontToTree(child, font);
             }
+        }
+    }
+
+    /**
+     * Centrally applies the current default UI font to a component.
+     * Should be called within updateUI() overrides.
+     */
+    public static void applyDefaultFont(Component comp) {
+        Font font = UIManager.getFont("Label.font");
+        if (font != null && comp != null) {
+            comp.setFont(font instanceof FontUIResource ? font : new FontUIResource(font));
         }
     }
 
