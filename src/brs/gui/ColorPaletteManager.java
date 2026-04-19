@@ -315,4 +315,15 @@ public final class ColorPaletteManager {
     public static Set<String> getAllKeys() {
         return defaultPalette.getAllKeys();
     }
+
+    /**
+     * Returns the color for a key from the base theme palette (without user profile
+     * overrides).
+     *
+     * @param key The key for the desired color.
+     * @return The resolved {@link Color} from the theme.
+     */
+    public static Color getThemeColor(String key) {
+        return baseThemePalette.getColor(key, defaultPalette.getColor(key, Color.MAGENTA));
+    }
 }
