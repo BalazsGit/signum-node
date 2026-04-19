@@ -2,6 +2,7 @@ package brs.gui;
 
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLaf;
+import brs.gui.laf.FlatLafPrefs;
 import com.formdev.flatlaf.util.SystemInfo;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -59,6 +60,7 @@ import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
+import javax.swing.JViewport;
 import javax.swing.JSeparator;
 import javax.swing.JTextField;
 import javax.swing.JTextPane;
@@ -90,6 +92,7 @@ import brs.BlockchainProcessor;
 import brs.Constants;
 import brs.gui.util.CustomDrawings;
 import brs.gui.util.HelpButton;
+import brs.gui.util.GuiUtils;
 import brs.gui.util.CustomDrawingComponent;
 import brs.Block;
 import brs.peer.Peer;
@@ -132,11 +135,19 @@ public class SignumGUI extends JFrame {
     private static Font activeConsoleFont;
 
     public static Font getActiveCustomFont() {
-        return activeCustomFont;
+        if (activeCustomFont != null) {
+            return activeCustomFont;
+        }
+        Font f = UIManager.getFont("Label.font");
+        return f != null ? f : new Font(Font.SANS_SERIF, Font.PLAIN, 12);
     }
 
     public static Font getActiveConsoleFont() {
-        return activeConsoleFont != null ? activeConsoleFont : activeCustomFont;
+        if (activeConsoleFont != null) {
+            return activeConsoleFont;
+        }
+        Font custom = getActiveCustomFont();
+        return custom != null ? custom : new Font(Font.MONOSPACED, Font.PLAIN, 14);
     }
 
     private static Path getGuiSettingsPath(String[] args) {
@@ -151,7 +162,7 @@ public class SignumGUI extends JFrame {
         }
 
         String settingsDir = Props.SETTINGS_DIR.getDefaultValue();
-        Path nodePropsFile = brs.util.PathUtils.resolvePath(confFolder).resolve("node.properties");
+        Path nodePropsFile = brs.util.PathUtils.resolvePath(confFolder).resolve("node").resolve(Signum.PROPERTIES_NAME);
         if (Files.exists(nodePropsFile)) {
             try (java.io.FileInputStream in = new java.io.FileInputStream(nodePropsFile.toFile())) {
                 Properties nodeProps = new Properties();
@@ -165,6 +176,9 @@ public class SignumGUI extends JFrame {
     }
 
     private static void loadLookAndFeelSettings(String[] args) {
+        // Initialize FlatLaf preferences early so ColorPaletteManager can access them
+        FlatLafPrefs.init("/flatlaf-settings");
+
         Path settingsPath = getGuiSettingsPath(args);
         String themeClassName = FlatDarkLaf.class.getName(); // Default theme
         Map<String, Color> colorOverrides = null;
@@ -263,6 +277,7 @@ public class SignumGUI extends JFrame {
 
     public static void updateCommonConsoleFontKeys(Font font) {
         activeConsoleFont = font;
+        GuiFontManager.updateConsoleFont(font);
     }
 
     /**
@@ -307,13 +322,13 @@ public class SignumGUI extends JFrame {
 
         LookAndFeel laf = UIManager.getLookAndFeel();
         LOGGER.info("Updating all UIs. Current LookAndFeel: {} ({})", laf.getName(), laf.getClass().getName());
-        logCurrentFonts("UI fonts BEFORE palette and font update");
 
         // 1. Update the color palette based on the current theme and overrides
         ColorPaletteManager.updatePalette(overrides);
 
         // 1b. Ensure all common UI fonts are linked to the active font
         updateCommonFontKeys(activeCustomFont);
+        updateCommonConsoleFontKeys(activeConsoleFont);
 
         // Capture window sizes before update to prevent auto-resizing (packing)
         // behavior
@@ -340,11 +355,13 @@ public class SignumGUI extends JFrame {
                     if (activeCustomFont != null) {
                         applyFontRecursively(window, activeCustomFont);
                     }
+                    window.revalidate();
+                    window.repaint();
                 }
             }
         }
 
-        // Restore window sizes ONLY for non-FlatLaf themes (like Nimbus).
+        // Restore window sizes ONLY for non-FlatLaf themes.
         // FlatLaf handles its own UI updates smoothly. Calling setSize during
         // a FlatLaf animation phase can cause flickering or cancel the transition.
         if (!(laf instanceof FlatLaf)) {
@@ -373,8 +390,6 @@ public class SignumGUI extends JFrame {
             }
             instance.updateCustomComponents();
         }
-
-        logCurrentFonts("UI fonts AFTER update");
     }
 
     /**
@@ -472,6 +487,8 @@ public class SignumGUI extends JFrame {
     private String version = null;
     private final String confFolder;
     private final Color iconColor;
+    private NodeConfigurationPanel nodeConfigPanel;
+    private LoggerConfigurationPanel loggerConfigPanel;
 
     private JLabel connectedPeersLabel;
     private JLabel peersCountLabel;
@@ -595,6 +612,7 @@ public class SignumGUI extends JFrame {
             @Override
             public void updateUI() {
                 super.updateUI();
+                GuiFontManager.applyDefaultFont(this);
                 // Re-apply custom color after Look and Feel change
                 if (color != null) {
                     setForeground(color);
@@ -727,8 +745,16 @@ public class SignumGUI extends JFrame {
         // Calculate target dimensions
         Dimension naturalSize = popOffButtonsPanel.getLayout().preferredLayoutSize(popOffButtonsPanel);
         final int targetWidth = naturalSize.width;
-        final int targetHeight = Math.max(naturalSize.height, 25);
+        // Use a stable height from existing toolbar buttons to prevent vertical jumping
+        final int targetHeight = editConfButton != null ? editConfButton.getPreferredSize().height
+                : Math.max(naturalSize.height, 25);
         Container parent = popOffButtonsPanel.getParent();
+
+        // Find scroll pane to keep it aligned to the right during animation
+        final JScrollPane sp = (parent instanceof JPanel && parent.getParent() instanceof JViewport
+                && parent.getParent().getParent() instanceof JScrollPane)
+                        ? (JScrollPane) parent.getParent().getParent()
+                        : null;
 
         if (showPopOff) {
             // Opening
@@ -754,6 +780,14 @@ public class SignumGUI extends JFrame {
                     if (parent != null) {
                         parent.revalidate();
                         parent.repaint();
+                    }
+
+                    // Ensure the toggle button stays pinned to the right edge during collapse
+                    if (sp != null) {
+                        JScrollBar hBar = sp.getHorizontalScrollBar();
+                        if (hBar != null && hBar.isVisible()) {
+                            hBar.setValue(hBar.getMaximum());
+                        }
                     }
 
                     if (progress >= 1.0f) {
@@ -784,6 +818,15 @@ public class SignumGUI extends JFrame {
                     if (parent != null) {
                         parent.revalidate();
                         parent.repaint();
+                    }
+
+                    // Ensure the toggle button stays at the right edge during expansion if
+                    // scrolling is needed
+                    if (sp != null) {
+                        JScrollBar hBar = sp.getHorizontalScrollBar();
+                        if (hBar != null && hBar.isVisible()) {
+                            hBar.setValue(hBar.getMaximum());
+                        }
                     }
 
                     if (progress >= 1.0f) {
@@ -1022,26 +1065,27 @@ public class SignumGUI extends JFrame {
         };
         mainCardPanel.add(content, VIEW_CONSOLE);
 
-        NodeConfigurationPanel nodeConfigPanel = new NodeConfigurationPanel(this::restart, this.confFolder,
+        this.nodeConfigPanel = new NodeConfigurationPanel(this::restart, this.confFolder,
                 () -> cardLayout.show(mainCardPanel, VIEW_CONSOLE),
                 () -> cardLayout.show(mainCardPanel, VIEW_LOGGER_PROPS));
         mainCardPanel.add(nodeConfigPanel, VIEW_NODE_PROPS);
 
-        LoggerConfigurationPanel loggerConfigPanel = new LoggerConfigurationPanel(this::restart, this.confFolder,
+        this.loggerConfigPanel = new LoggerConfigurationPanel(this::restart, this.confFolder,
                 () -> cardLayout.show(mainCardPanel, VIEW_CONSOLE),
                 () -> cardLayout.show(mainCardPanel, VIEW_NODE_PROPS));
         mainCardPanel.add(loggerConfigPanel, VIEW_LOGGER_PROPS);
 
-        LookAndFeelPanel lafPanel = new LookAndFeelPanel(this::restart, confFolder,
+        LookAndFeelPanel lafPanel = new LookAndFeelPanel(this::restart,
                 () -> cardLayout.show(mainCardPanel, VIEW_CONSOLE));
         mainCardPanel.add(lafPanel, VIEW_LAF_PROPS);
 
         setContentPane(mainCardPanel);
 
-        toolBar = new JPanel(new BorderLayout());
+        toolBar = new JPanel(new MigLayout("insets 0, gap 0, fillx, hidemode 3", "[grow, shrink]0[pref!]", "[top]"));
 
         JPanel leftButtons = new JPanel(new MigLayout("insets 0, gap 5, hidemode 3, aligny top"));
         leftButtons.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+        leftButtons.setOpaque(false);
 
         openPhoenixButton = new JButton("Phoenix Wallet");
         openClassicButton = new JButton("Classic Wallet");
@@ -1053,6 +1097,11 @@ public class SignumGUI extends JFrame {
         syncButton = new JButton("Pause Sync");
         restartButton = new JButton("Restart");
         shutdownButton = new JButton("Shutdown");
+
+        popOff10Button.setEnabled(false);
+        popOff100Button.setEnabled(false);
+        dbCheckButton.setEnabled(false);
+        syncButton.setEnabled(false);
 
         updateToolBarIcons();
         updateDbCheckButtonIcon();
@@ -1090,11 +1139,16 @@ public class SignumGUI extends JFrame {
         syncButton.addActionListener(e -> syncButtonAction());
         shutdownButton.addActionListener(e -> shutdownAction());
         restartButton.addActionListener(e -> {
-            if (JOptionPane.showConfirmDialog(SignumGUI.this,
-                    "This will restart the node. Are you sure?", "Restart node",
-                    JOptionPane.YES_NO_OPTION,
-                    JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
-                restart();
+            Runnable restartTask = () -> {
+                if (JOptionPane.showConfirmDialog(SignumGUI.this,
+                        "This will restart the node. Are you sure?", "Restart node",
+                        JOptionPane.YES_NO_OPTION,
+                        JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
+                    restart();
+                }
+            };
+            if (checkAllUnsavedChanges()) {
+                restartTask.run();
             }
         });
 
@@ -1348,10 +1402,22 @@ public class SignumGUI extends JFrame {
         enableGpuItem.setToolTipText("Enables OpenGL pipeline for smoother rendering. Requires restart.");
         enableGpuItem.setSelected(enableGPU);
         enableGpuItem.addActionListener(e -> {
-            enableGPU = enableGpuItem.isSelected();
-            JOptionPane.showMessageDialog(SignumGUI.this,
-                    "Changes to GPU acceleration will take effect after restart.", "Restart Required",
-                    JOptionPane.INFORMATION_MESSAGE);
+            boolean newValue = enableGpuItem.isSelected();
+            String message = "Changes to GPU acceleration will take effect after restart.\n\nWould you like to restart now?";
+            String[] options = { "Restart Now", "Restart Later", "Discard" };
+            int choice = JOptionPane.showOptionDialog(SignumGUI.this, message, "GPU Acceleration Changed",
+                    JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
+
+            if (choice == 0) { // Restart Now
+                enableGPU = newValue;
+                saveGuiSettings();
+                restart();
+            } else if (choice == 1 || choice == JOptionPane.CLOSED_OPTION) { // Restart Later or Closed
+                enableGPU = newValue;
+                saveGuiSettings();
+            } else { // Discard (choice == 2)
+                enableGpuItem.setSelected(!newValue);
+            }
         });
         menuPanel.add(enableGpuItem);
 
@@ -1395,24 +1461,16 @@ public class SignumGUI extends JFrame {
         JScrollPane scrollPane = new JScrollPane(leftButtons);
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
+        scrollPane.setMinimumSize(new Dimension(0, 0)); // Allow toolbar to shrink and show scrollbar
+        scrollPane.setOpaque(false);
+        scrollPane.getViewport().setOpaque(false);
+        scrollPane.getViewport().setScrollMode(JViewport.SIMPLE_SCROLL_MODE);
 
         // Listener to adjust bottom padding when scrollbar appears/disappears to
         // prevent overlay
         JScrollBar hBar = scrollPane.getHorizontalScrollBar();
-        hBar.addComponentListener(new java.awt.event.ComponentAdapter() {
-            @Override
-            public void componentShown(java.awt.event.ComponentEvent e) {
-                leftButtons.setBorder(BorderFactory.createEmptyBorder(5, 5, hBar.getHeight(), 5));
-                toolBar.revalidate();
-                SwingUtilities.invokeLater(() -> hBar.setValue(hBar.getMaximum()));
-            }
-
-            @Override
-            public void componentHidden(java.awt.event.ComponentEvent e) {
-                leftButtons.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
-                toolBar.revalidate();
-            }
-        });
+        GuiUtils.addHorizontalScrollPadding(scrollPane, leftButtons, new Insets(5, 5, 5, 5),
+                () -> SwingUtilities.invokeLater(() -> hBar.setValue(hBar.getMaximum())));
 
         scrollPane.addComponentListener(new java.awt.event.ComponentAdapter() {
             @Override
@@ -1423,14 +1481,15 @@ public class SignumGUI extends JFrame {
             }
         });
 
-        toolBar.add(scrollPane, BorderLayout.CENTER);
+        toolBar.add(scrollPane, "growx, pushx");
 
         JPanel rightIconsPanel = new JPanel(new MigLayout("insets 5 5 5 10, gap 5, aligny top"));
+        rightIconsPanel.setOpaque(false);
         globeButton = new JButton(IconFontSwing.buildIcon(FontAwesome.GLOBE, GuiConstants.getToolBarIconSize(),
                 GuiColors.getButtonIcon()));
         rightIconsPanel.add(globeButton);
         rightIconsPanel.add(menuButton);
-        toolBar.add(rightIconsPanel, BorderLayout.EAST);
+        toolBar.add(rightIconsPanel, "shrink 0, aligny top");
 
         leftButtons.add(popOffToggle);
 
@@ -1630,15 +1689,32 @@ public class SignumGUI extends JFrame {
             @Override
             public void windowClosing(WindowEvent e) {
                 if (trayIcon == null) {
-                    if (JOptionPane.showConfirmDialog(SignumGUI.this,
-                            "This will stop the node. Are you sure?", "Exit and stop node",
-                            JOptionPane.YES_NO_OPTION,
-                            JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
-                        shutdown();
+                    Runnable exitTask = () -> {
+                        if (JOptionPane.showConfirmDialog(SignumGUI.this,
+                                "This will stop the node. Are you sure?", "Exit and stop node",
+                                JOptionPane.YES_NO_OPTION,
+                                JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
+                            shutdown();
+                        }
+                    };
+                    if (checkAllUnsavedChanges()) {
+                        exitTask.run();
                     }
                 } else {
                     trayIcon.displayMessage("Signum GUI closed", "Note that Signum is still running", MessageType.INFO);
                     setVisible(false);
+                }
+            }
+        });
+
+        // Force a re-layout and repaint of the toolbar during resize to prevent visual
+        // artifacts
+        this.addComponentListener(new java.awt.event.ComponentAdapter() {
+            @Override
+            public void componentResized(java.awt.event.ComponentEvent e) {
+                if (toolBar != null) {
+                    toolBar.revalidate();
+                    toolBar.repaint();
                 }
             }
         });
@@ -1682,6 +1758,25 @@ public class SignumGUI extends JFrame {
 
         // Start BRS
         new Thread(this::startSignumWithGUI).start();
+    }
+
+    private boolean checkAllUnsavedChanges() {
+        if (LookAndFeelPanel.getInstance() != null) {
+            if (!LookAndFeelPanel.getInstance().checkUnsavedChangesAndProceed(false, null, null)) {
+                return false;
+            }
+        }
+        if (nodeConfigPanel != null) {
+            if (!nodeConfigPanel.checkUnsavedChangesAndProceed(null, null)) {
+                return false;
+            }
+        }
+        if (loggerConfigPanel != null) {
+            if (!loggerConfigPanel.checkUnsavedChangesAndProceed(null, null)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void initGlassPane() {
@@ -1890,15 +1985,23 @@ public class SignumGUI extends JFrame {
     private void syncButtonAction() {
         // The UI will update via the onSyncStateChanged listener when the core
         // processes the change.
-        Signum.getBlockchainProcessor().setSyncPaused(!isSyncStopped);
+        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        if (blockchainProcessor != null) {
+            blockchainProcessor.setSyncPaused(!isSyncStopped);
+        }
     }
 
     private void shutdownAction() {
-        if (JOptionPane.showConfirmDialog(SignumGUI.this,
-                "This will stop the node. Are you sure?", "Shutdown Node",
-                JOptionPane.YES_NO_OPTION,
-                JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
-            shutdown();
+        Runnable shutdownTask = () -> {
+            if (JOptionPane.showConfirmDialog(SignumGUI.this,
+                    "This will stop the node. Are you sure?", "Shutdown Node",
+                    JOptionPane.YES_NO_OPTION,
+                    JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
+                shutdown();
+            }
+        };
+        if (checkAllUnsavedChanges()) {
+            shutdownTask.run();
         }
     }
 
@@ -1931,6 +2034,10 @@ public class SignumGUI extends JFrame {
      */
     private void dbCheckAction() {
         BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        if (blockchainProcessor == null) {
+            showMessage("Blockchain processor not initialized.");
+            return;
+        }
 
         String statusMessage;
         if (blockchainProcessor.getResolutionState() == BlockchainProcessor.ResolutionState.ACTIVE) {
@@ -2198,9 +2305,10 @@ public class SignumGUI extends JFrame {
     }
 
     private void editConf() {
-        Path path = brs.util.PathUtils.resolvePath(confFolder).resolve(Signum.PROPERTIES_NAME);
+        Path nodeFolder = brs.util.PathUtils.resolvePath(confFolder).resolve("node");
+        Path path = nodeFolder.resolve(Signum.PROPERTIES_NAME);
         if (!Files.exists(path)) {
-            path = brs.util.PathUtils.resolvePath(confFolder).resolve(Signum.DEFAULT_PROPERTIES_NAME);
+            path = nodeFolder.resolve(Signum.DEFAULT_PROPERTIES_NAME);
         }
 
         File file = path.toFile();
@@ -2506,6 +2614,7 @@ public class SignumGUI extends JFrame {
                         popOffButtonsPanel.setPreferredSize(new Dimension(0, Math.max(natural.height, 25)));
                         popOffButtonsPanel.setVisible(false);
                     }
+                    metricsPanelWrapper.setMinimumSize(new Dimension(0, 0)); // Initial state shrinkable
                     toolBar.revalidate();
 
                     if (measurementActive) {
@@ -2548,6 +2657,11 @@ public class SignumGUI extends JFrame {
 
                     updateLatestBlock(lastBlock, maxPeerHeight, blockTime);
                     updatePeerCount(connectedCount, allKnownCount, blacklistedCount);
+
+                    syncButton.setEnabled(true);
+                    dbCheckButton.setEnabled(true);
+                    popOff10Button.setEnabled(true);
+                    popOff100Button.setEnabled(true);
                 });
 
                 updateTitle();
@@ -2654,6 +2768,7 @@ public class SignumGUI extends JFrame {
                             metricsPanelWrapper.removeAll();
                             metricsPanel = null;
                             metricsPanelWrapper.setPreferredSize(new Dimension(0, 0));
+                            metricsPanelWrapper.setMinimumSize(new Dimension(0, 0));
                             metricsPanelWrapper.revalidate();
                         }
                     }
