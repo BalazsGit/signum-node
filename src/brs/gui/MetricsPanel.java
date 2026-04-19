@@ -201,9 +201,10 @@ public class MetricsPanel extends JTabbedPane {
             wrapper.setPreferredSize(null);
             wrapper.setMinimumSize(null);
         } else {
-            Dimension d = new Dimension(content.getPreferredSize().width, height);
-            wrapper.setPreferredSize(d);
-            wrapper.setMinimumSize(d);
+            wrapper.setPreferredSize(new Dimension(content.getPreferredSize().width, height));
+            // Allow horizontal shrinking even during vertical animation/collapse to prevent
+            // toolbar right-side icons from being pushed out of the window.
+            wrapper.setMinimumSize(new Dimension(0, height));
         }
     }
 

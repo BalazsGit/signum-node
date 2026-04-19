@@ -55,12 +55,16 @@ public final class LoggerConfigurator {
             try {
                 Properties loggingProperties = new Properties();
                 Path confPath = PathUtils.resolvePath(confFolder);
-                File defaultProps = confPath.resolve("logging-default.properties").toFile();
-                try (InputStream is = new FileInputStream(defaultProps)) {
-                    loggingProperties.load(is);
-                    logs.add("INFO: Logging configuration loaded from " + defaultProps.getAbsolutePath());
+                File defaultProps = confPath.resolve("logging").resolve("logging-default.properties").toFile();
+                if (defaultProps.exists()) {
+                    try (InputStream is = new FileInputStream(defaultProps)) {
+                        loggingProperties.load(is);
+                        logs.add("INFO: Logging configuration loaded from " + defaultProps.getAbsolutePath());
+                    }
+                } else {
+                    logs.add("SEVERE: Logging configuration NOT found at " + defaultProps.getAbsolutePath());
                 }
-                File customProps = confPath.resolve("logging.properties").toFile();
+                File customProps = confPath.resolve("logging").resolve("logging.properties").toFile();
                 if (customProps.exists()) {
                     try (InputStream is = new FileInputStream(customProps)) {
                         loggingProperties.load(is);

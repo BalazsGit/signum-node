@@ -611,22 +611,33 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
         JPanel minersCountPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
         minersCountPanel.setOpaque(false);
-        nodeMinersCountLabel = new JLabel(
-                "<html>Node Miners: <font color='" + toHex(GuiColors.getBlockGenActiveMiner())
-                        + "'>0</font> / <font color='" // Active
-                        // miners
-                        // (y)
-                        // remains
-                        // Goldenrod
-                        + toHex(GuiColors.getBlockGenNodeMiners()) + "'>0</font></html>"); // Total unique node miners
-                                                                                           // (z)
-                                                                                           // uses new
+        nodeMinersCountLabel = new JLabel() {
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                GuiFontManager.applyDefaultFont(this);
+                refreshMinerLabelsText();
+            }
+        };
+        nodeMinersCountLabel.setText("<html>Node Miners: <font color='" + toHex(GuiColors.getBlockGenActiveMiner())
+                + "'>0</font> / <font color='"
+                + toHex(GuiColors.getBlockGenNodeMiners()) + "'>0</font></html>");
+        // (z)
+        // uses new
         // COLOR_NODE_MINERS
         addMinerListListener(nodeMinersCountLabel, 0);
 
-        networkMinersCountLabel = new JLabel(
-                "<html>Network Miners: <font color='" + toHex(GuiColors.getBlockGenNetworkMiners())
-                        + "'>0</font></html>"); // Uses new
+        networkMinersCountLabel = new JLabel() {
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                GuiFontManager.applyDefaultFont(this);
+                refreshMinerLabelsText();
+            }
+        };
+        networkMinersCountLabel
+                .setText("<html>Network Miners: <font color='" + toHex(GuiColors.getBlockGenNetworkMiners())
+                        + "'>0</font></html>");
         // COLOR_NETWORK_MINERS
         addMinerListListener(networkMinersCountLabel, 1);
 
@@ -644,6 +655,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
             @Override
             public void updateUI() {
                 super.updateUI();
+                GuiFontManager.applyDefaultFont(this);
+                setForeground(GuiColors.getBlockGenNodeShareLegend());
                 GuiFontManager.updateLabelStrikethrough(this, showNodeShare);
             }
         };
@@ -673,6 +686,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
             @Override
             public void updateUI() {
                 super.updateUI();
+                GuiFontManager.applyDefaultFont(this);
+                setForeground(GuiColors.getBlockGenNetworkShareLegend());
                 GuiFontManager.updateLabelStrikethrough(this, showNetworkShare);
             }
         };
@@ -1280,7 +1295,13 @@ public class BlockGenerationMetricsPanel extends JPanel {
     }
 
     private JLabel createInfoLabel(String title, String initialValue, String tooltip) {
-        JLabel label = new JLabel("<html><b>" + title + ":</b> " + initialValue + "</html>");
+        JLabel label = new JLabel("<html><b>" + title + ":</b> " + initialValue + "</html>") {
+            @Override
+            public void updateUI() {
+                super.updateUI();
+                GuiFontManager.applyDefaultFont(this);
+            }
+        };
         label.setHorizontalAlignment(SwingConstants.CENTER);
         if (tooltip != null) {
             ContextMenuUtils.addInfoTooltip(parentFrame, label, tooltip, null);
@@ -2259,11 +2280,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 val -> String.format("C: %d / %d | MA: %.1f - min: %.1f - max: %.1f", data.activeMinerCount,
                         data.uniqueNodeMiners, val, data.minMiners, data.maxMiners));
 
-        nodeMinersCountLabel.setText("<html>Node Miners: <font color='" + toHex(GuiColors.getBlockGenActiveMiner())
-                + "'>"
-                + data.activeMinerCount
-                + "</font> / <font color='" + toHex(GuiColors.getBlockGenNodeMiners()) + "'>"
-                + data.uniqueNodeMiners + "</font></html>");
+        refreshMinerLabelsText();
 
         String currentBestStr = (data.bestDeadline != null ? data.bestDeadline.longValue() + " s"
                 : "0 s");
@@ -2297,6 +2314,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
             @Override
             public void updateUI() {
                 super.updateUI();
+                GuiFontManager.applyDefaultFont(this);
                 // Re-apply color from palette on UI update, ensuring it stays in sync with
                 // theme changes.
                 if (colorKey != null) {
@@ -2316,6 +2334,23 @@ public class BlockGenerationMetricsPanel extends JPanel {
             ContextMenuUtils.addInfoTooltip(parentFrame, label, tooltip, colorKey);
         }
         return label;
+    }
+
+    private void refreshMinerLabelsText() {
+        if (nodeMinersCountLabel == null || networkMinersCountLabel == null)
+            return;
+
+        long active = currentBlockDeadlines.stream().map(e -> e.accountId).distinct().count();
+        long discovered = (long) minerCountMA.getLast();
+        long network = (long) networkMinersMA.getLast();
+
+        nodeMinersCountLabel.setText("<html>Node Miners: <font color='" + toHex(GuiColors.getBlockGenActiveMiner())
+                + "'>" + active + "</font> / <font color='"
+                + toHex(GuiColors.getBlockGenNodeMiners()) + "'>" + discovered + "</font></html>");
+
+        networkMinersCountLabel
+                .setText("<html>Network Miners: <font color='" + toHex(GuiColors.getBlockGenNetworkMiners())
+                        + "'>" + network + "</font></html>");
     }
 
     private void addMinerListListener(JLabel label, int tabIndex) {

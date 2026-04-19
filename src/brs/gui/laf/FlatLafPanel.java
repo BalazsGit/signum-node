@@ -71,6 +71,7 @@ public class FlatLafPanel
     private final String[] availableFontFamilyNames;
     private int initialFontMenuItemCount = -1;
     private Runnable closeAction;
+    private Runnable onChangeListener;
     private Font customFont;
     private Font customConsoleFont;
 
@@ -116,6 +117,10 @@ public class FlatLafPanel
         SwingUtilities.invokeLater(() -> {
             showHints();
         });
+    }
+
+    public void setOnChangeListener(Runnable listener) {
+        this.onChangeListener = listener;
     }
 
     public void setCloseAction(Runnable closeAction) {
@@ -502,6 +507,9 @@ public class FlatLafPanel
         }
 
         updateFontMenuItems();
+        if (onChangeListener != null) {
+            onChangeListener.run();
+        }
         FlatAnimatedLafChange.hideSnapshotWithAnimation();
     }
 
@@ -521,6 +529,9 @@ public class FlatLafPanel
         }
         SignumGUI.updateAllUIs();
         updateFontMenuItems();
+        if (onChangeListener != null) {
+            onChangeListener.run();
+        }
         FlatAnimatedLafChange.hideSnapshotWithAnimation();
     }
 
@@ -547,6 +558,9 @@ public class FlatLafPanel
         }
 
         SignumGUI.updateAllUIs();
+        if (onChangeListener != null) {
+            onChangeListener.run();
+        }
         updateFontMenuItems();
     }
 
@@ -560,6 +574,9 @@ public class FlatLafPanel
         }
         updateFontMenuItems();
         SignumGUI.updateAllUIs();
+        if (onChangeListener != null) {
+            onChangeListener.run();
+        }
     }
 
     private void incrFont(boolean isConsole) {
@@ -577,6 +594,9 @@ public class FlatLafPanel
 
         updateFontMenuItems();
         SignumGUI.updateAllUIs();
+        if (onChangeListener != null) {
+            onChangeListener.run();
+        }
     }
 
     private void decrFont(boolean isConsole) {
@@ -594,6 +614,9 @@ public class FlatLafPanel
 
         updateFontMenuItems();
         SignumGUI.updateAllUIs();
+        if (onChangeListener != null) {
+            onChangeListener.run();
+        }
     }
 
     void updateFontMenuItems() {
@@ -795,6 +818,7 @@ public class FlatLafPanel
         // //GEN-BEGIN:initComponents
         menuBar = new JMenuBar();
         JMenu fileMenu = new JMenu();
+        JMenu fontMenu = new JMenu();
         JMenuItem newMenuItem = new JMenuItem();
         JMenuItem openMenuItem = new JMenuItem();
         JMenuItem saveAsMenuItem = new JMenuItem();
@@ -1138,17 +1162,20 @@ public class FlatLafPanel
             }
             menuBar.add(zoomMenu);
 
-            // ======== globalFontMenu ========
+            // ======== fontMenu ========
             {
-                globalFontMenu.setText("Global Font");
-            }
-            menuBar.add(globalFontMenu);
+                fontMenu.setText("Font");
+                fontMenu.setMnemonic('O');
 
-            // ======== consoleFontMenu ========
-            {
+                // ======== globalFontMenu ========
+                globalFontMenu.setText("Global Font");
+                fontMenu.add(globalFontMenu);
+
+                // ======== consoleFontMenu ========
                 consoleFontMenu.setText("Console Font");
+                fontMenu.add(consoleFontMenu);
             }
-            menuBar.add(consoleFontMenu);
+            menuBar.add(fontMenu);
 
             // ======== optionsMenu ========
             {

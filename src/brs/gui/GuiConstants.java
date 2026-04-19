@@ -16,12 +16,19 @@ public final class GuiConstants {
         Font font = UIManager.getFont("Button.font");
         if (font == null)
             font = UIManager.getFont("Label.font");
-        return font != null ? font.getSize() * 1.5f : 18f;
+        return font != null ? font.getSize() * 1.2f : 14f;
+    }
+
+    public static float getButtonIconSize() {
+        Font font = UIManager.getFont("Button.font");
+        if (font == null)
+            font = UIManager.getFont("Label.font");
+        return font != null ? font.getSize() * 1.2f : 14f;
     }
 
     public static float getHelpIconSize() {
         Font font = UIManager.getFont("Label.font");
-        return font != null ? font.getSize() * 1.3f : 16f;
+        return font != null ? font.getSize() * 1.2f : 14f;
     }
 
     public static final int ICON_SIZE_DIALOG = 32;

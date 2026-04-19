@@ -1862,6 +1862,7 @@ public class PeerMetricsPanel extends JPanel {
             @Override
             public void updateUI() {
                 super.updateUI();
+                GuiFontManager.applyDefaultFont(this);
                 // Re-apply color from palette on UI update, ensuring it stays in sync with
                 // theme changes.
                 if (colorKey != null) {
