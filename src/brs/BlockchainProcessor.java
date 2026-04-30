@@ -94,6 +94,26 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     }
 
+    class TrimStats {
+        public final int currentHeight;
+        public final int targetHeight;
+
+        public TrimStats(int currentHeight, int targetHeight) {
+            this.currentHeight = currentHeight;
+            this.targetHeight = targetHeight;
+        }
+    }
+
+    class PruneStats {
+        public final int currentHeight;
+        public final int targetHeight;
+
+        public PruneStats(int currentHeight, int targetHeight) {
+            this.currentHeight = currentHeight;
+            this.targetHeight = targetHeight;
+        }
+    }
+
     enum Event {
         BLOCK_PUSHED, BLOCK_AUTO_POPPED, BLOCK_MANUAL_POPPED, BLOCK_GENERATED, BLOCK_SCANNED,
         RESCAN_BEGIN, RESCAN_END,
@@ -102,7 +122,17 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
         CONSISTENCY_RESOLUTION_STARTED, CONSISTENCY_RESOLUTION_FINISHED,
         PEERS_UPDATED, NET_VOLUME_CHANGED, QUEUE_STATUS_CHANGED, FORK_CACHE_CHANGED, PERFORMANCE_STATS_UPDATED,
         SYNC_STATE_CHANGED,
-        TRIM_START, TRIM_END
+        TRIM_START, TRIM_END,
+        PRUNE_START, PRUNE_END
+    }
+
+    enum ArchivalMode {
+        /** Keep all data, no blocks or transactions are deleted. */
+        ARCHIVE,
+        /** Clear derived tables, blocks and transactions remain. */
+        TRIM,
+        /** Blocks are deleted beyond the rollback limit. */
+        PRUNE
     }
 
     enum PeerMetricEvent {
@@ -184,9 +214,15 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     boolean isTrimming();
 
+    boolean isPruning();
+
     AtomicInteger getCurrentTrimHeight();
 
     AtomicInteger getLastTrimHeight();
+
+    AtomicInteger getCurrentPruneHeight();
+
+    AtomicInteger getLastPruneHeight();
 
     int getEstimatedTrimHeight();
 
@@ -220,11 +256,15 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     ConsistencyState getConsistencyState();
 
+    ArchivalMode getArchivalMode();
+
     ResolutionState getResolutionState();
 
     PopOffState getManualPopOffState();
 
     PopOffState getAutoPopOffState();
+
+    int getMinHeight();
 
     String getDbType();
 
@@ -274,6 +314,14 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
     void addSyncStateListener(Listener<Boolean> listener);
 
     void removeSyncStateListener(Listener<Boolean> listener);
+
+    void addTrimListener(Listener<TrimStats> listener, Event eventType);
+
+    void removeTrimListener(Listener<TrimStats> listener, Event eventType);
+
+    void addPruneListener(Listener<PruneStats> listener, Event eventType);
+
+    void removePruneListener(Listener<PruneStats> listener, Event eventType);
 
     class BlockNotAcceptedException extends SignumException {
 

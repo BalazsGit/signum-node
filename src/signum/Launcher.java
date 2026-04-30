@@ -49,7 +49,9 @@ public class Launcher {
                 canRunGui = false;
             }
         } catch (ParseException e) {
-            logger.error("Error parsing arguments", e);
+            logger.error("Error parsing arguments: {}", e.getMessage());
+            printHelp();
+            System.exit(1);
         }
 
         // Check if the environment supports a GUI (e.g., not a server without display)

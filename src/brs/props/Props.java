@@ -131,7 +131,7 @@ public class Props {
     public static final Prop<String> DB_PASSWORD = new Prop<>("DB.Password", "");
     public static final Prop<Integer> DB_CONNECTIONS = new Prop<>("DB.Connections", 30);
 
-    public static final Prop<Boolean> DB_TRIM_DERIVED_TABLES = new Prop<>("DB.trimDerivedTables", true);
+    public static final Prop<String> DB_ARCHIVAL_MODE = new Prop<>("DB.ArchivalMode", "TRIM");
 
     public static final Prop<Boolean> BRS_TEST_UNCONFIRMED_TRANSACTIONS = new Prop<>("brs.testUnconfirmedTransactions",
             false);

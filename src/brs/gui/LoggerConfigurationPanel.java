@@ -521,17 +521,18 @@ public class LoggerConfigurationPanel extends JPanel {
     }
 
     private void refreshProfileList() {
+        boolean wasProgrammatic = isProgrammaticChange;
         isProgrammaticChange = true;
-        String currentSelection = (String) profileComboBox.getSelectedItem();
-        profileComboBox.removeAllItems();
-
-        String lastProfile = loadAppliedProfile();
-        if ("logging-default".equals(lastProfile)) {
-            lastProfile = "logging";
-        }
-        this.activeProfileName = lastProfile != null ? lastProfile.trim() : "logging";
-
         try {
+            String currentSelection = (String) profileComboBox.getSelectedItem();
+            profileComboBox.removeAllItems();
+
+            String lastProfile = loadAppliedProfile();
+            if ("logging-default".equals(lastProfile)) {
+                lastProfile = "logging";
+            }
+            this.activeProfileName = lastProfile != null ? lastProfile.trim() : "logging";
+
             Path loggingConfPath = PathUtils.resolvePath(confFolder).resolve("logging");
             if (Files.exists(loggingConfPath)) {
                 try (java.util.stream.Stream<Path> stream = Files.list(loggingConfPath)) {
@@ -557,18 +558,18 @@ public class LoggerConfigurationPanel extends JPanel {
                 profileComboBox.insertItemAt("logging", 0);
             }
 
-            isProgrammaticChange = false;
             if (currentSelection != null && profileComboBox.getItemCount() > 0) {
                 profileComboBox.setSelectedItem(currentSelection);
             } else {
                 profileComboBox.setSelectedItem(this.activeProfileName);
             }
-            updateProfileComboBoxColor();
-            updateProfileButtonStates();
         } catch (Exception e) {
             e.printStackTrace();
-            isProgrammaticChange = false;
+        } finally {
+            isProgrammaticChange = wasProgrammatic;
         }
+        updateProfileComboBoxColor();
+        updateProfileButtonStates();
     }
 
     private void updateProfileComboBoxColor() {
@@ -584,18 +585,27 @@ public class LoggerConfigurationPanel extends JPanel {
 
     private boolean saveProfile() {
         String currentProfile = (String) profileComboBox.getSelectedItem();
-        String suggestedName = (currentProfile == null || "logging-default".equals(currentProfile)
-                || currentProfile == null) ? "" : currentProfile;
+        String suggestedName = (currentProfile == null || "logging-default".equals(currentProfile)) ? ""
+                : currentProfile;
 
         JTextField nameField = new JTextField(suggestedName);
-        JLabel errorLabel = new JLabel("Saving as system profile is not allowed.");
+        JLabel errorLabel = new JLabel("Saving as a system profile is not allowed.");
         errorLabel.setForeground(GuiColors.getContrastRed());
         errorLabel.setVisible(false);
 
-        JPanel panel = new JPanel(new MigLayout("wrap 1, fillx, insets 0", "[grow]", "[]5[]"));
+        JPanel panel = new JPanel(new MigLayout("wrap 1, fillx, insets 0", "[grow]", "[]5[]5[]"));
         panel.add(new JLabel("Enter profile name:"));
         panel.add(nameField, "growx");
         panel.add(errorLabel, "hidemode 3");
+
+        String report = getUnsavedChangesReport();
+        if (report != null) {
+            JLabel reportLabel = new JLabel(report);
+            JScrollPane scroll = new JScrollPane(reportLabel);
+            scroll.setPreferredSize(new Dimension(450, 150));
+            scroll.setBorder(BorderFactory.createTitledBorder("Changes to be saved"));
+            panel.add(scroll, "growx, gaptop 10");
+        }
 
         JButton saveBtn = new JButton("Save");
         JButton discardBtn = new JButton("Discard");
@@ -664,15 +674,23 @@ public class LoggerConfigurationPanel extends JPanel {
                         Properties propsToSave = getPropertiesFromUI();
                         savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
 
-                        refreshProfileList();
-                        profileComboBox.setSelectedItem(name);
+                        isProgrammaticChange = true;
+                        try {
+                            this.loadedProfileName = name;
+                            this.props.clear();
+                            this.props.putAll(propsToSave);
+                            this.propertiesFile = targetFile;
+
+                            refreshProfileList();
+                            profileComboBox.setSelectedItem(name);
+                        } finally {
+                            isProgrammaticChange = false;
+                        }
+
                         updateProfileComboBoxColor();
-                        this.loadedProfileName = name;
-                        this.props.clear();
-                        this.props.putAll(propsToSave);
-                        this.propertiesFile = targetFile;
                         updateTitle();
                         updateDirtyStatus();
+
                         refreshUIColors();
                         JOptionPane.showMessageDialog(this, "Profile '" + name + "' saved successfully.",
                                 "Success", JOptionPane.INFORMATION_MESSAGE);
@@ -1110,25 +1128,6 @@ public class LoggerConfigurationPanel extends JPanel {
 
     private Path getProfileMetadataPath() {
         return PathUtils.resolvePath(confFolder).resolve("logging").resolve("profile.json");
-    }
-
-    private void performSave() {
-        if ("logging-default".equals(loadedProfileName))
-            return;
-
-        Properties propsToSave = getPropertiesFromUI();
-        Path targetFile = resolveProfilePath(loadedProfileName + ".properties");
-
-        try {
-            savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
-            props.clear();
-            props.putAll(propsToSave);
-            updateDirtyStatus();
-            refreshUIColors();
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(this, "Error saving properties: " + e.getMessage(), "Error",
-                    JOptionPane.ERROR_MESSAGE);
-        }
     }
 
     private void handleBack() {

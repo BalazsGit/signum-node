@@ -420,7 +420,7 @@ public final class Signum {
 
             stores = new Stores(derivedTableManager, dbCacheManager, timeService, propertyService,
                     dbs.getTransactionDb(),
-                    params);
+                    dbs.getBlockDb(), params);
 
             final TransactionDb transactionDb = dbs.getTransactionDb();
             final BlockDb blockDb = dbs.getBlockDb();

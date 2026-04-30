@@ -26,471 +26,571 @@ import java.util.Collection;
 
 import static brs.schema.Tables.BLOCK;
 import static brs.schema.Tables.TRANSACTION;
+import static brs.schema.Tables.AT;
 import static brs.schema.Tables.INDIRECT_INCOMING;
 
 public class SqlBlockchainStore implements BlockchainStore {
 
-  private final Logger logger = LoggerFactory.getLogger(SqlBlockchainStore.class);
+    private final Logger logger = LoggerFactory.getLogger(SqlBlockchainStore.class);
 
-  private final TransactionDb transactionDb = Signum.getDbs().getTransactionDb();
-  private final BlockDb blockDb = Signum.getDbs().getBlockDb();
+    private final TransactionDb transactionDb;
+    private final BlockDb blockDb;
 
-  public SqlBlockchainStore() {
-  }
-
-  @Override
-  public Collection<Block> getBlocks(int from, int to) {
-    return Db.useDSLContext(ctx -> {
-      int blockchainHeight = Signum.getBlockchain().getHeight();
-      return
-        getBlocks(ctx.selectFrom(BLOCK)
-          .where(BLOCK.HEIGHT.between(blockchainHeight - Math.max(to, 0)).and(blockchainHeight - Math.max(from, 0)))
-          .orderBy(BLOCK.HEIGHT.desc())
-          .fetch());
-    });
-  }
-
-  @Override
-  public Collection<Block> getBlocks(Account account, int timestamp, int from, int to) {
-    return Db.useDSLContext(ctx -> {
-
-      SelectConditionStep<BlockRecord> query = ctx.selectFrom(BLOCK).where(BLOCK.GENERATOR_ID.eq(account.getId()));
-      if (timestamp > 0) {
-        query.and(BLOCK.TIMESTAMP.ge(timestamp));
-      }
-      SelectQuery<BlockRecord> selectQuery = query.orderBy(BLOCK.HEIGHT.desc()).getQuery();
-      DbUtils.applyLimits(selectQuery, from, to);
-      return getBlocks(selectQuery.fetch());
-    });
-  }
-
-  @Override
-  public int getBlocksCount(long accountId, int from, int to) {
-    if (from > to) {
-      return 0;
-    }
-    return Db.useDSLContext(ctx -> {
-      SelectConditionStep<BlockRecord> query = ctx.selectFrom(BLOCK).where(BLOCK.GENERATOR_ID.eq(accountId))
-        .and(BLOCK.HEIGHT.between(from).and(to));
-
-      return ctx.fetchCount(query);
-    });
-  }
-
-  @Override
-  public Collection<Block> getBlocks(Result<BlockRecord> blockRecords) {
-    return blockRecords.map(blockRecord -> {
-      try {
-        return blockDb.loadBlock(blockRecord);
-      } catch (SignumException.ValidationException e) {
-        throw new RuntimeException(e);
-      }
-    });
-  }
-
-  @Override
-  public Collection<Long> getBlockIdsAfter(long blockId, int limit) {
-    if (limit > 1440) {
-      throw new IllegalArgumentException("Can't get more than 1440 blocks at a time");
+    public SqlBlockchainStore(TransactionDb transactionDb, BlockDb blockDb) {
+        this.transactionDb = transactionDb;
+        this.blockDb = blockDb;
     }
 
-    return Db.useDSLContext(ctx -> {
-      return
-        ctx.selectFrom(BLOCK).where(
-          BLOCK.HEIGHT.gt(ctx.select(BLOCK.HEIGHT).from(BLOCK).where(BLOCK.ID.eq(blockId)))
-        ).orderBy(BLOCK.HEIGHT.asc()).limit(limit).fetch(BLOCK.ID, Long.class);
-    });
-  }
-
-  @Override
-  public Collection<Block> getBlocksAfter(long blockId, int limit) {
-    if (limit > 1440) {
-      throw new IllegalArgumentException("Can't get more than 1440 blocks at a time");
-    }
-    return Db.useDSLContext(ctx -> {
-      return ctx.selectFrom(BLOCK)
-        .where(BLOCK.HEIGHT.gt(ctx.select(BLOCK.HEIGHT)
-          .from(BLOCK)
-          .where(BLOCK.ID.eq(blockId))))
-        .orderBy(BLOCK.HEIGHT.asc())
-        .limit(limit)
-        .fetch(result -> {
-          try {
-            return blockDb.loadBlock(result);
-          } catch (SignumException.ValidationException e) {
-            throw new RuntimeException(e.toString(), e);
-          }
+    @Override
+    public Collection<Block> getBlocks(int from, int to) {
+        return Db.useDSLContext(ctx -> {
+            int blockchainHeight = Signum.getBlockchain().getHeight();
+            return getBlocks(ctx.selectFrom(BLOCK)
+                    .where(BLOCK.HEIGHT.between(blockchainHeight - Math.max(to, 0))
+                            .and(blockchainHeight - Math.max(from, 0)))
+                    .orderBy(BLOCK.HEIGHT.desc())
+                    .fetch());
         });
-    });
-  }
-
-  @Override
-  public int getTransactionCount() {
-    return Db.useDSLContext(ctx -> {
-      return ctx.selectCount().from(TRANSACTION).fetchOne(0, int.class);
-    });
-  }
-
-  @Override
-  public Collection<Transaction> getAllTransactions() {
-    return Db.useDSLContext(ctx -> {
-      return getTransactions(ctx, ctx.selectFrom(TRANSACTION).orderBy(TRANSACTION.DB_ID.asc()).fetch());
-    });
-  }
-
-  @Override
-  public long getAtBurnTotal() {
-    return Db.useDSLContext(ctx -> {
-      return ctx.select(DSL.sum(TRANSACTION.AMOUNT)).from(TRANSACTION)
-        .where(TRANSACTION.RECIPIENT_ID.isNull())
-        .and(TRANSACTION.AMOUNT.gt(0L))
-        .and(TRANSACTION.TYPE.equal(TransactionType.TYPE_AUTOMATED_TRANSACTIONS.getType()))
-        .fetchOneInto(long.class);
-    });
-  }
-
-
-  @Override
-  public Collection<Transaction> getTransactions(Account account, int numberOfConfirmations, byte type, byte subtype, int blockTimestamp, int from, int to, boolean includeIndirectIncoming) {
-    // note to devs: this method does not scale. as of 12, 2024 some account suffer long loading times here. some unsuccessful trials to refactor the queries failed. So, touch this method only
-    // if you are really understand what you are doing.
-    int height = getHeightForNumberOfConfirmations(numberOfConfirmations);
-    return Db.useDSLContext(ctx -> {
-      ArrayList<Condition> conditions = new ArrayList<>();
-      if (blockTimestamp > 0) {
-        conditions.add(TRANSACTION.BLOCK_TIMESTAMP.ge(blockTimestamp));
-      }
-      if (type >= 0) {
-        conditions.add(TRANSACTION.TYPE.eq(type));
-        if (subtype >= 0) {
-          conditions.add(TRANSACTION.SUBTYPE.eq(subtype));
-        }
-      }
-      if (height < Integer.MAX_VALUE) {
-        conditions.add(TRANSACTION.HEIGHT.le(height));
-      }
-
-      SelectOrderByStep<TransactionRecord> select = ctx.selectFrom(TRANSACTION).where(conditions).and(
-        account == null ? TRANSACTION.RECIPIENT_ID.isNull() :
-          TRANSACTION.RECIPIENT_ID.eq(account.getId()).and(
-            TRANSACTION.SENDER_ID.ne(account.getId())
-          )
-      ).unionAll(
-        account == null ? null :
-          ctx.selectFrom(TRANSACTION).where(conditions).and(
-            TRANSACTION.SENDER_ID.eq(account.getId())
-          )
-      );
-
-      if (includeIndirectIncoming) {
-        select = select.unionAll(ctx.selectFrom(TRANSACTION)
-          .where(conditions)
-          .and(TRANSACTION.ID.in(ctx.select(INDIRECT_INCOMING.TRANSACTION_ID).from(INDIRECT_INCOMING)
-            .where(INDIRECT_INCOMING.ACCOUNT_ID.eq(account.getId())))));
-      }
-
-      SelectQuery<TransactionRecord> selectQuery = select
-        .orderBy(TRANSACTION.BLOCK_TIMESTAMP.desc(), TRANSACTION.ID.desc())
-        .getQuery();
-
-      DbUtils.applyLimits(selectQuery, from, to);
-
-      return getTransactions(ctx, selectQuery.fetch());
-    });
-  }
-
-  private static int getHeightForNumberOfConfirmations(int numberOfConfirmations) {
-    int height = numberOfConfirmations > 0 ? Signum.getBlockchain().getHeight() - numberOfConfirmations : Integer.MAX_VALUE;
-    if (height < 0) {
-      throw new IllegalArgumentException("Number of confirmations required " + numberOfConfirmations + " exceeds current blockchain height " + Signum.getBlockchain().getHeight());
     }
-    return height;
-  }
 
-  // TODO: better introduce a dedicated bySender, byRecipient endpoint to reduce complexity
-  @Override
-  public Collection<Transaction> getTransactions(Long senderId, Long recipientId, int numberOfConfirmations, byte type, byte subtype, int blockTimestamp, int from, int to, boolean includeIndirectIncoming, boolean bidirectional) {
-    int height = getHeightForNumberOfConfirmations(numberOfConfirmations);
-    return Db.useDSLContext(ctx -> {
-      ArrayList<Condition> conditions = new ArrayList<>();
+    @Override
+    public Collection<Block> getBlocks(Account account, int timestamp, int from, int to) {
+        return Db.useDSLContext(ctx -> {
 
-      boolean hasSender = senderId != null;
-      boolean hasRecipient = recipientId != null; // consider burn address also
-
-      if (blockTimestamp > 0) {
-        conditions.add(TRANSACTION.BLOCK_TIMESTAMP.ge(blockTimestamp));
-      }
-      if (type >= 0) {
-        conditions.add(TRANSACTION.TYPE.eq(type));
-        if (subtype >= 0) {
-          conditions.add(TRANSACTION.SUBTYPE.eq(subtype));
-        }
-      }
-      if (height < Integer.MAX_VALUE) {
-        conditions.add(TRANSACTION.HEIGHT.le(height));
-      }
-
-      SelectOrderByStep<TransactionRecord> select = null;
-      if (!bidirectional) {
-        select = ctx
-          .selectFrom(TRANSACTION)
-          .where(conditions)
-          .and(hasSender ? TRANSACTION.SENDER_ID.eq(senderId) : null)
-          .and(hasRecipient ? TRANSACTION.RECIPIENT_ID.eq(recipientId) : null);
-      } else {
-        select = ctx
-          .selectFrom(TRANSACTION)
-          .where(conditions)
-          .and(hasSender ? TRANSACTION.SENDER_ID.eq(senderId).or(TRANSACTION.RECIPIENT_ID.eq(senderId)) : null)
-          .and(hasRecipient ? TRANSACTION.RECIPIENT_ID.eq(recipientId).or(TRANSACTION.SENDER_ID.eq(recipientId)) : null);
-      }
-
-      if (includeIndirectIncoming) {
-        // makes only sense if for recipient. Sender is implicitely included.
-        if (!bidirectional && hasRecipient) {
-          select = select.unionAll(ctx
-            .selectFrom(TRANSACTION)
-            .where(conditions)
-            .and(TRANSACTION.ID.in(ctx
-                .select(INDIRECT_INCOMING.TRANSACTION_ID)
-                .from(INDIRECT_INCOMING)
-                .where(INDIRECT_INCOMING.ACCOUNT_ID.eq(recipientId))
-              )
-            ));
-        }
-
-        if (bidirectional) {
-          select = select.unionAll(ctx
-            .selectFrom(TRANSACTION)
-            .where(conditions)
-            .and(TRANSACTION.ID.in(ctx
-                .select(INDIRECT_INCOMING.TRANSACTION_ID)
-                .from(INDIRECT_INCOMING)
-                .where(hasRecipient ? INDIRECT_INCOMING.ACCOUNT_ID.eq(recipientId) : null)
-                .or(hasSender ? INDIRECT_INCOMING.ACCOUNT_ID.eq(senderId) : null)
-              )
-            )
-          );
-        }
-      }
-
-      SelectQuery<TransactionRecord> selectQuery = select
-        .orderBy(TRANSACTION.BLOCK_TIMESTAMP.desc(), TRANSACTION.ID.desc())
-        .getQuery();
-
-      DbUtils.applyLimits(selectQuery, from, to);
-
-      return getTransactions(ctx, selectQuery.fetch());
-    });
-  }
-
-  @Override
-  public Collection<Transaction> getTransactions(long senderId, byte type, byte subtypeStart, byte subtypeEnd, int from, int to) {
-    return Db.useDSLContext(ctx -> {
-      ArrayList<Condition> conditions = new ArrayList<>();
-      if (type >= 0) {
-        conditions.add(TRANSACTION.TYPE.eq(type));
-        if (subtypeStart >= 0) {
-          conditions.add(TRANSACTION.SUBTYPE.ge(subtypeStart));
-        }
-        if (subtypeEnd >= 0) {
-          conditions.add(TRANSACTION.SUBTYPE.le(subtypeEnd));
-        }
-      }
-
-      SelectOrderByStep<TransactionRecord> select = ctx.selectFrom(TRANSACTION).where(conditions).and(
-        TRANSACTION.SENDER_ID.eq(senderId));
-
-      SelectQuery<TransactionRecord> selectQuery = select
-        .orderBy(TRANSACTION.BLOCK_TIMESTAMP.desc(), TRANSACTION.ID.desc())
-        .getQuery();
-
-      DbUtils.applyLimits(selectQuery, from, to);
-
-      return getTransactions(ctx, selectQuery.fetch());
-    });
-  }
-
-  @Override
-  public int countTransactions(byte type, byte subtypeStart, byte subtypeEnd) {
-    return Db.useDSLContext(ctx -> {
-      ArrayList<Condition> conditions = new ArrayList<>();
-      if (type >= 0) {
-        conditions.add(TRANSACTION.TYPE.eq(type));
-        if (subtypeStart >= 0) {
-          conditions.add(TRANSACTION.SUBTYPE.ge(subtypeStart));
-        }
-        if (subtypeEnd >= 0) {
-          conditions.add(TRANSACTION.SUBTYPE.le(subtypeEnd));
-        }
-      }
-
-      SelectOrderByStep<TransactionRecord> select = ctx.selectFrom(TRANSACTION).where(conditions);
-
-      return ctx.fetchCount(select);
-    });
-  }
-
-  @Override
-  public Collection<Transaction> getTransactionsWithFullHashReference(String fullHash, int numberOfConfirmations, byte type, byte subtypeStart, byte subtypeEnd, int from, int to) {
-    return Db.useDSLContext(ctx -> {
-      ArrayList<Condition> conditions = new ArrayList<>();
-
-      // must be confirmed already
-      int height = Signum.getBlockchain().getHeight() - numberOfConfirmations;
-      conditions.add(TRANSACTION.HEIGHT.le(height));
-      if (type >= 0) {
-        conditions.add(TRANSACTION.TYPE.eq(type));
-        if (subtypeStart >= 0) {
-          conditions.add(TRANSACTION.SUBTYPE.ge(subtypeStart));
-        }
-        if (subtypeEnd >= 0) {
-          conditions.add(TRANSACTION.SUBTYPE.le(subtypeEnd));
-        }
-      }
-
-      SelectOrderByStep<TransactionRecord> select = ctx.selectFrom(TRANSACTION).where(conditions).and(
-        TRANSACTION.REFERENCED_TRANSACTION_FULLHASH.eq(Convert.parseHexString(fullHash)));
-
-      SelectQuery<TransactionRecord> selectQuery = select
-        .orderBy(TRANSACTION.BLOCK_TIMESTAMP.desc(), TRANSACTION.ID.desc())
-        .getQuery();
-
-      DbUtils.applyLimits(selectQuery, from, to);
-
-      return getTransactions(ctx, selectQuery.fetch());
-    });
-  }
-
-  @Override
-  public Collection<Transaction> getTransactions(DSLContext ctx, Result<TransactionRecord> rs) {
-    return rs.map(r -> {
-      try {
-        return transactionDb.loadTransaction(r);
-      } catch (SignumException.ValidationException e) {
-        throw new RuntimeException(e);
-      }
-    });
-  }
-
-  @Override
-  public void addBlock(Block block) {
-    Db.useDSLContext(ctx -> {
-      blockDb.saveBlock(ctx, block);
-    });
-  }
-
-  @Override
-  public Collection<Block> getLatestBlocks(int amountBlocks) {
-    final int latestBlockHeight = blockDb.findLastBlock().getHeight();
-
-    final int firstLatestBlockHeight = Math.max(0, latestBlockHeight - amountBlocks);
-
-    return Db.useDSLContext(ctx -> {
-      return getBlocks(ctx.selectFrom(BLOCK)
-        .where(BLOCK.HEIGHT.between(firstLatestBlockHeight).and(latestBlockHeight))
-        .orderBy(BLOCK.HEIGHT.asc())
-        .fetch());
-    });
-  }
-
-  @Override
-  public long getCommittedAmount(long accountId, int height, int endHeight, Transaction skipTransaction) {
-    int commitmentWait = Signum.getFluxCapacitor().getValue(FluxValues.COMMITMENT_WAIT, height);
-    int commitmentHeight = Math.min(height - commitmentWait, endHeight);
-
-    Collection<byte[]> commitmmentAddBytes = Db.useDSLContext(ctx -> {
-      SelectConditionStep<Record1<byte[]>> select = ctx.select(TRANSACTION.ATTACHMENT_BYTES).from(TRANSACTION).where(TRANSACTION.TYPE.eq(TransactionType.TYPE_SIGNA_MINING.getType()))
-        .and(TRANSACTION.SUBTYPE.eq(TransactionType.SUBTYPE_SIGNA_MINING_COMMITMENT_ADD))
-        .and(TRANSACTION.HEIGHT.le(commitmentHeight));
-      if (accountId != 0L)
-        select = select.and(TRANSACTION.SENDER_ID.equal(accountId));
-      return select.fetch().getValues(TRANSACTION.ATTACHMENT_BYTES);
-    });
-    Collection<byte[]> commitmmentRemoveBytes = Db.useDSLContext(ctx -> {
-      SelectConditionStep<Record1<byte[]>> select = ctx.select(TRANSACTION.ATTACHMENT_BYTES).from(TRANSACTION).where(TRANSACTION.TYPE.eq(TransactionType.TYPE_SIGNA_MINING.getType()))
-        .and(TRANSACTION.SUBTYPE.eq(TransactionType.SUBTYPE_SIGNA_MINING_COMMITMENT_REMOVE))
-        .and(TRANSACTION.HEIGHT.le(endHeight));
-      if (accountId != 0L)
-        select = select.and(TRANSACTION.SENDER_ID.equal(accountId));
-      if (skipTransaction != null)
-        select = select.and(TRANSACTION.ID.ne(skipTransaction.getId()));
-      return select.fetch().getValues(TRANSACTION.ATTACHMENT_BYTES);
-    });
-
-    BigInteger amountCommitted = BigInteger.ZERO;
-    for (byte[] bytes : commitmmentAddBytes) {
-      try {
-        ByteBuffer buffer = ByteBuffer.wrap(bytes);
-        buffer.order(ByteOrder.LITTLE_ENDIAN);
-        CommitmentAdd txAttachment = (CommitmentAdd) TransactionType.SignaMining.COMMITMENT_ADD.parseAttachment(buffer, (byte) 1);
-        amountCommitted = amountCommitted.add(BigInteger.valueOf(txAttachment.getAmountNqt()));
-      } catch (Exception e) {
-        logger.error(e.getMessage());
-      }
+            SelectConditionStep<BlockRecord> query = ctx.selectFrom(BLOCK)
+                    .where(BLOCK.GENERATOR_ID.eq(account.getId()));
+            if (timestamp > 0) {
+                query.and(BLOCK.TIMESTAMP.ge(timestamp));
+            }
+            SelectQuery<BlockRecord> selectQuery = query.orderBy(BLOCK.HEIGHT.desc()).getQuery();
+            DbUtils.applyLimits(selectQuery, from, to);
+            return getBlocks(selectQuery.fetch());
+        });
     }
-    for (byte[] bytes : commitmmentRemoveBytes) {
-      try {
-        ByteBuffer buffer = ByteBuffer.wrap(bytes);
-        buffer.order(ByteOrder.LITTLE_ENDIAN);
-        CommitmentRemove txAttachment = (CommitmentRemove) TransactionType.SignaMining.COMMITMENT_REMOVE.parseAttachment(buffer, (byte) 1);
-        amountCommitted = amountCommitted.subtract(BigInteger.valueOf(txAttachment.getAmountNqt()));
-      } catch (Exception e) {
-        logger.error(e.getMessage());
-      }
-    }
-    if (amountCommitted.compareTo(BigInteger.ZERO) < 0) {
-      // should never happen
-      amountCommitted = BigInteger.ZERO;
-    }
-    return amountCommitted.longValue();
-  }
 
-  @Override
-  public Collection<Long> getTransactionIds(Long sender, Long recipient, int numberOfConfirmations, byte type,
-                                            byte subtype, int blockTimestamp, int from, int to, boolean includeIndirectIncoming) {
-
-    int height = getHeightForNumberOfConfirmations(numberOfConfirmations);
-    return Db.useDSLContext(ctx -> {
-      ArrayList<Condition> conditions = new ArrayList<>();
-      if (blockTimestamp > 0) {
-        conditions.add(TRANSACTION.BLOCK_TIMESTAMP.ge(blockTimestamp));
-      }
-      if (type >= 0) {
-        conditions.add(TRANSACTION.TYPE.eq(type));
-        if (subtype >= 0) {
-          conditions.add(TRANSACTION.SUBTYPE.eq(subtype));
+    @Override
+    public int getBlocksCount(long accountId, int from, int to) {
+        if (from > to) {
+            return 0;
         }
-      }
-      if (height < Integer.MAX_VALUE) {
-        conditions.add(TRANSACTION.HEIGHT.le(height));
-      }
+        return Db.useDSLContext(ctx -> {
+            // Query both active and pruned blocks to get the correct count for capacity
+            // estimation
+            return ctx.selectCount().from(
+                    ctx.select(BLOCK.GENERATOR_ID, BLOCK.HEIGHT).from(BLOCK)
+                            .unionAll(
+                                    ctx.select(DSL.field(DSL.name("generator_id"), Long.class),
+                                            DSL.field(DSL.name("height"), Integer.class))
+                                            .from(DSL.table(DSL.name("pruned_block")))))
+                    .where(DSL.field(DSL.name("generator_id")).eq(accountId))
+                    .and(DSL.field(DSL.name("height")).between(from, to))
+                    .fetchOne(0, int.class);
+        });
+    }
 
-      SelectConditionStep<TransactionRecord> select = ctx.selectFrom(TRANSACTION).where(conditions);
+    @Override
+    public Collection<Block> getBlocks(Result<BlockRecord> blockRecords) {
+        return blockRecords.map(blockRecord -> {
+            try {
+                return blockDb.loadBlock(blockRecord);
+            } catch (SignumException.ValidationException e) {
+                throw new RuntimeException(e);
+            }
+        });
+    }
 
-      if (recipient != null) {
-        select = select.and(TRANSACTION.RECIPIENT_ID.eq(recipient));
-      }
-      if (sender != null) {
-        select = select.and(TRANSACTION.SENDER_ID.eq(sender));
-      }
+    @Override
+    public Collection<Long> getBlockIdsAfter(long blockId, int limit) {
+        if (limit > 1440) {
+            throw new IllegalArgumentException("Can't get more than 1440 blocks at a time");
+        }
 
-      SelectOrderByStep<TransactionRecord> selectOrder = select;
+        return Db.useDSLContext(ctx -> {
+            return ctx.selectFrom(BLOCK).where(
+                    BLOCK.HEIGHT.gt(ctx.select(BLOCK.HEIGHT).from(BLOCK).where(BLOCK.ID.eq(blockId))))
+                    .orderBy(BLOCK.HEIGHT.asc()).limit(limit).fetch(BLOCK.ID, Long.class);
+        });
+    }
 
-      if (includeIndirectIncoming && recipient != null) {
-        selectOrder = selectOrder.unionAll(ctx.selectFrom(TRANSACTION)
-          .where(conditions)
-          .and(TRANSACTION.ID.in(ctx.select(INDIRECT_INCOMING.TRANSACTION_ID).from(INDIRECT_INCOMING)
-            .where(INDIRECT_INCOMING.ACCOUNT_ID.eq(recipient)))));
-      }
+    @Override
+    public Collection<Block> getBlocksAfter(long blockId, int limit) {
+        if (limit > 1440) {
+            throw new IllegalArgumentException("Can't get more than 1440 blocks at a time");
+        }
+        return Db.useDSLContext(ctx -> {
+            return ctx.selectFrom(BLOCK)
+                    .where(BLOCK.HEIGHT.gt(ctx.select(BLOCK.HEIGHT)
+                            .from(BLOCK)
+                            .where(BLOCK.ID.eq(blockId))))
+                    .orderBy(BLOCK.HEIGHT.asc())
+                    .limit(limit)
+                    .fetch(result -> {
+                        try {
+                            return blockDb.loadBlock(result);
+                        } catch (SignumException.ValidationException e) {
+                            throw new RuntimeException(e.toString(), e);
+                        }
+                    });
+        });
+    }
 
-      SelectQuery<TransactionRecord> selectQuery = selectOrder
-        .orderBy(TRANSACTION.BLOCK_TIMESTAMP.desc(), TRANSACTION.ID.desc())
-        .getQuery();
+    @Override
+    public int getTransactionCount() {
+        return Db.useDSLContext(ctx -> {
+            return ctx.selectCount().from(TRANSACTION).fetchOne(0, int.class);
+        });
+    }
 
-      DbUtils.applyLimits(selectQuery, from, to);
+    @Override
+    public Collection<Transaction> getAllTransactions() {
+        return Db.useDSLContext(ctx -> {
+            return getTransactions(ctx, ctx.selectFrom(TRANSACTION).orderBy(TRANSACTION.DB_ID.asc()).fetch());
+        });
+    }
 
-      return selectQuery.fetch(TRANSACTION.ID, Long.class);
-    });
-  }
+    @Override
+    public long getAtBurnTotal() {
+        return Db.useDSLContext(ctx -> {
+            return ctx.select(DSL.sum(TRANSACTION.AMOUNT)).from(TRANSACTION)
+                    .where(TRANSACTION.RECIPIENT_ID.isNull())
+                    .and(TRANSACTION.AMOUNT.gt(0L))
+                    .and(TRANSACTION.TYPE.equal(TransactionType.TYPE_AUTOMATED_TRANSACTIONS.getType()))
+                    .fetchOneInto(long.class);
+        });
+    }
+
+    @Override
+    public Collection<Transaction> getTransactions(Account account, int numberOfConfirmations, byte type, byte subtype,
+            int blockTimestamp, int from, int to, boolean includeIndirectIncoming) {
+        // note to devs: this method does not scale. as of 12, 2024 some account suffer
+        // long loading times here. some unsuccessful trials to refactor the queries
+        // failed. So, touch this method only
+        // if you are really understand what you are doing.
+        int height = getHeightForNumberOfConfirmations(numberOfConfirmations);
+        return Db.useDSLContext(ctx -> {
+            ArrayList<Condition> conditions = new ArrayList<>();
+            if (blockTimestamp > 0) {
+                conditions.add(TRANSACTION.BLOCK_TIMESTAMP.ge(blockTimestamp));
+            }
+            if (type >= 0) {
+                conditions.add(TRANSACTION.TYPE.eq(type));
+                if (subtype >= 0) {
+                    conditions.add(TRANSACTION.SUBTYPE.eq(subtype));
+                }
+            }
+            if (height < Integer.MAX_VALUE) {
+                conditions.add(TRANSACTION.HEIGHT.le(height));
+            }
+
+            SelectOrderByStep<TransactionRecord> select = ctx.selectFrom(TRANSACTION).where(conditions).and(
+                    account == null ? TRANSACTION.RECIPIENT_ID.isNull()
+                            : TRANSACTION.RECIPIENT_ID.eq(account.getId()).and(
+                                    TRANSACTION.SENDER_ID.ne(account.getId())))
+                    .unionAll(
+                            account == null ? null
+                                    : ctx.selectFrom(TRANSACTION).where(conditions).and(
+                                            TRANSACTION.SENDER_ID.eq(account.getId())));
+
+            if (includeIndirectIncoming) {
+                select = select.unionAll(ctx.selectFrom(TRANSACTION)
+                        .where(conditions)
+                        .and(TRANSACTION.ID.in(ctx.select(INDIRECT_INCOMING.TRANSACTION_ID).from(INDIRECT_INCOMING)
+                                .where(INDIRECT_INCOMING.ACCOUNT_ID.eq(account.getId())))));
+            }
+
+            SelectQuery<TransactionRecord> selectQuery = select
+                    .orderBy(TRANSACTION.BLOCK_TIMESTAMP.desc(), TRANSACTION.ID.desc())
+                    .getQuery();
+
+            DbUtils.applyLimits(selectQuery, from, to);
+
+            return getTransactions(ctx, selectQuery.fetch());
+        });
+    }
+
+    private static int getHeightForNumberOfConfirmations(int numberOfConfirmations) {
+        int height = numberOfConfirmations > 0 ? Signum.getBlockchain().getHeight() - numberOfConfirmations
+                : Integer.MAX_VALUE;
+        if (height < 0) {
+            throw new IllegalArgumentException("Number of confirmations required " + numberOfConfirmations
+                    + " exceeds current blockchain height " + Signum.getBlockchain().getHeight());
+        }
+        return height;
+    }
+
+    // TODO: better introduce a dedicated bySender, byRecipient endpoint to reduce
+    // complexity
+    @Override
+    public Collection<Transaction> getTransactions(Long senderId, Long recipientId, int numberOfConfirmations,
+            byte type, byte subtype, int blockTimestamp, int from, int to, boolean includeIndirectIncoming,
+            boolean bidirectional) {
+        int height = getHeightForNumberOfConfirmations(numberOfConfirmations);
+        return Db.useDSLContext(ctx -> {
+            ArrayList<Condition> conditions = new ArrayList<>();
+
+            boolean hasSender = senderId != null;
+            boolean hasRecipient = recipientId != null; // consider burn address also
+
+            if (blockTimestamp > 0) {
+                conditions.add(TRANSACTION.BLOCK_TIMESTAMP.ge(blockTimestamp));
+            }
+            if (type >= 0) {
+                conditions.add(TRANSACTION.TYPE.eq(type));
+                if (subtype >= 0) {
+                    conditions.add(TRANSACTION.SUBTYPE.eq(subtype));
+                }
+            }
+            if (height < Integer.MAX_VALUE) {
+                conditions.add(TRANSACTION.HEIGHT.le(height));
+            }
+
+            SelectOrderByStep<TransactionRecord> select = null;
+            if (!bidirectional) {
+                select = ctx
+                        .selectFrom(TRANSACTION)
+                        .where(conditions)
+                        .and(hasSender ? TRANSACTION.SENDER_ID.eq(senderId) : null)
+                        .and(hasRecipient ? TRANSACTION.RECIPIENT_ID.eq(recipientId) : null);
+            } else {
+                select = ctx
+                        .selectFrom(TRANSACTION)
+                        .where(conditions)
+                        .and(hasSender ? TRANSACTION.SENDER_ID.eq(senderId).or(TRANSACTION.RECIPIENT_ID.eq(senderId))
+                                : null)
+                        .and(hasRecipient
+                                ? TRANSACTION.RECIPIENT_ID.eq(recipientId).or(TRANSACTION.SENDER_ID.eq(recipientId))
+                                : null);
+            }
+
+            if (includeIndirectIncoming) {
+                // makes only sense if for recipient. Sender is implicitely included.
+                if (!bidirectional && hasRecipient) {
+                    select = select.unionAll(ctx
+                            .selectFrom(TRANSACTION)
+                            .where(conditions)
+                            .and(TRANSACTION.ID.in(ctx
+                                    .select(INDIRECT_INCOMING.TRANSACTION_ID)
+                                    .from(INDIRECT_INCOMING)
+                                    .where(INDIRECT_INCOMING.ACCOUNT_ID.eq(recipientId)))));
+                }
+
+                if (bidirectional) {
+                    select = select.unionAll(ctx
+                            .selectFrom(TRANSACTION)
+                            .where(conditions)
+                            .and(TRANSACTION.ID.in(ctx
+                                    .select(INDIRECT_INCOMING.TRANSACTION_ID)
+                                    .from(INDIRECT_INCOMING)
+                                    .where(hasRecipient ? INDIRECT_INCOMING.ACCOUNT_ID.eq(recipientId) : null)
+                                    .or(hasSender ? INDIRECT_INCOMING.ACCOUNT_ID.eq(senderId) : null))));
+                }
+            }
+
+            SelectQuery<TransactionRecord> selectQuery = select
+                    .orderBy(TRANSACTION.BLOCK_TIMESTAMP.desc(), TRANSACTION.ID.desc())
+                    .getQuery();
+
+            DbUtils.applyLimits(selectQuery, from, to);
+
+            return getTransactions(ctx, selectQuery.fetch());
+        });
+    }
+
+    @Override
+    public Collection<Transaction> getTransactions(long senderId, byte type, byte subtypeStart, byte subtypeEnd,
+            int from, int to) {
+        return Db.useDSLContext(ctx -> {
+            ArrayList<Condition> conditions = new ArrayList<>();
+            if (type >= 0) {
+                conditions.add(TRANSACTION.TYPE.eq(type));
+                if (subtypeStart >= 0) {
+                    conditions.add(TRANSACTION.SUBTYPE.ge(subtypeStart));
+                }
+                if (subtypeEnd >= 0) {
+                    conditions.add(TRANSACTION.SUBTYPE.le(subtypeEnd));
+                }
+            }
+
+            SelectOrderByStep<TransactionRecord> select = ctx.selectFrom(TRANSACTION).where(conditions).and(
+                    TRANSACTION.SENDER_ID.eq(senderId));
+
+            SelectQuery<TransactionRecord> selectQuery = select
+                    .orderBy(TRANSACTION.BLOCK_TIMESTAMP.desc(), TRANSACTION.ID.desc())
+                    .getQuery();
+
+            DbUtils.applyLimits(selectQuery, from, to);
+
+            return getTransactions(ctx, selectQuery.fetch());
+        });
+    }
+
+    @Override
+    public int countTransactions(byte type, byte subtypeStart, byte subtypeEnd) {
+        return Db.useDSLContext(ctx -> {
+            ArrayList<Condition> conditions = new ArrayList<>();
+            if (type >= 0) {
+                conditions.add(TRANSACTION.TYPE.eq(type));
+                if (subtypeStart >= 0) {
+                    conditions.add(TRANSACTION.SUBTYPE.ge(subtypeStart));
+                }
+                if (subtypeEnd >= 0) {
+                    conditions.add(TRANSACTION.SUBTYPE.le(subtypeEnd));
+                }
+            }
+
+            SelectOrderByStep<TransactionRecord> select = ctx.selectFrom(TRANSACTION).where(conditions);
+
+            return ctx.fetchCount(select);
+        });
+    }
+
+    @Override
+    public Collection<Transaction> getTransactionsWithFullHashReference(String fullHash, int numberOfConfirmations,
+            byte type, byte subtypeStart, byte subtypeEnd, int from, int to) {
+        return Db.useDSLContext(ctx -> {
+            ArrayList<Condition> conditions = new ArrayList<>();
+
+            // must be confirmed already
+            int height = Signum.getBlockchain().getHeight() - numberOfConfirmations;
+            conditions.add(TRANSACTION.HEIGHT.le(height));
+            if (type >= 0) {
+                conditions.add(TRANSACTION.TYPE.eq(type));
+                if (subtypeStart >= 0) {
+                    conditions.add(TRANSACTION.SUBTYPE.ge(subtypeStart));
+                }
+                if (subtypeEnd >= 0) {
+                    conditions.add(TRANSACTION.SUBTYPE.le(subtypeEnd));
+                }
+            }
+
+            SelectOrderByStep<TransactionRecord> select = ctx.selectFrom(TRANSACTION).where(conditions).and(
+                    TRANSACTION.REFERENCED_TRANSACTION_FULLHASH.eq(Convert.parseHexString(fullHash)));
+
+            SelectQuery<TransactionRecord> selectQuery = select
+                    .orderBy(TRANSACTION.BLOCK_TIMESTAMP.desc(), TRANSACTION.ID.desc())
+                    .getQuery();
+
+            DbUtils.applyLimits(selectQuery, from, to);
+
+            return getTransactions(ctx, selectQuery.fetch());
+        });
+    }
+
+    @Override
+    public Collection<Transaction> getTransactions(DSLContext ctx, Result<TransactionRecord> rs) {
+        return rs.map(r -> {
+            try {
+                return transactionDb.loadTransaction(r);
+            } catch (SignumException.ValidationException e) {
+                throw new RuntimeException(e);
+            }
+        });
+    }
+
+    @Override
+    public void addBlock(Block block) {
+        Db.useDSLContext(ctx -> {
+            blockDb.saveBlock(ctx, block);
+        });
+    }
+
+    @Override
+    public Collection<Block> getLatestBlocks(int amountBlocks) {
+        final int latestBlockHeight = blockDb.findLastBlock().getHeight();
+
+        final int firstLatestBlockHeight = Math.max(0, latestBlockHeight - amountBlocks);
+
+        return Db.useDSLContext(ctx -> {
+            return getBlocks(ctx.selectFrom(BLOCK)
+                    .where(BLOCK.HEIGHT.between(firstLatestBlockHeight).and(latestBlockHeight))
+                    .orderBy(BLOCK.HEIGHT.asc())
+                    .fetch());
+        });
+    }
+
+    @Override
+    public long getCommittedAmount(long accountId, int height, int endHeight, Transaction skipTransaction) {
+        int commitmentWait = Signum.getFluxCapacitor().getValue(FluxValues.COMMITMENT_WAIT, height);
+        int commitmentHeight = Math.min(height - commitmentWait, endHeight);
+
+        Collection<byte[]> commitmmentAddBytes = Db.useDSLContext(ctx -> {
+            SelectConditionStep<Record1<byte[]>> select = ctx.select(TRANSACTION.ATTACHMENT_BYTES).from(TRANSACTION)
+                    .where(TRANSACTION.TYPE.eq(TransactionType.TYPE_SIGNA_MINING.getType()))
+                    .and(TRANSACTION.SUBTYPE.eq(TransactionType.SUBTYPE_SIGNA_MINING_COMMITMENT_ADD))
+                    .and(TRANSACTION.HEIGHT.le(commitmentHeight));
+            if (accountId != 0L)
+                select = select.and(TRANSACTION.SENDER_ID.equal(accountId));
+            return select.fetch().getValues(TRANSACTION.ATTACHMENT_BYTES);
+        });
+        Collection<byte[]> commitmmentRemoveBytes = Db.useDSLContext(ctx -> {
+            SelectConditionStep<Record1<byte[]>> select = ctx.select(TRANSACTION.ATTACHMENT_BYTES).from(TRANSACTION)
+                    .where(TRANSACTION.TYPE.eq(TransactionType.TYPE_SIGNA_MINING.getType()))
+                    .and(TRANSACTION.SUBTYPE.eq(TransactionType.SUBTYPE_SIGNA_MINING_COMMITMENT_REMOVE))
+                    .and(TRANSACTION.HEIGHT.le(endHeight));
+            if (accountId != 0L)
+                select = select.and(TRANSACTION.SENDER_ID.equal(accountId));
+            if (skipTransaction != null)
+                select = select.and(TRANSACTION.ID.ne(skipTransaction.getId()));
+            return select.fetch().getValues(TRANSACTION.ATTACHMENT_BYTES);
+        });
+
+        BigInteger amountCommitted = BigInteger.ZERO;
+        for (byte[] bytes : commitmmentAddBytes) {
+            try {
+                ByteBuffer buffer = ByteBuffer.wrap(bytes);
+                buffer.order(ByteOrder.LITTLE_ENDIAN);
+                CommitmentAdd txAttachment = (CommitmentAdd) TransactionType.SignaMining.COMMITMENT_ADD
+                        .parseAttachment(buffer, (byte) 1);
+                amountCommitted = amountCommitted.add(BigInteger.valueOf(txAttachment.getAmountNqt()));
+            } catch (Exception e) {
+                logger.error(e.getMessage());
+            }
+        }
+        for (byte[] bytes : commitmmentRemoveBytes) {
+            try {
+                ByteBuffer buffer = ByteBuffer.wrap(bytes);
+                buffer.order(ByteOrder.LITTLE_ENDIAN);
+                CommitmentRemove txAttachment = (CommitmentRemove) TransactionType.SignaMining.COMMITMENT_REMOVE
+                        .parseAttachment(buffer, (byte) 1);
+                amountCommitted = amountCommitted.subtract(BigInteger.valueOf(txAttachment.getAmountNqt()));
+            } catch (Exception e) {
+                logger.error(e.getMessage());
+            }
+        }
+        if (amountCommitted.compareTo(BigInteger.ZERO) < 0) {
+            // should never happen
+            amountCommitted = BigInteger.ZERO;
+        }
+        return amountCommitted.longValue();
+    }
+
+    @Override
+    public Collection<Long> getTransactionIds(Long sender, Long recipient, int numberOfConfirmations, byte type,
+            byte subtype, int blockTimestamp, int from, int to, boolean includeIndirectIncoming) {
+
+        int height = getHeightForNumberOfConfirmations(numberOfConfirmations);
+        return Db.useDSLContext(ctx -> {
+            ArrayList<Condition> conditions = new ArrayList<>();
+            if (blockTimestamp > 0) {
+                conditions.add(TRANSACTION.BLOCK_TIMESTAMP.ge(blockTimestamp));
+            }
+            if (type >= 0) {
+                conditions.add(TRANSACTION.TYPE.eq(type));
+                if (subtype >= 0) {
+                    conditions.add(TRANSACTION.SUBTYPE.eq(subtype));
+                }
+            }
+            if (height < Integer.MAX_VALUE) {
+                conditions.add(TRANSACTION.HEIGHT.le(height));
+            }
+
+            SelectConditionStep<TransactionRecord> select = ctx.selectFrom(TRANSACTION).where(conditions);
+
+            if (recipient != null) {
+                select = select.and(TRANSACTION.RECIPIENT_ID.eq(recipient));
+            }
+            if (sender != null) {
+                select = select.and(TRANSACTION.SENDER_ID.eq(sender));
+            }
+
+            SelectOrderByStep<TransactionRecord> selectOrder = select;
+
+            if (includeIndirectIncoming && recipient != null) {
+                selectOrder = selectOrder.unionAll(ctx.selectFrom(TRANSACTION)
+                        .where(conditions)
+                        .and(TRANSACTION.ID.in(ctx.select(INDIRECT_INCOMING.TRANSACTION_ID).from(INDIRECT_INCOMING)
+                                .where(INDIRECT_INCOMING.ACCOUNT_ID.eq(recipient)))));
+            }
+
+            SelectQuery<TransactionRecord> selectQuery = selectOrder
+                    .orderBy(TRANSACTION.BLOCK_TIMESTAMP.desc(), TRANSACTION.ID.desc())
+                    .getQuery();
+
+            DbUtils.applyLimits(selectQuery, from, to);
+
+            return selectQuery.fetch(TRANSACTION.ID, Long.class);
+        });
+    }
+
+    @Override
+    public void prune(int fromHeight, int toHeight) {
+        Db.useDSLContext(ctx -> {
+            ctx.deleteFrom(INDIRECT_INCOMING).where(
+                    INDIRECT_INCOMING.HEIGHT.ge(fromHeight).and(INDIRECT_INCOMING.HEIGHT.lt(toHeight)))
+                    .execute();
+            ctx.deleteFrom(TRANSACTION)
+                    .where(TRANSACTION.HEIGHT.ge(fromHeight).and(TRANSACTION.HEIGHT.lt(toHeight)))
+                    // Keep burns (Recipient ID 0 is NULL)
+                    .and(TRANSACTION.RECIPIENT_ID.isNotNull())
+                    // Keep transactions involving Smart Contracts (ATs)
+                    .and(TRANSACTION.RECIPIENT_ID.notIn(ctx.select(AT.ID).from((TableLike<?>) AT)))
+                    // Keep transactions involving Smart Contracts (ATs)
+                    .and(TRANSACTION.SENDER_ID.notIn(ctx.select(AT.ID).from((TableLike<?>) AT)))
+                    // Keep PoC+ Commitment transactions (ADD/REMOVE)
+                    .and(DSL.not(TRANSACTION.TYPE.eq(TransactionType.TYPE_SIGNA_MINING.getType())
+                            .and(TRANSACTION.SUBTYPE.in((byte) 1, (byte) 2))))
+                    // Keep Asset Issuance
+                    .and(DSL.not(TRANSACTION.TYPE.eq(TransactionType.TYPE_COLORED_COINS.getType())
+                            .and(TRANSACTION.SUBTYPE.eq((byte) 0))))
+                    // Keep AT Creation
+                    .and(DSL.not(TRANSACTION.TYPE.eq(TransactionType.TYPE_AUTOMATED_TRANSACTIONS.getType())
+                            .and(TRANSACTION.SUBTYPE.eq((byte) 0))))
+                    .execute();
+            boolean isMySQL = Signum.getBlockchainProcessor().getDbType().equalsIgnoreCase("MariaDB")
+                    || Signum.getBlockchainProcessor().getDbType().equalsIgnoreCase("MySQL");
+            if (isMySQL) {
+                ctx.execute("SET FOREIGN_KEY_CHECKS = 0");
+            }
+
+            // Archive block headers before physical deletion
+            ctx.insertInto(DSL.table(DSL.name("pruned_block")),
+                    DSL.field(DSL.name("id"), Long.class),
+                    DSL.field(DSL.name("height"), Integer.class),
+                    DSL.field(DSL.name("version"), Integer.class),
+                    DSL.field(DSL.name("timestamp"), Integer.class),
+                    DSL.field(DSL.name("previous_block_id"), Long.class),
+                    DSL.field(DSL.name("total_amount"), Long.class),
+                    DSL.field(DSL.name("total_fee"), Long.class),
+                    DSL.field(DSL.name("payload_length"), Integer.class),
+                    DSL.field(DSL.name("generator_public_key"), byte[].class),
+                    DSL.field(DSL.name("previous_block_hash"), byte[].class),
+                    DSL.field(DSL.name("cumulative_difficulty"), byte[].class),
+                    DSL.field(DSL.name("base_target"), Long.class),
+                    DSL.field(DSL.name("next_block_id"), Long.class),
+                    DSL.field(DSL.name("nonce"), Long.class),
+                    DSL.field(DSL.name("generator_id"), Long.class),
+                    DSL.field(DSL.name("generation_signature"), byte[].class),
+                    DSL.field(DSL.name("block_signature"), byte[].class),
+                    DSL.field(DSL.name("payload_hash"), byte[].class),
+                    DSL.field(DSL.name("total_fee_cash_back"), Long.class),
+                    DSL.field(DSL.name("total_fee_burnt"), Long.class),
+                    DSL.field(DSL.name("ats"), byte[].class))
+                    .select(ctx.select(
+                            BLOCK.ID, BLOCK.HEIGHT, BLOCK.VERSION, BLOCK.TIMESTAMP,
+                            BLOCK.PREVIOUS_BLOCK_ID, BLOCK.TOTAL_AMOUNT, BLOCK.TOTAL_FEE,
+                            BLOCK.PAYLOAD_LENGTH, BLOCK.GENERATOR_PUBLIC_KEY, BLOCK.PREVIOUS_BLOCK_HASH,
+                            BLOCK.CUMULATIVE_DIFFICULTY, BLOCK.BASE_TARGET, BLOCK.NEXT_BLOCK_ID,
+                            BLOCK.NONCE, BLOCK.GENERATOR_ID, BLOCK.GENERATION_SIGNATURE,
+                            BLOCK.BLOCK_SIGNATURE, BLOCK.PAYLOAD_HASH, BLOCK.TOTAL_FEE_CASH_BACK,
+                            BLOCK.TOTAL_FEE_BURNT, BLOCK.ATS).from(BLOCK)
+                            .where(BLOCK.HEIGHT.lt(toHeight))
+                            .andNotExists(ctx.selectOne().from(DSL.table(DSL.name("pruned_block")))
+                                    .where(DSL.field(DSL.name("id"), Long.class).eq(BLOCK.ID))))
+                    .execute();
+
+            ctx.deleteFrom(BLOCK).where(BLOCK.HEIGHT.lt(toHeight)).execute();
+
+            if (isMySQL) {
+                ctx.execute("SET FOREIGN_KEY_CHECKS = 1");
+            }
+        });
+    }
+
+    @Override
+    public int getFirstHeight() {
+        return Db.useDSLContext(ctx -> {
+            Integer minHeight = ctx.select(DSL.min(BLOCK.HEIGHT)).from(BLOCK).fetchOneInto(Integer.class);
+            return minHeight != null ? minHeight : 0;
+        });
+    }
 }

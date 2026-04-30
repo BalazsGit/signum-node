@@ -16,47 +16,51 @@ import java.util.Collection;
 
 public interface BlockchainStore {
 
+    Collection<Block> getBlocks(int from, int to);
 
-  Collection<Block> getBlocks(int from, int to);
+    Collection<Block> getBlocks(Account account, int timestamp, int from, int to);
 
-  Collection<Block> getBlocks(Account account, int timestamp, int from, int to);
+    int getBlocksCount(long accountId, int from, int to);
 
-  int getBlocksCount(long accountId, int from, int to);
+    Collection<Block> getBlocks(Result<BlockRecord> blockRecords);
 
-  Collection<Block> getBlocks(Result<BlockRecord> blockRecords);
+    Collection<Long> getBlockIdsAfter(long blockId, int limit);
 
-  Collection<Long> getBlockIdsAfter(long blockId, int limit);
+    Collection<Block> getBlocksAfter(long blockId, int limit);
 
-  Collection<Block> getBlocksAfter(long blockId, int limit);
+    int getTransactionCount();
 
-  int getTransactionCount();
+    Collection<Transaction> getAllTransactions();
 
-  Collection<Transaction> getAllTransactions();
+    long getAtBurnTotal();
 
-  long getAtBurnTotal();
+    Collection<Transaction> getTransactions(Account account, int numberOfConfirmations, byte type, byte subtype,
+            int blockTimestamp, int from, int to, boolean includeIndirectIncoming);
 
-  Collection<Transaction> getTransactions(Account account, int numberOfConfirmations, byte type, byte subtype,
-                                          int blockTimestamp, int from, int to, boolean includeIndirectIncoming);
+    Collection<Transaction> getTransactions(Long senderId, Long recipientId, int numberOfConfirmations,
+            byte type, byte subtype, int blockTimestamp, int from, int to,
+            boolean includeIndirectIncoming, boolean bidirectional);
 
-  Collection<Transaction> getTransactions(Long senderId, Long recipientId, int numberOfConfirmations,
-                                                 byte type, byte subtype, int blockTimestamp, int from, int to,
-                                                 boolean includeIndirectIncoming, boolean bidirectional);
+    Collection<Transaction> getTransactions(long senderId, byte type, byte subtypeStart, byte subtypeEnd, int from,
+            int to);
 
-  Collection<Transaction> getTransactions(long senderId, byte type, byte subtypeStart, byte subtypeEnd, int from, int to);
+    int countTransactions(byte type, byte subtypeStart, byte subtypeEnd);
 
+    Collection<Transaction> getTransactionsWithFullHashReference(String fullHash, int numberOfConfirmations, byte type,
+            byte subtypeStart, byte subtypeEnd, int from, int to);
 
-  int countTransactions(byte type, byte subtypeStart, byte subtypeEnd);
+    Collection<Long> getTransactionIds(Long sender, Long recipient, int numberOfConfirmations, byte type, byte subtype,
+            int blockTimestamp, int from, int to, boolean includeIndirectIncoming);
 
-  Collection<Transaction> getTransactionsWithFullHashReference(String fullHash, int numberOfConfirmations, byte type, byte subtypeStart, byte subtypeEnd, int from, int to);
+    Collection<Transaction> getTransactions(DSLContext ctx, Result<TransactionRecord> rs);
 
-  Collection<Long> getTransactionIds(Long sender, Long recipient, int numberOfConfirmations, byte type, byte subtype,
-                                     int blockTimestamp, int from, int to, boolean includeIndirectIncoming);
+    void addBlock(Block block);
 
-  Collection<Transaction> getTransactions(DSLContext ctx, Result<TransactionRecord> rs);
+    Collection<Block> getLatestBlocks(int amountBlocks);
 
-  void addBlock(Block block);
+    long getCommittedAmount(long accountId, int height, int endHeight, Transaction skipTransaction);
 
-  Collection<Block> getLatestBlocks(int amountBlocks);
+    void prune(int fromHeight, int toHeight);
 
-  long getCommittedAmount(long accountId, int height, int endHeight, Transaction skipTransaction);
+    int getFirstHeight();
 }

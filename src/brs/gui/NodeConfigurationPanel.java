@@ -331,7 +331,8 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(dbPanel, Props.DB_USERNAME, "Database Username");
         addPasswordProperty(dbPanel, Props.DB_PASSWORD, "Database Password");
         addProperty(dbPanel, Props.DB_CONNECTIONS, "Max Connections");
-        addProperty(dbPanel, Props.DB_TRIM_DERIVED_TABLES, "Trim Derived Tables");
+        addProperty(dbPanel, Props.DB_ARCHIVAL_MODE, "Archival Mode",
+                new String[] { "ARCHIVE", "TRIM", "PRUNE" }, false);
         addProperty(dbPanel, Props.DB_OPTIMIZE, "Optimize DB on Start/Stop");
         addProperty(dbPanel, Props.DB_SQLITE_JOURNAL_MODE, "SQLite Journal Mode",
                 new String[] { "WAL", "DELETE", "TRUNCATE", "PERSIST", "MEMORY", "OFF" });
@@ -666,17 +667,18 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void refreshProfileList() {
+        boolean wasProgrammatic = isProgrammaticChange;
         isProgrammaticChange = true;
-        String currentSelection = (String) profileComboBox.getSelectedItem();
-        profileComboBox.removeAllItems();
-
-        String lastProfile = loadAppliedProfile();
-        if ("node-default".equals(lastProfile)) {
-            lastProfile = "node";
-        }
-        this.activeProfileName = lastProfile != null ? lastProfile.trim() : "node";
-
         try {
+            String currentSelection = (String) profileComboBox.getSelectedItem();
+            profileComboBox.removeAllItems();
+
+            String lastProfile = loadAppliedProfile();
+            if ("node-default".equals(lastProfile)) {
+                lastProfile = "node";
+            }
+            this.activeProfileName = lastProfile != null ? lastProfile.trim() : "node";
+
             Path nodeConfPath = PathUtils.resolvePath(confFolder).resolve("node");
             if (Files.exists(nodeConfPath)) {
                 try (java.util.stream.Stream<Path> stream = Files.list(nodeConfPath)) {
@@ -702,18 +704,18 @@ public class NodeConfigurationPanel extends JPanel {
                 profileComboBox.insertItemAt("node", 0);
             }
 
-            isProgrammaticChange = false;
             if (currentSelection != null) {
                 profileComboBox.setSelectedItem(currentSelection);
             } else {
                 profileComboBox.setSelectedItem(this.activeProfileName);
             }
-            updateProfileComboBoxColor();
-            updateProfileButtonStates();
         } catch (Exception e) {
             e.printStackTrace();
-            isProgrammaticChange = false;
+        } finally {
+            isProgrammaticChange = wasProgrammatic;
         }
+        updateProfileComboBoxColor();
+        updateProfileButtonStates();
     }
 
     private void updateProfileComboBoxColor() {
@@ -736,10 +738,19 @@ public class NodeConfigurationPanel extends JPanel {
         errorLabel.setForeground(GuiColors.getContrastRed());
         errorLabel.setVisible(false);
 
-        JPanel panel = new JPanel(new MigLayout("wrap 1, fillx, insets 0", "[grow]", "[]5[]"));
+        JPanel panel = new JPanel(new MigLayout("wrap 1, fillx, insets 0", "[grow]", "[]5[]5[]"));
         panel.add(new JLabel("Enter profile name:"));
         panel.add(nameField, "growx");
         panel.add(errorLabel, "hidemode 3");
+
+        String report = getUnsavedChangesReport();
+        if (report != null) {
+            JLabel reportLabel = new JLabel(report);
+            JScrollPane scroll = new JScrollPane(reportLabel);
+            scroll.setPreferredSize(new Dimension(500, 200));
+            scroll.setBorder(BorderFactory.createTitledBorder("Changes to be saved"));
+            panel.add(scroll, "growx, gaptop 10");
+        }
 
         JButton saveBtn = new JButton("Save");
         JButton discardBtn = new JButton("Discard");
@@ -808,13 +819,20 @@ public class NodeConfigurationPanel extends JPanel {
                         Properties propsToSave = getPropertiesFromUI();
                         savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
 
-                        refreshProfileList();
-                        profileComboBox.setSelectedItem(name);
+                        isProgrammaticChange = true;
+                        try {
+                            this.loadedProfileName = name;
+                            this.currentProperties.clear();
+                            this.currentProperties.putAll(propsToSave);
+                            this.propertiesFile = targetFile;
+
+                            refreshProfileList();
+                            profileComboBox.setSelectedItem(name);
+                        } finally {
+                            isProgrammaticChange = false;
+                        }
                         updateProfileComboBoxColor();
-                        this.loadedProfileName = name;
-                        this.currentProperties.clear();
-                        this.currentProperties.putAll(propsToSave);
-                        this.propertiesFile = targetFile;
+                        updateProfileComboBoxColor();
                         updateTitle();
 
                         updateDirtyStatus();
@@ -2452,8 +2470,13 @@ public class NodeConfigurationPanel extends JPanel {
         helpTexts.put(Props.DB_CONNECTIONS.getName(),
                 "The maximum number of simultaneous connections in the database connection pool.");
 
-        helpTexts.put(Props.DB_TRIM_DERIVED_TABLES.getName(),
-                "If enabled, the node will periodically prune old data from derived tables to save disk space. Recommended for non-archival nodes.");
+        helpTexts.put(Props.DB_ARCHIVAL_MODE.getName(),
+                "Sets the database maintenance and history mode:<br/>"
+                        + "<ul>"
+                        + "<li><b>ARCHIVE:</b> Full database, no trimming or pruning. Keep all history.</li>"
+                        + "<li><b>TRIM:</b> (Default) Periodically prunes derived tables to save space, but keeps all blocks and transactions.</li>"
+                        + "<li><b>PRUNE:</b> Trims derived tables AND physically deletes blocks older than the safe rollback limit (1440 blocks). ⚠️ Node becomes non-archival.</li>"
+                        + "</ul>");
 
         helpTexts.put(Props.DB_OPTIMIZE.getName(),
                 "If enabled, the node performs database optimization (e.g., VACUUM for SQLite) during startup or shutdown."
