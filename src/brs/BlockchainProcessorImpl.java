@@ -2295,8 +2295,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             return;
         }
 
+        boolean dbConsistent = false;
         this.isTrimming.set(true);
         long startTime = System.currentTimeMillis();
+        int startTrimHeight = currentTrimHeight.get();
 
         logger.info("Trimming derived tables from height {} up to {} starting...", currentTrimHeight, targetTrimHeight);
 
@@ -2309,9 +2311,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
             trimListeners.notify(new TrimStats(currentTrimHeight.get(), targetTrimHeight), Event.TRIM_START);
             for (DerivedTable table : tablesToTrim) {
-                if (this.isShutdown.get()) {
-                    break;
-                }
 
                 long tableStartTime = System.currentTimeMillis();
                 String tableName = table.getTable();
@@ -2328,6 +2327,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
             long endTime = System.currentTimeMillis();
             if (checkDatabaseState() == 0) {
+                dbConsistent = true;
                 logger.info("Database trim completed in {}.",
                         DurationFormatter.format(endTime - startTime));
                 logger.info("Trim height updated from {} to {}",
@@ -2337,25 +2337,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 }
                 try {
                     saveTrimHeight(targetTrimHeight);
-                    trimListeners.notify(new TrimStats(currentTrimHeight.get(), targetTrimHeight), Event.TRIM_END);
                 } catch (Exception e) {
                     throw new RuntimeException("Failed to save trim height to database after trim operation", e);
                 }
                 synchronized (currentTrimHeight) {
                     currentTrimHeight.set(targetTrimHeight);
-                }
-
-                // Add optimization for derived tables after successful trim
-                // Reclaming only if blockheigt - pruneheight > 2 * TRIM_PERIOD)
-                if (blockchain.getHeight() - currentTrimHeight.get() > 2 * Constants.TRIM_PERIOD) {
-                    logger.info("Reclaiming disk space for derived tables (OPTIMIZE TABLE)...");
-                    for (DerivedTable table : tablesToTrim) {
-                        try {
-                            table.optimize();
-                        } catch (Exception e) {
-                            logger.warn("Failed to optimize derived table {}: {}", table.getTable(), e.getMessage());
-                        }
-                    }
                 }
             } else {
                 logger.error(
@@ -2373,6 +2359,21 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             trimListeners.notify(new TrimStats(currentTrimHeight.get(), targetTrimHeight), Event.TRIM_END);
             stores.commitTransaction();
             stores.endTransaction();
+        }
+
+        if (dbConsistent) {
+            // Add optimization for derived tables after successful trim
+            // Reclaming only if blockheigt - pruneheight > 2 * TRIM_PERIOD)
+            if (blockchain.getHeight() - startTrimHeight > 2 * Constants.TRIM_PERIOD) {
+                logger.info("Reclaiming disk space for derived tables (OPTIMIZE TABLE)...");
+                for (DerivedTable table : tablesToTrim) {
+                    try {
+                        table.optimize();
+                    } catch (Exception e) {
+                        logger.warn("Failed to optimize derived table {}: {}", table.getTable(), e.getMessage());
+                    }
+                }
+            }
         }
     }
 
@@ -2450,13 +2451,15 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         this.logger.info("Prune blockchain data from height {} up to {} starting...",
                 currentPruneHeight, targetPruneHeight);
 
+        boolean dbConsistent = false;
         long startTime = System.currentTimeMillis();
+        int startPruneHeight = currentPruneHeight.get();
+
         stores.beginTransaction();
         try {
             // Prune in batches for progress reporting and to avoid long database locks
             int batchSize = 100;
-            int startHeight = currentPruneHeight.get();
-            for (int fromHeight = startHeight; fromHeight < targetPruneHeight; fromHeight += batchSize) {
+            for (int fromHeight = startPruneHeight; fromHeight < targetPruneHeight; fromHeight += batchSize) {
                 int toHeight = Math.min(fromHeight + batchSize, targetPruneHeight);
                 this.pruneListeners.notify(new BlockchainProcessor.PruneStats(fromHeight, targetPruneHeight),
                         BlockchainProcessor.Event.PRUNE_START);
@@ -2465,6 +2468,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
             long endTime = System.currentTimeMillis();
             if (checkDatabaseState() == 0) {
+                dbConsistent = true;
                 logger.info("Database prune completed in {}.",
                         DurationFormatter.format(endTime - startTime));
                 logger.info("Prune height updated from {} to {}",
@@ -2474,22 +2478,12 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 }
                 try {
                     savePruneHeight(targetPruneHeight);
-                    pruneListeners.notify(new PruneStats(currentPruneHeight.get(), targetPruneHeight), Event.PRUNE_END);
                 } catch (Exception e) {
                     throw new RuntimeException("Failed to save prune height to database after prune operation", e);
                 }
                 synchronized (currentPruneHeight) {
                     currentPruneHeight.set(targetPruneHeight);
                 }
-
-                // Add optimization for tables after successful prune
-                // Reclaming only if blockheigt - pruneheight > 2 * TRIM_PERIOD
-                if (blockchain.getHeight() - currentPruneHeight.get() > 2 * Constants.TRIM_PERIOD) {
-                    logger.info("Reclaiming disk space (OPTIMIZE TABLE)...");
-                    this.transactionDb.optimize();
-                    this.blockDb.optimize();
-                }
-
             } else {
                 logger.error(
                         "Database inconsistency detected after Prune. Rolling back changes. Min rollback height is {}",
@@ -2517,6 +2511,24 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             pruneListeners.notify(new PruneStats(currentPruneHeight.get(), targetPruneHeight), Event.PRUNE_END);
             stores.commitTransaction();
             stores.endTransaction();
+        }
+
+        if (dbConsistent) {
+            // Add optimization for blocks and transactions tables after successful prune
+            // Reclaming only if blockheigt - pruneheight > 2 * TRIM_PERIOD)
+            if (blockchain.getHeight() - startPruneHeight > 2 * Constants.TRIM_PERIOD) {
+                logger.info("Reclaiming disk space (OPTIMIZE TABLE)...");
+                try {
+                    blockDb.optimize();
+                } catch (Exception e) {
+                    logger.warn("Failed to optimize blocks table: {}", e.getMessage());
+                }
+                try {
+                    this.transactionDb.optimize();
+                } catch (Exception e) {
+                    logger.warn("Failed to optimize transactions table: {}", e.getMessage());
+                }
+            }
         }
     }
 

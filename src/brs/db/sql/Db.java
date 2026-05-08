@@ -238,6 +238,7 @@ public final class Db {
                 }
             } catch (Exception e) {
                 logger.debug("Failed to optimize table {}", tableName, e);
+                throw new RuntimeException(e);
             }
         });
     }
