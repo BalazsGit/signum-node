@@ -2517,12 +2517,13 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             // Add optimization for blocks and transactions tables after successful prune
             // Reclaming only if blockheigt - pruneheight > 2 * TRIM_PERIOD)
             if (blockchain.getHeight() - startPruneHeight > 2 * Constants.TRIM_PERIOD) {
-                logger.info("Reclaiming disk space (OPTIMIZE TABLE)...");
+                logger.info("Reclaiming disk space for blocks (OPTIMIZE TABLE)...");
                 try {
                     blockDb.optimize();
                 } catch (Exception e) {
                     logger.warn("Failed to optimize blocks table: {}", e.getMessage());
                 }
+                logger.info("Reclaiming disk space for transactions (OPTIMIZE TABLE)...");
                 try {
                     this.transactionDb.optimize();
                 } catch (Exception e) {
