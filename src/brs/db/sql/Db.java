@@ -230,6 +230,9 @@ public final class Db {
                     case MARIADB:
                         ctx.execute("OPTIMIZE NO_WRITE_TO_BINLOG TABLE " + tableName);
                         break;
+                    case SQLITE:
+                        ctx.execute("VACUUM");
+                        break;
                     default:
                         break;
                 }

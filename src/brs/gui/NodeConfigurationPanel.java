@@ -668,10 +668,10 @@ public class NodeConfigurationPanel extends JPanel {
 
     private void refreshProfileList() {
         boolean wasProgrammatic = isProgrammaticChange;
-        isProgrammaticChange = true;
         try {
             String currentSelection = (String) profileComboBox.getSelectedItem();
             profileComboBox.removeAllItems();
+            isProgrammaticChange = true;
 
             String lastProfile = loadAppliedProfile();
             if ("node-default".equals(lastProfile)) {
@@ -703,6 +703,8 @@ public class NodeConfigurationPanel extends JPanel {
             if (!hasBase) {
                 profileComboBox.insertItemAt("node", 0);
             }
+
+            isProgrammaticChange = false;
 
             if (currentSelection != null) {
                 profileComboBox.setSelectedItem(currentSelection);
@@ -1498,6 +1500,37 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(panel, prop, labelText, options, false);
     }
 
+    public void loadAppliedProperties() {
+        brs.props.PropertyService service = brs.Signum.getPropertyService();
+        if (service == null)
+            return;
+
+        for (PropertyRow row : allPropertyRows) {
+            String val = getServiceValueAsString(service, row.prop);
+            if (val != null) {
+                appliedProperties.setProperty(row.prop.getName(), val);
+            }
+        }
+        refreshUIColors();
+    }
+
+    private String getServiceValueAsString(brs.props.PropertyService service, Prop prop) {
+        Object defaultValue = prop.getDefaultValue();
+        if (defaultValue instanceof Boolean) {
+            return String.valueOf(service.getBoolean(prop));
+        } else if (defaultValue instanceof Integer) {
+            return String.valueOf(service.getInt(prop));
+        } else if (defaultValue instanceof List) {
+            List<String> list = service.getStringList(prop);
+            return list != null ? String.join(";", list) : "";
+        }
+        try {
+            return service.getString(prop);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private void addProperty(JPanel panel, Prop<?> prop, String labelText, String[] options, boolean editable) {
         // Label
         PropertyRow row = new PropertyRow(prop, labelText, panel, currentAddingTabIndex);
@@ -1514,8 +1547,12 @@ public class NodeConfigurationPanel extends JPanel {
         defaultValues.put(prop.getName(), getSafeDefault(prop));
 
         brs.props.PropertyService service = brs.Signum.getPropertyService();
-        String appliedValue = (service != null) ? service.getString((Prop<String>) prop) : savedValue;
-        this.appliedProperties.setProperty(prop.getName(), appliedValue);
+        if (service != null) {
+            String appliedValue = getServiceValueAsString(service, (Prop) prop);
+            if (appliedValue != null) {
+                this.appliedProperties.setProperty(prop.getName(), appliedValue);
+            }
+        }
 
         JComponent inputComponent;
 
@@ -1556,10 +1593,11 @@ public class NodeConfigurationPanel extends JPanel {
                         savedVal = getSafeDefault(prop);
 
                     String applied = appliedProperties.getProperty(prop.getName());
+                    boolean hasApplied = appliedProperties.containsKey(prop.getName());
                     if (applied == null)
                         applied = getSafeDefault(prop);
 
-                    if (value != null && value.toString().trim().equals(applied.trim())) {
+                    if (hasApplied && value != null && value.toString().trim().equals(applied.trim())) {
                         c.setForeground(GuiColors.getApplied());
                     } else if (value != null && value.toString().trim().equals(savedVal.trim())) {
                         c.setForeground(GuiColors.getSaved());
@@ -1661,8 +1699,12 @@ public class NodeConfigurationPanel extends JPanel {
         defaultValues.put(prop.getName(), getSafeDefault(prop));
 
         brs.props.PropertyService service = brs.Signum.getPropertyService();
-        String appliedValue = (service != null) ? service.getString(prop) : savedValue;
-        this.appliedProperties.setProperty(prop.getName(), appliedValue);
+        if (service != null) {
+            String appliedValue = getServiceValueAsString(service, (Prop) prop);
+            if (appliedValue != null) {
+                this.appliedProperties.setProperty(prop.getName(), appliedValue);
+            }
+        }
 
         JPasswordField passwordField = new JPasswordField(savedValue);
         passwordField.setColumns(20);
@@ -1734,7 +1776,7 @@ public class NodeConfigurationPanel extends JPanel {
         allPropertyRows.add(row);
     }
 
-    private void addListProperty(JPanel panel, Prop<String> prop, String labelText) {
+    private void addListProperty(JPanel panel, Prop<?> prop, String labelText) {
         PropertyRow row = new PropertyRow(prop, labelText, panel, currentAddingTabIndex);
         JLabel label = new JLabel(labelText);
         row.label = label;
@@ -1748,8 +1790,12 @@ public class NodeConfigurationPanel extends JPanel {
         defaultValues.put(prop.getName(), normalizeListValue(getSafeDefault(prop), ";"));
 
         brs.props.PropertyService service = brs.Signum.getPropertyService();
-        String appliedValue = (service != null) ? service.getString(prop) : savedValue;
-        this.appliedProperties.setProperty(prop.getName(), appliedValue);
+        if (service != null) {
+            String appliedValue = getServiceValueAsString(service, (Prop) prop);
+            if (appliedValue != null) {
+                this.appliedProperties.setProperty(prop.getName(), appliedValue);
+            }
+        }
 
         // Split by semicolon and join with newlines for display
         String[] items = savedValue.split(";");
@@ -2050,6 +2096,7 @@ public class NodeConfigurationPanel extends JPanel {
             savedValue = defaultValue;
 
         String applied = appliedProperties.getProperty(propName);
+        boolean hasApplied = appliedProperties.containsKey(propName);
         if (applied == null)
             applied = defaultValue;
 
@@ -2092,7 +2139,7 @@ public class NodeConfigurationPanel extends JPanel {
         }
 
         if (!(comp instanceof JCheckBox)) {
-            if (value.equals(applied)) {
+            if (hasApplied && value.equals(applied)) {
                 color = GuiColors.getApplied();
             } else if (value.equals(savedValue)) {
                 color = GuiColors.getSaved();

@@ -23,10 +23,12 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.function.Consumer;
 
 import static brs.schema.Tables.BLOCK;
 import static brs.schema.Tables.TRANSACTION;
 import static brs.schema.Tables.AT;
+import static brs.schema.Tables.PROPERTIES;
 import static brs.schema.Tables.INDIRECT_INCOMING;
 
 public class SqlBlockchainStore implements BlockchainStore {
@@ -74,15 +76,9 @@ public class SqlBlockchainStore implements BlockchainStore {
             return 0;
         }
         return Db.useDSLContext(ctx -> {
-            // Query both active and pruned blocks to get the correct count for capacity
-            // estimation
-            return ctx.selectCount().from(
-                    ctx.select(BLOCK.GENERATOR_ID, BLOCK.HEIGHT).from(BLOCK)
-                            .unionAll(
-                                    ctx.select(DSL.field(DSL.name("generator_id"), Long.class),
-                                            DSL.field(DSL.name("height"), Integer.class))
-                                            .from(DSL.table(DSL.name("pruned_block")))))
-                    .where(DSL.field(DSL.name("generator_id")).eq(accountId))
+            // No longer need to union with pruned_block since headers are kept in BLOCK
+            return ctx.selectCount().from(BLOCK)
+                    .where(BLOCK.GENERATOR_ID.eq(accountId))
                     .and(DSL.field(DSL.name("height")).between(from, to))
                     .fetchOne(0, int.class);
         });
@@ -514,83 +510,156 @@ public class SqlBlockchainStore implements BlockchainStore {
 
     @Override
     public void prune(int fromHeight, int toHeight) {
-        Db.useDSLContext(ctx -> {
-            ctx.deleteFrom(INDIRECT_INCOMING).where(
-                    INDIRECT_INCOMING.HEIGHT.ge(fromHeight).and(INDIRECT_INCOMING.HEIGHT.lt(toHeight)))
-                    .execute();
-            ctx.deleteFrom(TRANSACTION)
-                    .where(TRANSACTION.HEIGHT.ge(fromHeight).and(TRANSACTION.HEIGHT.lt(toHeight)))
-                    // Keep burns (Recipient ID 0 is NULL)
-                    .and(TRANSACTION.RECIPIENT_ID.isNotNull())
-                    // Keep transactions involving Smart Contracts (ATs)
-                    .and(TRANSACTION.RECIPIENT_ID.notIn(ctx.select(AT.ID).from((TableLike<?>) AT)))
-                    // Keep transactions involving Smart Contracts (ATs)
-                    .and(TRANSACTION.SENDER_ID.notIn(ctx.select(AT.ID).from((TableLike<?>) AT)))
-                    // Keep PoC+ Commitment transactions (ADD/REMOVE)
-                    .and(DSL.not(TRANSACTION.TYPE.eq(TransactionType.TYPE_SIGNA_MINING.getType())
-                            .and(TRANSACTION.SUBTYPE.in((byte) 1, (byte) 2))))
-                    // Keep Asset Issuance
-                    .and(DSL.not(TRANSACTION.TYPE.eq(TransactionType.TYPE_COLORED_COINS.getType())
-                            .and(TRANSACTION.SUBTYPE.eq((byte) 0))))
-                    // Keep AT Creation
-                    .and(DSL.not(TRANSACTION.TYPE.eq(TransactionType.TYPE_AUTOMATED_TRANSACTIONS.getType())
-                            .and(TRANSACTION.SUBTYPE.eq((byte) 0))))
-                    .execute();
-            boolean isMySQL = Signum.getBlockchainProcessor().getDbType().equalsIgnoreCase("MariaDB")
-                    || Signum.getBlockchainProcessor().getDbType().equalsIgnoreCase("MySQL");
-            if (isMySQL) {
-                ctx.execute("SET FOREIGN_KEY_CHECKS = 0");
-            }
 
-            // Archive block headers before physical deletion
-            ctx.insertInto(DSL.table(DSL.name("pruned_block")),
-                    DSL.field(DSL.name("id"), Long.class),
-                    DSL.field(DSL.name("height"), Integer.class),
-                    DSL.field(DSL.name("version"), Integer.class),
-                    DSL.field(DSL.name("timestamp"), Integer.class),
-                    DSL.field(DSL.name("previous_block_id"), Long.class),
-                    DSL.field(DSL.name("total_amount"), Long.class),
-                    DSL.field(DSL.name("total_fee"), Long.class),
-                    DSL.field(DSL.name("payload_length"), Integer.class),
-                    DSL.field(DSL.name("generator_public_key"), byte[].class),
-                    DSL.field(DSL.name("previous_block_hash"), byte[].class),
-                    DSL.field(DSL.name("cumulative_difficulty"), byte[].class),
-                    DSL.field(DSL.name("base_target"), Long.class),
-                    DSL.field(DSL.name("next_block_id"), Long.class),
-                    DSL.field(DSL.name("nonce"), Long.class),
-                    DSL.field(DSL.name("generator_id"), Long.class),
-                    DSL.field(DSL.name("generation_signature"), byte[].class),
-                    DSL.field(DSL.name("block_signature"), byte[].class),
-                    DSL.field(DSL.name("payload_hash"), byte[].class),
-                    DSL.field(DSL.name("total_fee_cash_back"), Long.class),
-                    DSL.field(DSL.name("total_fee_burnt"), Long.class),
-                    DSL.field(DSL.name("ats"), byte[].class))
-                    .select(ctx.select(
-                            BLOCK.ID, BLOCK.HEIGHT, BLOCK.VERSION, BLOCK.TIMESTAMP,
-                            BLOCK.PREVIOUS_BLOCK_ID, BLOCK.TOTAL_AMOUNT, BLOCK.TOTAL_FEE,
-                            BLOCK.PAYLOAD_LENGTH, BLOCK.GENERATOR_PUBLIC_KEY, BLOCK.PREVIOUS_BLOCK_HASH,
-                            BLOCK.CUMULATIVE_DIFFICULTY, BLOCK.BASE_TARGET, BLOCK.NEXT_BLOCK_ID,
-                            BLOCK.NONCE, BLOCK.GENERATOR_ID, BLOCK.GENERATION_SIGNATURE,
-                            BLOCK.BLOCK_SIGNATURE, BLOCK.PAYLOAD_HASH, BLOCK.TOTAL_FEE_CASH_BACK,
-                            BLOCK.TOTAL_FEE_BURNT, BLOCK.ATS).from(BLOCK)
-                            .where(BLOCK.HEIGHT.lt(toHeight))
-                            .andNotExists(ctx.selectOne().from(DSL.table(DSL.name("pruned_block")))
-                                    .where(DSL.field(DSL.name("id"), Long.class).eq(BLOCK.ID))))
-                    .execute();
+        final int STEP = 1000;
 
-            ctx.deleteFrom(BLOCK).where(BLOCK.HEIGHT.lt(toHeight)).execute();
+        for (int h = fromHeight; h < toHeight; h += STEP) {
+            final int currentFrom = h;
+            final int currentTo = Math.min(h + STEP, toHeight);
 
-            if (isMySQL) {
-                ctx.execute("SET FOREIGN_KEY_CHECKS = 1");
-            }
-        });
+            Db.useDSLContext(ctx -> {
+                ctx.deleteFrom(INDIRECT_INCOMING)
+                        .where(INDIRECT_INCOMING.HEIGHT.ge(currentFrom).and(INDIRECT_INCOMING.HEIGHT.lt(currentTo)))
+                        .execute();
+
+                Condition heightCondition = TRANSACTION.HEIGHT.ge(currentFrom).and(TRANSACTION.HEIGHT.lt(currentTo));
+
+                // Stage 0
+                // Arbitrary Messages and Account Info
+                Condition messagingStage0 = TRANSACTION.TYPE.eq(TransactionType.TYPE_MESSAGING.getType())
+                        .and(TRANSACTION.SUBTYPE.in((byte) 0, (byte) 5));
+
+                // Digital Goods Store (Marketplace)
+                // Keep subtype 0 (Listing) as it is required for purchase transaction
+                // validation
+                Condition digitalGoods = TRANSACTION.TYPE.eq(TransactionType.TYPE_DIGITAL_GOODS.getType())
+                        .and(TRANSACTION.SUBTYPE.ne((byte) 0));
+
+                // DEX Orders and Cancellations (Transient metadata)
+                Condition dexMetadata = TRANSACTION.TYPE.eq(TransactionType.TYPE_COLORED_COINS.getType())
+                        .and(TRANSACTION.SUBTYPE.in((byte) 2, (byte) 3, (byte) 4, (byte) 5));
+
+                // Stage 1
+                // Retain Alias (1) and TLD (2) assignments; prune only sell/buy market
+                // operations
+                Condition messagingStage1 = TRANSACTION.TYPE.eq(TransactionType.TYPE_MESSAGING.getType())
+                        .and(TRANSACTION.SUBTYPE.in((byte) 6, (byte) 7));
+
+                // Stage 2
+                // Asset Management (Issuance, Transfers, etc.)
+                // Prune only transfers (1) and multi-transfers (9).
+                // Issuance (0), minting (6), and treasury (7) must be kept for reference
+                // integrity.
+                Condition assetsStage2 = TRANSACTION.TYPE.eq(TransactionType.TYPE_COLORED_COINS.getType())
+                        .and(TRANSACTION.SUBTYPE.in((byte) 1, (byte) 9));
+
+                // Stage 3
+                // Core Transactions (Consensus breaking risk - use for deep pruning only)
+                // Keep Escrow (0) and Subscription (3) creation transactions.
+                Condition coreStage3 = TRANSACTION.TYPE.in(
+                        TransactionType.TYPE_PAYMENT.getType(),
+                        TransactionType.TYPE_ACCOUNT_CONTROL.getType())
+                        .or(TRANSACTION.TYPE.eq(TransactionType.TYPE_ADVANCED_PAYMENT.getType())
+                                .and(TRANSACTION.SUBTYPE.in((byte) 1, (byte) 2, (byte) 4, (byte) 5)));
+
+                // Stage 4
+                // Core Transactions with special pruning considerations (Consensus breaking
+                // risk - use for deep pruning only)
+                Condition coreStage4 = TRANSACTION.TYPE.in(
+                        TransactionType.TYPE_SIGNA_MINING.getType(),
+                        TransactionType.TYPE_AUTOMATED_TRANSACTIONS.getType());
+
+                Condition pruneCondition = messagingStage0
+                        .or(digitalGoods)
+                        .or(dexMetadata)
+                        .or(messagingStage1)
+                        .or(assetsStage2)
+                        .or(coreStage3);
+
+                // Exception: Never delete transactions where an Automated Transaction (AT) is
+                // the recipient.
+                // ATs can query their own transaction history (e.g. via findTransaction), and
+                // deleting
+                // this data leads to MD5 mismatch errors (state inconsistency) during block
+                // verification.
+                pruneCondition = pruneCondition.and(DSL.notExists(
+                        DSL.selectOne().from(AT)
+                                .where(AT.ID.eq(TRANSACTION.RECIPIENT_ID))
+                                .and(AT.LATEST.isTrue())));
+
+                // Nullify binary AT data in the block header as it's no longer needed
+                // for verification after reaching the safe rollback limit.
+                ctx.update(BLOCK)
+                        .set(BLOCK.ATS, (byte[]) null)
+                        .where(BLOCK.HEIGHT.ge(currentFrom).and(BLOCK.HEIGHT.lt(currentTo)))
+                        .execute();
+
+                totalTransactions[0] += ctx.selectCount().from(TRANSACTION).where(heightCondition).fetchOne(0,
+                        int.class);
+                int deletedCount = ctx.deleteFrom(TRANSACTION)
+                        .where(heightCondition)
+                        .and(pruneCondition)
+                        .execute();
+                totalDeletedTransactions[0] += deletedCount;
+
+            });
+        }
     }
 
     @Override
-    public int getFirstHeight() {
-        return Db.useDSLContext(ctx -> {
-            Integer minHeight = ctx.select(DSL.min(BLOCK.HEIGHT)).from(BLOCK).fetchOneInto(Integer.class);
-            return minHeight != null ? minHeight : 0;
-        });
+    public String getProperty(String key) {
+        return Db.useDSLContext((DSLContext ctx) -> ctx.select(PROPERTIES.DB_VALUE)
+                .from(PROPERTIES)
+                .where(PROPERTIES.DB_KEY.eq(key))
+                .fetchOne(PROPERTIES.DB_VALUE));
     }
+
+    @Override
+    public void setProperty(String key, String value) {
+        try {
+            if (key == null || value == null) {
+                throw new IllegalArgumentException("Key and value must not be null");
+            }
+            Db.useDSLContext(
+                    (Consumer<DSLContext>) ctx -> ctx.insertInto(PROPERTIES, PROPERTIES.DB_KEY, PROPERTIES.DB_VALUE)
+                            .values(key, value)
+                            .onConflict(PROPERTIES.DB_KEY).doUpdate()
+                            .set(PROPERTIES.DB_VALUE, value)
+                            .execute());
+        } catch (Exception e) {
+            logger.error("Failed to set property: key={}, value={}", key, value, e);
+            throw new RuntimeException("Failed to set property", e);
+        }
+    }
+
+    @Override
+    public void deleteProperty(String key) {
+        Db.useDSLContext((Consumer<DSLContext>) ctx -> ctx.deleteFrom(PROPERTIES)
+                .where(PROPERTIES.DB_KEY.eq(key))
+                .execute());
+    }
+
+    @Override
+    public int getTotalTransactions() {
+        return totalTransactions[0];
+    }
+
+    @Override
+    public void setTotalTransactions(int totalTransactions) {
+        SqlBlockchainStore.totalTransactions[0] = totalTransactions;
+    }
+
+    @Override
+    public int getTotalDeletedTransactions() {
+        return totalDeletedTransactions[0];
+    }
+
+    @Override
+    public void setTotalDeletedTransactions(int totalDeletedTransactions) {
+        SqlBlockchainStore.totalDeletedTransactions[0] = totalDeletedTransactions;
+    }
+
+    // TODO: Add whitelist accounts to prune method to prevent pruning of critical
+    // data.
+
 }

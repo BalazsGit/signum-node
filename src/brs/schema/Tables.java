@@ -3,7 +3,6 @@
  */
 package brs.schema;
 
-
 import brs.schema.tables.Account;
 import brs.schema.tables.AccountAsset;
 import brs.schema.tables.AccountBalance;
@@ -23,6 +22,7 @@ import brs.schema.tables.FlywaySchemaHistory;
 import brs.schema.tables.Goods;
 import brs.schema.tables.IndirectIncoming;
 import brs.schema.tables.Peer;
+import brs.schema.tables.Properties;
 import brs.schema.tables.Purchase;
 import brs.schema.tables.PurchaseFeedback;
 import brs.schema.tables.PurchasePublicFeedback;
@@ -31,7 +31,6 @@ import brs.schema.tables.Subscription;
 import brs.schema.tables.Trade;
 import brs.schema.tables.Transaction;
 import brs.schema.tables.UnconfirmedTransaction;
-
 
 /**
  * Convenience access to all tables in DB.
@@ -133,6 +132,11 @@ public class Tables {
      * The table <code>DB.peer</code>.
      */
     public static final Peer PEER = Peer.PEER;
+
+    /**
+     * The table <code>DB.properties</code>.
+     */
+    public static final Properties PROPERTIES = Properties.PROPERTIES;
 
     /**
      * The table <code>DB.purchase</code>.

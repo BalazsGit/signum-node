@@ -208,8 +208,6 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     int getMinRollbackHeight();
 
-    int getSafeRollbackHeight();
-
     boolean isScanning();
 
     boolean isTrimming();
@@ -218,11 +216,7 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     AtomicInteger getCurrentTrimHeight();
 
-    AtomicInteger getLastTrimHeight();
-
     AtomicInteger getCurrentPruneHeight();
-
-    AtomicInteger getLastPruneHeight();
 
     int getEstimatedTrimHeight();
 
@@ -263,8 +257,6 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
     PopOffState getManualPopOffState();
 
     PopOffState getAutoPopOffState();
-
-    int getMinHeight();
 
     String getDbType();
 

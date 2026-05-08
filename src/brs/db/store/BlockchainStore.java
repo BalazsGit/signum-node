@@ -16,6 +16,18 @@ import java.util.Collection;
 
 public interface BlockchainStore {
 
+    int[] totalTransactions = { 0 };
+
+    int[] totalDeletedTransactions = { 0 };
+
+    public int getTotalTransactions();
+
+    public void setTotalTransactions(int totalTransactions);
+
+    public int getTotalDeletedTransactions();
+
+    public void setTotalDeletedTransactions(int totalDeletedTransactions);
+
     Collection<Block> getBlocks(int from, int to);
 
     Collection<Block> getBlocks(Account account, int timestamp, int from, int to);
@@ -62,5 +74,9 @@ public interface BlockchainStore {
 
     void prune(int fromHeight, int toHeight);
 
-    int getFirstHeight();
+    String getProperty(String key);
+
+    void setProperty(String key, String value);
+
+    void deleteProperty(String key);
 }

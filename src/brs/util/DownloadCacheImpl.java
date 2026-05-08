@@ -48,6 +48,7 @@ public final class DownloadCacheImpl {
 
     private int lastTotalSize = 0;
     private int lastUnverifiedQueueSize = 0;
+    private long lastStatusUpdateTime = 0;
 
     public DownloadCacheImpl(
             PropertyService propertyService,
@@ -68,13 +69,18 @@ public final class DownloadCacheImpl {
         }
         int totalSize = blockCache.size();
         int unverifiedSize = unverified.size();
-        if (totalSize != lastTotalSize || unverifiedSize != lastUnverifiedQueueSize) {
-            lastTotalSize = totalSize;
-            lastUnverifiedQueueSize = unverifiedSize;
-            int verifiedSize = totalSize - unverifiedSize;
-            int downloadCacheFullness = blockCacheSize;
-            blockchainProcessor.onQueueStatusUpdated(new BlockchainProcessor.QueueStatus(unverifiedSize, verifiedSize,
-                    totalSize, downloadCacheFullness));
+        long now = System.currentTimeMillis();
+        if (unverifiedSize == 0 || now - lastStatusUpdateTime > 200) {
+            if (totalSize != lastTotalSize || unverifiedSize != lastUnverifiedQueueSize) {
+                lastStatusUpdateTime = now;
+                lastTotalSize = totalSize;
+                lastUnverifiedQueueSize = unverifiedSize;
+                int verifiedSize = totalSize - unverifiedSize;
+                int downloadCacheFullness = blockCacheSize;
+                blockchainProcessor
+                        .onQueueStatusUpdated(new BlockchainProcessor.QueueStatus(unverifiedSize, verifiedSize,
+                                totalSize, downloadCacheFullness));
+            }
         }
     }
 
@@ -237,9 +243,8 @@ public final class DownloadCacheImpl {
     public Block getFirstUnverifiedBlock() {
         long stamp = dcsl.writeLock();
         try {
-            long blockId = unverified.get(0);
+            long blockId = unverified.remove(0);
             Block block = blockCache.get(blockId);
-            unverified.remove(blockId);
             return block;
         } finally {
             updateAndFireQueueStatus();

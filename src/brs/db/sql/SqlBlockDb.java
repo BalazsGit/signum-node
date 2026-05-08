@@ -18,18 +18,13 @@ import static brs.schema.Tables.BLOCK;
 
 public class SqlBlockDb implements BlockDb {
 
-    private static final Logger logger = LoggerFactory.getLogger(BlockDb.class);
+    private static final Logger logger = LoggerFactory.getLogger(SqlBlockDb.class);
 
     public Block findBlock(long blockId) {
         return Db.useDSLContext(ctx -> {
             try {
                 BlockRecord r = ctx.selectFrom(BLOCK).where(BLOCK.ID.eq(blockId)).fetchAny();
-                Block block = r == null ? null : loadBlock(r);
-                if (block == null) {
-                    // Fallback to pruned_block if not found in active blocks
-                    block = findPrunedBlock(blockId);
-                }
-                return block;
+                return r == null ? null : loadBlock(r);
             } catch (SignumException.ValidationException e) {
                 throw new RuntimeException("Block already in database, id = " + blockId + ", does not pass validation!",
                         e);
@@ -39,39 +34,18 @@ public class SqlBlockDb implements BlockDb {
 
     @Override
     public Block findPrunedBlock(long blockId) {
-        return Db.useDSLContext(ctx -> {
-            try {
-                // We use dynamic DSL because pruned_block is not a generated class
-                Record r = ctx.selectFrom(DSL.table(DSL.name("pruned_block")))
-                        .where(DSL.field(DSL.name("id"), Long.class).eq(blockId))
-                        .fetchOne();
-                return r == null ? null : loadBlock(r);
-            } catch (SignumException.ValidationException e) {
-                throw new RuntimeException("Error loading pruned block headers", e);
-            }
-        });
+        return null;
     }
 
     public boolean hasBlock(long blockId) {
         return Db.useDSLContext(ctx -> {
-            if (ctx.fetchExists(ctx.selectOne().from(BLOCK).where(BLOCK.ID.eq(blockId)))) {
-                return true;
-            }
-            return ctx.fetchExists(ctx.selectOne().from(DSL.table(DSL.name("pruned_block")))
-                    .where(DSL.field(DSL.name("id"), Long.class).eq(blockId)));
+            return ctx.fetchExists(ctx.selectOne().from(BLOCK).where(BLOCK.ID.eq(blockId)));
         });
     }
 
     public long findBlockIdAtHeight(int height) {
         return Db.useDSLContext(ctx -> {
             Long id = ctx.select(BLOCK.ID).from(BLOCK).where(BLOCK.HEIGHT.eq(height)).fetchOne(BLOCK.ID);
-            if (id == null) {
-                // Fallback: search in pruned_block table
-                id = ctx.select(DSL.field(DSL.name("id"), Long.class))
-                        .from(DSL.table(DSL.name("pruned_block")))
-                        .where(DSL.field(DSL.name("height"), Integer.class).eq(height))
-                        .fetchOne(0, Long.class);
-            }
             if (id == null) {
                 throw new RuntimeException("Block at height " + height + " not found in database!");
             }
@@ -84,13 +58,6 @@ public class SqlBlockDb implements BlockDb {
             try {
                 BlockRecord r = ctx.selectFrom(BLOCK).where(BLOCK.HEIGHT.eq(height)).fetchAny();
                 Block block = r != null ? loadBlock(r) : null;
-                if (block == null) {
-                    // Fallback: search in pruned_block table
-                    Record pr = ctx.selectFrom(DSL.table(DSL.name("pruned_block")))
-                            .where(DSL.field(DSL.name("height"), Integer.class).eq(height))
-                            .fetchAny();
-                    block = pr != null ? loadBlock(pr) : null;
-                }
                 if (block == null) {
                     throw new RuntimeException("Block at height " + height + " not found in database!");
                 }
@@ -123,18 +90,8 @@ public class SqlBlockDb implements BlockDb {
     public Block findLastBlock(int timestamp) {
         return Db.useDSLContext(ctx -> {
             try {
-                BlockRecord r = ctx.selectFrom(BLOCK).where(BLOCK.TIMESTAMP.lessOrEqual(timestamp))
-                        .orderBy(BLOCK.DB_ID.desc()).limit(1).fetchAny();
-                if (r != null)
-                    return loadBlock(r);
-
-                // Search in pruned_block if not found in active blocks
-                Record pr = ctx.selectFrom(DSL.table(DSL.name("pruned_block")))
-                        .where(DSL.field(DSL.name("timestamp"), Integer.class).le(timestamp))
-                        .orderBy(DSL.field(DSL.name("height"), Integer.class).desc())
-                        .limit(1)
-                        .fetchAny();
-                return pr != null ? loadBlock(pr) : null;
+                return loadBlock(ctx.selectFrom(BLOCK).where(BLOCK.TIMESTAMP.lessOrEqual(timestamp))
+                        .orderBy(BLOCK.DB_ID.desc()).limit(1).fetchAny());
             } catch (SignumException.ValidationException e) {
                 throw new RuntimeException(
                         "Block already in database at timestamp " + timestamp + " does not pass validation!", e);
