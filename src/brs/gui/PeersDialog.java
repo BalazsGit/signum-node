@@ -103,6 +103,7 @@ public class PeersDialog extends JFrame {
                         "<li><b>Connected:</b> A subset of active peers with a stable connection.</li>" +
                         "<li><b>Blacklisted:</b> Peers temporarily banned for sending invalid data.</li>" +
                         "<li><b>All Known:</b> All peers your node has ever discovered.</li>" +
+                        "<li><b>Mode:</b> Peer database mode (ARCHIVE, TRIM, PRUNE, UNKNOWN).</li>" +
                         "</ul>" +
                         "<b>Colors:</b><br>" +
                         "<span style='color:" + greenHex + "'>&#9632;</span> <b>Green:</b> OK / Synced<br>" +
@@ -242,8 +243,10 @@ public class PeersDialog extends JFrame {
                 @Override
                 public void updateUI() {
                     super.updateUI();
-                    setDefaultRenderer(Object.class, new PeerTableCellRenderer(category));
-                    setDefaultRenderer(Long.class, new PeerTableCellRenderer(category));
+                    PeerTableCellRenderer renderer = new PeerTableCellRenderer(category);
+                    setDefaultRenderer(Object.class, renderer);
+                    setDefaultRenderer(Long.class, renderer);
+                    setDefaultRenderer(JButton.class, new ButtonRenderer());
                 }
 
                 @Override
@@ -278,8 +281,10 @@ public class PeersDialog extends JFrame {
                     ToolTipManager.sharedInstance().setDismissDelay(defaultDismissDelay);
                 }
             });
-            table.setDefaultRenderer(Object.class, new PeerTableCellRenderer(category));
-            table.setDefaultRenderer(Long.class, new PeerTableCellRenderer(category));
+            PeerTableCellRenderer baseRenderer = new PeerTableCellRenderer(category);
+            table.setDefaultRenderer(Object.class, baseRenderer);
+            table.setDefaultRenderer(Long.class, baseRenderer);
+            table.setDefaultRenderer(JButton.class, new ButtonRenderer());
             table.setFillsViewportHeight(true);
             table.setCellSelectionEnabled(true);
             table.setAutoCreateRowSorter(true);
@@ -300,6 +305,13 @@ public class PeersDialog extends JFrame {
                 }
             };
             table.setRowSorter(sorter);
+
+            // Gomb szerkesztők beállítása az utolsó két oszlophoz
+            ButtonEditor buttonEditor = new ButtonEditor(new JCheckBox());
+            table.getColumnModel().getColumn(PeersTableModel.COL_INDEX_BLACKLIST).setCellRenderer(new ButtonRenderer());
+            table.getColumnModel().getColumn(PeersTableModel.COL_INDEX_BLACKLIST).setCellEditor(buttonEditor);
+            table.getColumnModel().getColumn(PeersTableModel.COL_INDEX_CONNECT).setCellRenderer(new ButtonRenderer());
+            table.getColumnModel().getColumn(PeersTableModel.COL_INDEX_CONNECT).setCellEditor(buttonEditor);
 
             // Filter logic
             filterField.getDocument().addDocumentListener(new DocumentListener() {
@@ -347,8 +359,17 @@ public class PeersDialog extends JFrame {
         public static final String COL_STATE = "State";
         public static final String COL_VERSION = "Version";
         public static final String COL_HEIGHT = "Height";
+        public static final String COL_MODE = "Mode";
+        public static final String COL_ACTION_BLACKLIST = "Blacklist Action";
+        public static final String COL_ACTION_CONNECT = "Connection Action";
 
-        private final String[] columnNames = { COL_ADDRESS, COL_ANNOUNCED, COL_STATE, COL_VERSION, COL_HEIGHT };
+        public static final int COL_INDEX_BLACKLIST = 6;
+        public static final int COL_INDEX_CONNECT = 7;
+
+        private final String[] columnNames = {
+                COL_ADDRESS, COL_ANNOUNCED, COL_STATE, COL_VERSION, COL_HEIGHT, COL_MODE, COL_ACTION_BLACKLIST,
+                COL_ACTION_CONNECT
+        };
         private List<Peer> peers = new ArrayList<>();
         private long maxHeight;
         private String latestVersion;
@@ -401,14 +422,29 @@ public class PeersDialog extends JFrame {
                 return peer.getVersion() != null ? peer.getVersion().toString() : "";
             if (COL_HEIGHT.equals(columnName))
                 return peer.getHeight();
+            if (COL_MODE.equals(columnName))
+                return peer.getArchivalMode().toString();
+            if (COL_ACTION_BLACKLIST.equals(columnName))
+                return peer.isBlacklisted() ? "Whitelist" : "Blacklist";
+            if (COL_ACTION_CONNECT.equals(columnName))
+                return peer.getState() == Peer.State.CONNECTED ? "Disconnect" : "Connect";
             return null;
         }
 
         @Override
         public Class<?> getColumnClass(int columnIndex) {
-            if (COL_HEIGHT.equals(getColumnName(columnIndex)))
+            String colName = getColumnName(columnIndex);
+            if (COL_HEIGHT.equals(colName))
                 return Long.class;
+            if (COL_ACTION_BLACKLIST.equals(colName) || COL_ACTION_CONNECT.equals(colName))
+                return JButton.class;
             return String.class;
+        }
+
+        @Override
+        public boolean isCellEditable(int row, int column) {
+            String colName = getColumnName(column);
+            return COL_ACTION_BLACKLIST.equals(colName) || COL_ACTION_CONNECT.equals(colName);
         }
     }
 
@@ -462,6 +498,83 @@ public class PeersDialog extends JFrame {
             }
 
             return component;
+        }
+    }
+
+    /**
+     * Egyedi renderer a táblázatban lévő gombok megjelenítéséhez.
+     */
+    private static class ButtonRenderer extends JButton implements TableCellRenderer {
+        public ButtonRenderer() {
+            setOpaque(true);
+        }
+
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value,
+                boolean isSelected, boolean hasFocus, int row, int column) {
+            setText((value == null) ? "" : value.toString());
+            if (isSelected) {
+                setForeground(table.getSelectionForeground());
+                setBackground(table.getSelectionBackground());
+            } else {
+                setForeground(table.getForeground());
+                setBackground(UIManager.getColor("Button.background"));
+            }
+            return this;
+        }
+    }
+
+    /**
+     * Egyedi editor a gombok kattintásának kezeléséhez.
+     */
+    private static class ButtonEditor extends DefaultCellEditor {
+        protected JButton button;
+        private String label;
+        private boolean isPushed;
+        private Peer currentPeer;
+        private String currentColumn;
+
+        public ButtonEditor(JCheckBox checkBox) {
+            super(checkBox);
+            button = new JButton();
+            button.setOpaque(true);
+            button.addActionListener(e -> fireEditingStopped());
+        }
+
+        @Override
+        public Component getTableCellEditorComponent(JTable table, Object value,
+                boolean isSelected, int row, int column) {
+            label = (value == null) ? "" : value.toString();
+            button.setText(label);
+            isPushed = true;
+            currentPeer = ((PeersTableModel) table.getModel()).getPeerAt(table.convertRowIndexToModel(row));
+            currentColumn = table.getColumnName(column);
+            return button;
+        }
+
+        @Override
+        public Object getCellEditorValue() {
+            if (isPushed) {
+                if (PeersTableModel.COL_ACTION_BLACKLIST.equals(currentColumn)) {
+                    if (currentPeer.isBlacklisted())
+                        currentPeer.whitelist();
+                    else
+                        currentPeer.blacklist();
+                } else if (PeersTableModel.COL_ACTION_CONNECT.equals(currentColumn)) {
+                    if (currentPeer.getState() == Peer.State.CONNECTED)
+                        currentPeer.disconnect();
+                    else
+                        currentPeer.connect();
+                }
+            }
+            isPushed = false;
+            return label;
+        }
+
+        @Override
+        public boolean stopCellEditing() {
+            isPushed = false;
+            return super.stopCellEditing();
         }
     }
 }

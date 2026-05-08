@@ -33,6 +33,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import org.slf4j.Logger;
+import java.util.function.Supplier;
 import org.slf4j.LoggerFactory;
 
 public class LoggerConfigurationPanel extends JPanel {
@@ -46,6 +47,7 @@ public class LoggerConfigurationPanel extends JPanel {
     private final Properties props;
     private final Properties appliedProps;
     private final Map<String, String> helpTexts = new HashMap<>();
+    private final Map<String, Supplier<String>> valueSuppliers = new HashMap<>();
     private final Map<String, JComponent> propertyComponents = new HashMap<>();
     private final Map<String, String> defaultValues = new HashMap<>();
     private final String confFolder;
@@ -89,7 +91,7 @@ public class LoggerConfigurationPanel extends JPanel {
         }
 
         this.appliedProps = new Properties();
-        this.appliedProps.putAll(this.props);
+        loadAppliedProperties();
 
         this.renameProfileBtn = new JButton("Rename Profile");
         this.deleteProfileBtn = new JButton("Delete Profile");
@@ -521,17 +523,18 @@ public class LoggerConfigurationPanel extends JPanel {
     }
 
     private void refreshProfileList() {
-        isProgrammaticChange = true;
-        String currentSelection = (String) profileComboBox.getSelectedItem();
-        profileComboBox.removeAllItems();
-
-        String lastProfile = loadAppliedProfile();
-        if ("logging-default".equals(lastProfile)) {
-            lastProfile = "logging";
-        }
-        this.activeProfileName = lastProfile != null ? lastProfile.trim() : "logging";
-
+        boolean wasProgrammatic = isProgrammaticChange;
         try {
+            String currentSelection = (String) profileComboBox.getSelectedItem();
+            profileComboBox.removeAllItems();
+            isProgrammaticChange = true;
+
+            String lastProfile = loadAppliedProfile();
+            if ("logging-default".equals(lastProfile)) {
+                lastProfile = "logging";
+            }
+            this.activeProfileName = lastProfile != null ? lastProfile.trim() : "logging";
+
             Path loggingConfPath = PathUtils.resolvePath(confFolder).resolve("logging");
             if (Files.exists(loggingConfPath)) {
                 try (java.util.stream.Stream<Path> stream = Files.list(loggingConfPath)) {
@@ -558,17 +561,19 @@ public class LoggerConfigurationPanel extends JPanel {
             }
 
             isProgrammaticChange = false;
+
             if (currentSelection != null && profileComboBox.getItemCount() > 0) {
                 profileComboBox.setSelectedItem(currentSelection);
             } else {
                 profileComboBox.setSelectedItem(this.activeProfileName);
             }
-            updateProfileComboBoxColor();
-            updateProfileButtonStates();
         } catch (Exception e) {
             e.printStackTrace();
-            isProgrammaticChange = false;
+        } finally {
+            isProgrammaticChange = wasProgrammatic;
         }
+        updateProfileComboBoxColor();
+        updateProfileButtonStates();
     }
 
     private void updateProfileComboBoxColor() {
@@ -584,18 +589,27 @@ public class LoggerConfigurationPanel extends JPanel {
 
     private boolean saveProfile() {
         String currentProfile = (String) profileComboBox.getSelectedItem();
-        String suggestedName = (currentProfile == null || "logging-default".equals(currentProfile)
-                || currentProfile == null) ? "" : currentProfile;
+        String suggestedName = (currentProfile == null || "logging-default".equals(currentProfile)) ? ""
+                : currentProfile;
 
         JTextField nameField = new JTextField(suggestedName);
-        JLabel errorLabel = new JLabel("Saving as system profile is not allowed.");
+        JLabel errorLabel = new JLabel("Saving as a system profile is not allowed.");
         errorLabel.setForeground(GuiColors.getContrastRed());
         errorLabel.setVisible(false);
 
-        JPanel panel = new JPanel(new MigLayout("wrap 1, fillx, insets 0", "[grow]", "[]5[]"));
+        JPanel panel = new JPanel(new MigLayout("wrap 1, fillx, insets 0", "[grow]", "[]5[]5[]"));
         panel.add(new JLabel("Enter profile name:"));
         panel.add(nameField, "growx");
         panel.add(errorLabel, "hidemode 3");
+
+        String report = getUnsavedChangesReport();
+        if (report != null) {
+            JLabel reportLabel = new JLabel(report);
+            JScrollPane scroll = new JScrollPane(reportLabel);
+            scroll.setPreferredSize(new Dimension(450, 150));
+            scroll.setBorder(BorderFactory.createTitledBorder("Changes to be saved"));
+            panel.add(scroll, "growx, gaptop 10");
+        }
 
         JButton saveBtn = new JButton("Save");
         JButton discardBtn = new JButton("Discard");
@@ -661,18 +675,26 @@ public class LoggerConfigurationPanel extends JPanel {
                             }
                         }
 
-                        Properties propsToSave = getPropertiesFromUI();
+                        Properties propsToSave = getPropertiesFromUIInternal();
                         savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
 
-                        refreshProfileList();
-                        profileComboBox.setSelectedItem(name);
+                        isProgrammaticChange = true;
+                        try {
+                            this.loadedProfileName = name;
+                            this.props.clear();
+                            this.props.putAll(propsToSave);
+                            this.propertiesFile = targetFile;
+
+                            refreshProfileList();
+                            profileComboBox.setSelectedItem(name);
+                        } finally {
+                            isProgrammaticChange = false;
+                        }
+
                         updateProfileComboBoxColor();
-                        this.loadedProfileName = name;
-                        this.props.clear();
-                        this.props.putAll(propsToSave);
-                        this.propertiesFile = targetFile;
                         updateTitle();
                         updateDirtyStatus();
+
                         refreshUIColors();
                         JOptionPane.showMessageDialog(this, "Profile '" + name + "' saved successfully.",
                                 "Success", JOptionPane.INFORMATION_MESSAGE);
@@ -791,7 +813,7 @@ public class LoggerConfigurationPanel extends JPanel {
             if (comp instanceof JComboBox) {
                 newVal = (String) ((JComboBox<?>) comp).getSelectedItem();
             } else if (comp instanceof JTextComponent) {
-                newVal = ((JTextComponent) comp).getText();
+                newVal = ((JTextComponent) comp).getText().trim();
             }
 
             if (!newVal.trim().equals(savedValue.trim())) {
@@ -872,7 +894,7 @@ public class LoggerConfigurationPanel extends JPanel {
             isProgrammaticChange = false;
 
             try {
-                Properties propsToSave = getPropertiesFromUI();
+                Properties propsToSave = getPropertiesFromUIInternal();
                 savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
 
                 this.loadedProfileName = name; // Update early to prevent redundant load prompts during refresh
@@ -1043,6 +1065,21 @@ public class LoggerConfigurationPanel extends JPanel {
         return confPath.resolve("logging").resolve(fileName);
     }
 
+    public void loadAppliedProperties() {
+        Path appliedFile = resolveProfilePath(brs.Signum.LOGGING_PROPERTIES_NAME);
+        if (Files.exists(appliedFile)) {
+            try (FileInputStream in = new FileInputStream(appliedFile.toFile())) {
+                appliedProps.clear();
+                appliedProps.load(in);
+            } catch (Exception e) {
+                LOGGER.warn("Could not load applied logging properties: {}", e.getMessage());
+            }
+        } else {
+            appliedProps.clear();
+        }
+        refreshUIColors();
+    }
+
     private boolean hasUnsavedChanges() {
         for (Map.Entry<String, JComponent> entry : propertyComponents.entrySet()) {
             String key = entry.getKey();
@@ -1112,25 +1149,6 @@ public class LoggerConfigurationPanel extends JPanel {
         return PathUtils.resolvePath(confFolder).resolve("logging").resolve("profile.json");
     }
 
-    private void performSave() {
-        if ("logging-default".equals(loadedProfileName))
-            return;
-
-        Properties propsToSave = getPropertiesFromUI();
-        Path targetFile = resolveProfilePath(loadedProfileName + ".properties");
-
-        try {
-            savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
-            props.clear();
-            props.putAll(propsToSave);
-            updateDirtyStatus();
-            refreshUIColors();
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(this, "Error saving properties: " + e.getMessage(), "Error",
-                    JOptionPane.ERROR_MESSAGE);
-        }
-    }
-
     private void handleBack() {
         checkUnsavedChangesAndProceed(
                 () -> {
@@ -1140,24 +1158,34 @@ public class LoggerConfigurationPanel extends JPanel {
                 null);
     }
 
-    private Properties getPropertiesFromUI() {
+    private Properties getPropertiesFromUIInternal() {
         Properties props = new Properties();
-        for (Map.Entry<String, JComponent> entry : propertyComponents.entrySet()) {
+        for (Map.Entry<String, Supplier<String>> entry : valueSuppliers.entrySet()) {
             String key = entry.getKey();
-            JComponent comp = entry.getValue();
-            String val = "";
-            if (comp instanceof JComboBox) {
-                val = (String) ((JComboBox<?>) comp).getSelectedItem();
-            } else if (comp instanceof JTextComponent) {
-                val = ((JTextComponent) comp).getText();
-            }
-
+            String val = entry.getValue().get();
             String def = defaultValues.get(key);
-            if (val != null && !val.equals(def)) {
+            if (val != null && !val.trim().equals(def != null ? def.trim() : "")) {
                 props.setProperty(key, val);
             }
         }
         return props;
+    }
+
+    /**
+     * Legacy support for external calls if any
+     */
+    public Properties getPropertiesFromUI() {
+        return getPropertiesFromUIInternal();
+    }
+
+    private String getComponentValue(JComponent comp) {
+        if (comp instanceof JComboBox) {
+            Object item = ((JComboBox<?>) comp).getSelectedItem();
+            return item != null ? item.toString() : "";
+        } else if (comp instanceof JTextComponent) {
+            return ((JTextComponent) comp).getText();
+        }
+        return "";
     }
 
     private void updateUIFromProperties(Properties loadedProps) {
@@ -1287,6 +1315,14 @@ public class LoggerConfigurationPanel extends JPanel {
         row.inputConstraints = "split 2, growx, height pref!";
         panel.add(inputComponent, row.inputConstraints);
 
+        if (inputComponent instanceof JComboBox) {
+            JComboBox<?> combo = (JComboBox<?>) inputComponent;
+            valueSuppliers.put(propertyKey, () -> (String) combo.getSelectedItem());
+        } else if (inputComponent instanceof JTextComponent) {
+            JTextComponent text = (JTextComponent) inputComponent;
+            valueSuppliers.put(propertyKey, text::getText);
+        }
+
         propertyComponents.put(propertyKey, inputComponent);
         defaultValues.put(propertyKey, defaultValue);
 
@@ -1308,10 +1344,11 @@ public class LoggerConfigurationPanel extends JPanel {
                         savedVal = defaultValue;
 
                     String applied = appliedProps.getProperty(propertyKey);
+                    boolean hasApplied = appliedProps.containsKey(propertyKey);
                     if (applied == null)
                         applied = defaultValue;
 
-                    if (value != null && value.toString().equals(applied)) {
+                    if (hasApplied && value != null && value.toString().equals(applied)) {
                         c.setForeground(GuiColors.getApplied());
                     } else if (value != null && value.toString().equals(savedVal)) {
                         c.setForeground(GuiColors.getSaved());
@@ -1385,12 +1422,14 @@ public class LoggerConfigurationPanel extends JPanel {
             savedValue = defaultValue;
         }
         String applied = appliedProps.getProperty(propName);
+        boolean hasApplied = appliedProps.containsKey(propName);
         if (applied == null)
             applied = defaultValue;
 
         String value = "";
         if (comp instanceof JComboBox) {
-            value = (String) ((JComboBox<?>) comp).getSelectedItem();
+            Object selected = ((JComboBox<?>) comp).getSelectedItem();
+            value = (selected != null) ? selected.toString() : "";
         } else if (comp instanceof javax.swing.text.JTextComponent) {
             value = ((javax.swing.text.JTextComponent) comp).getText().trim();
             savedValue = savedValue.trim();
@@ -1398,7 +1437,7 @@ public class LoggerConfigurationPanel extends JPanel {
         }
 
         Color color;
-        if (value != null && value.equals(applied)) {
+        if (hasApplied && value != null && value.equals(applied)) {
             color = GuiColors.getApplied();
         } else if (value != null && value.equals(savedValue)) {
             color = GuiColors.getSaved();

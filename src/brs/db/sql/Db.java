@@ -230,11 +230,15 @@ public final class Db {
                     case MARIADB:
                         ctx.execute("OPTIMIZE NO_WRITE_TO_BINLOG TABLE " + tableName);
                         break;
+                    case SQLITE:
+                        ctx.execute("VACUUM");
+                        break;
                     default:
                         break;
                 }
             } catch (Exception e) {
                 logger.debug("Failed to optimize table {}", tableName, e);
+                throw new RuntimeException(e);
             }
         });
     }

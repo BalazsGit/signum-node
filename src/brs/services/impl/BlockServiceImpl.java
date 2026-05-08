@@ -481,6 +481,10 @@ public class BlockServiceImpl implements BlockService {
                 int pastBlockHeight = Math.max(0, block.getHeight() - Constants.MAX_ROLLBACK);
                 Block pastBlock = blockchain.getBlockAtHeight(pastBlockHeight);
 
+                if (pastBlock == null) {
+                    throw new BlockOutOfOrderException("Historical block at height " + pastBlockHeight
+                            + " is missing. PoC+ consensus requires access to historical headers even in pruned mode.");
+                }
                 long pastAverageCommitment = pastBlock.getAverageCommitment();
                 if (Signum.getFluxCapacitor().getValue(FluxValues.SPEEDWAY, block.getHeight())) {
                     // use the average from past and now to get a smoother result

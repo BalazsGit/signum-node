@@ -110,7 +110,9 @@ public class LookAndFeelPanel extends JPanel {
 
         // Listen for LookAndFeel changes globally
         UIManager.addPropertyChangeListener(e -> {
-            if ("lookAndFeel".equals(e.getPropertyName())) {
+            if ("lookAndFeel".equals(e.getPropertyName()) && !isProgrammaticChange) {
+                // Only trigger dirty status update if the change was manual (not during profile
+                // load)
                 updateDirtyStatus();
             }
         });
@@ -293,10 +295,11 @@ public class LookAndFeelPanel extends JPanel {
     }
 
     private void updateDirtyStatus() {
+        if (isProgrammaticChange)
+            return;
         boolean dirty = hasUnsavedChanges();
         saveProfileBtn.setText(dirty ? "Save Profile As *" : "Save Profile As");
 
-        // Frissítjük a gomb méretét, hogy ne legyen "..." a vége a szöveg változásakor
         fixComponentSize(saveProfileBtn);
         if (saveProfileBtn.getParent() != null) {
             saveProfileBtn.getParent().revalidate();
@@ -483,7 +486,7 @@ public class LookAndFeelPanel extends JPanel {
         errorLabel.setForeground(GuiColors.getContrastRed());
         errorLabel.setVisible(false);
 
-        JPanel panel = new JPanel(new MigLayout("wrap 1, fillx, insets 0", "[grow]", "[]5[]"));
+        JPanel panel = new JPanel(new MigLayout("wrap 1, fillx, insets 0", "[grow]", "[]5[]5[]"));
         panel.add(new JLabel("Enter profile name:"));
         panel.add(nameField, "growx");
         panel.add(errorLabel, "hidemode 3");
@@ -491,6 +494,16 @@ public class LookAndFeelPanel extends JPanel {
         JButton saveBtn = new JButton("Save");
         JButton discardBtn = new JButton("Discard");
         JButton cancelBtn = new JButton("Cancel");
+
+        String report = getUnsavedChangesReport();
+        if (report != null) {
+            JLabel reportLabel = new JLabel(report);
+            JScrollPane scroll = new JScrollPane(reportLabel);
+            scroll.setPreferredSize(new Dimension(450, 150));
+            scroll.setBorder(BorderFactory.createTitledBorder("Changes to be saved"));
+            panel.add(scroll, "growx, gaptop 10");
+        }
+
         Object[] options = { saveBtn, discardBtn, cancelBtn };
 
         JOptionPane pane = new JOptionPane(panel, JOptionPane.PLAIN_MESSAGE, JOptionPane.YES_NO_CANCEL_OPTION, null,
@@ -629,20 +642,25 @@ public class LookAndFeelPanel extends JPanel {
                 writer.write(gson.toJson(settings));
             }
 
-            // Update combobox
-            boolean exists = false;
-            for (int i = 0; i < profileComboBox.getItemCount(); i++) {
-                if (profileComboBox.getItemAt(i).equals(name)) {
-                    exists = true;
-                    break;
-                }
-            }
-            if (!exists) {
-                profileComboBox.addItem(name);
-            }
-            profileComboBox.setSelectedItem(name);
+            isProgrammaticChange = true;
+            try {
+                updateLoadedStateFromProfile(name);
 
-            updateLoadedStateFromProfile(name);
+                // Update combobox
+                boolean exists = false;
+                for (int i = 0; i < profileComboBox.getItemCount(); i++) {
+                    if (profileComboBox.getItemAt(i).equals(name)) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) {
+                    profileComboBox.addItem(name);
+                }
+                profileComboBox.setSelectedItem(name);
+            } finally {
+                isProgrammaticChange = false;
+            }
 
             JOptionPane.showMessageDialog(this, "Profile '" + name + "' saved successfully.", "Success",
                     JOptionPane.INFORMATION_MESSAGE);
@@ -910,36 +928,34 @@ public class LookAndFeelPanel extends JPanel {
 
     private void performLoadProfile(String profileName) {
         LOGGER.info("Loading Look and Feel profile: '{}'", profileName);
-
-        if (DEFAULT_PROFILE_NAME.equals(profileName)) {
-            resetToDefault();
-            try {
-                Path settingsPath = getGuiSettingsPath();
-                JsonObject settings;
-                if (Files.exists(settingsPath)) {
-                    try (BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
-                        settings = JsonParser.parseReader(reader).getAsJsonObject();
-                    } catch (Exception e) {
+        isProgrammaticChange = true;
+        try {
+            if (DEFAULT_PROFILE_NAME.equals(profileName)) {
+                resetToDefaultInternal();
+                try {
+                    Path settingsPath = getGuiSettingsPath();
+                    JsonObject settings;
+                    if (Files.exists(settingsPath)) {
+                        try (BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
+                            settings = JsonParser.parseReader(reader).getAsJsonObject();
+                        } catch (Exception e) {
+                            settings = new JsonObject();
+                        }
+                    } else {
                         settings = new JsonObject();
                     }
-                } else {
-                    settings = new JsonObject();
+                    settings.addProperty("lastSelectedLafProfile", DEFAULT_PROFILE_NAME);
+                    try (BufferedWriter writer = Files.newBufferedWriter(settingsPath, StandardCharsets.UTF_8)) {
+                        new GsonBuilder().setPrettyPrinting().create().toJson(settings, writer);
+                    }
+                } catch (IOException e) {
+                    e.printStackTrace();
                 }
-                settings.addProperty("lastSelectedLafProfile", DEFAULT_PROFILE_NAME);
-                try (BufferedWriter writer = Files.newBufferedWriter(settingsPath, StandardCharsets.UTF_8)) {
-                    new GsonBuilder().setPrettyPrinting().create().toJson(settings, writer);
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
+                profileComboBox.setSelectedItem(DEFAULT_PROFILE_NAME);
+                updateLoadedStateFromProfile(DEFAULT_PROFILE_NAME);
+                return;
             }
-            isProgrammaticChange = true;
-            profileComboBox.setSelectedItem(DEFAULT_PROFILE_NAME);
-            isProgrammaticChange = false;
-            updateLoadedStateFromProfile(DEFAULT_PROFILE_NAME);
-            return;
-        }
 
-        try {
             Path settingsPath = getGuiSettingsPath();
             if (Files.exists(settingsPath)) {
                 try (BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
@@ -1002,9 +1018,7 @@ public class LookAndFeelPanel extends JPanel {
                                 writer.write(gson.toJson(settings));
                             }
 
-                            isProgrammaticChange = true;
                             profileComboBox.setSelectedItem(profileName);
-                            isProgrammaticChange = false;
                         }
                     }
                 }
@@ -1013,10 +1027,23 @@ public class LookAndFeelPanel extends JPanel {
             e.printStackTrace();
             JOptionPane.showMessageDialog(this, "Error loading profile: " + e.getMessage(), "Error",
                     JOptionPane.ERROR_MESSAGE);
+        } finally {
+            isProgrammaticChange = false;
+            updateDirtyStatus();
         }
     }
 
     private void resetToDefault() {
+        isProgrammaticChange = true;
+        try {
+            resetToDefaultInternal();
+        } finally {
+            isProgrammaticChange = false;
+            updateDirtyStatus();
+        }
+    }
+
+    private void resetToDefaultInternal() {
         try {
             FlatAnimatedLafChange.showSnapshot();
             // Reset to a known default theme, e.g., FlatDarkLaf

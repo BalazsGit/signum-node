@@ -12,6 +12,7 @@ import com.google.gson.JsonParser;
 import java.util.HashMap;
 import java.io.ByteArrayOutputStream;
 import java.util.Map;
+import java.io.InputStream;
 import java.awt.*;
 import java.awt.TrayIcon.MessageType;
 import java.awt.event.ActionEvent;
@@ -495,10 +496,12 @@ public class SignumGUI extends JFrame {
     private JLabel blacklistedPeersLabel;
     private JLabel uploadVolumeLabel;
     private JLabel downloadVolumeLabel;
-    private JLabel trimHeightLabel;
+    private DynamicArrowPanel trimHeightLabel;
     private JSeparator trimSeparator;
+    private DynamicArrowPanel pruneHeightLabel;
+    private JSeparator pruneSeparator;
     private JLabel popOffBlockCountLabel;
-    private JLabel popOffBlockHeightLabel;
+    private DynamicArrowPanel popOffBlockHeightLabel;
     private JSeparator popOffSeparator1;
     private JSeparator popOffSeparator2;
     private boolean showPopOff = false;
@@ -627,17 +630,22 @@ public class SignumGUI extends JFrame {
         return label;
     }
 
-    private void addInfoTooltip(JLabel label, String text, String titleOverride) {
+    private void addInfoTooltip(JComponent component, String text, String titleOverride) {
         if (text != null) {
             String shortTooltip = text.split("\n")[0];
-            label.setToolTipText(shortTooltip);
+            component.setToolTipText(shortTooltip);
         }
-        label.addMouseListener(new MouseAdapter() {
+        component.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (SwingUtilities.isRightMouseButton(e)) {
                     String title;
-                    String labelText = label.getText();
+                    String labelText = "";
+                    if (component instanceof JLabel) {
+                        labelText = ((JLabel) component).getText();
+                    } else if (component instanceof DynamicArrowPanel) {
+                        labelText = ((DynamicArrowPanel) component).leftTextLabel.getText();
+                    }
                     if (titleOverride != null) {
                         title = (labelText != null && !labelText.isEmpty()) ? labelText + " " + titleOverride
                                 : titleOverride;
@@ -1029,6 +1037,16 @@ public class SignumGUI extends JFrame {
         this.confFolder = localConfFolder;
 
         IconFontSwing.register(FontAwesome.getIconFont());
+        try {
+            GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
+            InputStream fontStream = FontAwesome.class
+                    .getResourceAsStream("/jiconfont/icons/font_awesome/fontawesome-webfont.ttf");
+            if (fontStream != null) {
+                ge.registerFont(Font.createFont(Font.TRUETYPE_FONT, fontStream));
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Could not register FontAwesome for HTML rendering", e);
+        }
         JTextPane textPane = new JTextPane();
         Font consoleFont = UIManager.getFont("TextPane.font");
         if (consoleFont == null) {
@@ -1309,16 +1327,27 @@ public class SignumGUI extends JFrame {
 
         trimSeparator = new JSeparator(SwingConstants.VERTICAL);
         trimSeparator.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
-        String trimTooltip = "The minimum height to which the blockchain can be rolled back. Older data is pruned to save space.\n"
+        String trimTooltip = "The block height to which the derived tables are trimmed. This removes temporary historical data to maintain performance.\n"
                 + "Trimming occurs every " + brs.Constants.TRIM_PERIOD + " blocks.\n\n"
-                + "If 'est.' (estimated) is shown, the actual trim height is unknown (e.g. after restart),\n"
-                + "so it is calculated based on the trim period.";
-        trimHeightLabel = createLabel("Trim height: -", null, trimTooltip);
+                + "If '-' is shown, the actual trim height is unknown.";
+        trimHeightLabel = new DynamicArrowPanel();
+        addInfoTooltip(trimHeightLabel, trimTooltip, null);
 
         trimSeparator.setVisible(false);
         trimHeightLabel.setVisible(false);
         latestBlockInfoPanel.add(trimSeparator, "gapleft 5, gapright 5");
         latestBlockInfoPanel.add(trimHeightLabel);
+
+        pruneSeparator = new JSeparator(SwingConstants.VERTICAL);
+        pruneSeparator.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
+        String pruneTooltip = "The current block height of the physical pruning process. Blocks older than the rollback limit are deleted from the disk to save space.\nPruning occurs every "
+                + brs.Constants.TRIM_PERIOD + " blocks.";
+        pruneHeightLabel = new DynamicArrowPanel();
+        addInfoTooltip(pruneHeightLabel, pruneTooltip, "PRUNE");
+        pruneSeparator.setVisible(false);
+        pruneHeightLabel.setVisible(false);
+        latestBlockInfoPanel.add(pruneSeparator, "gapleft 5, gapright 5");
+        latestBlockInfoPanel.add(pruneHeightLabel);
 
         popOffSeparator1 = new JSeparator(SwingConstants.VERTICAL);
         popOffSeparator1.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
@@ -1330,7 +1359,8 @@ public class SignumGUI extends JFrame {
         popOffSeparator2.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
 
         String popOffHeightTooltip = "Displays the target block height after the pop-off operation completes, along with the current block height before the pop-off.\n\nThis information is crucial for understanding the state of your blockchain during a pop-off, which is used to resolve forks or other issues by reverting to a previous state.";
-        popOffBlockHeightLabel = createLabel("- 🡸 -", null, popOffHeightTooltip);
+        popOffBlockHeightLabel = new DynamicArrowPanel();
+        addInfoTooltip(popOffBlockHeightLabel, popOffHeightTooltip, "POP OFF");
 
         latestBlockInfoPanel.add(popOffSeparator1, "gapleft 5, gapright 5");
         latestBlockInfoPanel.add(popOffBlockCountLabel);
@@ -1640,13 +1670,8 @@ public class SignumGUI extends JFrame {
         trimIconSeparator = new JSeparator(SwingConstants.VERTICAL);
         trimIconSeparator.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
         trimIconSeparator.setMaximumSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
-        tooltip = "Automatic table trimming is active (DB.trimDerivedTables = true).\n" +
-                "Derived tables are being periodically pruned to save disk space.\n" +
-                "This happens every " + (brs.Constants.MAX_ROLLBACK * 10) + " blocks."
-                + "\n\nEnabled by property: DB.trimDerivedTables = true";
         trimLabel = new JLabel(IconFontSwing.buildIcon(FontAwesome.SCISSORS, GuiConstants.getToolBarIconSize(),
                 GuiColors.getButtonIcon()));
-        addInfoTooltip(trimLabel, tooltip, "TRIM");
         trimLabel.setVisible(false);
         trimIconSeparator.setVisible(false);
 
@@ -2097,8 +2122,8 @@ public class SignumGUI extends JFrame {
                         final long totalMined = blockchainProcessor.getLastCheckTotalMined();
                         final long totalEffectiveBalance = blockchainProcessor.getLastCheckTotalEffectiveBalance();
 
-                        final int finalLimitHeight = blockchainProcessor.getSafeRollbackHeight();
-                        int lastTrimHeight = blockchainProcessor.getLastTrimHeight().get();
+                        final int finalLimitHeight = blockchainProcessor.getMinRollbackHeight();
+                        int lastTrimHeight = blockchainProcessor.getCurrentTrimHeight().get();
                         final int finalLastTrimHeight = lastTrimHeight;
 
                         SwingUtilities.invokeLater(() -> {
@@ -2357,10 +2382,18 @@ public class SignumGUI extends JFrame {
         blockchainProcessor.addSyncStateListener(this::onSyncStateChanged);
 
         if (trimEnabled) {
-            blockchainProcessor.addListener(block -> onTrimStart(),
+            blockchainProcessor.addTrimListener(
+                    stats -> onTrimStart(stats.currentHeight, stats.targetHeight),
                     BlockchainProcessor.Event.TRIM_START);
-            blockchainProcessor.addListener(block -> onTrimHeightChanged(),
+            blockchainProcessor.addTrimListener(
+                    stats -> onTrimEnd(stats.currentHeight),
                     BlockchainProcessor.Event.TRIM_END);
+            blockchainProcessor.addPruneListener(
+                    stats -> onPruneStart(stats.currentHeight, stats.targetHeight),
+                    BlockchainProcessor.Event.PRUNE_START);
+            blockchainProcessor.addPruneListener(
+                    stats -> onPruneEnd(stats.currentHeight),
+                    BlockchainProcessor.Event.PRUNE_END);
             blockchainProcessor.addListener(block -> onConsistencyUpdate(),
                     BlockchainProcessor.Event.DATABASE_CONSISTENCY_UPDATE);
         }
@@ -2412,21 +2445,47 @@ public class SignumGUI extends JFrame {
         guiTimer.start();
     }
 
-    private void onTrimStart() {
-
-        int currentTrimHeight = Signum.getBlockchainProcessor().getCurrentTrimHeight().get();
-        int lastTrimHeight = Signum.getBlockchainProcessor().getLastTrimHeight().get();
+    private void onTrimStart(int currentHeight, int targetHeight) {
         SwingUtilities.invokeLater(() -> {
 
-            if (lastTrimHeight > currentTrimHeight) {
-                if (currentTrimHeight < 0) {
-                    trimHeightLabel.setText(String.format("Trim height: - 🡺 %d", lastTrimHeight));
-                } else {
-                    trimHeightLabel
-                            .setText(String.format("Trim height: %d 🡺 %d", currentTrimHeight, lastTrimHeight));
-                }
-            }
-            trimHeightLabel.setForeground(Color.GREEN);
+            trimHeightLabel.setVisible(true);
+            trimSeparator.setVisible(true);
+            pruneHeightLabel.setVisible(false);
+            pruneSeparator.setVisible(false);
+
+            trimHeightLabel.updateValues("Trim height: " + currentHeight,
+                    FontAwesome.ARROW_RIGHT, String.valueOf(targetHeight),
+                    GuiColors.getSaved(), GuiColors.getSaved());
+        });
+    }
+
+    private void onTrimEnd(int currentHeight) {
+        SwingUtilities.invokeLater(() -> {
+            trimHeightLabel.updateValues("Trim height: " + currentHeight,
+                    null, "", GuiColors.getApplied(), null);
+            trimHeightLabel.setAllColors(GuiColors.getApplied());
+        });
+    }
+
+    private void onPruneStart(int currentHeight, int targetHeight) {
+        SwingUtilities.invokeLater(() -> {
+
+            trimHeightLabel.setVisible(false);
+            trimSeparator.setVisible(false);
+            pruneHeightLabel.setVisible(true);
+            pruneSeparator.setVisible(true);
+
+            pruneHeightLabel.updateValues("Prune height: " + currentHeight,
+                    FontAwesome.ARROW_RIGHT, String.valueOf(targetHeight),
+                    GuiColors.getSaved(), GuiColors.getSaved());
+        });
+    }
+
+    private void onPruneEnd(int currentHeight) {
+        SwingUtilities.invokeLater(() -> {
+            pruneHeightLabel.updateValues("Prune height: " + (currentHeight < 0 ? "-" : currentHeight),
+                    null, "", GuiColors.getApplied(), null);
+            pruneHeightLabel.setAllColors(GuiColors.getApplied());
         });
     }
 
@@ -2477,14 +2536,16 @@ public class SignumGUI extends JFrame {
         int blockHeight = Signum.getBlockchainProcessor().getBeforeRollbackHeight();
         int targetHeight = Signum.getBlockchainProcessor().getManualLastPopOffHeight();
         SwingUtilities.invokeLater(() -> {
+            Color textColor = remaining > 0 ? GuiColors.getSaved() : GuiColors.getApplied();
             popOffBlockCountLabel.setText("Pop off blocks: " + remaining);
-            popOffBlockHeightLabel.setText(targetHeight < 0 ? "-" : targetHeight + " 🡸 " + blockHeight);
+            popOffBlockHeightLabel.updateValues(String.valueOf(targetHeight < 0 ? "-" : targetHeight),
+                    FontAwesome.ARROW_LEFT, String.valueOf(blockHeight), textColor, textColor);
             if (remaining > 0) {
-                popOffBlockCountLabel.setForeground(Color.YELLOW);
-                popOffBlockHeightLabel.setForeground(Color.YELLOW);
+                popOffBlockCountLabel.setForeground(textColor);
+                popOffBlockHeightLabel.setAllColors(textColor);
             } else {
-                popOffBlockCountLabel.setForeground(iconColor);
-                popOffBlockHeightLabel.setForeground(iconColor);
+                popOffBlockCountLabel.setForeground(GuiColors.getApplied());
+                popOffBlockHeightLabel.setAllColors(GuiColors.getApplied());
             }
             setPopOffLabelVisible(remaining > 0);
         });
@@ -2495,26 +2556,22 @@ public class SignumGUI extends JFrame {
         int blockHeight = Signum.getBlockchainProcessor().getBeforeRollbackHeight();
         int targetHeight = Signum.getBlockchainProcessor().getAutoLastPopOffHeight();
         SwingUtilities.invokeLater(() -> {
-            popOffBlockCountLabel.setText("Pop off blocks: " + remaining);
-            popOffBlockHeightLabel.setText(targetHeight < 0 ? "-" : targetHeight + " 🡸 " + blockHeight);
-
+            Color textColor;
             if (Signum.getBlockchainProcessor().getResolutionState() == BlockchainProcessor.ResolutionState.ACTIVE) {
-                if (remaining > 0) {
-                    popOffBlockCountLabel.setForeground(GuiColors.getContrastRed());
-                    popOffBlockHeightLabel.setForeground(GuiColors.getContrastRed());
-                } else {
-                    popOffBlockCountLabel.setForeground(iconColor);
-                    popOffBlockHeightLabel.setForeground(iconColor);
-                }
+                textColor = GuiColors.getContrastRed();
             } else {
-                if (remaining > 0) {
-                    popOffBlockCountLabel.setForeground(Color.ORANGE);
-                    popOffBlockHeightLabel.setForeground(Color.ORANGE);
-                } else {
-                    popOffBlockCountLabel.setForeground(iconColor);
-                    popOffBlockHeightLabel.setForeground(iconColor);
-                }
+                textColor = GuiColors.getSaved();
             }
+            if (remaining == 0) {
+                textColor = GuiColors.getApplied();
+            }
+
+            popOffBlockCountLabel.setText("Pop off blocks: " + remaining);
+            popOffBlockCountLabel.setForeground(textColor);
+
+            popOffBlockHeightLabel.updateValues(String.valueOf(targetHeight < 0 ? "-" : targetHeight),
+                    FontAwesome.ARROW_LEFT, String.valueOf(blockHeight), textColor, textColor);
+            popOffBlockHeightLabel.setAllColors(textColor);
             setPopOffLabelVisible(remaining > 0);
         });
     }
@@ -2561,7 +2618,34 @@ public class SignumGUI extends JFrame {
             showPopOff = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
             measurementActive = Signum.getPropertyService().getBoolean(Props.MEASUREMENT_ACTIVE);
             experimentalActive = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
-            trimEnabled = Signum.getPropertyService().getBoolean(Props.DB_TRIM_DERIVED_TABLES);
+            String archivalMode = Signum.getPropertyService().getString(Props.DB_ARCHIVAL_MODE).toUpperCase();
+            boolean isPruneMode = "PRUNE".equals(archivalMode);
+            boolean isTrimMode = "TRIM".equals(archivalMode);
+            trimEnabled = isTrimMode || isPruneMode;
+
+            String shortTooltip = "Database Mode: " + archivalMode;
+            String detailedTooltip = "Database Archival Mode: " + archivalMode + "\n\n";
+
+            if (isPruneMode) {
+                shortTooltip += " - Physical pruning is active (blocks deleted).";
+                detailedTooltip += "Physical pruning is active. Blocks and associated data older than the rollback limit ("
+                        + brs.Constants.MAX_ROLLBACK
+                        + " blocks) are permanently deleted from the database to save disk space.\n\n"
+                        + "Maintenance occurs automatically every " + brs.Constants.TRIM_PERIOD + " blocks.";
+            } else if (isTrimMode) {
+                shortTooltip += " - Table trimming is active (history cleaned).";
+                detailedTooltip += "Table trimming is active. Only temporary derived table history is periodically cleaned to maintain performance. All blocks and transactions are kept.\n\n"
+                        + "Trimming occurs automatically every " + brs.Constants.TRIM_PERIOD + " blocks.";
+            } else {
+                shortTooltip += " - Full history preserved.";
+                detailedTooltip += "Automatic database maintenance is disabled. No trimming or pruning is performed.\n\n"
+                        + "The entire blockchain history is stored locally. This node acts as an archival node.";
+            }
+            detailedTooltip += "\n\nControlled by property: DB.ArchivalMode";
+
+            trimLabel.setToolTipText(shortTooltip);
+            addInfoTooltip(trimLabel, detailedTooltip, archivalMode);
+
             autoResolveEnabled = Signum.getPropertyService().getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED);
 
             Block lastBlock = Signum.getBlockchain().getLastBlock();
@@ -2630,17 +2714,15 @@ public class SignumGUI extends JFrame {
                         timeSeparator.setVisible(true);
                     }
 
-                    if (trimEnabled) {
-                        trimLabel.setVisible(true);
-                        trimIconSeparator.setVisible(true);
-                        trimHeightLabel.setVisible(true);
-                        trimSeparator.setVisible(true);
-                    } else {
-                        trimLabel.setVisible(false);
-                        trimIconSeparator.setVisible(false);
-                        trimHeightLabel.setVisible(false);
-                        trimSeparator.setVisible(false);
-                    }
+                    // Scissors icon is always visible to show database mode status
+                    trimLabel.setVisible(trimEnabled);
+                    trimIconSeparator.setVisible(trimEnabled);
+
+                    // Maintenance labels are only visible if TRIM or PRUNE is active
+                    trimHeightLabel.setVisible(isTrimMode);
+                    trimSeparator.setVisible(isTrimMode);
+                    pruneHeightLabel.setVisible(isPruneMode);
+                    pruneSeparator.setVisible(isPruneMode);
 
                     if (autoResolveEnabled) {
                         autoResolveLabel.setVisible(true);
@@ -2650,10 +2732,14 @@ public class SignumGUI extends JFrame {
                         autoResolveSeparator.setVisible(false);
                     }
 
-                    onTrimHeightChanged();
+                    onTrimEnd(blockchainProcessor.getCurrentTrimHeight().get());
+                    onPruneEnd(blockchainProcessor.getCurrentPruneHeight().get());
                     onConsistencyUpdate();
                     onManualPopOffProgress();
                     onAutoPopOffProgress();
+
+                    nodeConfigPanel.loadAppliedProperties();
+                    loggerConfigPanel.loadAppliedProperties();
 
                     updateLatestBlock(lastBlock, maxPeerHeight, blockTime);
                     updatePeerCount(connectedCount, allKnownCount, blacklistedCount);
@@ -2933,21 +3019,6 @@ public class SignumGUI extends JFrame {
         elapsedTimeLabel.setText("Elapsed Time: " + elapsedTimeCounter + "s");
     }
 
-    private void onTrimHeightChanged() {
-        int currentTrimHeight = Signum.getBlockchainProcessor().getCurrentTrimHeight().get();
-        int estimatedTrimHeight = (currentTrimHeight == -1) ? Signum.getBlockchainProcessor().getEstimatedTrimHeight()
-                : 0;
-        SwingUtilities.invokeLater(() -> {
-
-            if (currentTrimHeight != -1) {
-                trimHeightLabel.setText("Trim height: " + currentTrimHeight);
-            } else {
-                trimHeightLabel.setText("Trim height: est. " + estimatedTrimHeight);
-            }
-            trimHeightLabel.setForeground(iconColor);
-        });
-    }
-
     private void addInfoTooltip(JComponent component, String text) {
         component.setToolTipText("Right-click for more info");
         component.addMouseListener(new MouseAdapter() {
@@ -2959,6 +3030,8 @@ public class SignumGUI extends JFrame {
                         title = ((JLabel) component).getText();
                     } else if (component instanceof JButton) {
                         title = ((JButton) component).getText();
+                    } else if (component instanceof DynamicArrowPanel) {
+                        title = ((DynamicArrowPanel) component).leftTextLabel.getText();
                     }
                     showInfoDialog(title, text, 300);
                 }
@@ -3216,6 +3289,73 @@ public class SignumGUI extends JFrame {
             // Place any confirmation dialogs or cleanup here if needed.
         } finally {
             System.exit(status);
+        }
+    }
+
+    /**
+     * A custom JPanel that displays a left text, a FontAwesome icon, and a right
+     * text.
+     * Used for consistent "number icon number" formatting in the bottom panel.
+     */
+    private static class DynamicArrowPanel extends JPanel {
+        private final JLabel leftTextLabel = new JLabel("-");
+        private final JLabel iconLabel = new JLabel();
+        private final JLabel rightTextLabel = new JLabel("-");
+        private FontAwesome currentIcon = null;
+        private Color currentIconColor = null;
+
+        public DynamicArrowPanel() {
+            super(new FlowLayout(FlowLayout.LEFT, 2, 0));
+            setOpaque(false);
+            add(leftTextLabel);
+            add(iconLabel);
+            add(rightTextLabel);
+            updateUI();
+        }
+
+        @Override
+        public void updateUI() {
+            super.updateUI();
+            if (leftTextLabel != null) {
+                GuiFontManager.applyDefaultFont(leftTextLabel);
+                GuiFontManager.applyDefaultFont(rightTextLabel);
+                if (currentIcon != null) {
+                    iconLabel.setIcon(IconFontSwing.buildIcon(currentIcon, GuiConstants.getHelpIconSize(),
+                            currentIconColor != null ? currentIconColor : UIManager.getColor("Label.foreground")));
+                }
+            }
+        }
+
+        public void updateValues(String leftText, FontAwesome icon, String rightText, Color textColor,
+                Color iconColor) {
+            this.currentIcon = icon;
+            this.currentIconColor = iconColor;
+
+            leftTextLabel.setText(leftText + (icon != null ? " " : ""));
+            rightTextLabel.setText((icon != null ? " " : "") + rightText);
+
+            Color actualTextColor = (textColor != null) ? textColor : UIManager.getColor("Label.foreground");
+            Color actualIconColor = (iconColor != null) ? iconColor : GuiColors.getButtonIcon();
+
+            leftTextLabel.setForeground(actualTextColor);
+            rightTextLabel.setForeground(actualTextColor);
+
+            if (icon != null) {
+                iconLabel.setIcon(IconFontSwing.buildIcon(icon, GuiConstants.getHelpIconSize(), actualIconColor));
+                iconLabel.setVisible(true);
+            } else {
+                iconLabel.setIcon(null);
+                iconLabel.setVisible(false);
+            }
+        }
+
+        public void setAllColors(Color color) {
+            leftTextLabel.setForeground(color);
+            rightTextLabel.setForeground(color);
+            if (currentIcon != null) {
+                iconLabel.setIcon(IconFontSwing.buildIcon(currentIcon, GuiConstants.getHelpIconSize(), color));
+                currentIconColor = color;
+            }
         }
     }
 }

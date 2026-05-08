@@ -331,7 +331,8 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(dbPanel, Props.DB_USERNAME, "Database Username");
         addPasswordProperty(dbPanel, Props.DB_PASSWORD, "Database Password");
         addProperty(dbPanel, Props.DB_CONNECTIONS, "Max Connections");
-        addProperty(dbPanel, Props.DB_TRIM_DERIVED_TABLES, "Trim Derived Tables");
+        addProperty(dbPanel, Props.DB_ARCHIVAL_MODE, "Archival Mode",
+                new String[] { "ARCHIVE", "TRIM", "PRUNE" }, false);
         addProperty(dbPanel, Props.DB_OPTIMIZE, "Optimize DB on Start/Stop");
         addProperty(dbPanel, Props.DB_SQLITE_JOURNAL_MODE, "SQLite Journal Mode",
                 new String[] { "WAL", "DELETE", "TRUNCATE", "PERSIST", "MEMORY", "OFF" });
@@ -666,17 +667,18 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void refreshProfileList() {
-        isProgrammaticChange = true;
-        String currentSelection = (String) profileComboBox.getSelectedItem();
-        profileComboBox.removeAllItems();
-
-        String lastProfile = loadAppliedProfile();
-        if ("node-default".equals(lastProfile)) {
-            lastProfile = "node";
-        }
-        this.activeProfileName = lastProfile != null ? lastProfile.trim() : "node";
-
+        boolean wasProgrammatic = isProgrammaticChange;
         try {
+            String currentSelection = (String) profileComboBox.getSelectedItem();
+            profileComboBox.removeAllItems();
+            isProgrammaticChange = true;
+
+            String lastProfile = loadAppliedProfile();
+            if ("node-default".equals(lastProfile)) {
+                lastProfile = "node";
+            }
+            this.activeProfileName = lastProfile != null ? lastProfile.trim() : "node";
+
             Path nodeConfPath = PathUtils.resolvePath(confFolder).resolve("node");
             if (Files.exists(nodeConfPath)) {
                 try (java.util.stream.Stream<Path> stream = Files.list(nodeConfPath)) {
@@ -703,17 +705,19 @@ public class NodeConfigurationPanel extends JPanel {
             }
 
             isProgrammaticChange = false;
+
             if (currentSelection != null) {
                 profileComboBox.setSelectedItem(currentSelection);
             } else {
                 profileComboBox.setSelectedItem(this.activeProfileName);
             }
-            updateProfileComboBoxColor();
-            updateProfileButtonStates();
         } catch (Exception e) {
             e.printStackTrace();
-            isProgrammaticChange = false;
+        } finally {
+            isProgrammaticChange = wasProgrammatic;
         }
+        updateProfileComboBoxColor();
+        updateProfileButtonStates();
     }
 
     private void updateProfileComboBoxColor() {
@@ -736,10 +740,19 @@ public class NodeConfigurationPanel extends JPanel {
         errorLabel.setForeground(GuiColors.getContrastRed());
         errorLabel.setVisible(false);
 
-        JPanel panel = new JPanel(new MigLayout("wrap 1, fillx, insets 0", "[grow]", "[]5[]"));
+        JPanel panel = new JPanel(new MigLayout("wrap 1, fillx, insets 0", "[grow]", "[]5[]5[]"));
         panel.add(new JLabel("Enter profile name:"));
         panel.add(nameField, "growx");
         panel.add(errorLabel, "hidemode 3");
+
+        String report = getUnsavedChangesReport();
+        if (report != null) {
+            JLabel reportLabel = new JLabel(report);
+            JScrollPane scroll = new JScrollPane(reportLabel);
+            scroll.setPreferredSize(new Dimension(500, 200));
+            scroll.setBorder(BorderFactory.createTitledBorder("Changes to be saved"));
+            panel.add(scroll, "growx, gaptop 10");
+        }
 
         JButton saveBtn = new JButton("Save");
         JButton discardBtn = new JButton("Discard");
@@ -808,13 +821,20 @@ public class NodeConfigurationPanel extends JPanel {
                         Properties propsToSave = getPropertiesFromUI();
                         savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
 
-                        refreshProfileList();
-                        profileComboBox.setSelectedItem(name);
+                        isProgrammaticChange = true;
+                        try {
+                            this.loadedProfileName = name;
+                            this.currentProperties.clear();
+                            this.currentProperties.putAll(propsToSave);
+                            this.propertiesFile = targetFile;
+
+                            refreshProfileList();
+                            profileComboBox.setSelectedItem(name);
+                        } finally {
+                            isProgrammaticChange = false;
+                        }
                         updateProfileComboBoxColor();
-                        this.loadedProfileName = name;
-                        this.currentProperties.clear();
-                        this.currentProperties.putAll(propsToSave);
-                        this.propertiesFile = targetFile;
+                        updateProfileComboBoxColor();
                         updateTitle();
 
                         updateDirtyStatus();
@@ -1480,6 +1500,37 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(panel, prop, labelText, options, false);
     }
 
+    public void loadAppliedProperties() {
+        brs.props.PropertyService service = brs.Signum.getPropertyService();
+        if (service == null)
+            return;
+
+        for (PropertyRow row : allPropertyRows) {
+            String val = getServiceValueAsString(service, row.prop);
+            if (val != null) {
+                appliedProperties.setProperty(row.prop.getName(), val);
+            }
+        }
+        refreshUIColors();
+    }
+
+    private String getServiceValueAsString(brs.props.PropertyService service, Prop prop) {
+        Object defaultValue = prop.getDefaultValue();
+        if (defaultValue instanceof Boolean) {
+            return String.valueOf(service.getBoolean(prop));
+        } else if (defaultValue instanceof Integer) {
+            return String.valueOf(service.getInt(prop));
+        } else if (defaultValue instanceof List) {
+            List<String> list = service.getStringList(prop);
+            return list != null ? String.join(";", list) : "";
+        }
+        try {
+            return service.getString(prop);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private void addProperty(JPanel panel, Prop<?> prop, String labelText, String[] options, boolean editable) {
         // Label
         PropertyRow row = new PropertyRow(prop, labelText, panel, currentAddingTabIndex);
@@ -1496,8 +1547,12 @@ public class NodeConfigurationPanel extends JPanel {
         defaultValues.put(prop.getName(), getSafeDefault(prop));
 
         brs.props.PropertyService service = brs.Signum.getPropertyService();
-        String appliedValue = (service != null) ? service.getString((Prop<String>) prop) : savedValue;
-        this.appliedProperties.setProperty(prop.getName(), appliedValue);
+        if (service != null) {
+            String appliedValue = getServiceValueAsString(service, (Prop) prop);
+            if (appliedValue != null) {
+                this.appliedProperties.setProperty(prop.getName(), appliedValue);
+            }
+        }
 
         JComponent inputComponent;
 
@@ -1538,10 +1593,11 @@ public class NodeConfigurationPanel extends JPanel {
                         savedVal = getSafeDefault(prop);
 
                     String applied = appliedProperties.getProperty(prop.getName());
+                    boolean hasApplied = appliedProperties.containsKey(prop.getName());
                     if (applied == null)
                         applied = getSafeDefault(prop);
 
-                    if (value != null && value.toString().trim().equals(applied.trim())) {
+                    if (hasApplied && value != null && value.toString().trim().equals(applied.trim())) {
                         c.setForeground(GuiColors.getApplied());
                     } else if (value != null && value.toString().trim().equals(savedVal.trim())) {
                         c.setForeground(GuiColors.getSaved());
@@ -1643,8 +1699,12 @@ public class NodeConfigurationPanel extends JPanel {
         defaultValues.put(prop.getName(), getSafeDefault(prop));
 
         brs.props.PropertyService service = brs.Signum.getPropertyService();
-        String appliedValue = (service != null) ? service.getString(prop) : savedValue;
-        this.appliedProperties.setProperty(prop.getName(), appliedValue);
+        if (service != null) {
+            String appliedValue = getServiceValueAsString(service, (Prop) prop);
+            if (appliedValue != null) {
+                this.appliedProperties.setProperty(prop.getName(), appliedValue);
+            }
+        }
 
         JPasswordField passwordField = new JPasswordField(savedValue);
         passwordField.setColumns(20);
@@ -1716,7 +1776,7 @@ public class NodeConfigurationPanel extends JPanel {
         allPropertyRows.add(row);
     }
 
-    private void addListProperty(JPanel panel, Prop<String> prop, String labelText) {
+    private void addListProperty(JPanel panel, Prop<?> prop, String labelText) {
         PropertyRow row = new PropertyRow(prop, labelText, panel, currentAddingTabIndex);
         JLabel label = new JLabel(labelText);
         row.label = label;
@@ -1730,8 +1790,12 @@ public class NodeConfigurationPanel extends JPanel {
         defaultValues.put(prop.getName(), normalizeListValue(getSafeDefault(prop), ";"));
 
         brs.props.PropertyService service = brs.Signum.getPropertyService();
-        String appliedValue = (service != null) ? service.getString(prop) : savedValue;
-        this.appliedProperties.setProperty(prop.getName(), appliedValue);
+        if (service != null) {
+            String appliedValue = getServiceValueAsString(service, (Prop) prop);
+            if (appliedValue != null) {
+                this.appliedProperties.setProperty(prop.getName(), appliedValue);
+            }
+        }
 
         // Split by semicolon and join with newlines for display
         String[] items = savedValue.split(";");
@@ -2032,6 +2096,7 @@ public class NodeConfigurationPanel extends JPanel {
             savedValue = defaultValue;
 
         String applied = appliedProperties.getProperty(propName);
+        boolean hasApplied = appliedProperties.containsKey(propName);
         if (applied == null)
             applied = defaultValue;
 
@@ -2074,7 +2139,7 @@ public class NodeConfigurationPanel extends JPanel {
         }
 
         if (!(comp instanceof JCheckBox)) {
-            if (value.equals(applied)) {
+            if (hasApplied && value.equals(applied)) {
                 color = GuiColors.getApplied();
             } else if (value.equals(savedValue)) {
                 color = GuiColors.getSaved();
@@ -2452,8 +2517,13 @@ public class NodeConfigurationPanel extends JPanel {
         helpTexts.put(Props.DB_CONNECTIONS.getName(),
                 "The maximum number of simultaneous connections in the database connection pool.");
 
-        helpTexts.put(Props.DB_TRIM_DERIVED_TABLES.getName(),
-                "If enabled, the node will periodically prune old data from derived tables to save disk space. Recommended for non-archival nodes.");
+        helpTexts.put(Props.DB_ARCHIVAL_MODE.getName(),
+                "Sets the database maintenance and history mode:<br/>"
+                        + "<ul>"
+                        + "<li><b>ARCHIVE:</b> Full database, no trimming or pruning. Keep all history.</li>"
+                        + "<li><b>TRIM:</b> (Default) Periodically prunes derived tables to save space, but keeps all blocks and transactions.</li>"
+                        + "<li><b>PRUNE:</b> Trims derived tables AND physically deletes blocks older than the safe rollback limit (1440 blocks). ⚠️ Node becomes non-archival.</li>"
+                        + "</ul>");
 
         helpTexts.put(Props.DB_OPTIMIZE.getName(),
                 "If enabled, the node performs database optimization (e.g., VACUUM for SQLite) during startup or shutdown."

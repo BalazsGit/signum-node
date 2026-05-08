@@ -10,8 +10,16 @@ public interface Peer extends Comparable<Peer> {
 
     void connect(int currentTime);
 
+    void connect();
+
+    void disconnect();
+
     enum State {
         NON_CONNECTED, CONNECTED, DISCONNECTED;
+    }
+
+    enum ArchivalMode {
+        ARCHIVE, TRIM, PRUNE, UNKNOWN
     }
 
     String getPeerAddress();
@@ -50,6 +58,8 @@ public interface Peer extends Comparable<Peer> {
 
     boolean isHigherOrEqualVersionThan(Version version);
 
+    ArchivalMode getArchivalMode();
+
     void blacklist(Exception cause, String description);
 
     void blacklist(String description);
@@ -57,6 +67,8 @@ public interface Peer extends Comparable<Peer> {
     void blacklist();
 
     void unBlacklist();
+
+    void whitelist();
 
     void updateBlacklistedStatus(long curTime);
 

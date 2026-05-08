@@ -16,47 +16,67 @@ import java.util.Collection;
 
 public interface BlockchainStore {
 
+    int[] totalTransactions = { 0 };
 
-  Collection<Block> getBlocks(int from, int to);
+    int[] totalDeletedTransactions = { 0 };
 
-  Collection<Block> getBlocks(Account account, int timestamp, int from, int to);
+    public int getTotalTransactions();
 
-  int getBlocksCount(long accountId, int from, int to);
+    public void setTotalTransactions(int totalTransactions);
 
-  Collection<Block> getBlocks(Result<BlockRecord> blockRecords);
+    public int getTotalDeletedTransactions();
 
-  Collection<Long> getBlockIdsAfter(long blockId, int limit);
+    public void setTotalDeletedTransactions(int totalDeletedTransactions);
 
-  Collection<Block> getBlocksAfter(long blockId, int limit);
+    Collection<Block> getBlocks(int from, int to);
 
-  int getTransactionCount();
+    Collection<Block> getBlocks(Account account, int timestamp, int from, int to);
 
-  Collection<Transaction> getAllTransactions();
+    int getBlocksCount(long accountId, int from, int to);
 
-  long getAtBurnTotal();
+    Collection<Block> getBlocks(Result<BlockRecord> blockRecords);
 
-  Collection<Transaction> getTransactions(Account account, int numberOfConfirmations, byte type, byte subtype,
-                                          int blockTimestamp, int from, int to, boolean includeIndirectIncoming);
+    Collection<Long> getBlockIdsAfter(long blockId, int limit);
 
-  Collection<Transaction> getTransactions(Long senderId, Long recipientId, int numberOfConfirmations,
-                                                 byte type, byte subtype, int blockTimestamp, int from, int to,
-                                                 boolean includeIndirectIncoming, boolean bidirectional);
+    Collection<Block> getBlocksAfter(long blockId, int limit);
 
-  Collection<Transaction> getTransactions(long senderId, byte type, byte subtypeStart, byte subtypeEnd, int from, int to);
+    int getTransactionCount();
 
+    Collection<Transaction> getAllTransactions();
 
-  int countTransactions(byte type, byte subtypeStart, byte subtypeEnd);
+    long getAtBurnTotal();
 
-  Collection<Transaction> getTransactionsWithFullHashReference(String fullHash, int numberOfConfirmations, byte type, byte subtypeStart, byte subtypeEnd, int from, int to);
+    Collection<Transaction> getTransactions(Account account, int numberOfConfirmations, byte type, byte subtype,
+            int blockTimestamp, int from, int to, boolean includeIndirectIncoming);
 
-  Collection<Long> getTransactionIds(Long sender, Long recipient, int numberOfConfirmations, byte type, byte subtype,
-                                     int blockTimestamp, int from, int to, boolean includeIndirectIncoming);
+    Collection<Transaction> getTransactions(Long senderId, Long recipientId, int numberOfConfirmations,
+            byte type, byte subtype, int blockTimestamp, int from, int to,
+            boolean includeIndirectIncoming, boolean bidirectional);
 
-  Collection<Transaction> getTransactions(DSLContext ctx, Result<TransactionRecord> rs);
+    Collection<Transaction> getTransactions(long senderId, byte type, byte subtypeStart, byte subtypeEnd, int from,
+            int to);
 
-  void addBlock(Block block);
+    int countTransactions(byte type, byte subtypeStart, byte subtypeEnd);
 
-  Collection<Block> getLatestBlocks(int amountBlocks);
+    Collection<Transaction> getTransactionsWithFullHashReference(String fullHash, int numberOfConfirmations, byte type,
+            byte subtypeStart, byte subtypeEnd, int from, int to);
 
-  long getCommittedAmount(long accountId, int height, int endHeight, Transaction skipTransaction);
+    Collection<Long> getTransactionIds(Long sender, Long recipient, int numberOfConfirmations, byte type, byte subtype,
+            int blockTimestamp, int from, int to, boolean includeIndirectIncoming);
+
+    Collection<Transaction> getTransactions(DSLContext ctx, Result<TransactionRecord> rs);
+
+    void addBlock(Block block);
+
+    Collection<Block> getLatestBlocks(int amountBlocks);
+
+    long getCommittedAmount(long accountId, int height, int endHeight, Transaction skipTransaction);
+
+    void prune(int fromHeight, int toHeight);
+
+    String getProperty(String key);
+
+    void setProperty(String key, String value);
+
+    void deleteProperty(String key);
 }

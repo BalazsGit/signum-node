@@ -40,7 +40,6 @@ public class BlockchainImpl implements Blockchain {
         return StampedLockUtils.stampedLockRead(bcsl, supplier);
     }
 
-
     @Override
     public void setLastBlock(Block block) {
         long stamp = bcsl.writeLock();
@@ -88,7 +87,12 @@ public class BlockchainImpl implements Blockchain {
         if (block.getId() == blockId) {
             return block;
         }
-        return blockDb.findBlock(blockId);
+        Block foundBlock = blockDb.findBlock(blockId);
+        if (foundBlock == null) {
+            // Fallback to pruned_block headers
+            foundBlock = blockDb.findPrunedBlock(blockId);
+        }
+        return foundBlock;
     }
 
     @Override
@@ -152,7 +156,7 @@ public class BlockchainImpl implements Blockchain {
         if (height == block.getHeight()) {
             return block;
         }
-        return blockDb.findBlockAtHeight(height);
+        return getBlock(getBlockIdAtHeight(height));
     }
 
     @Override

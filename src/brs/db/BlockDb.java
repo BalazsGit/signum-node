@@ -2,28 +2,31 @@ package brs.db;
 
 import brs.Block;
 import brs.SignumException;
-import brs.schema.tables.records.BlockRecord;
 import org.jooq.DSLContext;
+import org.jooq.Record;
 
 public interface BlockDb extends Table {
-  Block findBlock(long blockId);
+    Block findBlock(long blockId);
 
-  boolean hasBlock(long blockId);
+    Block findPrunedBlock(long blockId);
 
-  long findBlockIdAtHeight(int height);
+    boolean hasBlock(long blockId);
 
-  Block findBlockAtHeight(int height);
+    long findBlockIdAtHeight(int height);
 
-  Block findLastBlock();
+    Block findBlockAtHeight(int height);
 
-  Block findLastBlock(int timestamp);
+    Block findLastBlock();
 
-  Block loadBlock(BlockRecord r) throws SignumException.ValidationException;
+    Block findLastBlock(int timestamp);
 
-  void saveBlock(DSLContext ctx, Block block);
+    Block loadBlock(Record r) throws SignumException.ValidationException;
 
-  // relying on cascade triggers in the database to delete the transactions for all deleted blocks
-  void deleteBlocksFrom(long blockId);
+    void saveBlock(DSLContext ctx, Block block);
 
-  void deleteAll(boolean force);
+    // relying on cascade triggers in the database to delete the transactions for
+    // all deleted blocks
+    void deleteBlocksFrom(long blockId);
+
+    void deleteAll(boolean force);
 }

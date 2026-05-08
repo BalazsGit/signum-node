@@ -60,6 +60,7 @@ final class PeerImpl implements Peer {
     private final AtomicBoolean isOldVersion = new AtomicBoolean(false);
     private final AtomicLong blacklistingTime = new AtomicLong();
     private final AtomicReference<State> state = new AtomicReference<>();
+    private final AtomicReference<ArchivalMode> archivalMode = new AtomicReference<>(ArchivalMode.UNKNOWN);
     private final AtomicLong downloadedVolume = new AtomicLong();
     private final AtomicLong uploadedVolume = new AtomicLong();
     private final AtomicInteger lastUpdated = new AtomicInteger();
@@ -70,14 +71,19 @@ final class PeerImpl implements Peer {
     PeerImpl(String peerAddress, String announcedAddress) {
         this.peerAddress = peerAddress;
         this.announcedAddress.set(announcedAddress);
-        try {
-            this.port.set(new URI(Constants.HTTP + announcedAddress).toURL().getPort());
-        } catch (MalformedURLException | URISyntaxException ignored) {
+        if (announcedAddress != null) {
+            try {
+                this.port.set(new URI(Constants.HTTP + announcedAddress).toURL().getPort());
+            } catch (MalformedURLException | URISyntaxException ignored) {
+                // Do nothing, ignore it all
+            }
+        } else {
             // Do nothing, ignore it all
         }
         this.state.set(State.NON_CONNECTED);
         this.version.set(Version.EMPTY); // not null
         this.shareAddress.set(true);
+        this.archivalMode.set(ArchivalMode.UNKNOWN);
     }
 
     @Override
@@ -174,6 +180,11 @@ final class PeerImpl implements Peer {
         return isHigherOrEqualVersionThan(Signum.VERSION);
     }
 
+    @Override
+    public ArchivalMode getArchivalMode() {
+        return archivalMode.get();
+    }
+
     void setVersion(String version) {
         this.version.set(Version.EMPTY);
         isOldVersion.set(false);
@@ -188,6 +199,18 @@ final class PeerImpl implements Peer {
             } catch (IllegalArgumentException e) {
                 isOldVersion.set(true);
             }
+        }
+    }
+
+    private void setArchivalMode(String archivalMode) {
+        if (archivalMode == null) {
+            this.archivalMode.set(ArchivalMode.UNKNOWN);
+            return;
+        }
+        try {
+            this.archivalMode.set(ArchivalMode.valueOf(archivalMode.toUpperCase()));
+        } catch (IllegalArgumentException e) {
+            this.archivalMode.set(ArchivalMode.UNKNOWN);
         }
     }
 
@@ -327,6 +350,16 @@ final class PeerImpl implements Peer {
     }
 
     @Override
+    public void whitelist() {
+        unBlacklist();
+    }
+
+    @Override
+    public void disconnect() {
+        setState(State.DISCONNECTED);
+    }
+
+    @Override
     public void updateBlacklistedStatus(long curTime) {
         if (blacklistingTime.get() > 0
                 && blacklistingTime.get() + Peers.blacklistingPeriod <= curTime) {
@@ -435,6 +468,9 @@ final class PeerImpl implements Peer {
                     } else if (response.has("height")) {
                         setHeight(response.get("height").getAsInt());
                     }
+                    if (response.has("archivalMode")) {
+                        setArchivalMode(JSON.getAsString(response.get("archivalMode")));
+                    }
                 }
                 updateDownloadedVolume(cis.getCount());
             } else {
@@ -497,6 +533,11 @@ final class PeerImpl implements Peer {
     }
 
     @Override
+    public void connect() {
+        connect((int) ((System.currentTimeMillis() - Constants.EPOCH_BEGINNING) / 1000));
+    }
+
+    @Override
     public void connect(int currentTime) {
         logger.debug("Trying to connect to {}", peerAddress);
         JsonObject response = send(Peers.myPeerInfoRequest);
@@ -505,6 +546,7 @@ final class PeerImpl implements Peer {
             setVersion(JSON.getAsString(response.get("version")));
             platform.set(JSON.getAsString(response.get("platform")));
             setNetworkName(JSON.getAsString(response.get("networkName")));
+            setArchivalMode(JSON.getAsString(response.get("archivalMode")));
             shareAddress.set(Boolean.TRUE.equals(JSON.getAsBoolean(response.get("shareAddress"))));
             String newAnnouncedAddress = Convert.emptyToNull(
                     JSON.getAsString(response.get("announcedAddress")));
