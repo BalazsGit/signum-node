@@ -83,10 +83,17 @@ public class NodeConfigurationPanel extends JPanel {
         this.backAction = backAction;
         this.switchAction = switchAction;
 
-        // At startup, use the currently loaded file as a base
-        this.propertiesFile = resolveProfilePath(brs.Signum.PROPERTIES_NAME);
-        this.loadedProfileName = brs.Signum.PROPERTIES_NAME.replace(".properties", "");
+        // Determine the currently applied profile name from metadata once at startup
+        String lastProfile = loadAppliedProfile();
+        if ("node-default".equals(lastProfile)) {
+            lastProfile = "node";
+        }
+        this.runningProfileName = lastProfile != null ? lastProfile.trim() : "node";
+        this.activeProfileName = this.runningProfileName;
+        this.loadedProfileName = this.runningProfileName;
 
+        // Use the detected profile to resolve the properties file path
+        this.propertiesFile = resolveProfilePath(this.loadedProfileName + ".properties");
         ensureConfigFileExists(this.propertiesFile);
 
         this.currentProperties = new Properties();
@@ -95,14 +102,6 @@ public class NodeConfigurationPanel extends JPanel {
         } catch (Exception e) {
             e.printStackTrace();
         }
-
-        // Determine the currently applied profile name from metadata once at startup
-        String lastProfile = loadAppliedProfile();
-        if ("node-default".equals(lastProfile)) {
-            lastProfile = "node";
-        }
-        this.runningProfileName = lastProfile != null ? lastProfile.trim() : "node";
-        this.activeProfileName = this.runningProfileName;
 
         this.appliedProperties = new Properties();
         // Request the running values from the Signum service for accurate comparison

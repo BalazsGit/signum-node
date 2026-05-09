@@ -78,9 +78,17 @@ public class LoggerConfigurationPanel extends JPanel {
         this.confFolder = confFolder;
         this.backAction = backAction;
         this.switchAction = switchAction;
-        this.propertiesFile = resolveProfilePath(brs.Signum.LOGGING_PROPERTIES_NAME);
-        this.loadedProfileName = brs.Signum.LOGGING_PROPERTIES_NAME.replace(".properties", "");
 
+        // Determine the currently applied profile name from metadata once at startup
+        String lastProfile = loadAppliedProfile();
+        if ("logging-default".equals(lastProfile)) {
+            lastProfile = "logging";
+        }
+        this.runningProfileName = lastProfile != null ? lastProfile.trim() : "logging";
+        this.activeProfileName = this.runningProfileName;
+        this.loadedProfileName = this.runningProfileName;
+
+        this.propertiesFile = resolveProfilePath(this.loadedProfileName + ".properties");
         ensureConfigFileExists(this.propertiesFile);
 
         this.props = new Properties();
@@ -95,14 +103,6 @@ public class LoggerConfigurationPanel extends JPanel {
 
         this.renameProfileBtn = new JButton("Rename Profile");
         this.deleteProfileBtn = new JButton("Delete Profile");
-        // Determine the currently applied profile name from metadata once at startup
-        String lastProfile = loadAppliedProfile();
-        if ("logging-default".equals(lastProfile)) {
-            lastProfile = "logging";
-        }
-        this.runningProfileName = lastProfile != null ? lastProfile.trim() : "logging";
-        this.activeProfileName = this.runningProfileName;
-
         // Initialize buttons early to avoid NullPointerException in listeners during UI
         // construction
         this.saveProfileBtn = new JButton("Save Profile As");
