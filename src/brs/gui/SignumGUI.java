@@ -1848,6 +1848,41 @@ public class SignumGUI extends JFrame {
                             LOGGER.warn("Error stopping elapsed time timer", t);
                         }
                     }
+                    if (guiTimer != null) {
+                        try {
+                            guiTimer.stop();
+                        } catch (Throwable t) {
+                            LOGGER.warn("Error stopping GUI timer", t);
+                        }
+                    }
+                    if (popOffAnimator != null) {
+                        try {
+                            popOffAnimator.stop();
+                        } catch (Throwable t) {
+                            LOGGER.warn("Error stopping popOff animator", t);
+                        }
+                    }
+                    if (metricsPanelAnimator != null) {
+                        try {
+                            metricsPanelAnimator.stop();
+                        } catch (Throwable t) {
+                            LOGGER.warn("Error stopping metricsPanel animator", t);
+                        }
+                    }
+                    if (commandPanelAnimator != null) {
+                        try {
+                            commandPanelAnimator.stop();
+                        } catch (Throwable t) {
+                            LOGGER.warn("Error stopping commandPanel animator", t);
+                        }
+                    }
+                    if (menuPanelAnimator != null) {
+                        try {
+                            menuPanelAnimator.stop();
+                        } catch (Throwable t) {
+                            LOGGER.warn("Error stopping menuPanel animator", t);
+                        }
+                    }
 
                     if (metricsPanel != null) {
                         try {
