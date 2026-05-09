@@ -78,6 +78,7 @@ import java.util.TreeSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -94,12 +95,6 @@ import org.bouncycastle.util.encoders.Hex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import signumj.entity.SignumID;
-
-//TODO: Create JavaDocs and remove this
-@SuppressWarnings({
-        "checkstyle:MissingJavadocTypeCheck",
-        "checkstyle:MissingJavadocMethodCheck",
-        "checkstyle:LineLengthCheck" })
 
 public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
@@ -127,6 +122,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private final long genesisBlockId;
     private final String dbType;
     private final String dbVersion;
+    private final AtomicBoolean oclInitialized = new AtomicBoolean(false);
     private final AtomicBoolean isShutdown = new AtomicBoolean(false);
 
     private final boolean logSyncProgressToCsv;
@@ -137,6 +133,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
     private final boolean measurementActive;
     private final ExecutorService measurementLogExecutor;
+    private final ExecutorService maintenanceExecutor = Executors
+            .newSingleThreadExecutor(task -> new Thread(task, "ArchivalMaintenanceThread"));
     private final List<String> measurementData = Collections.synchronizedList(new ArrayList<>());
     private final String measurementDir;
     private final String syncProgressLogFilename;
@@ -192,6 +190,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private final AtomicBoolean isPruning = new AtomicBoolean(false);
     private final AtomicBoolean isScanning = new AtomicBoolean(false);
 
+    private final AtomicReference<CompletableFuture<Void>> archivalMaintenanceFuture = new AtomicReference<>();
     private final AtomicBoolean isScheduleTrimRequested = new AtomicBoolean(false);
 
     /**
@@ -335,6 +334,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             logger.info("Waiting for database prune to finish before shutdown...");
         }
 
+        CompletableFuture<Void> maintenanceFuture = archivalMaintenanceFuture.get();
+        if (maintenanceFuture != null && !maintenanceFuture.isDone()) {
+            logger.info("Waiting for database archival maintenance task to finish before shutdown...");
+            try {
+                maintenanceFuture.join();
+            } catch (Exception e) {
+                logger.warn("Archival maintenance task finished with error during shutdown: {}", e.getMessage());
+            }
+        }
+
         if (manualPopOffState == PopOffState.ACTIVE || autoPopOffState == PopOffState.ACTIVE) {
             logger.info("Waiting for pop-off to finish before shutdown...");
         }
@@ -342,8 +351,12 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         // Stop getMoreBlocks and blockImporter threads
         getMoreBlocksAutoPause.set(true);
         blockImporterAutoPause.set(true);
-        getMoreBlocksLock.writeLock().lock();
-        blockImporterLock.writeLock().lock();
+
+        // Try to acquire locks non-blockingly to avoid hanging the entire shutdown
+        // sequence
+        boolean hasMoreBlocksLock = getMoreBlocksLock.writeLock().tryLock();
+        boolean hasImporterLock = blockImporterLock.writeLock().tryLock();
+
         Throwable firstException = null;
         try {
             synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
@@ -390,13 +403,14 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         Thread.currentThread().interrupt();
                     }
                 }
+                maintenanceExecutor.shutdown();
 
                 blockListeners.clear();
                 for (Peers.Event event : Peers.Event.values()) {
                     Peers.removeListener(peerListener, event);
                 }
 
-                if (getOclVerify()) {
+                if (oclInitialized.get()) {
                     logger.info("Destroying OCLPoC instance from BlockchainProcessor.");
                     try {
                         OCLPoC.destroy();
@@ -414,8 +428,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 firstException = t;
             }
         } finally {
-            blockImporterLock.writeLock().unlock();
-            getMoreBlocksLock.writeLock().unlock();
+            if (hasImporterLock)
+                blockImporterLock.writeLock().unlock();
+            if (hasMoreBlocksLock)
+                getMoreBlocksLock.writeLock().unlock();
         }
 
         if (firstException != null) {
@@ -1407,6 +1423,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         }
                         if (!blocks.isEmpty()) {
                             try {
+                                oclInitialized.set(true);
                                 OCLPoC.validatePoC(blocks, pocVersion, blockService);
                                 downloadCache.removeUnverifiedBatch(blocks.keySet());
                             } catch (OCLPoC.PreValidateFailException e) {
@@ -2309,8 +2326,12 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
             logger.info("Total derived tables to trim: {}", totalTables);
 
-            trimListeners.notify(new TrimStats(currentTrimHeight.get(), targetTrimHeight), Event.TRIM_START);
+            trimListeners.notify(new TrimStats(startTrimHeight, targetTrimHeight), Event.TRIM_START);
             for (DerivedTable table : tablesToTrim) {
+                if (isShutdown.get()) {
+                    logger.info("Shutdown detected, aborting database trim.");
+                    break;
+                }
 
                 long tableStartTime = System.currentTimeMillis();
                 String tableName = table.getTable();
@@ -2328,20 +2349,20 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             long endTime = System.currentTimeMillis();
             if (checkDatabaseState() == 0) {
                 dbConsistent = true;
+                synchronized (currentTrimHeight) {
+                    currentTrimHeight.set(targetTrimHeight);
+                }
                 logger.info("Database trim completed in {}.",
                         DurationFormatter.format(endTime - startTime));
                 logger.info("Trim height updated from {} to {}",
-                        currentTrimHeight.get(), targetTrimHeight);
+                        startTrimHeight, currentTrimHeight.get());
                 if (measurementActive) {
-                    writeTrimLog(targetTrimHeight, endTime - startTime);
+                    writeTrimLog(currentTrimHeight.get(), endTime - startTime);
                 }
                 try {
-                    saveTrimHeight(targetTrimHeight);
+                    saveTrimHeight(currentTrimHeight.get());
                 } catch (Exception e) {
                     throw new RuntimeException("Failed to save trim height to database after trim operation", e);
-                }
-                synchronized (currentTrimHeight) {
-                    currentTrimHeight.set(targetTrimHeight);
                 }
             } else {
                 logger.error(
@@ -2356,7 +2377,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         } finally {
             this.isTrimming.set(false);
             this.currentlyTrimmingTable.set(null);
-            trimListeners.notify(new TrimStats(currentTrimHeight.get(), targetTrimHeight), Event.TRIM_END);
+            trimListeners.notify(new TrimStats(startTrimHeight, currentTrimHeight.get()), Event.TRIM_END);
             stores.commitTransaction();
             stores.endTransaction();
         }
@@ -2385,7 +2406,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             return;
         }
 
-        new Thread(() -> {
+        CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
             try {
                 getMoreBlocksAutoPause.set(true);
                 blockImporterAutoPause.set(true);
@@ -2395,6 +2416,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 if (!isShutdown.get()) {
                     executeArchivalMaintenance(block);
                 }
+            } catch (Throwable t) {
+                logger.error("Maintenance error", t);
             } finally {
                 blockImporterLock.writeLock().unlock();
                 getMoreBlocksLock.writeLock().unlock();
@@ -2402,7 +2425,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 blockImporterAutoPause.set(false);
                 isScheduleTrimRequested.set(false);
             }
-        }, "ManualArchivalMaintenanceThread").start();
+        }, maintenanceExecutor);
+
+        archivalMaintenanceFuture.set(future);
+        future.whenComplete((res, ex) -> archivalMaintenanceFuture.compareAndSet(future, null));
     }
 
     private void executeArchivalMaintenance(Block block) {
@@ -2454,13 +2480,18 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         boolean dbConsistent = false;
         long startTime = System.currentTimeMillis();
         int startPruneHeight = currentPruneHeight.get();
+        int toHeight = startPruneHeight;
 
         stores.beginTransaction();
         try {
             // Prune in batches for progress reporting and to avoid long database locks
             int batchSize = 100;
             for (int fromHeight = startPruneHeight; fromHeight < targetPruneHeight; fromHeight += batchSize) {
-                int toHeight = Math.min(fromHeight + batchSize, targetPruneHeight);
+                if (isShutdown.get()) {
+                    logger.info("Shutdown detected, aborting database prune.");
+                    break;
+                }
+                toHeight = Math.min(fromHeight + batchSize, targetPruneHeight);
                 this.pruneListeners.notify(new BlockchainProcessor.PruneStats(fromHeight, targetPruneHeight),
                         BlockchainProcessor.Event.PRUNE_START);
                 this.blockchainStore.prune(fromHeight - 1, toHeight - 1);
@@ -2469,20 +2500,20 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             long endTime = System.currentTimeMillis();
             if (checkDatabaseState() == 0) {
                 dbConsistent = true;
+                synchronized (currentPruneHeight) {
+                    currentPruneHeight.set(toHeight);
+                }
                 logger.info("Database prune completed in {}.",
                         DurationFormatter.format(endTime - startTime));
                 logger.info("Prune height updated from {} to {}",
-                        currentPruneHeight.get(), targetPruneHeight);
+                        startPruneHeight, toHeight);
                 if (measurementActive) {
-                    writePruneLog(targetPruneHeight, endTime - startTime);
+                    writePruneLog(toHeight, endTime - startTime);
                 }
                 try {
-                    savePruneHeight(targetPruneHeight);
+                    savePruneHeight(toHeight);
                 } catch (Exception e) {
                     throw new RuntimeException("Failed to save prune height to database after prune operation", e);
-                }
-                synchronized (currentPruneHeight) {
-                    currentPruneHeight.set(targetPruneHeight);
                 }
             } else {
                 logger.error(
@@ -2508,7 +2539,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                             / this.blockchainStore.getTotalTransactions() * 100)
                             : "N/A");
             isPruning.set(false);
-            pruneListeners.notify(new PruneStats(currentPruneHeight.get(), targetPruneHeight), Event.PRUNE_END);
+            pruneListeners.notify(new PruneStats(startPruneHeight, currentPruneHeight.get()), Event.PRUNE_END);
             stores.commitTransaction();
             stores.endTransaction();
         }
@@ -3503,6 +3534,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     blockListeners.notify(block, Event.BLOCK_MANUAL_POPPED);
                     minRollbackHeight = getMinRollbackHeight();
                     while (manualPopOffBlocksCount.get() > 0) {
+                        if (isShutdown.get()) {
+                            logger.info("Shutdown detected, aborting manual pop-off loop.");
+                            break;
+                        }
                         if (block == null || block.getId() == genesisBlockId) {
                             logger.info("Blockchain is empty or at genesis block, nothing more to pop off.");
                             manualPopOffBlocksCount.set(0);
@@ -3652,6 +3687,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     logger.info("Rollback to {} from {}",
                             commonBlock.getHeight(), block.getHeight());
                     while (block.getId() != commonBlock.getId() && block.getId() != genesisBlockId) {
+                        if (isShutdown.get()) {
+                            logger.info("Shutdown detected, aborting auto pop-off to height {}.",
+                                    commonBlock.getHeight());
+                            break;
+                        }
                         if (forkBlocks != null) {
                             for (Block fb : forkBlocks) {
                                 if (fb.getHeight() == block.getHeight()
