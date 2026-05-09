@@ -775,14 +775,6 @@ public final class Signum {
                     }
                     logger.error("Error shutting down Peers", t);
                 }
-                try {
-                    threadPool.shutdown();
-                } catch (Throwable t) {
-                    if (shutdownManager != null) {
-                        shutdownManager.markFailure("ThreadPool");
-                    }
-                    logger.error("Error shutting down threadPool", t);
-                }
             }
 
             if (blockchainProcessor != null) {
@@ -796,14 +788,14 @@ public final class Signum {
                 }
             }
 
-            if (!ignoreDbShutdown) {
+            if (threadPool != null) {
                 try {
-                    Db.shutdown();
+                    threadPool.shutdown();
                 } catch (Throwable t) {
                     if (shutdownManager != null) {
-                        shutdownManager.markFailure("Database");
+                        shutdownManager.markFailure("ThreadPool");
                     }
-                    logger.error("Error shutting down DB", t);
+                    logger.error("Error shutting down threadPool", t);
                 }
             }
 
@@ -815,6 +807,17 @@ public final class Signum {
                         shutdownManager.markFailure("DBCacheManager");
                     }
                     logger.error("Error closing dbCacheManager", t);
+                }
+            }
+
+            if (!ignoreDbShutdown) {
+                try {
+                    Db.shutdown();
+                } catch (Throwable t) {
+                    if (shutdownManager != null) {
+                        shutdownManager.markFailure("Database");
+                    }
+                    logger.error("Error shutting down DB", t);
                 }
             }
 
