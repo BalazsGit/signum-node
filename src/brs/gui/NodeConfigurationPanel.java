@@ -669,9 +669,9 @@ public class NodeConfigurationPanel extends JPanel {
     private void refreshProfileList() {
         boolean wasProgrammatic = isProgrammaticChange;
         try {
+            isProgrammaticChange = true;
             String currentSelection = (String) profileComboBox.getSelectedItem();
             profileComboBox.removeAllItems();
-            isProgrammaticChange = true;
 
             String lastProfile = loadAppliedProfile();
             if ("node-default".equals(lastProfile)) {
@@ -703,8 +703,6 @@ public class NodeConfigurationPanel extends JPanel {
             if (!hasBase) {
                 profileComboBox.insertItemAt("node", 0);
             }
-
-            isProgrammaticChange = false;
 
             if (currentSelection != null) {
                 profileComboBox.setSelectedItem(currentSelection);
@@ -1024,25 +1022,26 @@ public class NodeConfigurationPanel extends JPanel {
             }
 
             isProgrammaticChange = true;
-            for (Map.Entry<String, JComponent> entry : propertyComponents.entrySet()) {
-                String key = entry.getKey();
-                JComponent comp = entry.getValue();
-                String defaultValue = defaultValues.get(key);
-
-                if (comp instanceof JCheckBox) {
-                    ((JCheckBox) comp).setSelected(Boolean.parseBoolean(defaultValue));
-                } else if (comp instanceof JComboBox) {
-                    ((JComboBox<?>) comp).setSelectedItem(defaultValue);
-                } else if (comp instanceof javax.swing.text.JTextComponent) {
-                    ((javax.swing.text.JTextComponent) comp).setText(defaultValue);
-                } else if (comp instanceof JScrollPane
-                        && ((JScrollPane) comp).getViewport().getView() instanceof JTextArea) {
-                    ((JTextArea) ((JScrollPane) comp).getViewport().getView()).setText(defaultValue.replace(";", "\n"));
-                }
-            }
-            isProgrammaticChange = false;
 
             try {
+                for (Map.Entry<String, JComponent> entry : propertyComponents.entrySet()) {
+                    String key = entry.getKey();
+                    JComponent comp = entry.getValue();
+                    String defaultValue = defaultValues.get(key);
+
+                    if (comp instanceof JCheckBox) {
+                        ((JCheckBox) comp).setSelected(Boolean.parseBoolean(defaultValue));
+                    } else if (comp instanceof JComboBox) {
+                        ((JComboBox<?>) comp).setSelectedItem(defaultValue);
+                    } else if (comp instanceof javax.swing.text.JTextComponent) {
+                        ((javax.swing.text.JTextComponent) comp).setText(defaultValue);
+                    } else if (comp instanceof JScrollPane
+                            && ((JScrollPane) comp).getViewport().getView() instanceof JTextArea) {
+                        ((JTextArea) ((JScrollPane) comp).getViewport().getView())
+                                .setText(defaultValue.replace(";", "\n"));
+                    }
+                }
+
                 Properties propsToSave = getPropertiesFromUI();
                 savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
 
@@ -1058,6 +1057,8 @@ public class NodeConfigurationPanel extends JPanel {
             } catch (IOException e) {
                 JOptionPane.showMessageDialog(this, "Error creating profile: " + e.getMessage(), "Error",
                         JOptionPane.ERROR_MESSAGE);
+            } finally {
+                isProgrammaticChange = false;
             }
         }, null);
     }

@@ -181,6 +181,7 @@ tasks.register('dist', Zip) {
     into('html') { from "html" }
     from "LICENSE.txt"
     from "README.md"
+    from("src") { into "src" }
     archiveFileName = "${baseNodeFileName}.zip"
 }
 
@@ -308,6 +309,7 @@ tasks.register('zipWinExe', Zip) {
     into('html') { from "html" }
     from "LICENSE.txt"
     from "README.md"
+    from("src") { into "src" }
     into('jre') { from "build/distributions/jre" }
 
     archiveFileName = "${baseNodeFileName}-win_x64.zip"

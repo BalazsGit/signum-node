@@ -525,9 +525,9 @@ public class LoggerConfigurationPanel extends JPanel {
     private void refreshProfileList() {
         boolean wasProgrammatic = isProgrammaticChange;
         try {
+            isProgrammaticChange = true;
             String currentSelection = (String) profileComboBox.getSelectedItem();
             profileComboBox.removeAllItems();
-            isProgrammaticChange = true;
 
             String lastProfile = loadAppliedProfile();
             if ("logging-default".equals(lastProfile)) {
@@ -559,8 +559,6 @@ public class LoggerConfigurationPanel extends JPanel {
             if (!hasBase) {
                 profileComboBox.insertItemAt("logging", 0);
             }
-
-            isProgrammaticChange = false;
 
             if (currentSelection != null && profileComboBox.getItemCount() > 0) {
                 profileComboBox.setSelectedItem(currentSelection);
@@ -880,20 +878,19 @@ public class LoggerConfigurationPanel extends JPanel {
             }
 
             isProgrammaticChange = true;
-            for (Map.Entry<String, JComponent> entry : propertyComponents.entrySet()) {
-                String key = entry.getKey();
-                JComponent comp = entry.getValue();
-                String defaultValue = defaultValues.get(key);
-
-                if (comp instanceof JComboBox) {
-                    ((JComboBox<?>) comp).setSelectedItem(defaultValue);
-                } else if (comp instanceof javax.swing.text.JTextComponent) {
-                    ((javax.swing.text.JTextComponent) comp).setText(defaultValue);
-                }
-            }
-            isProgrammaticChange = false;
-
             try {
+                for (Map.Entry<String, JComponent> entry : propertyComponents.entrySet()) {
+                    String key = entry.getKey();
+                    JComponent comp = entry.getValue();
+                    String defaultValue = defaultValues.get(key);
+
+                    if (comp instanceof JComboBox) {
+                        ((JComboBox<?>) comp).setSelectedItem(defaultValue);
+                    } else if (comp instanceof javax.swing.text.JTextComponent) {
+                        ((javax.swing.text.JTextComponent) comp).setText(defaultValue);
+                    }
+                }
+
                 Properties propsToSave = getPropertiesFromUIInternal();
                 savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
 
@@ -909,6 +906,8 @@ public class LoggerConfigurationPanel extends JPanel {
             } catch (IOException e) {
                 JOptionPane.showMessageDialog(this, "Error creating profile: " + e.getMessage(), "Error",
                         JOptionPane.ERROR_MESSAGE);
+            } finally {
+                isProgrammaticChange = false;
             }
         }, null);
     }
