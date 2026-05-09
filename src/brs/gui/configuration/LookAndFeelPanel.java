@@ -1,9 +1,14 @@
-package brs.gui;
+package brs.gui.configuration;
 
 import brs.props.Props;
 import brs.util.PathUtils;
 import brs.gui.util.GuiUtils;
 import brs.gui.util.HelpButton;
+import brs.gui.ColorPaletteManager;
+import brs.gui.ColorSettingsPanel;
+import brs.gui.GuiColors;
+import brs.gui.GuiConstants;
+import brs.gui.SignumGUI;
 import brs.gui.laf.FlatLafPanel;
 import brs.gui.laf.LookAndFeelsComboBox;
 import brs.gui.laf.FlatLafPrefs;
@@ -46,7 +51,6 @@ public class LookAndFeelPanel extends JPanel {
     private static LookAndFeelPanel instance;
     private final Runnable backAction;
     private JComboBox<String> profileComboBox;
-    private JButton backButton;
     private JButton newProfileBtn;
     private JButton renameProfileBtn;
     private JButton deleteProfileBtn;
@@ -54,7 +58,6 @@ public class LookAndFeelPanel extends JPanel {
     private JButton saveProfileBtn;
     private JButton reloadProfileBtn;
     private JTabbedPane tabbedPane;
-    private JLabel titleLabel;
 
     private static final String DEFAULT_PROFILE_NAME = "Default";
 
@@ -119,23 +122,6 @@ public class LookAndFeelPanel extends JPanel {
     }
 
     private void initUI() {
-        JPanel header = new JPanel(new BorderLayout());
-        header.setBorder(new EmptyBorder(5, 5, 5, 5));
-
-        JPanel leftHeader = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
-        leftHeader.setOpaque(false);
-        backButton = new JButton("Back to Console",
-                IconFontSwing.buildIcon(FontAwesome.ARROW_LEFT, GuiConstants.getHelpIconSize(),
-                        UIManager.getColor("Label.foreground")));
-        backButton.addActionListener(e -> handleBack());
-        leftHeader.add(backButton);
-
-        titleLabel = new JLabel("Look and Feel Settings", SwingConstants.CENTER);
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 16f));
-
-        header.add(leftHeader, BorderLayout.WEST);
-        header.add(titleLabel, BorderLayout.CENTER);
-
         // --- Profile Panel ---
         JPanel profilePanel = new JPanel(new MigLayout("insets 0, gap 5"));
         profilePanel.setBorder(new EmptyBorder(5, 10, 5, 5));
@@ -200,18 +186,17 @@ public class LookAndFeelPanel extends JPanel {
 
         GuiUtils.addHorizontalScrollPadding(profileScrollPane, profilePanel, new Insets(5, 10, 5, 5));
 
-        JPanel headerWrapper = new JPanel(new BorderLayout());
-        headerWrapper.add(header, BorderLayout.NORTH);
-        headerWrapper.add(profileScrollPane, BorderLayout.CENTER);
-        headerWrapper.add(new JSeparator(SwingConstants.HORIZONTAL), BorderLayout.SOUTH);
+        JPanel northWrapper = new JPanel(new BorderLayout());
+        northWrapper.add(profileScrollPane, BorderLayout.CENTER);
+        northWrapper.add(new JSeparator(SwingConstants.HORIZONTAL), BorderLayout.SOUTH);
 
-        add(headerWrapper, BorderLayout.NORTH);
+        add(northWrapper, BorderLayout.NORTH);
 
         tabbedPane = new JTabbedPane();
 
         FlatLafPanel themePanel = new FlatLafPanel();
         themePanel.setOnChangeListener(this::updateDirtyStatus);
-        themePanel.setCloseAction(this::handleBack);
+        themePanel.setCloseAction(() -> checkUnsavedChangesAndProceed(true, backAction, null));
         tabbedPane.addTab("Themes & Fonts", themePanel);
 
         colorSettingsPanel = new ColorSettingsPanel();
@@ -224,10 +209,6 @@ public class LookAndFeelPanel extends JPanel {
         add(tabbedPane, BorderLayout.CENTER);
 
         loadProfiles(profileComboBox);
-    }
-
-    private void handleBack() {
-        checkUnsavedChangesAndProceed(true, backAction, null);
     }
 
     private void updateProfileButtonStates() {
@@ -433,10 +414,6 @@ public class LookAndFeelPanel extends JPanel {
         float iconSize = GuiConstants.getHelpIconSize();
         Color iconColor = GuiColors.getButtonIcon();
 
-        if (backButton != null) {
-            backButton.setIcon(IconFontSwing.buildIcon(FontAwesome.ARROW_LEFT, iconSize, iconColor));
-            fixComponentSize(backButton);
-        }
         if (newProfileBtn != null) {
             newProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.FILE_O, iconSize, iconColor));
             fixComponentSize(newProfileBtn);
@@ -465,9 +442,6 @@ public class LookAndFeelPanel extends JPanel {
     @Override
     public void updateUI() {
         super.updateUI();
-        if (titleLabel != null) {
-            titleLabel.setFont(UIManager.getFont("Label.font").deriveFont(Font.BOLD, 16f));
-        }
         // Re-apply icons and recalculate sizes based on new font metrics
         updateProfileButtonsUI();
     }

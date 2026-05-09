@@ -1,9 +1,12 @@
-package brs.gui;
+package brs.gui.configuration;
 
 import brs.crypto.Crypto;
 import brs.props.Prop;
 import brs.props.Props;
 import brs.util.Convert;
+import brs.gui.GuiColors;
+import brs.gui.GuiConstants;
+import brs.gui.GuiFontManager;
 import brs.gui.util.GuiUtils;
 import brs.gui.util.HelpButton;
 import brs.util.PathUtils;
@@ -68,7 +71,6 @@ public class NodeConfigurationPanel extends JPanel {
     private JButton reloadProfileBtn;
     private JButton refreshProfilesBtn;
     private JPanel contentContainer;
-    private JLabel titleLabel;
     private String runningProfileName;
     private String activeProfileName;
     private String loadedProfileName;
@@ -120,50 +122,7 @@ public class NodeConfigurationPanel extends JPanel {
         initUI();
     }
 
-    private void updateTitle() {
-        if (titleLabel != null) {
-            titleLabel.setText("Node Configuration");
-        }
-    }
-
     private void initUI() {
-        JPanel header = new JPanel(new BorderLayout());
-        header.setBorder(new EmptyBorder(5, 5, 5, 5));
-
-        JPanel leftHeader = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
-        leftHeader.setOpaque(false);
-        JButton backButton = new JButton("Back to Console",
-                IconFontSwing.buildIcon(FontAwesome.ARROW_LEFT, GuiConstants.getHelpIconSize(),
-                        UIManager.getColor("Label.foreground")));
-        backButton.addActionListener(e -> {
-            handleBack();
-        });
-        leftHeader.add(backButton);
-
-        JPanel rightHeader = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
-        rightHeader.setOpaque(false);
-        JButton switchBtn = new JButton("Switch to Logger Configuration",
-                IconFontSwing.buildIcon(FontAwesome.EXCHANGE, GuiConstants.getHelpIconSize(),
-                        UIManager.getColor("Label.foreground")));
-        switchBtn.addActionListener(e -> {
-            if (switchAction != null)
-                switchAction.run();
-        });
-        rightHeader.add(switchBtn);
-
-        titleLabel = new JLabel("Node Configuration", SwingConstants.CENTER);
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 16f));
-
-        header.add(leftHeader, BorderLayout.WEST);
-        header.add(titleLabel, BorderLayout.CENTER);
-        header.add(rightHeader, BorderLayout.EAST);
-
-        JPanel topContainer = new JPanel(new BorderLayout());
-        topContainer.add(header, BorderLayout.CENTER);
-        topContainer.add(new JSeparator(SwingConstants.HORIZONTAL), BorderLayout.SOUTH);
-
-        add(topContainer, BorderLayout.NORTH);
-
         JPanel bodyPanel = new JPanel(new BorderLayout());
 
         // --- Profile Panel ---
@@ -556,11 +515,6 @@ public class NodeConfigurationPanel extends JPanel {
     @Override
     public void updateUI() {
         super.updateUI();
-        // Re-apply derived fonts using the new base font from the LookAndFeel
-        if (titleLabel != null) {
-            titleLabel.setFont(GuiFontManager.getBoldDefaultFont());
-        }
-
         // Re-style and re-size input fields (borders and fonts)
         if (allPropertyRows != null) {
             allPropertyRows.forEach(row -> {
@@ -832,7 +786,6 @@ public class NodeConfigurationPanel extends JPanel {
                         }
                         updateProfileComboBoxColor();
                         updateProfileComboBoxColor();
-                        updateTitle();
 
                         updateDirtyStatus();
                         refreshUIColors();
@@ -880,7 +833,6 @@ public class NodeConfigurationPanel extends JPanel {
                             updateUIFromProperties(loaded);
                             this.propertiesFile = targetFile;
                             this.loadedProfileName = profileName;
-                            updateTitle();
                             updateDirtyStatus();
                             isProgrammaticChange = false;
                             updateProfileComboBoxColor();
@@ -1154,7 +1106,6 @@ public class NodeConfigurationPanel extends JPanel {
                 if (oldProfileName.equals(loadedProfileName)) {
                     this.loadedProfileName = newProfileName;
                     this.propertiesFile = newFile;
-                    updateTitle();
                 }
                 updateProfileComboBoxColor();
                 updateDirtyStatus();
@@ -1344,15 +1295,6 @@ public class NodeConfigurationPanel extends JPanel {
                         "Profile Applied", JOptionPane.INFORMATION_MESSAGE);
             }
         }
-    }
-
-    private void handleBack() {
-        checkUnsavedChangesAndProceed(
-                () -> {
-                    if (backAction != null)
-                        backAction.run();
-                },
-                null);
     }
 
     private Path getProfileMetadataPath() {
@@ -2091,14 +2033,9 @@ public class NodeConfigurationPanel extends JPanel {
             }
         }
 
-        String savedValue = currentProperties.getProperty(propName);
-        if (savedValue == null)
-            savedValue = defaultValue;
+        String savedValue = currentProperties.getProperty(propName, defaultValue);
 
-        String applied = appliedProperties.getProperty(propName);
-        boolean hasApplied = appliedProperties.containsKey(propName);
-        if (applied == null)
-            applied = defaultValue;
+        String applied = appliedProperties.getProperty(propName, defaultValue);
 
         String value = "";
         JComponent target = comp;
@@ -2139,7 +2076,7 @@ public class NodeConfigurationPanel extends JPanel {
         }
 
         if (!(comp instanceof JCheckBox)) {
-            if (hasApplied && value.equals(applied)) {
+            if (value.equals(applied)) {
                 color = GuiColors.getApplied();
             } else if (value.equals(savedValue)) {
                 color = GuiColors.getSaved();

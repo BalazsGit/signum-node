@@ -2,8 +2,9 @@ package brs.gui.util;
 
 import brs.gui.ColorPaletteManager;
 import brs.gui.ColorSettingsPanel;
-import brs.gui.LookAndFeelPanel;
 import brs.gui.SignumGUI;
+import brs.gui.configuration.LookAndFeelPanel;
+
 import javax.swing.*;
 import javax.swing.SwingUtilities;
 import java.awt.*;

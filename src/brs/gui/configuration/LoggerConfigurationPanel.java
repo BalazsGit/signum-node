@@ -1,7 +1,10 @@
-package brs.gui;
+package brs.gui.configuration;
 
 import brs.props.Props;
 import brs.util.PathUtils;
+import brs.gui.GuiColors;
+import brs.gui.GuiConstants;
+import brs.gui.GuiFontManager;
 import brs.gui.util.GuiUtils;
 import brs.gui.util.HelpButton;
 import com.google.gson.Gson;
@@ -65,7 +68,6 @@ public class LoggerConfigurationPanel extends JPanel {
     private JButton refreshProfilesBtn;
     private JPanel contentContainer;
     private JComponent verticalFiller;
-    private JLabel titleLabel;
     private String runningProfileName;
     private String activeProfileName;
     private String loadedProfileName;
@@ -112,50 +114,7 @@ public class LoggerConfigurationPanel extends JPanel {
         initUI();
     }
 
-    private void updateTitle() {
-        if (titleLabel != null) {
-            titleLabel.setText("Logger Configuration");
-        }
-    }
-
     private void initUI() {
-        JPanel header = new JPanel(new BorderLayout());
-        header.setBorder(new EmptyBorder(5, 5, 5, 5));
-
-        JPanel leftHeader = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
-        leftHeader.setOpaque(false);
-        JButton backButton = new JButton("Back to Console",
-                IconFontSwing.buildIcon(FontAwesome.ARROW_LEFT, GuiConstants.getHelpIconSize(),
-                        UIManager.getColor("Label.foreground")));
-        backButton.addActionListener(e -> {
-            handleBack();
-        });
-        leftHeader.add(backButton);
-
-        JPanel rightHeader = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
-        rightHeader.setOpaque(false);
-        JButton switchBtn = new JButton("Switch to Node Configuration",
-                IconFontSwing.buildIcon(FontAwesome.EXCHANGE, GuiConstants.getHelpIconSize(),
-                        UIManager.getColor("Label.foreground")));
-        switchBtn.addActionListener(e -> {
-            if (switchAction != null)
-                switchAction.run();
-        });
-        rightHeader.add(switchBtn);
-
-        titleLabel = new JLabel("Logger Configuration", SwingConstants.CENTER);
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 16f));
-
-        header.add(leftHeader, BorderLayout.WEST);
-        header.add(titleLabel, BorderLayout.CENTER);
-        header.add(rightHeader, BorderLayout.EAST);
-
-        JPanel topContainer = new JPanel(new BorderLayout());
-        topContainer.add(header, BorderLayout.CENTER);
-        topContainer.add(new JSeparator(SwingConstants.HORIZONTAL), BorderLayout.SOUTH);
-
-        add(topContainer, BorderLayout.NORTH);
-
         JPanel bodyPanel = new JPanel(new BorderLayout());
 
         // --- Profile Panel ---
@@ -380,11 +339,6 @@ public class LoggerConfigurationPanel extends JPanel {
     @Override
     public void updateUI() {
         super.updateUI();
-        // Re-apply derived fonts using central manager
-        if (titleLabel != null) {
-            titleLabel.setFont(GuiFontManager.getBoldDefaultFont());
-        }
-
         // Re-style and re-size input fields
         if (allPropertyRows != null) {
             for (PropertyRow row : allPropertyRows) {
@@ -690,7 +644,6 @@ public class LoggerConfigurationPanel extends JPanel {
                         }
 
                         updateProfileComboBoxColor();
-                        updateTitle();
                         updateDirtyStatus();
 
                         refreshUIColors();
@@ -735,7 +688,6 @@ public class LoggerConfigurationPanel extends JPanel {
                             updateUIFromProperties(loaded);
                             this.propertiesFile = targetFile;
                             this.loadedProfileName = profileName;
-                            updateTitle();
                             updateDirtyStatus();
                             isProgrammaticChange = false;
                             updateProfileComboBoxColor();
@@ -1004,7 +956,6 @@ public class LoggerConfigurationPanel extends JPanel {
                 if (oldProfileName.equals(loadedProfileName)) {
                     this.loadedProfileName = newProfileName;
                     this.propertiesFile = newFile;
-                    updateTitle();
                 }
                 updateProfileComboBoxColor();
 
@@ -1416,29 +1367,17 @@ public class LoggerConfigurationPanel extends JPanel {
     }
 
     private void updateColor(JComponent comp, String propName, String defaultValue) {
-        String savedValue = props.getProperty(propName);
-        if (savedValue == null) {
-            savedValue = defaultValue;
-        }
-        String applied = appliedProps.getProperty(propName);
-        boolean hasApplied = appliedProps.containsKey(propName);
-        if (applied == null)
-            applied = defaultValue;
+        String savedValue = props.getProperty(propName, defaultValue);
+        String applied = appliedProps.getProperty(propName, defaultValue);
 
-        String value = "";
-        if (comp instanceof JComboBox) {
-            Object selected = ((JComboBox<?>) comp).getSelectedItem();
-            value = (selected != null) ? selected.toString() : "";
-        } else if (comp instanceof javax.swing.text.JTextComponent) {
-            value = ((javax.swing.text.JTextComponent) comp).getText().trim();
-            savedValue = savedValue.trim();
-            applied = applied.trim();
-        }
+        String value = getComponentValue(comp).trim();
+        savedValue = savedValue.trim();
+        applied = applied.trim();
 
         Color color;
-        if (hasApplied && value != null && value.equals(applied)) {
+        if (value.equals(applied)) {
             color = GuiColors.getApplied();
-        } else if (value != null && value.equals(savedValue)) {
+        } else if (value.equals(savedValue)) {
             color = GuiColors.getSaved();
         } else {
             color = GuiColors.getUnsaved();

@@ -37,20 +37,19 @@ import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.imageio.ImageIO;
+import javax.swing.AbstractButton;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.Icon;
-import javax.swing.JDialog;
 import brs.gui.animations.RotatingSvgIcon;
+import brs.gui.configuration.ConfigurationPanel;
+import brs.gui.configuration.LookAndFeelPanel;
 import javax.swing.JDialog;
-import com.github.weisj.jsvg.SVGDocument;
-import com.github.weisj.jsvg.parser.SVGLoader;
 import java.awt.geom.Rectangle2D;
 import javax.swing.JButton;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JCheckBox;
-import javax.swing.UIDefaults;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLayeredPane;
@@ -71,7 +70,6 @@ import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.UIManager;
 import javax.swing.JPopupMenu;
-import javax.swing.UIDefaults;
 import javax.swing.plaf.FontUIResource;
 import java.util.Set;
 import java.util.HashSet;
@@ -488,8 +486,7 @@ public class SignumGUI extends JFrame {
     private String version = null;
     private final String confFolder;
     private final Color iconColor;
-    private NodeConfigurationPanel nodeConfigPanel;
-    private LoggerConfigurationPanel loggerConfigPanel;
+    private ConfigurationPanel configurationPanel;
 
     private JLabel connectedPeersLabel;
     private JLabel peersCountLabel;
@@ -543,9 +540,7 @@ public class SignumGUI extends JFrame {
     private JPanel mainCardPanel;
     private CardLayout cardLayout;
     private static final String VIEW_CONSOLE = "CONSOLE";
-    private static final String VIEW_NODE_PROPS = "NODE_PROPS";
-    private static final String VIEW_LOGGER_PROPS = "LOGGER_PROPS";
-    private static final String VIEW_LAF_PROPS = "LAF_PROPS";
+    private static final String VIEW_CONFIGURATION = "CONFIGURATION";
     private boolean showCommandInput = false;
     private boolean showMetricsPanel = true;
     private JCheckBox showCommandItem;
@@ -953,7 +948,8 @@ public class SignumGUI extends JFrame {
     }
 
     public void showLookAndFeelSettings() {
-        cardLayout.show(mainCardPanel, VIEW_LAF_PROPS);
+        configurationPanel.setSelectedTab(ConfigurationPanel.ConfigTab.LAF);
+        cardLayout.show(mainCardPanel, VIEW_CONFIGURATION);
     }
 
     public static void main(String[] args) {
@@ -1083,19 +1079,9 @@ public class SignumGUI extends JFrame {
         };
         mainCardPanel.add(content, VIEW_CONSOLE);
 
-        this.nodeConfigPanel = new NodeConfigurationPanel(this::restart, this.confFolder,
-                () -> cardLayout.show(mainCardPanel, VIEW_CONSOLE),
-                () -> cardLayout.show(mainCardPanel, VIEW_LOGGER_PROPS));
-        mainCardPanel.add(nodeConfigPanel, VIEW_NODE_PROPS);
-
-        this.loggerConfigPanel = new LoggerConfigurationPanel(this::restart, this.confFolder,
-                () -> cardLayout.show(mainCardPanel, VIEW_CONSOLE),
-                () -> cardLayout.show(mainCardPanel, VIEW_NODE_PROPS));
-        mainCardPanel.add(loggerConfigPanel, VIEW_LOGGER_PROPS);
-
-        LookAndFeelPanel lafPanel = new LookAndFeelPanel(this::restart,
+        this.configurationPanel = new ConfigurationPanel(this::restart, this.confFolder,
                 () -> cardLayout.show(mainCardPanel, VIEW_CONSOLE));
-        mainCardPanel.add(lafPanel, VIEW_LAF_PROPS);
+        mainCardPanel.add(configurationPanel, VIEW_CONFIGURATION);
 
         setContentPane(mainCardPanel);
 
@@ -1419,14 +1405,16 @@ public class SignumGUI extends JFrame {
         showCommandItem = new JCheckBox("Show Command Input");
         showCommandItem.setSelected(showCommandInput);
         showCommandItem.addActionListener(e -> toggleCommandPanel());
-        menuPanel.add(showCommandItem);
+        styleMenuComponent(showCommandItem);
+        menuPanel.add(showCommandItem, "growx");
 
         showMetricsItem = new JCheckBox("Show Metrics Panel");
         showMetricsItem.setSelected(showMetricsPanel);
         showMetricsItem.addActionListener(e -> {
             updateMetricsPanelState(showMetricsItem.isSelected());
         });
-        menuPanel.add(showMetricsItem);
+        styleMenuComponent(showMetricsItem);
+        menuPanel.add(showMetricsItem, "growx");
 
         enableGpuItem = new JCheckBox("Enable GPU Acceleration");
         enableGpuItem.setToolTipText("Enables OpenGL pipeline for smoother rendering. Requires restart.");
@@ -1449,42 +1437,24 @@ public class SignumGUI extends JFrame {
                 enableGpuItem.setSelected(!newValue);
             }
         });
-        menuPanel.add(enableGpuItem);
+        styleMenuComponent(enableGpuItem);
+        menuPanel.add(enableGpuItem, "growx");
 
         menuPanel.add(new JSeparator(), "growx, gapy 5");
 
-        JButton nodePropsItem = new JButton("Node Configuration");
-        nodePropsItem.setHorizontalAlignment(SwingConstants.LEFT);
-        nodePropsItem.setBorderPainted(false);
-        nodePropsItem.setContentAreaFilled(false);
-        nodePropsItem.setFocusPainted(false);
-        nodePropsItem.addActionListener(e -> {
-            cardLayout.show(mainCardPanel, VIEW_NODE_PROPS);
+        JButton configItem = new JButton("Configuration");
+        configItem.setHorizontalAlignment(SwingConstants.LEFT);
+        configItem.setBorderPainted(false);
+        configItem.setContentAreaFilled(false);
+        configItem.setFocusPainted(false);
+        configItem.setIcon(
+                IconFontSwing.buildIcon(FontAwesome.COG, GuiConstants.getHelpIconSize(), GuiColors.getButtonIcon()));
+        configItem.addActionListener(e -> {
+            cardLayout.show(mainCardPanel, VIEW_CONFIGURATION);
             toggleMenu();
         });
-        menuPanel.add(nodePropsItem, "growx");
-
-        JButton loggerPropsItem = new JButton("Logger Configuration");
-        loggerPropsItem.setHorizontalAlignment(SwingConstants.LEFT);
-        loggerPropsItem.setBorderPainted(false);
-        loggerPropsItem.setContentAreaFilled(false);
-        loggerPropsItem.setFocusPainted(false);
-        loggerPropsItem.addActionListener(e -> {
-            cardLayout.show(mainCardPanel, VIEW_LOGGER_PROPS);
-            toggleMenu();
-        });
-        menuPanel.add(loggerPropsItem, "growx");
-
-        JButton lafPropsItem = new JButton("Look and Feel Settings");
-        lafPropsItem.setHorizontalAlignment(SwingConstants.LEFT);
-        lafPropsItem.setBorderPainted(false);
-        lafPropsItem.setContentAreaFilled(false);
-        lafPropsItem.setFocusPainted(false);
-        lafPropsItem.addActionListener(e -> {
-            cardLayout.show(mainCardPanel, VIEW_LAF_PROPS);
-            toggleMenu();
-        });
-        menuPanel.add(lafPropsItem, "growx");
+        styleMenuComponent(configItem);
+        menuPanel.add(configItem, "growx");
 
         menuPanelWrapper = new JPanel(new BorderLayout());
 
@@ -1786,22 +1756,7 @@ public class SignumGUI extends JFrame {
     }
 
     private boolean checkAllUnsavedChanges() {
-        if (LookAndFeelPanel.getInstance() != null) {
-            if (!LookAndFeelPanel.getInstance().checkUnsavedChangesAndProceed(false, null, null)) {
-                return false;
-            }
-        }
-        if (nodeConfigPanel != null) {
-            if (!nodeConfigPanel.checkUnsavedChangesAndProceed(null, null)) {
-                return false;
-            }
-        }
-        if (loggerConfigPanel != null) {
-            if (!loggerConfigPanel.checkUnsavedChangesAndProceed(null, null)) {
-                return false;
-            }
-        }
-        return true;
+        return configurationPanel == null || configurationPanel.checkUnsavedChanges();
     }
 
     private void initGlassPane() {
@@ -2773,8 +2728,7 @@ public class SignumGUI extends JFrame {
                     onManualPopOffProgress();
                     onAutoPopOffProgress();
 
-                    nodeConfigPanel.loadAppliedProperties();
-                    loggerConfigPanel.loadAppliedProperties();
+                    configurationPanel.loadAppliedProperties();
 
                     updateLatestBlock(lastBlock, maxPeerHeight, blockTime);
                     updatePeerCount(connectedCount, allKnownCount, blacklistedCount);
@@ -3311,6 +3265,38 @@ public class SignumGUI extends JFrame {
             }
             textPane.setCaretPosition(doc.getLength());
         }
+    }
+
+    private void styleMenuComponent(JComponent comp) {
+        comp.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        // Add internal padding for a "row" feel and proper height
+        comp.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
+
+        if (comp instanceof AbstractButton) {
+            AbstractButton button = (AbstractButton) comp;
+            button.setContentAreaFilled(false);
+            button.setBorderPainted(false);
+            button.setHorizontalAlignment(SwingConstants.LEFT);
+        }
+        comp.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseEntered(MouseEvent e) {
+                if (comp instanceof AbstractButton) {
+                    ((AbstractButton) comp).setContentAreaFilled(true);
+                }
+                comp.setBackground(UIManager.getColor("List.selectionBackground"));
+                comp.setForeground(UIManager.getColor("List.selectionForeground"));
+            }
+
+            @Override
+            public void mouseExited(MouseEvent e) {
+                if (comp instanceof AbstractButton) {
+                    ((AbstractButton) comp).setContentAreaFilled(false);
+                }
+                // Restore default foreground color
+                comp.setForeground(UIManager.getColor("Label.foreground"));
+            }
+        });
     }
 
     // Removed deprecated SignaGUISecurityManager (Java 17+)

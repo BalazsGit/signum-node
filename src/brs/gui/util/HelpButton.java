@@ -2,7 +2,7 @@ package brs.gui.util;
 
 import brs.gui.GuiColors;
 import brs.gui.GuiConstants;
-import brs.gui.LookAndFeelPanel;
+import brs.gui.configuration.LookAndFeelPanel;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 

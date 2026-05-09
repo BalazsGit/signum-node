@@ -2,6 +2,8 @@ package brs.gui;
 
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.IntelliJTheme;
+
+import brs.gui.configuration.LookAndFeelPanel;
 import brs.gui.laf.FlatLafPrefs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

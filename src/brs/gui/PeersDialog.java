@@ -306,7 +306,7 @@ public class PeersDialog extends JFrame {
             };
             table.setRowSorter(sorter);
 
-            // Gomb szerkesztők beállítása az utolsó két oszlophoz
+            // Set button editors for the last two columns
             ButtonEditor buttonEditor = new ButtonEditor(new JCheckBox());
             table.getColumnModel().getColumn(PeersTableModel.COL_INDEX_BLACKLIST).setCellRenderer(new ButtonRenderer());
             table.getColumnModel().getColumn(PeersTableModel.COL_INDEX_BLACKLIST).setCellEditor(buttonEditor);
@@ -502,7 +502,7 @@ public class PeersDialog extends JFrame {
     }
 
     /**
-     * Egyedi renderer a táblázatban lévő gombok megjelenítéséhez.
+     * Custom renderer for displaying buttons in the table.
      */
     private static class ButtonRenderer extends JButton implements TableCellRenderer {
         public ButtonRenderer() {
@@ -525,7 +525,7 @@ public class PeersDialog extends JFrame {
     }
 
     /**
-     * Egyedi editor a gombok kattintásának kezeléséhez.
+     * Custom editor for handling button clicks.
      */
     private static class ButtonEditor extends DefaultCellEditor {
         protected JButton button;
