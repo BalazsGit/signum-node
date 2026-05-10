@@ -65,6 +65,7 @@ public class LoggerConfigurationPanel extends JPanel {
     private JButton deleteProfileBtn;
     private JButton newProfileBtn;
     private JButton reloadProfileBtn;
+    private JButton resetToDefaultsBtn;
     private JButton refreshProfilesBtn;
     private JPanel contentContainer;
     private JComponent verticalFiller;
@@ -82,7 +83,8 @@ public class LoggerConfigurationPanel extends JPanel {
         this.switchAction = switchAction;
 
         // Determine the currently applied profile name from metadata once at startup
-        String lastProfile = loadAppliedProfile();
+        String lastProfile = ConfigurationUtils
+                .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, "logging"));
         if ("logging-default".equals(lastProfile)) {
             lastProfile = "logging";
         }
@@ -90,8 +92,9 @@ public class LoggerConfigurationPanel extends JPanel {
         this.activeProfileName = this.runningProfileName;
         this.loadedProfileName = this.runningProfileName;
 
-        this.propertiesFile = resolveProfilePath(this.loadedProfileName + ".properties");
-        ensureConfigFileExists(this.propertiesFile);
+        this.propertiesFile = ConfigurationUtils.resolveProfilePath(confFolder, "logging",
+                this.loadedProfileName + ".properties");
+        ConfigurationUtils.ensureConfigFileExists(this.propertiesFile);
 
         this.props = new Properties();
         try (FileInputStream in = new FileInputStream(propertiesFile.toFile())) {
@@ -120,40 +123,19 @@ public class LoggerConfigurationPanel extends JPanel {
         // --- Profile Panel ---
         JPanel profilePanel = new JPanel(new MigLayout("insets 0, gap 5"));
         profilePanel.setBorder(new EmptyBorder(5, 10, 5, 5));
-        profilePanel.add(new JLabel("Logger Configuration Profile:"));
+        profilePanel.add(new JLabel("Configuration Profile:"));
 
         profileComboBox = new JComboBox<>();
         profileComboBox.setEditable(false);
         profileComboBox.setPrototypeDisplayValue("XXXXXXXXXXXXXXXXXXXX");
-        fixComponentSize(profileComboBox);
+        ConfigurationUtils.fixComponentSize(profileComboBox);
         profilePanel.add(profileComboBox);
 
-        profileComboBox.setRenderer(new DefaultListCellRenderer() {
-            @Override
-            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
-                    boolean isSelected, boolean cellHasFocus) {
-                Component c = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-                String valStr = (value != null) ? value.toString().trim() : "";
-                if (!valStr.isEmpty()) {
-                    if (valStr.equals(runningProfileName)) {
-                        c.setForeground(GuiColors.getApplied());
-                        c.setFont(c.getFont().deriveFont(Font.BOLD));
-                    } else if (valStr.equals(activeProfileName)) {
-                        c.setForeground(GuiColors.getSaved());
-                        c.setFont(c.getFont().deriveFont(Font.BOLD));
-                    } else {
-                        c.setForeground(list.getForeground());
-                    }
-                } else {
-                    c.setForeground(list.getForeground());
-                }
-                return c;
-            }
-        });
+        profileComboBox.setRenderer(
+                ConfigurationUtils.createProfileComboBoxRenderer(() -> runningProfileName, () -> activeProfileName));
 
-        newProfileBtn = new JButton(
-                "New Profile");
-        newProfileBtn.setToolTipText("Create a new profile with application defaults");
+        newProfileBtn = new JButton("New Default Profile");
+        newProfileBtn.setToolTipText("Create a new profile initialized with application defaults");
         newProfileBtn.addActionListener(e -> createNewProfile());
         profilePanel.add(newProfileBtn);
 
@@ -172,6 +154,11 @@ public class LoggerConfigurationPanel extends JPanel {
         deleteProfileBtn.setToolTipText("Delete selected profile");
         deleteProfileBtn.addActionListener(e -> deleteProfile((String) profileComboBox.getSelectedItem()));
         profilePanel.add(deleteProfileBtn);
+
+        resetToDefaultsBtn = new JButton("Reset to Defaults");
+        resetToDefaultsBtn.setToolTipText("Reset current profile settings to application defaults (without saving)");
+        resetToDefaultsBtn.addActionListener(e -> resetToDefaults());
+        profilePanel.add(resetToDefaultsBtn);
 
         reloadProfileBtn = new JButton("Reload Profile");
         reloadProfileBtn.setToolTipText("Reload settings from the current profile file on disk");
@@ -224,7 +211,7 @@ public class LoggerConfigurationPanel extends JPanel {
         searchPanel.add(new JLabel("Search Configuration:"));
         JTextField searchField = new JTextField();
         searchField.putClientProperty("JTextField.placeholderText", "Type to filter properties...");
-        styleTextField(searchField);
+        ConfigurationUtils.styleTextField(searchField);
         searchPanel.add(searchField, "growx");
 
         searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
@@ -346,8 +333,8 @@ public class LoggerConfigurationPanel extends JPanel {
                     row.label.setFont(UIManager.getFont("Label.font").deriveFont(Font.BOLD));
                 }
                 if (row.input != null) {
-                    styleTextField(row.input);
-                    fixComponentSize(row.input);
+                    ConfigurationUtils.styleTextField(row.input);
+                    ConfigurationUtils.fixComponentSize(row.input);
                 }
             }
         }
@@ -355,40 +342,10 @@ public class LoggerConfigurationPanel extends JPanel {
     }
 
     private void updateProfileButtonsUI() {
-        float iconSize = GuiConstants.getHelpIconSize();
-        Color iconColor = GuiColors.getButtonIcon();
-
         if (profileComboBox != null)
-            fixComponentSize(profileComboBox);
-
-        if (newProfileBtn != null) {
-            newProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.FILE_O, iconSize, iconColor));
-            fixComponentSize(newProfileBtn);
-        }
-        if (saveProfileBtn != null) {
-            saveProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.FLOPPY_O, iconSize, iconColor));
-            fixComponentSize(saveProfileBtn);
-        }
-        if (applyProfileBtn != null) {
-            applyProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.CHECK_CIRCLE_O, iconSize, iconColor));
-            fixComponentSize(applyProfileBtn);
-        }
-        if (renameProfileBtn != null) {
-            renameProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.PENCIL_SQUARE_O, iconSize, iconColor));
-            fixComponentSize(renameProfileBtn);
-        }
-        if (deleteProfileBtn != null) {
-            deleteProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.TRASH_O, iconSize, iconColor));
-            fixComponentSize(deleteProfileBtn);
-        }
-        if (reloadProfileBtn != null) {
-            reloadProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.RECYCLE, iconSize, iconColor));
-            fixComponentSize(reloadProfileBtn);
-        }
-        if (refreshProfilesBtn != null) {
-            refreshProfilesBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.REFRESH, iconSize, iconColor));
-            fixComponentSize(refreshProfilesBtn);
-        }
+            ConfigurationUtils.fixComponentSize(profileComboBox);
+        ConfigurationUtils.configureProfileToolbar(newProfileBtn, saveProfileBtn, applyProfileBtn, renameProfileBtn,
+                deleteProfileBtn, reloadProfileBtn, refreshProfilesBtn, resetToDefaultsBtn);
     }
 
     private void refreshUIColors() {
@@ -444,36 +401,9 @@ public class LoggerConfigurationPanel extends JPanel {
 
     private JTextField createStyledTextField(String text) {
         JTextField textField = new JTextField(text);
-        styleTextField(textField);
-        fixComponentSize(textField);
+        ConfigurationUtils.styleTextField(textField);
+        ConfigurationUtils.fixComponentSize(textField);
         return textField;
-    }
-
-    private void styleTextField(JComponent field) {
-        if (field instanceof JTextField) {
-            field.setFont(UIManager.getFont("TextField.font"));
-            field.setBorder(BorderFactory.createCompoundBorder(
-                    UIManager.getBorder("TextField.border"),
-                    BorderFactory.createEmptyBorder(4, 6, 4, 6)));
-        }
-    }
-
-    private void fixComponentSize(JComponent comp) {
-        comp.setPreferredSize(null);
-        comp.setMinimumSize(null);
-        // Use a button with an icon as reference to ensure perfect alignment with
-        // toolbar buttons
-        JButton dummy = new JButton("P",
-                IconFontSwing.buildIcon(FontAwesome.CIRCLE, GuiConstants.getHelpIconSize(), Color.BLACK));
-        Dimension pref = dummy.getPreferredSize();
-        Dimension currentPref = comp.getPreferredSize();
-
-        // Ensure height is at least as tall as a button, but allow it to grow if the
-        // font
-        // requires it. Added a small vertical padding to prevent text clipping.
-        int targetHeight = Math.max(currentPref.height, pref.height) + 2;
-        comp.setPreferredSize(new Dimension(currentPref.width + 2, targetHeight));
-        comp.setMinimumSize(new Dimension(currentPref.width + 2, targetHeight));
     }
 
     private void refreshProfileList() {
@@ -483,24 +413,16 @@ public class LoggerConfigurationPanel extends JPanel {
             String currentSelection = (String) profileComboBox.getSelectedItem();
             profileComboBox.removeAllItems();
 
-            String lastProfile = loadAppliedProfile();
+            String lastProfile = ConfigurationUtils
+                    .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, "logging"));
             if ("logging-default".equals(lastProfile)) {
                 lastProfile = "logging";
             }
             this.activeProfileName = lastProfile != null ? lastProfile.trim() : "logging";
 
             Path loggingConfPath = PathUtils.resolvePath(confFolder).resolve("logging");
-            if (Files.exists(loggingConfPath)) {
-                try (java.util.stream.Stream<Path> stream = Files.list(loggingConfPath)) {
-                    stream.filter(p -> !Files.isDirectory(p))
-                            .map(p -> p.getFileName().toString())
-                            .filter(name -> name.endsWith(".properties")
-                                    && !name.equals(brs.Signum.DEFAULT_LOGGING_PROPERTIES_NAME))
-                            .map(name -> name.substring(0, name.length() - 11))
-                            .sorted()
-                            .forEach(profileComboBox::addItem);
-                }
-            }
+            ConfigurationUtils.fetchProfileNames(loggingConfPath, brs.Signum.DEFAULT_LOGGING_PROPERTIES_NAME)
+                    .forEach(profileComboBox::addItem);
 
             // Ensure the base profile is always available in the list
             boolean hasBase = false;
@@ -529,20 +451,12 @@ public class LoggerConfigurationPanel extends JPanel {
     }
 
     private void updateProfileComboBoxColor() {
-        String selected = (String) profileComboBox.getSelectedItem();
-        if (selected != null && selected.trim().equals(runningProfileName)) {
-            profileComboBox.setForeground(GuiColors.getApplied());
-        } else if (selected != null && selected.trim().equals(activeProfileName)) {
-            profileComboBox.setForeground(GuiColors.getSaved());
-        } else {
-            profileComboBox.setForeground(UIManager.getColor("ComboBox.foreground"));
-        }
+        ConfigurationUtils.updateProfileComboBoxColor(profileComboBox, runningProfileName, activeProfileName);
     }
 
     private boolean saveProfile() {
         String currentProfile = (String) profileComboBox.getSelectedItem();
-        String suggestedName = (currentProfile == null || "logging-default".equals(currentProfile)) ? ""
-                : currentProfile;
+        String suggestedName = currentProfile != null ? currentProfile : "";
 
         JTextField nameField = new JTextField(suggestedName);
         JLabel errorLabel = new JLabel("Saving as a system profile is not allowed.");
@@ -588,7 +502,7 @@ public class LoggerConfigurationPanel extends JPanel {
         nameField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             private void validate() {
                 String text = nameField.getText().trim();
-                boolean isReserved = "logging-default".equalsIgnoreCase(text) || "logging".equalsIgnoreCase(text);
+                boolean isReserved = "logging-default".equalsIgnoreCase(text);
                 errorLabel.setVisible(isReserved);
                 saveBtn.setEnabled(!isReserved && !text.isEmpty());
             }
@@ -615,7 +529,8 @@ public class LoggerConfigurationPanel extends JPanel {
                 if (value == saveBtn) {
                     String name = nameField.getText().trim();
                     try {
-                        Path targetFile = resolveProfilePath(name + ".properties");
+                        Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, "logging",
+                                name + ".properties");
                         if (Files.exists(targetFile)) {
                             int choice = JOptionPane.showConfirmDialog(this,
                                     "Profile '" + name + "' already exists. Do you want to overwrite it?",
@@ -628,7 +543,8 @@ public class LoggerConfigurationPanel extends JPanel {
                         }
 
                         Properties propsToSave = getPropertiesFromUIInternal();
-                        savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
+                        ConfigurationUtils.savePropertiesPreservingFormat(targetFile, propsToSave,
+                                propertyComponents.keySet());
 
                         isProgrammaticChange = true;
                         try {
@@ -677,7 +593,8 @@ public class LoggerConfigurationPanel extends JPanel {
 
         checkUnsavedChangesAndProceed(
                 () -> {
-                    Path targetFile = resolveProfilePath(profileName + ".properties");
+                    Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, "logging",
+                            profileName + ".properties");
                     if (Files.exists(targetFile)) {
                         Properties loaded = new Properties();
                         try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
@@ -795,7 +712,8 @@ public class LoggerConfigurationPanel extends JPanel {
                 }
             }
 
-            Path targetFile = resolveProfilePath(loadedProfileName + ".properties");
+            Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, "logging",
+                    loadedProfileName + ".properties");
             if (Files.exists(targetFile)) {
                 Properties loaded = new Properties();
                 try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
@@ -822,7 +740,7 @@ public class LoggerConfigurationPanel extends JPanel {
             if (name == null || name.trim().isEmpty() || "logging-default".equalsIgnoreCase(name.trim()))
                 return;
 
-            Path targetFile = resolveProfilePath(name + ".properties");
+            Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, "logging", name + ".properties");
             if (Files.exists(targetFile)) {
                 JOptionPane.showMessageDialog(this, "Profile '" + name + "' already exists.", "Error",
                         JOptionPane.ERROR_MESSAGE);
@@ -844,7 +762,7 @@ public class LoggerConfigurationPanel extends JPanel {
                 }
 
                 Properties propsToSave = getPropertiesFromUIInternal();
-                savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
+                ConfigurationUtils.savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
 
                 this.loadedProfileName = name; // Update early to prevent redundant load prompts during refresh
                 refreshProfileList();
@@ -864,54 +782,27 @@ public class LoggerConfigurationPanel extends JPanel {
         }, null);
     }
 
+    private void resetToDefaults() {
+        Properties defaultProps = new Properties();
+        for (Map.Entry<String, String> entry : defaultValues.entrySet()) {
+            defaultProps.setProperty(entry.getKey(), entry.getValue());
+        }
+        isProgrammaticChange = true;
+        updateUIFromProperties(defaultProps);
+        updateDirtyStatus();
+        refreshUIColors();
+        isProgrammaticChange = false;
+        JOptionPane.showMessageDialog(this,
+                "All settings reset to application defaults. Remember to save if you want to keep these changes.",
+                "Reset to Defaults", JOptionPane.INFORMATION_MESSAGE);
+    }
+
     private void updateProfileButtonStates() {
         String selected = (String) profileComboBox.getSelectedItem();
         boolean isReadOnly = "logging".equals(selected) || "logging-default".equals(selected);
+        resetToDefaultsBtn.setEnabled(true); // Always enable reset to defaults
         renameProfileBtn.setEnabled(!isReadOnly);
         deleteProfileBtn.setEnabled(!isReadOnly);
-    }
-
-    private String loadAppliedProfile() {
-        Path profileJson = getProfileMetadataPath();
-        if (Files.exists(profileJson)) {
-            try (BufferedReader reader = Files.newBufferedReader(profileJson, StandardCharsets.UTF_8)) {
-                JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
-                if (json.has("appliedProfile")) {
-                    return json.get("appliedProfile").getAsString();
-                }
-            } catch (Exception e) {
-                // Ignore parse errors
-            }
-        }
-        return null;
-    }
-
-    private void updateAppliedProfile(String profileName) {
-        try {
-            Path profileJson = getProfileMetadataPath();
-            JsonObject metadata;
-            try {
-                if (Files.exists(profileJson)) {
-                    try (BufferedReader reader = Files.newBufferedReader(profileJson, StandardCharsets.UTF_8)) {
-                        metadata = JsonParser.parseReader(reader).getAsJsonObject();
-                    }
-                } else {
-                    metadata = new JsonObject();
-                }
-            } catch (Exception e) {
-                metadata = new JsonObject();
-            }
-
-            metadata.addProperty("appliedProfile", profileName);
-            if (Files.notExists(profileJson.getParent())) {
-                Files.createDirectories(profileJson.getParent());
-            }
-            try (BufferedWriter writer = Files.newBufferedWriter(profileJson, StandardCharsets.UTF_8)) {
-                new GsonBuilder().setPrettyPrinting().create().toJson(metadata, writer);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
     }
 
     public void renameProfile(String oldProfileName) {
@@ -936,28 +827,19 @@ public class LoggerConfigurationPanel extends JPanel {
         }
 
         try {
-            Path oldFile = resolveProfilePath(oldProfileName + ".properties");
-            Path newFile = resolveProfilePath(newProfileName + ".properties");
+            Path oldFile = ConfigurationUtils.resolveProfilePath(confFolder, "logging", oldProfileName + ".properties");
+            Path newFile = ConfigurationUtils.resolveProfilePath(confFolder, "logging", newProfileName + ".properties");
 
-            if (Files.exists(newFile)) {
-                JOptionPane.showMessageDialog(this, "A profile with the name '" + newProfileName + "' already exists.",
-                        "Error", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-
-            if (Files.exists(oldFile)) {
-                Files.move(oldFile, newFile);
+            if (ConfigurationUtils.confirmAndRenameProfile(this, oldFile, newFile, oldProfileName, newProfileName)) {
                 refreshProfileList();
                 profileComboBox.setSelectedItem(newProfileName);
                 if (oldProfileName.equals(activeProfileName)) {
                     activeProfileName = newProfileName;
-                    updateAppliedProfile(newProfileName);
-                }
-                if (oldProfileName.equals(loadedProfileName)) {
-                    this.loadedProfileName = newProfileName;
-                    this.propertiesFile = newFile;
+                    ConfigurationUtils.updateAppliedProfile(
+                            ConfigurationUtils.getProfileMetadataPath(confFolder, "logging"), newProfileName);
                 }
                 updateProfileComboBoxColor();
+                updateDirtyStatus();
 
                 JOptionPane.showMessageDialog(this,
                         "Profile '" + oldProfileName + "' renamed to '" + newProfileName + "' successfully.", "Success",
@@ -994,7 +876,7 @@ public class LoggerConfigurationPanel extends JPanel {
         }
 
         try {
-            Path file = resolveProfilePath(profileName + ".properties");
+            Path file = ConfigurationUtils.resolveProfilePath(confFolder, "logging", profileName + ".properties");
             if (Files.exists(file)) {
                 Files.delete(file);
                 refreshProfileList();
@@ -1010,13 +892,9 @@ public class LoggerConfigurationPanel extends JPanel {
         }
     }
 
-    private Path resolveProfilePath(String fileName) {
-        Path confPath = PathUtils.resolvePath(confFolder);
-        return confPath.resolve("logging").resolve(fileName);
-    }
-
     public void loadAppliedProperties() {
-        Path appliedFile = resolveProfilePath(brs.Signum.LOGGING_PROPERTIES_NAME);
+        Path appliedFile = ConfigurationUtils.resolveProfilePath(confFolder, "logging",
+                brs.Signum.LOGGING_PROPERTIES_NAME);
         if (Files.exists(appliedFile)) {
             try (FileInputStream in = new FileInputStream(appliedFile.toFile())) {
                 appliedProps.clear();
@@ -1057,7 +935,7 @@ public class LoggerConfigurationPanel extends JPanel {
         boolean dirty = hasUnsavedChanges();
         saveProfileBtn.setText(dirty ? "Save Profile As *" : "Save Profile As");
 
-        fixComponentSize(saveProfileBtn);
+        ConfigurationUtils.fixComponentSize(saveProfileBtn);
         if (saveProfileBtn.getParent() != null) {
             saveProfileBtn.getParent().revalidate();
         }
@@ -1082,16 +960,10 @@ public class LoggerConfigurationPanel extends JPanel {
                 null, options, options[0]);
 
         if (choice == 0 || choice == 1) {
-            updateAppliedProfile(selected);
+            ConfigurationUtils.updateAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, "logging"),
+                    selected);
             this.activeProfileName = selected;
             updateProfileComboBoxColor();
-            if (choice == 0 && restartAction != null) {
-                restartAction.run();
-            } else if (choice == 1) {
-                JOptionPane.showMessageDialog(this,
-                        "Profile '" + selected + "' will be applied on the next startup.",
-                        "Profile Applied", JOptionPane.INFORMATION_MESSAGE);
-            }
         }
     }
 
@@ -1160,94 +1032,28 @@ public class LoggerConfigurationPanel extends JPanel {
                 "<p>Profiles allow you to maintain multiple sets of logging configurations. Use the toolbar buttons to perform the following actions:</p>"
                 +
                 "<ul>" +
-                "<li><b>New Profile</b>: Creates a new configuration profile initialized with application defaults.</li>"
+                "<li><b>New Default Profile</b>: Creates a new configuration profile initialized with application defaults.</li>"
                 +
-                "<li><b>Save Profile</b>: Saves the current logging settings into the selected or a new profile.</li>" +
-                "<li><b>Apply and Restart</b>: Activates the selected logging profile and restarts the node service to apply changes.</li>"
+                "<li><b>Save Profile As</b>: Saves the current logging settings into the selected or a new profile.</li>"
                 +
-                "<li><b>Rename Profile</b>: Changes the name of the currently selected configuration profile.</li>" +
+                "<li><b>Apply Profile</b>: Activates the selected logging profile. You can choose to apply it for the next startup or restart the node service immediately to apply changes.</li>"
+                +
+                "<li><b>Rename Profile</b>: Changes the name of the currently selected configuration profile.</li>"
+                +
                 "<li><b>Delete Profile</b>: Permanently removes the selected configuration profile from the disk.</li>"
+                +
+                "<li><b>Reset to Defaults</b>: Resets all current settings to their application default values without saving.</li>"
+                +
+                "<li><b>Reload Profile</b>: Reloads settings from the profile file on disk, discarding any unsaved changes in the UI.</li>"
                 +
                 "<li><b>Refresh Profiles</b>: Synchronizes the profile list with the files currently available on disk.</li>"
                 +
                 "</ul>" +
-                "<p>Profiles are stored as \".properties\" files within the \"conf/logging\" directory.</p>"
+                "<p>Profiles are stored as \".properties\" files within the logging sub-directory of the configuration folder.</p>"
                 +
                 "</body></html>";
 
         JOptionPane.showMessageDialog(this, message, "About Configuration Profiles", JOptionPane.INFORMATION_MESSAGE);
-    }
-
-    private void savePropertiesPreservingFormat(Path file, Properties props, Set<String> managedKeys)
-            throws IOException {
-        List<String> lines = Files.exists(file) ? Files.readAllLines(file) : new ArrayList<>();
-        List<String> newLines = new ArrayList<>();
-        Set<String> processedKeys = new HashSet<>();
-
-        for (String line : lines) {
-            String trimmed = line.trim();
-            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!")) {
-                newLines.add(line);
-                continue;
-            }
-
-            int sepIdx = -1;
-            for (int i = 0; i < line.length(); i++) {
-                char c = line.charAt(i);
-                if (c == '\\') {
-                    i++;
-                    continue;
-                }
-                if (c == '=' || c == ':' || Character.isWhitespace(c)) {
-                    sepIdx = i;
-                    break;
-                }
-            }
-
-            if (sepIdx != -1) {
-                String key = line.substring(0, sepIdx).trim();
-                if (props.containsKey(key)) {
-                    String val = props.getProperty(key);
-                    newLines.add(key + "=" + escapePropertyValue(val));
-                    processedKeys.add(key);
-                } else {
-                    if (!managedKeys.contains(key)) {
-                        newLines.add(line);
-                    }
-                }
-            } else {
-                newLines.add(line);
-            }
-        }
-
-        for (String key : props.stringPropertyNames()) {
-            if (!processedKeys.contains(key)) {
-                newLines.add(key + "=" + escapePropertyValue(props.getProperty(key)));
-            }
-        }
-
-        Files.write(file, newLines);
-    }
-
-    private String escapePropertyValue(String value) {
-        if (value == null)
-            return "";
-        return value.replace("\\", "\\\\")
-                .replace("\t", "\\t")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\f", "\\f");
-    }
-
-    private void ensureConfigFileExists(Path file) {
-        if (!Files.exists(file)) {
-            try {
-                Files.createDirectories(file.getParent());
-                Files.createFile(file);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
     }
 
     private void addProperty(JPanel panel, String labelText, String propertyKey, JComponent inputComponent,
@@ -1261,7 +1067,7 @@ public class LoggerConfigurationPanel extends JPanel {
         panel.add(label, row.labelConstraints);
 
         // Input
-        fixComponentSize(inputComponent);
+        ConfigurationUtils.fixComponentSize(inputComponent);
         row.inputConstraints = "split 2, growx, height pref!";
         panel.add(inputComponent, row.inputConstraints);
 
@@ -1417,22 +1223,21 @@ public class LoggerConfigurationPanel extends JPanel {
                 "<h3>Color Coding Legend</h3>" +
                 "<p>The configuration values are color-coded to indicate their current status:</p>" +
                 "<ul>" +
-                "<li><b><font color='" + toHex(GuiColors.getUnsaved()) + "'>\u25A0 Unsaved Values:</font></b> " +
+                "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getUnsaved())
+                + "'>\u25A0 Unsaved Values:</font></b> " +
                 "These values have been modified in the UI but have not yet been saved to the configuration file. " +
                 "Properties with unsaved changes are marked with an asterisk (*).</li>" +
-                "<li><b><font color='" + toHex(GuiColors.getSaved()) + "'>\u25A0 Saved Values:</font></b> " +
+                "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getSaved())
+                + "'>\u25A0 Saved Values:</font></b> " +
                 "These values are saved in the currently loaded profile on disk, but they differ from the values " +
                 "currently being used by the running node.</li>" +
-                "<li><b><font color='" + toHex(GuiColors.getApplied()) + "'>\u25A0 Applied Values:</font></b> " +
+                "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getApplied())
+                + "'>\u25A0 Applied Values:</font></b> " +
                 "These values match exactly what the node is currently using. Note that most changes require a restart to take effect.</li>"
                 +
                 "</ul>" +
                 "</body></html>";
         JOptionPane.showMessageDialog(this, msg, "Color Legend", JOptionPane.INFORMATION_MESSAGE);
-    }
-
-    private static String toHex(Color color) {
-        return String.format("#%02x%02x%02x", color.getRed(), color.getGreen(), color.getBlue());
     }
 
     private JPanel createLegendItem(Color color, String text) {

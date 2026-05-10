@@ -398,3 +398,16 @@ jooq {
 }
 
 generateJooq.dependsOn(flywayMigrate)
+
+tasks.register('setupDatabaseDirectories') {
+    group = 'setup'
+    description = 'Creates the database directory structure'
+    doLast {
+        def dbBase = file("${projectDir}/database")
+        ['MariaDB', 'PostgreSQL', 'SQLite'].each { dir ->
+            new File(dbBase, dir).mkdirs()
+        }
+    }
+}
+
+processResources.dependsOn setupDatabaseDirectories

@@ -707,6 +707,20 @@ public class SignumGUI extends JFrame {
             });
             menuPanelAnimator.start();
         } else {
+            // Reset selection state of all menu components to prevent "stuck" highlight
+            // when reopening
+            for (Component c : menuPanel.getComponents()) {
+                if (c instanceof JComponent) {
+                    JComponent jc = (JComponent) c;
+                    jc.setBackground(null);
+                    jc.setForeground(UIManager.getColor("Label.foreground"));
+                    if (jc instanceof AbstractButton) {
+                        ((AbstractButton) jc).setContentAreaFilled(false);
+                        ((AbstractButton) jc).setOpaque(false);
+                    }
+                }
+            }
+
             final int startHeight = menuPanelWrapper.getHeight();
             final int menuWidth = menuPanelWrapper.getWidth();
 
@@ -1398,9 +1412,9 @@ public class SignumGUI extends JFrame {
         menuButton.addActionListener(e -> toggleMenu());
 
         // Menu Panel setup
-        menuPanel = new JPanel(new MigLayout("insets 10 15 10 15, fillx, wrap 1", "[grow]"));
+        menuPanel = new JPanel(new MigLayout("insets 0, fillx, wrap 1, gapy 0", "[grow]"));
         menuPanel.setBackground(UIManager.getColor("PopupMenu.background"));
-        menuPanel.setBorder(UIManager.getBorder("PopupMenu.border"));
+        menuPanel.setBorder(BorderFactory.createEmptyBorder());
 
         showCommandItem = new JCheckBox("Show Command Input");
         showCommandItem.setSelected(showCommandInput);
@@ -1440,7 +1454,7 @@ public class SignumGUI extends JFrame {
         styleMenuComponent(enableGpuItem);
         menuPanel.add(enableGpuItem, "growx");
 
-        menuPanel.add(new JSeparator(), "growx, gapy 5");
+        menuPanel.add(new JSeparator(), "growx");
 
         JButton configItem = new JButton("Configuration");
         configItem.setHorizontalAlignment(SwingConstants.LEFT);
@@ -3270,12 +3284,13 @@ public class SignumGUI extends JFrame {
     private void styleMenuComponent(JComponent comp) {
         comp.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         // Add internal padding for a "row" feel and proper height
-        comp.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
+        comp.setBorder(BorderFactory.createEmptyBorder(8, 15, 8, 15));
 
         if (comp instanceof AbstractButton) {
             AbstractButton button = (AbstractButton) comp;
             button.setContentAreaFilled(false);
             button.setBorderPainted(false);
+            button.setOpaque(false);
             button.setHorizontalAlignment(SwingConstants.LEFT);
         }
         comp.addMouseListener(new MouseAdapter() {
@@ -3283,6 +3298,7 @@ public class SignumGUI extends JFrame {
             public void mouseEntered(MouseEvent e) {
                 if (comp instanceof AbstractButton) {
                     ((AbstractButton) comp).setContentAreaFilled(true);
+                    ((AbstractButton) comp).setOpaque(true);
                 }
                 comp.setBackground(UIManager.getColor("List.selectionBackground"));
                 comp.setForeground(UIManager.getColor("List.selectionForeground"));
@@ -3292,8 +3308,10 @@ public class SignumGUI extends JFrame {
             public void mouseExited(MouseEvent e) {
                 if (comp instanceof AbstractButton) {
                     ((AbstractButton) comp).setContentAreaFilled(false);
+                    ((AbstractButton) comp).setOpaque(false);
                 }
-                // Restore default foreground color
+                // Restore default colors
+                comp.setBackground(null);
                 comp.setForeground(UIManager.getColor("Label.foreground"));
             }
         });

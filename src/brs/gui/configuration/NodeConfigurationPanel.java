@@ -1,20 +1,15 @@
 package brs.gui.configuration;
 
 import brs.crypto.Crypto;
+import brs.Constants;
 import brs.props.Prop;
 import brs.props.Props;
 import brs.util.Convert;
+import brs.util.PathUtils;
 import brs.gui.GuiColors;
 import brs.gui.GuiConstants;
-import brs.gui.GuiFontManager;
 import brs.gui.util.GuiUtils;
 import brs.gui.util.HelpButton;
-import brs.util.PathUtils;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonParser;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
@@ -25,13 +20,10 @@ import javax.swing.text.SimpleAttributeSet;
 import javax.swing.text.StyleConstants;
 import java.awt.*;
 import java.awt.event.HierarchyEvent;
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -69,6 +61,7 @@ public class NodeConfigurationPanel extends JPanel {
     private JButton deleteProfileBtn;
     private JButton newProfileBtn;
     private JButton reloadProfileBtn;
+    private JButton resetToDefaultsBtn;
     private JButton refreshProfilesBtn;
     private JPanel contentContainer;
     private String runningProfileName;
@@ -86,7 +79,8 @@ public class NodeConfigurationPanel extends JPanel {
         this.switchAction = switchAction;
 
         // Determine the currently applied profile name from metadata once at startup
-        String lastProfile = loadAppliedProfile();
+        String lastProfile = ConfigurationUtils
+                .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, "node"));
         if ("node-default".equals(lastProfile)) {
             lastProfile = "node";
         }
@@ -95,8 +89,9 @@ public class NodeConfigurationPanel extends JPanel {
         this.loadedProfileName = this.runningProfileName;
 
         // Use the detected profile to resolve the properties file path
-        this.propertiesFile = resolveProfilePath(this.loadedProfileName + ".properties");
-        ensureConfigFileExists(this.propertiesFile);
+        this.propertiesFile = ConfigurationUtils.resolveProfilePath(confFolder, "node",
+                this.loadedProfileName + ".properties");
+        ConfigurationUtils.ensureConfigFileExists(this.propertiesFile);
 
         this.currentProperties = new Properties();
         try (FileInputStream in = new FileInputStream(propertiesFile.toFile())) {
@@ -133,34 +128,14 @@ public class NodeConfigurationPanel extends JPanel {
         profileComboBox = new JComboBox<>();
         profileComboBox.setEditable(false);
         profileComboBox.setPrototypeDisplayValue("XXXXXXXXXXXXXXXXXXXX");
-        fixComponentSize(profileComboBox);
+        ConfigurationUtils.fixComponentSize(profileComboBox);
         profilePanel.add(profileComboBox);
 
-        profileComboBox.setRenderer(new DefaultListCellRenderer() {
-            @Override
-            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
-                    boolean isSelected, boolean cellHasFocus) {
-                Component c = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-                String valStr = (value != null) ? value.toString().trim() : "";
-                if (!valStr.isEmpty()) {
-                    if (valStr.equals(runningProfileName)) {
-                        c.setForeground(GuiColors.getApplied());
-                        c.setFont(c.getFont().deriveFont(Font.BOLD));
-                    } else if (valStr.equals(activeProfileName)) {
-                        c.setForeground(GuiColors.getSaved());
-                        c.setFont(c.getFont().deriveFont(Font.BOLD));
-                    } else {
-                        c.setForeground(list.getForeground());
-                    }
-                } else {
-                    c.setForeground(list.getForeground());
-                }
-                return c;
-            }
-        });
+        profileComboBox.setRenderer(
+                ConfigurationUtils.createProfileComboBoxRenderer(() -> runningProfileName, () -> activeProfileName));
 
-        newProfileBtn = new JButton("New Profile");
-        newProfileBtn.setToolTipText("Create a new profile with application defaults");
+        newProfileBtn = new JButton("New Default Profile");
+        newProfileBtn.setToolTipText("Create a new profile initialized with application defaults");
         newProfileBtn.addActionListener(e -> createNewProfile());
         profilePanel.add(newProfileBtn);
 
@@ -179,6 +154,11 @@ public class NodeConfigurationPanel extends JPanel {
         deleteProfileBtn.setToolTipText("Delete selected profile");
         deleteProfileBtn.addActionListener(e -> deleteProfile((String) profileComboBox.getSelectedItem()));
         profilePanel.add(deleteProfileBtn);
+
+        resetToDefaultsBtn = new JButton("Reset to Defaults");
+        resetToDefaultsBtn.setToolTipText("Reset current profile settings to application defaults (without saving)");
+        resetToDefaultsBtn.addActionListener(e -> resetToDefaults());
+        profilePanel.add(resetToDefaultsBtn);
 
         reloadProfileBtn = new JButton("Reload Profile");
         reloadProfileBtn.setToolTipText("Reload settings from the current profile file on disk");
@@ -231,7 +211,7 @@ public class NodeConfigurationPanel extends JPanel {
         searchPanel.add(new JLabel("Search Configuration:"));
         JTextField searchField = new JTextField();
         searchField.putClientProperty("JTextField.placeholderText", "Type to filter properties...");
-        styleTextField(searchField);
+        ConfigurationUtils.styleTextField(searchField);
         searchPanel.add(searchField, "growx");
 
         searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
@@ -519,8 +499,8 @@ public class NodeConfigurationPanel extends JPanel {
         if (allPropertyRows != null) {
             allPropertyRows.forEach(row -> {
                 if (row.input != null) {
-                    styleTextField(row.input);
-                    fixComponentSize(row.input);
+                    ConfigurationUtils.styleTextField(row.input);
+                    ConfigurationUtils.fixComponentSize(row.input);
                 }
             });
         }
@@ -528,40 +508,10 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void updateProfileButtonsUI() {
-        float iconSize = GuiConstants.getHelpIconSize();
-        Color iconColor = GuiColors.getButtonIcon();
-
         if (profileComboBox != null)
-            fixComponentSize(profileComboBox);
-
-        if (newProfileBtn != null) {
-            newProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.FILE_O, iconSize, iconColor));
-            fixComponentSize(newProfileBtn);
-        }
-        if (saveProfileBtn != null) {
-            saveProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.FLOPPY_O, iconSize, iconColor));
-            fixComponentSize(saveProfileBtn);
-        }
-        if (applyProfileBtn != null) {
-            applyProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.CHECK_CIRCLE_O, iconSize, iconColor));
-            fixComponentSize(applyProfileBtn);
-        }
-        if (renameProfileBtn != null) {
-            renameProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.PENCIL_SQUARE_O, iconSize, iconColor));
-            fixComponentSize(renameProfileBtn);
-        }
-        if (deleteProfileBtn != null) {
-            deleteProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.TRASH_O, iconSize, iconColor));
-            fixComponentSize(deleteProfileBtn);
-        }
-        if (reloadProfileBtn != null) {
-            reloadProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.RECYCLE, iconSize, iconColor));
-            fixComponentSize(reloadProfileBtn);
-        }
-        if (refreshProfilesBtn != null) {
-            refreshProfilesBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.REFRESH, iconSize, iconColor));
-            fixComponentSize(refreshProfilesBtn);
-        }
+            ConfigurationUtils.fixComponentSize(profileComboBox);
+        ConfigurationUtils.configureProfileToolbar(newProfileBtn, saveProfileBtn, applyProfileBtn, renameProfileBtn,
+                deleteProfileBtn, reloadProfileBtn, refreshProfilesBtn, resetToDefaultsBtn);
     }
 
     private void refreshUIColors() {
@@ -626,24 +576,16 @@ public class NodeConfigurationPanel extends JPanel {
             String currentSelection = (String) profileComboBox.getSelectedItem();
             profileComboBox.removeAllItems();
 
-            String lastProfile = loadAppliedProfile();
+            String lastProfile = ConfigurationUtils
+                    .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, "node"));
             if ("node-default".equals(lastProfile)) {
                 lastProfile = "node";
             }
             this.activeProfileName = lastProfile != null ? lastProfile.trim() : "node";
 
             Path nodeConfPath = PathUtils.resolvePath(confFolder).resolve("node");
-            if (Files.exists(nodeConfPath)) {
-                try (java.util.stream.Stream<Path> stream = Files.list(nodeConfPath)) {
-                    stream.filter(p -> !Files.isDirectory(p))
-                            .map(p -> p.getFileName().toString())
-                            .filter(name -> name.endsWith(".properties")
-                                    && !name.equals(brs.Signum.DEFAULT_PROPERTIES_NAME))
-                            .map(name -> name.substring(0, name.length() - 11))
-                            .sorted()
-                            .forEach(profileComboBox::addItem);
-                }
-            }
+            ConfigurationUtils.fetchProfileNames(nodeConfPath, brs.Signum.DEFAULT_PROPERTIES_NAME)
+                    .forEach(profileComboBox::addItem);
 
             // Ensure the base profile is always available in the list
             boolean hasBase = false;
@@ -672,19 +614,12 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void updateProfileComboBoxColor() {
-        String selected = (String) profileComboBox.getSelectedItem();
-        if (selected != null && selected.trim().equals(runningProfileName)) {
-            profileComboBox.setForeground(GuiColors.getApplied());
-        } else if (selected != null && selected.trim().equals(activeProfileName)) {
-            profileComboBox.setForeground(GuiColors.getSaved());
-        } else {
-            profileComboBox.setForeground(UIManager.getColor("ComboBox.foreground"));
-        }
+        ConfigurationUtils.updateProfileComboBoxColor(profileComboBox, runningProfileName, activeProfileName);
     }
 
     private boolean saveProfile() {
         String currentProfile = (String) profileComboBox.getSelectedItem();
-        String suggestedName = (currentProfile == null || "node-default".equals(currentProfile)) ? "" : currentProfile;
+        String suggestedName = currentProfile != null ? currentProfile : "";
 
         JTextField nameField = new JTextField(suggestedName);
         JLabel errorLabel = new JLabel("Saving as system profile is not allowed.");
@@ -730,7 +665,7 @@ public class NodeConfigurationPanel extends JPanel {
         nameField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             private void validate() {
                 String text = nameField.getText().trim();
-                boolean isReserved = "node-default".equalsIgnoreCase(text) || "node".equalsIgnoreCase(text);
+                boolean isReserved = "node-default".equalsIgnoreCase(text);
                 errorLabel.setVisible(isReserved);
                 saveBtn.setEnabled(!isReserved && !text.isEmpty());
             }
@@ -757,7 +692,8 @@ public class NodeConfigurationPanel extends JPanel {
                 if (value == saveBtn) {
                     String name = nameField.getText().trim();
                     try {
-                        Path targetFile = resolveProfilePath(name + ".properties");
+                        Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, "node",
+                                name + ".properties");
                         if (Files.exists(targetFile)) {
                             int choice = JOptionPane.showConfirmDialog(this,
                                     "Profile '" + name + "' already exists. Do you want to overwrite it?",
@@ -770,7 +706,8 @@ public class NodeConfigurationPanel extends JPanel {
                         }
 
                         Properties propsToSave = getPropertiesFromUI();
-                        savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
+                        ConfigurationUtils.savePropertiesPreservingFormat(targetFile, propsToSave,
+                                propertyComponents.keySet());
 
                         isProgrammaticChange = true;
                         try {
@@ -822,7 +759,8 @@ public class NodeConfigurationPanel extends JPanel {
 
         checkUnsavedChangesAndProceed(
                 () -> {
-                    Path targetFile = resolveProfilePath(profileName + ".properties");
+                    Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, "node",
+                            profileName + ".properties");
                     if (Files.exists(targetFile)) {
                         Properties loaded = new Properties();
                         try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
@@ -938,7 +876,8 @@ public class NodeConfigurationPanel extends JPanel {
                 }
             }
 
-            Path targetFile = resolveProfilePath(loadedProfileName + ".properties");
+            Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, "node",
+                    loadedProfileName + ".properties");
             if (Files.exists(targetFile)) {
                 Properties loaded = new Properties();
                 try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
@@ -965,7 +904,7 @@ public class NodeConfigurationPanel extends JPanel {
             if (name == null || name.trim().isEmpty() || "node-default".equalsIgnoreCase(name.trim()))
                 return;
 
-            Path targetFile = resolveProfilePath(name + ".properties");
+            Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, "node", name + ".properties");
             if (Files.exists(targetFile)) {
                 JOptionPane.showMessageDialog(this, "Profile '" + name + "' already exists.", "Error",
                         JOptionPane.ERROR_MESSAGE);
@@ -994,7 +933,7 @@ public class NodeConfigurationPanel extends JPanel {
                 }
 
                 Properties propsToSave = getPropertiesFromUI();
-                savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
+                ConfigurationUtils.savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
 
                 this.loadedProfileName = name; // Update early to prevent redundant load prompts during refresh
                 refreshProfileList();
@@ -1014,54 +953,27 @@ public class NodeConfigurationPanel extends JPanel {
         }, null);
     }
 
+    private void resetToDefaults() {
+        Properties defaultProps = new Properties();
+        for (Map.Entry<String, String> entry : defaultValues.entrySet()) {
+            defaultProps.setProperty(entry.getKey(), entry.getValue());
+        }
+        isProgrammaticChange = true;
+        updateUIFromProperties(defaultProps);
+        updateDirtyStatus();
+        refreshUIColors();
+        isProgrammaticChange = false;
+        JOptionPane.showMessageDialog(this,
+                "All settings reset to application defaults. Remember to save if you want to keep these changes.",
+                "Reset to Defaults", JOptionPane.INFORMATION_MESSAGE);
+    }
+
     private void updateProfileButtonStates() {
         String selected = (String) profileComboBox.getSelectedItem();
         boolean isReadOnly = "node".equals(selected) || "node-default".equals(selected);
+        resetToDefaultsBtn.setEnabled(true); // Always enable reset to defaults
         renameProfileBtn.setEnabled(!isReadOnly);
         deleteProfileBtn.setEnabled(!isReadOnly);
-    }
-
-    private String loadAppliedProfile() {
-        Path profileJson = getProfileMetadataPath();
-        if (Files.exists(profileJson)) {
-            try (BufferedReader reader = Files.newBufferedReader(profileJson, StandardCharsets.UTF_8)) {
-                JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
-                if (json.has("appliedProfile")) {
-                    return json.get("appliedProfile").getAsString();
-                }
-            } catch (Exception e) {
-                // Ignore parse errors
-            }
-        }
-        return null;
-    }
-
-    private void updateAppliedProfile(String profileName) {
-        try {
-            Path profileJson = getProfileMetadataPath();
-            JsonObject metadata;
-            try {
-                if (Files.exists(profileJson)) {
-                    try (BufferedReader reader = Files.newBufferedReader(profileJson, StandardCharsets.UTF_8)) {
-                        metadata = JsonParser.parseReader(reader).getAsJsonObject();
-                    }
-                } else {
-                    metadata = new JsonObject();
-                }
-            } catch (Exception e) {
-                metadata = new JsonObject();
-            }
-
-            metadata.addProperty("appliedProfile", profileName);
-            if (Files.notExists(profileJson.getParent())) {
-                Files.createDirectories(profileJson.getParent());
-            }
-            try (BufferedWriter writer = Files.newBufferedWriter(profileJson, StandardCharsets.UTF_8)) {
-                new GsonBuilder().setPrettyPrinting().create().toJson(metadata, writer);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
     }
 
     public void renameProfile(String oldProfileName) {
@@ -1086,22 +998,16 @@ public class NodeConfigurationPanel extends JPanel {
         }
 
         try {
-            Path oldFile = resolveProfilePath(oldProfileName + ".properties");
-            Path newFile = resolveProfilePath(newProfileName + ".properties");
+            Path oldFile = ConfigurationUtils.resolveProfilePath(confFolder, "node", oldProfileName + ".properties");
+            Path newFile = ConfigurationUtils.resolveProfilePath(confFolder, "node", newProfileName + ".properties");
 
-            if (Files.exists(newFile)) {
-                JOptionPane.showMessageDialog(this, "A profile with the name '" + newProfileName + "' already exists.",
-                        "Error", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-
-            if (Files.exists(oldFile)) {
-                Files.move(oldFile, newFile);
+            if (ConfigurationUtils.confirmAndRenameProfile(this, oldFile, newFile, oldProfileName, newProfileName)) {
                 refreshProfileList();
                 profileComboBox.setSelectedItem(newProfileName);
                 if (oldProfileName.equals(activeProfileName)) {
+                    ConfigurationUtils.updateAppliedProfile(
+                            ConfigurationUtils.getProfileMetadataPath(confFolder, "node"), newProfileName);
                     this.activeProfileName = newProfileName;
-                    updateAppliedProfile(newProfileName);
                 }
                 if (oldProfileName.equals(loadedProfileName)) {
                     this.loadedProfileName = newProfileName;
@@ -1145,7 +1051,7 @@ public class NodeConfigurationPanel extends JPanel {
         }
 
         try {
-            Path file = resolveProfilePath(profileName + ".properties");
+            Path file = ConfigurationUtils.resolveProfilePath(confFolder, "node", profileName + ".properties");
             if (Files.exists(file)) {
                 Files.delete(file);
                 refreshProfileList();
@@ -1167,28 +1073,28 @@ public class NodeConfigurationPanel extends JPanel {
                 "<p>Profiles allow you to maintain multiple sets of node configurations. Use the toolbar buttons to perform the following actions:</p>"
                 +
                 "<ul>" +
-                "<li><b>New Profile</b>: Creates a new configuration profile initialized with application defaults.</li>"
+                "<li><b>New Default Profile</b>: Creates a new configuration profile initialized with application defaults.</li>"
                 +
-                "<li><b>Save Profile</b>: Saves the current settings from all tabs into the selected or a new profile.</li>"
+                "<li><b>Save Profile As</b>: Saves the current settings from all tabs into the selected or a new profile.</li>"
                 +
-                "<li><b>Apply and Restart</b>: Activates the selected profile and restarts the node service to apply changes.</li>"
+                "<li><b>Apply Profile</b>: Activates the selected profile. You can choose to apply it for the next startup or restart the node service immediately to apply changes.</li>"
                 +
-                "<li><b>Rename Profile</b>: Changes the name of the currently selected configuration profile.</li>" +
+                "<li><b>Rename Profile</b>: Changes the name of the currently selected configuration profile.</li>"
+                +
                 "<li><b>Delete Profile</b>: Permanently removes the selected configuration profile from the disk.</li>"
+                +
+                "<li><b>Reset to Defaults</b>: Resets all current settings to their application default values without saving.</li>"
+                +
+                "<li><b>Reload Profile</b>: Reloads settings from the profile file on disk, discarding any unsaved changes in the UI.</li>"
                 +
                 "<li><b>Refresh Profiles</b>: Synchronizes the profile list with the files currently available on disk.</li>"
                 +
                 "</ul>" +
-                "<p>Profiles are stored as \".properties\" files within the \"conf/node\" directory.</p>"
+                "<p>Profiles are stored as \".properties\" files within the node sub-directory of the configuration folder.</p>"
                 +
                 "</body></html>";
 
         JOptionPane.showMessageDialog(this, message, "About Configuration Profiles", JOptionPane.INFORMATION_MESSAGE);
-    }
-
-    private Path resolveProfilePath(String fileName) {
-        Path confPath = PathUtils.resolvePath(confFolder);
-        return confPath.resolve("node").resolve(fileName);
     }
 
     private boolean hasUnsavedChanges() {
@@ -1259,7 +1165,7 @@ public class NodeConfigurationPanel extends JPanel {
         }
         saveProfileBtn.setText(overallDirty ? "Save Profile As *" : "Save Profile As");
 
-        fixComponentSize(saveProfileBtn);
+        ConfigurationUtils.fixComponentSize(saveProfileBtn);
         if (saveProfileBtn.getParent() != null) {
             saveProfileBtn.getParent().revalidate();
         }
@@ -1284,16 +1190,10 @@ public class NodeConfigurationPanel extends JPanel {
                 null, options, options[0]);
 
         if (choice == 0 || choice == 1) {
-            updateAppliedProfile(selected);
+            ConfigurationUtils.updateAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, "node"),
+                    selected);
             this.activeProfileName = selected;
             updateProfileComboBoxColor();
-            if (choice == 0 && restartAction != null) {
-                restartAction.run();
-            } else if (choice == 1) {
-                JOptionPane.showMessageDialog(this,
-                        "Profile '" + selected + "' will be applied on the next startup.",
-                        "Profile Applied", JOptionPane.INFORMATION_MESSAGE);
-            }
         }
     }
 
@@ -1313,17 +1213,6 @@ public class NodeConfigurationPanel extends JPanel {
             }
         }
         return props;
-    }
-
-    private void ensureConfigFileExists(Path file) {
-        if (!Files.exists(file)) {
-            try {
-                Files.createDirectories(file.getParent());
-                Files.createFile(file);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
     }
 
     private void updateUIFromProperties(Properties props) {
@@ -1521,7 +1410,7 @@ public class NodeConfigurationPanel extends JPanel {
                 comboBox.setEditable(true);
                 comboBox.setSelectedItem(savedValue);
             }
-            fixComponentSize(comboBox);
+            ConfigurationUtils.fixComponentSize(comboBox);
             inputComponent = comboBox;
             valueSuppliers.put(prop.getName(), () -> (String) comboBox.getSelectedItem());
 
@@ -1557,10 +1446,10 @@ public class NodeConfigurationPanel extends JPanel {
             });
         } else {
             JTextField textField = new JTextField(savedValue);
-            styleTextField(textField);
+            ConfigurationUtils.styleTextField(textField);
 
             // Fix dimensions to match standard text fields
-            fixComponentSize(textField);
+            ConfigurationUtils.fixComponentSize(textField);
 
             inputComponent = textField;
             valueSuppliers.put(prop.getName(), textField::getText);
@@ -1650,10 +1539,10 @@ public class NodeConfigurationPanel extends JPanel {
 
         JPasswordField passwordField = new JPasswordField(savedValue);
         passwordField.setColumns(20);
-        styleTextField(passwordField);
+        ConfigurationUtils.styleTextField(passwordField);
 
         // Fix dimensions to match standard text fields (consistent with addProperty)
-        fixComponentSize(passwordField);
+        ConfigurationUtils.fixComponentSize(passwordField);
 
         char defaultEchoChar = passwordField.getEchoChar();
 
@@ -1985,33 +1874,6 @@ public class NodeConfigurationPanel extends JPanel {
         return Convert.toHexString(buffer.array());
     }
 
-    private void styleTextField(JComponent field) {
-        if (field instanceof JTextField || field instanceof JPasswordField) {
-            field.setFont(UIManager.getFont("TextField.font"));
-            field.setBorder(BorderFactory.createCompoundBorder(
-                    UIManager.getBorder("TextField.border"),
-                    BorderFactory.createEmptyBorder(4, 6, 4, 6)));
-        }
-    }
-
-    private void fixComponentSize(JComponent comp) {
-        comp.setPreferredSize(null);
-        comp.setMinimumSize(null);
-        // Use a button with an icon as reference to ensure perfect alignment with
-        // toolbar buttons
-        JButton dummy = new JButton("P",
-                IconFontSwing.buildIcon(FontAwesome.CIRCLE, GuiConstants.getHelpIconSize(), Color.BLACK));
-        Dimension pref = dummy.getPreferredSize();
-        Dimension currentPref = comp.getPreferredSize();
-
-        // Ensure height is at least as tall as a button, but allow it to grow if the
-        // font
-        // requires it. Added a small vertical padding to prevent text clipping.
-        int targetHeight = Math.max(currentPref.height, pref.height) + 2;
-        comp.setPreferredSize(new Dimension(currentPref.width + 2, targetHeight));
-        comp.setMinimumSize(new Dimension(currentPref.width + 2, targetHeight));
-    }
-
     private String getSafeDefault(Prop<?> prop) {
         Object def = prop.getDefaultValue();
         return def == null ? "" : String.valueOf(def);
@@ -2131,22 +1993,21 @@ public class NodeConfigurationPanel extends JPanel {
                 "<h3>Color Coding Legend</h3>" +
                 "<p>The configuration values are color-coded to indicate their current status:</p>" +
                 "<ul>" +
-                "<li><b><font color='" + toHex(GuiColors.getUnsaved()) + "'>\u25A0 Unsaved Values:</font></b> " +
+                "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getUnsaved())
+                + "'>\u25A0 Unsaved Values:</font></b> " +
                 "These values have been modified in the UI but have not yet been saved to the configuration file. " +
                 "Properties with unsaved changes are marked with an asterisk (*).</li>" +
-                "<li><b><font color='" + toHex(GuiColors.getSaved()) + "'>\u25A0 Saved Values:</font></b> " +
+                "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getSaved())
+                + "'>\u25A0 Saved Values:</font></b> " +
                 "These values are saved in the currently loaded profile on disk, but they differ from the values " +
                 "currently being used by the running node.</li>" +
-                "<li><b><font color='" + toHex(GuiColors.getApplied()) + "'>\u25A0 Applied Values:</font></b> " +
+                "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getApplied())
+                + "'>\u25A0 Applied Values:</font></b> " +
                 "These values match exactly what the node is currently using. Note that most changes require a restart to take effect.</li>"
                 +
                 "</ul>" +
                 "</body></html>";
         JOptionPane.showMessageDialog(this, msg, "Color Legend", JOptionPane.INFORMATION_MESSAGE);
-    }
-
-    private static String toHex(Color color) {
-        return String.format("#%02x%02x%02x", color.getRed(), color.getGreen(), color.getBlue());
     }
 
     private JPanel createLegendItem(Color color, String text) {
@@ -2176,10 +2037,10 @@ public class NodeConfigurationPanel extends JPanel {
             return;
 
         Properties propsToSave = getPropertiesFromUI();
-        Path targetFile = resolveProfilePath(loadedProfileName + ".properties");
+        Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, "node", loadedProfileName + ".properties");
 
         try {
-            savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
+            ConfigurationUtils.savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
             // After saving, update currentProperties to reflect the new saved state
             currentProperties.clear();
             currentProperties.putAll(propsToSave);
@@ -2189,57 +2050,6 @@ public class NodeConfigurationPanel extends JPanel {
             JOptionPane.showMessageDialog(this, "Error saving properties: " + e.getMessage(), "Error",
                     JOptionPane.ERROR_MESSAGE);
         }
-    }
-
-    private void savePropertiesPreservingFormat(Path file, Properties props, Set<String> managedKeys)
-            throws IOException {
-        List<String> lines = Files.exists(file) ? Files.readAllLines(file) : new ArrayList<>();
-        List<String> newLines = new ArrayList<>();
-        Set<String> processedKeys = new HashSet<>();
-
-        for (String line : lines) {
-            String trimmed = line.trim();
-            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!")) {
-                newLines.add(line);
-                continue;
-            }
-
-            int sepIdx = -1;
-            for (int i = 0; i < line.length(); i++) {
-                char c = line.charAt(i);
-                if (c == '\\') {
-                    i++;
-                    continue;
-                }
-                if (c == '=' || c == ':' || Character.isWhitespace(c)) {
-                    sepIdx = i;
-                    break;
-                }
-            }
-
-            if (sepIdx != -1) {
-                String key = line.substring(0, sepIdx).trim();
-                if (props.containsKey(key)) {
-                    String val = props.getProperty(key);
-                    newLines.add(key + "=" + escapePropertyValue(val));
-                    processedKeys.add(key);
-                } else {
-                    if (!managedKeys.contains(key)) {
-                        newLines.add(line);
-                    }
-                }
-            } else {
-                newLines.add(line);
-            }
-        }
-
-        for (String key : props.stringPropertyNames()) {
-            if (!processedKeys.contains(key)) {
-                newLines.add(key + "=" + escapePropertyValue(props.getProperty(key)));
-            }
-        }
-
-        Files.write(file, newLines);
     }
 
     private String normalizeListValue(String value, String delimiter) {
@@ -2252,16 +2062,6 @@ public class NodeConfigurationPanel extends JPanel {
                 .distinct()
                 .sorted()
                 .collect(Collectors.joining(";"));
-    }
-
-    private String escapePropertyValue(String value) {
-        if (value == null)
-            return "";
-        return value.replace("\\", "\\\\")
-                .replace("\t", "\\t")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\f", "\\f");
     }
 
     private void initHelpTexts() {
@@ -2287,7 +2087,7 @@ public class NodeConfigurationPanel extends JPanel {
         helpTexts.put(Props.API_ALLOWED.getName(),
                 "List of allowed IP addresses, hostnames, or subnets to access the API."
                         + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
-                        + "<br>The configuration is stored as a single semicolon-separated list in the <code>node.properties</code> file."
+                        + "<br>The configuration is stored as a single semicolon-separated list in the configuration file."
                         + "<br><br><b>Examples:</b>"
                         + "<ul>"
                         + "<li><code>*</code>: Allows all IP addresses. <b>Warning:</b> Use with caution on public nodes.</li>"
@@ -2457,9 +2257,11 @@ public class NodeConfigurationPanel extends JPanel {
         helpTexts.put(Props.DB_ARCHIVAL_MODE.getName(),
                 "Sets the database maintenance and history mode:<br/>"
                         + "<ul>"
-                        + "<li><b>ARCHIVE:</b> Full database, no trimming or pruning. Keep all history.</li>"
-                        + "<li><b>TRIM:</b> (Default) Periodically prunes derived tables to save space, but keeps all blocks and transactions.</li>"
-                        + "<li><b>PRUNE:</b> Trims derived tables AND physically deletes blocks older than the safe rollback limit (1440 blocks). ⚠️ Node becomes non-archival.</li>"
+                        + "<li><b>ARCHIVE:</b> Full database, no trimming or pruning. Keeps every piece of history and derived data. Uses the most disk space.</li>"
+                        + "<li><b>TRIM:</b> (Default) Periodically prunes derived tables (like account balances history) to save space, but <b>keeps all blocks and transactions</b>. The node remains archival.</li>"
+                        + "<li><b>PRUNE:</b> Trims derived tables AND physically deletes old blocks and transactions beyond the safe rollback limit ("
+                        + Constants.MAX_ROLLBACK
+                        + " blocks). ⚠️ The node becomes non-archival and cannot serve old history to peers.</li>"
                         + "</ul>");
 
         helpTexts.put(Props.DB_OPTIMIZE.getName(),
@@ -2528,13 +2330,13 @@ public class NodeConfigurationPanel extends JPanel {
         helpTexts.put(Props.P2P_BOOTSTRAP_PEERS.getName(),
                 "A list of initial peers to connect to when the node starts."
                         + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
-                        + "<br>The configuration is stored as a single semicolon-separated list in the <code>node.properties</code> file."
+                        + "<br>The configuration is stored as a single semicolon-separated list in the configuration file."
                         + "<br>This helps the node to quickly find other peers and join the network.");
 
         helpTexts.put(Props.P2P_REBROADCAST_TO.getName(),
                 "A list of peers to which this node will always rebroadcast transactions."
                         + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
-                        + "<br>The configuration is stored as a single semicolon-separated list in the <code>node.properties</code> file."
+                        + "<br>The configuration is stored as a single semicolon-separated list in the configuration file."
                         + "<br>Useful for ensuring transactions reach specific nodes (e.g., pools or exchanges).");
 
         helpTexts.put(Props.P2P_NUM_BOOTSTRAP_CONNECTIONS.getName(),
@@ -2544,7 +2346,7 @@ public class NodeConfigurationPanel extends JPanel {
         helpTexts.put(Props.P2P_BLACKLISTED_PEERS.getName(),
                 "A list of peer addresses that are permanently banned from connecting to your node."
                         + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
-                        + "<br>The configuration is stored as a single semicolon-separated list in the <code>node.properties</code> file.");
+                        + "<br>The configuration is stored as a single semicolon-separated list in the configuration file.");
 
         helpTexts.put(Props.P2P_MAX_CONNECTIONS.getName(),
                 "The maximum number of active peer connections the node will maintain."
@@ -2632,14 +2434,14 @@ public class NodeConfigurationPanel extends JPanel {
         helpTexts.put(Props.SOLO_MINING_PASSPHRASES.getName(),
                 "A list of secret phrases for accounts that are solo mining on this node."
                         + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
-                        + "<br>The configuration is stored as a single semicolon-separated list in the <code>node.properties</code> file."
+                        + "<br>The configuration is stored as a single semicolon-separated list in the configuration file."
                         + "<br>This allows miners to use the 'submitNonce' API without sending their secret phrase over the network."
                         + "<br><b>Security Warning:</b> Do not use on public-facing nodes or nodes accessible by others, as it stores secret phrases in the configuration file.");
 
         helpTexts.put(Props.REWARD_RECIPIENT_PASSPHRASES.getName(),
                 "A list of passphrases for reward recipient accounts, used in pool mining."
                         + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
-                        + "<br>The configuration is stored as a single semicolon-separated list in the <code>node.properties</code> file."
+                        + "<br>The configuration is stored as a single semicolon-separated list in the configuration file."
                         + "<br>Format: <code>miner_account_id:reward_recipient_secret_phrase</code>"
                         + "<br>This allows the node to automatically claim mining rewards on behalf of the pool miners.");
 
@@ -2772,7 +2574,7 @@ public class NodeConfigurationPanel extends JPanel {
         helpTexts.put(Props.BRS_DEBUG_TRACE_ACCOUNTS.getName(),
                 "A list of account IDs to trace in debug logs."
                         + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
-                        + "<br>The configuration is stored as a single semicolon-separated list in the <code>node.properties</code> file.");
+                        + "<br>The configuration is stored as a single semicolon-separated list in the configuration file.");
 
         helpTexts.put(Props.BRS_DEBUG_TRACE_LOG.getName(),
                 "The file path for the debug trace log.");
@@ -2823,7 +2625,7 @@ public class NodeConfigurationPanel extends JPanel {
         helpTexts.put(Props.JETTY_API_DOS_FILTER_IP_WHITELIST.getName(),
                 "DoS Filter: A list of IPs that are exempt from rate limiting."
                         + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
-                        + "<br>The configuration is stored as a single semicolon-separated list in the <code>node.properties</code> file.");
+                        + "<br>The configuration is stored as a single semicolon-separated list in the configuration file.");
 
         helpTexts.put(Props.JETTY_API_DOS_FILTER_MANAGED_ATTR.getName(),
                 "DoS Filter: Whether the filter is managed by a container attribute.");
@@ -2870,7 +2672,7 @@ public class NodeConfigurationPanel extends JPanel {
         helpTexts.put(Props.JETTY_P2P_DOS_FILTER_IP_WHITELIST.getName(),
                 "DoS Filter: A list of IPs that are exempt from rate limiting."
                         + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
-                        + "<br>The configuration is stored as a single semicolon-separated list in the <code>node.properties</code> file.");
+                        + "<br>The configuration is stored as a single semicolon-separated list in the configuration file.");
 
         helpTexts.put(Props.JETTY_P2P_DOS_FILTER_MANAGED_ATTR.getName(),
                 "DoS Filter: Whether the filter is managed by a container attribute.");

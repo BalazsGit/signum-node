@@ -56,10 +56,12 @@ public class LookAndFeelPanel extends JPanel {
     private JButton deleteProfileBtn;
     private ColorSettingsPanel colorSettingsPanel;
     private JButton saveProfileBtn;
+    private JButton resetToDefaultsBtn;
     private JButton reloadProfileBtn;
+    private JButton refreshProfilesBtn;
     private JTabbedPane tabbedPane;
 
-    private static final String DEFAULT_PROFILE_NAME = "Default";
+    private static final String DEFAULT_PROFILE_NAME = "gui";
 
     private String loadedProfileName = DEFAULT_PROFILE_NAME;
     private String loadedThemeClass = FlatDarkLaf.class.getName();
@@ -130,11 +132,11 @@ public class LookAndFeelPanel extends JPanel {
         profileComboBox = new JComboBox<>();
         profileComboBox.setEditable(false);
         profileComboBox.setPrototypeDisplayValue("XXXXXXXXXXXXXXXXXXXX");
-        fixComponentSize(profileComboBox);
+        ConfigurationUtils.fixComponentSize(profileComboBox);
         profilePanel.add(profileComboBox);
 
-        newProfileBtn = new JButton("New Profile");
-        newProfileBtn.setToolTipText("Create a new profile with application defaults");
+        newProfileBtn = new JButton("New Default Profile");
+        newProfileBtn.setToolTipText("Create a new profile initialized with application defaults");
         newProfileBtn.addActionListener(e -> createNewProfile());
         profilePanel.add(newProfileBtn);
 
@@ -153,10 +155,20 @@ public class LookAndFeelPanel extends JPanel {
         deleteProfileBtn.addActionListener(e -> deleteProfile((String) profileComboBox.getSelectedItem()));
         profilePanel.add(deleteProfileBtn);
 
+        resetToDefaultsBtn = new JButton("Reset to Defaults");
+        resetToDefaultsBtn.setToolTipText("Reset current profile settings to application defaults (without saving)");
+        resetToDefaultsBtn.addActionListener(e -> resetToDefault());
+        profilePanel.add(resetToDefaultsBtn);
+
         reloadProfileBtn = new JButton("Reload Profile");
         reloadProfileBtn.setToolTipText("Reload settings from the current profile file on disk");
         reloadProfileBtn.addActionListener(e -> reloadProfile());
         profilePanel.add(reloadProfileBtn);
+
+        refreshProfilesBtn = new JButton("Refresh Profiles");
+        refreshProfilesBtn.setToolTipText("Refresh the list of available profiles from the disk");
+        refreshProfilesBtn.addActionListener(e -> refreshProfileList());
+        profilePanel.add(refreshProfilesBtn);
 
         // Apply icons and sizes for the first time
         updateProfileButtonsUI();
@@ -281,7 +293,7 @@ public class LookAndFeelPanel extends JPanel {
         boolean dirty = hasUnsavedChanges();
         saveProfileBtn.setText(dirty ? "Save Profile As *" : "Save Profile As");
 
-        fixComponentSize(saveProfileBtn);
+        ConfigurationUtils.fixComponentSize(saveProfileBtn);
         if (saveProfileBtn.getParent() != null) {
             saveProfileBtn.getParent().revalidate();
         }
@@ -323,10 +335,10 @@ public class LookAndFeelPanel extends JPanel {
     }
 
     private void createNewProfile() {
-        checkUnsavedChangesAndProceed(false, () -> {
+        checkUnsavedChangesAndProceed(false, () -> { // allowKeepUnsaved = false
             String name = (String) JOptionPane.showInputDialog(this, "Enter new profile name:", "New Profile",
                     JOptionPane.PLAIN_MESSAGE, null, null, "");
-            if (name == null || name.trim().isEmpty() || isReservedProfileName(name))
+            if (name == null || name.trim().isEmpty())
                 return;
 
             try {
@@ -352,8 +364,20 @@ public class LookAndFeelPanel extends JPanel {
         }, null);
     }
 
-    private boolean isReservedProfileName(String name) {
-        return DEFAULT_PROFILE_NAME.equalsIgnoreCase(name.trim());
+    private void refreshProfileList() {
+        boolean wasProgrammatic = isProgrammaticChange;
+        try {
+            isProgrammaticChange = true;
+            String currentSelection = (String) profileComboBox.getSelectedItem();
+            profileComboBox.removeAllItems();
+            loadProfiles(profileComboBox);
+            if (currentSelection != null) {
+                profileComboBox.setSelectedItem(currentSelection);
+            }
+        } finally {
+            isProgrammaticChange = wasProgrammatic;
+        }
+        updateProfileButtonStates();
     }
 
     private void updateLoadedStateFromProfile(String profileName) {
@@ -364,40 +388,41 @@ public class LookAndFeelPanel extends JPanel {
         this.loadedThemeClass = UIManager.getLookAndFeel().getClass().getName();
         this.loadedGlobalFont = SignumGUI.getActiveCustomFont();
         this.loadedConsoleFont = SignumGUI.getActiveConsoleFont();
-        this.loadedColorOverrides = new HashMap<>();
+        this.loadedColorOverrides = new java.util.HashMap<>();
 
-        if (DEFAULT_PROFILE_NAME.equals(profileName)) {
-            // Current GUI values already set above
-        } else {
-            try {
-                Path settingsPath = getGuiSettingsPath();
-                if (Files.exists(settingsPath)) {
-                    JsonObject settings = JsonParser
-                            .parseReader(Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8))
-                            .getAsJsonObject();
-                    JsonObject profiles = settings.getAsJsonObject("lookAndFeelProfiles");
-                    if (profiles.has(profileName)) {
-                        JsonObject lafSettings = profiles.getAsJsonObject(profileName);
-                        if (lafSettings.has("theme")) {
-                            loadedThemeClass = lafSettings.get("theme").getAsString();
-                        }
-                        if (lafSettings.has("font")) {
-                            loadedGlobalFont = parseFont(lafSettings.getAsJsonObject("font"));
-                        } else {
-                            loadedGlobalFont = SignumGUI.getActiveCustomFont();
-                        }
-                        if (lafSettings.has("consoleFont")) {
-                            loadedConsoleFont = parseFont(lafSettings.getAsJsonObject("consoleFont"));
-                        } else {
-                            loadedConsoleFont = SignumGUI.getActiveConsoleFont();
-                        }
-                        loadedColorOverrides = lafSettings.has("colorOverrides")
-                                ? parseColorOverrides(lafSettings.getAsJsonObject("colorOverrides"))
-                                : new HashMap<>();
-                    }
+        try {
+            Path settingsPath = getGuiSettingsPath();
+            if (Files.exists(settingsPath)) {
+                JsonObject settings = JsonParser
+                        .parseReader(Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8))
+                        .getAsJsonObject();
+                if ("look-and-feel-default".equals(profileName)) {
+                    profileName = DEFAULT_PROFILE_NAME;
                 }
-            } catch (Exception e) {
+                JsonObject profiles = settings.has("lookAndFeelProfiles")
+                        ? settings.getAsJsonObject("lookAndFeelProfiles")
+                        : null;
+                if (profiles != null && profiles.has(profileName)) {
+                    JsonObject lafSettings = profiles.getAsJsonObject(profileName);
+                    if (lafSettings.has("theme")) {
+                        loadedThemeClass = lafSettings.get("theme").getAsString();
+                    }
+                    if (lafSettings.has("font")) {
+                        loadedGlobalFont = parseFont(lafSettings.getAsJsonObject("font"));
+                    } else {
+                        loadedGlobalFont = SignumGUI.getActiveCustomFont();
+                    }
+                    if (lafSettings.has("consoleFont")) {
+                        loadedConsoleFont = parseFont(lafSettings.getAsJsonObject("consoleFont"));
+                    } else {
+                        loadedConsoleFont = SignumGUI.getActiveConsoleFont();
+                    }
+                    loadedColorOverrides = lafSettings.has("colorOverrides")
+                            ? parseColorOverrides(lafSettings.getAsJsonObject("colorOverrides"))
+                            : new HashMap<>();
+                }
             }
+        } catch (Exception e) {
         }
         // Reset the observer since the loaded state was updated
         lastUnsavedStatus = false;
@@ -411,32 +436,11 @@ public class LookAndFeelPanel extends JPanel {
     }
 
     private void updateProfileButtonsUI() {
-        float iconSize = GuiConstants.getHelpIconSize();
-        Color iconColor = GuiColors.getButtonIcon();
-
-        if (newProfileBtn != null) {
-            newProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.FILE_O, iconSize, iconColor));
-            fixComponentSize(newProfileBtn);
-        }
-        if (saveProfileBtn != null) {
-            saveProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.FLOPPY_O, iconSize, iconColor));
-            fixComponentSize(saveProfileBtn);
-        }
-        if (renameProfileBtn != null) {
-            renameProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.PENCIL_SQUARE_O, iconSize, iconColor));
-            fixComponentSize(renameProfileBtn);
-        }
-        if (deleteProfileBtn != null) {
-            deleteProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.TRASH_O, iconSize, iconColor));
-            fixComponentSize(deleteProfileBtn);
-        }
-        if (reloadProfileBtn != null) {
-            reloadProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.RECYCLE, iconSize, iconColor));
-            fixComponentSize(reloadProfileBtn);
-        }
         if (profileComboBox != null) {
-            fixComponentSize(profileComboBox);
+            ConfigurationUtils.fixComponentSize(profileComboBox);
         }
+        ConfigurationUtils.configureProfileToolbar(newProfileBtn, saveProfileBtn, null, renameProfileBtn,
+                deleteProfileBtn, reloadProfileBtn, refreshProfilesBtn, resetToDefaultsBtn);
     }
 
     @Override
@@ -452,18 +456,14 @@ public class LookAndFeelPanel extends JPanel {
 
     public boolean saveProfile() {
         String currentProfile = (String) profileComboBox.getSelectedItem();
-        String suggestedName = (DEFAULT_PROFILE_NAME.equals(currentProfile) || currentProfile == null) ? ""
-                : currentProfile;
+        String suggestedName = currentProfile != null ? currentProfile : "";
 
         JTextField nameField = new JTextField(suggestedName);
-        JLabel errorLabel = new JLabel("Saving as 'Default' profile is not possible.");
-        errorLabel.setForeground(GuiColors.getContrastRed());
-        errorLabel.setVisible(false);
+        // No error label for reserved names, as DEFAULT_PROFILE_NAME is now savable
 
         JPanel panel = new JPanel(new MigLayout("wrap 1, fillx, insets 0", "[grow]", "[]5[]5[]"));
         panel.add(new JLabel("Enter profile name:"));
         panel.add(nameField, "growx");
-        panel.add(errorLabel, "hidemode 3");
 
         JButton saveBtn = new JButton("Save");
         JButton discardBtn = new JButton("Discard");
@@ -499,10 +499,7 @@ public class LookAndFeelPanel extends JPanel {
 
         Runnable validate = () -> {
             String text = nameField.getText().trim();
-            boolean isReserved = isReservedProfileName(text);
-            boolean isEmpty = text.isEmpty();
-            errorLabel.setVisible(isReserved);
-            saveBtn.setEnabled(!isReserved && !isEmpty);
+            saveBtn.setEnabled(!text.isEmpty());
             dialog.pack();
         };
 
@@ -658,8 +655,9 @@ public class LookAndFeelPanel extends JPanel {
                     if (settings.has("lookAndFeelProfiles")) {
                         JsonObject profiles = settings.getAsJsonObject("lookAndFeelProfiles");
                         for (String profileName : profiles.keySet()) {
-                            if (isReservedProfileName(profileName))
+                            if (DEFAULT_PROFILE_NAME.equals(profileName)) {
                                 continue;
+                            }
                             comboBox.addItem(profileName);
                         }
                     }
@@ -904,7 +902,19 @@ public class LookAndFeelPanel extends JPanel {
         LOGGER.info("Loading Look and Feel profile: '{}'", profileName);
         isProgrammaticChange = true;
         try {
-            if (DEFAULT_PROFILE_NAME.equals(profileName)) {
+            // Check if profile is defined in settings file even if it is the "Default" one
+            boolean profileExistsInFile = false;
+            Path settingsPathForCheck = getGuiSettingsPath();
+            if (Files.exists(settingsPathForCheck)) {
+                try (BufferedReader reader = Files.newBufferedReader(settingsPathForCheck, StandardCharsets.UTF_8)) {
+                    JsonObject settings = JsonParser.parseReader(reader).getAsJsonObject();
+                    profileExistsInFile = settings.has("lookAndFeelProfiles") &&
+                            settings.getAsJsonObject("lookAndFeelProfiles").has(profileName);
+                } catch (Exception e) {
+                }
+            }
+
+            if (DEFAULT_PROFILE_NAME.equals(profileName) && !profileExistsInFile) {
                 resetToDefaultInternal();
                 try {
                     Path settingsPath = getGuiSettingsPath();
@@ -1064,13 +1074,21 @@ public class LookAndFeelPanel extends JPanel {
         String message = "<html><body style='width: 350px'>" +
                 "<h2>Look and Feel Profiles</h2>" +
                 "<p>Look and Feel Profiles allow you to save and load different visual themes and font settings.</p>" +
-                "<ul>" +
-                "<li><b>Load Profile</b>: Loads the theme and font settings from the selected profile in the dropdown.</li>"
+                "<ul>"
                 +
-                "<li><b>Save Profile</b>: Saves the current theme and font settings into a named profile. If you use an existing profile name, it will be overwritten after confirmation.</li>"
+                "<li><b>New Default Profile</b>: Creates a new configuration profile initialized with application defaults.</li>"
                 +
-                "<li><b>Rename Profile</b>: Renames the currently selected profile.</li>" +
-                "<li><b>Delete Profile</b>: Deletes the currently selected profile after confirmation.</li>" +
+                "<li><b>Save Profile As</b>: Saves the current theme and font settings into a named profile. If you use an existing profile name, it will be overwritten after confirmation.</li>"
+                +
+                "<li><b>Rename Profile</b>: Renames the currently selected profile.</li>"
+                +
+                "<li><b>Delete Profile</b>: Deletes the currently selected profile after confirmation.</li>"
+                +
+                "<li><b>Reset to Defaults</b>: Resets all current settings to their application default values without saving.</li>"
+                +
+                "<li><b>Reload Profile</b>: Reloads the visual settings from the stored profile on disk, discarding manual changes.</li>"
+                +
+                "<li><b>Refresh Profiles</b>: Synchronizes the profile list with the settings file on disk.</li>" +
                 "</ul>" +
                 "<p>Profiles are stored in the <code>gui-settings.json</code> file in your settings directory.</p>" +
                 "</body></html>";
@@ -1134,32 +1152,5 @@ public class LookAndFeelPanel extends JPanel {
     private Path getGuiSettingsPath() {
         String settingsDir = Props.SETTINGS_DIR.getDefaultValue();
         return PathUtils.resolvePath(settingsDir).resolve("gui-settings.json");
-    }
-
-    private void styleTextField(JComponent field) {
-        if (field instanceof JTextField || field instanceof JPasswordField) {
-            field.setFont(UIManager.getFont("TextField.font"));
-            field.setBorder(BorderFactory.createCompoundBorder(
-                    UIManager.getBorder("TextField.border"),
-                    BorderFactory.createEmptyBorder(4, 6, 4, 6)));
-        }
-    }
-
-    private void fixComponentSize(JComponent comp) {
-        comp.setPreferredSize(null);
-        comp.setMinimumSize(null);
-        // Use a button with an icon as reference to ensure perfect alignment with
-        // toolbar buttons
-        JButton dummy = new JButton("P",
-                IconFontSwing.buildIcon(FontAwesome.CIRCLE, GuiConstants.getHelpIconSize(), Color.BLACK));
-        Dimension pref = dummy.getPreferredSize();
-        Dimension currentPref = comp.getPreferredSize();
-
-        // Ensure height is at least as tall as a button, but allow it to grow if the
-        // font
-        // requires it. Added a small vertical padding to prevent text clipping.
-        int targetHeight = Math.max(currentPref.height, pref.height) + 2;
-        comp.setPreferredSize(new Dimension(currentPref.width + 2, targetHeight));
-        comp.setMinimumSize(new Dimension(currentPref.width + 2, targetHeight));
     }
 }

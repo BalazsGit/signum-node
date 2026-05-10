@@ -19,6 +19,7 @@ public class ConfigurationPanel extends JPanel {
     private final JTabbedPane tabbedPane;
     private final NodeConfigurationPanel nodeConfig;
     private final LoggerConfigurationPanel loggerConfig;
+    private final DatabaseConfigurationPanel dbConfig;
     private final LookAndFeelPanel lafConfig;
     private final Runnable backAction;
     private final JButton backButton;
@@ -56,10 +57,12 @@ public class ConfigurationPanel extends JPanel {
         // tabs
         nodeConfig = new NodeConfigurationPanel(restartAction, confFolder, backAction, null);
         loggerConfig = new LoggerConfigurationPanel(restartAction, confFolder, backAction, null);
+        dbConfig = new DatabaseConfigurationPanel(restartAction, confFolder, backAction);
         lafConfig = new LookAndFeelPanel(restartAction, backAction);
 
         tabbedPane.addTab("Node", nodeConfig);
         tabbedPane.addTab("Logger", loggerConfig);
+        tabbedPane.addTab("Database", dbConfig);
         tabbedPane.addTab("Look & Feel", lafConfig);
 
         add(tabbedPane, BorderLayout.CENTER);
@@ -85,7 +88,7 @@ public class ConfigurationPanel extends JPanel {
     }
 
     public enum ConfigTab {
-        NODE, LOGGER, LAF
+        NODE, LOGGER, DATABASE, LAF
     }
 
     @Override
