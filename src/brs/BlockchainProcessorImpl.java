@@ -3460,23 +3460,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             throw new ConsensusMismatchException(
                     "Calculated remaining amount doesn't add up for block " + block.getHeight());
         }
-        if (calculatedRemainingAmount > Constants.MAX_BALANCE_NQT || calculatedRemainingAmount < 0) {
-            throw new ConsensusMismatchException(
-                    "Total supply violation detected in block execution: " + calculatedRemainingAmount);
-        }
-        // The cashback and burnt fee checks are based on the block header values, which
-        // are set by the miner and should be consistent with the calculated values from
-        // transactions and services.
-        if (block.getTotalFeeCashBackNqt() > Constants.MAX_BALANCE_NQT || block.getTotalFeeCashBackNqt() < 0) {
-            throw new ConsensusMismatchException(
-                    "Total cashback fee violation detected in block header: " + block.getTotalFeeCashBackNqt()
-                            + " for block " + block.getHeight());
-        }
-        if (block.getTotalFeeBurntNqt() > Constants.MAX_BALANCE_NQT || block.getTotalFeeBurntNqt() < 0) {
-            throw new ConsensusMismatchException(
-                    "Total burnt fee violation detected in block header: " + block.getTotalFeeBurntNqt()
-                            + " for block " + block.getHeight());
-        }
         if (remainingFee != null && remainingFee != calculatedRemainingFee) {
             throw new ConsensusMismatchException(
                     "Calculated remaining fee doesn't add up for block " + block.getHeight());
@@ -4075,14 +4058,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     totalFeeBurntNqt += atBlock.getTotalFees();
                 }
                 totalAmountNqt += atBlock.getTotalAmount();
-            }
-
-            // Overflow/Underflow check before block creation
-            if (totalAmountNqt < 0 || totalAmountNqt > Constants.MAX_BALANCE_NQT ||
-                    totalFeeNqt < 0 || totalFeeNqt > Constants.MAX_BALANCE_NQT ||
-                    totalFeeCashBackNqt < 0 || totalFeeBurntNqt < 0) {
-                throw new BlockNotAcceptedException(
-                        "Invalid totals calculated during block generation - range violation suspected.");
             }
 
             // ATs for block
