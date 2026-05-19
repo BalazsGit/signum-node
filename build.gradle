@@ -135,6 +135,7 @@ sourceSets {
     if (!project.hasProperty('skipTests')) {
         test {
             java.srcDirs = ["test/java"]
+            resources.srcDirs = ["test/resources"]
         }
     }
 }

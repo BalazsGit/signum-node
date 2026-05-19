@@ -1817,7 +1817,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                  * The file starts with a block of system information (Property;Value).
                  * The file contains detailed timing measurements for each pushed block during
                  * synchronization.
-                 * 
+                 *
                  * Header:
                  * Block_height;Block_timestamp[s];Cumulative_difficulty;
                  * Accumulated_sync_in_progress_time[ms];
@@ -1913,9 +1913,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
      * total elapsed time, and current block height.
      * accumulatedSyncInProgressTimeMs is for the time when sync is in progress
      * totalTime is for the total time since start of node
-     * 
+     *
      * @param totalTime Total elapsed time in milliseconds
-     * 
+     *
      * @param height Current block height
      */
     private void writeSyncProgressLog(long totalTime, int height) {
@@ -3287,6 +3287,18 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                             "Total amount or fee don't match transaction totals for block " + block.getHeight());
                 }
 
+                if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, block.getHeight())) {
+                    long calculatedTotalFeeCashBackNqt = 0;
+                    for (Transaction transaction : transactions) {
+                        calculatedTotalFeeCashBackNqt = Convert.safeAdd(calculatedTotalFeeCashBackNqt,
+                                transaction.getFeeNqt() / propertyService.getInt(Props.CASH_BACK_FACTOR));
+                    }
+                    if (calculatedTotalFeeCashBackNqt != block.getTotalFeeCashBackNqt()) {
+                        throw new BlockNotAcceptedException(
+                                "Total fee cash back doesn't match transaction totals for block " + block.getHeight());
+                    }
+                }
+
                 if (Signum.getFluxCapacitor().getValue(FluxValues.SODIUM)
                         && !Signum.getFluxCapacitor().getValue(FluxValues.SPEEDWAY)) {
                     Arrays.sort(feeArray);
@@ -3464,6 +3476,12 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             throw new ConsensusMismatchException(
                     "Calculated remaining fee doesn't add up for block " + block.getHeight());
         }
+        if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, block.getHeight())) {
+            if (calculatedRemainingFee != block.getTotalFeeBurntNqt()) {
+                throw new BlockNotAcceptedException(
+                        "Total fee burnt doesn't match AT and subscription totals for block " + block.getHeight());
+            }
+        }
 
         start = System.nanoTime();
         blockListeners.notify(block, Event.BEFORE_BLOCK_APPLY);
@@ -3585,25 +3603,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                             dbCacheManager.flushCache();
                             downloadCache.resetCache();
                             atProcessorCache.reset();
-                            // Checking database consistency after each block popped
-                            if (checkDatabaseState() != 0) {
-                                manualPopOffBlocksCount.set(0);
-                                manualLastPopOffHeight.set(-1);
-                                stores.rollbackTransaction();
-                                // Get block height from datbase
-                                block = blockDb.findLastBlock();
-                                blockchain.setLastBlock(block);
-                                logger.warn("Database could be inconsistent after popping block at height {}.",
-                                        block.getHeight() + 1);
-                                logger.warn("Cacelling pop-off process to prevent database consistency.");
-                                logger.warn("Setting blockchain height back to {}.", block.getHeight());
-                                break;
-                            } else {
-                                stores.commitTransaction();
-                                poppedBlocks++;
-                                manualPopOffBlocksCount.decrementAndGet();
-                                blockListeners.notify(block, Event.BLOCK_MANUAL_POPPED);
-                            }
+                            stores.commitTransaction();
+                            poppedBlocks++;
+                            manualPopOffBlocksCount.decrementAndGet();
+                            blockListeners.notify(block, Event.BLOCK_MANUAL_POPPED);
                         } else {
                             logger.warn("Reached minimum rollback height {}, cannot pop off block at height {}.",
                                     minRollbackHeight, block.getHeight());
@@ -4008,8 +4011,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                 totalAmountNqt += transaction.getAmountNqt();
                                 totalFeeNqt += transaction.getFeeNqt();
                                 if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, blockHeight)) {
-                                    totalFeeCashBackNqt += transaction.getFeeNqt()
-                                            / propertyService.getInt(Props.CASH_BACK_FACTOR);
+                                    totalFeeCashBackNqt = Convert.safeAdd(totalFeeCashBackNqt, transaction.getFeeNqt()
+                                            / propertyService.getInt(Props.CASH_BACK_FACTOR));
                                 }
                                 orderedBlockTransactions.add(transaction);
                                 blockSize--;
@@ -4029,9 +4032,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 if (subscriptionService.isEnabled()) {
                     subscriptionService.clearRemovals();
                     long subscriptionFeeNqt = subscriptionService.calculateFees(blockTimestamp, blockHeight);
-                    totalFeeNqt += subscriptionFeeNqt;
+                    totalFeeNqt = Convert.safeAdd(totalFeeNqt, subscriptionFeeNqt);
                     if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, blockHeight)) {
-                        totalFeeBurntNqt += subscriptionFeeNqt;
+                        totalFeeBurntNqt = Convert.safeAdd(totalFeeBurntNqt, subscriptionFeeNqt);
                     }
                 }
 
@@ -4053,11 +4056,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             // digesting AT Bytes
             if (byteAts != null) {
                 payloadSize -= byteAts.length;
-                totalFeeNqt += atBlock.getTotalFees();
+                totalFeeNqt = Convert.safeAdd(totalFeeNqt, atBlock.getTotalFees());
                 if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, blockHeight)) {
-                    totalFeeBurntNqt += atBlock.getTotalFees();
+                    totalFeeBurntNqt = Convert.safeAdd(totalFeeBurntNqt, atBlock.getTotalFees());
                 }
-                totalAmountNqt += atBlock.getTotalAmount();
+                totalAmountNqt = Convert.safeAdd(totalAmountNqt, atBlock.getTotalAmount());
             }
 
             // ATs for block
