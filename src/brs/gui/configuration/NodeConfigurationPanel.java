@@ -4,6 +4,8 @@ import brs.crypto.Crypto;
 import brs.Constants;
 import brs.props.Prop;
 import brs.props.Props;
+import brs.gui.configuration.databaseConfiguration.DatabaseConfigurationPanel;
+import brs.gui.configuration.databaseConfiguration.DatabaseConfigurationUtils;
 import brs.util.Convert;
 import brs.util.PathUtils;
 import brs.gui.GuiColors;
@@ -46,6 +48,7 @@ public class NodeConfigurationPanel extends JPanel {
     private final Map<String, String> helpTexts = new HashMap<>();
     private final Map<String, String> defaultValues = new HashMap<>();
     private final Runnable restartAction;
+
     private final Runnable backAction;
     private final Runnable switchAction;
     private final String confFolder;
@@ -211,7 +214,7 @@ public class NodeConfigurationPanel extends JPanel {
         searchPanel.add(new JLabel("Search Configuration:"));
         JTextField searchField = new JTextField();
         searchField.putClientProperty("JTextField.placeholderText", "Type to filter properties...");
-        ConfigurationUtils.styleTextField(searchField);
+        ConfigurationUtils.styleInputComponent(searchField);
         searchPanel.add(searchField, "growx");
 
         searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
@@ -265,9 +268,7 @@ public class NodeConfigurationPanel extends JPanel {
         // --- Database Settings ---
         currentAddingTabIndex = 1;
         JPanel dbPanel = createCategoryPanel();
-        addProperty(dbPanel, Props.DB_URL, "JDBC Connection URL", getSuggestions(Props.DB_URL.getName()), true);
-        addProperty(dbPanel, Props.DB_USERNAME, "Database Username");
-        addPasswordProperty(dbPanel, Props.DB_PASSWORD, "Database Password");
+        addJdbcUrlProperty(dbPanel, (Prop<String>) Props.DB_URL, "JDBC Connection URL");
         addProperty(dbPanel, Props.DB_CONNECTIONS, "Max Connections");
         addProperty(dbPanel, Props.DB_ARCHIVAL_MODE, "Archival Mode",
                 new String[] { "ARCHIVE", "TRIM", "PRUNE" }, false);
@@ -499,7 +500,7 @@ public class NodeConfigurationPanel extends JPanel {
         if (allPropertyRows != null) {
             allPropertyRows.forEach(row -> {
                 if (row.input != null) {
-                    ConfigurationUtils.styleTextField(row.input);
+                    ConfigurationUtils.styleInputComponent(row.input);
                     ConfigurationUtils.fixComponentSize(row.input);
                 }
             });
@@ -1120,6 +1121,8 @@ public class NodeConfigurationPanel extends JPanel {
         if (val == null)
             val = ""; // Ensure non-null for comparison
 
+        boolean dirty = false;
+
         // Special handling for JCheckBox as its value is boolean, not string directly
         if (row.input instanceof JCheckBox) {
             boolean savedBool = "true".equalsIgnoreCase(saved) || "yes".equalsIgnoreCase(saved)
@@ -1136,11 +1139,23 @@ public class NodeConfigurationPanel extends JPanel {
         if (isList) {
             String normalizedVal = normalizeListValue(val, "\n");
             String normalizedSaved = normalizeListValue(saved, ";");
-            return !normalizedVal.equals(normalizedSaved);
+            dirty = !normalizedVal.equals(normalizedSaved);
+        } else {
+            dirty = !val.trim().equals(saved.trim());
         }
 
-        boolean dirty = !val.trim().equals(saved.trim());
+        if (!dirty && Props.DB_URL.getName().equals(row.prop.getName())) {
+            dirty = isComponentDirty(Props.DB_USERNAME) || isComponentDirty(Props.DB_PASSWORD);
+        }
+
         return dirty;
+    }
+
+    private boolean isComponentDirty(Prop<?> prop) {
+        String key = prop.getName();
+        String saved = currentProperties.getProperty(key, getSafeDefault(prop));
+        String current = valueSuppliers.get(key) != null ? valueSuppliers.get(key).get() : "";
+        return !current.trim().equals(saved.trim());
     }
 
     private void updateDirtyStatus() {
@@ -1228,6 +1243,22 @@ public class NodeConfigurationPanel extends JPanel {
                         break;
                     }
                 }
+            }
+
+            if (comp instanceof JPanel && Props.DB_URL.getName().equals(key)) {
+                String val = props.getProperty(key, defaultValues.get(key));
+                String user = props.getProperty(Props.DB_USERNAME.getName(),
+                        defaultValues.get(Props.DB_USERNAME.getName()));
+                String pass = props.getProperty(Props.DB_PASSWORD.getName(),
+                        defaultValues.get(Props.DB_PASSWORD.getName()));
+
+                JdbcManualConfigurationPanel mp = (JdbcManualConfigurationPanel) comp.getClientProperty("manualPanel");
+                if (mp != null) {
+                    mp.updateFromUrl(val);
+                    mp.setCredentials(user, pass);
+                }
+                updateColor(comp, key, defaultValues.get(key));
+                continue;
             }
 
             String val = props.getProperty(key);
@@ -1342,6 +1373,17 @@ public class NodeConfigurationPanel extends JPanel {
                 appliedProperties.setProperty(row.prop.getName(), val);
             }
         }
+
+        // Special case for database credentials which are part of DB_URL composite
+        // property
+        String appliedUser = getServiceValueAsString(service, Props.DB_USERNAME);
+        if (appliedUser != null && !appliedUser.isEmpty())
+            appliedProperties.setProperty(Props.DB_USERNAME.getName(), appliedUser);
+
+        String appliedPass = getServiceValueAsString(service, Props.DB_PASSWORD);
+        if (appliedPass != null && !appliedPass.isEmpty())
+            appliedProperties.setProperty(Props.DB_PASSWORD.getName(), appliedPass);
+
         refreshUIColors();
     }
 
@@ -1446,7 +1488,7 @@ public class NodeConfigurationPanel extends JPanel {
             });
         } else {
             JTextField textField = new JTextField(savedValue);
-            ConfigurationUtils.styleTextField(textField);
+            ConfigurationUtils.styleInputComponent(textField);
 
             // Fix dimensions to match standard text fields
             ConfigurationUtils.fixComponentSize(textField);
@@ -1514,6 +1556,159 @@ public class NodeConfigurationPanel extends JPanel {
         allPropertyRows.add(row);
     }
 
+    private void parseJdbcUrl(String url, JComboBox<DatabaseConfigurationPanel.DatabaseEngine> engineCombo,
+            JTextField hostField, JTextField portField, JTextField dbNameField, JTextField postfixField) {
+        if (url == null || url.isEmpty())
+            return;
+
+        if (url.startsWith("jdbc:sqlite:")) {
+            engineCombo.setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.SQLITE);
+            hostField.setText("");
+            portField.setText("");
+            dbNameField.setText(url.substring("jdbc:sqlite:".length()));
+            postfixField.setText("");
+            return;
+        }
+
+        Matcher matcher = DatabaseConfigurationUtils.JDBC_URL_PATTERN.matcher(url);
+        if (matcher.find()) {
+            String engine = matcher.group(1);
+            if ("mariadb".equalsIgnoreCase(engine)) {
+                engineCombo.setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.MARIADB);
+            } else if ("postgresql".equalsIgnoreCase(engine)) {
+                engineCombo.setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.POSTGRESQL);
+            }
+            hostField.setText(matcher.group(2));
+            portField.setText(matcher.group(3) != null ? matcher.group(3) : "");
+            dbNameField.setText(matcher.group(4));
+            postfixField.setText(matcher.group(5) != null ? matcher.group(5) : "");
+        }
+    }
+
+    private String buildJdbcUrl(DatabaseConfigurationPanel.DatabaseEngine engine, String host, String port,
+            String dbName, String postfix) {
+        if (engine == DatabaseConfigurationPanel.DatabaseEngine.SQLITE) {
+            return "jdbc:sqlite:" + dbName;
+        }
+        String protocol = engine == DatabaseConfigurationPanel.DatabaseEngine.MARIADB ? "mariadb"
+                : (engine == DatabaseConfigurationPanel.DatabaseEngine.POSTGRESQL ? "postgresql" : "");
+        StringBuilder sb = new StringBuilder("jdbc:").append(protocol).append("://").append(host);
+        if (port != null && !port.trim().isEmpty()) {
+            sb.append(":").append(port.trim());
+        }
+        sb.append("/").append(dbName);
+        if (postfix != null && !postfix.trim().isEmpty()) {
+            sb.append(postfix.trim());
+        }
+        return sb.toString();
+    }
+
+    private void addJdbcUrlProperty(JPanel panel, Prop<String> prop, String labelText) {
+        PropertyRow row = new PropertyRow(prop, labelText, panel, currentAddingTabIndex);
+        JLabel label = new JLabel(labelText);
+        row.label = label;
+        row.labelConstraints = "align label, aligny top";
+        panel.add(label, row.labelConstraints);
+
+        JPanel wrapper = new JPanel(new MigLayout("insets 0, fillx, gap 2", "[grow]", "[]5[]"));
+        wrapper.setOpaque(false);
+
+        JCheckBox useProfileCheck = new JCheckBox("Connect Database Profile");
+        useProfileCheck.setOpaque(false);
+        wrapper.add(useProfileCheck, "wrap");
+
+        CardLayout cardLayout = new CardLayout();
+        JPanel cardPanel = new JPanel(cardLayout);
+        cardPanel.setOpaque(false);
+
+        JdbcManualConfigurationPanel manualPanel = new JdbcManualConfigurationPanel(() -> {
+            updateColor(wrapper, prop.getName(), defaultValues.get(prop.getName()));
+            updateDirtyStatus();
+        });
+        JdbcProfileConfigurationPanel profilePanel = new JdbcProfileConfigurationPanel(confFolder,
+                () -> {
+                    updateColor(wrapper, prop.getName(), defaultValues.get(prop.getName()));
+                    updateDirtyStatus();
+                });
+
+        cardPanel.add(manualPanel, "MANUAL");
+        cardPanel.add(profilePanel, "PROFILE");
+        wrapper.add(cardPanel, "growx");
+
+        useProfileCheck.addActionListener(e -> {
+            cardLayout.show(cardPanel, useProfileCheck.isSelected() ? "PROFILE" : "MANUAL");
+            updateDirtyStatus();
+            refreshUIColors();
+        });
+
+        wrapper.putClientProperty("manualPanel", manualPanel);
+        wrapper.putClientProperty("profilePanel", profilePanel);
+        wrapper.putClientProperty("useProfileCheck", useProfileCheck);
+
+        // Register sub-components for coloring and dirty status tracking
+        wrapper.putClientProperty("engineCombo", manualPanel.getEngineCombo());
+        wrapper.putClientProperty("hostField", manualPanel.getHostField());
+        wrapper.putClientProperty("portField", manualPanel.getPortField());
+        wrapper.putClientProperty("dbNameField", manualPanel.getDbNameField());
+        wrapper.putClientProperty("postfixField", manualPanel.getPostfixField());
+        wrapper.putClientProperty("userField", manualPanel.getUserField());
+        wrapper.putClientProperty("passField", manualPanel.getPassField());
+
+        wrapper.putClientProperty("engineLabel", manualPanel.getEngineLabel());
+        wrapper.putClientProperty("hostLabel", manualPanel.getHostLabel());
+        wrapper.putClientProperty("portLabel", manualPanel.getPortLabel());
+        wrapper.putClientProperty("dbNameLabel", manualPanel.getDbNameLabel());
+        wrapper.putClientProperty("postfixLabel", manualPanel.getPostfixLabel());
+        wrapper.putClientProperty("userLabel", manualPanel.getUserLabel());
+        wrapper.putClientProperty("passLabel", manualPanel.getPassLabel());
+
+        wrapper.putClientProperty("resultLabel", manualPanel.getResultField());
+
+        // Populate valueSuppliers and propertyComponents for DB_URL, DB_USERNAME,
+        // DB_PASSWORD early
+        // to prevent NullPointerException when manualPanel.updateFromUrl/setCredentials
+        // trigger the onChange callback, which calls updateColor.
+        valueSuppliers.put(Props.DB_USERNAME.getName(),
+                () -> useProfileCheck.isSelected() ? profilePanel.getUsername() : manualPanel.getUsername());
+        valueSuppliers.put(Props.DB_PASSWORD.getName(),
+                () -> useProfileCheck.isSelected() ? profilePanel.getPassword() : manualPanel.getPassword());
+        valueSuppliers.put(prop.getName(), // This is Props.DB_URL
+                () -> useProfileCheck.isSelected() ? profilePanel.getJdbcUrl() : manualPanel.getJdbcUrl());
+
+        // Register separate components for DB_USERNAME and DB_PASSWORD
+        propertyComponents.put(Props.DB_USERNAME.getName(), (JComponent) manualPanel.getUserField());
+        propertyComponents.put(Props.DB_PASSWORD.getName(), (JComponent) manualPanel.getPassField());
+
+        String savedValue = currentProperties.getProperty(prop.getName(), getSafeDefault(prop));
+        String savedUser = currentProperties.getProperty(Props.DB_USERNAME.getName(),
+                getSafeDefault(Props.DB_USERNAME));
+        String savedPass = currentProperties.getProperty(Props.DB_PASSWORD.getName(),
+                getSafeDefault(Props.DB_PASSWORD));
+
+        manualPanel.updateFromUrl(savedValue);
+        manualPanel.setCredentials(savedUser, savedPass);
+
+        defaultValues.put(prop.getName(), getSafeDefault(prop));
+        defaultValues.put(Props.DB_USERNAME.getName(), getSafeDefault(Props.DB_USERNAME));
+        defaultValues.put(Props.DB_PASSWORD.getName(), getSafeDefault(Props.DB_PASSWORD));
+
+        row.input = wrapper;
+        row.inputConstraints = "split 2, growx";
+        panel.add(wrapper, row.inputConstraints);
+        propertyComponents.put(prop.getName(), wrapper);
+
+        JButton helpBtn = new HelpButton();
+        helpBtn.addActionListener(e -> showHelp(prop, labelText));
+        row.help = helpBtn;
+        row.helpConstraints = "wrap, aligny top";
+        panel.add(helpBtn, row.helpConstraints);
+        row.separator = new JSeparator();
+        row.separatorConstraints = "span, growx, wrap, gaptop 2, gapbottom 2";
+        panel.add(row.separator, row.separatorConstraints);
+        allPropertyRows.add(row);
+        updateColor(wrapper, prop.getName(), defaultValues.get(prop.getName()));
+    }
+
     private void addPasswordProperty(JPanel panel, Prop<String> prop, String labelText) {
         // Label
         PropertyRow row = new PropertyRow(prop, labelText, panel, currentAddingTabIndex);
@@ -1539,7 +1734,7 @@ public class NodeConfigurationPanel extends JPanel {
 
         JPasswordField passwordField = new JPasswordField(savedValue);
         passwordField.setColumns(20);
-        ConfigurationUtils.styleTextField(passwordField);
+        ConfigurationUtils.styleInputComponent(passwordField);
 
         // Fix dimensions to match standard text fields (consistent with addProperty)
         ConfigurationUtils.fixComponentSize(passwordField);
@@ -1880,28 +2075,41 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void updateColor(JComponent comp, String propName, String defaultValue) {
+        String value = "";
+        JComponent target = comp;
+        Color color = GuiColors.getUnsaved();
+
         // Unwrap wrappers for lists and special components
         if (comp instanceof JScrollPane && ((JScrollPane) comp).getViewport().getView() instanceof JTextArea) {
-            comp = (JComponent) ((JScrollPane) comp).getViewport().getView();
+            target = (JComponent) ((JScrollPane) comp).getViewport().getView();
         } else if (comp instanceof JPanel && Props.BRS_PK_CHECKS.getName().equals(propName)) {
             for (Component inner : ((JPanel) comp).getComponents()) {
                 if (inner instanceof JScrollPane) {
                     Component view = ((JScrollPane) inner).getViewport().getView();
                     if (view instanceof JTextArea) {
-                        comp = (JComponent) view;
+                        target = (JComponent) view;
                         break;
                     }
                 }
             }
         }
 
-        String savedValue = currentProperties.getProperty(propName, defaultValue);
+        if (comp instanceof JPanel && Props.DB_URL.getName().equals(propName)) {
+            JComponent resultComp = (JComponent) comp.getClientProperty("resultLabel");
+            target = resultComp != null ? resultComp : target;
+            String supplierVal = valueSuppliers.get(propName).get();
+            value = supplierVal != null ? supplierVal.trim() : "";
+        }
 
+        String savedValue = currentProperties.getProperty(propName, defaultValue);
         String applied = appliedProperties.getProperty(propName, defaultValue);
 
-        String value = "";
-        JComponent target = comp;
-        Color color = GuiColors.getUnsaved();
+        if (savedValue == null)
+            savedValue = "";
+        if (applied == null)
+            applied = "";
+        savedValue = savedValue.trim();
+        applied = applied.trim();
 
         if (comp instanceof JCheckBox) {
             value = String.valueOf(((JCheckBox) comp).isSelected());
@@ -1938,11 +2146,16 @@ public class NodeConfigurationPanel extends JPanel {
         }
 
         if (!(comp instanceof JCheckBox)) {
-            if (value.equals(applied)) {
+            if (value.trim().equals(applied)) {
                 color = GuiColors.getApplied();
-            } else if (value.equals(savedValue)) {
+            } else if (value.trim().equals(savedValue)) {
                 color = GuiColors.getSaved();
             }
+        }
+
+        // Detailed sub-component coloring and asterisk logic for JDBC URL panel
+        if (comp instanceof JPanel && Props.DB_URL.getName().equals(propName)) {
+            updateJdbcSubComponents(comp, savedValue, applied);
         }
 
         PropertyRow row = allPropertyRows.stream()
@@ -1970,6 +2183,99 @@ public class NodeConfigurationPanel extends JPanel {
         } else {
             target.setForeground(color);
         }
+    }
+
+    private void updateJdbcSubComponents(JComponent panel, String savedUrl, String appliedUrl) {
+        JComboBox<?> engineCombo = (JComboBox<?>) panel.getClientProperty("engineCombo");
+        JTextField hostField = (JTextField) panel.getClientProperty("hostField");
+        JTextField portField = (JTextField) panel.getClientProperty("portField");
+        JTextField dbNameField = (JTextField) panel.getClientProperty("dbNameField");
+        JTextField postfixField = (JTextField) panel.getClientProperty("postfixField");
+        JTextField userField = (JTextField) panel.getClientProperty("userField");
+        JPasswordField passField = (JPasswordField) panel.getClientProperty("passField");
+
+        JLabel engineLabel = (JLabel) panel.getClientProperty("engineLabel");
+        JLabel hostLabel = (JLabel) panel.getClientProperty("hostLabel");
+        JLabel portLabel = (JLabel) panel.getClientProperty("portLabel");
+        JLabel dbNameLabel = (JLabel) panel.getClientProperty("dbNameLabel");
+        JLabel postfixLabel = (JLabel) panel.getClientProperty("postfixLabel");
+        JLabel userLabel = (JLabel) panel.getClientProperty("userLabel");
+        JLabel passLabel = (JLabel) panel.getClientProperty("passLabel");
+
+        Map<String, String> savedParts = getJdbcUrlParts(savedUrl);
+        Map<String, String> appliedParts = getJdbcUrlParts(appliedUrl);
+
+        updateJdbcPart(engineCombo, engineLabel, "Engine:",
+                engineCombo.getSelectedItem() != null ? engineCombo.getSelectedItem().toString() : "",
+                savedParts.get("engine"), appliedParts.get("engine"));
+        updateJdbcPart(hostField, hostLabel, "Host:", hostField.getText(), savedParts.get("host"),
+                appliedParts.get("host"));
+        updateJdbcPart(portField, portLabel, "Port:", portField.getText(), savedParts.get("port"),
+                appliedParts.get("port"));
+        updateJdbcPart(dbNameField, dbNameLabel, "Database:", dbNameField.getText(), savedParts.get("dbName"),
+                appliedParts.get("dbName"));
+        updateJdbcPart(postfixField, postfixLabel, "Postfix:", postfixField.getText(), savedParts.get("postfix"),
+                appliedParts.get("postfix"));
+
+        String userKey = Props.DB_USERNAME.getName();
+        String passKey = Props.DB_PASSWORD.getName();
+        updateJdbcPart(userField, userLabel, "Username:", userField.getText(),
+                currentProperties.getProperty(userKey, getSafeDefault(Props.DB_USERNAME)),
+                appliedProperties.getProperty(userKey, getSafeDefault(Props.DB_USERNAME)));
+        updateJdbcPart(passField, passLabel, "Password:", new String(passField.getPassword()),
+                currentProperties.getProperty(passKey, getSafeDefault(Props.DB_PASSWORD)),
+                appliedProperties.getProperty(passKey, getSafeDefault(Props.DB_PASSWORD)));
+    }
+
+    private void updateJdbcPart(JComponent input, JLabel label, String baseText, String current, String saved,
+            String applied) {
+        if (input == null)
+            return;
+        current = current != null ? current.trim() : "";
+        saved = saved != null ? saved.trim() : "";
+        applied = applied != null ? applied.trim() : "";
+
+        Color c;
+        if (current.equals(applied))
+            c = GuiColors.getApplied();
+        else if (current.equals(saved))
+            c = GuiColors.getSaved();
+        else
+            c = GuiColors.getUnsaved();
+
+        input.setForeground(c);
+        if (label != null) {
+            label.setText(current.equals(saved) ? baseText : baseText + " *");
+        }
+    }
+
+    private Map<String, String> getJdbcUrlParts(String url) {
+        Map<String, String> parts = new HashMap<>();
+        parts.put("engine", "");
+        parts.put("host", "");
+        parts.put("port", "");
+        parts.put("dbName", "");
+        parts.put("postfix", "");
+        if (url == null || url.isEmpty())
+            return parts;
+        if (url.startsWith("jdbc:sqlite:")) {
+            parts.put("engine", "SQLite");
+            parts.put("dbName", url.substring("jdbc:sqlite:".length()));
+        } else {
+            Matcher matcher = DatabaseConfigurationUtils.JDBC_URL_PATTERN.matcher(url);
+            if (matcher.find()) {
+                String proto = matcher.group(1);
+                if ("mariadb".equalsIgnoreCase(proto))
+                    parts.put("engine", "MariaDB");
+                else if ("postgresql".equalsIgnoreCase(proto))
+                    parts.put("engine", "PostgreSQL");
+                parts.put("host", matcher.group(2));
+                parts.put("port", matcher.group(3) != null ? matcher.group(3) : "");
+                parts.put("dbName", matcher.group(4));
+                parts.put("postfix", matcher.group(5) != null ? matcher.group(5) : "");
+            }
+        }
+        return parts;
     }
 
     private JPanel createLegendPanel() {

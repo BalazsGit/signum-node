@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -20,9 +21,12 @@ public final class ThreadPool {
     public static final AtomicBoolean running = new AtomicBoolean(true);
 
     private static final Logger logger = LoggerFactory.getLogger(ThreadPool.class);
+    private final Map<Thread, Long> activeThreadsStartTime = new ConcurrentHashMap<>();
+    private final Map<Thread, String> activeThreadsJobName = new ConcurrentHashMap<>();
 
-    private static ScheduledExecutorService scheduledThreadPool;
+    private ScheduledExecutorService scheduledThreadPool;
     private final Map<Runnable, Long> backgroundJobs = new HashMap<>();
+    private final Map<Runnable, String> backgroundJobNames = new HashMap<>();
     private final Map<Runnable, Long> backgroundJobsCores = new HashMap<>();
     private final List<Runnable> beforeStartJobs = new ArrayList<>();
     private final List<Runnable> lastBeforeStartJobs = new ArrayList<>();
@@ -59,6 +63,7 @@ public final class ThreadPool {
         }
         if (!propertyService.getBoolean("brs.disable" + name + "Thread", false)) {
             backgroundJobs.put(runnable, timeUnit.toMillis(delay));
+            backgroundJobNames.put(runnable, name);
         } else {
             logger.info("Will not run {} thread", name);
         }
@@ -100,24 +105,53 @@ public final class ThreadPool {
         scheduledThreadPool = Executors.newScheduledThreadPool(totalThreads);
         for (Map.Entry<Runnable, Long> entry : backgroundJobs.entrySet()) {
             final Runnable inner = entry.getKey();
+            final String name = backgroundJobNames.get(inner);
             Runnable toRun = () -> {
+                Thread currentThread = Thread.currentThread();
+                String oldName = currentThread.getName();
+                currentThread.setName(name + "Thread");
+                activeThreadsStartTime.put(currentThread, System.currentTimeMillis());
+                activeThreadsJobName.put(currentThread, name);
                 try {
                     inner.run();
                 } catch (Exception e) {
-                    logger.warn(
-                            "Uncaught exception while running background thread " + inner.getClass().getSimpleName(),
-                            e);
+                    logger.warn("Uncaught exception while running background thread " + name, e);
+                } finally {
+                    activeThreadsStartTime.remove(currentThread);
+                    activeThreadsJobName.remove(currentThread);
+                    if (!running.get()) {
+                        logger.info("Background thread '{}' stopped.", name);
+                    }
+                    Thread.currentThread().setName(oldName);
                 }
             };
             scheduledThreadPool.scheduleWithFixedDelay(toRun, 0, Math.max(entry.getValue() / timeMultiplier, 1),
                     TimeUnit.MILLISECONDS);
         }
-        backgroundJobs.clear();
+        // backgroundJobs.clear(); // Keep for debugging if needed, or clear later
 
         // Starting multicore-Threads:
         for (Map.Entry<Runnable, Long> entry : backgroundJobsCores.entrySet()) {
+            final Runnable inner = entry.getKey();
+            final String name = "CoreTask-" + inner.getClass().getSimpleName();
+            Runnable toRun = () -> {
+                Thread currentThread = Thread.currentThread();
+                activeThreadsStartTime.put(currentThread, System.currentTimeMillis());
+                activeThreadsJobName.put(currentThread, name);
+                try {
+                    inner.run();
+                } catch (Exception e) {
+                    logger.warn("Uncaught exception while running background thread " + name, e);
+                } finally {
+                    activeThreadsStartTime.remove(currentThread);
+                    activeThreadsJobName.remove(currentThread);
+                    if (!running.get()) {
+                        logger.info("Core background thread '{}' stopped.", name);
+                    }
+                }
+            };
             for (int i = 0; i < cores; i++)
-                scheduledThreadPool.scheduleWithFixedDelay(entry.getKey(), 0,
+                scheduledThreadPool.scheduleWithFixedDelay(toRun, 0,
                         Math.max(entry.getValue() / timeMultiplier, 1), TimeUnit.MILLISECONDS);
         }
         backgroundJobsCores.clear();
@@ -135,29 +169,57 @@ public final class ThreadPool {
 
     public synchronized void shutdown() {
         if (scheduledThreadPool != null) {
-            logger.info("Stopping background jobs...");
-            shutdownExecutor(scheduledThreadPool);
+            shutdownExecutor("MainThreadPool", scheduledThreadPool);
             scheduledThreadPool = null;
-            logger.info("...Done");
         }
     }
 
     public void shutdownExecutor(ExecutorService executor) {
+        shutdownExecutor("UnnamedExecutor", executor);
+    }
+
+    public void shutdownExecutor(String name, ExecutorService executor) {
         running.lazySet(false); // Signal all loops to stop
         if (executor == null || executor.isTerminated()) {
             return;
         }
-        executor.shutdown(); // Disable new tasks from being submitted
+        logger.info("Stopping executor '{}'...", name);
+        long shutdownStartTime = System.currentTimeMillis();
+        executor.shutdown();
+
+        // List what is currently running ONLY for the main pool to avoid misleading
+        // logs
+        if ("MainThreadPool".equals(name) && !activeThreadsJobName.isEmpty()) {
+            logger.info("The following background jobs are still executing and being awaited: {}",
+                    new ArrayList<>(activeThreadsJobName.values()));
+        }
+
+        int timeout = propertyService.getInt(Props.BRS_SHUTDOWN_TIMEOUT);
+        logger.info("Waiting up to {} seconds for executor termination...", timeout);
         try {
             // Wait a while for existing tasks to terminate
-            if (!executor.awaitTermination(propertyService.getInt(Props.BRS_SHUTDOWN_TIMEOUT), TimeUnit.SECONDS)) {
-                logger.warn("Executor service did not terminate gracefully within timeout. Forcing shutdown...");
+            if (!executor.awaitTermination(timeout, TimeUnit.SECONDS)) {
+                logger.warn("Executor service '{}' did not terminate gracefully within {}s. Forcing shutdown...", name,
+                        timeout);
+
+                // Report exactly which threads are stuck and for how long
+                activeThreadsJobName.forEach((thread, jobName) -> {
+                    Long startTime = activeThreadsStartTime.get(thread);
+                    long duration = (startTime != null) ? (System.currentTimeMillis() - startTime) : -1;
+                    logger.warn("Stuck Job: '{}' on thread '{}' (active for {} ms)", jobName,
+                            thread.getName(), duration);
+                });
+
                 executor.shutdownNow(); // Cancel currently executing tasks
                 // Wait a while for tasks to respond to being cancelled
                 if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
-                    logger.error("Executor service did not terminate even after forcing shutdown.");
-                    throw new RuntimeException("Executor service " + executor + " failed to terminate.");
+                    logger.error("Executor service '{}' did not terminate even after forcing shutdown (shutdownNow).",
+                            name);
+                    throw new RuntimeException("Executor service '" + name + "' failed to terminate.");
                 }
+            } else {
+                long totalShutdownTime = System.currentTimeMillis() - shutdownStartTime;
+                logger.info("Executor service '{}' terminated cleanly in {} ms.", name, totalShutdownTime);
             }
         } catch (InterruptedException e) {
             executor.shutdownNow(); // (Re-)Cancel if current thread also interrupted

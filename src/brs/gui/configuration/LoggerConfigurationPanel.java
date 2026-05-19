@@ -211,7 +211,7 @@ public class LoggerConfigurationPanel extends JPanel {
         searchPanel.add(new JLabel("Search Configuration:"));
         JTextField searchField = new JTextField();
         searchField.putClientProperty("JTextField.placeholderText", "Type to filter properties...");
-        ConfigurationUtils.styleTextField(searchField);
+        ConfigurationUtils.styleInputComponent(searchField);
         searchPanel.add(searchField, "growx");
 
         searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
@@ -333,7 +333,7 @@ public class LoggerConfigurationPanel extends JPanel {
                     row.label.setFont(UIManager.getFont("Label.font").deriveFont(Font.BOLD));
                 }
                 if (row.input != null) {
-                    ConfigurationUtils.styleTextField(row.input);
+                    ConfigurationUtils.styleInputComponent(row.input);
                     ConfigurationUtils.fixComponentSize(row.input);
                 }
             }
@@ -401,7 +401,7 @@ public class LoggerConfigurationPanel extends JPanel {
 
     private JTextField createStyledTextField(String text) {
         JTextField textField = new JTextField(text);
-        ConfigurationUtils.styleTextField(textField);
+        ConfigurationUtils.styleInputComponent(textField);
         ConfigurationUtils.fixComponentSize(textField);
         return textField;
     }

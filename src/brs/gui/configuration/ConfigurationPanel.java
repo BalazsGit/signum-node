@@ -1,6 +1,7 @@
 package brs.gui.configuration;
 
 import brs.gui.GuiConstants;
+import brs.gui.configuration.databaseConfiguration.DatabaseConfigurationPanel;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 
@@ -75,10 +76,14 @@ public class ConfigurationPanel extends JPanel {
 
     public boolean checkUnsavedChanges() {
         // Orchestrate unsaved changes check across all tabs
-        if (!nodeConfig.checkUnsavedChangesAndProceed(null, null))
+        if (!nodeConfig.checkUnsavedChangesAndProceed(null, null)) {
             return false;
-        if (!loggerConfig.checkUnsavedChangesAndProceed(null, null))
+        }
+        if (!loggerConfig.checkUnsavedChangesAndProceed(null, null)) {
             return false;
+        }
+        // if (!dbConfig.checkUnsavedChangesAndProceed(null, null))
+        // return false;
         return lafConfig.checkUnsavedChangesAndProceed(true, null, null);
     }
 

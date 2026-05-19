@@ -325,6 +325,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
         logger.info("Shutting down blockchain processor...");
 
+        // NEW: Shut down transaction processor first
+        transactionProcessor.shutdown();
+
         if (isMaintenanceRunning.get()) {
             String phase = isPruning.get() ? "pruning" : "trimming";
             logger.info("Waiting for database {} maintenance to finish before shutdown...", phase);
@@ -403,7 +406,18 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         Thread.currentThread().interrupt();
                     }
                 }
+                logger.info("Shutting down maintenance executor...");
                 maintenanceExecutor.shutdown();
+                try {
+                    if (!maintenanceExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
+                        logger.warn("Maintenance executor did not terminate in 10 seconds.");
+                        maintenanceExecutor.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
+                    logger.warn("Interrupted while waiting for maintenance executor to terminate.");
+                    maintenanceExecutor.shutdownNow();
+                    Thread.currentThread().interrupt();
+                }
 
                 blockListeners.clear();
                 for (Peers.Event event : Peers.Event.values()) {
@@ -762,7 +776,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     request.addProperty("requestType", "getCumulativeDifficulty");
                     getCumulativeDifficultyRequest = JSON.prepareRequest(request);
                 }
-                while (!Thread.currentThread().isInterrupted() && ThreadPool.running.get()) {
+                while (!Thread.currentThread().isInterrupted() && ThreadPool.running.get() && !isShutdown.get()) {
                     try {
 
                         if (getMoreBlocksPause.get() || getMoreBlocksAutoPause.get()) {
@@ -1174,7 +1188,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             private void processFork(Peer peer, final List<Block> forkBlocks, long forkBlockId) {
                 logger.debug("A fork is detected. Waiting for cache to be processed.");
                 downloadCache.lockCache(); // dont let anything add to cache!
-                while (!Thread.currentThread().isInterrupted() && ThreadPool.running.get()) {
+                while (!Thread.currentThread().isInterrupted() && ThreadPool.running.get() && !isShutdown.get()) {
                     if (downloadCache.size() == 0) {
                         break;
                     }
@@ -1230,9 +1244,19 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                                     "Local state is likely inconsistent with a better chain. Initiating aggressive recovery at height {}.",
                                                     forkBlock.getHeight());
 
-                                            // Aggressive rollback to common ancestor. Reset caches and don't restore
-                                            // our "bad" fork.
-                                            popOffTo(forkBlock.getHeight() - 1);
+                                            // TRAP RECOVERY: If we are already at or above the fork block,
+                                            // we must roll back further to clear the corrupted state.
+                                            int recoveryHeight = forkBlock.getHeight() - 1;
+                                            if (blockchain.getHeight() <= forkBlock.getHeight()) {
+                                                // If rollback to ancestor is a no-op, go deeper (e.g., 10 blocks)
+                                                recoveryHeight = Math.max(getMinRollbackHeight(),
+                                                        blockchain.getHeight() - 10);
+                                                logger.warn(
+                                                        "No-op rollback detected. Forcing deeper recovery to height {}.",
+                                                        recoveryHeight);
+                                            }
+
+                                            popOffTo(recoveryHeight);
                                             transactionProcessor.requeueAllUnconfirmedTransactions();
                                             logger.info(
                                                     "Recovery initiated. Node will attempt to re-sync from a clean state.");
@@ -1305,7 +1329,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         // resetting cache because we have blocks that cannot be processed.
         // pushblock removes the block from cache.
         Runnable blockImporterThread = () -> {
-            while (!Thread.interrupted() && ThreadPool.running.get() && downloadCache.size() > 0) {
+            while (!Thread.interrupted() && ThreadPool.running.get() && !isShutdown.get() && downloadCache.size() > 0) {
                 if (blockImporterPause.get() || blockImporterAutoPause.get()) {
                     return;
                 }
@@ -1347,7 +1371,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                     "Local state inconsistency detected during import. Initiating aggressive recovery at height {}.",
                                     lastBlock.getHeight());
 
-                            popOffTo(lastBlock.getHeight() - 1);
+                            int recoveryHeight = lastBlock.getHeight() - 1;
+                            if (blockchain.getHeight() <= lastBlock.getHeight()) {
+                                // Go deeper to ensure we cross the point of divergence
+                                recoveryHeight = Math.max(getMinRollbackHeight(), blockchain.getHeight() - 10);
+                                logger.warn(
+                                        "No-op rollback during import recovery. Forcing deeper recovery to height {}.",
+                                        recoveryHeight);
+                            }
+
+                            popOffTo(recoveryHeight);
                             transactionProcessor.requeueAllUnconfirmedTransactions();
                             logger.info("Recovery initiated. The node will attempt to re-sync from a cleaner state.");
                         } else {
@@ -1381,7 +1414,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             boolean verifyWithOcl;
             int oclThreshold = oclVerify ? oclUnverifiedQueue : Integer.MAX_VALUE;
 
-            while (!Thread.interrupted() && ThreadPool.running.get()) {
+            while (!Thread.interrupted() && ThreadPool.running.get() && !isShutdown.get()) {
                 if (isShutdown.get()) {
                     return;
                 }
@@ -3427,6 +3460,23 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             throw new ConsensusMismatchException(
                     "Calculated remaining amount doesn't add up for block " + block.getHeight());
         }
+        if (calculatedRemainingAmount > Constants.MAX_BALANCE_NQT || calculatedRemainingAmount < 0) {
+            throw new ConsensusMismatchException(
+                    "Total supply violation detected in block execution: " + calculatedRemainingAmount);
+        }
+        // The cashback and burnt fee checks are based on the block header values, which
+        // are set by the miner and should be consistent with the calculated values from
+        // transactions and services.
+        if (block.getTotalFeeCashBackNqt() > Constants.MAX_BALANCE_NQT || block.getTotalFeeCashBackNqt() < 0) {
+            throw new ConsensusMismatchException(
+                    "Total cashback fee violation detected in block header: " + block.getTotalFeeCashBackNqt()
+                            + " for block " + block.getHeight());
+        }
+        if (block.getTotalFeeBurntNqt() > Constants.MAX_BALANCE_NQT || block.getTotalFeeBurntNqt() < 0) {
+            throw new ConsensusMismatchException(
+                    "Total burnt fee violation detected in block header: " + block.getTotalFeeBurntNqt()
+                            + " for block " + block.getHeight());
+        }
         if (remainingFee != null && remainingFee != calculatedRemainingFee) {
             throw new ConsensusMismatchException(
                     "Calculated remaining fee doesn't add up for block " + block.getHeight());
@@ -4025,6 +4075,14 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     totalFeeBurntNqt += atBlock.getTotalFees();
                 }
                 totalAmountNqt += atBlock.getTotalAmount();
+            }
+
+            // Overflow/Underflow check before block creation
+            if (totalAmountNqt < 0 || totalAmountNqt > Constants.MAX_BALANCE_NQT ||
+                    totalFeeNqt < 0 || totalFeeNqt > Constants.MAX_BALANCE_NQT ||
+                    totalFeeCashBackNqt < 0 || totalFeeBurntNqt < 0) {
+                throw new BlockNotAcceptedException(
+                        "Invalid totals calculated during block generation - range violation suspected.");
             }
 
             // ATs for block

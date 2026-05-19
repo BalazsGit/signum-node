@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import static brs.web.api.http.common.ResultFields.UNCONFIRMED_TRANSACTIONS_RESPONSE;
@@ -38,6 +39,7 @@ public class TransactionProcessorImpl implements TransactionProcessor {
     private static final Logger logger = LoggerFactory.getLogger(TransactionProcessorImpl.class);
 
     private final boolean testUnconfirmedTransactions;
+    private final AtomicBoolean isShutdown = new AtomicBoolean(false);
 
     private final Object unconfirmedTransactionsSyncObj = new Object();
 
@@ -77,6 +79,10 @@ public class TransactionProcessorImpl implements TransactionProcessor {
 
         Runnable getUnconfirmedTransactions = () -> {
             // The initial peer selection and request should be outside the synchronized
+            if (isShutdown.get()) {
+                logger.debug("TransactionProcessor is shutting down, skipping pull unconfirmed transactions.");
+                return;
+            }
             // block
             // to avoid blocking the entire unconfirmedTransactionsSyncObj while waiting for
             // network I/O.
@@ -464,5 +470,11 @@ public class TransactionProcessorImpl implements TransactionProcessor {
 
     public void removeForgedTransactions(List<Transaction> transactions) {
         this.unconfirmedTransactionStore.removeForgedTransactions(transactions);
+    }
+
+    @Override
+    public void shutdown() {
+        isShutdown.set(true);
+        logger.info("Transaction processor shutdown initiated.");
     }
 }

@@ -30,28 +30,60 @@ import java.util.stream.Stream;
 
 public class ConfigurationUtils {
 
-    public static void styleTextField(JComponent field) {
-        if (field instanceof JTextField || field instanceof JPasswordField) {
-            field.setFont(UIManager.getFont("TextField.font"));
-            field.setBorder(BorderFactory.createCompoundBorder(
+    /**
+     * Styles input components consistently using the global label font and standard
+     * padding.
+     *
+     * @param comp The component to style.
+     */
+    public static void styleInputComponent(JComponent comp) {
+        comp.setFont(UIManager.getFont("Label.font"));
+        if (comp instanceof JTextField || comp instanceof JPasswordField) {
+            comp.setBorder(BorderFactory.createCompoundBorder(
                     UIManager.getBorder("TextField.border"),
-                    BorderFactory.createEmptyBorder(4, 6, 4, 6)));
+                    BorderFactory.createEmptyBorder(2, 6, 2, 6)));
         }
     }
 
+    /**
+     * Calculates and sets a fixed height for a component based on font metrics and
+     * standard icon sizes to ensure consistent UI layout across different systems.
+     *
+     * @param comp The component whose size should be fixed.
+     */
     public static void fixComponentSize(JComponent comp) {
         comp.setPreferredSize(null);
         comp.setMinimumSize(null);
-        JButton dummy = new JButton("P",
-                IconFontSwing.buildIcon(FontAwesome.CIRCLE, GuiConstants.getHelpIconSize(), Color.BLACK));
-        Dimension pref = dummy.getPreferredSize();
-        Dimension currentPref = comp.getPreferredSize();
 
-        int targetHeight = Math.max(currentPref.height, pref.height) + 2;
-        comp.setPreferredSize(new Dimension(currentPref.width + 2, targetHeight));
-        comp.setMinimumSize(new Dimension(currentPref.width + 2, targetHeight));
+        // Calculate target height based on font metrics to ensure it scales with font
+        // size
+        Font font = comp.getFont() != null ? comp.getFont() : UIManager.getFont("Label.font");
+        FontMetrics fm = comp.getFontMetrics(font);
+        int fontHeight = fm.getHeight();
+
+        // Ensure height is at least enough for the help icons used in the rows (usually
+        // 16-18px)
+        int iconHeight = Math.round(GuiConstants.getHelpIconSize());
+        int targetHeight = Math.max(fontHeight + 10, iconHeight + 6);
+
+        Dimension currentPref = comp.getPreferredSize();
+        Dimension size = new Dimension(currentPref.width + 4, targetHeight);
+        comp.setPreferredSize(size);
+        comp.setMinimumSize(size);
+        comp.setMaximumSize(new Dimension(Short.MAX_VALUE, targetHeight));
     }
 
+    /**
+     * Creates a custom {@link ListCellRenderer} for profile selection combo boxes.
+     * Highlights the running and active profiles using bold fonts and
+     * status-specific colors.
+     *
+     * @param runningProfileSupplier Supplier for the name of the currently running
+     *                               profile.
+     * @param activeProfileSupplier  Supplier for the name of the currently active
+     *                               (applied) profile.
+     * @return A custom cell renderer.
+     */
     public static ListCellRenderer<Object> createProfileComboBoxRenderer(Supplier<String> runningProfileSupplier,
             Supplier<String> activeProfileSupplier) {
         return new DefaultListCellRenderer() {
@@ -84,6 +116,18 @@ public class ConfigurationUtils {
         };
     }
 
+    /**
+     * Saves a set of properties to a file while attempting to preserve the existing
+     * formatting and comments found in the original file.
+     *
+     * @param file        The path to the properties file.
+     * @param props       The properties to save.
+     * @param managedKeys A set of keys that are managed by the application. Keys
+     *                    not in this
+     *                    set found in the file will be preserved if not present in
+     *                    the props.
+     * @throws IOException If an I/O error occurs.
+     */
     public static void savePropertiesPreservingFormat(Path file, Properties props, Set<String> managedKeys)
             throws IOException {
         List<String> lines = Files.exists(file) ? Files.readAllLines(file) : new ArrayList<>();
@@ -134,6 +178,13 @@ public class ConfigurationUtils {
         Files.write(file, newLines);
     }
 
+    /**
+     * Escapes special characters (tab, newline, etc.) in a string for safe storage
+     * in a properties file.
+     *
+     * @param value The value to escape.
+     * @return The escaped string.
+     */
     public static String escapePropertyValue(String value) {
         if (value == null)
             return "";
@@ -144,6 +195,12 @@ public class ConfigurationUtils {
                 .replace("\f", "\\f");
     }
 
+    /**
+     * Ensures that a configuration file exists. Creates parent directories and an
+     * empty file if it's missing.
+     *
+     * @param file The path to the file.
+     */
     public static void ensureConfigFileExists(Path file) {
         if (!Files.exists(file)) {
             try {
@@ -155,14 +212,36 @@ public class ConfigurationUtils {
         }
     }
 
+    /**
+     * Converts a {@link Color} object to a hexadecimal color string (e.g.,
+     * "#ff0000").
+     *
+     * @param color The color to convert.
+     * @return The hex string representation.
+     */
     public static String toHex(Color color) {
         return String.format("#%02x%02x%02x", color.getRed(), color.getGreen(), color.getBlue());
     }
 
+    /**
+     * Resolves the absolute path to a profile file within a specific configuration
+     * structure.
+     *
+     * @param confFolder The base configuration folder.
+     * @param subFolder  The sub-folder (e.g., "node", "logging").
+     * @param fileName   The name of the file.
+     * @return The resolved {@link Path}.
+     */
     public static Path resolveProfilePath(String confFolder, String subFolder, String fileName) {
         return PathUtils.resolvePath(confFolder).resolve(subFolder).resolve(fileName);
     }
 
+    /**
+     * Loads the name of the applied profile from a metadata JSON file.
+     *
+     * @param profileJson Path to the profile.json metadata file.
+     * @return The name of the applied profile, or null if not found.
+     */
     public static String loadAppliedProfile(Path profileJson) {
         if (Files.exists(profileJson)) {
             try (BufferedReader reader = Files.newBufferedReader(profileJson, StandardCharsets.UTF_8)) {
@@ -177,6 +256,13 @@ public class ConfigurationUtils {
         return null;
     }
 
+    /**
+     * Updates the metadata JSON file with the name of the currently applied
+     * profile.
+     *
+     * @param profileJson Path to the profile.json metadata file.
+     * @param profileName The name of the profile being applied.
+     */
     public static void updateAppliedProfile(Path profileJson, String profileName) {
         try {
             JsonObject metadata;
@@ -202,6 +288,18 @@ public class ConfigurationUtils {
         }
     }
 
+    /**
+     * Renames a profile file. Checks if the destination file already exists before
+     * moving.
+     *
+     * @param parent  The parent component for showing error dialogs.
+     * @param oldFile Path to the existing profile file.
+     * @param newFile Path to the new profile destination.
+     * @param oldName Original profile name.
+     * @param newName New profile name.
+     * @return true if the rename was successful.
+     * @throws IOException If a file movement error occurs.
+     */
     public static boolean confirmAndRenameProfile(Component parent, Path oldFile, Path newFile, String oldName,
             String newName) throws IOException {
         if (Files.exists(newFile)) {
@@ -216,6 +314,19 @@ public class ConfigurationUtils {
         return false;
     }
 
+    /**
+     * Configures a set of toolbar buttons with consistent icons and sizes for
+     * profile management.
+     *
+     * @param newBtn             Button for creating a new profile.
+     * @param saveBtn            Button for saving the current profile.
+     * @param applyBtn           Button for applying the profile.
+     * @param renameBtn          Button for renaming the profile.
+     * @param deleteBtn          Button for deleting the profile.
+     * @param reloadBtn          Button for reloading from disk.
+     * @param refreshBtn         Button for refreshing the profile list.
+     * @param resetToDefaultsBtn Button for resetting to application defaults.
+     */
     public static void configureProfileToolbar(
             JButton newBtn, JButton saveBtn, JButton applyBtn,
             JButton renameBtn, JButton deleteBtn, JButton reloadBtn, JButton refreshBtn, JButton resetToDefaultsBtn) {
@@ -256,6 +367,13 @@ public class ConfigurationUtils {
         }
     }
 
+    /**
+     * Creates a {@link JPanel} containing a visual legend for the configuration
+     * status colors.
+     *
+     * @param parent The parent component used for help dialog positioning.
+     * @return A panel showing color boxes and descriptions.
+     */
     public static JPanel createLegendPanel(Component parent) {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 0));
         panel.setBorder(new EmptyBorder(0, 0, 5, 0));
@@ -272,6 +390,14 @@ public class ConfigurationUtils {
         return panel;
     }
 
+    /**
+     * Helper to create an individual legend item consisting of a color box and
+     * label.
+     *
+     * @param color The status color.
+     * @param text  The description of what the color signifies.
+     * @return A configured {@link JPanel}.
+     */
     private static JPanel createLegendItem(Color color, String text) {
         JPanel item = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
         JLabel colorBox = new JLabel("\u25A0");
@@ -281,6 +407,13 @@ public class ConfigurationUtils {
         return item;
     }
 
+    /**
+     * Shows a detailed information dialog explaining the color-coding scheme used
+     * in
+     * configuration panels.
+     *
+     * @param parent The component used as the dialog's owner.
+     */
     public static void showColorLegendHelp(Component parent) {
         String msg = "<html><body style='width: 350px'>" +
                 "<h3>Color Coding Legend</h3>" +
@@ -300,6 +433,15 @@ public class ConfigurationUtils {
         JOptionPane.showMessageDialog(parent, msg, "Color Legend", JOptionPane.INFORMATION_MESSAGE);
     }
 
+    /**
+     * Updates the foreground color of a profile selection combo box based on
+     * whether the
+     * selected item is currently running, active, or modified.
+     *
+     * @param combo   The combo box to update.
+     * @param running The name of the running profile.
+     * @param active  The name of the active (applied) profile.
+     */
     public static void updateProfileComboBoxColor(JComboBox<String> combo, String running, String active) {
         String selected = (String) combo.getSelectedItem();
         if (selected != null && selected.trim().equals(running)) {
@@ -311,10 +453,25 @@ public class ConfigurationUtils {
         }
     }
 
+    /**
+     * Resolves the path to the profile metadata JSON file for a specific
+     * configuration category.
+     *
+     * @param confFolder Base configuration folder.
+     * @param subFolder  Configuration sub-folder (e.g., "node").
+     * @return The path to profile.json.
+     */
     public static Path getProfileMetadataPath(String confFolder, String subFolder) {
         return PathUtils.resolvePath(confFolder).resolve(subFolder).resolve("profile.json");
     }
 
+    /**
+     * Scans a directory for properties-based configuration profiles.
+     *
+     * @param folder          The directory to scan.
+     * @param excludeFileName A filename to exclude (usually the base default file).
+     * @return A list of profile names found (filename minus extension).
+     */
     public static List<String> fetchProfileNames(Path folder, String excludeFileName) {
         if (Files.notExists(folder))
             return new ArrayList<>();

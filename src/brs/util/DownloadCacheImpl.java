@@ -226,13 +226,15 @@ public final class DownloadCacheImpl {
 
     public long getUnverifiedBlockIdFromPos(int pos) {
         long stamp = dcsl.tryOptimisticRead();
-        long reVal = unverified.get(pos);
+        int size = unverified.size();
+        long reVal = (pos >= 0 && pos < size) ? unverified.get(pos) : 0;
 
         if (!dcsl.validate(stamp)) {
 
             stamp = dcsl.readLock();
             try {
-                reVal = unverified.get(pos);
+                size = unverified.size();
+                reVal = (pos >= 0 && pos < size) ? unverified.get(pos) : 0;
             } finally {
                 dcsl.unlockRead(stamp);
             }
@@ -243,6 +245,9 @@ public final class DownloadCacheImpl {
     public Block getFirstUnverifiedBlock() {
         long stamp = dcsl.writeLock();
         try {
+            if (unverified.isEmpty()) {
+                return null;
+            }
             long blockId = unverified.remove(0);
             Block block = blockCache.get(blockId);
             return block;

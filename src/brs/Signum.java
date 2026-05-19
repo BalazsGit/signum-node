@@ -766,17 +766,6 @@ public final class Signum {
                 }
             }
 
-            if (threadPool != null) {
-                try {
-                    Peers.shutdown(threadPool);
-                } catch (Throwable t) {
-                    if (shutdownManager != null) {
-                        shutdownManager.markFailure("Peers");
-                    }
-                    logger.error("Error shutting down Peers", t);
-                }
-            }
-
             if (blockchainProcessor != null) {
                 try {
                     blockchainProcessor.shutdown();
@@ -785,6 +774,17 @@ public final class Signum {
                         shutdownManager.markFailure("BlockchainProcessor");
                     }
                     logger.error("Error shutting down blockchainProcessor", t);
+                }
+            }
+
+            if (threadPool != null) {
+                try {
+                    Peers.shutdown(threadPool);
+                } catch (Throwable t) {
+                    if (shutdownManager != null) {
+                        shutdownManager.markFailure("Peers");
+                    }
+                    logger.error("Error shutting down Peers", t);
                 }
             }
 
