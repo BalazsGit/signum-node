@@ -3182,6 +3182,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 final TransactionDuplicatesCheckerImpl transactionDuplicatesChecker = new TransactionDuplicatesCheckerImpl();
                 long calculatedTotalAmount = 0;
                 long calculatedTotalFee = 0;
+                long expectedTotalFeeCashBack = 0;
                 MessageDigest digest = Crypto.sha256();
                 List<Transaction> transactions = block.getTransactions();
                 long[] feeArray = new long[transactions.size()];
@@ -3272,6 +3273,12 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
                     calculatedTotalAmount += transaction.getAmountNqt();
                     calculatedTotalFee += transaction.getFeeNqt();
+
+                    if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, block.getHeight())) {
+                        expectedTotalFeeCashBack = Convert.safeAdd(expectedTotalFeeCashBack,
+                                transaction.getFeeNqt() / propertyService.getInt(Props.CASH_BACK_FACTOR));
+                    }
+
                     digest.update(transaction.getBytes());
                     indirectIncomingService.processTransaction(transaction);
                     feeArray[slotIdx] = transaction.getFeeNqt();
@@ -3285,6 +3292,14 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         || calculatedTotalFee > block.getTotalFeeNqt()) {
                     throw new BlockNotAcceptedException(
                             "Total amount or fee don't match transaction totals for block " + block.getHeight());
+                }
+
+                if (block.getVersion() >= 4) {
+                    if (block.getTotalFeeCashBackNqt() != expectedTotalFeeCashBack) {
+                        throw new BlockNotAcceptedException("Total fee cashback mismatch for block " + block.getHeight()
+                                + ". Expected: " + expectedTotalFeeCashBack + ", found: "
+                                + block.getTotalFeeCashBackNqt());
+                    }
                 }
 
                 if (Signum.getFluxCapacitor().getValue(FluxValues.SODIUM)
@@ -3447,12 +3462,22 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
         long calculatedRemainingAmount = 0;
         long calculatedRemainingFee = 0;
+        long expectedTotalFeeBurnt = 0;
+
         calculatedRemainingAmount += atBlock.getTotalAmount();
         calculatedRemainingFee += atBlock.getTotalFees();
+        if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, block.getHeight())) {
+            expectedTotalFeeBurnt = Convert.safeAdd(expectedTotalFeeBurnt, atBlock.getTotalFees());
+        }
 
         start = System.nanoTime();
+        long subscriptionFeeNqt = 0;
         if (subscriptionService.isEnabled()) {
-            calculatedRemainingFee += subscriptionService.applyUnconfirmed(block.getTimestamp(), block.getHeight());
+            subscriptionFeeNqt = subscriptionService.applyUnconfirmed(block.getTimestamp(), block.getHeight());
+            calculatedRemainingFee += subscriptionFeeNqt;
+            if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, block.getHeight())) {
+                expectedTotalFeeBurnt = Convert.safeAdd(expectedTotalFeeBurnt, subscriptionFeeNqt);
+            }
         }
         subscriptionTimeNanos = (System.nanoTime() - start);
 
@@ -3463,6 +3488,19 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         if (remainingFee != null && remainingFee != calculatedRemainingFee) {
             throw new ConsensusMismatchException(
                     "Calculated remaining fee doesn't add up for block " + block.getHeight());
+        }
+
+        if (block.getVersion() >= 4) {
+            if (block.getTotalFeeBurntNqt() != expectedTotalFeeBurnt) {
+                throw new ConsensusMismatchException("Total fee burnt mismatch for block " + block.getHeight()
+                        + ". Expected: " + expectedTotalFeeBurnt + ", found: " + block.getTotalFeeBurntNqt());
+            }
+            long totalDeductions = Convert.safeAdd(block.getTotalFeeCashBackNqt(), block.getTotalFeeBurntNqt());
+            if (block.getTotalFeeNqt() < totalDeductions) {
+                throw new ConsensusMismatchException("Total fees (" + block.getTotalFeeNqt()
+                        + ") are less than combined cashback and burn (" + totalDeductions + ") for block "
+                        + block.getHeight());
+            }
         }
 
         start = System.nanoTime();
