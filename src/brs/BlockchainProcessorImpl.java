@@ -2316,7 +2316,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                             "Total amount or fee don't match transaction totals for block " + block.getHeight());
                 }
 
-                if (block.getVersion() >= 4 && Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, block.getHeight())) {
+                if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, block.getHeight())) {
                     long calculatedTotalFeeCashBackNqt = 0;
                     for (Transaction transaction : transactions) {
                         calculatedTotalFeeCashBackNqt = Convert.safeAdd(calculatedTotalFeeCashBackNqt,
@@ -2479,18 +2479,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         }
         atTimeNanos = atEndTime > 0 ? atEndTime - atStartTime : 0;
 
-        long calculatedAtAmount = atBlock.getTotalAmount();
-        long calculatedAtFee = atBlock.getTotalFees();
-        long calculatedSubscriptionFee = 0;
+        long calculatedRemainingAmount = 0;
+        long calculatedRemainingFee = 0;
+        calculatedRemainingAmount += atBlock.getTotalAmount();
+        calculatedRemainingFee += atBlock.getTotalFees();
 
         start = System.nanoTime();
         if (subscriptionService.isEnabled()) {
-            calculatedSubscriptionFee = subscriptionService.applyUnconfirmed(block.getTimestamp(), block.getHeight());
+            calculatedRemainingFee += subscriptionService.applyUnconfirmed(block.getTimestamp(), block.getHeight());
         }
         subscriptionTimeNanos = (System.nanoTime() - start);
-
-        long calculatedRemainingAmount = (block.getVersion() >= 4) ? calculatedAtAmount : 0L;
-        long calculatedRemainingFee = (block.getVersion() >= 4) ? Convert.safeAdd(calculatedAtFee, calculatedSubscriptionFee) : 0L;
 
         if (remainingAmount != null && remainingAmount != calculatedRemainingAmount) {
             throw new BlockNotAcceptedException(
@@ -2500,7 +2498,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             throw new BlockNotAcceptedException(
                     "Calculated remaining fee doesn't add up for block " + block.getHeight());
         }
-         if (block.getVersion() >= 4 && Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, block.getHeight())) {
+        if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, block.getHeight())) {
             if (calculatedRemainingFee != block.getTotalFeeBurntNqt()) {
                 throw new BlockNotAcceptedException("Total fee burnt doesn't match AT and subscription totals for block " + block.getHeight());
             }
@@ -3024,8 +3022,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 if (subscriptionService.isEnabled()) {
                     subscriptionService.clearRemovals();
                     long subscriptionFeeNqt = subscriptionService.calculateFees(blockTimestamp, blockHeight);
-                    if (getBlockVersion() >= 4 && Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, blockHeight)) {
-                        totalFeeNqt = Convert.safeAdd(totalFeeNqt, subscriptionFeeNqt);
+                    totalFeeNqt = Convert.safeAdd(totalFeeNqt, subscriptionFeeNqt);
+                    if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, blockHeight)) {
                         totalFeeBurntNqt = Convert.safeAdd(totalFeeBurntNqt, subscriptionFeeNqt);
                     }
                 }
@@ -3046,11 +3044,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             // digesting AT Bytes
             if (byteAts != null) {
                 payloadSize -= byteAts.length;
-                if (getBlockVersion() >= 4 && Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, blockHeight)) {
-                    totalFeeNqt = Convert.safeAdd(totalFeeNqt, atBlock.getTotalFees());
+                totalFeeNqt = Convert.safeAdd(totalFeeNqt, atBlock.getTotalFees());
+                if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, blockHeight)) {
                     totalFeeBurntNqt = Convert.safeAdd(totalFeeBurntNqt, atBlock.getTotalFees());
-                    totalAmountNqt = Convert.safeAdd(totalAmountNqt, atBlock.getTotalAmount());
                 }
+                totalAmountNqt = Convert.safeAdd(totalAmountNqt, atBlock.getTotalAmount());
             }
 
             // ATs for block
