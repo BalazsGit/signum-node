@@ -2323,7 +2323,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                 transaction.getFeeNqt() / propertyService.getInt(Props.CASH_BACK_FACTOR));
                     }
                     if (calculatedTotalFeeCashBackNqt != block.getTotalFeeCashBackNqt()) {
-                        throw new BlockNotAcceptedException("Total fee cash back doesn't match transaction totals for block " + block.getHeight());
+                        throw new BlockNotAcceptedException(
+                                "Total fee cash back doesn't match transaction totals for block " + block.getHeight());
                     }
                 }
 
@@ -2498,9 +2499,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             throw new BlockNotAcceptedException(
                     "Calculated remaining fee doesn't add up for block " + block.getHeight());
         }
-        if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, block.getHeight())) {
+        if (block.getVersion() >= 4 && Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, block.getHeight())) {
             if (calculatedRemainingFee != block.getTotalFeeBurntNqt()) {
-                throw new BlockNotAcceptedException("Total fee burnt doesn't match AT and subscription totals for block " + block.getHeight());
+                throw new BlockNotAcceptedException(
+                        "Total fee burnt doesn't match AT and subscription totals for block " + block.getHeight());
             }
         }
 
