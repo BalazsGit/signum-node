@@ -3171,7 +3171,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 }
                 if (!block.isVerified() && !blockService.verifyGenerationSignature(block)) {
                     throw new GenerationSignatureException(
-
                             "Generation signature verification failed for block " + block.getHeight());
                 }
                 if (!blockService.verifyBlockSignature(block)) {
