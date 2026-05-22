@@ -267,6 +267,8 @@ public class Props {
 
     public static final Prop<Boolean> AUTO_POP_OFF_ENABLED = new Prop<>("node.autoPopOff.enable", true);
 
+    public static final Prop<Boolean> POP_OFF_SKIP_DB_CHECK = new Prop<>("node.popOff.skipDatabaseCheck", false);
+
     public static final Prop<Boolean> AUTO_CONSISTENCY_RESOLVE_ENABLED = new Prop<>(
             "node.autoConsistencyResolve.enable", true);
 

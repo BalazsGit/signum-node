@@ -349,6 +349,7 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(systemPanel, Props.SETTINGS_DIR, "Settings Dir");
         addProperty(systemPanel, Props.ICON_LOCATION, "Icon Location");
         addProperty(systemPanel, Props.AUTO_POP_OFF_ENABLED, "Enable Auto Pop-Off");
+        addProperty(systemPanel, Props.POP_OFF_SKIP_DB_CHECK, "Skip DB Check on Manual Pop-Off");
         addProperty(systemPanel, Props.AUTO_CONSISTENCY_RESOLVE_ENABLED, "Enable Auto DB Resolve");
         addProperty(systemPanel, Props.INDIRECT_INCOMING_SERVICE_ENABLE, "Enable Indirect Incoming Service");
         addProperty(systemPanel, Props.BRS_AT_PROCESSOR_CACHE_BLOCK_COUNT, "AT Processor Cache (Blocks)");
@@ -2798,6 +2799,11 @@ public class NodeConfigurationPanel extends JPanel {
         helpTexts.put(Props.AUTO_POP_OFF_ENABLED.getName(),
                 "Enables automatic block pop-off when a fork is detected."
                         + "<br>Helps the node stay on the correct chain.");
+
+        helpTexts.put(Props.POP_OFF_SKIP_DB_CHECK.getName(),
+                "If enabled, skips the database consistency check after each block is removed during a manual pop-off operation."
+                        + "<br><b>Enabling this significantly speeds up large pop-offs</b> because the node won't re-calculate the entire database state for every single block removed."
+                        + "<br><br><b>Warning:</b> This risks leaving the database in an inconsistent state if an error occurs during the process.");
 
         helpTexts.put(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED.getName(),
                 "Enables automatic resolution of database inconsistencies at startup.");
