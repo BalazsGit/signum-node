@@ -2725,7 +2725,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
      */
     private void addPermissionHeaderRow(JPanel panel) {
         panel.add(new JLabel(""), "align right"); // Empty label for the first column
-        JLabel tableHeader = new JLabel("Table");
+        JLabel tableHeader = new JLabel("Database");
         tableHeader.setFont(tableHeader.getFont().deriveFont(Font.BOLD));
         panel.add(tableHeader, "growx, align center");
         JLabel permissionHeader = new JLabel("Permissions");
