@@ -68,8 +68,8 @@ public class Launcher {
 
         // 2. Resolve paths and detect profiles before SLF4J loads
         Path confPath = Paths.get(confFolder).toAbsolutePath().normalize();
-        Path nodePath = confPath.resolve(Signum.NODE_CONF_DIR);
-        Path loggingPath = confPath.resolve(Signum.LOGGING_CONF_DIR);
+        Path nodePath = confPath.resolve(Signum.NODE_SUBFOLDER);
+        Path loggingPath = confPath.resolve(Signum.NODE_LOGGING_SUBFOLDER);
 
         detectProfiles(nodePath, loggingPath);
 
@@ -157,7 +157,7 @@ public class Launcher {
                         String p = settings.get("appliedProfile").getAsString();
                         if ("node-default".equals(p)) {
                             Signum.PROPERTIES_NAME = Signum.DEFAULT_PROPERTIES_NAME;
-                        } else if (!Signum.NODE_CONF_DIR.equals(p)) {
+                        } else if (!Signum.NODE_SUBFOLDER.equals(p)) {
                             Signum.PROPERTIES_NAME = p + ".properties";
                         }
                     }
@@ -172,7 +172,7 @@ public class Launcher {
                         String p = settings.get("appliedProfile").getAsString();
                         if ("logging-default".equals(p)) {
                             Signum.LOGGING_PROPERTIES_NAME = Signum.DEFAULT_LOGGING_PROPERTIES_NAME;
-                        } else if (!Signum.LOGGING_CONF_DIR.equals(p)) {
+                        } else if (!Signum.NODE_LOGGING_SUBFOLDER.equals(p)) {
                             Signum.LOGGING_PROPERTIES_NAME = p + ".properties";
                         }
                     }
