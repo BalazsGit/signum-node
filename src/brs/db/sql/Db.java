@@ -19,6 +19,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -147,7 +148,7 @@ public final class Db {
             throw new IllegalStateException("Not in transaction");
         }
         // noinspection unchecked
-        return (Map<SignumKey, V>) transactionCaches.get().computeIfAbsent(tableName, k -> new HashMap<>());
+        return (Map<SignumKey, V>) transactionCaches.get().computeIfAbsent(tableName, k -> new LinkedHashMap<>());
     }
 
     static <V> Map<SignumKey, V> getBatch(String tableName) {
@@ -155,7 +156,7 @@ public final class Db {
             throw new IllegalStateException("Not in transaction");
         }
         // noinspection unchecked
-        return (Map<SignumKey, V>) transactionBatches.get().computeIfAbsent(tableName, k -> new HashMap<>());
+        return (Map<SignumKey, V>) transactionBatches.get().computeIfAbsent(tableName, k -> new LinkedHashMap<>());
     }
 
     public static boolean isInTransaction() {
@@ -174,8 +175,8 @@ public final class Db {
             Connection con = databaseInstance.getDataSource().getConnection();
             con.setAutoCommit(false);
             localConnection.set(con);
-            transactionCaches.set(new HashMap<>());
-            transactionBatches.set(new HashMap<>());
+            transactionCaches.set(new LinkedHashMap<>());
+            transactionBatches.set(new LinkedHashMap<>());
             return con;
         } catch (Exception e) {
             throw new RuntimeException(e.toString(), e);
