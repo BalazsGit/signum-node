@@ -86,10 +86,21 @@ public final class Signum {
     public static final String APPLICATION = "BRS";
 
     public static final String CONF_FOLDER = "../conf";
+    public static final String NODE_CONF_DIR = "node";
+    public static final String LOGGING_CONF_DIR = "logging";
+    public static final String NODE_CONF_PATH = CONF_FOLDER + "/" + NODE_CONF_DIR;
+    public static final String LOGGING_CONF_PATH = CONF_FOLDER + "/" + LOGGING_CONF_DIR;
     public static final String DEFAULT_PROPERTIES_NAME = "node-default.properties";
     public static String PROPERTIES_NAME = "node.properties";
     public static final String DEFAULT_LOGGING_PROPERTIES_NAME = "logging-default.properties";
     public static String LOGGING_PROPERTIES_NAME = "logging.properties";
+
+    /**
+     * Stores log messages produced during the bootstrap phase before the GUI is
+     * ready.
+     */
+    public static final List<String> BOOTSTRAP_LOGS = java.util.Collections
+            .synchronizedList(new java.util.ArrayList<>());
 
     public static final Option CONF_FOLDER_OPTION = Option.builder("c")
             .longOpt("config")
@@ -108,7 +119,7 @@ public final class Signum {
                     .longOpt("help")
                     .build());
 
-    private static Logger logger = LoggerFactory.getLogger(Signum.class);
+    private static Logger logger;
 
     private static Stores stores;
     private static Dbs dbs;
@@ -137,90 +148,79 @@ public final class Signum {
     private static AtomicBoolean isInitialized = new AtomicBoolean(false); // New flag for initialization
 
     private static PropertyService loadProperties(String confFolder) {
-        logger.info("Initializing Signum Node version {}", VERSION);
-
         Path confPath = PathUtils.resolvePath(confFolder);
-        logger.info("Configurations from folder {}", confPath);
+        CaselessProperties properties = new CaselessProperties();
+        Path nodePath = confPath.resolve(NODE_CONF_DIR);
 
-        String fallbackNodePropertiesName = PROPERTIES_NAME; // Store the initial "node.properties"
-        CaselessProperties defaultProperties = new CaselessProperties();
-        File defaultPropsFile = confPath.resolve(DEFAULT_PROPERTIES_NAME).toFile();
-        try (Reader reader = new InputStreamReader(new FileInputStream(defaultPropsFile), StandardCharsets.UTF_8)) {
-            logger.info("Loading default properties from {}", defaultPropsFile.getAbsolutePath());
-            defaultProperties.load(reader);
-            defaultProperties.setProperty(Props.SETTINGS_DIR.getName(), Props.SETTINGS_DIR.getDefaultValue());
-        } catch (IOException e) {
-            throw new RuntimeException("Error loading " + DEFAULT_PROPERTIES_NAME, e);
-        }
+        if (logger != null)
+            logger.info("Initializing Signum Node version {}", VERSION);
+        if (logger != null)
+            logger.info("Configurations from folder {}", confPath.toAbsolutePath());
 
-        // Detect applied profiles from metadata before loading
-        try {
-            // Check for applied node configuration profile
-            Path nodeProfilePath = confPath.resolve("node").resolve("profile.json");
-            if (Files.exists(nodeProfilePath)) {
-                try (BufferedReader reader = Files.newBufferedReader(nodeProfilePath, StandardCharsets.UTF_8)) {
-                    JsonObject settings = JsonParser.parseReader(reader).getAsJsonObject();
-                    if (settings.has("appliedProfile")) {
-                        String p = settings.get("appliedProfile").getAsString();
-                        if ("node-default".equals(p)) {
-                            PROPERTIES_NAME = DEFAULT_PROPERTIES_NAME;
-                        } else if (!"node".equals(p)) {
-                            Path profilePath = confPath.resolve("node").resolve(p + ".properties");
-                            if (Files.exists(profilePath)) {
-                                PROPERTIES_NAME = p + ".properties";
-                            }
-                        }
-                    }
-                }
-            }
+        Path fileToLoad = resolvePropertiesPath(nodePath, PROPERTIES_NAME, DEFAULT_PROPERTIES_NAME, confPath);
 
-            // Check for applied logging configuration profile
-            Path loggingProfilePath = confPath.resolve("logging").resolve("profile.json");
-            if (Files.exists(loggingProfilePath)) {
-                try (BufferedReader reader = Files.newBufferedReader(loggingProfilePath, StandardCharsets.UTF_8)) {
-                    JsonObject settings = JsonParser.parseReader(reader).getAsJsonObject();
-                    if (settings.has("appliedProfile")) {
-                        String p = settings.get("appliedProfile").getAsString();
-                        if ("logging-default".equals(p)) {
-                            LOGGING_PROPERTIES_NAME = DEFAULT_LOGGING_PROPERTIES_NAME;
-                        } else if (!"logging".equals(p)) {
-                            Path profilePath = confPath.resolve("logging").resolve(p + ".properties");
-                            if (Files.exists(profilePath)) {
-                                LOGGING_PROPERTIES_NAME = p + ".properties";
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            logger.debug("Error detecting applied profiles", e);
-        }
-
-        CaselessProperties properties = new CaselessProperties(defaultProperties);
-        Path propsPath = PROPERTIES_NAME.equals(DEFAULT_PROPERTIES_NAME)
-                ? confPath.resolve(PROPERTIES_NAME)
-                : confPath.resolve("node").resolve(PROPERTIES_NAME);
-        File propsFile = propsPath.toFile();
-
-        if (!propsFile.exists() && !PROPERTIES_NAME.equals(fallbackNodePropertiesName)) {
-            logger.warn("Active profile file {} not found, falling back to {}", PROPERTIES_NAME,
-                    fallbackNodePropertiesName);
-            PROPERTIES_NAME = fallbackNodePropertiesName;
-            propsFile = confPath.resolve("node").resolve(PROPERTIES_NAME).toFile();
-        }
-
-        if (propsFile.exists()) {
-            try (Reader reader = new InputStreamReader(new FileInputStream(propsFile), StandardCharsets.UTF_8)) {
-                logger.info("Loading custom user properties from {}", propsFile.getAbsolutePath());
+        if (fileToLoad != null) {
+            try (Reader reader = new InputStreamReader(new FileInputStream(fileToLoad.toFile()),
+                    StandardCharsets.UTF_8)) {
+                if (logger != null)
+                    logger.info("Loading properties from {}", fileToLoad.toAbsolutePath());
                 properties.load(reader);
+                // Update global variable to reflect actual file used
+                PROPERTIES_NAME = nodePath.relativize(fileToLoad).toString();
             } catch (IOException e) {
-                logger.info("Custom user properties file {} not loaded", propsFile.getName(), e);
+                if (logger != null) {
+                    Path fileName = fileToLoad.getFileName();
+                    logger.warn("Error loading {}, using internal defaults.",
+                            fileName != null ? fileName.toString() : "properties");
+                }
             }
         } else {
-            logger.info("Custom user properties file {} not found", propsFile.getName());
+            if (logger != null)
+                logger.info("No property files found in {}. Using internal defaults.", nodePath);
+        }
+
+        // Ensure SETTINGS_DIR is set if not in file
+        if (properties.getProperty(Props.SETTINGS_DIR.getName()) == null) {
+            properties.setProperty(Props.SETTINGS_DIR.getName(), Props.SETTINGS_DIR.getDefaultValue());
         }
 
         return new PropertyServiceImpl(properties);
+    }
+
+    public static Path resolvePropertiesPath(Path dir, String fileName, String defaultFileName, Path confPath) {
+        // 1. Priority: check appliedProfile in profile.json
+        Path profileJsonPath = dir.resolve("profile.json");
+        if (Files.exists(profileJsonPath)) {
+            try (BufferedReader reader = Files.newBufferedReader(profileJsonPath, StandardCharsets.UTF_8)) {
+                JsonObject profileJson = JsonParser.parseReader(reader).getAsJsonObject();
+                if (profileJson.has("appliedProfile")) {
+                    String appliedProfileName = profileJson.get("appliedProfile").getAsString();
+                    if (appliedProfileName != null && !appliedProfileName.isEmpty()) {
+                        Path profileProps = dir.resolve(appliedProfileName + ".properties");
+                        if (Files.exists(profileProps)) {
+                            return profileProps;
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        // 2. Priority: dir/fileName
+        Path propsFile = dir.resolve(fileName);
+        if (Files.exists(propsFile)) {
+            return propsFile;
+        }
+        // 3. Priority: dir/defaultFileName
+        Path defaultInDir = dir.resolve(defaultFileName);
+        if (Files.exists(defaultInDir)) {
+            return defaultInDir;
+        }
+        // 4. Priority: conf/defaultFileName
+        Path defaultInConf = confPath.resolve(defaultFileName);
+        if (Files.exists(defaultInConf)) {
+            return defaultInConf;
+        }
+        return null;
     }
 
     private Signum() {
@@ -271,14 +271,23 @@ public final class Signum {
         Runtime.getRuntime().addShutdownHook(new Thread(Signum::shutdown));
         String confFolder = CONF_FOLDER;
         try {
-            CommandLine cmd = new DefaultParser().parse(CLI_OPTIONS, args);
+            CommandLine cmd = new DefaultParser().parse(CLI_OPTIONS, args, true);
             if (cmd.hasOption(CONF_FOLDER_OPTION.getOpt())) {
                 confFolder = cmd.getOptionValue(CONF_FOLDER_OPTION.getOpt());
             }
         } catch (Exception e) {
-            logger.error("Exception parsing command line arguments", e);
+            System.err.println("Exception parsing command line arguments: " + e.getMessage());
         }
         init(confFolder);
+    }
+
+    public static void setLogger(Logger l) {
+        logger = l;
+    }
+
+    private static void ensureLogger() {
+        if (logger == null)
+            logger = LoggerFactory.getLogger(Signum.class);
     }
 
     private static boolean validateVersionNotDev(PropertyService propertyService) {
@@ -296,81 +305,39 @@ public final class Signum {
     public static void initShutdown() {
         isShutdown.set(false);
         nodeStopped.set(false);
-        isInitialized.set(false); // Reset initialization flag on shutdown init
+        isInitialized.set(false);
     }
 
     public static void init(CaselessProperties customProperties) {
         if (isInitialized.compareAndSet(false, true)) {
+            ensureLogger();
             loadWallet(new PropertyServiceImpl(customProperties));
         } else {
-            logger.warn("Signum node already initialized. Skipping re-initialization.");
+            if (logger != null)
+                logger.warn("Signum node already initialized. Skipping re-initialization.");
         }
     }
 
-    private static void init(String confFolder) {
-        if (isInitialized.compareAndSet(false, true)) { // Ensure init runs only once
-            Path confPath = PathUtils.resolvePath(confFolder);
-            Path nodePath = confPath.resolve("node");
-            Path loggingPath = confPath.resolve("logging");
-
-            // Check and copy default logging properties if missing
-            boolean createdLoggingProps = ensureConfigFileExists(confPath, loggingPath, DEFAULT_LOGGING_PROPERTIES_NAME,
-                    LOGGING_PROPERTIES_NAME);
-
-            // 1. Initialize logging system (apply logging.properties)
-            try {
-                List<String> loggingStatus = LoggerConfigurator.init(confFolder);
-                logger = LoggerFactory.getLogger(Signum.class);
-                if (createdLoggingProps) {
-                    logger.info("Created {} from default configuration.", LOGGING_PROPERTIES_NAME);
-                }
-                for (String status : loggingStatus) {
-                    if (status.startsWith("WARN:")) {
-                        logger.warn(status.substring(5).trim());
-                    } else if (status.startsWith("INFO:")) {
-                        logger.info(status.substring(5).trim());
-                    } else {
-                        logger.info(status);
-                    }
-                }
-            } catch (Exception e) {
-                System.err.println("Error initializing logging: " + e.getMessage());
-                e.printStackTrace();
-            }
-
-            // Check and copy default node properties if missing
-            boolean createdNodeProps = ensureConfigFileExists(confPath, nodePath, DEFAULT_PROPERTIES_NAME,
-                    PROPERTIES_NAME);
-            if (createdNodeProps) {
-                logger.info("Created {} from default configuration.", PROPERTIES_NAME);
-            }
-
-            // 2. Load properties (logs will appear on configured output)
-            PropertyService propertyService = loadProperties(confFolder);
-
-            loadWallet(propertyService);
-        } else {
-            logger.warn("Signum node already initialized. Skipping re-initialization.");
+    public static void init(String confFolder) {
+        if (!isInitialized.compareAndSet(false, true)) {
+            if (logger != null)
+                logger.warn("Signum node already initialized. Skipping.");
+            return;
         }
-    }
 
-    private static boolean ensureConfigFileExists(Path confPath, Path targetDir, String defaultFileName,
-            String targetFileName) {
-        Path targetFile = targetDir.resolve(targetFileName);
-        if (!Files.exists(targetFile)) {
-            Path defaultFile = confPath.resolve(defaultFileName);
-            if (Files.exists(defaultFile)) {
-                try {
-                    Files.createDirectories(targetDir);
-                    Files.copy(defaultFile, targetFile);
-                    return true;
-                } catch (IOException e) {
-                    System.err.println(
-                            "Failed to copy " + defaultFileName + " to " + targetFileName + ": " + e.getMessage());
-                }
-            }
+        ensureLogger();
+
+        // Resolve logging properties priority
+        Path confPath = PathUtils.resolvePath(confFolder);
+        Path loggingPath = confPath.resolve(LOGGING_CONF_DIR);
+        Path loggingFileToLoad = resolvePropertiesPath(loggingPath, LOGGING_PROPERTIES_NAME,
+                DEFAULT_LOGGING_PROPERTIES_NAME, confPath);
+        if (loggingFileToLoad != null) {
+            LOGGING_PROPERTIES_NAME = loggingPath.relativize(loggingFileToLoad).toString();
         }
-        return false;
+
+        PropertyService propertyService = loadProperties(confFolder);
+        loadWallet(propertyService);
     }
 
     private static void loadWallet(PropertyService propertyService) {
