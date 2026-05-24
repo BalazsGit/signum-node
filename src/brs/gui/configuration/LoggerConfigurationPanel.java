@@ -2,6 +2,7 @@ package brs.gui.configuration;
 
 import brs.props.Props;
 import brs.util.PathUtils;
+import brs.Signum;
 import brs.gui.GuiColors;
 import brs.gui.GuiConstants;
 import brs.gui.GuiFontManager;
@@ -85,15 +86,17 @@ public class LoggerConfigurationPanel extends JPanel {
 
         // Determine the currently applied profile name from metadata once at startup
         String lastProfile = ConfigurationUtils
-                .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, "logging"));
+                .loadAppliedProfile(ConfigurationUtils
+                        .getProfileMetadataPath(confFolder, Signum.NODE_LOGGING_SUBFOLDER));
         if ("logging-default".equals(lastProfile)) {
-            lastProfile = "logging";
+            lastProfile = Signum.NODE_LOGGING_SUBFOLDER;
         }
-        this.runningProfileName = lastProfile != null ? lastProfile.trim() : "logging";
+        this.runningProfileName = lastProfile != null ? lastProfile.trim() : Signum.NODE_LOGGING_SUBFOLDER;
         this.activeProfileName = this.runningProfileName;
         this.loadedProfileName = this.runningProfileName;
 
-        this.propertiesFile = ConfigurationUtils.resolveProfilePath(confFolder, "logging",
+        this.propertiesFile = ConfigurationUtils.resolveProfilePath(confFolder,
+                Signum.NODE_LOGGING_SUBFOLDER,
                 this.loadedProfileName + ".properties");
         ConfigurationUtils.ensureConfigFileExists(this.propertiesFile);
 
@@ -519,26 +522,27 @@ public class LoggerConfigurationPanel extends JPanel {
             profileComboBox.removeAllItems();
 
             String lastProfile = ConfigurationUtils
-                    .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, "logging"));
+                    .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder,
+                            Signum.NODE_LOGGING_SUBFOLDER));
             if ("logging-default".equals(lastProfile)) {
-                lastProfile = "logging";
+                lastProfile = Signum.NODE_LOGGING_SUBFOLDER;
             }
-            this.activeProfileName = lastProfile != null ? lastProfile.trim() : "logging";
+            this.activeProfileName = lastProfile != null ? lastProfile.trim() : Signum.NODE_LOGGING_SUBFOLDER;
 
-            Path loggingConfPath = PathUtils.resolvePath(confFolder).resolve("logging");
+            Path loggingConfPath = PathUtils.resolvePath(confFolder).resolve(Signum.NODE_LOGGING_SUBFOLDER);
             ConfigurationUtils.fetchProfileNames(loggingConfPath, brs.Signum.DEFAULT_LOGGING_PROPERTIES_NAME)
                     .forEach(profileComboBox::addItem);
 
             // Ensure the base profile is always available in the list
             boolean hasBase = false;
             for (int i = 0; i < profileComboBox.getItemCount(); i++) {
-                if ("logging".equals(profileComboBox.getItemAt(i))) {
+                if (Signum.NODE_LOGGING_SUBFOLDER.equals(profileComboBox.getItemAt(i))) {
                     hasBase = true;
                     break;
                 }
             }
             if (!hasBase) {
-                profileComboBox.insertItemAt("logging", 0);
+                profileComboBox.insertItemAt(Signum.NODE_LOGGING_SUBFOLDER, 0);
             }
 
             if (currentSelection != null && profileComboBox.getItemCount() > 0) {
@@ -634,7 +638,8 @@ public class LoggerConfigurationPanel extends JPanel {
                 if (value == saveBtn) {
                     String name = nameField.getText().trim();
                     try {
-                        Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, "logging",
+                        Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder,
+                                Signum.NODE_LOGGING_SUBFOLDER,
                                 name + ".properties");
                         if (Files.exists(targetFile)) {
                             int choice = JOptionPane.showConfirmDialog(this,
@@ -698,7 +703,8 @@ public class LoggerConfigurationPanel extends JPanel {
 
         checkUnsavedChangesAndProceed(
                 () -> {
-                    Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, "logging",
+                    Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder,
+                            Signum.NODE_LOGGING_SUBFOLDER,
                             profileName + ".properties");
                     if (Files.exists(targetFile)) {
                         Properties loaded = new Properties();
@@ -719,8 +725,8 @@ public class LoggerConfigurationPanel extends JPanel {
                                     JOptionPane.ERROR_MESSAGE);
                             // Revert to headless fallback
                             isProgrammaticChange = true;
-                            profileComboBox.setSelectedItem("logging");
-                            loadProfile("logging-default");
+                            profileComboBox.setSelectedItem(Signum.NODE_LOGGING_SUBFOLDER);
+                            loadProfile(Signum.NODE_LOGGING_SUBFOLDER + "-default");
                             isProgrammaticChange = false;
                         }
                     }
@@ -812,7 +818,7 @@ public class LoggerConfigurationPanel extends JPanel {
                 }
             }
 
-            Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, "logging",
+            Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_LOGGING_SUBFOLDER,
                     loadedProfileName + ".properties");
             if (Files.exists(targetFile)) {
                 Properties loaded = new Properties();
@@ -840,7 +846,8 @@ public class LoggerConfigurationPanel extends JPanel {
             if (name == null || name.trim().isEmpty() || "logging-default".equalsIgnoreCase(name.trim()))
                 return;
 
-            Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, "logging", name + ".properties");
+            Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder,
+                    Signum.NODE_LOGGING_SUBFOLDER, name + ".properties");
             if (Files.exists(targetFile)) {
                 JOptionPane.showMessageDialog(this, "Profile '" + name + "' already exists.", "Error",
                         JOptionPane.ERROR_MESSAGE);
@@ -899,7 +906,8 @@ public class LoggerConfigurationPanel extends JPanel {
 
     private void updateProfileButtonStates() {
         String selected = (String) profileComboBox.getSelectedItem();
-        boolean isReadOnly = "logging".equals(selected) || "logging-default".equals(selected);
+        boolean isReadOnly = Signum.NODE_LOGGING_SUBFOLDER.equals(selected)
+                || "logging-default".equals(selected);
         resetToDefaultsBtn.setEnabled(true); // Always enable reset to defaults
         renameProfileBtn.setEnabled(!isReadOnly);
         deleteProfileBtn.setEnabled(!isReadOnly);
@@ -927,16 +935,19 @@ public class LoggerConfigurationPanel extends JPanel {
         }
 
         try {
-            Path oldFile = ConfigurationUtils.resolveProfilePath(confFolder, "logging", oldProfileName + ".properties");
-            Path newFile = ConfigurationUtils.resolveProfilePath(confFolder, "logging", newProfileName + ".properties");
+            Path oldFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_LOGGING_SUBFOLDER,
+                    oldProfileName + ".properties");
+            Path newFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_LOGGING_SUBFOLDER,
+                    newProfileName + ".properties");
 
             if (ConfigurationUtils.confirmAndRenameProfile(this, oldFile, newFile, oldProfileName, newProfileName)) {
                 refreshProfileList();
                 profileComboBox.setSelectedItem(newProfileName);
                 if (oldProfileName.equals(activeProfileName)) {
+                    ConfigurationUtils.updateAppliedProfile(ConfigurationUtils
+                            .getProfileMetadataPath(confFolder, Signum.NODE_LOGGING_SUBFOLDER),
+                            newProfileName);
                     activeProfileName = newProfileName;
-                    ConfigurationUtils.updateAppliedProfile(
-                            ConfigurationUtils.getProfileMetadataPath(confFolder, "logging"), newProfileName);
                 }
                 updateProfileComboBoxColor();
                 updateDirtyStatus();
@@ -976,12 +987,13 @@ public class LoggerConfigurationPanel extends JPanel {
         }
 
         try {
-            Path file = ConfigurationUtils.resolveProfilePath(confFolder, "logging", profileName + ".properties");
+            Path file = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_LOGGING_SUBFOLDER,
+                    profileName + ".properties");
             if (Files.exists(file)) {
                 Files.delete(file);
                 refreshProfileList();
-                profileComboBox.setSelectedItem("logging");
-                loadProfile("logging");
+                profileComboBox.setSelectedItem(Signum.NODE_LOGGING_SUBFOLDER);
+                loadProfile(Signum.NODE_LOGGING_SUBFOLDER);
                 JOptionPane.showMessageDialog(this, "Profile '" + profileName + "' deleted successfully.",
                         "Success", JOptionPane.INFORMATION_MESSAGE);
             }
@@ -993,7 +1005,7 @@ public class LoggerConfigurationPanel extends JPanel {
     }
 
     public void loadAppliedProperties() {
-        Path appliedFile = ConfigurationUtils.resolveProfilePath(confFolder, "logging",
+        Path appliedFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_LOGGING_SUBFOLDER,
                 brs.Signum.LOGGING_PROPERTIES_NAME);
         if (Files.exists(appliedFile)) {
             try (FileInputStream in = new FileInputStream(appliedFile.toFile())) {
@@ -1055,7 +1067,8 @@ public class LoggerConfigurationPanel extends JPanel {
                 null, options, options[0]);
 
         if (choice == 0 || choice == 1) {
-            ConfigurationUtils.updateAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, "logging"),
+            ConfigurationUtils.updateAppliedProfile(ConfigurationUtils
+                    .getProfileMetadataPath(confFolder, Signum.NODE_LOGGING_SUBFOLDER),
                     selected);
             this.activeProfileName = selected;
             updateProfileComboBoxColor();
@@ -1066,7 +1079,8 @@ public class LoggerConfigurationPanel extends JPanel {
     }
 
     private Path getProfileMetadataPath() {
-        return PathUtils.resolvePath(confFolder).resolve("logging").resolve("profile.json");
+        return PathUtils.resolvePath(confFolder).resolve(Signum.NODE_LOGGING_SUBFOLDER)
+                .resolve("profile.json");
     }
 
     private void handleBack() {
