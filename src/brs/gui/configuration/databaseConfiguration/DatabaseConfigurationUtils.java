@@ -50,6 +50,7 @@ public class DatabaseConfigurationUtils {
      */
     public static final String DATABASE_BASE_DIR = "../database";
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
+    private static JsonObject cachedGlobalSettings;
 
     public static void downloadFile(String urlString, Path targetPath, ProgressListener listener) throws IOException {
         URL url = new URL(urlString);
@@ -286,21 +287,27 @@ public class DatabaseConfigurationUtils {
      *
      * @return A {@link JsonObject} containing the global database settings.
      */
-    public static JsonObject loadGlobalSettings() {
+    public static synchronized JsonObject loadGlobalSettings() {
+        if (cachedGlobalSettings != null) {
+            return cachedGlobalSettings;
+        }
+
         Path settingsFile = PathUtils.resolvePath(DATABASE_BASE_DIR).resolve("settings.json");
         if (Files.exists(settingsFile)) {
             try {
                 if (Files.size(settingsFile) > 0) {
                     try (BufferedReader reader = Files.newBufferedReader(settingsFile, StandardCharsets.UTF_8)) {
                         logger.info("Loaded global settings from: {}", settingsFile);
-                        return JsonParser.parseReader(reader).getAsJsonObject();
+                        cachedGlobalSettings = JsonParser.parseReader(reader).getAsJsonObject();
+                        return cachedGlobalSettings;
                     }
                 }
             } catch (Exception e) {
                 logger.error("Error loading global settings from {}: {}", settingsFile, e.getMessage());
             }
         }
-        return createDefaultSettingsJson(settingsFile);
+        cachedGlobalSettings = createDefaultSettingsJson(settingsFile);
+        return cachedGlobalSettings;
     }
 
     /**
