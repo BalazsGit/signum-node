@@ -2,6 +2,9 @@ package signum;
 
 import brs.Signum;
 import brs.props.Props;
+import brs.util.LoggerConfigurator;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.HelpFormatter;
@@ -9,13 +12,20 @@ import org.apache.commons.cli.ParseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.BufferedReader;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.io.IOException;
+import java.text.SimpleDateFormat;
 import java.net.ServerSocket;
 import java.lang.management.ManagementFactory;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -23,8 +33,17 @@ import java.util.concurrent.TimeUnit;
 
 public class Launcher {
 
-    private static final Logger logger = LoggerFactory.getLogger(Launcher.class);
     private static String[] savedArgs;
+    private static Logger logger;
+
+    static {
+        // 0. Pre-emptively set the LogManager before JUL is ever touched.
+        // This helps avoid IllegalAccessException on modern JREs (17/21+)
+        // when the LogManager tries to initialize via LoggerFactory calls.
+        if (System.getProperty("java.util.logging.manager") == null) {
+            System.setProperty("java.util.logging.manager", "brs.util.SignumLogManager");
+        }
+    }
 
     /**
      * The main entry point for the application.
@@ -35,10 +54,67 @@ public class Launcher {
      */
     public static void main(String[] args) {
         savedArgs = args;
-        boolean canRunGui = true;
 
+        // 1. Determine configuration folder early
+        String confFolder = Signum.CONF_FOLDER;
         try {
-            // Parse command line arguments to check for help or headless mode
+            CommandLine cmd = new DefaultParser().parse(Signum.CLI_OPTIONS, args, true);
+            if (cmd.hasOption(Signum.CONF_FOLDER_OPTION.getOpt())) {
+                confFolder = cmd.getOptionValue(Signum.CONF_FOLDER_OPTION.getOpt());
+            }
+        } catch (ParseException e) {
+            System.err.println("Error parsing early arguments: " + e.getMessage());
+        }
+
+        // 2. Resolve paths and detect profiles before SLF4J loads
+        Path confPath = Paths.get(confFolder).toAbsolutePath().normalize();
+        Path nodePath = confPath.resolve(Signum.NODE_CONF_DIR);
+        Path loggingPath = confPath.resolve(Signum.LOGGING_CONF_DIR);
+
+        detectProfiles(nodePath, loggingPath);
+
+        // 5. Activate Logging system
+        List<String> initLogs = null;
+        try {
+            initLogs = LoggerConfigurator.init(confFolder);
+        } catch (Exception e) {
+            System.err.println("Failed to initialize LoggerConfigurator: " + e.getMessage());
+        }
+
+        // Initialize loggers immediately after configuration is applied
+        logger = LoggerFactory.getLogger(Launcher.class);
+        Logger bootLogger = LoggerFactory.getLogger(LoggerConfigurator.class);
+        Signum.setLogger(LoggerFactory.getLogger(Signum.class));
+
+        if (initLogs != null) {
+            String ts = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+            for (String message : initLogs) {
+                String content = message;
+                String level = "INFO";
+
+                // Parse level markers for proper logger routing
+                if (message.startsWith("SEVERE:")) {
+                    content = message.substring(7).trim();
+                    level = "ERROR";
+                    bootLogger.error(content);
+                } else if (message.startsWith("WARNING:")) {
+                    content = message.substring(8).trim();
+                    level = "WARN";
+                    bootLogger.warn(content);
+                } else if (message.startsWith("INFO:")) {
+                    content = message.substring(5).trim();
+                    bootLogger.info(content);
+                } else {
+                    bootLogger.info(content);
+                }
+                // Add formatted string to GUI buffer to ensure uniform appearance in console
+                Signum.BOOTSTRAP_LOGS
+                        .add(String.format("[%s] %s brs.util.LoggerConfigurator - %s", level, ts, content));
+            }
+        }
+
+        boolean canRunGui = true;
+        try {
             CommandLine cmd = new DefaultParser().parse(Signum.CLI_OPTIONS, args);
             if (cmd.hasOption("h")) {
                 printHelp();
@@ -64,6 +140,46 @@ public class Launcher {
             launchGui(args);
         } else {
             Signum.main(args);
+        }
+    }
+
+    /**
+     * Detects applied configuration profiles from metadata before initializing
+     * logging or properties.
+     */
+    private static void detectProfiles(Path nodePath, Path loggingPath) {
+        try {
+            Path nodeProfilePath = nodePath.resolve("profile.json");
+            if (Files.exists(nodeProfilePath)) {
+                try (BufferedReader reader = Files.newBufferedReader(nodeProfilePath, StandardCharsets.UTF_8)) {
+                    JsonObject settings = JsonParser.parseReader(reader).getAsJsonObject();
+                    if (settings.has("appliedProfile")) {
+                        String p = settings.get("appliedProfile").getAsString();
+                        if ("node-default".equals(p)) {
+                            Signum.PROPERTIES_NAME = Signum.DEFAULT_PROPERTIES_NAME;
+                        } else if (!Signum.NODE_CONF_DIR.equals(p)) {
+                            Signum.PROPERTIES_NAME = p + ".properties";
+                        }
+                    }
+                }
+            }
+
+            Path loggingProfilePath = loggingPath.resolve("profile.json");
+            if (Files.exists(loggingProfilePath)) {
+                try (BufferedReader reader = Files.newBufferedReader(loggingProfilePath, StandardCharsets.UTF_8)) {
+                    JsonObject settings = JsonParser.parseReader(reader).getAsJsonObject();
+                    if (settings.has("appliedProfile")) {
+                        String p = settings.get("appliedProfile").getAsString();
+                        if ("logging-default".equals(p)) {
+                            Signum.LOGGING_PROPERTIES_NAME = Signum.DEFAULT_LOGGING_PROPERTIES_NAME;
+                        } else if (!Signum.LOGGING_CONF_DIR.equals(p)) {
+                            Signum.LOGGING_PROPERTIES_NAME = p + ".properties";
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Warning: Error detecting applied profiles: " + e.getMessage());
         }
     }
 
