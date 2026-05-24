@@ -7,6 +7,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import brs.Signum;
 import brs.gui.GuiColors;
 import brs.gui.GuiConstants;
 import brs.gui.configuration.ConfigurationUtils;
@@ -2241,7 +2242,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     public void loadAppliedProperties() {
         // Load properties from the currently applied profile file
         String lastProfile = ConfigurationUtils
-                .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, "database"));
+                .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.DATABASE_SUBFOLDER));
         String appliedEngineName = DatabaseEngine.MARIADB.getDisplayName();
         String appliedProfileName = null;
 
@@ -3223,7 +3224,8 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         String selected = (String) profileComboBox.getSelectedItem();
         if (selected == null)
             return;
-        ConfigurationUtils.updateAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, "database"),
+        ConfigurationUtils.updateAppliedProfile(
+                ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.DATABASE_SUBFOLDER),
                 currentEngine.toString() + ":" + selected);
         this.runningProfileName = selected;
         this.activeProfileName = selected;
@@ -3318,10 +3320,11 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
 
             // Update applied profile if the renamed one was active
             String applied = ConfigurationUtils
-                    .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, "database"));
+                    .loadAppliedProfile(
+                            ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.DATABASE_SUBFOLDER));
             if (applied != null && applied.equals(currentEngine.toString() + ":" + oldName)) {
                 ConfigurationUtils.updateAppliedProfile(
-                        ConfigurationUtils.getProfileMetadataPath(confFolder, "database"),
+                        ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.DATABASE_SUBFOLDER),
                         currentEngine.toString() + ":" + newName);
             }
 
@@ -3528,7 +3531,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
 
         // Determine the currently applied profile name from metadata once at startup
         String lastProfile = ConfigurationUtils
-                .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, "database"));
+                .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.DATABASE_SUBFOLDER));
 
         // Format in metadata for DB is "Engine:ProfileName"
         String lastEngine = DatabaseEngine.MARIADB.getDisplayName(); // This panel is specifically for MariaDB
