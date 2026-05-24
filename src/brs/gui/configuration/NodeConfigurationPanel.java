@@ -1210,6 +1210,9 @@ public class NodeConfigurationPanel extends JPanel {
                     selected);
             this.activeProfileName = selected;
             updateProfileComboBoxColor();
+            if (choice == 0 && restartAction != null) {
+                restartAction.run();
+            }
         }
     }
 
