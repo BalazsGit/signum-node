@@ -86,8 +86,12 @@ public final class Signum {
     public static final String APPLICATION = "BRS";
 
     public static final String CONF_FOLDER = "../conf";
-    public static final String NODE_CONF_DIR = "node";
-    public static final String LOGGING_CONF_DIR = "logging";
+    public static final String NODE_SUBFOLDER = "node";
+    public static final String NODE_LOGGING_SUBFOLDER = "node-logging";
+    public static final String DATABASE_SUBFOLDER = "database";
+
+    public static final String NODE_CONF_DIR = NODE_SUBFOLDER;
+    public static final String LOGGING_CONF_DIR = NODE_LOGGING_SUBFOLDER;
     public static final String NODE_CONF_PATH = CONF_FOLDER + "/" + NODE_CONF_DIR;
     public static final String LOGGING_CONF_PATH = CONF_FOLDER + "/" + LOGGING_CONF_DIR;
     public static final String DEFAULT_PROPERTIES_NAME = "node-default.properties";
