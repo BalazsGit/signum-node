@@ -119,10 +119,6 @@ public class SignumGUI extends JFrame {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(SignumGUI.class);
 
-    private static final ByteArrayOutputStream EARLY_LOG_BUFFER = new ByteArrayOutputStream();
-    private static final ByteArrayOutputStream EARLY_ERR_BUFFER = new ByteArrayOutputStream();
-    private static PrintStream ORIGINAL_OUT;
-    private static PrintStream ORIGINAL_ERR;
     private static String[] args;
 
     static {
@@ -161,8 +157,12 @@ public class SignumGUI extends JFrame {
         }
 
         String settingsDir = Props.SETTINGS_DIR.getDefaultValue();
-        Path nodePropsFile = brs.util.PathUtils.resolvePath(confFolder).resolve("node").resolve(Signum.PROPERTIES_NAME);
-        if (Files.exists(nodePropsFile)) {
+        Path confPath = brs.util.PathUtils.resolvePath(confFolder);
+        Path nodePath = confPath.resolve("node");
+        Path nodePropsFile = Signum.resolvePropertiesPath(nodePath, Signum.PROPERTIES_NAME,
+                Signum.DEFAULT_PROPERTIES_NAME, confPath);
+
+        if (nodePropsFile != null && Files.exists(nodePropsFile)) {
             try (java.io.FileInputStream in = new java.io.FileInputStream(nodePropsFile.toFile())) {
                 Properties nodeProps = new Properties();
                 nodeProps.load(in);
@@ -546,6 +546,7 @@ public class SignumGUI extends JFrame {
     private JCheckBox showCommandItem;
     private JCheckBox enableGpuItem;
     private JCheckBox showMetricsItem;
+    private JCheckBox skipDbCheckItem;
     private JLabel experimentalLabel;
     private JPanel commandPanelWrapper;
     private Timer commandPanelAnimator;
@@ -967,40 +968,13 @@ public class SignumGUI extends JFrame {
     }
 
     public static void main(String[] args) {
-        // Set default log format for early logs (before LoggerConfigurator takes over)
-        System.setProperty("java.util.logging.SimpleFormatter.format", "[%4$s] %1$tF %1$tT %3$s - %5$s%6$s%n");
-
-        // Capture early logs before GUI is initialized
-        ORIGINAL_OUT = System.out;
-        ORIGINAL_ERR = System.err;
-
-        System.setOut(new PrintStream(new OutputStream() {
-            @Override
-            public void write(int b) throws IOException {
-                ORIGINAL_OUT.write(b);
-                EARLY_LOG_BUFFER.write(b);
-            }
-
-            @Override
-            public void write(byte[] b, int off, int len) throws IOException {
-                ORIGINAL_OUT.write(b, off, len);
-                EARLY_LOG_BUFFER.write(b, off, len);
-            }
-        }, true));
-
-        System.setErr(new PrintStream(new OutputStream() {
-            @Override
-            public void write(int b) throws IOException {
-                ORIGINAL_ERR.write(b);
-                EARLY_ERR_BUFFER.write(b);
-            }
-
-            @Override
-            public void write(byte[] b, int off, int len) throws IOException {
-                ORIGINAL_ERR.write(b, off, len);
-                EARLY_ERR_BUFFER.write(b, off, len);
-            }
-        }, true));
+        // We no longer manually add a JUL handler or redirect here.
+        // Launcher.main has already set up the Proxy Streams.
+        try {
+            brs.util.BriefLogFormatter.init(); // Apply consistent formatting
+        } catch (Exception e) {
+            // ignore
+        }
 
         SignumGUI.loadLookAndFeelSettings(args);
         new SignumGUI("Signum Node", Props.ICON_LOCATION.getDefaultValue(), Signum.VERSION.toString(), args);
@@ -1068,8 +1042,33 @@ public class SignumGUI extends JFrame {
         DefaultCaret caret = (DefaultCaret) textPane.getCaret();
         caret.setUpdatePolicy(DefaultCaret.ALWAYS_UPDATE);
         textPane.setEditable(false);
-        flushEarlyLogs(textPane);
-        sendJavaOutputToTextArea(textPane);
+
+        // Setup the GUI log capture
+        TextAreaOutputStream taos = new TextAreaOutputStream(textPane, null, false, true);
+
+        // 1. Flush bootstrap logs from Launcher/Signum
+        Signum.BOOTSTRAP_LOGS.forEach(line -> taos.write((line + "\n").getBytes(StandardCharsets.UTF_8)));
+        Signum.BOOTSTRAP_LOGS.clear();
+
+        // 2. Add a JUL Handler to capture all live logs directly into the text pane
+        java.util.logging.Handler guiHandler = new java.util.logging.Handler() {
+            @Override
+            public void publish(java.util.logging.LogRecord record) {
+                taos.append(new brs.util.BriefLogFormatter().format(record));
+            }
+
+            @Override
+            public void flush() {
+                taos.flush();
+            }
+
+            @Override
+            public void close() throws SecurityException {
+            }
+        };
+        guiHandler.setLevel(java.util.logging.Level.ALL);
+        java.util.logging.Logger.getLogger("").addHandler(guiHandler);
+
         textScrollPane = new JScrollPane(textPane);
         textScrollPane.getVerticalScrollBar().setUnitIncrement(16);
 
@@ -1453,6 +1452,39 @@ public class SignumGUI extends JFrame {
         });
         styleMenuComponent(enableGpuItem);
         menuPanel.add(enableGpuItem, "growx");
+
+        skipDbCheckItem = new JCheckBox("Skip DB Check on Manual Pop-off");
+        skipDbCheckItem.addActionListener(e -> {
+            BlockchainProcessor bp = Signum.getBlockchainProcessor();
+            if (bp != null) {
+                bp.setSkipDbCheckOnManualPopOff(skipDbCheckItem.isSelected());
+            }
+        });
+
+        JPanel skipDbRow = new JPanel(new MigLayout("insets 0, fillx", "[grow][]")) {
+            @Override
+            public void setForeground(Color fg) {
+                super.setForeground(fg);
+                if (skipDbCheckItem != null)
+                    skipDbCheckItem.setForeground(fg);
+            }
+        };
+        skipDbRow.setOpaque(false);
+        styleMenuComponent(skipDbRow);
+        skipDbCheckItem.setOpaque(false);
+        skipDbCheckItem.setBorder(null);
+
+        JButton skipDbHelp = new HelpButton();
+        skipDbHelp.addActionListener(e -> {
+            String msg = "<html><body style='width: 300px'><b>Skip Database Check</b><br><br>" +
+                    "If enabled, the node will skip the expensive consistency check after each block removed during a manual pop-off.<br><br>"
+                    +
+                    "<i>Note: This setting is temporary for the current session. To make it permanent, modify <b>node.popOff.skipDatabaseCheck</b> in your node configuration and restart the node.</i></body></html>";
+            showInfoDialog("Manual Pop-off Setting", msg, 350);
+        });
+        skipDbRow.add(skipDbCheckItem, "growx");
+        skipDbRow.add(skipDbHelp);
+        menuPanel.add(skipDbRow, "growx");
 
         menuPanel.add(new JSeparator(), "growx");
 
@@ -2679,6 +2711,10 @@ public class SignumGUI extends JFrame {
                         enableGpuItem.setSelected(enableGPU);
                     }
 
+                    if (skipDbCheckItem != null && blockchainProcessor != null) {
+                        skipDbCheckItem.setSelected(blockchainProcessor.isSkipDbCheckOnManualPopOff());
+                    }
+
                     if (showMetricsPanel) {
                         metricsPanel.init();
                         metricsPanel.setVisible(true);
@@ -3132,39 +3168,6 @@ public class SignumGUI extends JFrame {
             trayIcon.setToolTip(trayIcon.getToolTip() + " (STOPPED)");
     }
 
-    private void flushEarlyLogs(JTextPane textPane) {
-        // Use a dummy stream for actualOutput to prevent duplication to console,
-        // as these logs were already printed to ORIGINAL_OUT/ERR during capture.
-        PrintStream dummyStream = new PrintStream(new OutputStream() {
-            @Override
-            public void write(int b) {
-            }
-        });
-
-        if (EARLY_LOG_BUFFER.size() > 0) {
-            // Pass false to disable timer, we flush immediately
-            TextAreaOutputStream taos = new TextAreaOutputStream(textPane, dummyStream, false, false);
-            taos.write(EARLY_LOG_BUFFER.toByteArray());
-            taos.flush();
-        }
-        if (EARLY_ERR_BUFFER.size() > 0) {
-            TextAreaOutputStream taos = new TextAreaOutputStream(textPane, dummyStream, true, false);
-            taos.write(EARLY_ERR_BUFFER.toByteArray());
-            taos.flush();
-        }
-        // Release memory
-        EARLY_LOG_BUFFER.reset();
-        EARLY_ERR_BUFFER.reset();
-    }
-
-    private void sendJavaOutputToTextArea(JTextPane textPane) {
-        // Revert to original streams + GUI capture (removes the buffering layer)
-        PrintStream out = ORIGINAL_OUT != null ? ORIGINAL_OUT : System.out;
-        PrintStream err = ORIGINAL_ERR != null ? ORIGINAL_ERR : System.err;
-        System.setOut(new PrintStream(new TextAreaOutputStream(textPane, out, false)));
-        System.setErr(new PrintStream(new TextAreaOutputStream(textPane, err, true)));
-    }
-
     private void showMessage(String message) {
         SwingUtilities.invokeLater(() -> {
             System.err.println("Showing message: " + message);
@@ -3198,21 +3201,23 @@ public class SignumGUI extends JFrame {
 
         @Override
         public void write(int b) {
-            writeString(new String(new byte[] { (byte) b }));
+            writeString(new String(new byte[] { (byte) b }, StandardCharsets.UTF_8));
         }
 
         @Override
         public void write(byte[] b) {
-            writeString(new String(b));
+            writeString(new String(b, StandardCharsets.UTF_8));
         }
 
         @Override
         public void write(byte[] b, int off, int len) {
-            writeString(new String(b, off, len));
+            writeString(new String(b, off, len, StandardCharsets.UTF_8));
         }
 
         private synchronized void writeString(String string) {
-            actualOutput.print(string);
+            if (actualOutput != null) {
+                actualOutput.print(string);
+            }
             buffer.append(string);
         }
 
@@ -3229,55 +3234,57 @@ public class SignumGUI extends JFrame {
         }
 
         private void append(String text) {
-            StyledDocument doc = textPane.getStyledDocument();
-            String[] lines = text.split("(?<=\\n)");
+            SwingUtilities.invokeLater(() -> {
+                StyledDocument doc = textPane.getStyledDocument();
+                String[] lines = text.split("(?<=\\n)");
 
-            for (String line : lines) {
-                SimpleAttributeSet attrs = new SimpleAttributeSet();
-                Color color = null;
+                for (String line : lines) {
+                    SimpleAttributeSet attrs = new SimpleAttributeSet();
+                    Color color = null;
 
-                if (line.contains("ERROR") || line.contains("SEVERE")) {
-                    color = new Color(255, 100, 100);
-                } else if (line.contains("WARN") || line.contains("WARNING")) {
-                    color = new Color(255, 200, 100);
-                } else if (line.contains("TRACE") || line.contains("FINER") || line.contains("FINEST")) {
-                    color = new Color(150, 150, 150);
-                } else if (line.contains("DEBUG") || line.contains("FINE")) {
-                    color = new Color(180, 180, 180);
-                } else if (line.contains("CONFIG")) {
-                    color = new Color(100, 200, 200);
-                } else if (isError && !line.contains("INFO")) {
-                    color = new Color(255, 100, 100);
+                    if (line.contains("ERROR") || line.contains("SEVERE")) {
+                        color = new Color(255, 100, 100);
+                    } else if (line.contains("WARN") || line.contains("WARNING")) {
+                        color = new Color(255, 200, 100);
+                    } else if (line.contains("TRACE") || line.contains("FINER") || line.contains("FINEST")) {
+                        color = new Color(150, 150, 150);
+                    } else if (line.contains("DEBUG") || line.contains("FINE")) {
+                        color = new Color(180, 180, 180);
+                    } else if (line.contains("CONFIG")) {
+                        color = new Color(100, 200, 200);
+                    } else if (isError && !line.contains("INFO")) {
+                        color = new Color(255, 100, 100);
+                    }
+
+                    // Apply the active custom font to new lines being appended to the console
+                    Font activeFont = SignumGUI.getActiveConsoleFont();
+                    if (activeFont != null) {
+                        StyleConstants.setFontFamily(attrs, activeFont.getFamily());
+                        StyleConstants.setFontSize(attrs, activeFont.getSize());
+                    }
+
+                    if (color != null) {
+                        StyleConstants.setForeground(attrs, color);
+                    }
+
+                    try {
+                        doc.insertString(doc.getLength(), line, attrs);
+                    } catch (BadLocationException e) {
+                        // ignore
+                    }
                 }
 
-                // Apply the active custom font to new lines being appended to the console
-                Font activeFont = SignumGUI.getActiveConsoleFont();
-                if (activeFont != null) {
-                    StyleConstants.setFontFamily(attrs, activeFont.getFamily());
-                    StyleConstants.setFontSize(attrs, activeFont.getSize());
+                Element root = doc.getDefaultRootElement();
+                while (root.getElementCount() > OUTPUT_MAX_LINES) {
+                    try {
+                        Element firstLine = root.getElement(0);
+                        doc.remove(0, firstLine.getEndOffset());
+                    } catch (BadLocationException e) {
+                        break;
+                    }
                 }
-
-                if (color != null) {
-                    StyleConstants.setForeground(attrs, color);
-                }
-
-                try {
-                    doc.insertString(doc.getLength(), line, attrs);
-                } catch (BadLocationException e) {
-                    // ignore
-                }
-            }
-
-            Element root = doc.getDefaultRootElement();
-            while (root.getElementCount() > OUTPUT_MAX_LINES) {
-                try {
-                    Element firstLine = root.getElement(0);
-                    doc.remove(0, firstLine.getEndOffset());
-                } catch (BadLocationException e) {
-                    break;
-                }
-            }
-            textPane.setCaretPosition(doc.getLength());
+                textPane.setCaretPosition(doc.getLength());
+            });
         }
     }
 
@@ -3296,9 +3303,9 @@ public class SignumGUI extends JFrame {
         comp.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseEntered(MouseEvent e) {
+                comp.setOpaque(true);
                 if (comp instanceof AbstractButton) {
                     ((AbstractButton) comp).setContentAreaFilled(true);
-                    ((AbstractButton) comp).setOpaque(true);
                 }
                 comp.setBackground(UIManager.getColor("List.selectionBackground"));
                 comp.setForeground(UIManager.getColor("List.selectionForeground"));
@@ -3306,9 +3313,14 @@ public class SignumGUI extends JFrame {
 
             @Override
             public void mouseExited(MouseEvent e) {
+                // Only reset if we're actually outside the component, not just moving between
+                // child elements
+                if (comp.contains(e.getPoint())) {
+                    return;
+                }
+                comp.setOpaque(false);
                 if (comp instanceof AbstractButton) {
                     ((AbstractButton) comp).setContentAreaFilled(false);
-                    ((AbstractButton) comp).setOpaque(false);
                 }
                 // Restore default colors
                 comp.setBackground(null);
