@@ -20,6 +20,7 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.text.JTextComponent;
 import java.awt.*;
+import java.awt.event.ActionListener;
 import java.awt.event.HierarchyEvent;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -240,10 +241,18 @@ public class LoggerConfigurationPanel extends JPanel {
 
         addSectionHeader(contentPanel, "Global Settings", true);
 
-        String defaultGlobalLevel = "INFO";
+        String defaultGlobalLevel = "SEVERE";
         JComboBox<String> globalLevelCombo = new JComboBox<>(LOG_LEVELS);
         globalLevelCombo.setSelectedItem(props.getProperty(".level", defaultGlobalLevel));
         addProperty(contentPanel, "Global Level", ".level", globalLevelCombo, defaultGlobalLevel);
+
+        String defaultBrsLevel = "INFO";
+        JComboBox<String> brsLevelCombo = new JComboBox<>(LOG_LEVELS);
+        brsLevelCombo.setSelectedItem(props.getProperty("brs.level", defaultBrsLevel));
+        addProperty(contentPanel, "Node (BRS) Level", "brs.level", brsLevelCombo, defaultBrsLevel);
+
+        addSectionHeader(contentPanel, "Log Destinations", false);
+        addHandlersProperty(contentPanel);
 
         addSectionHeader(contentPanel, "Console Handler", false);
 
@@ -281,6 +290,40 @@ public class LoggerConfigurationPanel extends JPanel {
         JTextField fileCountField = createStyledTextField(
                 props.getProperty("java.util.logging.FileHandler.count", defaultCount));
         addProperty(contentPanel, "File Count", "java.util.logging.FileHandler.count", fileCountField, defaultCount);
+
+        addSectionHeader(contentPanel, "Library Logging (Noise Suppression)", false);
+
+        String defaultJettyLevel = "OFF";
+        JComboBox<String> jettyLevelCombo = new JComboBox<>(LOG_LEVELS);
+        jettyLevelCombo.setSelectedItem(props.getProperty("org.eclipse.jetty.level", defaultJettyLevel));
+        addProperty(contentPanel, "Jetty Level", "org.eclipse.jetty.level", jettyLevelCombo, defaultJettyLevel);
+
+        String defaultServletLevel = "OFF";
+        JComboBox<String> servletLevelCombo = new JComboBox<>(LOG_LEVELS);
+        servletLevelCombo.setSelectedItem(props.getProperty("javax.servlet.level", defaultServletLevel));
+        addProperty(contentPanel, "Servlet Level", "javax.servlet.level", servletLevelCombo, defaultServletLevel);
+
+        String defaultHikariLevel = "WARNING";
+        JComboBox<String> hikariLevelCombo = new JComboBox<>(LOG_LEVELS);
+        hikariLevelCombo.setSelectedItem(props.getProperty("com.zaxxer.hikari.level", defaultHikariLevel));
+        addProperty(contentPanel, "Hikari Level", "com.zaxxer.hikari.level", hikariLevelCombo, defaultHikariLevel);
+
+        String defaultJooqLevel = "OFF";
+        JComboBox<String> jooqLevelCombo = new JComboBox<>(LOG_LEVELS);
+        jooqLevelCombo.setSelectedItem(props.getProperty("org.jooq.Constants.level", defaultJooqLevel));
+        addProperty(contentPanel, "JOOQ Level", "org.jooq.Constants.level", jooqLevelCombo, defaultJooqLevel);
+
+        String defaultRmiLevel = "INFO";
+        JComboBox<String> rmiLevelCombo = new JComboBox<>(LOG_LEVELS);
+        rmiLevelCombo.setSelectedItem(props.getProperty("sun.rmi.level", defaultRmiLevel));
+        addProperty(contentPanel, "RMI Level", "sun.rmi.level", rmiLevelCombo, defaultRmiLevel);
+
+        String defaultDerivedLevel = "OFF";
+        JComboBox<String> derivedLevelCombo = new JComboBox<>(LOG_LEVELS);
+        derivedLevelCombo
+                .setSelectedItem(props.getProperty("brs.db.store.DerivedTableManager.level", defaultDerivedLevel));
+        addProperty(contentPanel, "Derived Table Level", "brs.db.store.DerivedTableManager.level", derivedLevelCombo,
+                defaultDerivedLevel);
 
         // Push everything to top
         verticalFiller = new JLabel();
@@ -346,6 +389,68 @@ public class LoggerConfigurationPanel extends JPanel {
             ConfigurationUtils.fixComponentSize(profileComboBox);
         ConfigurationUtils.configureProfileToolbar(newProfileBtn, saveProfileBtn, applyProfileBtn, renameProfileBtn,
                 deleteProfileBtn, reloadProfileBtn, refreshProfilesBtn, resetToDefaultsBtn);
+    }
+
+    private void addHandlersProperty(JPanel panel) {
+        String key = "handlers";
+        String labelText = "Enabled Handlers";
+        String defaultValue = "java.util.logging.ConsoleHandler";
+        String savedValue = props.getProperty(key, defaultValue);
+
+        PropertyRow row = new PropertyRow(key, labelText, panel);
+        JLabel label = new JLabel(labelText);
+        row.label = label;
+        row.labelConstraints = "align label";
+        panel.add(label, row.labelConstraints);
+
+        JPanel wrapper = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        wrapper.setOpaque(false);
+        JCheckBox consoleCheck = new JCheckBox("Console");
+        JCheckBox fileCheck = new JCheckBox("File");
+        consoleCheck.setOpaque(false);
+        fileCheck.setOpaque(false);
+
+        consoleCheck.setSelected(savedValue.contains("ConsoleHandler"));
+        fileCheck.setSelected(savedValue.contains("FileHandler"));
+
+        wrapper.add(consoleCheck);
+        wrapper.add(fileCheck);
+
+        row.input = wrapper;
+        row.inputConstraints = "split 2, growx, height pref!";
+        panel.add(wrapper, row.inputConstraints);
+
+        valueSuppliers.put(key, () -> {
+            List<String> active = new ArrayList<>();
+            if (consoleCheck.isSelected())
+                active.add("java.util.logging.ConsoleHandler");
+            if (fileCheck.isSelected())
+                active.add("java.util.logging.FileHandler");
+            return String.join(", ", active);
+        });
+
+        ActionListener al = e -> {
+            if (isProgrammaticChange)
+                return;
+            updateColor(wrapper, key, defaultValue);
+            updateDirtyStatus();
+        };
+        consoleCheck.addActionListener(al);
+        fileCheck.addActionListener(al);
+
+        propertyComponents.put(key, wrapper);
+        defaultValues.put(key, defaultValue);
+
+        JButton helpBtn = new HelpButton();
+        helpBtn.addActionListener(e -> showHelp(labelText, key));
+        row.help = helpBtn;
+        row.helpConstraints = "wrap";
+        panel.add(helpBtn, row.helpConstraints);
+
+        row.separator = new JSeparator();
+        row.separatorConstraints = "span, growx, wrap, gaptop 2, gapbottom 2";
+        panel.add(row.separator, row.separatorConstraints);
+        allPropertyRows.add(row);
     }
 
     private void refreshUIColors() {
@@ -676,12 +781,7 @@ public class LoggerConfigurationPanel extends JPanel {
             if (savedValue == null)
                 savedValue = "";
 
-            String newVal = "";
-            if (comp instanceof JComboBox) {
-                newVal = (String) ((JComboBox<?>) comp).getSelectedItem();
-            } else if (comp instanceof JTextComponent) {
-                newVal = ((JTextComponent) comp).getText().trim();
-            }
+            String newVal = getComponentValue(comp, key).trim();
 
             if (!newVal.trim().equals(savedValue.trim())) {
                 changesFound = true;
@@ -918,12 +1018,7 @@ public class LoggerConfigurationPanel extends JPanel {
             if (savedValue == null)
                 savedValue = "";
 
-            String val = "";
-            if (comp instanceof JComboBox) {
-                val = (String) ((JComboBox<?>) comp).getSelectedItem();
-            } else if (comp instanceof JTextComponent) {
-                val = ((JTextComponent) comp).getText();
-            }
+            String val = getComponentValue(comp, key);
             if (!val.trim().equals(savedValue.trim())) {
                 return true;
             }
@@ -964,6 +1059,9 @@ public class LoggerConfigurationPanel extends JPanel {
                     selected);
             this.activeProfileName = selected;
             updateProfileComboBoxColor();
+            if (choice == 0 && restartAction != null) {
+                restartAction.run();
+            }
         }
     }
 
@@ -1000,12 +1098,15 @@ public class LoggerConfigurationPanel extends JPanel {
         return getPropertiesFromUIInternal();
     }
 
-    private String getComponentValue(JComponent comp) {
+    private String getComponentValue(JComponent comp, String propName) {
         if (comp instanceof JComboBox) {
             Object item = ((JComboBox<?>) comp).getSelectedItem();
             return item != null ? item.toString() : "";
         } else if (comp instanceof JTextComponent) {
             return ((JTextComponent) comp).getText();
+        } else if (comp instanceof JPanel && valueSuppliers.containsKey(propName)) {
+            // Handle custom value supplier for Handlers panel
+            return valueSuppliers.get(propName).get();
         }
         return "";
     }
@@ -1021,6 +1122,17 @@ public class LoggerConfigurationPanel extends JPanel {
                 ((JComboBox<?>) comp).setSelectedItem(val);
             } else if (comp instanceof javax.swing.text.JTextComponent) {
                 ((javax.swing.text.JTextComponent) comp).setText(val);
+            } else if (key.equals("handlers") && comp instanceof JPanel) {
+                for (Component c : ((JPanel) comp).getComponents()) {
+                    if (c instanceof JCheckBox) {
+                        JCheckBox cb = (JCheckBox) c;
+                        if (cb.getText().equals("Console")) {
+                            cb.setSelected(val.contains("ConsoleHandler"));
+                        } else if (cb.getText().equals("File")) {
+                            cb.setSelected(val.contains("FileHandler"));
+                        }
+                    }
+                }
             }
             updateColor(comp, key, def);
         }
@@ -1176,7 +1288,7 @@ public class LoggerConfigurationPanel extends JPanel {
         String savedValue = props.getProperty(propName, defaultValue);
         String applied = appliedProps.getProperty(propName, defaultValue);
 
-        String value = getComponentValue(comp).trim();
+        String value = getComponentValue(comp, propName).trim();
         savedValue = savedValue.trim();
         applied = applied.trim();
 
@@ -1268,6 +1380,27 @@ public class LoggerConfigurationPanel extends JPanel {
                         + "<ul>"
                         + "<li><b>SEVERE:</b> Critical errors that may cause the application to terminate.</li>"
                         + "<li><b>WARNING:</b> Potential problems or unexpected events.</li>"
+                        + "</ul>");
+        helpTexts.put("brs.level",
+                "Sets the logging level specifically for the Signum Node application code (brs.* packages)."
+                        + "<br>This is the primary setting to control how much information you see about block processing, P2P networking, and wallet operations.");
+        helpTexts.put("handlers",
+                "Defines where the log messages are sent."
+                        + "<ul>"
+                        + "<li><b>Console:</b> Messages are displayed in the GUI console and the terminal.</li>"
+                        + "<li><b>File:</b> Messages are saved to the log file defined in 'Log File Pattern'.</li>"
+                        + "</ul>");
+        helpTexts.put("sun.rmi.level", "Level for RMI (Remote Method Invocation) system logs.");
+        helpTexts.put("com.zaxxer.hikari.level", "Level for the HikariCP database connection pool logs.");
+        helpTexts.put("org.eclipse.jetty.level", "Level for the internal Jetty web server logs.");
+        helpTexts.put("brs.db.store.DerivedTableManager.level",
+                "Level for internal database derived table maintenance logs.");
+        helpTexts.put("org.jooq.Constants.level", "Level for the JOOQ database abstraction library.");
+        helpTexts.put("javax.servlet.level", "Level for internal Java Servlet API logs.");
+
+        helpTexts.put("java.util.logging.ConsoleHandler.level",
+                "Sets the minimum logging level for messages displayed in the console window (the main text area of the GUI)."
+                        + "<br><br>Only messages with this level or higher will be shown in the console."
                         + "<li><b>INFO:</b> General operational information (default).</li>"
                         + "<li><b>CONFIG:</b> Static configuration messages.</li>"
                         + "<li><b>FINE:</b> Detailed tracing information.</li>"
