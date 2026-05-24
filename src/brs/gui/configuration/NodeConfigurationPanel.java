@@ -1,5 +1,6 @@
 package brs.gui.configuration;
 
+import brs.Signum;
 import brs.crypto.Crypto;
 import brs.Constants;
 import brs.props.Prop;
@@ -83,16 +84,16 @@ public class NodeConfigurationPanel extends JPanel {
 
         // Determine the currently applied profile name from metadata once at startup
         String lastProfile = ConfigurationUtils
-                .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, "node"));
+                .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER));
         if ("node-default".equals(lastProfile)) {
-            lastProfile = "node";
+            lastProfile = Signum.NODE_SUBFOLDER;
         }
-        this.runningProfileName = lastProfile != null ? lastProfile.trim() : "node";
+        this.runningProfileName = lastProfile != null ? lastProfile.trim() : Signum.NODE_SUBFOLDER;
         this.activeProfileName = this.runningProfileName;
         this.loadedProfileName = this.runningProfileName;
 
         // Use the detected profile to resolve the properties file path
-        this.propertiesFile = ConfigurationUtils.resolveProfilePath(confFolder, "node",
+        this.propertiesFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_SUBFOLDER,
                 this.loadedProfileName + ".properties");
         ConfigurationUtils.ensureConfigFileExists(this.propertiesFile);
 
@@ -579,26 +580,26 @@ public class NodeConfigurationPanel extends JPanel {
             profileComboBox.removeAllItems();
 
             String lastProfile = ConfigurationUtils
-                    .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, "node"));
+                    .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER));
             if ("node-default".equals(lastProfile)) {
-                lastProfile = "node";
+                lastProfile = Signum.NODE_SUBFOLDER;
             }
-            this.activeProfileName = lastProfile != null ? lastProfile.trim() : "node";
+            this.activeProfileName = lastProfile != null ? lastProfile.trim() : Signum.NODE_SUBFOLDER;
 
-            Path nodeConfPath = PathUtils.resolvePath(confFolder).resolve("node");
+            Path nodeConfPath = PathUtils.resolvePath(confFolder).resolve(Signum.NODE_SUBFOLDER);
             ConfigurationUtils.fetchProfileNames(nodeConfPath, brs.Signum.DEFAULT_PROPERTIES_NAME)
                     .forEach(profileComboBox::addItem);
 
             // Ensure the base profile is always available in the list
             boolean hasBase = false;
             for (int i = 0; i < profileComboBox.getItemCount(); i++) {
-                if ("node".equals(profileComboBox.getItemAt(i))) {
+                if (Signum.NODE_SUBFOLDER.equals(profileComboBox.getItemAt(i))) {
                     hasBase = true;
                     break;
                 }
             }
             if (!hasBase) {
-                profileComboBox.insertItemAt("node", 0);
+                profileComboBox.insertItemAt(Signum.NODE_SUBFOLDER, 0);
             }
 
             if (currentSelection != null) {
@@ -694,7 +695,7 @@ public class NodeConfigurationPanel extends JPanel {
                 if (value == saveBtn) {
                     String name = nameField.getText().trim();
                     try {
-                        Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, "node",
+                        Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_SUBFOLDER,
                                 name + ".properties");
                         if (Files.exists(targetFile)) {
                             int choice = JOptionPane.showConfirmDialog(this,
@@ -761,7 +762,7 @@ public class NodeConfigurationPanel extends JPanel {
 
         checkUnsavedChangesAndProceed(
                 () -> {
-                    Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, "node",
+                    Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_SUBFOLDER,
                             profileName + ".properties");
                     if (Files.exists(targetFile)) {
                         Properties loaded = new Properties();
@@ -782,8 +783,8 @@ public class NodeConfigurationPanel extends JPanel {
                                     JOptionPane.ERROR_MESSAGE);
                             // Revert to headless if loading fails
                             isProgrammaticChange = true;
-                            profileComboBox.setSelectedItem("node");
-                            loadProfile("node-default");
+                            profileComboBox.setSelectedItem(Signum.NODE_SUBFOLDER);
+                            loadProfile(Signum.NODE_SUBFOLDER + "-default");
                             isProgrammaticChange = false;
                         }
                     }
@@ -878,7 +879,7 @@ public class NodeConfigurationPanel extends JPanel {
                 }
             }
 
-            Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, "node",
+            Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_SUBFOLDER,
                     loadedProfileName + ".properties");
             if (Files.exists(targetFile)) {
                 Properties loaded = new Properties();
@@ -903,10 +904,12 @@ public class NodeConfigurationPanel extends JPanel {
         checkUnsavedChangesAndProceed(() -> {
             String name = (String) JOptionPane.showInputDialog(this, "Enter new profile name:", "New Profile",
                     JOptionPane.PLAIN_MESSAGE, null, null, "");
-            if (name == null || name.trim().isEmpty() || "node-default".equalsIgnoreCase(name.trim()))
+            if (name == null || name.trim().isEmpty()
+                    || (Signum.NODE_SUBFOLDER + "-default").equalsIgnoreCase(name.trim()))
                 return;
 
-            Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, "node", name + ".properties");
+            Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_SUBFOLDER,
+                    name + ".properties");
             if (Files.exists(targetFile)) {
                 JOptionPane.showMessageDialog(this, "Profile '" + name + "' already exists.", "Error",
                         JOptionPane.ERROR_MESSAGE);
@@ -972,7 +975,8 @@ public class NodeConfigurationPanel extends JPanel {
 
     private void updateProfileButtonStates() {
         String selected = (String) profileComboBox.getSelectedItem();
-        boolean isReadOnly = "node".equals(selected) || "node-default".equals(selected);
+        boolean isReadOnly = Signum.NODE_SUBFOLDER.equals(selected)
+                || (Signum.NODE_SUBFOLDER + "-default").equals(selected);
         resetToDefaultsBtn.setEnabled(true); // Always enable reset to defaults
         renameProfileBtn.setEnabled(!isReadOnly);
         deleteProfileBtn.setEnabled(!isReadOnly);
@@ -995,20 +999,23 @@ public class NodeConfigurationPanel extends JPanel {
                 oldProfileName);
 
         if (newProfileName == null || newProfileName.trim().isEmpty() || newProfileName.equals(oldProfileName)
-                || "node-default".equalsIgnoreCase(newProfileName.trim())) {
+                || (Signum.NODE_SUBFOLDER + "-default").equalsIgnoreCase(newProfileName.trim())) {
             return; // User cancelled or entered the same name
         }
 
         try {
-            Path oldFile = ConfigurationUtils.resolveProfilePath(confFolder, "node", oldProfileName + ".properties");
-            Path newFile = ConfigurationUtils.resolveProfilePath(confFolder, "node", newProfileName + ".properties");
+            Path oldFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_SUBFOLDER,
+                    oldProfileName + ".properties");
+            Path newFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_SUBFOLDER,
+                    newProfileName + ".properties");
 
             if (ConfigurationUtils.confirmAndRenameProfile(this, oldFile, newFile, oldProfileName, newProfileName)) {
                 refreshProfileList();
                 profileComboBox.setSelectedItem(newProfileName);
                 if (oldProfileName.equals(activeProfileName)) {
                     ConfigurationUtils.updateAppliedProfile(
-                            ConfigurationUtils.getProfileMetadataPath(confFolder, "node"), newProfileName);
+                            ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER),
+                            newProfileName);
                     this.activeProfileName = newProfileName;
                 }
                 if (oldProfileName.equals(loadedProfileName)) {
@@ -1037,7 +1044,7 @@ public class NodeConfigurationPanel extends JPanel {
         if (profileName == null || profileName.trim().isEmpty()) {
             return;
         }
-        if ("node-default".equals(profileName)) {
+        if ((Signum.NODE_SUBFOLDER + "-default").equals(profileName)) {
             JOptionPane.showMessageDialog(this, "The system profiles cannot be deleted.", "Action Not Allowed",
                     JOptionPane.WARNING_MESSAGE);
             return;
@@ -1053,12 +1060,13 @@ public class NodeConfigurationPanel extends JPanel {
         }
 
         try {
-            Path file = ConfigurationUtils.resolveProfilePath(confFolder, "node", profileName + ".properties");
+            Path file = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_SUBFOLDER,
+                    profileName + ".properties");
             if (Files.exists(file)) {
                 Files.delete(file);
                 refreshProfileList();
-                profileComboBox.setSelectedItem("node");
-                loadProfile("node");
+                profileComboBox.setSelectedItem(Signum.NODE_SUBFOLDER);
+                loadProfile(Signum.NODE_SUBFOLDER);
                 JOptionPane.showMessageDialog(this, "Profile '" + profileName + "' deleted successfully.",
                         "Success", JOptionPane.INFORMATION_MESSAGE);
             }
@@ -1206,7 +1214,8 @@ public class NodeConfigurationPanel extends JPanel {
                 null, options, options[0]);
 
         if (choice == 0 || choice == 1) {
-            ConfigurationUtils.updateAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, "node"),
+            ConfigurationUtils.updateAppliedProfile(
+                    ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER),
                     selected);
             this.activeProfileName = selected;
             updateProfileComboBoxColor();
@@ -1217,7 +1226,7 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private Path getProfileMetadataPath() {
-        return PathUtils.resolvePath(confFolder).resolve("node").resolve("profile.json");
+        return PathUtils.resolvePath(confFolder).resolve(Signum.NODE_SUBFOLDER).resolve("profile.json");
     }
 
     private Properties getPropertiesFromUI() {
