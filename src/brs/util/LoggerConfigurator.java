@@ -82,7 +82,7 @@ public final class LoggerConfigurator {
                 loggingProperties.setProperty("org.jooq.Constants.level", "OFF");
 
                 Path confPath = PathUtils.resolvePath(confFolder);
-                Path logConfPath = confPath.resolve(Signum.LOGGING_CONF_DIR);
+                Path logConfPath = confPath.resolve(Signum.NODE_LOGGING_SUBFOLDER);
 
                 File fileToLoad = null;
                 File propsFile = logConfPath.resolve(Signum.LOGGING_PROPERTIES_NAME).toFile();
