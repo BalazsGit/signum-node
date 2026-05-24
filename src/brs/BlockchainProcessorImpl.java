@@ -236,6 +236,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private final Listener<Peer> netVolumeListener = peer -> updateAndFireNetVolume();
 
     private final boolean autoPopOffEnabled;
+    private final AtomicBoolean skipDbCheckOnManualPopOff = new AtomicBoolean(false);
 
     private int minRollbackHeight = 0;
     private final AtomicInteger manualPopOffBlocksCount = new AtomicInteger(0);
@@ -607,6 +608,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         Peers.listeners.addListener(netVolumeListener, Peers.Event.DOWNLOADED_VOLUME);
 
         autoPopOffEnabled = propertyService.getBoolean(Props.AUTO_POP_OFF_ENABLED);
+
+        this.skipDbCheckOnManualPopOff.set(propertyService.getBoolean(Props.POP_OFF_SKIP_DB_CHECK));
 
         oclVerify = propertyService.getBoolean(Props.GPU_ACCELERATION); // use GPU acceleration ?
         oclUnverifiedQueue = propertyService.getInt(Props.GPU_UNVERIFIED_QUEUE);
@@ -2811,6 +2814,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     }
 
     @Override
+    public boolean isSkipDbCheckOnManualPopOff() {
+        return skipDbCheckOnManualPopOff.get();
+    }
+
+    @Override
+    public void setSkipDbCheckOnManualPopOff(boolean skip) {
+        this.skipDbCheckOnManualPopOff.set(skip);
+    }
+
+    @Override
     public void setSyncPaused(boolean paused) {
         setGetMoreBlocksPause(paused);
         setBlockImporterPause(paused);
@@ -3607,7 +3620,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                             atProcessorCache.reset();
                             // Checking database consistency after each block popped unless skipped via
                             // property
-                            if (!propertyService.getBoolean(Props.POP_OFF_SKIP_DB_CHECK) && checkDatabaseState() != 0) {
+                            if (!skipDbCheckOnManualPopOff.get() && checkDatabaseState() != 0) {
                                 manualPopOffBlocksCount.set(0);
                                 manualLastPopOffHeight.set(-1);
                                 stores.rollbackTransaction();

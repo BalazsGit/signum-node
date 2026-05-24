@@ -270,6 +270,10 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     void setBlockImporterPause(boolean blockImporterPause);
 
+    boolean isSkipDbCheckOnManualPopOff();
+
+    void setSkipDbCheckOnManualPopOff(boolean skip);
+
     void setSyncPaused(boolean paused);
 
     void generateBlock(String secretPhrase, byte[] publicKey, Long nonce)
