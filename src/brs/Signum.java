@@ -94,10 +94,13 @@ public final class Signum {
     public static final String LOGGING_CONF_DIR = NODE_LOGGING_SUBFOLDER;
     public static final String NODE_CONF_PATH = CONF_FOLDER + "/" + NODE_CONF_DIR;
     public static final String LOGGING_CONF_PATH = CONF_FOLDER + "/" + LOGGING_CONF_DIR;
-    public static final String DEFAULT_PROPERTIES_NAME = "node-default.properties";
-    public static String PROPERTIES_NAME = "node.properties";
-    public static final String DEFAULT_LOGGING_PROPERTIES_NAME = "logging-default.properties";
-    public static String LOGGING_PROPERTIES_NAME = "logging.properties";
+    public static final String DEFAULT_PROPERTIES_NAME = "node-default";
+    public static final String PROPERTIES_NAME = "node";
+    public static final String DEFAULT_LOGGING_PROPERTIES_NAME = "logging-default";
+    public static final String LOGGING_PROPERTIES_NAME = "logging";
+
+    private static String activeNodeProfile = PROPERTIES_NAME;
+    private static String activeLoggingProfile = LOGGING_PROPERTIES_NAME;
 
     /**
      * Stores log messages produced during the bootstrap phase before the GUI is
@@ -161,7 +164,8 @@ public final class Signum {
         if (logger != null)
             logger.info("Configurations from folder {}", confPath.toAbsolutePath());
 
-        Path fileToLoad = resolvePropertiesPath(nodePath, PROPERTIES_NAME, DEFAULT_PROPERTIES_NAME, confPath);
+        Path fileToLoad = resolvePropertiesPath(nodePath, PROPERTIES_NAME + ".properties",
+                DEFAULT_PROPERTIES_NAME + ".properties", confPath);
 
         if (fileToLoad != null) {
             try (Reader reader = new InputStreamReader(new FileInputStream(fileToLoad.toFile()),
@@ -169,8 +173,11 @@ public final class Signum {
                 if (logger != null)
                     logger.info("Loading properties from {}", fileToLoad.toAbsolutePath());
                 properties.load(reader);
-                // Update global variable to reflect actual file used
-                PROPERTIES_NAME = nodePath.relativize(fileToLoad).toString();
+                // Update active profile name to reflect actual file used
+                String fileName = nodePath.relativize(fileToLoad).toString();
+                if (fileName.endsWith(".properties")) {
+                    activeNodeProfile = fileName.substring(0, fileName.length() - 11);
+                }
             } catch (IOException e) {
                 if (logger != null) {
                     Path fileName = fileToLoad.getFileName();
@@ -189,6 +196,22 @@ public final class Signum {
         }
 
         return new PropertyServiceImpl(properties);
+    }
+
+    public static String getActiveNodeProfile() {
+        return activeNodeProfile;
+    }
+
+    public static void setActiveNodeProfile(String profile) {
+        activeNodeProfile = profile;
+    }
+
+    public static String getActiveLoggingProfile() {
+        return activeLoggingProfile;
+    }
+
+    public static void setActiveLoggingProfile(String profile) {
+        activeLoggingProfile = profile;
     }
 
     public static Path resolvePropertiesPath(Path dir, String fileName, String defaultFileName, Path confPath) {
@@ -334,10 +357,13 @@ public final class Signum {
         // Resolve logging properties priority
         Path confPath = PathUtils.resolvePath(confFolder);
         Path loggingPath = confPath.resolve(LOGGING_CONF_DIR);
-        Path loggingFileToLoad = resolvePropertiesPath(loggingPath, LOGGING_PROPERTIES_NAME,
-                DEFAULT_LOGGING_PROPERTIES_NAME, confPath);
+        Path loggingFileToLoad = resolvePropertiesPath(loggingPath, LOGGING_PROPERTIES_NAME + ".properties",
+                DEFAULT_LOGGING_PROPERTIES_NAME + ".properties", confPath);
         if (loggingFileToLoad != null) {
-            LOGGING_PROPERTIES_NAME = loggingPath.relativize(loggingFileToLoad).toString();
+            String fileName = loggingPath.relativize(loggingFileToLoad).toString();
+            if (fileName.endsWith(".properties")) {
+                activeLoggingProfile = fileName.substring(0, fileName.length() - 11);
+            }
         }
 
         PropertyService propertyService = loadProperties(confFolder);
