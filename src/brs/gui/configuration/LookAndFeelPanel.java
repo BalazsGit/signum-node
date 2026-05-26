@@ -63,11 +63,7 @@ public class LookAndFeelPanel extends JPanel {
 
     private static final String DEFAULT_PROFILE_NAME = "gui";
 
-    private String loadedProfileName = DEFAULT_PROFILE_NAME;
-    private String loadedThemeClass = FlatDarkLaf.class.getName();
-    private Font loadedGlobalFont;
-    private Font loadedConsoleFont;
-    private Map<String, Color> loadedColorOverrides = new HashMap<>();
+    private LookAndFeelProfile savedProfile;
     private boolean isProgrammaticChange = false;
     private boolean lastUnsavedStatus = false;
 
@@ -85,12 +81,6 @@ public class LookAndFeelPanel extends JPanel {
         super(new BorderLayout());
         this.backAction = backAction;
         instance = this;
-        // FlatLafPrefs.init() was moved to SignumGUI.loadLookAndFeelSettings() to
-        // ensure early initialization
-
-        // Initialize the loaded state with default values
-        this.loadedGlobalFont = UIManager.getFont("Label.font");
-        this.loadedConsoleFont = SignumGUI.getActiveConsoleFont();
 
         // Determine initial state from file BEFORE the UI is created
         String lastProfile = DEFAULT_PROFILE_NAME;
@@ -214,7 +204,7 @@ public class LookAndFeelPanel extends JPanel {
         colorSettingsPanel = new ColorSettingsPanel();
         // Sync the color settings panel with the overrides loaded from the profile
         // to prevent false "unsaved changes" detection on startup.
-        colorSettingsPanel.setProfileOverrides(loadedColorOverrides);
+        colorSettingsPanel.setProfileOverrides(savedProfile != null ? savedProfile.getColorOverrides() : null);
         colorSettingsPanel.setOnChangeListener(this::updateDirtyStatus);
         tabbedPane.addTab("Color Settings", colorSettingsPanel);
 
@@ -231,64 +221,21 @@ public class LookAndFeelPanel extends JPanel {
     }
 
     private boolean hasUnsavedChanges() {
-        boolean dirty = false;
-        StringBuilder reason = new StringBuilder();
-
-        // Check colors
-        Map<String, Color> currentColors = colorSettingsPanel != null ? colorSettingsPanel.getCurrentOverrides()
-                : Collections.emptyMap();
-        if (!currentColors.equals(loadedColorOverrides)) {
-            dirty = true;
-            reason.append("Color overrides differ. ");
-        }
-
-        // Check theme
-        String currentTheme = UIManager.getLookAndFeel().getClass().getName();
-        if (!currentTheme.equals(loadedThemeClass)) {
-            dirty = true;
-            reason.append("Theme class differs. ");
-        }
-
-        // Check global font
-        Font currentGlobal = SignumGUI.getActiveCustomFont();
-        if (!fontsMatch(currentGlobal, loadedGlobalFont)) {
-            dirty = true;
-            reason.append("Global font differs. ");
-        }
-
-        // Check console font
-        Font currentConsole = SignumGUI.getActiveConsoleFont();
-        if (!fontsMatch(currentConsole, loadedConsoleFont)) {
-            dirty = true;
-            reason.append("Console font differs (Current: ").append(currentConsole).append(", Loaded: ")
-                    .append(loadedConsoleFont).append("). ");
-        }
-
-        // Only log if the status has changed (state transition)
-        if (dirty != lastUnsavedStatus) {
-            if (dirty) {
-                LOGGER.info("Unsaved changes detected: {}", reason.toString().trim());
-            } else {
-                LOGGER.info("All changes saved or reverted.");
-            }
-            lastUnsavedStatus = dirty;
-        }
-
-        return dirty;
-    }
-
-    private boolean fontsMatch(Font a, Font b) {
-        if (a == b)
-            return true;
-        if (a == null || b == null)
+        if (savedProfile == null)
             return false;
-        return a.getFamily().equals(b.getFamily()) &&
-                a.getSize() == b.getSize() &&
-                a.getStyle() == b.getStyle();
+
+        LookAndFeelProfile currentUI = new LookAndFeelProfile(savedProfile.getName());
+        currentUI.setThemeClassName(UIManager.getLookAndFeel().getClass().getName());
+        currentUI.setGlobalFont(SignumGUI.getActiveCustomFont());
+        currentUI.setConsoleFont(SignumGUI.getActiveConsoleFont());
+        currentUI.setColorOverrides(
+                colorSettingsPanel != null ? colorSettingsPanel.getCurrentOverrides() : new HashMap<>());
+
+        return !currentUI.equals(savedProfile);
     }
 
     private void updateDirtyStatus() {
-        if (isProgrammaticChange)
+        if (isProgrammaticChange || savedProfile == null)
             return;
         boolean dirty = hasUnsavedChanges();
         saveProfileBtn.setText(dirty ? "Save Profile As *" : "Save Profile As");
@@ -300,10 +247,11 @@ public class LookAndFeelPanel extends JPanel {
 
         // Mark tabs with an asterisk if there are unsaved changes
         boolean colorsDirty = colorSettingsPanel != null
-                && !colorSettingsPanel.getCurrentOverrides().equals(loadedColorOverrides);
-        boolean themeDirty = !UIManager.getLookAndFeel().getClass().getName().equals(loadedThemeClass) ||
-                !fontsMatch(SignumGUI.getActiveCustomFont(), loadedGlobalFont) ||
-                !fontsMatch(SignumGUI.getActiveConsoleFont(), loadedConsoleFont);
+                && !colorSettingsPanel.getCurrentOverrides().equals(savedProfile.getColorOverrides());
+        boolean themeDirty = !UIManager.getLookAndFeel().getClass().getName().equals(savedProfile.getThemeClassName())
+                ||
+                !fontsMatch(SignumGUI.getActiveCustomFont(), savedProfile.getGlobalFont()) ||
+                !fontsMatch(SignumGUI.getActiveConsoleFont(), savedProfile.getConsoleFont());
 
         updateTabTitle(0, "Themes & Fonts", themeDirty);
         updateTabTitle(1, "Color Settings", colorsDirty);
@@ -318,7 +266,7 @@ public class LookAndFeelPanel extends JPanel {
     }
 
     private void reloadProfile() {
-        if (loadedProfileName != null) {
+        if (savedProfile != null) {
             if (hasUnsavedChanges()) {
                 String message = "You have unsaved changes. Are you sure you want to reload from disk and discard these changes?";
                 Object[] options = { "Discard and Reload", "Cancel" };
@@ -330,7 +278,7 @@ public class LookAndFeelPanel extends JPanel {
                 }
             }
             // Reload profile from saved state
-            performLoadProfile(loadedProfileName);
+            performLoadProfile(savedProfile.getName());
         }
     }
 
@@ -381,50 +329,13 @@ public class LookAndFeelPanel extends JPanel {
     }
 
     private void updateLoadedStateFromProfile(String profileName) {
-        this.loadedProfileName = profileName;
-        LOGGER.info("Look and Feel profile tracking state updated to: '{}'", profileName);
-        // Set default values from the current GUI state to avoid
-        // null
-        this.loadedThemeClass = UIManager.getLookAndFeel().getClass().getName();
-        this.loadedGlobalFont = SignumGUI.getActiveCustomFont();
-        this.loadedConsoleFont = SignumGUI.getActiveConsoleFont();
-        this.loadedColorOverrides = new java.util.HashMap<>();
-
-        try {
-            Path settingsPath = getGuiSettingsPath();
-            if (Files.exists(settingsPath)) {
-                JsonObject settings = JsonParser
-                        .parseReader(Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8))
-                        .getAsJsonObject();
-                if ("look-and-feel-default".equals(profileName)) {
-                    profileName = DEFAULT_PROFILE_NAME;
-                }
-                JsonObject profiles = settings.has("lookAndFeelProfiles")
-                        ? settings.getAsJsonObject("lookAndFeelProfiles")
-                        : null;
-                if (profiles != null && profiles.has(profileName)) {
-                    JsonObject lafSettings = profiles.getAsJsonObject(profileName);
-                    if (lafSettings.has("theme")) {
-                        loadedThemeClass = lafSettings.get("theme").getAsString();
-                    }
-                    if (lafSettings.has("font")) {
-                        loadedGlobalFont = parseFont(lafSettings.getAsJsonObject("font"));
-                    } else {
-                        loadedGlobalFont = SignumGUI.getActiveCustomFont();
-                    }
-                    if (lafSettings.has("consoleFont")) {
-                        loadedConsoleFont = parseFont(lafSettings.getAsJsonObject("consoleFont"));
-                    } else {
-                        loadedConsoleFont = SignumGUI.getActiveConsoleFont();
-                    }
-                    loadedColorOverrides = lafSettings.has("colorOverrides")
-                            ? parseColorOverrides(lafSettings.getAsJsonObject("colorOverrides"))
-                            : new HashMap<>();
-                }
-            }
-        } catch (Exception e) {
+        this.savedProfile = ConfigurationUtils.loadLookAndFeelProfile(getGuiSettingsPath(), profileName);
+        if (this.savedProfile != null && this.savedProfile.getThemeClassName() == null) {
+            this.savedProfile.setThemeClassName(FlatDarkLaf.class.getName());
         }
-        // Reset the observer since the loaded state was updated
+        if (colorSettingsPanel != null) {
+            colorSettingsPanel.setProfileOverrides(savedProfile.getColorOverrides());
+        }
         lastUnsavedStatus = false;
     }
 
@@ -534,7 +445,7 @@ public class LookAndFeelPanel extends JPanel {
                         return true;
                     }
                 } else if (value == discardBtn) {
-                    performLoadProfile(loadedProfileName);
+                    performLoadProfile(savedProfile != null ? savedProfile.getName() : DEFAULT_PROFILE_NAME);
                     return false;
                 } else {
                     return false;
@@ -752,12 +663,14 @@ public class LookAndFeelPanel extends JPanel {
     }
 
     public void loadProfile(String profileName) {
-        if (profileName == null || profileName.trim().isEmpty() || profileName.equals(loadedProfileName))
+        if (profileName == null || profileName.trim().isEmpty()
+                || (savedProfile != null && profileName.equals(savedProfile.getName())))
             return;
 
         checkUnsavedChangesAndProceed(false,
                 () -> performLoadProfile(profileName),
-                () -> profileComboBox.setSelectedItem(loadedProfileName));
+                () -> profileComboBox
+                        .setSelectedItem(savedProfile != null ? savedProfile.getName() : DEFAULT_PROFILE_NAME));
     }
 
     public boolean checkUnsavedChangesAndProceed(boolean allowKeepUnsaved, Runnable onProceed, Runnable onCancel) {
@@ -769,7 +682,8 @@ public class LookAndFeelPanel extends JPanel {
         }
 
         Object[] message = {
-                "You have unsaved changes in profile '" + loadedProfileName + "'.",
+                "You have unsaved changes in profile '"
+                        + (savedProfile != null ? savedProfile.getName() : DEFAULT_PROFILE_NAME) + "'.",
                 report,
                 "What would you like to do?"
         };
@@ -801,7 +715,7 @@ public class LookAndFeelPanel extends JPanel {
                 onProceed.run();
             return true;
         } else if (result == discardIndex) {
-            performLoadProfile(loadedProfileName);
+            performLoadProfile(savedProfile != null ? savedProfile.getName() : DEFAULT_PROFILE_NAME);
             if (onProceed != null) {
                 SwingUtilities.invokeLater(onProceed);
             }
@@ -814,39 +728,42 @@ public class LookAndFeelPanel extends JPanel {
     }
 
     private String getUnsavedChangesReport() {
+        if (savedProfile == null)
+            return null;
         StringBuilder report = new StringBuilder(
-                "<html><b>Unsaved changes in Look and Feel Settings (Profile: '" + loadedProfileName + "'):</b><ul>");
+                "<html><b>Unsaved changes in Look and Feel Settings (Profile: '" + savedProfile.getName()
+                        + "'):</b><ul>");
         boolean changesFound = false;
 
         // Check theme
         String currentTheme = UIManager.getLookAndFeel().getClass().getName();
-        if (!currentTheme.equals(loadedThemeClass)) {
+        if (!currentTheme.equals(savedProfile.getThemeClassName())) {
             changesFound = true;
-            String oldName = getLookAndFeelName(loadedThemeClass);
+            String oldName = getLookAndFeelName(savedProfile.getThemeClassName());
             String newName = UIManager.getLookAndFeel().getName();
             report.append("<li>Theme: '").append(oldName).append("' &rarr; '").append(newName).append("'</li>");
         }
 
         // Check global font
         Font currentGlobal = SignumGUI.getActiveCustomFont();
-        if (!fontsMatch(currentGlobal, loadedGlobalFont)) {
+        if (!fontsMatch(currentGlobal, savedProfile.getGlobalFont())) {
             changesFound = true;
-            report.append("<li>Global font: '").append(formatFont(loadedGlobalFont)).append("' &rarr; '")
+            report.append("<li>Global font: '").append(formatFont(savedProfile.getGlobalFont())).append("' &rarr; '")
                     .append(formatFont(currentGlobal)).append("'</li>");
         }
 
         // Check console font
         Font currentConsole = SignumGUI.getActiveConsoleFont();
-        if (!fontsMatch(currentConsole, loadedConsoleFont)) {
+        if (!fontsMatch(currentConsole, savedProfile.getConsoleFont())) {
             changesFound = true;
-            report.append("<li>Console font: '").append(formatFont(loadedConsoleFont)).append("' &rarr; '")
+            report.append("<li>Console font: '").append(formatFont(savedProfile.getConsoleFont())).append("' &rarr; '")
                     .append(formatFont(currentConsole)).append("'</li>");
         }
 
         // Check colors
         Map<String, Color> currentColors = colorSettingsPanel != null ? colorSettingsPanel.getCurrentOverrides()
                 : Collections.emptyMap();
-        if (!currentColors.equals(loadedColorOverrides)) {
+        if (!currentColors.equals(savedProfile.getColorOverrides())) {
             changesFound = true;
             report.append("<li>Color modifications:<ul>");
 
@@ -854,7 +771,7 @@ public class LookAndFeelPanel extends JPanel {
             for (Map.Entry<String, Color> entry : currentColors.entrySet()) {
                 String key = entry.getKey();
                 Color newVal = entry.getValue();
-                Color oldVal = loadedColorOverrides.get(key);
+                Color oldVal = savedProfile.getColorOverrides().get(key);
 
                 if (oldVal == null) {
                     Color themeColor = ColorPaletteManager.getThemeColor(key);
@@ -867,10 +784,11 @@ public class LookAndFeelPanel extends JPanel {
             }
 
             // Find removed overrides (reverted to palette default)
-            for (String key : loadedColorOverrides.keySet()) {
+            for (String key : savedProfile.getColorOverrides().keySet()) {
                 if (!currentColors.containsKey(key)) {
                     Color themeColor = ColorPaletteManager.getThemeColor(key);
-                    report.append("<li>").append(key).append(": '").append(toHexString(loadedColorOverrides.get(key)))
+                    report.append("<li>").append(key).append(": '")
+                            .append(toHexString(savedProfile.getColorOverrides().get(key)))
                             .append("' &rarr; default ").append(toHexString(themeColor)).append("</li>");
                 }
             }
@@ -882,6 +800,9 @@ public class LookAndFeelPanel extends JPanel {
     }
 
     private String getLookAndFeelName(String className) {
+        if (className == null) {
+            className = FlatDarkLaf.class.getName();
+        }
         for (UIManager.LookAndFeelInfo laf : UIManager.getInstalledLookAndFeels()) {
             if (laf.getClassName().equals(className)) {
                 return laf.getName();
@@ -1152,5 +1073,22 @@ public class LookAndFeelPanel extends JPanel {
     private Path getGuiSettingsPath() {
         String settingsDir = Props.SETTINGS_DIR.getDefaultValue();
         return PathUtils.resolvePath(settingsDir).resolve("gui-settings.json");
+    }
+
+    private boolean fontsMatch(Font a, Font b) {
+        if (a == b)
+            return true;
+        if (a == null || b == null) {
+            // If one is null, consider them matching if the other is the system default
+            // font
+            Font nonNull = (a != null) ? a : b;
+            Font systemDefault = UIManager.getFont("Label.font");
+            if (systemDefault == null)
+                return false;
+            return nonNull.getFamily().equals(systemDefault.getFamily()) &&
+                    nonNull.getSize() == systemDefault.getSize() &&
+                    nonNull.getStyle() == systemDefault.getStyle();
+        }
+        return a.getFamily().equals(b.getFamily()) && a.getSize() == b.getSize() && a.getStyle() == b.getStyle();
     }
 }
