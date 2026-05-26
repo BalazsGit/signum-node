@@ -43,6 +43,9 @@ public class DatabaseConfigurationUtils {
     @FunctionalInterface
     public interface ProgressListener {
         void onProgress(String message, int progress);
+
+        default void onLog(String line) {
+        }
     }
 
     /**
@@ -139,13 +142,18 @@ public class DatabaseConfigurationUtils {
         }
     }
 
-    public static void executeExternalProcess(List<String> command, File workingDir, String logPrefix)
+    public static void executeExternalProcess(List<String> command, File workingDir, String logPrefix,
+            ProgressListener listener)
             throws IOException, InterruptedException {
         Process process = new ProcessBuilder(command).directory(workingDir).redirectErrorStream(true).start();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
             String line;
-            while ((line = reader.readLine()) != null)
+            while ((line = reader.readLine()) != null) {
                 logger.info("{}: {}", logPrefix, line);
+                if (listener != null)
+                    listener.onLog(line);
+            }
         }
         int exitCode = process.waitFor();
         if (exitCode != 0) {
