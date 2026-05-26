@@ -45,6 +45,11 @@ public class LoggerConfigurationPanel extends JPanel {
 
     private static final String[] LOG_LEVELS = { "SEVERE", "WARNING", "INFO", "CONFIG", "FINE", "FINER", "FINEST",
             "ALL", "OFF" };
+    private static final String[] COMMON_LOGGERS = {
+            "brs", "brs.http", "brs.peer", "brs.db", "brs.crypto", "brs.util",
+            "org.eclipse.jetty", "javax.servlet", "com.zaxxer.hikari", "org.jooq", "sun.rmi"
+    };
+
     private final Runnable restartAction;
     private final Runnable backAction;
     private static final Logger LOGGER = LoggerFactory.getLogger(LoggerConfigurationPanel.class);
@@ -69,6 +74,10 @@ public class LoggerConfigurationPanel extends JPanel {
     private JButton reloadProfileBtn;
     private JButton resetToDefaultsBtn;
     private JButton refreshProfilesBtn;
+    private final Set<String> dynamicLoggerKeys = new java.util.LinkedHashSet<>();
+    private final Set<String> staticLoggerKeys = new java.util.HashSet<>();
+    private JPanel mainContentPanel;
+    private JComboBox<String> addLoggerClassCombo;
     private JPanel contentContainer;
     private JComponent verticalFiller;
     private String runningProfileName;
@@ -85,19 +94,11 @@ public class LoggerConfigurationPanel extends JPanel {
         this.switchAction = switchAction;
 
         // Determine the currently applied profile name from metadata once at startup
-        String lastProfile = ConfigurationUtils
-                .loadAppliedProfile(ConfigurationUtils
-                        .getProfileMetadataPath(confFolder, Signum.NODE_LOGGING_SUBFOLDER));
-        if ("logging-default".equals(lastProfile)) {
-            lastProfile = Signum.NODE_LOGGING_SUBFOLDER;
-        }
-        this.runningProfileName = lastProfile != null ? lastProfile.trim() : Signum.NODE_LOGGING_SUBFOLDER;
+        this.runningProfileName = Signum.getActiveLoggingProfile();
         this.activeProfileName = this.runningProfileName;
         this.loadedProfileName = this.runningProfileName;
 
-        this.propertiesFile = ConfigurationUtils.resolveProfilePath(confFolder,
-                Signum.NODE_LOGGING_SUBFOLDER,
-                this.loadedProfileName + ".properties");
+        this.propertiesFile = getPropertiesPath(this.loadedProfileName);
         ConfigurationUtils.ensureConfigFileExists(this.propertiesFile);
 
         this.props = new Properties();
@@ -119,6 +120,11 @@ public class LoggerConfigurationPanel extends JPanel {
 
         initHelpTexts();
         initUI();
+
+        // After UI is initialized, ensure the correct profile is loaded and displayed
+        isProgrammaticChange = true;
+        updateUIFromProperties(this.props);
+        isProgrammaticChange = false;
     }
 
     private void initUI() {
@@ -237,106 +243,119 @@ public class LoggerConfigurationPanel extends JPanel {
         northPanel.add(searchPanel, BorderLayout.SOUTH);
         bodyPanel.add(northPanel, BorderLayout.NORTH);
 
-        JPanel contentPanel = new JPanel(new MigLayout("fillx, insets 10, gap 5", "[][grow]", ""));
+        mainContentPanel = new JPanel(new MigLayout("fillx, insets 10, gap 5", "[][grow]", ""));
 
         // Clear list before rebuilding UI (in case of re-init)
         allPropertyRows.clear();
 
-        addSectionHeader(contentPanel, "Global Settings", true);
+        addSectionHeader(mainContentPanel, "Global Settings", true);
 
         String defaultGlobalLevel = "SEVERE";
         JComboBox<String> globalLevelCombo = new JComboBox<>(LOG_LEVELS);
         globalLevelCombo.setSelectedItem(props.getProperty(".level", defaultGlobalLevel));
-        addProperty(contentPanel, "Global Level", ".level", globalLevelCombo, defaultGlobalLevel);
+        addProperty(mainContentPanel, "Global Level", ".level", globalLevelCombo, defaultGlobalLevel);
 
         String defaultBrsLevel = "INFO";
         JComboBox<String> brsLevelCombo = new JComboBox<>(LOG_LEVELS);
         brsLevelCombo.setSelectedItem(props.getProperty("brs.level", defaultBrsLevel));
-        addProperty(contentPanel, "Node (BRS) Level", "brs.level", brsLevelCombo, defaultBrsLevel);
+        addProperty(mainContentPanel, "Node (BRS) Level", "brs.level", brsLevelCombo, defaultBrsLevel);
 
-        addSectionHeader(contentPanel, "Log Destinations", false);
-        addHandlersProperty(contentPanel);
+        String defaultConsoleSize = "100000";
+        JTextField consoleSizeField = createStyledTextField(
+                props.getProperty("brs.gui.consoleLogSize", defaultConsoleSize));
+        addProperty(mainContentPanel, "GUI Console Buffer Size (chars)", "brs.gui.consoleLogSize", consoleSizeField,
+                defaultConsoleSize);
 
-        addSectionHeader(contentPanel, "Console Handler", false);
+        addSectionHeader(mainContentPanel, "Log Destinations", false);
+        addHandlersProperty(mainContentPanel);
 
-        String defaultConsoleLevel = "INFO";
+        addSectionHeader(mainContentPanel, "Console Handler", false);
+
+        String defaultConsoleLevel = "ALL";
         JComboBox<String> consoleLevelCombo = new JComboBox<>(LOG_LEVELS);
         consoleLevelCombo
                 .setSelectedItem(props.getProperty("java.util.logging.ConsoleHandler.level", defaultConsoleLevel));
-        addProperty(contentPanel, "Console Level", "java.util.logging.ConsoleHandler.level", consoleLevelCombo,
+        addProperty(mainContentPanel, "Console Level", "java.util.logging.ConsoleHandler.level", consoleLevelCombo,
                 defaultConsoleLevel);
 
-        addSectionHeader(contentPanel, "File Handler", false);
+        addSectionHeader(mainContentPanel, "File Handler", false);
 
         String defaultFileLevel = "INFO";
         JComboBox<String> fileLevelCombo = new JComboBox<>(LOG_LEVELS);
         fileLevelCombo.setSelectedItem(props.getProperty("java.util.logging.FileHandler.level", defaultFileLevel));
-        addProperty(contentPanel, "File Level", "java.util.logging.FileHandler.level", fileLevelCombo,
+        addProperty(mainContentPanel, "File Level", "java.util.logging.FileHandler.level", fileLevelCombo,
                 defaultFileLevel);
 
         // File Pattern
         String defaultPattern = "logs/signum%u.log";
         JTextField filePatternField = createStyledTextField(
                 props.getProperty("java.util.logging.FileHandler.pattern", defaultPattern));
-        addProperty(contentPanel, "Log File Pattern", "java.util.logging.FileHandler.pattern", filePatternField,
+        addProperty(mainContentPanel, "Log File Pattern", "java.util.logging.FileHandler.pattern", filePatternField,
                 defaultPattern);
 
         // File Limit
         String defaultLimit = "0";
         JTextField fileLimitField = createStyledTextField(
                 props.getProperty("java.util.logging.FileHandler.limit", defaultLimit));
-        addProperty(contentPanel, "File Size Limit (bytes)", "java.util.logging.FileHandler.limit", fileLimitField,
+        addProperty(mainContentPanel, "File Size Limit (bytes)", "java.util.logging.FileHandler.limit", fileLimitField,
                 defaultLimit);
 
         // File Count
         String defaultCount = "1";
         JTextField fileCountField = createStyledTextField(
                 props.getProperty("java.util.logging.FileHandler.count", defaultCount));
-        addProperty(contentPanel, "File Count", "java.util.logging.FileHandler.count", fileCountField, defaultCount);
+        addProperty(mainContentPanel, "File Count", "java.util.logging.FileHandler.count", fileCountField,
+                defaultCount);
 
-        addSectionHeader(contentPanel, "Library Logging (Noise Suppression)", false);
+        addSectionHeader(mainContentPanel, "Library Logging (Noise Suppression)", false);
 
         String defaultJettyLevel = "OFF";
         JComboBox<String> jettyLevelCombo = new JComboBox<>(LOG_LEVELS);
         jettyLevelCombo.setSelectedItem(props.getProperty("org.eclipse.jetty.level", defaultJettyLevel));
-        addProperty(contentPanel, "Jetty Level", "org.eclipse.jetty.level", jettyLevelCombo, defaultJettyLevel);
+        addProperty(mainContentPanel, "Jetty Level", "org.eclipse.jetty.level", jettyLevelCombo, defaultJettyLevel);
 
         String defaultServletLevel = "OFF";
         JComboBox<String> servletLevelCombo = new JComboBox<>(LOG_LEVELS);
         servletLevelCombo.setSelectedItem(props.getProperty("javax.servlet.level", defaultServletLevel));
-        addProperty(contentPanel, "Servlet Level", "javax.servlet.level", servletLevelCombo, defaultServletLevel);
+        addProperty(mainContentPanel, "Servlet Level", "javax.servlet.level", servletLevelCombo, defaultServletLevel);
 
         String defaultHikariLevel = "WARNING";
         JComboBox<String> hikariLevelCombo = new JComboBox<>(LOG_LEVELS);
         hikariLevelCombo.setSelectedItem(props.getProperty("com.zaxxer.hikari.level", defaultHikariLevel));
-        addProperty(contentPanel, "Hikari Level", "com.zaxxer.hikari.level", hikariLevelCombo, defaultHikariLevel);
+        addProperty(mainContentPanel, "Hikari Level", "com.zaxxer.hikari.level", hikariLevelCombo, defaultHikariLevel);
 
         String defaultJooqLevel = "OFF";
         JComboBox<String> jooqLevelCombo = new JComboBox<>(LOG_LEVELS);
         jooqLevelCombo.setSelectedItem(props.getProperty("org.jooq.Constants.level", defaultJooqLevel));
-        addProperty(contentPanel, "JOOQ Level", "org.jooq.Constants.level", jooqLevelCombo, defaultJooqLevel);
+        addProperty(mainContentPanel, "JOOQ Level", "org.jooq.Constants.level", jooqLevelCombo, defaultJooqLevel);
 
         String defaultRmiLevel = "INFO";
         JComboBox<String> rmiLevelCombo = new JComboBox<>(LOG_LEVELS);
         rmiLevelCombo.setSelectedItem(props.getProperty("sun.rmi.level", defaultRmiLevel));
-        addProperty(contentPanel, "RMI Level", "sun.rmi.level", rmiLevelCombo, defaultRmiLevel);
+        addProperty(mainContentPanel, "RMI Level", "sun.rmi.level", rmiLevelCombo, defaultRmiLevel);
 
         String defaultDerivedLevel = "OFF";
         JComboBox<String> derivedLevelCombo = new JComboBox<>(LOG_LEVELS);
         derivedLevelCombo
                 .setSelectedItem(props.getProperty("brs.db.store.DerivedTableManager.level", defaultDerivedLevel));
-        addProperty(contentPanel, "Derived Table Level", "brs.db.store.DerivedTableManager.level", derivedLevelCombo,
+        addProperty(mainContentPanel, "Derived Table Level", "brs.db.store.DerivedTableManager.level",
+                derivedLevelCombo,
                 defaultDerivedLevel);
+
+        staticLoggerKeys.addAll(propertyComponents.keySet());
+
+        addSectionHeader(mainContentPanel, "Specific Logger Levels", false);
+        addLoggerCreationGui(mainContentPanel);
 
         // Push everything to top
         verticalFiller = new JLabel();
-        contentPanel.add(verticalFiller, "pushy");
+        mainContentPanel.add(verticalFiller, "pushy");
 
         // --- Content Container (CardLayout for Settings vs Search Results) ---
         contentCardLayout = new CardLayout();
         contentContainer = new JPanel(contentCardLayout);
 
-        JScrollPane scrollPane = new JScrollPane(contentPanel);
+        JScrollPane scrollPane = new JScrollPane(mainContentPanel);
         scrollPane.getVerticalScrollBar().setUnitIncrement(16);
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
 
@@ -359,7 +378,7 @@ public class LoggerConfigurationPanel extends JPanel {
         bottomPanel.add(createLegendPanel(), BorderLayout.NORTH);
 
         // File path field
-        JLabel pathLabel = new JLabel("Configuration File: " + propertiesFile.toAbsolutePath().toString());
+        JLabel pathLabel = new JLabel("Configuration File: " + propertiesFile.getFileName().toString());
         pathLabel.setForeground(GuiColors.getFaintText());
         bottomPanel.add(pathLabel, BorderLayout.CENTER);
 
@@ -482,10 +501,12 @@ public class LoggerConfigurationPanel extends JPanel {
             }
             contentCardLayout.show(contentContainer, "SEARCH");
         } else {
-            // Restore components to their original panels in order
-            if (!allPropertyRows.isEmpty()) {
-                allPropertyRows.get(0).originalParent.removeAll();
-            }
+            // Robust Restore: Clear all involved parents
+            java.util.Set<JPanel> parents = allPropertyRows.stream()
+                    .map(row -> row.originalParent)
+                    .collect(java.util.stream.Collectors.toSet());
+            parents.forEach(JPanel::removeAll);
+
             for (PropertyRow row : allPropertyRows) {
                 row.originalParent.add(row.label, row.labelConstraints);
                 if (row.input != null) {
@@ -498,8 +519,9 @@ public class LoggerConfigurationPanel extends JPanel {
                     row.originalParent.add(row.separator, row.separatorConstraints);
                 }
             }
-            if (verticalFiller != null && !allPropertyRows.isEmpty()) {
-                allPropertyRows.get(0).originalParent.add(verticalFiller, "pushy");
+
+            if (verticalFiller != null) {
+                mainContentPanel.add(verticalFiller, "pushy");
             }
             contentCardLayout.show(contentContainer, "SETTINGS");
         }
@@ -521,28 +543,26 @@ public class LoggerConfigurationPanel extends JPanel {
             String currentSelection = (String) profileComboBox.getSelectedItem();
             profileComboBox.removeAllItems();
 
-            String lastProfile = ConfigurationUtils
-                    .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder,
-                            Signum.NODE_LOGGING_SUBFOLDER));
-            if ("logging-default".equals(lastProfile)) {
-                lastProfile = Signum.NODE_LOGGING_SUBFOLDER;
-            }
-            this.activeProfileName = lastProfile != null ? lastProfile.trim() : Signum.NODE_LOGGING_SUBFOLDER;
+            this.activeProfileName = Signum.getActiveLoggingProfile();
 
             Path loggingConfPath = PathUtils.resolvePath(confFolder).resolve(Signum.NODE_LOGGING_SUBFOLDER);
-            ConfigurationUtils.fetchProfileNames(loggingConfPath, brs.Signum.DEFAULT_LOGGING_PROPERTIES_NAME)
+            String baseFileName = Signum.LOGGING_PROPERTIES_NAME + ".properties";
+            ConfigurationUtils
+                    .fetchProfileNames(loggingConfPath, Signum.DEFAULT_LOGGING_PROPERTIES_NAME + ".properties")
+                    .stream()
+                    .filter(name -> !(name + ".properties").equals(baseFileName))
                     .forEach(profileComboBox::addItem);
 
             // Ensure the base profile is always available in the list
             boolean hasBase = false;
             for (int i = 0; i < profileComboBox.getItemCount(); i++) {
-                if (Signum.NODE_LOGGING_SUBFOLDER.equals(profileComboBox.getItemAt(i))) {
+                if (Signum.LOGGING_PROPERTIES_NAME.equals(profileComboBox.getItemAt(i))) {
                     hasBase = true;
                     break;
                 }
             }
             if (!hasBase) {
-                profileComboBox.insertItemAt(Signum.NODE_LOGGING_SUBFOLDER, 0);
+                profileComboBox.insertItemAt(Signum.LOGGING_PROPERTIES_NAME, 0);
             }
 
             if (currentSelection != null && profileComboBox.getItemCount() > 0) {
@@ -611,7 +631,7 @@ public class LoggerConfigurationPanel extends JPanel {
         nameField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             private void validate() {
                 String text = nameField.getText().trim();
-                boolean isReserved = "logging-default".equalsIgnoreCase(text);
+                boolean isReserved = Signum.DEFAULT_LOGGING_PROPERTIES_NAME.equalsIgnoreCase(text);
                 errorLabel.setVisible(isReserved);
                 saveBtn.setEnabled(!isReserved && !text.isEmpty());
             }
@@ -638,9 +658,7 @@ public class LoggerConfigurationPanel extends JPanel {
                 if (value == saveBtn) {
                     String name = nameField.getText().trim();
                     try {
-                        Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder,
-                                Signum.NODE_LOGGING_SUBFOLDER,
-                                name + ".properties");
+                        Path targetFile = getPropertiesPath(name);
                         if (Files.exists(targetFile)) {
                             int choice = JOptionPane.showConfirmDialog(this,
                                     "Profile '" + name + "' already exists. Do you want to overwrite it?",
@@ -653,8 +671,21 @@ public class LoggerConfigurationPanel extends JPanel {
                         }
 
                         Properties propsToSave = getPropertiesFromUIInternal();
+
+                        // Build a comprehensive set of managed keys.
+                        // Managed keys that are NOT in propsToSave will be removed from the file.
+                        Set<String> managedKeys = new HashSet<>(staticLoggerKeys);
+                        managedKeys.addAll(propertyComponents.keySet());
+                        // Include all .level properties currently in the saved reference
+                        // to ensure that those removed from the UI are also removed from the file.
+                        for (String key : props.stringPropertyNames()) {
+                            if (key.endsWith(".level")) {
+                                managedKeys.add(key);
+                            }
+                        }
+
                         ConfigurationUtils.savePropertiesPreservingFormat(targetFile, propsToSave,
-                                propertyComponents.keySet());
+                                managedKeys);
 
                         isProgrammaticChange = true;
                         try {
@@ -703,9 +734,7 @@ public class LoggerConfigurationPanel extends JPanel {
 
         checkUnsavedChangesAndProceed(
                 () -> {
-                    Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder,
-                            Signum.NODE_LOGGING_SUBFOLDER,
-                            profileName + ".properties");
+                    Path targetFile = getPropertiesPath(profileName);
                     if (Files.exists(targetFile)) {
                         Properties loaded = new Properties();
                         try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
@@ -742,9 +771,13 @@ public class LoggerConfigurationPanel extends JPanel {
             return true;
         }
 
+        JLabel reportLabel = new JLabel(report);
+        JScrollPane scrollPane = new JScrollPane(reportLabel);
+        scrollPane.setPreferredSize(new Dimension(500, 250));
+
         Object[] message = {
                 "You have unsaved changes in profile '" + loadedProfileName + "'.",
-                report,
+                scrollPane,
                 "What would you like to do?"
         };
         Object[] options = { "Save Profile As", "Discard", "Cancel" };
@@ -778,31 +811,69 @@ public class LoggerConfigurationPanel extends JPanel {
         StringBuilder report = new StringBuilder(
                 "<html><b>Unsaved changes in Logger Configuration (Profile: '" + loadedProfileName + "'):</b><ul>");
         boolean changesFound = false;
+
+        // 1. Check existing components (updates and additions)
         for (Map.Entry<String, JComponent> entry : propertyComponents.entrySet()) {
             String key = entry.getKey();
             JComponent comp = entry.getValue();
-            String savedValue = props.getProperty(key);
-            if (savedValue == null)
-                savedValue = defaultValues.get(key);
-            if (savedValue == null)
-                savedValue = "";
+            String savedInFile = props.getProperty(key);
 
-            String newVal = getComponentValue(comp, key).trim();
+            String effectiveSaved = normalizeValue(key,
+                    (savedInFile != null) ? savedInFile : defaultValues.getOrDefault(key, ""));
+            String newVal = normalizeValue(key, getComponentValue(comp, key));
 
-            if (!newVal.trim().equals(savedValue.trim())) {
+            boolean isNew = (savedInFile == null && dynamicLoggerKeys.contains(key));
+            boolean isModified = !newVal.equals(effectiveSaved);
+
+            if ((isNew && !newVal.isEmpty()) || isModified) {
                 changesFound = true;
                 PropertyRow row = allPropertyRows.stream()
                         .filter(r -> key.equals(r.propertyKey))
                         .findFirst()
                         .orElse(null);
                 String label = row != null ? row.labelText : key;
-                report.append("<li>").append(label).append(": '")
-                        .append(savedValue.trim()).append("' &rarr; '")
-                        .append(newVal.trim()).append("'</li>");
+
+                if (isNew) {
+                    report.append("<li>[Added] ").append(label).append(": ").append(newVal).append("</li>");
+                } else {
+                    report.append("<li>").append(label).append(": '")
+                            .append(effectiveSaved.isEmpty() ? "<i>none</i>" : effectiveSaved).append("' &rarr; '")
+                            .append(newVal.isEmpty() ? "<i>none</i>" : newVal).append("'</li>");
+                }
             }
         }
+
+        // 2. Check for deletions (present in file but missing in UI)
+        for (String key : props.stringPropertyNames()) {
+            if (key.endsWith(".level") && !propertyComponents.containsKey(key)) {
+                changesFound = true;
+                String label = key.endsWith(".level") ? key.substring(0, key.length() - 6) : key;
+                report.append("<li>[Deleted] ").append(label).append("</li>");
+            }
+        }
+
         report.append("</ul></html>");
         return changesFound ? report.toString() : null;
+    }
+
+    /**
+     * Normalizes property values for stable comparison.
+     * For the 'handlers' key, it splits, trims, sorts, and joins the values.
+     * This prevents false "unsaved changes" detection when the order in the file
+     * differs from the UI.
+     */
+    private String normalizeValue(String key, String value) {
+        if (value == null)
+            return "";
+        if ("handlers".equals(key)) {
+            return java.util.Arrays.stream(value.split("[,\\s;]+"))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .distinct()
+                    .sorted()
+                    .collect(java.util.stream.Collectors.joining(", "));
+        }
+        return value.trim();
     }
 
     private void reloadProfile() {
@@ -818,8 +889,7 @@ public class LoggerConfigurationPanel extends JPanel {
                 }
             }
 
-            Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_LOGGING_SUBFOLDER,
-                    loadedProfileName + ".properties");
+            Path targetFile = getPropertiesPath(loadedProfileName);
             if (Files.exists(targetFile)) {
                 Properties loaded = new Properties();
                 try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
@@ -843,11 +913,11 @@ public class LoggerConfigurationPanel extends JPanel {
         checkUnsavedChangesAndProceed(() -> {
             String name = (String) JOptionPane.showInputDialog(this, "Enter new profile name:", "New Profile",
                     JOptionPane.PLAIN_MESSAGE, null, null, "");
-            if (name == null || name.trim().isEmpty() || "logging-default".equalsIgnoreCase(name.trim()))
+            if (name == null || name.trim().isEmpty()
+                    || Signum.DEFAULT_LOGGING_PROPERTIES_NAME.equalsIgnoreCase(name.trim()))
                 return;
 
-            Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder,
-                    Signum.NODE_LOGGING_SUBFOLDER, name + ".properties");
+            Path targetFile = getPropertiesPath(name);
             if (Files.exists(targetFile)) {
                 JOptionPane.showMessageDialog(this, "Profile '" + name + "' already exists.", "Error",
                         JOptionPane.ERROR_MESSAGE);
@@ -906,8 +976,8 @@ public class LoggerConfigurationPanel extends JPanel {
 
     private void updateProfileButtonStates() {
         String selected = (String) profileComboBox.getSelectedItem();
-        boolean isReadOnly = Signum.NODE_LOGGING_SUBFOLDER.equals(selected)
-                || "logging-default".equals(selected);
+        boolean isReadOnly = Signum.LOGGING_PROPERTIES_NAME.equals(selected)
+                || Signum.DEFAULT_LOGGING_PROPERTIES_NAME.equals(selected);
         resetToDefaultsBtn.setEnabled(true); // Always enable reset to defaults
         renameProfileBtn.setEnabled(!isReadOnly);
         deleteProfileBtn.setEnabled(!isReadOnly);
@@ -930,15 +1000,13 @@ public class LoggerConfigurationPanel extends JPanel {
                 oldProfileName);
 
         if (newProfileName == null || newProfileName.trim().isEmpty() || newProfileName.equals(oldProfileName)
-                || "logging-default".equalsIgnoreCase(newProfileName.trim())) {
+                || Signum.DEFAULT_LOGGING_PROPERTIES_NAME.equalsIgnoreCase(newProfileName.trim())) {
             return; // User cancelled or entered the same name
         }
 
         try {
-            Path oldFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_LOGGING_SUBFOLDER,
-                    oldProfileName + ".properties");
-            Path newFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_LOGGING_SUBFOLDER,
-                    newProfileName + ".properties");
+            Path oldFile = getPropertiesPath(oldProfileName);
+            Path newFile = getPropertiesPath(newProfileName);
 
             if (ConfigurationUtils.confirmAndRenameProfile(this, oldFile, newFile, oldProfileName, newProfileName)) {
                 refreshProfileList();
@@ -971,7 +1039,7 @@ public class LoggerConfigurationPanel extends JPanel {
         if (profileName == null || profileName.trim().isEmpty()) {
             return;
         }
-        if ("logging-default".equals(profileName)) {
+        if (Signum.DEFAULT_LOGGING_PROPERTIES_NAME.equals(profileName)) {
             JOptionPane.showMessageDialog(this, "The system profiles cannot be deleted.", "Action Not Allowed",
                     JOptionPane.WARNING_MESSAGE);
             return;
@@ -987,13 +1055,12 @@ public class LoggerConfigurationPanel extends JPanel {
         }
 
         try {
-            Path file = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_LOGGING_SUBFOLDER,
-                    profileName + ".properties");
+            Path file = getPropertiesPath(profileName);
             if (Files.exists(file)) {
                 Files.delete(file);
                 refreshProfileList();
-                profileComboBox.setSelectedItem(Signum.NODE_LOGGING_SUBFOLDER);
-                loadProfile(Signum.NODE_LOGGING_SUBFOLDER);
+                profileComboBox.setSelectedItem(Signum.LOGGING_PROPERTIES_NAME);
+                loadProfile(Signum.LOGGING_PROPERTIES_NAME);
                 JOptionPane.showMessageDialog(this, "Profile '" + profileName + "' deleted successfully.",
                         "Success", JOptionPane.INFORMATION_MESSAGE);
             }
@@ -1005,18 +1072,10 @@ public class LoggerConfigurationPanel extends JPanel {
     }
 
     public void loadAppliedProperties() {
-        Path appliedFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_LOGGING_SUBFOLDER,
-                brs.Signum.LOGGING_PROPERTIES_NAME);
-        if (Files.exists(appliedFile)) {
-            try (FileInputStream in = new FileInputStream(appliedFile.toFile())) {
-                appliedProps.clear();
-                appliedProps.load(in);
-            } catch (Exception e) {
-                LOGGER.warn("Could not load applied logging properties: {}", e.getMessage());
-            }
-        } else {
-            appliedProps.clear();
-        }
+        // Replicate exactly what the node is running with
+        LoggerProfile effective = ConfigurationUtils.loadEffectiveLoggerProfile(confFolder, runningProfileName);
+        appliedProps.clear();
+        appliedProps.putAll(effective.getProperties());
         refreshUIColors();
     }
 
@@ -1024,17 +1083,29 @@ public class LoggerConfigurationPanel extends JPanel {
         for (Map.Entry<String, JComponent> entry : propertyComponents.entrySet()) {
             String key = entry.getKey();
             JComponent comp = entry.getValue();
-            String savedValue = props.getProperty(key);
-            if (savedValue == null)
-                savedValue = defaultValues.get(key);
-            if (savedValue == null)
-                savedValue = "";
+            String savedInFile = props.getProperty(key);
 
-            String val = getComponentValue(comp, key);
-            if (!val.trim().equals(savedValue.trim())) {
+            String effectiveSaved = normalizeValue(key,
+                    (savedInFile != null) ? savedInFile : defaultValues.getOrDefault(key, ""));
+            String newVal = normalizeValue(key, getComponentValue(comp, key));
+
+            if (savedInFile == null && dynamicLoggerKeys.contains(key) && !newVal.isEmpty()) {
+                return true;
+            }
+
+            if (!newVal.equals(effectiveSaved)) {
                 return true;
             }
         }
+
+        // Also check if any dynamic loggers that were in the saved profile are now
+        // missing from the UI
+        for (String key : props.stringPropertyNames()) {
+            if (key.endsWith(".level") && !propertyComponents.containsKey(key)) {
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -1097,9 +1168,19 @@ public class LoggerConfigurationPanel extends JPanel {
         for (Map.Entry<String, Supplier<String>> entry : valueSuppliers.entrySet()) {
             String key = entry.getKey();
             String val = entry.getValue().get();
-            String def = defaultValues.get(key);
-            if (val != null && !val.trim().equals(def != null ? def.trim() : "")) {
+            if (val == null)
+                continue;
+
+            if (dynamicLoggerKeys.contains(key)) {
+                // Dynamic loggers are always saved if they exist in the UI list,
+                // as their presence in the file is an explicit override.
                 props.setProperty(key, val);
+            } else {
+                // Static properties are only saved if they differ from the system default.
+                String def = defaultValues.get(key);
+                if (!val.trim().equals(def != null ? def.trim() : "")) {
+                    props.setProperty(key, val);
+                }
             }
         }
         return props;
@@ -1126,6 +1207,20 @@ public class LoggerConfigurationPanel extends JPanel {
     }
 
     private void updateUIFromProperties(Properties loadedProps) {
+        // Identify dynamic loggers (anything .level not in static list)
+        java.util.Set<String> foundDynamic = new java.util.LinkedHashSet<>();
+        for (String key : loadedProps.stringPropertyNames()) {
+            if (key.endsWith(".level") && !staticLoggerKeys.contains(key) && !key.startsWith("java.util.logging.")) {
+                foundDynamic.add(key);
+            }
+        }
+
+        if (!foundDynamic.equals(dynamicLoggerKeys)) {
+            dynamicLoggerKeys.clear();
+            dynamicLoggerKeys.addAll(foundDynamic);
+            refreshDynamicLoggersUI();
+        }
+
         for (Map.Entry<String, JComponent> entry : propertyComponents.entrySet()) {
             String key = entry.getKey();
             JComponent comp = entry.getValue();
@@ -1221,18 +1316,16 @@ public class LoggerConfigurationPanel extends JPanel {
                 public Component getListCellRendererComponent(JList<?> list, Object value, int index,
                         boolean isSelected, boolean cellHasFocus) {
                     Component c = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-                    String savedVal = props.getProperty(propertyKey);
-                    if (savedVal == null)
-                        savedVal = defaultValue;
+                    if (isSelected)
+                        return c;
 
-                    String applied = appliedProps.getProperty(propertyKey);
-                    boolean hasApplied = appliedProps.containsKey(propertyKey);
-                    if (applied == null)
-                        applied = defaultValue;
+                    String savedVal = props.getProperty(propertyKey, defaultValue).trim();
+                    String applied = appliedProps.getProperty(propertyKey, defaultValue).trim();
+                    String valStr = (value != null) ? value.toString().trim() : "";
 
-                    if (hasApplied && value != null && value.toString().equals(applied)) {
+                    if (valStr.equals(applied)) {
                         c.setForeground(GuiColors.getApplied());
-                    } else if (value != null && value.toString().equals(savedVal)) {
+                    } else if (valStr.equals(savedVal)) {
                         c.setForeground(GuiColors.getSaved());
                     } else {
                         c.setForeground(GuiColors.getUnsaved());
@@ -1298,23 +1391,251 @@ public class LoggerConfigurationPanel extends JPanel {
         allPropertyRows.add(row);
     }
 
-    private void updateColor(JComponent comp, String propName, String defaultValue) {
-        String savedValue = props.getProperty(propName, defaultValue);
-        String applied = appliedProps.getProperty(propName, defaultValue);
+    private String[] getFilteredCommonLoggers() {
+        java.util.List<String> filtered = new java.util.ArrayList<>();
+        for (String name : COMMON_LOGGERS) {
+            String key = name + ".level";
+            if (!staticLoggerKeys.contains(key) && !dynamicLoggerKeys.contains(key)) {
+                filtered.add(name);
+            }
+        }
+        return filtered.toArray(new String[0]);
+    }
 
-        String value = getComponentValue(comp, propName).trim();
-        savedValue = savedValue.trim();
-        applied = applied.trim();
+    private void addLoggerCreationGui(JPanel panel) {
+        JPanel addPanel = new JPanel(new MigLayout("insets 0, gap 5, fillx", "[grow][pref!][pref!][pref!]", "[]"));
+        addPanel.setOpaque(false);
+
+        addLoggerClassCombo = new JComboBox<>(getFilteredCommonLoggers());
+        addLoggerClassCombo.setEditable(true);
+        addLoggerClassCombo.putClientProperty("JTextField.placeholderText", "Class or Package name...");
+        ConfigurationUtils.styleInputComponent(addLoggerClassCombo);
+        ConfigurationUtils.fixComponentSize(addLoggerClassCombo);
+
+        JComboBox<String> levelCombo = new JComboBox<>(LOG_LEVELS);
+        levelCombo.setSelectedItem("INFO");
+        ConfigurationUtils.fixComponentSize(levelCombo);
+
+        JButton addBtn = new JButton("Add");
+        ConfigurationUtils.fixComponentSize(addBtn);
+
+        addBtn.addActionListener(e -> {
+            String className = (String) addLoggerClassCombo.getSelectedItem();
+            if (className == null || className.trim().isEmpty())
+                return;
+
+            String key = className.trim() + ".level";
+            if (dynamicLoggerKeys.contains(key) || staticLoggerKeys.contains(key)) {
+                JOptionPane.showMessageDialog(this, "Logger configuration for '" + className + "' already exists.",
+                        "Info", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+
+            String level = (String) levelCombo.getSelectedItem();
+            dynamicLoggerKeys.add(key);
+            refreshDynamicLoggersUI();
+            updateDirtyStatus();
+            addLoggerClassCombo.setSelectedItem("");
+        });
+
+        addPanel.add(addLoggerClassCombo, "growx");
+        addPanel.add(new JLabel("Level:"));
+        addPanel.add(levelCombo);
+        addPanel.add(addBtn);
+
+        PropertyRow row = new PropertyRow("logger-creation-gui", "Add Logger", panel);
+        row.label = new JLabel("Add Logger:");
+        row.labelConstraints = "align label";
+        row.input = addPanel;
+        row.inputConstraints = "split 2, growx, height pref!";
+        row.help = new HelpButton();
+        row.help.setToolTipText(
+                "Add a custom logging level for a specific package or class (e.g. 'brs.http' or 'brs.Signum')");
+        row.helpConstraints = "wrap";
+        row.separator = new JSeparator();
+        row.separatorConstraints = "span, growx, wrap, gaptop 2, gapbottom 2";
+
+        allPropertyRows.add(row);
+        panel.add(row.label, row.labelConstraints);
+        panel.add(row.input, row.inputConstraints);
+        panel.add(row.help, row.helpConstraints);
+        panel.add(row.separator, row.separatorConstraints);
+    }
+
+    private void refreshDynamicLoggersUI() {
+        if (mainContentPanel == null)
+            return;
+
+        // Identify and remove all current dynamic rows from master list and trackers
+        Set<String> trackedDynamicKeys = new HashSet<>(propertyComponents.keySet());
+        trackedDynamicKeys.removeAll(staticLoggerKeys);
+
+        allPropertyRows.removeIf(row -> row.propertyKey != null && trackedDynamicKeys.contains(row.propertyKey));
+        for (String key : trackedDynamicKeys) {
+            propertyComponents.remove(key);
+            valueSuppliers.remove(key);
+            defaultValues.remove(key);
+        }
+
+        // Re-add dynamic loggers to allPropertyRows before the creation GUI
+        int insertionIndex = -1;
+        for (int i = 0; i < allPropertyRows.size(); i++) {
+            if ("logger-creation-gui".equals(allPropertyRows.get(i).propertyKey)) {
+                insertionIndex = i;
+                break;
+            }
+        }
+
+        List<PropertyRow> dynamicRows = new ArrayList<>();
+        for (String key : dynamicLoggerKeys) {
+            String labelText = key.endsWith(".level") ? key.substring(0, key.length() - 6) : key;
+            dynamicRows.add(createDynamicPropertyRow(labelText, key, "INFO"));
+        }
+
+        if (insertionIndex != -1) {
+            allPropertyRows.addAll(insertionIndex, dynamicRows);
+        } else {
+            allPropertyRows.addAll(dynamicRows);
+        }
+
+        // Update the "Add Logger" dropdown model to hide already added items
+        if (addLoggerClassCombo != null) {
+            String currentSelection = (String) addLoggerClassCombo.getSelectedItem();
+            addLoggerClassCombo.setModel(new DefaultComboBoxModel<>(getFilteredCommonLoggers()));
+            addLoggerClassCombo.setSelectedItem(currentSelection);
+        }
+
+        filterProperties(null); // Triggers re-rendering of the panel
+    }
+
+    private PropertyRow createDynamicPropertyRow(String labelText, String propertyKey, String defaultValue) {
+        PropertyRow row = new PropertyRow(propertyKey, labelText, mainContentPanel);
+        row.label = new JLabel(labelText);
+        row.labelConstraints = "align label";
+
+        JComboBox<String> combo = new JComboBox<>(LOG_LEVELS);
+        combo.setSelectedItem(props.getProperty(propertyKey, defaultValue));
+        ConfigurationUtils.fixComponentSize(combo);
+        valueSuppliers.put(propertyKey, () -> (String) combo.getSelectedItem());
+        propertyComponents.put(propertyKey, combo);
+        defaultValues.put(propertyKey, defaultValue);
+
+        combo.addActionListener(e -> {
+            if (!isProgrammaticChange) {
+                updateColor(combo, propertyKey, defaultValue);
+                updateDirtyStatus();
+            }
+        });
+        combo.setRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                    boolean isSelected, boolean cellHasFocus) {
+                Component c = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                if (isSelected)
+                    return c;
+
+                String savedVal = props.getProperty(propertyKey, defaultValue).trim();
+                String applied = appliedProps.getProperty(propertyKey, defaultValue).trim();
+                String valStr = (value != null) ? value.toString().trim() : "";
+
+                if (valStr.equals(applied)) {
+                    c.setForeground(GuiColors.getApplied());
+                } else if (valStr.equals(savedVal)) {
+                    c.setForeground(GuiColors.getSaved());
+                } else {
+                    c.setForeground(GuiColors.getUnsaved());
+                }
+                return c;
+            }
+        });
+
+        JPanel wrapper = new JPanel(new BorderLayout(5, 0));
+        wrapper.setOpaque(false);
+        wrapper.add(combo, BorderLayout.CENTER);
+
+        // Create a panel for the action buttons (refresh and delete)
+        JPanel actionButtonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        actionButtonPanel.setOpaque(false);
+
+        // Refresh button
+        JButton refreshBtn = new JButton(
+                IconFontSwing.buildIcon(FontAwesome.REFRESH, GuiConstants.getHelpIconSize(),
+                        GuiColors.getApplied()));
+        refreshBtn.setToolTipText("Update value in profile immediately");
+        refreshBtn.setContentAreaFilled(false);
+        refreshBtn.setBorderPainted(false);
+        refreshBtn.setFocusPainted(false);
+        refreshBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        refreshBtn.addActionListener(e -> {
+            String newVal = (String) combo.getSelectedItem();
+            if (newVal == null)
+                return;
+            try {
+                props.setProperty(propertyKey, newVal);
+                Set<String> managedKeys = new HashSet<>(staticLoggerKeys);
+                managedKeys.addAll(propertyComponents.keySet());
+                for (String k : props.stringPropertyNames()) {
+                    if (k.endsWith(".level"))
+                        managedKeys.add(k);
+                }
+                ConfigurationUtils.savePropertiesPreservingFormat(propertiesFile, props, managedKeys);
+                updateColor(combo, propertyKey, defaultValue);
+                updateDirtyStatus();
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(this, "Failed to update configuration file: " + ex.getMessage(), "Error",
+                        JOptionPane.ERROR_MESSAGE);
+            }
+        });
+        actionButtonPanel.add(refreshBtn);
+
+        JButton delBtn = new JButton(
+                IconFontSwing.buildIcon(FontAwesome.TRASH, GuiConstants.getHelpIconSize(), GuiColors.getContrastRed()));
+        delBtn.setContentAreaFilled(false);
+        delBtn.setBorderPainted(false);
+        delBtn.setFocusPainted(false);
+        delBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        delBtn.addActionListener(e -> {
+            dynamicLoggerKeys.remove(propertyKey);
+            refreshDynamicLoggersUI();
+            updateDirtyStatus();
+        });
+        actionButtonPanel.add(delBtn);
+
+        wrapper.add(actionButtonPanel, BorderLayout.EAST);
+
+        row.input = wrapper;
+        row.inputConstraints = "split 2, growx, height pref!";
+        row.help = new HelpButton();
+        row.help.addActionListener(e -> showHelp(labelText, propertyKey));
+        row.helpConstraints = "wrap";
+        row.separator = new JSeparator();
+        row.separatorConstraints = "span, growx, wrap, gaptop 2, gapbottom 2";
+        updateColor(combo, propertyKey, defaultValue);
+        return row;
+    }
+
+    private void updateColor(JComponent comp, String propName, String defaultValue) {
+        String savedInFile = props.getProperty(propName);
+
+        String value = normalizeValue(propName, getComponentValue(comp, propName));
+        String effectiveSaved = normalizeValue(propName, (savedInFile != null) ? savedInFile : defaultValue);
+        String applied = normalizeValue(propName, appliedProps.getProperty(propName, defaultValue));
+
+        boolean isNewDynamic = dynamicLoggerKeys.contains(propName) && savedInFile == null;
+        boolean isModified = !value.equals(effectiveSaved);
+
+        if (isNewDynamic && value.isEmpty()) {
+            isNewDynamic = false; // Ne jelöljük sárgának az éppen csak hozzáadott, de még üres loggert
+        }
 
         Color color;
         if (value.equals(applied)) {
             color = GuiColors.getApplied();
-        } else if (value.equals(savedValue)) {
+        } else if (!isNewDynamic && !isModified) {
             color = GuiColors.getSaved();
         } else {
             color = GuiColors.getUnsaved();
         }
-
         comp.setForeground(color);
 
         // Update Label asterisk
@@ -1323,7 +1644,7 @@ public class LoggerConfigurationPanel extends JPanel {
                 .findFirst()
                 .orElse(null);
         if (row != null && row.label != null) {
-            boolean isDirty = !value.trim().equals(savedValue.trim());
+            boolean isDirty = isNewDynamic || isModified;
             row.label.setText(isDirty ? row.labelText + " *" : row.labelText);
         }
     }
@@ -1413,8 +1734,12 @@ public class LoggerConfigurationPanel extends JPanel {
         helpTexts.put("javax.servlet.level", "Level for internal Java Servlet API logs.");
 
         helpTexts.put("java.util.logging.ConsoleHandler.level",
-                "Sets the minimum logging level for messages displayed in the console window (the main text area of the GUI)."
-                        + "<br><br>Only messages with this level or higher will be shown in the console."
+                "Sets the minimum logging level for messages sent to the <b>terminal / command prompt</b> (System.err)."
+                        + "<br><br>Only messages with this level or higher will be visible in the terminal window. "
+                        + "Selecting <b>ALL</b> ensures that the terminal output remains fully synchronized with the internal GUI console, "
+                        + "forwarding all log entries generated by the application without additional filtering."
+                        + "<br><br><b>Available Levels:</b>"
+                        + "<ul>"
                         + "<li><b>INFO:</b> General operational information (default).</li>"
                         + "<li><b>CONFIG:</b> Static configuration messages.</li>"
                         + "<li><b>FINE:</b> Detailed tracing information.</li>"
@@ -1423,10 +1748,6 @@ public class LoggerConfigurationPanel extends JPanel {
                         + "<li><b>ALL:</b> Log all messages.</li>"
                         + "<li><b>OFF:</b> Turn off logging.</li>"
                         + "</ul>");
-        helpTexts.put("java.util.logging.ConsoleHandler.level",
-                "Sets the minimum logging level for messages displayed in the console window (the main text area of the GUI)."
-                        + "<br><br>Only messages with this level or higher will be shown in the console."
-                        + "<br>This allows you to see important messages in the GUI while logging more detailed information to a file.");
         helpTexts.put("java.util.logging.FileHandler.level",
                 "Sets the minimum logging level for messages written to the log file(s)."
                         + "<br><br>Only messages with this level or higher will be saved to disk."
@@ -1467,6 +1788,11 @@ public class LoggerConfigurationPanel extends JPanel {
         }
         panel.add(label, row.labelConstraints);
         allPropertyRows.add(row);
+    }
+
+    private Path getPropertiesPath(String profileName) {
+        String fileName = profileName + ".properties";
+        return ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_LOGGING_SUBFOLDER, fileName);
     }
 
     private static class PropertyRow {
