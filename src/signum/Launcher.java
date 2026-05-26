@@ -5,6 +5,7 @@ import brs.props.Props;
 import brs.util.LoggerConfigurator;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import brs.util.PathUtils;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.HelpFormatter;
@@ -16,7 +17,6 @@ import java.io.BufferedReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.awt.GraphicsEnvironment;
 import java.io.File;
 import java.io.IOException;
@@ -67,7 +67,7 @@ public class Launcher {
         }
 
         // 2. Resolve paths and detect profiles before SLF4J loads
-        Path confPath = Paths.get(confFolder).toAbsolutePath().normalize();
+        Path confPath = PathUtils.resolvePath(confFolder);
         Path nodePath = confPath.resolve(Signum.NODE_SUBFOLDER);
         Path loggingPath = confPath.resolve(Signum.NODE_LOGGING_SUBFOLDER);
 
@@ -154,12 +154,7 @@ public class Launcher {
                 try (BufferedReader reader = Files.newBufferedReader(nodeProfilePath, StandardCharsets.UTF_8)) {
                     JsonObject settings = JsonParser.parseReader(reader).getAsJsonObject();
                     if (settings.has("appliedProfile")) {
-                        String p = settings.get("appliedProfile").getAsString();
-                        if ("node-default".equals(p)) {
-                            Signum.PROPERTIES_NAME = Signum.DEFAULT_PROPERTIES_NAME;
-                        } else if (!Signum.NODE_SUBFOLDER.equals(p)) {
-                            Signum.PROPERTIES_NAME = p + ".properties";
-                        }
+                        Signum.setActiveNodeProfile(settings.get("appliedProfile").getAsString().trim());
                     }
                 }
             }
@@ -169,12 +164,7 @@ public class Launcher {
                 try (BufferedReader reader = Files.newBufferedReader(loggingProfilePath, StandardCharsets.UTF_8)) {
                     JsonObject settings = JsonParser.parseReader(reader).getAsJsonObject();
                     if (settings.has("appliedProfile")) {
-                        String p = settings.get("appliedProfile").getAsString();
-                        if ("logging-default".equals(p)) {
-                            Signum.LOGGING_PROPERTIES_NAME = Signum.DEFAULT_LOGGING_PROPERTIES_NAME;
-                        } else if (!Signum.NODE_LOGGING_SUBFOLDER.equals(p)) {
-                            Signum.LOGGING_PROPERTIES_NAME = p + ".properties";
-                        }
+                        Signum.setActiveLoggingProfile(settings.get("appliedProfile").getAsString().trim());
                     }
                 }
             }
