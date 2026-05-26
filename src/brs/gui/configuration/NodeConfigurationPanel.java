@@ -29,7 +29,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.*;
 import java.util.List;
 import java.util.function.Supplier;
@@ -41,8 +40,8 @@ import java.util.stream.Collectors;
 
 public class NodeConfigurationPanel extends JPanel {
 
-    private final Properties currentProperties;
-    private final Properties appliedProperties;
+    private NodeProfile savedProfile;
+    private NodeProfile appliedProfile;
     private static final Logger LOGGER = LoggerFactory.getLogger(NodeConfigurationPanel.class);
     private final Map<String, Supplier<String>> valueSuppliers = new HashMap<>();
     private final Map<String, JComponent> propertyComponents = new HashMap<>();
@@ -83,12 +82,7 @@ public class NodeConfigurationPanel extends JPanel {
         this.switchAction = switchAction;
 
         // Determine the currently applied profile name from metadata once at startup
-        String lastProfile = ConfigurationUtils
-                .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER));
-        if ("node-default".equals(lastProfile)) {
-            lastProfile = Signum.NODE_SUBFOLDER;
-        }
-        this.runningProfileName = lastProfile != null ? lastProfile.trim() : Signum.NODE_SUBFOLDER;
+        this.runningProfileName = Signum.getActiveNodeProfile();
         this.activeProfileName = this.runningProfileName;
         this.loadedProfileName = this.runningProfileName;
 
@@ -97,14 +91,14 @@ public class NodeConfigurationPanel extends JPanel {
                 this.loadedProfileName + ".properties");
         ConfigurationUtils.ensureConfigFileExists(this.propertiesFile);
 
-        this.currentProperties = new Properties();
+        this.savedProfile = new NodeProfile(this.loadedProfileName);
         try (FileInputStream in = new FileInputStream(propertiesFile.toFile())) {
-            this.currentProperties.load(in);
+            this.savedProfile.getProperties().load(in);
         } catch (Exception e) {
             e.printStackTrace();
         }
 
-        this.appliedProperties = new Properties();
+        this.appliedProfile = new NodeProfile(this.runningProfileName);
         // Request the running values from the Signum service for accurate comparison
         // Populated on demand in addProperty methods to avoid compilation errors with
         // Props class
@@ -116,7 +110,7 @@ public class NodeConfigurationPanel extends JPanel {
         // construction
         this.saveProfileBtn = new JButton("Save Profile As");
         this.applyProfileBtn = new JButton("Apply Profile");
-
+        loadAppliedProperties();
         initHelpTexts();
         initUI();
     }
@@ -581,30 +575,30 @@ public class NodeConfigurationPanel extends JPanel {
 
             String lastProfile = ConfigurationUtils
                     .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER));
-            if ("node-default".equals(lastProfile)) {
-                lastProfile = Signum.NODE_SUBFOLDER;
-            }
-            this.activeProfileName = lastProfile != null ? lastProfile.trim() : Signum.NODE_SUBFOLDER;
+            this.activeProfileName = lastProfile != null ? lastProfile.trim() : Signum.PROPERTIES_NAME;
 
             Path nodeConfPath = PathUtils.resolvePath(confFolder).resolve(Signum.NODE_SUBFOLDER);
-            ConfigurationUtils.fetchProfileNames(nodeConfPath, brs.Signum.DEFAULT_PROPERTIES_NAME)
+            String baseFileName = Signum.PROPERTIES_NAME + ".properties";
+            ConfigurationUtils.fetchProfileNames(nodeConfPath, Signum.DEFAULT_PROPERTIES_NAME + ".properties")
+                    .stream()
+                    .filter(name -> !(name + ".properties").equals(baseFileName))
                     .forEach(profileComboBox::addItem);
 
             // Ensure the base profile is always available in the list
             boolean hasBase = false;
             for (int i = 0; i < profileComboBox.getItemCount(); i++) {
-                if (Signum.NODE_SUBFOLDER.equals(profileComboBox.getItemAt(i))) {
+                if (Signum.PROPERTIES_NAME.equals(profileComboBox.getItemAt(i))) {
                     hasBase = true;
                     break;
                 }
             }
             if (!hasBase) {
-                profileComboBox.insertItemAt(Signum.NODE_SUBFOLDER, 0);
+                profileComboBox.insertItemAt(Signum.PROPERTIES_NAME, 0);
             }
 
             if (currentSelection != null) {
                 profileComboBox.setSelectedItem(currentSelection);
-            } else {
+            } else if (this.activeProfileName != null) {
                 profileComboBox.setSelectedItem(this.activeProfileName);
             }
         } catch (Exception e) {
@@ -715,8 +709,8 @@ public class NodeConfigurationPanel extends JPanel {
                         isProgrammaticChange = true;
                         try {
                             this.loadedProfileName = name;
-                            this.currentProperties.clear();
-                            this.currentProperties.putAll(propsToSave);
+                            this.savedProfile = new NodeProfile(name);
+                            this.savedProfile.setProperties(propsToSave);
                             this.propertiesFile = targetFile;
 
                             refreshProfileList();
@@ -741,7 +735,7 @@ public class NodeConfigurationPanel extends JPanel {
                     }
                 } else if (value == discardBtn) {
                     isProgrammaticChange = true;
-                    updateUIFromProperties(currentProperties);
+                    updateUIFromProperties(savedProfile.getProperties());
                     updateDirtyStatus();
                     isProgrammaticChange = false;
                     return false;
@@ -769,8 +763,8 @@ public class NodeConfigurationPanel extends JPanel {
                         try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
                             isProgrammaticChange = true;
                             loaded.load(in);
-                            currentProperties.clear();
-                            currentProperties.putAll(loaded);
+                            savedProfile = new NodeProfile(profileName);
+                            savedProfile.setProperties(loaded);
                             updateUIFromProperties(loaded);
                             this.propertiesFile = targetFile;
                             this.loadedProfileName = profileName;
@@ -819,7 +813,7 @@ public class NodeConfigurationPanel extends JPanel {
             return false;
         } else if (result == JOptionPane.NO_OPTION) {
             isProgrammaticChange = true;
-            updateUIFromProperties(currentProperties);
+            updateUIFromProperties(savedProfile.getProperties());
             updateDirtyStatus();
             isProgrammaticChange = false;
             if (onProceed != null)
@@ -839,7 +833,7 @@ public class NodeConfigurationPanel extends JPanel {
         for (PropertyRow row : allPropertyRows) {
             if (isRowDirty(row)) {
                 changesFound = true;
-                String savedValue = currentProperties.getProperty(row.prop.getName());
+                String savedValue = savedProfile.getProperty(row.prop.getName());
                 if (savedValue == null)
                     savedValue = getSafeDefault(row.prop);
                 String newValue = valueSuppliers.get(row.prop.getName()).get();
@@ -886,8 +880,8 @@ public class NodeConfigurationPanel extends JPanel {
                 try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
                     isProgrammaticChange = true;
                     loaded.load(in);
-                    currentProperties.clear();
-                    currentProperties.putAll(loaded);
+                    savedProfile = new NodeProfile(loadedProfileName);
+                    savedProfile.setProperties(loaded);
                     updateUIFromProperties(loaded);
                     updateDirtyStatus();
                     updateProfileComboBoxColor();
@@ -943,8 +937,8 @@ public class NodeConfigurationPanel extends JPanel {
                 this.loadedProfileName = name; // Update early to prevent redundant load prompts during refresh
                 refreshProfileList();
                 profileComboBox.setSelectedItem(name);
-                this.currentProperties.clear();
-                this.currentProperties.putAll(propsToSave);
+                this.savedProfile = new NodeProfile(name);
+                this.savedProfile.setProperties(propsToSave);
                 this.propertiesFile = targetFile;
                 updateDirtyStatus();
                 updateUIFromProperties(propsToSave);
@@ -1117,7 +1111,7 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private boolean isRowDirty(PropertyRow row) {
-        String savedValue = currentProperties.getProperty(row.prop.getName());
+        String savedValue = savedProfile.getProperty(row.prop.getName());
         boolean isDefault = (savedValue == null);
         // 'current' here represents the effective value from the file, considering
         // defaults
@@ -1162,7 +1156,7 @@ public class NodeConfigurationPanel extends JPanel {
 
     private boolean isComponentDirty(Prop<?> prop) {
         String key = prop.getName();
-        String saved = currentProperties.getProperty(key, getSafeDefault(prop));
+        String saved = savedProfile.getProperty(key, getSafeDefault(prop));
         String current = valueSuppliers.get(key) != null ? valueSuppliers.get(key).get() : "";
         return !current.trim().equals(saved.trim());
     }
@@ -1311,16 +1305,18 @@ public class NodeConfigurationPanel extends JPanel {
 
     private String[] getSuggestions(String propName) {
         Set<String> suggestions = new LinkedHashSet<>();
-        String current = currentProperties.getProperty(propName);
+        String current = savedProfile.getProperty(propName);
         if (current != null && !current.isEmpty()) {
             suggestions.add(current);
         }
 
+        // TODO check this part (why don't use Signum constants and utility method for
+        // this?)
         Path[] paths = {
                 PathUtils.resolvePath(confFolder).resolve("node").resolve("node-default.properties"),
-                Paths.get("conf", "node", "node-default.properties"),
-                Paths.get("..", "conf", "node", "node-default.properties"),
-                Paths.get("node", "node", "node-default.properties")
+                PathUtils.resolvePath("conf/node/node-default.properties"),
+                PathUtils.resolvePath("../conf/node/node-default.properties"),
+                PathUtils.resolvePath("node/node/node-default.properties")
         };
 
         for (Path path : paths) {
@@ -1383,7 +1379,7 @@ public class NodeConfigurationPanel extends JPanel {
         for (PropertyRow row : allPropertyRows) {
             String val = getServiceValueAsString(service, row.prop);
             if (val != null) {
-                appliedProperties.setProperty(row.prop.getName(), val);
+                appliedProfile.setProperty(row.prop.getName(), val);
             }
         }
 
@@ -1391,11 +1387,11 @@ public class NodeConfigurationPanel extends JPanel {
         // property
         String appliedUser = getServiceValueAsString(service, Props.DB_USERNAME);
         if (appliedUser != null && !appliedUser.isEmpty())
-            appliedProperties.setProperty(Props.DB_USERNAME.getName(), appliedUser);
+            appliedProfile.setProperty(Props.DB_USERNAME.getName(), appliedUser);
 
         String appliedPass = getServiceValueAsString(service, Props.DB_PASSWORD);
         if (appliedPass != null && !appliedPass.isEmpty())
-            appliedProperties.setProperty(Props.DB_PASSWORD.getName(), appliedPass);
+            appliedProfile.setProperty(Props.DB_PASSWORD.getName(), appliedPass);
 
         refreshUIColors();
     }
@@ -1426,19 +1422,11 @@ public class NodeConfigurationPanel extends JPanel {
         panel.add(label, row.labelConstraints);
 
         // Input Component
-        String savedValue = currentProperties.getProperty(prop.getName());
+        String savedValue = savedProfile.getProperty(prop.getName());
         if (savedValue == null) {
             savedValue = getSafeDefault(prop);
         }
         defaultValues.put(prop.getName(), getSafeDefault(prop));
-
-        brs.props.PropertyService service = brs.Signum.getPropertyService();
-        if (service != null) {
-            String appliedValue = getServiceValueAsString(service, (Prop) prop);
-            if (appliedValue != null) {
-                this.appliedProperties.setProperty(prop.getName(), appliedValue);
-            }
-        }
 
         JComponent inputComponent;
 
@@ -1474,12 +1462,12 @@ public class NodeConfigurationPanel extends JPanel {
                 public Component getListCellRendererComponent(JList<?> list, Object value, int index,
                         boolean isSelected, boolean cellHasFocus) {
                     Component c = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-                    String savedVal = currentProperties.getProperty(prop.getName());
+                    String savedVal = savedProfile.getProperty(prop.getName());
                     if (savedVal == null)
                         savedVal = getSafeDefault(prop);
 
-                    String applied = appliedProperties.getProperty(prop.getName());
-                    boolean hasApplied = appliedProperties.containsKey(prop.getName());
+                    String applied = appliedProfile.getProperty(prop.getName());
+                    boolean hasApplied = appliedProfile.getProperties().containsKey(prop.getName());
                     if (applied == null)
                         applied = getSafeDefault(prop);
 
@@ -1692,10 +1680,10 @@ public class NodeConfigurationPanel extends JPanel {
         propertyComponents.put(Props.DB_USERNAME.getName(), (JComponent) manualPanel.getUserField());
         propertyComponents.put(Props.DB_PASSWORD.getName(), (JComponent) manualPanel.getPassField());
 
-        String savedValue = currentProperties.getProperty(prop.getName(), getSafeDefault(prop));
-        String savedUser = currentProperties.getProperty(Props.DB_USERNAME.getName(),
+        String savedValue = savedProfile.getProperty(prop.getName(), getSafeDefault(prop));
+        String savedUser = savedProfile.getProperty(Props.DB_USERNAME.getName(),
                 getSafeDefault(Props.DB_USERNAME));
-        String savedPass = currentProperties.getProperty(Props.DB_PASSWORD.getName(),
+        String savedPass = savedProfile.getProperty(Props.DB_PASSWORD.getName(),
                 getSafeDefault(Props.DB_PASSWORD));
 
         manualPanel.updateFromUrl(savedValue);
@@ -1731,20 +1719,11 @@ public class NodeConfigurationPanel extends JPanel {
         panel.add(label, row.labelConstraints);
 
         // Input Component
-        String savedValue = currentProperties.getProperty(prop.getName());
+        String savedValue = savedProfile.getProperty(prop.getName());
         if (savedValue == null) {
             savedValue = getSafeDefault(prop);
         }
         defaultValues.put(prop.getName(), getSafeDefault(prop));
-
-        brs.props.PropertyService service = brs.Signum.getPropertyService();
-        if (service != null) {
-            String appliedValue = getServiceValueAsString(service, (Prop) prop);
-            if (appliedValue != null) {
-                this.appliedProperties.setProperty(prop.getName(), appliedValue);
-            }
-        }
-
         JPasswordField passwordField = new JPasswordField(savedValue);
         passwordField.setColumns(20);
         ConfigurationUtils.styleInputComponent(passwordField);
@@ -1822,20 +1801,11 @@ public class NodeConfigurationPanel extends JPanel {
         row.labelConstraints = "align label, aligny top";
         panel.add(label, row.labelConstraints);
 
-        String savedValue = currentProperties.getProperty(prop.getName());
+        String savedValue = savedProfile.getProperty(prop.getName());
         if (savedValue == null) {
             savedValue = getSafeDefault(prop);
         }
         defaultValues.put(prop.getName(), normalizeListValue(getSafeDefault(prop), ";"));
-
-        brs.props.PropertyService service = brs.Signum.getPropertyService();
-        if (service != null) {
-            String appliedValue = getServiceValueAsString(service, (Prop) prop);
-            if (appliedValue != null) {
-                this.appliedProperties.setProperty(prop.getName(), appliedValue);
-            }
-        }
-
         // Split by semicolon and join with newlines for display
         String[] items = savedValue.split(";");
         StringBuilder sb = new StringBuilder();
@@ -2114,8 +2084,8 @@ public class NodeConfigurationPanel extends JPanel {
             value = supplierVal != null ? supplierVal.trim() : "";
         }
 
-        String savedValue = currentProperties.getProperty(propName, defaultValue);
-        String applied = appliedProperties.getProperty(propName, defaultValue);
+        String savedValue = savedProfile.getProperty(propName, defaultValue);
+        String applied = appliedProfile.getProperty(propName, defaultValue);
 
         if (savedValue == null)
             savedValue = "";
@@ -2233,11 +2203,11 @@ public class NodeConfigurationPanel extends JPanel {
         String userKey = Props.DB_USERNAME.getName();
         String passKey = Props.DB_PASSWORD.getName();
         updateJdbcPart(userField, userLabel, "Username:", userField.getText(),
-                currentProperties.getProperty(userKey, getSafeDefault(Props.DB_USERNAME)),
-                appliedProperties.getProperty(userKey, getSafeDefault(Props.DB_USERNAME)));
+                savedProfile.getProperty(userKey, getSafeDefault(Props.DB_USERNAME)),
+                appliedProfile.getProperty(userKey, getSafeDefault(Props.DB_USERNAME)));
         updateJdbcPart(passField, passLabel, "Password:", new String(passField.getPassword()),
-                currentProperties.getProperty(passKey, getSafeDefault(Props.DB_PASSWORD)),
-                appliedProperties.getProperty(passKey, getSafeDefault(Props.DB_PASSWORD)));
+                savedProfile.getProperty(passKey, getSafeDefault(Props.DB_PASSWORD)),
+                appliedProfile.getProperty(passKey, getSafeDefault(Props.DB_PASSWORD)));
     }
 
     private void updateJdbcPart(JComponent input, JLabel label, String baseText, String current, String saved,
@@ -2360,9 +2330,8 @@ public class NodeConfigurationPanel extends JPanel {
 
         try {
             ConfigurationUtils.savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
-            // After saving, update currentProperties to reflect the new saved state
-            currentProperties.clear();
-            currentProperties.putAll(propsToSave);
+            // After saving, update savedProfile to reflect the new saved state
+            savedProfile.setProperties(propsToSave);
             updateDirtyStatus();
             refreshUIColors();
         } catch (Exception e) {
