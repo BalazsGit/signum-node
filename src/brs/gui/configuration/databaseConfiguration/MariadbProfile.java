@@ -621,6 +621,61 @@ public class MariadbProfile {
         saveToProfileJson(updates);
     }
 
+    public void stopInstance(ProgressListener listener) throws Exception {
+        if (!isInstanceRunning()) {
+            if (listener != null)
+                listener.onProgress("MariaDB is already stopped.", 100);
+            return;
+        }
+
+        if (listener != null)
+            listener.onProgress("Stopping MariaDB instance...", 20);
+        Path binPath = getBinPath();
+        if (binPath == null)
+            throw new IOException("MariaDB binary path could not be resolved.");
+
+        Path mysqlAdmin = binPath.resolve(currentOsName.equalsIgnoreCase("windows") ? "mysqladmin.exe" : "mysqladmin");
+        if (!Files.exists(mysqlAdmin)) {
+            throw new FileNotFoundException("mysqladmin not found at: " + mysqlAdmin.toAbsolutePath());
+        }
+
+        List<String> command = new ArrayList<>();
+        command.add(mysqlAdmin.toAbsolutePath().toString());
+        command.add("--defaults-file=" + getConfigPath().toAbsolutePath().toString());
+        command.add("--host=127.0.0.1");
+        command.add("--port=" + getPort());
+        command.add("-u" + getAdminUsername());
+        String pwd = getAdminPassword();
+        if (pwd != null && !pwd.isEmpty()) {
+            command.add("-p" + pwd);
+        }
+        command.add("shutdown");
+
+        DatabaseConfigurationUtils.executeExternalProcess(command, getBaseDir().toFile(), "MariaDB Stop", listener);
+
+        // Wait loop for shutdown confirmation
+        for (int i = 0; i < 20; i++) {
+            Thread.sleep(1000);
+            if (!isInstanceRunning()) {
+                if (listener != null)
+                    listener.onProgress("MariaDB instance stopped.", 100);
+                return;
+            }
+        }
+        throw new IOException("MariaDB failed to stop within timeout.");
+    }
+
+    public void restartInstance(ProgressListener listener) throws Exception {
+        stopInstance((msg, p) -> {
+            if (listener != null)
+                listener.onProgress(msg, p / 2);
+        });
+        ensureInstanceRunning((msg, p) -> {
+            if (listener != null)
+                listener.onProgress(msg, 50 + (p / 2));
+        });
+    }
+
     public void removeUser(String id) throws IOException {
         Optional<UserInfo> userToRemove = createdUsers.stream().filter(u -> u.id.equals(id)).findFirst();
         if (userToRemove.isPresent()) {
@@ -963,7 +1018,7 @@ public class MariadbProfile {
         }
         List<String> command = Arrays.asList(exePath.toAbsolutePath().toString(), "--datadir=" + getDataDirectory());
 
-        DatabaseConfigurationUtils.executeExternalProcess(command, baseDir.toFile(), "MariaDB Init");
+        DatabaseConfigurationUtils.executeExternalProcess(command, baseDir.toFile(), "MariaDB Init", listener);
 
         // Set defaults for admin credentials if they are missing
         if (this.adminUsername == null || this.adminUsername.trim().isEmpty()) {
@@ -1020,12 +1075,32 @@ public class MariadbProfile {
         List<String> command = new ArrayList<>();
         command.add(daemonExe.toAbsolutePath().toString());
         command.add("--defaults-file=" + configPath.toAbsolutePath().toString());
+        command.add("--console"); // Windowson szükséges a logok elkapásához
 
         ProcessBuilder pb = new ProcessBuilder(command).directory(baseDir.toFile());
         pb.redirectErrorStream(true);
-        pb.redirectOutput(
-                ProcessBuilder.Redirect.appendTo(getDataPath().resolve("mariadb_daemon.log").toFile()));
-        pb.start();
+        Process process = pb.start();
+
+        // Kimenet olvasása háttérszálon, hogy ne akadjon meg a folyamat és lássuk a
+        // logokat a GUI-ban
+        Path logFile = getDataPath().resolve("mariadb_daemon.log");
+        new Thread(() -> {
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
+                    BufferedWriter writer = Files.newBufferedWriter(logFile, StandardCharsets.UTF_8,
+                            java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND)) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (listener != null)
+                        listener.onLog(line);
+                    writer.write(line);
+                    writer.newLine();
+                    writer.flush();
+                }
+            } catch (IOException e) {
+                // A folyamat leállt vagy a stream lezárult
+            }
+        }, "MariaDB-Log-Forwarder-" + profileName).start();
 
         // Wait loop for startup confirmation
         for (int i = 0; i < 15; i++) {
@@ -1037,6 +1112,37 @@ public class MariadbProfile {
             }
         }
         throw new IOException("MariaDB failed to start within timeout. Check mariadb_daemon.log");
+    }
+
+    public void runClientCommand(String cmd, ProgressListener listener) {
+        Path binPath = getBinPath();
+        if (binPath == null)
+            return;
+
+        Path mysqlExe = binPath.resolve(currentOsName.equalsIgnoreCase("windows") ? "mysql.exe" : "mysql");
+        if (!Files.exists(mysqlExe)) {
+            if (listener != null)
+                listener.onLog("Error: mysql client not found.");
+            return;
+        }
+
+        List<String> command = new ArrayList<>();
+        command.add(mysqlExe.toAbsolutePath().toString());
+        command.add("--host=127.0.0.1");
+        command.add("--port=" + getPort());
+        command.add("-u" + getAdminUsername());
+        if (getAdminPassword() != null && !getAdminPassword().isEmpty()) {
+            command.add("-p" + getAdminPassword());
+        }
+        command.add("-e");
+        command.add(cmd);
+
+        try {
+            DatabaseConfigurationUtils.executeExternalProcess(command, getBaseDir().toFile(), "SQL", listener);
+        } catch (Exception e) {
+            if (listener != null)
+                listener.onLog("Command failed: " + e.getMessage());
+        }
     }
 
     public void changeAdminCredentials(String oldUser, String oldPass, String newUser,
@@ -1088,20 +1194,30 @@ public class MariadbProfile {
             }
 
             if (exists) {
+                listener.onLog("Database '" + dbName + "' already exists.");
                 addCreatedDatabase(dbName, appUser, permissions);
+                this.step3Completed = true;
+                this.updateReadiness();
                 Map<String, Object> updates = new HashMap<>();
                 updates.put("createdDatabases", this.createdDatabases);
+                updates.put("step3Completed", this.step3Completed);
+                updates.put("isReady", this.isReady);
                 saveToProfileJson(updates);
                 return false;
             }
 
             listener.onProgress("Creating database: " + dbName, 60);
+            listener.onLog("SQL: CREATE DATABASE `" + dbName + "`");
             stmt.execute("CREATE DATABASE `" + dbName + "`");
 
             addCreatedDatabase(dbName, appUser, permissions);
+            this.step3Completed = true;
+            this.updateReadiness();
 
             Map<String, Object> updates = new HashMap<>();
             updates.put("createdDatabases", this.createdDatabases);
+            updates.put("step3Completed", this.step3Completed);
+            updates.put("isReady", this.isReady);
             saveToProfileJson(updates);
             return true;
         }
@@ -1121,6 +1237,7 @@ public class MariadbProfile {
             // 1. Process created databases (ensure they exist)
             for (DatabaseInfo db : createdDatabases) {
                 listener.onProgress("Ensuring database '" + db.name + "' exists...", 20);
+                listener.onLog("SQL: CREATE DATABASE IF NOT EXISTS `" + db.name + "`");
                 stmt.execute("CREATE DATABASE IF NOT EXISTS `" + db.name + "`");
             }
 
@@ -1135,6 +1252,7 @@ public class MariadbProfile {
 
                 for (String host : uniqueHosts) {
                     try {
+                        listener.onLog("Ensuring user exists: " + user.username + "@" + host);
                         stmt.execute(String.format("CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY '%s'",
                                 user.username, host, user.password));
                         // Since CREATE USER IF NOT EXISTS doesn't update password if user exists:
@@ -1155,6 +1273,8 @@ public class MariadbProfile {
 
                     listener.onProgress(
                             String.format("Granting %s on %s to %s...", sqlPermissions, target, user.username), 60);
+                    listener.onLog("SQL: GRANT " + sqlPermissions + " ON " + target + " TO '" + user.username + "'@'"
+                            + grant.host + "'");
                     stmt.execute(String.format("GRANT %s ON %s TO '%s'@'%s'",
                             sqlPermissions, target, user.username, grant.host));
                 }
