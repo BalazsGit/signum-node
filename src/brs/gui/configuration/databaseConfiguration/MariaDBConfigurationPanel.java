@@ -51,6 +51,8 @@ import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 
 /**
  * MariaDB specific configuration and version management.
@@ -92,11 +94,20 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     private JButton reloadProfileBtn;
     private JButton refreshProfilesBtn;
     private JPanel contentContainer;
+    private JButton startDbBtn;
+    private JButton stopDbBtn;
+    private JButton restartDbBtn;
+    private JTextPane consoleTextPane;
+    private JPanel consoleWrapper;
+    private CustomDrawingComponent consoleChevron;
+    private boolean isConsoleExpanded = false;
+    private Timer consoleAnimator;
     private JComponent verticalFiller;
     private String runningProfileName;
     private String activeProfileName;
     private String loadedProfileName;
     private JLabel step2HeaderLabel;
+    private JPanel dbControlPanel;
     private JPanel step2ContentPanel;
     private static final String[] COMMON_MARIADB_PARAMS = {
             "port", "datadir", "log_error", "pid_file", "bind-address", "innodb_flush_log_at_trx_commit",
@@ -452,6 +463,9 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         updateProfileButtonsUI();
 
         profileComboBox.addActionListener(e -> {
+            if (!isInitialized) {
+                return;
+            }
             String selected = (String) profileComboBox.getSelectedItem();
             if (selected != null && !selected.equals(loadedProfileName)) { // Only load if different and not null
                 loadProfile(currentEngine, selected); // This will update currentEngine if changed
@@ -491,20 +505,174 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
 
         searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             public void insertUpdate(javax.swing.event.DocumentEvent e) {
-                filterProperties(searchField.getText());
+                if (isInitialized) {
+                    filterProperties(searchField.getText());
+                }
             }
 
             public void removeUpdate(javax.swing.event.DocumentEvent e) {
-                filterProperties(searchField.getText());
+                if (isInitialized) {
+                    filterProperties(searchField.getText());
+                }
             }
 
             public void changedUpdate(javax.swing.event.DocumentEvent e) {
-                filterProperties(searchField.getText());
+                if (isInitialized) {
+                    filterProperties(searchField.getText());
+                }
             }
         });
 
+        // --- Database Control Panel ---
+        dbControlPanel = new JPanel(new MigLayout("insets 5 10 0 5, gap 5, fillx", "[grow]", "[]5[]0[]"));
+        dbControlPanel.setOpaque(false);
+
+        JPanel btnRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+        btnRow.setOpaque(false);
+
+        startDbBtn = new JButton("Start Database",
+                IconFontSwing.buildIcon(FontAwesome.PLAY, GuiConstants.getHelpIconSize(), GuiColors.getApplied()));
+        stopDbBtn = new JButton("Stop Database",
+                IconFontSwing.buildIcon(FontAwesome.STOP, GuiConstants.getHelpIconSize(), GuiColors.getContrastRed()));
+        restartDbBtn = new JButton("Restart Database",
+                IconFontSwing.buildIcon(FontAwesome.REFRESH, GuiConstants.getHelpIconSize(), GuiColors.getSaved()));
+
+        ConfigurationUtils.fixComponentSize(startDbBtn);
+        ConfigurationUtils.fixComponentSize(stopDbBtn);
+        ConfigurationUtils.fixComponentSize(restartDbBtn);
+
+        startDbBtn.addActionListener(e -> executeStartDatabaseWorker());
+        stopDbBtn.addActionListener(e -> executeStopDatabaseWorker());
+        restartDbBtn.addActionListener(e -> executeRestartDatabaseWorker());
+
+        btnRow.add(startDbBtn);
+
+        btnRow.add(stopDbBtn);
+        btnRow.add(restartDbBtn);
+        dbControlPanel.add(btnRow, "wrap");
+
+        // --- Console Section ---
+        JPanel consoleHeader = new JPanel(new MigLayout("insets 5 0 0 0, gap 5", "[][grow]", "[]"));
+        consoleHeader.setOpaque(false);
+
+        consoleChevron = new CustomDrawingComponent(CustomDrawings.Chevron.DOWN);
+        consoleChevron.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        consoleChevron.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                toggleConsole();
+            }
+        });
+
+        JLabel consoleTitle = new JLabel("Console Output");
+        consoleTitle.setFont(UIManager.getFont("Label.font").deriveFont(Font.BOLD, 13f));
+        consoleTitle.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        consoleTitle.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                toggleConsole();
+            }
+        });
+
+        consoleHeader.add(consoleChevron);
+        consoleHeader.add(consoleTitle, "growx");
+        dbControlPanel.add(consoleHeader, "growx, wrap");
+        dbControlPanel.add(new JSeparator(SwingConstants.HORIZONTAL), "growx, wrap, gaptop 2");
+
+        consoleWrapper = new JPanel(new BorderLayout());
+        consoleWrapper.setOpaque(false);
+        consoleWrapper.setPreferredSize(new Dimension(10, 0)); // Start collapsed
+
+        consoleTextPane = new JTextPane();
+        consoleTextPane.setEditable(false);
+        consoleTextPane.setBackground(UIManager.getColor("TextArea.background"));
+        consoleTextPane.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+
+        JScrollPane consoleScroll = new JScrollPane(consoleTextPane);
+        consoleScroll.setBorder(BorderFactory.createEmptyBorder());
+        consoleWrapper.add(consoleScroll, BorderLayout.CENTER);
+
+        // --- Console Input Section ---
+        JPanel consoleInputPanel = new JPanel(new BorderLayout(5, 0));
+        consoleInputPanel.setOpaque(false);
+        consoleInputPanel.setBorder(BorderFactory.createEmptyBorder(5, 0, 5, 0));
+
+        JComponent commandSymbol = new JComponent() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                CustomDrawings.COMMAND_SYMBOL.draw((Graphics2D) g, getWidth(), getHeight(), GuiColors.getButtonIcon());
+            }
+
+            @Override
+            public Dimension getPreferredSize() {
+                int size = Math.round(GuiConstants.getToolBarIconSize());
+                return new Dimension(size, size);
+            }
+
+            @Override
+            public Dimension getMaximumSize() {
+                return getPreferredSize();
+            }
+        };
+        commandSymbol.setToolTipText("Command Input");
+
+        JTextField consoleInputField = new JTextField();
+        consoleInputField.putClientProperty("JTextField.placeholderText", "Enter database command...");
+        ConfigurationUtils.styleInputComponent(consoleInputField);
+
+        JButton sendCommandBtn = new JButton("Send");
+        ConfigurationUtils.fixComponentSize(sendCommandBtn);
+
+        ActionListener sendAction = e -> {
+            String cmd = consoleInputField.getText().trim();
+            if (!cmd.isEmpty()) {
+                appendLog("> " + cmd);
+                // Run command in a separate thread to avoid blocking the UI
+                new Thread(() -> {
+                    currentProfile.runClientCommand(cmd, new DatabaseConfigurationUtils.ProgressListener() {
+                        @Override
+                        public void onProgress(String message, int progress) {
+                        }
+
+                        @Override
+                        public void onLog(String line) {
+                            MariaDBConfigurationPanel.this.appendLog(line);
+                        }
+                    });
+                }).start();
+                consoleInputField.setText("");
+            }
+        };
+        consoleInputField.addActionListener(sendAction);
+        sendCommandBtn.addActionListener(sendAction);
+
+        JButton consoleHelpBtn = new HelpButton();
+        consoleHelpBtn.setToolTipText("Command Help");
+        consoleHelpBtn.addActionListener(e -> {
+            String helpText = "<html><b>Available Commands:</b><br>" +
+                    "Enter commands here to interact with the MariaDB instance via this console.</html>";
+            JOptionPane.showMessageDialog(this, helpText, "Console Usage", JOptionPane.INFORMATION_MESSAGE);
+        });
+
+        JPanel consoleBtnRow = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
+        consoleBtnRow.setOpaque(false);
+        consoleBtnRow.add(sendCommandBtn);
+        consoleBtnRow.add(consoleHelpBtn);
+
+        consoleInputPanel.add(commandSymbol, BorderLayout.WEST);
+        consoleInputPanel.add(consoleInputField, BorderLayout.CENTER);
+        consoleInputPanel.add(consoleBtnRow, BorderLayout.EAST);
+
+        consoleWrapper.add(consoleInputPanel, BorderLayout.SOUTH);
+
+        dbControlPanel.add(consoleWrapper, "growx, h pref!, hidemode 3");
+
         JPanel northPanel = new JPanel(new BorderLayout());
-        northPanel.add(profileScrollPane, BorderLayout.NORTH);
+        JPanel northTopPanel = new JPanel(new BorderLayout());
+        northTopPanel.add(dbControlPanel, BorderLayout.NORTH);
+        northTopPanel.add(profileScrollPane, BorderLayout.CENTER);
+        northPanel.add(northTopPanel, BorderLayout.NORTH);
         northPanel.add(searchPanel, BorderLayout.SOUTH);
         bodyPanel.add(northPanel, BorderLayout.NORTH);
 
@@ -1234,6 +1402,14 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             }
         }
         updateProfileButtonsUI();
+        if (startDbBtn != null) {
+            startDbBtn.setIcon(
+                    IconFontSwing.buildIcon(FontAwesome.PLAY, GuiConstants.getHelpIconSize(), GuiColors.getApplied()));
+            stopDbBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.STOP, GuiConstants.getHelpIconSize(),
+                    GuiColors.getContrastRed()));
+            restartDbBtn.setIcon(
+                    IconFontSwing.buildIcon(FontAwesome.REFRESH, GuiConstants.getHelpIconSize(), GuiColors.getSaved()));
+        }
     }
 
     private void updateProfileButtonsUI() {
@@ -1810,9 +1986,24 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             // Fetch profiles for the currently selected engine
             Path enginePath = PathUtils.resolvePath(DatabaseConfigurationUtils.DATABASE_BASE_DIR)
                     .resolve(currentEngine.toString());
+
+            Set<String> profileNames = new HashSet<>();
             if (Files.exists(enginePath)) {
-                fetchFolderProfiles(enginePath).forEach(profileComboBox::addItem);
+                fetchFolderProfiles(enginePath).forEach(profileNames::add);
             }
+
+            // Ensure the currently active or loaded profiles are included in the list
+            // (Requirement Fix)
+            if (activeProfileName != null && !activeProfileName.trim().isEmpty()) {
+                profileNames.add(activeProfileName);
+            }
+            if (loadedProfileName != null && !loadedProfileName.trim().isEmpty()) {
+                profileNames.add(loadedProfileName);
+            }
+
+            List<String> sortedProfiles = new ArrayList<>(profileNames);
+            Collections.sort(sortedProfiles);
+            sortedProfiles.forEach(profileComboBox::addItem);
 
             if (profileComboBox.getItemCount() == 0) {
                 // If no profiles exist, ensure the combo box is truly empty
@@ -1821,19 +2012,14 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
                 this.activeProfileName = null;
                 this.runningProfileName = null;
                 this.activeProfilePath = null;
-            } else if (currentSelection != null && profileComboBox.getItemCount() > 0) {
-                // Try to re-select the previously selected item
+            } else if (currentSelection != null && profileNames.contains(currentSelection)) {
                 profileComboBox.setSelectedItem(currentSelection);
+            } else if (activeProfileName != null && profileNames.contains(activeProfileName)) {
+                profileComboBox.setSelectedItem(activeProfileName);
+            } else if (loadedProfileName != null && profileNames.contains(loadedProfileName)) {
+                profileComboBox.setSelectedItem(loadedProfileName);
             } else {
-                // If no selection or current selection is gone, try to select the active one,
-                // or default
-                // If there are items, but currentSelection was not found or null
-                if (profileComboBox.getItemCount() > 0 && this.activeProfileName != null) { // Check if there are items
-                                                                                            // before trying to select
-                    profileComboBox.setSelectedItem(this.activeProfileName);
-                } else {
-                    profileComboBox.setSelectedItem(null);
-                }
+                profileComboBox.setSelectedIndex(0);
             }
         } catch (Exception e) {
             logger.error("Error refreshing profile list: {}", e.getMessage());
@@ -2235,6 +2421,12 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             updateProfileComboBoxColor();
             pathLabel.setText("Profile Directory: "
                     + (activeProfilePath != null ? activeProfilePath.toAbsolutePath().toString() : "N/A"));
+
+            // Ensure the combo box selection matches the loaded profile name (Requirement
+            // Fix)
+            if (profileComboBox != null && !objectsEqual(profileComboBox.getSelectedItem(), profileName)) {
+                profileComboBox.setSelectedItem(profileName);
+            }
         };
         loadAction.run();
     }
@@ -2758,7 +2950,17 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         new SwingWorker<Void, ProgressInfo>() {
             @Override
             protected Void doInBackground() throws Exception {
-                currentProfile.setupDatabase((msg, p) -> publish(new ProgressInfo(msg, p)));
+                currentProfile.setupDatabase(new DatabaseConfigurationUtils.ProgressListener() {
+                    @Override
+                    public void onProgress(String message, int progress) {
+                        publish(new ProgressInfo(message, progress));
+                    }
+
+                    @Override
+                    public void onLog(String line) {
+                        appendLog(line);
+                    }
+                });
                 return null;
             }
 
@@ -2830,6 +3032,16 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         if (removeDatabaseBtn != null) {
             removeDatabaseBtn.setEnabled(currentProfile != null &&
                     (currentProfile.getDownloadedVersion() != null || currentProfile.isStep1Completed()));
+        }
+
+        if (startDbBtn != null) {
+            startDbBtn.setEnabled(step1Completed && step2Completed);
+        }
+        if (stopDbBtn != null) {
+            stopDbBtn.setEnabled(step1Completed && step2Completed);
+        }
+        if (restartDbBtn != null) {
+            restartDbBtn.setEnabled(step1Completed && step2Completed);
         }
 
         renameProfileBtn.setEnabled(!isNoProfileSelected);
@@ -3551,24 +3763,151 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         this.loadedProfileName = null; // Nothing loaded yet
         this.activeProfilePath = null;
 
+        // Set to false initially to prevent listeners from firing during UI build
+        this.isInitialized = false;
         initUI();
-        loadProfile(this.currentEngine, lastProfileName);
-        this.isInitialized = true;
+        this.isInitialized = true; // Mark as initialized before the first data load
 
-        // The fetchReleasesButton was part of the original constructor, but it's now
-        // handled by initUI and updateMainVersionComboBox
-        // JButton fetchReleasesButton = new JButton("Fetch Major Releases");
-        // fetchReleasesButton.addActionListener(e -> {
-        // List<MainVersionInfo> releases = fetchMajorReleases(API_BASE_URL);
-        // if (releases != null) {
-        // JOptionPane.showMessageDialog(this, "Fetched " + releases.size() + " major
-        // releases.");
-        // } else {
-        // JOptionPane.showMessageDialog(this, "Failed to fetch releases.", "Error",
-        // JOptionPane.ERROR_MESSAGE);
-        // }
-        // });
-        // add(fetchReleasesButton); // This button is now part of the initUI() in
-        // populateStep1Content
+        loadProfile(this.currentEngine, lastProfileName);
     }
+
+    private boolean objectsEqual(Object a, Object b) {
+        return (a == b) || (a != null && a.equals(b));
+    }
+
+    private void toggleConsole() {
+        if (consoleAnimator != null && consoleAnimator.isRunning())
+            return;
+
+        isConsoleExpanded = !isConsoleExpanded;
+        consoleChevron.setDrawing(isConsoleExpanded ? CustomDrawings.Chevron.UP : CustomDrawings.Chevron.DOWN);
+
+        final int targetHeight = isConsoleExpanded ? 250 : 0;
+        final int startHeight = consoleWrapper.getHeight();
+
+        consoleAnimator = new Timer(10, new ActionListener() {
+            final long startTime = System.currentTimeMillis();
+            final int duration = 250;
+
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                long elapsed = System.currentTimeMillis() - startTime;
+                float progress = Math.min(1.0f, (float) elapsed / duration);
+                progress = 1.0f - (float) Math.pow(1.0f - progress, 3); // Cubic Ease Out
+
+                int h = (int) (startHeight + (targetHeight - startHeight) * progress);
+                consoleWrapper.setPreferredSize(
+                        new Dimension(consoleWrapper.getWidth() > 0 ? consoleWrapper.getWidth() : 100, h));
+                dbControlPanel.revalidate();
+
+                if (progress >= 1.0f) {
+                    ((Timer) e.getSource()).stop();
+                    consoleWrapper.setPreferredSize(new Dimension(consoleWrapper.getWidth(), targetHeight));
+                    dbControlPanel.revalidate();
+                }
+            }
+        });
+        consoleAnimator.start();
+    }
+
+    private void appendLog(String line) {
+        SwingUtilities.invokeLater(() -> {
+            try {
+                javax.swing.text.Document doc = consoleTextPane.getDocument();
+                doc.insertString(doc.getLength(), line + "\n", null);
+                consoleTextPane.setCaretPosition(doc.getLength());
+            } catch (Exception e) {
+                // ignore
+            }
+        });
+    }
+
+    private void executeStartDatabaseWorker() {
+        executeDbControlWorker("Starting", currentProfile::ensureInstanceRunning, "Database started successfully.");
+    }
+
+    private void executeStopDatabaseWorker() {
+        executeDbControlWorker("Stopping", currentProfile::stopInstance, "Database stopped successfully.");
+    }
+
+    private void executeRestartDatabaseWorker() {
+        executeDbControlWorker("Restarting", currentProfile::restartInstance, "Database restarted successfully.");
+    }
+
+    private interface DbControlAction {
+        void execute(DatabaseConfigurationUtils.ProgressListener listener) throws Exception;
+    }
+
+    private void executeDbControlWorker(String actionName, DbControlAction action, String successMsg) {
+        if (currentProfile == null)
+            return;
+
+        if (!isConsoleExpanded)
+            toggleConsole();
+        appendLog("\n--- " + actionName + " MariaDB Operation ---");
+
+        final JProgressBar progressBar = new JProgressBar(0, 100);
+        progressBar.setStringPainted(true);
+        final JDialog progressDialog = new JDialog((Window) SwingUtilities.getWindowAncestor(this),
+                actionName + " MariaDB", Dialog.ModalityType.APPLICATION_MODAL);
+        progressDialog.add(progressBar);
+        progressDialog.pack();
+        progressDialog.setLocationRelativeTo(this);
+
+        new SwingWorker<Void, ProgressInfo>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                action.execute(new DatabaseConfigurationUtils.ProgressListener() {
+                    @Override
+                    public void onProgress(String msg, int p) {
+                        publish(new ProgressInfo(msg, p));
+                    }
+
+                    @Override
+                    public void onLog(String line) {
+                        MariaDBConfigurationPanel.this.appendLog(line);
+                    }
+                });
+                return null;
+            }
+
+            @Override
+            protected void process(List<ProgressInfo> chunks) {
+                ProgressInfo info = chunks.get(chunks.size() - 1);
+                progressBar.setValue(info.progress);
+                progressBar.setString(info.message);
+            }
+
+            @Override
+            protected void done() {
+                progressDialog.dispose();
+                try {
+                    get();
+                    updateUIFromData();
+                    JOptionPane.showMessageDialog(MariaDBConfigurationPanel.this, successMsg);
+                } catch (Exception e) {
+                    JOptionPane.showMessageDialog(MariaDBConfigurationPanel.this, "Error: " + e.getCause().getMessage(),
+                            "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
+        progressDialog.setVisible(true);
+    }
+
+    // The fetchReleasesButton was part of the original constructor, but it's now
+    // handled by initUI and updateMainVersionComboBox
+    // JButton fetchReleasesButton = new JButton("Fetch Major Releases");
+    // fetchReleasesButton.addActionListener(e -> {
+    // List<MainVersionInfo> releases = fetchMajorReleases(API_BASE_URL);
+    // if (releases != null) {
+    // JOptionPane.showMessageDialog(this, "Fetched " + releases.size() + " major
+    // releases.");
+    // } else {
+    // JOptionPane.showMessageDialog(this, "Failed to fetch releases.", "Error",
+    // JOptionPane.ERROR_MESSAGE);
+    // }
+    // });
+    // add(fetchReleasesButton); // This button is now part of the initUI() in
+    // populateStep1Content
+
 }
