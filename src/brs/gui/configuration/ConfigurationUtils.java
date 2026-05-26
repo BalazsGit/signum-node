@@ -2,8 +2,10 @@ package brs.gui.configuration;
 
 import brs.gui.GuiColors;
 import brs.gui.GuiConstants;
+import brs.Signum;
 import brs.gui.util.HelpButton;
 import brs.util.PathUtils;
+import com.google.gson.JsonElement;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -11,6 +13,7 @@ import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 
 import javax.swing.*;
+import java.io.FileInputStream;
 import javax.swing.border.EmptyBorder;
 import java.awt.*;
 import java.io.BufferedReader;
@@ -22,6 +25,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -484,6 +488,150 @@ public class ConfigurationUtils {
                     .collect(Collectors.toList());
         } catch (IOException e) {
             return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Beolvassa a logging konfigurációt a prioritási sorrendnek megfelelően.
+     */
+    public static LoggerProfile loadEffectiveLoggerProfile(String confFolder, String profileName) {
+        LoggerProfile effective = new LoggerProfile(profileName);
+        effective.applyInternalDefaults();
+
+        Path confPath = PathUtils.resolvePath(confFolder);
+        Path logConfPath = confPath.resolve(Signum.NODE_LOGGING_SUBFOLDER);
+        Path pathToLoad = null;
+
+        // 1. Keresés az aktív név alapján
+        Path specificPath = logConfPath.resolve(profileName + ".properties");
+        if (Files.exists(specificPath)) {
+            pathToLoad = specificPath;
+        } else {
+            // 2. Fallback logging.properties
+            if (!Signum.LOGGING_PROPERTIES_NAME.equals(profileName)) {
+                Path fallbackPath = logConfPath.resolve(Signum.LOGGING_PROPERTIES_NAME + ".properties");
+                if (Files.exists(fallbackPath))
+                    pathToLoad = fallbackPath;
+            }
+            // 3. Fallback defaultokra (logging mappában, majd conf mappában)
+            if (pathToLoad == null) {
+                Path defSub = logConfPath.resolve(Signum.DEFAULT_LOGGING_PROPERTIES_NAME + ".properties");
+                if (Files.exists(defSub)) {
+                    pathToLoad = defSub;
+                } else {
+                    Path defConf = confPath.resolve(Signum.DEFAULT_LOGGING_PROPERTIES_NAME + ".properties");
+                    if (Files.exists(defConf))
+                        pathToLoad = defConf;
+                }
+            }
+        }
+
+        if (pathToLoad != null) {
+            try (FileInputStream is = new FileInputStream(pathToLoad.toFile())) {
+                Properties fileProps = new Properties();
+                fileProps.load(is);
+                effective.getProperties().putAll(fileProps);
+            } catch (IOException e) {
+                // Logger initialization has not happened yet, using System.err
+                System.err.println("Failed to load logger properties: " + e.getMessage());
+            }
+        }
+        return effective;
+    }
+
+    /**
+     * Beolvassa a node konfigurációt a prioritási sorrendnek megfelelően.
+     */
+    public static NodeProfile loadEffectiveNodeProfile(String confFolder, String profileName) {
+        NodeProfile effective = new NodeProfile(profileName);
+        Path confPath = PathUtils.resolvePath(confFolder);
+        Path nodeConfPath = confPath.resolve(Signum.NODE_SUBFOLDER);
+        Path pathToLoad = null;
+
+        // 1. Keresés az aktív név alapján
+        Path specificPath = nodeConfPath.resolve(profileName + ".properties");
+        if (Files.exists(specificPath)) {
+            pathToLoad = specificPath;
+        } else {
+            // 2. Fallback node.properties-re
+            if (!Signum.PROPERTIES_NAME.equals(profileName)) {
+                Path fallbackPath = nodeConfPath.resolve(Signum.PROPERTIES_NAME + ".properties");
+                if (Files.exists(fallbackPath))
+                    pathToLoad = fallbackPath;
+            }
+            // 3. & 4. Fallback defaultokra (node mappában, majd conf mappában)
+            if (pathToLoad == null) {
+                Path defSub = nodeConfPath.resolve(Signum.DEFAULT_PROPERTIES_NAME + ".properties");
+                if (Files.exists(defSub)) {
+                    pathToLoad = defSub;
+                } else {
+                    Path defConf = confPath.resolve(Signum.DEFAULT_PROPERTIES_NAME + ".properties");
+                    if (Files.exists(defConf))
+                        pathToLoad = defConf;
+                }
+            }
+        }
+
+        if (pathToLoad != null) {
+            try (FileInputStream is = new FileInputStream(pathToLoad.toFile())) {
+                effective.getProperties().load(is);
+            } catch (IOException e) {
+                System.err.println("Failed to load node properties: " + e.getMessage());
+            }
+        }
+        return effective;
+    }
+
+    /**
+     * Beolvas egy Look and Feel profilt a gui-settings.json fájlból.
+     */
+    public static LookAndFeelProfile loadLookAndFeelProfile(Path settingsPath, String profileName) {
+        LookAndFeelProfile profile = new LookAndFeelProfile(profileName);
+        if (Files.notExists(settingsPath))
+            return profile;
+
+        try (BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
+            JsonObject settings = JsonParser.parseReader(reader).getAsJsonObject();
+            if (settings.has("lookAndFeelProfiles")) {
+                JsonObject profiles = settings.getAsJsonObject("lookAndFeelProfiles");
+                if (profiles.has(profileName)) {
+                    JsonObject data = profiles.getAsJsonObject(profileName);
+
+                    if (data.has("theme")) {
+                        profile.setThemeClassName(data.get("theme").getAsString());
+                    }
+                    if (data.has("font")) {
+                        profile.setGlobalFont(parseJsonFont(data.getAsJsonObject("font")));
+                    }
+                    if (data.has("consoleFont")) {
+                        profile.setConsoleFont(parseJsonFont(data.getAsJsonObject("consoleFont")));
+                    }
+                    if (data.has("colorOverrides")) {
+                        Map<String, Color> overrides = new java.util.HashMap<>();
+                        JsonObject colors = data.getAsJsonObject("colorOverrides");
+                        for (Map.Entry<String, JsonElement> entry : colors.entrySet()) {
+                            overrides.put(entry.getKey(), Color.decode(entry.getValue().getAsString()));
+                        }
+                        profile.setColorOverrides(overrides);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to load LAF profile: " + e.getMessage());
+        }
+        return profile;
+    }
+
+    private static Font parseJsonFont(JsonObject obj) {
+        if (obj == null)
+            return null;
+        try {
+            return new Font(
+                    obj.get("family").getAsString(),
+                    obj.get("style").getAsInt(),
+                    obj.get("size").getAsInt());
+        } catch (Exception e) {
+            return null;
         }
     }
 }
