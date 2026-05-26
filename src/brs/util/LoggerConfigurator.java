@@ -1,6 +1,8 @@
 package brs.util;
 
 import brs.Signum;
+import brs.gui.configuration.ConfigurationUtils;
+import brs.gui.configuration.LoggerProfile;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -61,68 +63,10 @@ public final class LoggerConfigurator {
 
         if (!Boolean.getBoolean("brs.doNotConfigureLogging")) {
             try {
-                Properties loggingProperties = new Properties();
-
-                // 0. Set internal defaults (baseline). These match logging-default.properties
-                // This acts like the "Props.java" for logging, providing a fail-safe
-                // configuration.
-                loggingProperties.setProperty("handlers", "java.util.logging.ConsoleHandler");
-                loggingProperties.setProperty(".level", "SEVERE");
-                loggingProperties.setProperty("brs.level", "INFO");
-                loggingProperties.setProperty("java.util.logging.ConsoleHandler.level", "INFO");
-                loggingProperties.setProperty("java.util.logging.ConsoleHandler.formatter",
-                        "brs.util.BriefLogFormatter");
-                loggingProperties.setProperty("org.eclipse.jetty.level", "OFF");
-                loggingProperties.setProperty("javax.servlet.level", "OFF");
-                loggingProperties.setProperty("com.zaxxer.hikari.level", "WARNING");
-                loggingProperties.setProperty("com.zaxxer.hikari.HikariConfig.level", "INFO");
-                loggingProperties.setProperty("sun.rmi.level", "INFO");
-                loggingProperties.setProperty("javax.management.level", "INFO");
-                loggingProperties.setProperty("brs.db.store.DerivedTableManager.level", "OFF");
-                loggingProperties.setProperty("org.jooq.Constants.level", "OFF");
-
-                Path confPath = PathUtils.resolvePath(confFolder);
-                Path logConfPath = confPath.resolve(Signum.NODE_LOGGING_SUBFOLDER);
-
-                File fileToLoad = null;
-                File propsFile = logConfPath.resolve(Signum.LOGGING_PROPERTIES_NAME).toFile();
-
-                // 1. Priority: Current LOGGING_PROPERTIES_NAME (Profile or logging.properties)
-                if (propsFile.exists()) {
-                    fileToLoad = propsFile;
-                } else {
-                    // 2. Fallback to logging.properties if current name was a profile and didn't
-                    // exist in logging/
-                    if (!Signum.LOGGING_PROPERTIES_NAME.equals("logging.properties")) {
-                        File fallbackFile = logConfPath.resolve("logging.properties").toFile();
-                        if (fallbackFile.exists()) {
-                            fileToLoad = fallbackFile;
-                        }
-                    }
-                    // 3. Fallback to logging-default.properties (Search logging/ then conf/)
-                    if (fileToLoad == null) {
-                        File defaultInLogging = logConfPath.resolve(Signum.DEFAULT_LOGGING_PROPERTIES_NAME).toFile();
-                        if (defaultInLogging.exists()) {
-                            fileToLoad = defaultInLogging;
-                        } else {
-                            File defaultInConf = confPath.resolve(Signum.DEFAULT_LOGGING_PROPERTIES_NAME).toFile();
-                            if (defaultInConf.exists()) {
-                                fileToLoad = defaultInConf;
-                            }
-                        }
-                    }
-                }
-
-                if (fileToLoad != null) {
-                    try (InputStream is = new FileInputStream(fileToLoad)) {
-                        loggingProperties.load(is);
-                        logs.add("INFO: Logging configuration loaded from " + fileToLoad.getAbsolutePath());
-                        // Update global variable to reflect actual file used
-                        Signum.LOGGING_PROPERTIES_NAME = fileToLoad.getName();
-                    }
-                } else {
-                    logs.add("INFO: No logging configuration files found. Using internal defaults.");
-                }
+                LoggerProfile effectiveProfile = ConfigurationUtils.loadEffectiveLoggerProfile(confFolder,
+                        Signum.getActiveLoggingProfile());
+                Properties loggingProperties = effectiveProfile.getProperties();
+                logs.add("INFO: Logging configuration resolved for profile: " + Signum.getActiveLoggingProfile());
 
                 ByteArrayOutputStream outStream = new ByteArrayOutputStream();
                 loggingProperties.store(outStream, "logging properties");
