@@ -9,7 +9,8 @@ import java.util.regex.Matcher;
 
 public class JdbcManualConfigurationPanel extends JPanel {
     private final JComboBox<DatabaseConfigurationPanel.DatabaseEngine> engineCombo;
-    private final JTextField hostField, portField, dbNameField, postfixField, userField;
+    private final JComboBox<String> hostCombo;
+    private final JTextField portField, dbNameField, postfixField, userField;
     private final JLabel engineLabel, hostLabel, portLabel, dbNameLabel, postfixLabel, userLabel, passLabel;
     private final JPasswordField passField;
     private final JTextField resultField;
@@ -22,7 +23,9 @@ public class JdbcManualConfigurationPanel extends JPanel {
         setOpaque(false);
 
         engineCombo = new JComboBox<>(DatabaseConfigurationPanel.DatabaseEngine.values());
-        hostField = new JTextField();
+        hostCombo = new JComboBox<>(new String[] { "localhost", "127.0.0.1", "::1", "0.0.0.0", "::" });
+        hostCombo.setEditable(true);
+        hostCombo.setSelectedItem("localhost");
         portField = new JTextField();
         dbNameField = new JTextField();
         postfixField = new JTextField();
@@ -43,7 +46,8 @@ public class JdbcManualConfigurationPanel extends JPanel {
         userLabel = new JLabel("Username:");
         passLabel = new JLabel("Password:");
 
-        ConfigurationUtils.styleInputComponent(hostField);
+        ConfigurationUtils.styleInputComponent(hostCombo);
+        ConfigurationUtils.fixComponentSize(hostCombo);
         ConfigurationUtils.styleInputComponent(portField);
         ConfigurationUtils.styleInputComponent(dbNameField);
         ConfigurationUtils.styleInputComponent(postfixField);
@@ -53,7 +57,7 @@ public class JdbcManualConfigurationPanel extends JPanel {
         add(engineLabel, "gapright 5");
         add(engineCombo, "growx, wrap");
         add(hostLabel, "gapright 5");
-        add(hostField, "growx, wrap");
+        add(hostCombo, "growx, wrap");
         add(portLabel, "gapright 5");
         add(portField, "growx, wrap");
         add(dbNameLabel, "gapright 5");
@@ -75,12 +79,18 @@ public class JdbcManualConfigurationPanel extends JPanel {
             DatabaseConfigurationPanel.DatabaseEngine engine = (DatabaseConfigurationPanel.DatabaseEngine) engineCombo
                     .getSelectedItem();
             boolean sqlite = engine == DatabaseConfigurationPanel.DatabaseEngine.SQLITE;
-            hostField.setEnabled(!sqlite);
+            hostCombo.setEnabled(!sqlite);
             portField.setEnabled(!sqlite);
             postfixField.setEnabled(!sqlite);
             userField.setEnabled(!sqlite);
             passField.setEnabled(!sqlite);
             showPass.setEnabled(!sqlite);
+            updatePreview();
+            if (onChange != null)
+                onChange.run();
+        });
+
+        hostCombo.addActionListener(e -> {
             updatePreview();
             if (onChange != null)
                 onChange.run();
@@ -105,7 +115,7 @@ public class JdbcManualConfigurationPanel extends JPanel {
                     onChange.run();
             }
         };
-        hostField.getDocument().addDocumentListener(dl);
+        ((JTextField) hostCombo.getEditor().getEditorComponent()).getDocument().addDocumentListener(dl);
         portField.getDocument().addDocumentListener(dl);
         dbNameField.getDocument().addDocumentListener(dl);
         postfixField.getDocument().addDocumentListener(dl);
@@ -131,7 +141,7 @@ public class JdbcManualConfigurationPanel extends JPanel {
                     engineCombo.setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.MARIADB);
                 else if ("postgresql".equalsIgnoreCase(engine))
                     engineCombo.setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.POSTGRESQL);
-                hostField.setText(m.group(2));
+                hostCombo.setSelectedItem(m.group(2));
                 portField.setText(m.group(3) != null ? m.group(3) : "");
                 dbNameField.setText(m.group(4));
                 postfixField.setText(m.group(5) != null ? m.group(5) : "");
@@ -146,7 +156,8 @@ public class JdbcManualConfigurationPanel extends JPanel {
         if (engine == DatabaseConfigurationPanel.DatabaseEngine.SQLITE)
             return "jdbc:sqlite:" + dbNameField.getText();
         String protocol = engine == DatabaseConfigurationPanel.DatabaseEngine.MARIADB ? "mariadb" : "postgresql";
-        StringBuilder sb = new StringBuilder("jdbc:").append(protocol).append("://").append(hostField.getText());
+        String host = hostCombo.getSelectedItem() != null ? hostCombo.getSelectedItem().toString() : "";
+        StringBuilder sb = new StringBuilder("jdbc:").append(protocol).append("://").append(host);
         if (!portField.getText().trim().isEmpty())
             sb.append(":").append(portField.getText().trim());
         sb.append("/").append(dbNameField.getText());
@@ -173,7 +184,7 @@ public class JdbcManualConfigurationPanel extends JPanel {
     }
 
     public JComponent getHostField() {
-        return hostField;
+        return hostCombo;
     }
 
     public JComponent getPortField() {
