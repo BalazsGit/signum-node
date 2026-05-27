@@ -948,19 +948,28 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
 
         // Add New Database User section (Requirement 1, 2, 5)
         addSectionHeader(panel, "Add New Database User", null, false);
-        JPanel addUserInnerPanel = new JPanel(new MigLayout("insets 0, gap 5, fillx", "[align right][grow]", ""));
+        JPanel addUserInnerPanel = new JPanel(
+                new MigLayout("insets 0, gap 5, fillx", "[pref!][grow][pref!][grow]", ""));
         addUserInnerPanel.setOpaque(false);
 
         // User input fields
         addUserInnerPanel.add(new JLabel("User:"), "align right");
         JTextField newUserNameField = createStyledTextField("");
         newUserNameField.putClientProperty("JTextField.placeholderText", "Username...");
-        addUserInnerPanel.add(newUserNameField, "growx, wrap");
+        addUserInnerPanel.add(newUserNameField, "growx");
 
-        addUserInnerPanel.add(new JLabel("Password:"), "align right");
+        addUserInnerPanel.add(new JLabel("Host:"), "align right");
+        JComboBox<String> newUserHostCombo = new JComboBox<>(TYPICAL_HOSTS);
+        newUserHostCombo.setEditable(true);
+        newUserHostCombo.setSelectedItem("localhost");
+        ConfigurationUtils.styleInputComponent(newUserHostCombo);
+        ConfigurationUtils.fixComponentSize(newUserHostCombo);
+        addUserInnerPanel.add(newUserHostCombo, "growx, wrap");
+
+        addUserInnerPanel.add(new JLabel("Password:"), "align right"); // Password row starts on a new line
         JPasswordField newUserPassField = new JPasswordField();
         ConfigurationUtils.styleInputComponent(newUserPassField);
-        addUserInnerPanel.add(newUserPassField, "growx, wrap");
+        addUserInnerPanel.add(newUserPassField, "growx, span, wrap");
 
         JCheckBox showNewUserPass = new JCheckBox("Show Password");
         char defaultEchoChar = newUserPassField.getEchoChar();
@@ -978,9 +987,11 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         addUserBtn.addActionListener(e -> {
             String name = newUserNameField.getText().trim();
             String pass = new String(newUserPassField.getPassword());
+            String host = newUserHostCombo.getSelectedItem() != null ? newUserHostCombo.getSelectedItem().toString()
+                    : "localhost";
             if (!name.isEmpty()) {
-                try {
-                    currentProfile.addCreatedUser(name, pass, new ArrayList<>(tempGrantsForNewUser));
+                try { // Pass host to addCreatedUser
+                    currentProfile.addCreatedUser(name, pass, host, new ArrayList<>(tempGrantsForNewUser));
                     tempGrantsForNewUser.clear();
                     updateUIFromData();
                     newUserNameField.setText("");
@@ -1100,11 +1111,25 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         progressDialog.pack();
         progressDialog.setLocationRelativeTo(this);
 
+        if (!isConsoleExpanded)
+            toggleConsole();
+        appendLog("\n--- Changing Admin Credentials ---");
+
         new SwingWorker<Void, ProgressInfo>() {
             @Override
             protected Void doInBackground() throws Exception {
                 currentProfile.changeAdminCredentials(oldUser, oldPass, newUser, newPass,
-                        (msg, p) -> publish(new ProgressInfo(msg, p)));
+                        new DatabaseConfigurationUtils.ProgressListener() {
+                            @Override
+                            public void onProgress(String message, int progress) {
+                                publish(new ProgressInfo(message, progress));
+                            }
+
+                            @Override
+                            public void onLog(String line) {
+                                appendLog(line);
+                            }
+                        });
                 return null;
             }
 
@@ -1139,11 +1164,19 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             return;
         }
 
-        String appUser = valueSuppliers.get("appUsername").get();
-        String permissions = valueSuppliers.get("appUserPermissions").get();
+        if (!isConsoleExpanded)
+            toggleConsole();
+        appendLog("\n--- Creating Database: " + newDbName + " ---");
 
-        currentProfile.setAdminUsername(valueSuppliers.get("adminUsername").get());
-        currentProfile.setAdminPassword(valueSuppliers.get("adminPassword").get());
+        String appUser = valueSuppliers.containsKey("appUsername") ? valueSuppliers.get("appUsername").get() : "";
+        String permissions = valueSuppliers.containsKey("appUserPermissions")
+                ? valueSuppliers.get("appUserPermissions").get()
+                : "ALL";
+
+        if (valueSuppliers.containsKey("adminUsername"))
+            currentProfile.setAdminUsername(valueSuppliers.get("adminUsername").get());
+        if (valueSuppliers.containsKey("adminPassword"))
+            currentProfile.setAdminPassword(valueSuppliers.get("adminPassword").get());
 
         final JProgressBar progressBar = new JProgressBar(0, 100);
         progressBar.setStringPainted(true);
@@ -1163,7 +1196,17 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             @Override
             protected Boolean doInBackground() throws Exception {
                 return currentProfile.createDatabase(newDbName, appUser, permissions,
-                        (msg, p) -> publish(new ProgressInfo(msg, p)));
+                        new DatabaseConfigurationUtils.ProgressListener() {
+                            @Override
+                            public void onProgress(String message, int progress) {
+                                publish(new ProgressInfo(message, progress));
+                            }
+
+                            @Override
+                            public void onLog(String line) {
+                                appendLog(line);
+                            }
+                        });
             }
 
             @Override
@@ -2216,11 +2259,25 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         downloadDatabaseBtn.setEnabled(false);
         downloadStatusLabel.setText("Downloading...");
 
+        if (!isConsoleExpanded)
+            toggleConsole();
+        appendLog("\n--- Downloading and Installing MariaDB (" + selectedSubVersionName + ") ---");
+
         SwingWorker<Void, ProgressInfo> worker = new SwingWorker<>() {
             @Override
             protected Void doInBackground() throws Exception {
                 currentProfile.install(downloadUrl, selectedSubVersionName, currentOsArch,
-                        (msg, p) -> publish(new ProgressInfo(msg, p)));
+                        new DatabaseConfigurationUtils.ProgressListener() {
+                            @Override
+                            public void onProgress(String message, int progress) {
+                                publish(new ProgressInfo(message, progress));
+                            }
+
+                            @Override
+                            public void onLog(String line) {
+                                appendLog(line);
+                            }
+                        });
                 return null;
             }
 
@@ -2316,10 +2373,24 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         initializeDatabaseBtn.setEnabled(false);
         downloadStatusLabel.setText("Initializing database..."); // Reuse downloadStatusLabel for general status
 
+        if (!isConsoleExpanded)
+            toggleConsole();
+        appendLog("\n--- Initializing MariaDB Instance ---");
+
         SwingWorker<Void, ProgressInfo> worker = new SwingWorker<>() {
             @Override
             protected Void doInBackground() throws Exception {
-                currentProfile.initializeInstance((msg, p) -> publish(new ProgressInfo(msg, p)));
+                currentProfile.initializeInstance(new DatabaseConfigurationUtils.ProgressListener() {
+                    @Override
+                    public void onProgress(String message, int progress) {
+                        publish(new ProgressInfo(message, progress));
+                    }
+
+                    @Override
+                    public void onLog(String line) {
+                        appendLog(line);
+                    }
+                });
                 return null;
             }
 
@@ -2578,7 +2649,9 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
 
         for (MariadbProfile.UserInfo user : currentProfile.getCreatedUsers()) {
             JPanel userContainer = new JPanel(new MigLayout("fillx, insets 10, gap 5",
-                    "[align right, pref!][grow, fill][grow, fill][grow, fill][pref!][pref!][pref!]", ""));
+                    "[align right][grow][align right][grow][pref!][pref!][pref!]", "")); // Adjusted layout for
+                                                                                         // User/Host in one
+            // row
             userContainer.setBorder(BorderFactory.createTitledBorder("User Management: " + user.username));
             userContainer.setOpaque(false);
 
@@ -2586,7 +2659,12 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             userContainer.add(new JLabel("User:"), "align right");
             JTextField userField = createStyledTextField(user.username);
             userField.setEditable(false);
-            userContainer.add(userField, "growx, span 3");
+            userContainer.add(userField, "growx");
+
+            userContainer.add(new JLabel("Host:"), "align right");
+            JTextField hostField = createStyledTextField(user.host);
+            hostField.setEditable(false);
+            userContainer.add(hostField, "growx");
 
             JButton syncUserBtn = new JButton(IconFontSwing.buildIcon(FontAwesome.REFRESH,
                     GuiConstants.getHelpIconSize(), GuiColors.getApplied()));
@@ -2664,7 +2742,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             // Add headers for grants section
             userContainer.add(new JSeparator(), "span, growx, wrap, gaptop 10, gapbottom 5"); // Separator before
                                                                                               // headers
-            addPermissionHeaderRow(userContainer); // Adds "Table", "Permissions", "Host" headers
+            addPermissionHeaderRow(userContainer, false); // Adds "Table", "Permissions" headers
             for (MariadbProfile.UserGrant grant : user.grants) {
                 String dbDisplay = grant.databaseId.equals("global") ? "GLOBAL (*.*)"
                         : currentProfile.getCreatedDatabases().stream().filter(d -> d.id.equals(grant.databaseId))
@@ -2681,15 +2759,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
                 dbField.setEditable(false);
                 userContainer.add(dbField, "growx");
 
-                userContainer.add(permissionPanel, "growx, height pref!");
-
-                // Host selection (New Requirement)
-                JComboBox<String> hostCombo = new JComboBox<>(TYPICAL_HOSTS);
-                hostCombo.setEditable(true);
-                hostCombo.setSelectedItem(grant.host != null ? grant.host : "localhost");
-                ConfigurationUtils.styleInputComponent(hostCombo);
-                ConfigurationUtils.fixComponentSize(hostCombo);
-                userContainer.add(hostCombo, "growx");
+                userContainer.add(permissionPanel, "growx, height pref!, span 2");
 
                 JButton syncGrantBtn = new JButton(
                         IconFontSwing.buildIcon(FontAwesome.REFRESH, GuiConstants.getHelpIconSize(),
@@ -2703,9 +2773,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
                 syncGrantBtn.addActionListener(e -> {
                     try { // (Requirement 3)
                         String newPermissions = getPermissionsString(grantPermsKey);
-                        String host = hostCombo.getSelectedItem() != null ? hostCombo.getSelectedItem().toString()
-                                : "localhost";
-                        currentProfile.addUserGrant(user.id, grant.databaseId, host, newPermissions);
+                        currentProfile.addUserGrant(user.id, grant.databaseId, newPermissions);
                         updateUIFromData();
                     } catch (IOException ex) { // (Requirement 3)
                         logger.error("Fail", ex);
@@ -2724,7 +2792,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
                 delGrantBtn.setEnabled(step2Completed);
                 delGrantBtn.addActionListener(e -> {
                     try {
-                        currentProfile.removeUserGrant(user.id, grant.databaseId, grant.host); // (Requirement 3)
+                        currentProfile.removeUserGrant(user.id, grant.databaseId); // (Requirement 3)
                         updateUIFromData();
                     } catch (IOException ex) {
                         logger.error("Fail", ex);
@@ -2737,18 +2805,12 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
                 userContainer.add(grantHelpBtn, "gapleft 2, wrap");
             }
 
-            // 5. Add new grant row (Requirement 5)
             userContainer.add(new JSeparator(), "span, growx, wrap, gaptop 10, gapbottom 5");
 
             String newGrantPermsKey = user.id + "_new_permissions"; // Unique key for new grant checkboxes
             JComponent newPermissionPanel = createPermissionCheckboxesPanel(newGrantPermsKey, "", step2Completed); // Empty
-            // string
-            // for
-            userContainer.add(new JSeparator(), "span, growx, wrap, gaptop 10, gapbottom 5"); // Separator before
-                                                                                              // headers
-            addPermissionHeaderRow(userContainer); // Headers for adding new grant
-            // initial
-            // permissions
+
+            addPermissionHeaderRow(userContainer, false); // Headers for adding new grant
 
             userContainer.add(new JLabel("Add Permissions:"), "align right");
             JComboBox<String> dbSelect = new JComboBox<>();
@@ -2763,15 +2825,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             ConfigurationUtils.fixComponentSize(dbSelect);
             userContainer.add(dbSelect, "growx");
 
-            userContainer.add(newPermissionPanel, "growx, height pref!"); // Add the checkbox panel here
-
-            // Host select for new grant
-            JComboBox<String> newHostCombo = new JComboBox<>(TYPICAL_HOSTS);
-            newHostCombo.setEditable(true);
-            newHostCombo.setSelectedItem("localhost");
-            ConfigurationUtils.styleInputComponent(newHostCombo);
-            ConfigurationUtils.fixComponentSize(newHostCombo);
-            userContainer.add(newHostCombo, "growx");
+            userContainer.add(newPermissionPanel, "growx, height pref!, span 2"); // Add the checkbox panel here
 
             JButton addGrantBtn = new JButton("Add");
             addGrantBtn.setEnabled(step2Completed);
@@ -2782,10 +2836,8 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
                 String dbId = sel.equals("GLOBAL") ? "global"
                         : sel.substring(sel.lastIndexOf('(') + 1, sel.length() - 1);
                 String p = getPermissionsString(newGrantPermsKey);
-                String host = newHostCombo.getSelectedItem() != null ? newHostCombo.getSelectedItem().toString()
-                        : "localhost";
                 try {
-                    currentProfile.addUserGrant(user.id, dbId, host, p);
+                    currentProfile.addUserGrant(user.id, dbId, p);
                     updateUIFromData();
                 } catch (IOException ex) {
                     logger.error("Fail", ex);
@@ -2807,13 +2859,14 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         tempGrantsContainer.removeAll();
         // Apply consistent column setup for alignment with user management
         tempGrantsContainer.setLayout(new MigLayout("fillx, insets 0, gap 5",
-                "[align right, pref!][grow, fill][grow, fill][grow, fill][pref!][pref!][pref!]", ""));
+                "[right][grow][grow][pref!][pref!]",
+                ""));
 
         if (!tempGrantsForNewUser.isEmpty()) {
             tempGrantsContainer.add(new JLabel("Assigned Permissions:"),
                     "span, wrap, gaptop 5, gapbottom 5, gapleft 10");
             tempGrantsContainer.add(new JSeparator(), "span, growx, wrap, gapbottom 5");
-            addPermissionHeaderRow(tempGrantsContainer);
+            addPermissionHeaderRow(tempGrantsContainer, false);
             for (MariadbProfile.UserGrant grant : tempGrantsForNewUser) {
                 String dbDisplay = grant.databaseId.equals("global") ? "GLOBAL (*.*)"
                         : currentProfile.getCreatedDatabases().stream().filter(d -> d.id.equals(grant.databaseId))
@@ -2831,15 +2884,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
                 dbField.setEditable(false);
                 tempGrantsContainer.add(dbField, "growx");
 
-                tempGrantsContainer.add(permissionPanel, "growx, height pref!"); // Add the checkbox panel here
-
-                // Host select for temp grant
-                JComboBox<String> tempHostCombo = new JComboBox<>(TYPICAL_HOSTS);
-                tempHostCombo.setEditable(true);
-                tempHostCombo.setSelectedItem(grant.host != null ? grant.host : "localhost");
-                ConfigurationUtils.styleInputComponent(tempHostCombo);
-                ConfigurationUtils.fixComponentSize(tempHostCombo);
-                tempGrantsContainer.add(tempHostCombo, "growx");
+                tempGrantsContainer.add(permissionPanel, "growx, height pref!, span 2"); // Add the checkbox panel here
 
                 JButton delBtn = new JButton(
                         IconFontSwing.buildIcon(FontAwesome.TRASH, GuiConstants.getHelpIconSize(),
@@ -2857,9 +2902,9 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             }
         }
 
-        // For adding new temporary grant
         tempGrantsContainer.add(new JSeparator(), "span, growx, wrap, gaptop 10, gapbottom 5");
-        addPermissionHeaderRow(tempGrantsContainer);
+
+        addPermissionHeaderRow(tempGrantsContainer, false);
 
         String addTempGrantPermsKey = "temp_new_permissions";
         JComponent addPermissionPanel = createPermissionCheckboxesPanel(addTempGrantPermsKey, "", true);
@@ -2876,15 +2921,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         ConfigurationUtils.fixComponentSize(dbSelect);
         tempGrantsContainer.add(dbSelect, "growx");
 
-        tempGrantsContainer.add(addPermissionPanel, "growx, height pref!");
-
-        // Host select for new temp grant
-        JComboBox<String> newTempHostCombo = new JComboBox<>(TYPICAL_HOSTS);
-        newTempHostCombo.setEditable(true);
-        newTempHostCombo.setSelectedItem("localhost");
-        ConfigurationUtils.styleInputComponent(newTempHostCombo);
-        ConfigurationUtils.fixComponentSize(newTempHostCombo);
-        tempGrantsContainer.add(newTempHostCombo, "growx");
+        tempGrantsContainer.add(addPermissionPanel, "growx");
 
         // Add button for new temporary grant
         JButton addBtn = new JButton("Add");
@@ -2895,16 +2932,13 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             if (sel == null)
                 return;
             String dbId = sel.equals("GLOBAL") ? "global" : sel.substring(sel.lastIndexOf('(') + 1, sel.length() - 1);
-            String host = newTempHostCombo.getSelectedItem() != null ? newTempHostCombo.getSelectedItem().toString()
-                    : "localhost";
-            tempGrantsForNewUser
-                    .add(new MariadbProfile.UserGrant(dbId, host, getPermissionsString(addTempGrantPermsKey)));
+            tempGrantsForNewUser.add(new MariadbProfile.UserGrant(dbId, getPermissionsString(addTempGrantPermsKey)));
             updateTempGrantsUI();
         });
-        tempGrantsContainer.add(addBtn, "right, span 2");
+        tempGrantsContainer.add(addBtn);
         JButton addTempGrantHelp = new HelpButton();
         addTempGrantHelp.setToolTipText("Add the specified permissions to the list for the new user.");
-        tempGrantsContainer.add(addTempGrantHelp, "gapleft 2, wrap");
+        tempGrantsContainer.add(addTempGrantHelp, "wrap");
 
         tempGrantsContainer.revalidate();
         tempGrantsContainer.repaint();
@@ -2916,14 +2950,16 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
      *
      * @param panel The JPanel to which the headers should be added.
      */
-    private void addPermissionHeaderRow(JPanel panel) {
+    private void addPermissionHeaderRow(JPanel panel, boolean includeHost) {
         panel.add(new JLabel(""), "align right"); // Empty label for the first column
         JLabel tableHeader = new JLabel("Database");
         tableHeader.setFont(tableHeader.getFont().deriveFont(Font.BOLD));
         panel.add(tableHeader, "growx, align center");
         JLabel permissionHeader = new JLabel("Permissions");
         permissionHeader.setFont(permissionHeader.getFont().deriveFont(Font.BOLD));
-        panel.add(permissionHeader, "growx, align center");
+        panel.add(permissionHeader, "growx, align center" + (includeHost ? "" : ", span 2, wrap"));
+        if (!includeHost)
+            return;
         JLabel hostHeader = new JLabel("Host");
         hostHeader.setFont(hostHeader.getFont().deriveFont(Font.BOLD));
         panel.add(hostHeader, "growx, align center, wrap");
@@ -2937,6 +2973,10 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
                     "Prerequisite Missing", JOptionPane.WARNING_MESSAGE);
             return;
         }
+
+        if (!isConsoleExpanded)
+            toggleConsole();
+        appendLog("\n--- Running Database User and Grant Setup ---");
 
         // 2. Start worker (UI trigger)
         final JProgressBar progressBar = new JProgressBar(0, 100);
