@@ -43,12 +43,10 @@ public class MariadbProfile {
 
     public static class UserGrant {
         public String databaseId; // "global" or specific DB ID
-        public String host;
         public String permissions;
 
-        public UserGrant(String databaseId, String host, String permissions) {
+        public UserGrant(String databaseId, String permissions) {
             this.databaseId = databaseId;
-            this.host = host != null ? host : "localhost";
             this.permissions = permissions;
         }
     }
@@ -57,12 +55,14 @@ public class MariadbProfile {
         public String id;
         public String username;
         public String password;
+        public String host;
         public List<UserGrant> grants = new ArrayList<>();
 
-        public UserInfo(String id, String username, String password) {
+        public UserInfo(String id, String username, String password, String host) {
             this.id = id;
             this.username = username;
             this.password = password;
+            this.host = host != null ? host : "localhost";
         }
     }
 
@@ -203,12 +203,12 @@ public class MariadbProfile {
                 UserInfo user = new UserInfo(
                         getString(obj, "id", UUID.randomUUID().toString().substring(0, 8)),
                         getString(obj, "username", ""),
-                        getString(obj, "password", ""));
+                        getString(obj, "password", ""),
+                        getString(obj, "host", "localhost"));
                 if (obj.has("grants")) {
                     obj.getAsJsonArray("grants").forEach(g -> {
                         JsonObject gObj = g.getAsJsonObject();
                         user.grants.add(new UserGrant(getString(gObj, "databaseId", "global"),
-                                getString(gObj, "host", "localhost"),
                                 getString(gObj, "permissions", "ALL")));
                     });
                 }
@@ -274,11 +274,11 @@ public class MariadbProfile {
                 uObj.addProperty("id", user.id);
                 uObj.addProperty("username", user.username);
                 uObj.addProperty("password", user.password);
+                uObj.addProperty("host", user.host);
                 JsonArray grants = new JsonArray();
                 for (UserGrant grant : user.grants) {
                     JsonObject gObj = new JsonObject();
                     gObj.addProperty("databaseId", grant.databaseId);
-                    gObj.addProperty("host", grant.host);
                     gObj.addProperty("permissions", grant.permissions);
                     grants.add(gObj);
                 }
@@ -606,8 +606,16 @@ public class MariadbProfile {
     }
 
     public void addCreatedUser(String username, String password, List<UserGrant> grants) throws IOException {
-        createdUsers.removeIf(u -> u.username.equalsIgnoreCase(username)); // Ensure uniqueness by username
-        UserInfo newUser = new UserInfo(UUID.randomUUID().toString().substring(0, 8), username, password);
+        // This method is deprecated. Use the one with host.
+        // For now, default host to localhost for compatibility.
+        addCreatedUser(username, password, "localhost", grants);
+    }
+
+    public void addCreatedUser(String username, String password, String host, List<UserGrant> grants)
+            throws IOException {
+        // Ensure uniqueness by username@host
+        createdUsers.removeIf(u -> u.username.equalsIgnoreCase(username) && u.host.equalsIgnoreCase(host));
+        UserInfo newUser = new UserInfo(UUID.randomUUID().toString().substring(0, 8), username, password, host);
         if (grants != null && !grants.isEmpty()) {
             newUser.grants.addAll(grants);
         }
@@ -699,11 +707,10 @@ public class MariadbProfile {
         logger.info("Password for user ID '{}' updated in profile '{}'.", userId, profileName);
     }
 
-    public void addUserGrant(String userId, String dbId, String host, String permissions) throws IOException {
+    public void addUserGrant(String userId, String dbId, String permissions) throws IOException {
         createdUsers.stream().filter(u -> u.id.equals(userId)).findFirst().ifPresent(u -> {
-            // MariaDB identify grants by DB and Host
-            u.grants.removeIf(g -> g.databaseId.equals(dbId) && g.host.equals(host));
-            u.grants.add(new UserGrant(dbId, host, permissions));
+            u.grants.removeIf(g -> g.databaseId.equals(dbId));
+            u.grants.add(new UserGrant(dbId, permissions));
         });
         Map<String, Object> updates = new HashMap<>();
         updates.put("createdUsers", this.createdUsers);
@@ -712,18 +719,10 @@ public class MariadbProfile {
                 dbId, permissions, profileName);
     }
 
-    public void removeUserGrant(String userId, String dbId, String host) throws IOException {
+    public void removeUserGrant(String userId, String dbId) throws IOException {
         createdUsers.stream().filter(u -> u.id.equals(userId)).findFirst().ifPresent(u -> {
-            Optional<UserGrant> grantToRemove = u.grants.stream()
-                    .filter(g -> g.databaseId.equals(dbId) && g.host.equals(host)).findFirst();
-            if (grantToRemove.isPresent()) {
-                // TODO: Also execute REVOKE ... ON ... FROM in MariaDB
-                u.grants.removeIf(g -> g.databaseId.equals(dbId) && g.host.equals(host));
-                logger.info("Grant for user ID '{}' on DB '{}' removed from profile '{}'.", userId, dbId, profileName);
-            } else {
-                logger.warn("Attempted to remove non-existent grant for user ID '{}' on DB '{}' in profile '{}'.",
-                        userId, dbId, profileName);
-            }
+            u.grants.removeIf(g -> g.databaseId.equals(dbId));
+            logger.info("Grant for user ID '{}' on DB '{}' removed from profile '{}'.", userId, dbId, profileName);
         });
         Map<String, Object> updates = new HashMap<>();
         updates.put("createdUsers", this.createdUsers);
@@ -1245,24 +1244,18 @@ public class MariadbProfile {
             for (UserInfo user : createdUsers) {
                 listener.onProgress("Processing user '" + user.username + "'...", 40);
 
-                // Group grants by host because MariaDB users are defined as user@host
-                Set<String> uniqueHosts = user.grants.stream().map(g -> g.host).collect(Collectors.toSet());
-                if (uniqueHosts.isEmpty())
-                    uniqueHosts.add("localhost");
+                String host = (user.host == null || user.host.isEmpty()) ? "localhost" : user.host;
 
-                for (String host : uniqueHosts) {
-                    try {
-                        listener.onLog("Ensuring user exists: " + user.username + "@" + host);
-                        stmt.execute(String.format("CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY '%s'",
-                                user.username, host, user.password));
-                        // Since CREATE USER IF NOT EXISTS doesn't update password if user exists:
-                        stmt.execute(String.format("ALTER USER '%s'@'%s' IDENTIFIED BY '%s'",
-                                user.username, host, user.password));
-                        logger.info("Ensured user exists: {}@{}", user.username, host);
-                    } catch (java.sql.SQLException e) {
-                        logger.error("Failed to create/alter user {}@{}", user.username, host, e);
-                        throw e;
-                    }
+                try {
+                    listener.onLog("Ensuring user exists: " + user.username + "@" + host);
+                    stmt.execute(String.format("CREATE USER IF NOT EXISTS '%s'@'%s' IDENTIFIED BY '%s'",
+                            user.username, host, user.password));
+                    stmt.execute(String.format("ALTER USER '%s'@'%s' IDENTIFIED BY '%s'",
+                            user.username, host, user.password));
+                    logger.info("Ensured user exists: {}@{}", user.username, host);
+                } catch (java.sql.SQLException e) {
+                    logger.error("Failed to create/alter user {}@{}", user.username, host, e);
+                    throw e;
                 }
 
                 // Apply grants
@@ -1274,9 +1267,9 @@ public class MariadbProfile {
                     listener.onProgress(
                             String.format("Granting %s on %s to %s...", sqlPermissions, target, user.username), 60);
                     listener.onLog("SQL: GRANT " + sqlPermissions + " ON " + target + " TO '" + user.username + "'@'"
-                            + grant.host + "'");
+                            + host + "'");
                     stmt.execute(String.format("GRANT %s ON %s TO '%s'@'%s'",
-                            sqlPermissions, target, user.username, grant.host));
+                            sqlPermissions, target, user.username, host));
                 }
             }
 
