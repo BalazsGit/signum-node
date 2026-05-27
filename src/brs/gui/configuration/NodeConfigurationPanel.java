@@ -836,7 +836,10 @@ public class NodeConfigurationPanel extends JPanel {
                 String savedValue = savedProfile.getProperty(row.prop.getName());
                 if (savedValue == null)
                     savedValue = getSafeDefault(row.prop);
-                String newValue = valueSuppliers.get(row.prop.getName()).get();
+                Supplier<String> supplier = valueSuppliers.get(row.prop.getName());
+                String newValue = (supplier != null) ? supplier.get() : "";
+                if (newValue == null)
+                    newValue = "";
 
                 boolean isList = (row.input instanceof JScrollPane) ||
                         (row.input instanceof JPanel && Props.BRS_PK_CHECKS.getName().equals(row.prop.getName()));
@@ -1120,7 +1123,8 @@ public class NodeConfigurationPanel extends JPanel {
             saved = "";
         saved = saved.trim();
 
-        String val = valueSuppliers.get(row.prop.getName()).get();
+        Supplier<String> supplier = valueSuppliers.get(row.prop.getName());
+        String val = (supplier != null) ? supplier.get() : "";
         if (val == null)
             val = ""; // Ensure non-null for comparison
 
@@ -1263,6 +1267,12 @@ public class NodeConfigurationPanel extends JPanel {
                 if (mp != null) {
                     mp.updateFromUrl(val);
                     mp.setCredentials(user, pass);
+                }
+                JCheckBox useProfileCheck = (JCheckBox) comp.getClientProperty("useProfileCheck");
+                if (useProfileCheck != null && useProfileCheck.isSelected()) {
+                    useProfileCheck.setSelected(false);
+                    JPanel cardPanel = (JPanel) comp.getClientProperty("cardPanel");
+                    ((CardLayout) cardPanel.getLayout()).show(cardPanel, "MANUAL");
                 }
                 updateColor(comp, key, defaultValues.get(key));
                 continue;
@@ -1622,15 +1632,16 @@ public class NodeConfigurationPanel extends JPanel {
         JPanel cardPanel = new JPanel(cardLayout);
         cardPanel.setOpaque(false);
 
-        JdbcManualConfigurationPanel manualPanel = new JdbcManualConfigurationPanel(() -> {
-            updateColor(wrapper, prop.getName(), defaultValues.get(prop.getName()));
-            updateDirtyStatus();
-        });
-        JdbcProfileConfigurationPanel profilePanel = new JdbcProfileConfigurationPanel(confFolder,
-                () -> {
-                    updateColor(wrapper, prop.getName(), defaultValues.get(prop.getName()));
-                    updateDirtyStatus();
-                });
+        final boolean[] jdbcInitialized = { false };
+        Runnable jdbcOnChange = () -> {
+            if (jdbcInitialized[0]) {
+                updateColor(wrapper, prop.getName(), defaultValues.get(prop.getName()));
+                updateDirtyStatus();
+            }
+        };
+
+        JdbcManualConfigurationPanel manualPanel = new JdbcManualConfigurationPanel(jdbcOnChange);
+        JdbcProfileConfigurationPanel profilePanel = new JdbcProfileConfigurationPanel(confFolder, jdbcOnChange);
 
         cardPanel.add(manualPanel, "MANUAL");
         cardPanel.add(profilePanel, "PROFILE");
@@ -1644,6 +1655,7 @@ public class NodeConfigurationPanel extends JPanel {
 
         wrapper.putClientProperty("manualPanel", manualPanel);
         wrapper.putClientProperty("profilePanel", profilePanel);
+        wrapper.putClientProperty("cardPanel", cardPanel);
         wrapper.putClientProperty("useProfileCheck", useProfileCheck);
 
         // Register sub-components for coloring and dirty status tracking
@@ -1662,6 +1674,24 @@ public class NodeConfigurationPanel extends JPanel {
         wrapper.putClientProperty("postfixLabel", manualPanel.getPostfixLabel());
         wrapper.putClientProperty("userLabel", manualPanel.getUserLabel());
         wrapper.putClientProperty("passLabel", manualPanel.getPassLabel());
+
+        // Register profile panel components for sub-coloring
+        wrapper.putClientProperty("pEngineCombo", profilePanel.getEngineCombo());
+        wrapper.putClientProperty("pProfileCombo", profilePanel.getProfileCombo());
+        wrapper.putClientProperty("pDbCombo", profilePanel.getDbCombo());
+        wrapper.putClientProperty("pHostCombo", profilePanel.getHostField());
+        wrapper.putClientProperty("pPortField", profilePanel.getPortField());
+        wrapper.putClientProperty("pPostfixField", profilePanel.getPostfixField());
+        wrapper.putClientProperty("pUserCombo", profilePanel.getUserCombo());
+        wrapper.putClientProperty("pPassField", profilePanel.getPassField());
+        wrapper.putClientProperty("pEngineLabel", profilePanel.getEngineLabel());
+        wrapper.putClientProperty("pProfileLabel", profilePanel.getProfileLabel());
+        wrapper.putClientProperty("pDbLabel", profilePanel.getDbLabel());
+        wrapper.putClientProperty("pHostLabel", profilePanel.getHostLabel());
+        wrapper.putClientProperty("pPortLabel", profilePanel.getPortLabel());
+        wrapper.putClientProperty("pPostfixLabel", profilePanel.getPostfixLabel());
+        wrapper.putClientProperty("pUserLabel", profilePanel.getUserLabel());
+        wrapper.putClientProperty("pPassLabel", profilePanel.getPassLabel());
 
         wrapper.putClientProperty("resultLabel", manualPanel.getResultField());
 
@@ -1686,6 +1716,7 @@ public class NodeConfigurationPanel extends JPanel {
         String savedPass = savedProfile.getProperty(Props.DB_PASSWORD.getName(),
                 getSafeDefault(Props.DB_PASSWORD));
 
+        jdbcInitialized[0] = true;
         manualPanel.updateFromUrl(savedValue);
         manualPanel.setCredentials(savedUser, savedPass);
 
@@ -2080,7 +2111,8 @@ public class NodeConfigurationPanel extends JPanel {
         if (comp instanceof JPanel && Props.DB_URL.getName().equals(propName)) {
             JComponent resultComp = (JComponent) comp.getClientProperty("resultLabel");
             target = resultComp != null ? resultComp : target;
-            String supplierVal = valueSuppliers.get(propName).get();
+            Supplier<String> supplier = valueSuppliers.get(propName);
+            String supplierVal = supplier != null ? supplier.get() : "";
             value = supplierVal != null ? supplierVal.trim() : "";
         }
 
@@ -2115,9 +2147,9 @@ public class NodeConfigurationPanel extends JPanel {
             if (((JComboBox<?>) comp).isEditable()) {
                 target = (JComponent) ((JComboBox<?>) comp).getEditor().getEditorComponent();
             }
-        } else if (comp instanceof javax.swing.text.JTextComponent) {
-            value = ((javax.swing.text.JTextComponent) comp).getText();
-            if (comp instanceof JTextArea) {
+        } else if (target instanceof javax.swing.text.JTextComponent) {
+            value = ((javax.swing.text.JTextComponent) target).getText();
+            if (target instanceof JTextArea) {
                 value = normalizeListValue(value, "\n");
                 savedValue = normalizeListValue(savedValue, ";");
                 applied = normalizeListValue(applied, ";");
@@ -2169,45 +2201,75 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void updateJdbcSubComponents(JComponent panel, String savedUrl, String appliedUrl) {
-        JComboBox<?> engineCombo = (JComboBox<?>) panel.getClientProperty("engineCombo");
-        JTextField hostField = (JTextField) panel.getClientProperty("hostField");
-        JTextField portField = (JTextField) panel.getClientProperty("portField");
-        JTextField dbNameField = (JTextField) panel.getClientProperty("dbNameField");
-        JTextField postfixField = (JTextField) panel.getClientProperty("postfixField");
-        JTextField userField = (JTextField) panel.getClientProperty("userField");
-        JPasswordField passField = (JPasswordField) panel.getClientProperty("passField");
+        JCheckBox useProfileCheck = (JCheckBox) panel.getClientProperty("useProfileCheck");
+        boolean useProfile = useProfileCheck != null && useProfileCheck.isSelected();
 
-        JLabel engineLabel = (JLabel) panel.getClientProperty("engineLabel");
-        JLabel hostLabel = (JLabel) panel.getClientProperty("hostLabel");
-        JLabel portLabel = (JLabel) panel.getClientProperty("portLabel");
-        JLabel dbNameLabel = (JLabel) panel.getClientProperty("dbNameLabel");
-        JLabel postfixLabel = (JLabel) panel.getClientProperty("postfixLabel");
-        JLabel userLabel = (JLabel) panel.getClientProperty("userLabel");
-        JLabel passLabel = (JLabel) panel.getClientProperty("passLabel");
+        JComponent engineCombo = (JComponent) panel.getClientProperty(useProfile ? "pEngineCombo" : "engineCombo");
+        JComponent hostField = (JComponent) panel.getClientProperty(useProfile ? "pHostCombo" : "hostField");
+        JComponent portField = (JComponent) panel.getClientProperty(useProfile ? "pPortField" : "portField");
+        JComponent dbNameField = (JComponent) panel.getClientProperty(useProfile ? "pDbCombo" : "dbNameField");
+        JComponent postfixField = (JComponent) panel.getClientProperty(useProfile ? "pPostfixField" : "postfixField");
+        JComponent userField = (JComponent) panel.getClientProperty(useProfile ? "pUserCombo" : "userField");
+        JComponent passField = (JComponent) panel.getClientProperty(useProfile ? "pPassField" : "passField");
+
+        JLabel engineLabel = (JLabel) panel.getClientProperty(useProfile ? "pEngineLabel" : "engineLabel");
+        JLabel hostLabel = (JLabel) panel.getClientProperty(useProfile ? "pHostLabel" : "hostLabel");
+        JLabel portLabel = (JLabel) panel.getClientProperty(useProfile ? "pPortLabel" : "portLabel");
+        JLabel dbNameLabel = (JLabel) panel.getClientProperty(useProfile ? "pDbLabel" : "dbLabel");
+        JLabel postfixLabel = (JLabel) panel.getClientProperty(useProfile ? "pPostfixLabel" : "postfixLabel");
+        JLabel userLabel = (JLabel) panel.getClientProperty(useProfile ? "pUserLabel" : "userLabel");
+        JLabel passLabel = (JLabel) panel.getClientProperty(useProfile ? "pPassLabel" : "passLabel");
 
         Map<String, String> savedParts = getJdbcUrlParts(savedUrl);
         Map<String, String> appliedParts = getJdbcUrlParts(appliedUrl);
 
-        updateJdbcPart(engineCombo, engineLabel, "Engine:",
-                engineCombo.getSelectedItem() != null ? engineCombo.getSelectedItem().toString() : "",
+        String engineVal = "";
+        if (engineCombo instanceof JComboBox) {
+            Object sel = ((JComboBox<?>) engineCombo).getSelectedItem();
+            engineVal = sel != null ? sel.toString() : "";
+        }
+        updateJdbcPart(engineCombo, engineLabel, "Engine:", engineVal,
                 savedParts.get("engine"), appliedParts.get("engine"));
-        updateJdbcPart(hostField, hostLabel, "Host:", hostField.getText(), savedParts.get("host"),
-                appliedParts.get("host"));
-        updateJdbcPart(portField, portLabel, "Port:", portField.getText(), savedParts.get("port"),
-                appliedParts.get("port"));
-        updateJdbcPart(dbNameField, dbNameLabel, "Database:", dbNameField.getText(), savedParts.get("dbName"),
+
+        String hostVal = getCompValue(hostField);
+        updateJdbcPart(hostField, hostLabel, "Host:", hostVal, savedParts.get("host"), appliedParts.get("host"));
+
+        String portVal = getCompValue(portField);
+        updateJdbcPart(portField, portLabel, "Port:", portVal, savedParts.get("port"), appliedParts.get("port"));
+
+        String dbVal = getCompValue(dbNameField);
+        updateJdbcPart(dbNameField, dbNameLabel, "Database:", dbVal, savedParts.get("dbName"),
                 appliedParts.get("dbName"));
-        updateJdbcPart(postfixField, postfixLabel, "Postfix:", postfixField.getText(), savedParts.get("postfix"),
+
+        String postfixVal = getCompValue(postfixField);
+        updateJdbcPart(postfixField, postfixLabel, "Postfix:", postfixVal, savedParts.get("postfix"),
                 appliedParts.get("postfix"));
 
         String userKey = Props.DB_USERNAME.getName();
         String passKey = Props.DB_PASSWORD.getName();
-        updateJdbcPart(userField, userLabel, "Username:", userField.getText(),
+
+        String userVal = getCompValue(userField);
+        updateJdbcPart(userField, userLabel, "Username:", userVal,
                 savedProfile.getProperty(userKey, getSafeDefault(Props.DB_USERNAME)),
                 appliedProfile.getProperty(userKey, getSafeDefault(Props.DB_USERNAME)));
-        updateJdbcPart(passField, passLabel, "Password:", new String(passField.getPassword()),
+
+        String passVal = "";
+        if (passField instanceof JPasswordField) {
+            passVal = new String(((JPasswordField) passField).getPassword());
+        }
+        updateJdbcPart(passField, passLabel, "Password:", passVal,
                 savedProfile.getProperty(passKey, getSafeDefault(Props.DB_PASSWORD)),
                 appliedProfile.getProperty(passKey, getSafeDefault(Props.DB_PASSWORD)));
+    }
+
+    private String getCompValue(JComponent comp) {
+        if (comp instanceof javax.swing.text.JTextComponent)
+            return ((javax.swing.text.JTextComponent) comp).getText();
+        if (comp instanceof JComboBox) {
+            Object sel = ((JComboBox<?>) comp).getSelectedItem();
+            return sel != null ? sel.toString() : "";
+        }
+        return "";
     }
 
     private void updateJdbcPart(JComponent input, JLabel label, String baseText, String current, String saved,
