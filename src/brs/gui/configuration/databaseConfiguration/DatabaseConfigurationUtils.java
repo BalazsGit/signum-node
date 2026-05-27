@@ -28,6 +28,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.List;
+import java.util.Collections;
 import java.util.regex.Pattern;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -181,10 +182,19 @@ public class DatabaseConfigurationUtils {
     public static class DbUser {
         public String username;
         public String password;
+        public String host;
+        public String permissions;
 
         @Override
         public String toString() {
-            return username;
+            if (username == null)
+                return "";
+            StringBuilder sb = new StringBuilder(username);
+            if (host != null && !host.isEmpty())
+                sb.append("@").append(host);
+            if (permissions != null && !permissions.isEmpty())
+                sb.append(" (").append(permissions).append(")");
+            return sb.toString();
         }
     }
 
@@ -377,14 +387,25 @@ public class DatabaseConfigurationUtils {
      * @return A list of profile names.
      */
     public static List<String> getProfileNames(String confFolder, String engine) {
-        Path base = PathUtils.resolvePath(confFolder).resolve("db-profiles").resolve(engine.toLowerCase());
+        // Prioritize Portable Database directory: ../database/<EngineName>
+        Path base = PathUtils.resolvePath(DATABASE_BASE_DIR).resolve(engine);
+
+        // Fallback to legacy location: conf/db-profiles/<engine_lowercase>
+        if (!Files.exists(base)) {
+            base = PathUtils.resolvePath(confFolder).resolve("db-profiles").resolve(engine.toLowerCase());
+        }
+
         if (!Files.exists(base))
             return new ArrayList<>();
-        try (Stream<Path> s = Files.list(base)) {
-            return s.filter(Files::isDirectory)
-                    .map(p -> p.getFileName().toString())
-                    .sorted()
-                    .collect(Collectors.toList());
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(base)) {
+            List<String> names = new ArrayList<>();
+            for (Path path : stream) {
+                if (Files.isDirectory(path)) {
+                    names.add(path.getFileName().toString());
+                }
+            }
+            Collections.sort(names);
+            return names;
         } catch (Exception e) {
             return new ArrayList<>();
         }
@@ -399,8 +420,15 @@ public class DatabaseConfigurationUtils {
      * @return A {@link DbProfile} object or null if not found.
      */
     public static DbProfile loadProfile(String confFolder, String engine, String profileName) {
-        Path jsonPath = PathUtils.resolvePath(confFolder).resolve("db-profiles")
-                .resolve(engine.toLowerCase()).resolve(profileName).resolve("profile.json");
+        // Try Portable directory structure first
+        Path profileDir = PathUtils.resolvePath(DATABASE_BASE_DIR).resolve(engine).resolve(profileName);
+        if (!Files.exists(profileDir)) {
+            // Try legacy location
+            profileDir = PathUtils.resolvePath(confFolder).resolve("db-profiles")
+                    .resolve(engine.toLowerCase()).resolve(profileName);
+        }
+
+        Path jsonPath = profileDir.resolve("profile.json");
         if (!Files.exists(jsonPath))
             return null;
 
@@ -409,7 +437,34 @@ public class DatabaseConfigurationUtils {
             DbProfile profile = new DbProfile();
             profile.name = profileName;
 
-            if (json.has("databases")) {
+            // Handle new MariaDB portable profile format
+            if (engine.equalsIgnoreCase("MariaDB") && (json.has("createdDatabases") || json.has("createdUsers"))) {
+                try {
+                    MariadbProfile mProfile = new MariadbProfile(profileName, json);
+                    for (MariadbProfile.DatabaseInfo dbInfo : mProfile.getCreatedDatabases()) {
+                        DbInstance instance = new DbInstance();
+                        instance.name = dbInfo.name;
+                        instance.url = "jdbc:mariadb://127.0.0.1:" + mProfile.getPort() + "/" + dbInfo.name;
+
+                        for (MariadbProfile.UserInfo uInfo : mProfile.getCreatedUsers()) {
+                            for (MariadbProfile.UserGrant grant : uInfo.grants) {
+                                if (grant.databaseId.equals("global") || grant.databaseId.equals(dbInfo.id)) {
+                                    DbUser user = new DbUser();
+                                    user.username = uInfo.username;
+                                    user.password = uInfo.password;
+                                    user.host = uInfo.host;
+                                    user.permissions = grant.permissions;
+                                    instance.users.add(user);
+                                }
+                            }
+                        }
+                        profile.databases.add(instance);
+                    }
+                } catch (Exception e) {
+                    logger.warn("Could not parse MariaDB profile '{}': {}", profileName, e.getMessage());
+                }
+            } else if (json.has("databases")) {
+                // Legacy/Generic format
                 JsonArray dbs = json.getAsJsonArray("databases");
                 for (JsonElement dbEl : dbs) {
                     JsonObject dbObj = dbEl.getAsJsonObject();
