@@ -5,18 +5,24 @@ import brs.gui.configuration.databaseConfiguration.DatabaseConfigurationUtils;
 import net.miginfocom.swing.MigLayout;
 import javax.swing.*;
 import java.util.List;
+import java.util.regex.Matcher;
 
 public class JdbcProfileConfigurationPanel extends JPanel {
     private final JComboBox<DatabaseConfigurationPanel.DatabaseEngine> engineCombo;
     private final JComboBox<String> profileCombo;
     private final JComboBox<DatabaseConfigurationUtils.DbInstance> dbCombo;
+    private final JComboBox<String> hostCombo;
+    private final JTextField portField;
+    private final JTextField postfixField;
     private final JComboBox<DatabaseConfigurationUtils.DbUser> userCombo;
     private final JPasswordField passField;
+    private final JLabel engineLabel, profileLabel, dbLabel, hostLabel, portLabel, postfixLabel, userLabel, passLabel;
     private final JCheckBox showPass;
     private final JTextField resultField;
     private final String confFolder;
     private final Runnable onChange;
     private boolean isProgrammatic = false;
+    private DatabaseConfigurationUtils.DbProfile currentProfile;
 
     public JdbcProfileConfigurationPanel(String confFolder, Runnable onChange) {
         super(new MigLayout("insets 0, fillx, gap 2", "[][grow]", ""));
@@ -27,6 +33,11 @@ public class JdbcProfileConfigurationPanel extends JPanel {
         engineCombo = new JComboBox<>(DatabaseConfigurationPanel.DatabaseEngine.values());
         profileCombo = new JComboBox<>();
         dbCombo = new JComboBox<>();
+        hostCombo = new JComboBox<>(new String[] { "localhost", "127.0.0.1", "::1", "0.0.0.0", "::" });
+        hostCombo.setEditable(true);
+        hostCombo.setSelectedItem("localhost");
+        portField = new JTextField();
+        postfixField = new JTextField();
         userCombo = new JComboBox<>();
         passField = new JPasswordField();
         passField.setEditable(false);
@@ -38,32 +49,98 @@ public class JdbcProfileConfigurationPanel extends JPanel {
         resultField.setOpaque(false);
         resultField.setFont(resultField.getFont().deriveFont(java.awt.Font.BOLD));
 
+        engineLabel = new JLabel("Engine:");
+        profileLabel = new JLabel("Profile:");
+        dbLabel = new JLabel("Database:");
+        hostLabel = new JLabel("Host:");
+        portLabel = new JLabel("Port:");
+        postfixLabel = new JLabel("Postfix:");
+        userLabel = new JLabel("User:");
+        passLabel = new JLabel("Password:");
+
+        ConfigurationUtils.styleInputComponent(hostCombo);
+        ConfigurationUtils.styleInputComponent(portField);
+        ConfigurationUtils.styleInputComponent(postfixField);
         ConfigurationUtils.styleInputComponent(passField);
 
-        add(new JLabel("Engine:"), "gapright 5");
+        add(engineLabel, "gapright 5");
         add(engineCombo, "growx, wrap");
-        add(new JLabel("Profile:"), "gapright 5");
+        add(profileLabel, "gapright 5");
         add(profileCombo, "growx, wrap");
-        add(new JLabel("Database:"), "gapright 5");
+        add(dbLabel, "gapright 5");
         add(dbCombo, "growx, wrap");
-        add(new JLabel("User:"), "gapright 5");
+        add(hostLabel, "gapright 5");
+        add(hostCombo, "growx, wrap");
+        add(portLabel, "gapright 5");
+        add(portField, "growx, wrap");
+        add(postfixLabel, "gapright 5");
+        add(postfixField, "growx, wrap");
+        add(userLabel, "gapright 5");
         add(userCombo, "growx, wrap");
-        add(new JLabel("Password:"), "gapright 5");
+        add(passLabel, "gapright 5");
         add(passField, "growx, wrap");
         add(showPass, "skip 1, wrap, gapbottom 5");
         add(new JLabel("JDBC URL Preview:"), "span 2, gaptop 5, wrap");
         add(resultField, "span 2, growx");
 
         char defaultEchoChar = passField.getEchoChar();
-        showPass.addActionListener(e -> passField.setEchoChar(showPass.isSelected() ? (char) 0 : defaultEchoChar));
+        showPass.addActionListener(e -> {
+            passField.setEchoChar(showPass.isSelected() ? (char) 0 : defaultEchoChar);
+        });
 
-        engineCombo.addActionListener(e -> refreshProfiles());
-        profileCombo.addActionListener(e -> refreshDatabases());
-        dbCombo.addActionListener(e -> refreshUsers());
+        engineCombo.addActionListener(e -> {
+            refreshProfiles();
+            if (!isProgrammatic && onChange != null)
+                onChange.run();
+        });
+        profileCombo.addActionListener(e -> {
+            refreshDatabases();
+            if (!isProgrammatic && onChange != null)
+                onChange.run();
+        });
+        dbCombo.addActionListener(e -> {
+            refreshUsers();
+            if (!isProgrammatic && onChange != null)
+                onChange.run();
+        });
+
+        hostCombo.addActionListener(e -> {
+            updatePreview();
+            if (!isProgrammatic && onChange != null)
+                onChange.run();
+        });
+
+        javax.swing.event.DocumentListener dl = new javax.swing.event.DocumentListener() {
+            private void update() {
+                updatePreview();
+                if (!isProgrammatic && onChange != null)
+                    onChange.run();
+            }
+
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                update();
+            }
+
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                update();
+            }
+
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                update();
+            }
+        };
+        ((JTextField) hostCombo.getEditor().getEditorComponent()).getDocument().addDocumentListener(dl);
+        portField.getDocument().addDocumentListener(dl);
+        postfixField.getDocument().addDocumentListener(dl);
+
         userCombo.addActionListener(e -> {
-            DatabaseConfigurationUtils.DbUser user = (DatabaseConfigurationUtils.DbUser) userCombo.getSelectedItem();
-            if (user != null)
-                passField.setText(user.password);
+            Object selected = userCombo.getSelectedItem();
+            if (selected instanceof DatabaseConfigurationUtils.DbUser) {
+                DatabaseConfigurationUtils.DbUser user = (DatabaseConfigurationUtils.DbUser) selected;
+                passField.setText(user.password != null ? user.password : "");
+            } else {
+                passField.setText("");
+            }
             if (!isProgrammatic && onChange != null)
                 onChange.run();
         });
@@ -73,10 +150,11 @@ public class JdbcProfileConfigurationPanel extends JPanel {
     private void refreshProfiles() {
         isProgrammatic = true;
         profileCombo.removeAllItems();
+        currentProfile = null;
         DatabaseConfigurationPanel.DatabaseEngine engine = (DatabaseConfigurationPanel.DatabaseEngine) engineCombo
                 .getSelectedItem();
         if (engine != null) {
-            DatabaseConfigurationUtils.getProfileNames(confFolder, engine.name()).forEach(profileCombo::addItem);
+            DatabaseConfigurationUtils.getProfileNames(confFolder, engine.toString()).forEach(profileCombo::addItem);
         }
         isProgrammatic = false;
         refreshDatabases();
@@ -85,14 +163,17 @@ public class JdbcProfileConfigurationPanel extends JPanel {
     private void refreshDatabases() {
         isProgrammatic = true;
         dbCombo.removeAllItems();
+        currentProfile = null;
         String pName = (String) profileCombo.getSelectedItem();
         DatabaseConfigurationPanel.DatabaseEngine engine = (DatabaseConfigurationPanel.DatabaseEngine) engineCombo
                 .getSelectedItem();
         if (pName != null && engine != null) {
             DatabaseConfigurationUtils.DbProfile profile = DatabaseConfigurationUtils.loadProfile(confFolder,
-                    engine.name(), pName);
-            if (profile != null)
+                    engine.toString(), pName);
+            if (profile != null) {
+                this.currentProfile = profile;
                 profile.databases.forEach(dbCombo::addItem);
+            }
         }
         isProgrammatic = false;
         refreshUsers();
@@ -103,14 +184,60 @@ public class JdbcProfileConfigurationPanel extends JPanel {
         userCombo.removeAllItems();
         DatabaseConfigurationUtils.DbInstance db = (DatabaseConfigurationUtils.DbInstance) dbCombo.getSelectedItem();
         if (db != null) {
+            // Add users specific to this database instance
             db.users.forEach(userCombo::addItem);
-            resultField.setText(db.url);
+            updateFieldsFromUrl(db.url);
+        } else {
+            portField.setText("");
+            postfixField.setText("");
+            passField.setText("");
         }
+        updatePreview();
         isProgrammatic = false;
     }
 
+    private void updateFieldsFromUrl(String url) {
+        if (url == null || url.isEmpty())
+            return;
+        if (url.startsWith("jdbc:sqlite:")) {
+            hostCombo.setSelectedItem("");
+            portField.setText("");
+            postfixField.setText("");
+        } else {
+            Matcher m = DatabaseConfigurationUtils.JDBC_URL_PATTERN.matcher(url);
+            if (m.find()) {
+                hostCombo.setSelectedItem(m.group(2));
+                portField.setText(m.group(3) != null ? m.group(3) : "");
+                postfixField.setText(m.group(5) != null ? m.group(5) : "");
+            }
+        }
+    }
+
+    private void updatePreview() {
+        resultField.setText(getJdbcUrl());
+    }
+
     public String getJdbcUrl() {
-        return resultField.getText();
+        DatabaseConfigurationPanel.DatabaseEngine engine = (DatabaseConfigurationPanel.DatabaseEngine) engineCombo
+                .getSelectedItem();
+        DatabaseConfigurationUtils.DbInstance db = (DatabaseConfigurationUtils.DbInstance) dbCombo.getSelectedItem();
+        String dbName = db != null ? db.name : "";
+        if (engine == DatabaseConfigurationPanel.DatabaseEngine.SQLITE) {
+            if (db != null && db.url.startsWith("jdbc:sqlite:"))
+                return db.url;
+            return "jdbc:sqlite:" + dbName;
+        }
+        String protocol = engine == DatabaseConfigurationPanel.DatabaseEngine.MARIADB ? "mariadb" : "postgresql";
+        String host = hostCombo.getSelectedItem() != null ? hostCombo.getSelectedItem().toString() : "";
+        StringBuilder sb = new StringBuilder("jdbc:").append(protocol).append("://").append(host);
+        String port = portField.getText().trim();
+        if (!port.isEmpty())
+            sb.append(":").append(port);
+        sb.append("/").append(dbName);
+        String postfix = postfixField.getText().trim();
+        if (!postfix.isEmpty())
+            sb.append(postfix);
+        return sb.toString();
     }
 
     public String getUsername() {
@@ -119,5 +246,69 @@ public class JdbcProfileConfigurationPanel extends JPanel {
 
     public String getPassword() {
         return new String(passField.getPassword());
+    }
+
+    public JComponent getEngineCombo() {
+        return engineCombo;
+    }
+
+    public JComponent getProfileCombo() {
+        return profileCombo;
+    }
+
+    public JComponent getDbCombo() {
+        return dbCombo;
+    }
+
+    public JComponent getHostField() {
+        return hostCombo;
+    }
+
+    public JComponent getPortField() {
+        return portField;
+    }
+
+    public JComponent getPostfixField() {
+        return postfixField;
+    }
+
+    public JComponent getUserCombo() {
+        return userCombo;
+    }
+
+    public JComponent getPassField() {
+        return passField;
+    }
+
+    public JLabel getEngineLabel() {
+        return engineLabel;
+    }
+
+    public JLabel getProfileLabel() {
+        return profileLabel;
+    }
+
+    public JLabel getDbLabel() {
+        return dbLabel;
+    }
+
+    public JLabel getHostLabel() {
+        return hostLabel;
+    }
+
+    public JLabel getPortLabel() {
+        return portLabel;
+    }
+
+    public JLabel getPostfixLabel() {
+        return postfixLabel;
+    }
+
+    public JLabel getUserLabel() {
+        return userLabel;
+    }
+
+    public JLabel getPassLabel() {
+        return passLabel;
     }
 }
