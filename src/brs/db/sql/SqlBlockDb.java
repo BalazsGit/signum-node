@@ -21,7 +21,7 @@ public class SqlBlockDb implements BlockDb {
     private static final Logger logger = LoggerFactory.getLogger(SqlBlockDb.class);
 
     public Block findBlock(long blockId) {
-        return Db.useDSLContext(ctx -> {
+        return Db.fetchWithDSLContext(ctx -> {
             try {
                 BlockRecord r = ctx.selectFrom(BLOCK).where(BLOCK.ID.eq(blockId)).fetchAny();
                 return r == null ? null : loadBlock(r);
@@ -38,13 +38,13 @@ public class SqlBlockDb implements BlockDb {
     }
 
     public boolean hasBlock(long blockId) {
-        return Db.useDSLContext(ctx -> {
+        return Db.fetchWithDSLContext(ctx -> {
             return ctx.fetchExists(ctx.selectOne().from(BLOCK).where(BLOCK.ID.eq(blockId)));
         });
     }
 
     public long findBlockIdAtHeight(int height) {
-        return Db.useDSLContext(ctx -> {
+        return Db.fetchWithDSLContext(ctx -> {
             Long id = ctx.select(BLOCK.ID).from(BLOCK).where(BLOCK.HEIGHT.eq(height)).fetchOne(BLOCK.ID);
             if (id == null) {
                 throw new RuntimeException("Block at height " + height + " not found in database!");
@@ -54,7 +54,7 @@ public class SqlBlockDb implements BlockDb {
     }
 
     public Block findBlockAtHeight(int height) {
-        return Db.useDSLContext(ctx -> {
+        return Db.fetchWithDSLContext(ctx -> {
             try {
                 BlockRecord r = ctx.selectFrom(BLOCK).where(BLOCK.HEIGHT.eq(height)).fetchAny();
                 Block block = r != null ? loadBlock(r) : null;
@@ -69,7 +69,7 @@ public class SqlBlockDb implements BlockDb {
     }
 
     public Block findLastBlock() {
-        return Db.useDSLContext(ctx -> {
+        return Db.fetchWithDSLContext(ctx -> {
             try {
 
                 // avoid table scans through ordering - using indexed columns for direct lookups
@@ -88,7 +88,7 @@ public class SqlBlockDb implements BlockDb {
     }
 
     public Block findLastBlock(int timestamp) {
-        return Db.useDSLContext(ctx -> {
+        return Db.fetchWithDSLContext(ctx -> {
             try {
                 return loadBlock(ctx.selectFrom(BLOCK).where(BLOCK.TIMESTAMP.lessOrEqual(timestamp))
                         .orderBy(BLOCK.DB_ID.desc()).limit(1).fetchAny());

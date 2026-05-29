@@ -123,7 +123,7 @@ public final class Db {
         return con;
     }
 
-    public static <T> T useDSLContext(Function<DSLContext, T> function) {
+    public static <T> T fetchWithDSLContext(Function<DSLContext, T> function) {
         return function.apply(getDSLContext());
     }
 
