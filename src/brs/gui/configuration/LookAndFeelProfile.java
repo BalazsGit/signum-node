@@ -71,8 +71,8 @@ public class LookAndFeelProfile {
         if (a == b)
             return true;
         if (a == null || b == null) {
-            // Ha az egyik null (Default), akkor akkor tekintjük egyezőnek,
-            // ha a másik megegyezik a rendszer alapértelmezett fontjával.
+            // If one is null (Default), they are considered matching
+            // if the other matches the system default font.
             Font nonNull = (a != null) ? a : b;
             Font systemDefault = UIManager.getFont("Label.font");
             if (systemDefault == null)
