@@ -963,8 +963,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                     block.setHeight(height);
                                     block.setPeer(peer);
                                     block.setByteLength(JSON.toJsonString(blockData).length());
-                                    synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
+                                    blockImporterLock.readLock().lock();
+                                    try {
                                         blockService.calculateBaseTarget(block, lastBlock);
+                                    } finally {
+                                        blockImporterLock.readLock().unlock();
                                     }
                                     if (saveInCache) {
                                         if (downloadCache.getLastBlockId() == block.getPreviousBlockId()) {
