@@ -35,7 +35,7 @@ public final class ATProcessorCache {
     private static final int CostOfOneAT = AtConstants.AT_ID_SIZE + 16;
     private final LinkedHashMap<Long, ATContext> atMap = new LinkedHashMap<>();
     private int currentBlockHeight = Integer.MIN_VALUE;
-    private final ArrayList<Long> currentBlockAtIds = new ArrayList<>();
+    private final LinkedHashSet<Long> currentBlockAtIds = new LinkedHashSet<>();
     private int startBlockHeight = Integer.MAX_VALUE;
     private long minimumActivationAmount = Long.MAX_VALUE;
     private final int numberOfBlocksToCache;
@@ -44,7 +44,7 @@ public final class ATProcessorCache {
     public static class ATContext {
         public byte[] md5;
         public AT at;
-        public LinkedList<Transaction> transactions = new LinkedList<>();
+        public ArrayList<Transaction> transactions = new ArrayList<>();
     }
 
     private ATProcessorCache(PropertyService propertyService) {
@@ -75,7 +75,7 @@ public final class ATProcessorCache {
         lastLoadedBlockHeight = 0;
     }
 
-    public ArrayList<Long> getCurrentBlockAtIds() {
+    public LinkedHashSet<Long> getCurrentBlockAtIds() {
         return this.currentBlockAtIds;
     }
 
@@ -96,6 +96,7 @@ public final class ATProcessorCache {
         if (isEnabled()) {
             loadTransactions();
         }
+        logger.debug("AT Processor Cache: current size = {}", atMap.size());
         long executionTime = (System.nanoTime() - startTime) / 1000000;
         logger.debug("Cache Duration: {} milliseconds", executionTime);
     }
@@ -150,37 +151,39 @@ public final class ATProcessorCache {
     private void loadTransactionsFromHeightUntilCurrentBlock(int startHeight, boolean shallRemoveOldest) {
         logger.debug("Loading AT transactions for heights from {} to {}", startHeight, currentBlockHeight - 1);
 
-        HashSet<Long> processedRecipients = new HashSet<>();
-
         Db.useDSLContext(ctx -> {
             try (Cursor<TransactionRecord> cursor = ctx.selectFrom(TRANSACTION)
                     .where(TRANSACTION.HEIGHT.between(startHeight, currentBlockHeight - 1))
                     .and(TRANSACTION.RECIPIENT_ID.isNotNull())
                     .orderBy(TRANSACTION.HEIGHT, TRANSACTION.ID)
+                    .fetchSize(1000)
                     .fetchLazy()) {
 
-                TransactionDb db = Db.getDbsByDatabaseType().getTransactionDb();
-
+                // Phase 1: Collect records only.
+                // This avoids executing nested queries while the DB cursor is open.
+                List<TransactionRecord> recordsToProcess = new ArrayList<>();
                 for (TransactionRecord r : cursor) {
+                    recordsToProcess.add(r);
+                }
+
+                // Phase 2: Now that the cursor is closed, we can safely load full transactions
+                TransactionDb db = Db.getDbsByDatabaseType().getTransactionDb();
+                for (TransactionRecord r : recordsToProcess) {
                     Long recipientId = r.getRecipientId();
 
-                    // Only collect transactions for ATs already in the cache (O(1) lookup)
                     ATContext context = this.atMap.get(recipientId);
                     if (context == null) {
-                        continue;
+                        // Collect transactions for any potential AT to ensure complete history
+                        context = new ATContext();
+                        this.atMap.put(recipientId, context);
                     }
 
-                    processedRecipients.add(recipientId);
                     long txId = r.getId();
 
-                    // Optimization for duplication check (loop instead of stream)
-                    boolean alreadyExists = false;
-                    for (Transaction t : context.transactions) {
-                        if (t.getId() == txId) {
-                            alreadyExists = true;
-                            break;
-                        }
-                    }
+                    // Quick duplicate check: only check the last transaction in the list
+                    // since the DB query is ordered by height and ID.
+                    int size = context.transactions.size();
+                    boolean alreadyExists = size > 0 && context.transactions.get(size - 1).getId() == txId;
 
                     if (!alreadyExists) {
                         try {
@@ -192,32 +195,28 @@ public final class ATProcessorCache {
                 }
 
                 if (shallRemoveOldest) {
-                    processedRecipients.forEach(this::pruneTransactionList);
+                    int minimumHeightToKeep = currentBlockHeight - numberOfBlocksToCache - 1;
+
+                    // Iterating the whole map to avoid memory leak of old recipient IDs
+                    Iterator<Map.Entry<Long, ATContext>> it = atMap.entrySet().iterator();
+                    while (it.hasNext()) {
+                        Map.Entry<Long, ATContext> entry = it.next();
+                        Long id = entry.getKey();
+                        ATContext context = entry.getValue();
+
+                        // Remove old transactions
+                        context.transactions.removeIf(t -> t.getHeight() < minimumHeightToKeep);
+
+                        // Cleanup: if it's not an active AT in this block AND has no transactions in
+                        // window
+                        // we can safely remove the context to save memory.
+                        if (context.at == null && context.transactions.isEmpty() && !currentBlockAtIds.contains(id)) {
+                            it.remove();
+                        }
+                    }
                 }
             }
         });
-    }
-
-    private void pruneTransactionList(long recipientId) {
-        ATContext context = this.atMap.get(recipientId);
-        if (context == null || context.transactions.isEmpty()) {
-            return;
-        }
-
-        int minimumHeightToKeep = currentBlockHeight - numberOfBlocksToCache - 1;
-        int count = 0;
-        while (!context.transactions.isEmpty()) {
-            Transaction oldest = context.transactions.peekFirst();
-            if (oldest.getHeight() >= minimumHeightToKeep)
-                break;
-
-            context.transactions.removeFirst();
-            ++count;
-        }
-        if (count > 0) {
-            logger.debug("Removed {} old transactions lower than height {} for recipient {}", count,
-                    minimumHeightToKeep, recipientId);
-        }
     }
 
     public Long findTransactionId(int startHeight, int endHeight, Long atID, int numOfTx, long minAmount)
@@ -227,6 +226,15 @@ public final class ATProcessorCache {
         ATContext atContext = this.atMap.get(atID);
         if (atContext == null) {
             logger.debug("AT {} not found", atID);
+            throw new CacheMissException();
+        }
+
+        if (atContext.at == null) {
+            // This might happen if querying history for a non-AT account or an AT not in
+            // current block
+            logger.debug(
+                    "AT {} context found but AT object missing! Cross-contract history query or cache boundary reached.",
+                    atID);
             throw new CacheMissException();
         }
 
@@ -264,6 +272,11 @@ public final class ATProcessorCache {
         ATContext atContext = this.atMap.get(atID);
         if (atContext == null) {
             logger.debug("AT {} not found", atID);
+            throw new CacheMissException();
+        }
+
+        if (atContext.at == null) {
+            logger.debug("AT {} context found but AT object missing in findTransactionHeight!", atID);
             throw new CacheMissException();
         }
 
