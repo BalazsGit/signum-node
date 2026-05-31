@@ -313,6 +313,23 @@ public class PeersDialog extends JFrame {
             table.getColumnModel().getColumn(PeersTableModel.COL_INDEX_CONNECT).setCellRenderer(new ButtonRenderer());
             table.getColumnModel().getColumn(PeersTableModel.COL_INDEX_CONNECT).setCellEditor(buttonEditor);
 
+            table.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
+                @Override
+                public void mouseMoved(java.awt.event.MouseEvent e) {
+                    int viewColumn = table.columnAtPoint(e.getPoint());
+                    int viewRow = table.rowAtPoint(e.getPoint());
+                    if (viewColumn != -1 && viewRow != -1) {
+                        int modelColumn = table.convertColumnIndexToModel(viewColumn);
+                        if (modelColumn == PeersTableModel.COL_INDEX_BLACKLIST
+                                || modelColumn == PeersTableModel.COL_INDEX_CONNECT) {
+                            table.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                            return;
+                        }
+                    }
+                    table.setCursor(Cursor.getDefaultCursor());
+                }
+            });
+
             // Filter logic
             filterField.getDocument().addDocumentListener(new DocumentListener() {
                 public void changedUpdate(DocumentEvent e) {
