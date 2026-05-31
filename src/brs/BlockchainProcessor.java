@@ -94,6 +94,16 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     }
 
+    class ForkCacheStats {
+        public final int forkCacheSize;
+        public final int restoreBlocksCount;
+
+        public ForkCacheStats(int forkCacheSize, int restoreBlocksCount) {
+            this.forkCacheSize = forkCacheSize;
+            this.restoreBlocksCount = restoreBlocksCount;
+        }
+    }
+
     class TrimStats {
         public final int currentHeight;
         public final int targetHeight;
@@ -196,6 +206,12 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     int getForkCacheSize();
 
+    /**
+     * Returns the number of blocks currently held in the temporary rollback buffer
+     * during a fork resolution process.
+     */
+    int getRestoreBlocksCount();
+
     int getManualPopOffBlocksCount();
 
     int getManualLastPopOffHeight();
@@ -292,6 +308,10 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
     void manualResolveDatabaseConsistency();
 
     void autoResolveDatabaseConsistency();
+
+    void addForkCacheStatsListener(Listener<ForkCacheStats> listener);
+
+    void removeForkCacheStatsListener(Listener<ForkCacheStats> listener);
 
     void addPeerMetricListener(Listener<PeerMetric> listener);
 

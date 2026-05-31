@@ -238,6 +238,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private final boolean autoPopOffEnabled;
     private final AtomicBoolean skipDbCheckOnManualPopOff = new AtomicBoolean(false);
 
+    private final AtomicInteger restoreBlocksCount = new AtomicInteger(0);
     private int minRollbackHeight = 0;
     private final AtomicInteger manualPopOffBlocksCount = new AtomicInteger(0);
     private final AtomicInteger autoPopOffBlocksCount = new AtomicInteger(0);
@@ -248,6 +249,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private volatile PopOffState autoPopOffState = PopOffState.IDLE;
 
     private final Listeners<PeerMetric, PeerMetricEvent> peerMetricListeners = new Listeners<>();
+    private final Listeners<ForkCacheStats, Event> forkCacheStatsListeners = new Listeners<>();
     private final Listeners<PerformanceStats, Event> performanceStatsListeners = new Listeners<>();
     private final Listeners<QueueStatus, Event> queueStatusListeners = new Listeners<>();
     private final Listeners<Boolean, Event> syncStateListeners = new Listeners<>();
@@ -260,6 +262,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     @Override
     public void removePeerMetricListener(Listener<PeerMetric> listener) {
         peerMetricListeners.removeListener(listener, PeerMetricEvent.METRIC);
+    }
+
+    @Override
+    public void addForkCacheStatsListener(Listener<ForkCacheStats> listener) {
+        forkCacheStatsListeners.addListener(listener, Event.FORK_CACHE_CHANGED);
+    }
+
+    @Override
+    public void removeForkCacheStatsListener(Listener<ForkCacheStats> listener) {
+        forkCacheStatsListeners.removeListener(listener, Event.FORK_CACHE_CHANGED);
     }
 
     @Override
@@ -477,6 +489,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     }
 
     @Override
+    public int getRestoreBlocksCount() {
+        return restoreBlocksCount.get();
+    }
+
+    @Override
     public int getManualPopOffBlocksCount() {
         return manualPopOffBlocksCount.get();
     }
@@ -499,6 +516,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     @Override
     public int getBeforeRollbackHeight() {
         return beforeRollbackHeight.get();
+    }
+
+    private void notifyForkCacheStats() {
+        forkCacheStatsListeners.notify(new ForkCacheStats(getForkCacheSize(), restoreBlocksCount.get()),
+                Event.FORK_CACHE_CHANGED);
     }
 
     @Override
@@ -1298,6 +1320,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                     peer.getPeerAddress());
                             peer.blacklist("got a bad fork");
                             List<Block> peerPoppedOffBlocks = popOffTo(forkBlock, null);
+                            restoreBlocksCount.set(0);
+                            notifyForkCacheStats();
                             pushedForkBlocks = 0;
                             peerPoppedOffBlocks
                                     .forEach(block -> transactionProcessor.processLater(block.getTransactions()));
@@ -1312,6 +1336,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                         blockService.preVerify(block, blockchain.getLastBlock());
                                     }
                                     pushBlock(block);
+                                    restoreBlocksCount.set(myPoppedOffBlocks.size());
+                                    notifyForkCacheStats();
                                 } catch (InterruptedException e) {
                                     Thread.currentThread().interrupt();
                                 } catch (BlockNotAcceptedException e) {
@@ -1323,10 +1349,14 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         } else {
                             myPoppedOffBlocks
                                     .forEach(block -> transactionProcessor.processLater(block.getTransactions()));
+                            restoreBlocksCount.set(0);
+                            notifyForkCacheStats();
                             logger.debug("Successfully switched to better chain.");
                         }
                         logger.info("Forkprocessing complete.");
+                        restoreBlocksCount.set(0);
                         downloadCache.resetForkBlocks();
+                        notifyForkCacheStats();
                         downloadCache.resetCache(); // Reset and set cached vars to chaindata.
                     }
                 }
@@ -3782,6 +3812,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                 block.getTimestamp(), block.getBaseTarget(),
                                 block.getCumulativeDifficulty(), block.getCommitment());
                         poppedOffBlocks.add(block);
+                        restoreBlocksCount.set(poppedOffBlocks.size());
+                        notifyForkCacheStats();
                         block = popLastBlock();
                         logger.debug("Rolling back derived tables...");
                         for (DerivedTable table : derivedTableManager.getDerivedTables()) {

@@ -169,6 +169,7 @@ public class SynchronizationMetricsPanel extends JPanel {
     private JProgressBar unconfirmedTxsProgressBar;
     private JLabel cacheFullnessLabel;
     private JProgressBar cacheFullnessProgressBar;
+    private JProgressBar restoreCacheProgressBar;
     private JLabel forkCacheLabel;
     private JProgressBar forkCacheProgressBar;
 
@@ -231,7 +232,7 @@ public class SynchronizationMetricsPanel extends JPanel {
 
     // Listeners stored as fields to ensure reliable removal
     private final Listener<BlockchainProcessor.QueueStatus> queueStatusListener = this::onQueueStatus;
-    private final Listener<Block> forkCacheListener = block -> onForkCacheChanged();
+    private final Listener<BlockchainProcessor.ForkCacheStats> forkCacheListener = this::onForkCacheStats;
     private final Listener<Block> netVolumeListener = block -> onNetVolumeChanged();
     private final Listener<BlockchainProcessor.PerformanceStats> performanceStatsListener = this::onPerformanceStatsUpdated;
     private final Listener<Block> blockPoppedListener = this::onBlockPopped;
@@ -782,31 +783,41 @@ public class SynchronizationMetricsPanel extends JPanel {
         // SyncPanel (Progress Bars)
         JPanel syncPanel = new JPanel(
                 new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx, wrap 2, gapy 4",
-                        "[align right]5[]"));
+                        "[align right]5[grow, fill]"));
         if (showDebugBorders) {
             syncPanel.setBorder(BorderFactory.createLineBorder(Color.GREEN));
         }
-        String rowConstraints = "";
+        String rowConstraints = "growx";
 
-        // Fork Cache
+        // Fork / Restore Cache
         tooltip = """
-                The number of blocks in the fork cache.
+                Displays the status of the fork resolution process.
+
+                - Fork Cache (Magenta): New blocks downloaded from a peer that form a potentially better chain.
+                - Restore Cache (Orange): Your own local blocks that have been temporarily removed to try the new fork.
 
                 The progress bar displays:
-                - Fork Cache: Current cache size / maximum rollback limit.
-                - Bar length: Indicates the current fork cache size relative to the maximum rollback limit.
+                - [ Fork Blocks / 1440 ] / [ Restore Blocks / 1440 ]
                 """;
-        forkCacheLabel = createLabel("Fork Cache", tooltip, null);
+        forkCacheLabel = createLabel("Fork / Restore Cache", tooltip, null);
         forkCacheProgressBar = createProgressBar(0, Constants.MAX_ROLLBACK, Color.MAGENTA,
-                "0 / " + Constants.MAX_ROLLBACK, GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        syncPanel.add(forkCacheLabel, rowConstraints);
-        syncPanel.add(forkCacheProgressBar, rowConstraints);
+                "0 / " + Constants.MAX_ROLLBACK, GuiConstants.PROGRESS_BAR_SIZE_SMALL);
+        restoreCacheProgressBar = createProgressBar(0, Constants.MAX_ROLLBACK, Color.ORANGE,
+                "0 / " + Constants.MAX_ROLLBACK, GuiConstants.PROGRESS_BAR_SIZE_SMALL);
+
+        JPanel forkRemovedPanel = new JPanel(new MigLayout("insets 0, gap 4, fillx", "[grow, fill][grow, fill]"));
+        forkRemovedPanel.setOpaque(false);
+        forkRemovedPanel.add(forkCacheProgressBar);
+        forkRemovedPanel.add(restoreCacheProgressBar);
+
+        syncPanel.add(forkCacheLabel);
+        syncPanel.add(forkRemovedPanel, rowConstraints);
 
         // Cache Fullness
         cacheFullnessLabel = createLabel("Download Cache", null, null); // Tooltip is set in init()
         cacheFullnessProgressBar = createProgressBar(0, 100, Color.ORANGE, "0.00 / 0.00 MB | 0%",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        syncPanel.add(cacheFullnessLabel, rowConstraints);
+        syncPanel.add(cacheFullnessLabel);
         syncPanel.add(cacheFullnessProgressBar, rowConstraints);
 
         // Verified / Total Blocks
@@ -825,7 +836,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         JLabel verifLabel = createLabel("Verified / Total Blocks", tooltip, null);
         syncProgressBarDownloadedBlocks = createProgressBar(0, 100, Color.GREEN, "0 / 0 | 0%",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        syncPanel.add(verifLabel, rowConstraints);
+        syncPanel.add(verifLabel);
         syncPanel.add(syncProgressBarDownloadedBlocks, rowConstraints);
 
         // Unverified Blocks
@@ -842,7 +853,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         JLabel unVerifLabel = createLabel("Unverified Blocks", tooltip, null);
         syncProgressBarUnverifiedBlocks = createProgressBar(0, 1000, Color.GREEN, "0",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        syncPanel.add(unVerifLabel, rowConstraints);
+        syncPanel.add(unVerifLabel);
         syncPanel.add(syncProgressBarUnverifiedBlocks, rowConstraints);
 
         // Unconfirmed Transactions
@@ -858,7 +869,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         JLabel unconfirmedTxsLabel = createLabel("Unconfirmed Txs", tooltip, null);
         unconfirmedTxsProgressBar = createProgressBar(0, 1000, Color.GREEN, "0 / 0",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        syncPanel.add(unconfirmedTxsLabel, rowConstraints);
+        syncPanel.add(unconfirmedTxsLabel);
         syncPanel.add(unconfirmedTxsProgressBar, rowConstraints);
 
         // Separator
@@ -880,7 +891,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         blocksPerSecondLabel = createLabel("Blocks/Sec (MA)", tooltip, "sync.blocks.per.sec");
         blocksPerSecondProgressBar = createProgressBar(0, 200, null, "0.00 - max: 0.00",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        syncPanel.add(blocksPerSecondLabel, rowConstraints);
+        syncPanel.add(blocksPerSecondLabel);
         syncPanel.add(blocksPerSecondProgressBar, rowConstraints);
 
         // All Transactions/Second (Moving Average)
@@ -907,7 +918,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         txPerSecondLabel = createLabel("All Txs/Sec (MA)", tooltip, "sync.all.tx.per.sec");
         allTransactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0.00 - max: 0.00",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        syncPanel.add(txPerSecondLabel, rowConstraints);
+        syncPanel.add(txPerSecondLabel);
         syncPanel.add(allTransactionsPerSecondProgressBar, rowConstraints);
 
         // System Transactions/Second (Moving Average)
@@ -924,7 +935,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 "sync.system.tx.per.sec");
         systemTransactionsPerSecondProgressBar = createProgressBar(0, 2000, null, "0.00 - max: 0.00",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        syncPanel.add(systemTxPerSecondLabel, rowConstraints);
+        syncPanel.add(systemTxPerSecondLabel);
         syncPanel.add(systemTransactionsPerSecondProgressBar, rowConstraints);
 
         // All Transactions/Block (Moving Average)
@@ -950,7 +961,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         txPerBlockLabel = createLabel("All Txs/Block (MA)", tooltip, "sync.all.tx.per.block");
         allTransactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0.00 - max: 0.00",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        syncPanel.add(txPerBlockLabel, rowConstraints);
+        syncPanel.add(txPerBlockLabel);
         syncPanel.add(allTransactionsPerBlockProgressBar, rowConstraints);
 
         // System Transactions/Block (Moving Average)
@@ -967,7 +978,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 "sync.system.tx.per.block");
         systemTransactionsPerBlockProgressBar = createProgressBar(0, 255, null, "0.00 - max: 0.00",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        syncPanel.add(systemTxPerBlockLabel, rowConstraints);
+        syncPanel.add(systemTxPerBlockLabel);
         syncPanel.add(systemTransactionsPerBlockProgressBar, rowConstraints);
 
         // ATs/Block (Moving Average)
@@ -983,7 +994,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         atCountLabel = createLabel("ATs/Block (MA)", tooltip, "sync.at.count.per.block");
         atCountsPerBlockProgressBar = createProgressBar(0, 100, null, "0.00 - max: 0.00",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        syncPanel.add(atCountLabel, rowConstraints);
+        syncPanel.add(atCountLabel);
         syncPanel.add(atCountsPerBlockProgressBar, rowConstraints);
 
         // Add SyncPanel to performanceMetricsPanel
@@ -1015,7 +1026,7 @@ public class SynchronizationMetricsPanel extends JPanel {
 
         JPanel timingInfoPanel = new JPanel(
                 new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx, wrap 2, gapy 4",
-                        "[align right]5[]"));
+                        "[align right]5[grow, fill]"));
         if (showDebugBorders) {
             timingInfoPanel.setBorder(BorderFactory.createLineBorder(Color.GREEN));
         }
@@ -1044,7 +1055,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         pushTimeLabel = createLabel("Push Time (MA)", tooltip, "sync.push.time");
         pushTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        timingInfoPanel.add(pushTimeLabel, rowConstraints);
+        timingInfoPanel.add(pushTimeLabel);
         timingInfoPanel.add(pushTimeProgressBar, rowConstraints);
 
         // Validation Time
@@ -1068,7 +1079,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         validationTimeLabel = createLabel("Validation Time (MA)", tooltip, "sync.validation.time");
         validationTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        timingInfoPanel.add(validationTimeLabel, rowConstraints);
+        timingInfoPanel.add(validationTimeLabel);
         timingInfoPanel.add(validationTimeProgressBar, rowConstraints);
 
         // TX Loop Time
@@ -1093,7 +1104,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         txLoopTimeLabel = createLabel("TX Loop Time (MA)", tooltip, "sync.tx.loop.time");
         txLoopTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        timingInfoPanel.add(txLoopTimeLabel, rowConstraints);
+        timingInfoPanel.add(txLoopTimeLabel);
         timingInfoPanel.add(txLoopTimeProgressBar, rowConstraints);
 
         // Housekeeping Time
@@ -1117,7 +1128,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 "sync.housekeeping.time");
         housekeepingTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        timingInfoPanel.add(housekeepingTimeLabel, rowConstraints);
+        timingInfoPanel.add(housekeepingTimeLabel);
         timingInfoPanel.add(housekeepingTimeProgressBar, rowConstraints);
 
         // TX Apply Time
@@ -1141,7 +1152,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         txApplyTimeLabel = createLabel("TX Apply Time (MA)", tooltip, "sync.tx.apply.time");
         txApplyTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        timingInfoPanel.add(txApplyTimeLabel, rowConstraints);
+        timingInfoPanel.add(txApplyTimeLabel);
         timingInfoPanel.add(txApplyTimeProgressBar, rowConstraints);
 
         // AT Time
@@ -1164,7 +1175,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         atTimeLabel = createLabel("AT Time (MA)", tooltip, "sync.at.time");
         atTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        timingInfoPanel.add(atTimeLabel, rowConstraints);
+        timingInfoPanel.add(atTimeLabel);
         timingInfoPanel.add(atTimeProgressBar, rowConstraints);
 
         // Subscription Time
@@ -1188,7 +1199,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 "sync.subscription.time");
         subscriptionTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        timingInfoPanel.add(subscriptionTimeLabel, rowConstraints);
+        timingInfoPanel.add(subscriptionTimeLabel);
         timingInfoPanel.add(subscriptionTimeProgressBar, rowConstraints);
 
         // Block Apply Time
@@ -1212,7 +1223,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 "sync.block.apply.time");
         blockApplyTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        timingInfoPanel.add(blockApplyTimeLabel, rowConstraints);
+        timingInfoPanel.add(blockApplyTimeLabel);
         timingInfoPanel.add(blockApplyTimeProgressBar, rowConstraints);
 
         // Commit Time
@@ -1235,7 +1246,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         commitTimeLabel = createLabel("Commit Time (MA)", tooltip, "sync.commit.time");
         commitTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        timingInfoPanel.add(commitTimeLabel, rowConstraints);
+        timingInfoPanel.add(commitTimeLabel);
         timingInfoPanel.add(commitTimeProgressBar, rowConstraints);
 
         // Misc. Time
@@ -1258,7 +1269,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         miscTimeLabel = createLabel("Misc. Time (MA)", tooltip, "sync.misc.time");
         miscTimeProgressBar = createProgressBar(0, 100, null, "0 ms - max: 0 ms | 0%",
                 GuiConstants.PROGRESS_BAR_SIZE_MEDIUM);
-        timingInfoPanel.add(miscTimeLabel, rowConstraints);
+        timingInfoPanel.add(miscTimeLabel);
         timingInfoPanel.add(miscTimeProgressBar, rowConstraints);
         // --- Payload Fullness Panel (spanning below both columns) ---
         JPanel payloadPanel = new JPanel(
@@ -1536,7 +1547,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
         if (blockchainProcessor != null) {
             blockchainProcessor.addQueueStatusListener(queueStatusListener);
-            blockchainProcessor.addListener(forkCacheListener, BlockchainProcessor.Event.FORK_CACHE_CHANGED);
+            blockchainProcessor.addForkCacheStatsListener(forkCacheListener);
             blockchainProcessor.addListener(netVolumeListener, BlockchainProcessor.Event.NET_VOLUME_CHANGED);
             blockchainProcessor.addPerformanceStatsListener(performanceStatsListener);
             blockchainProcessor.addListener(blockPoppedListener, BlockchainProcessor.Event.BLOCK_MANUAL_POPPED);
@@ -1564,7 +1575,7 @@ public class SynchronizationMetricsPanel extends JPanel {
             BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
             if (blockchainProcessor != null) {
                 blockchainProcessor.removeQueueStatusListener(queueStatusListener);
-                blockchainProcessor.removeListener(forkCacheListener, BlockchainProcessor.Event.FORK_CACHE_CHANGED);
+                blockchainProcessor.removeForkCacheStatsListener(forkCacheListener);
                 blockchainProcessor.removeListener(netVolumeListener, BlockchainProcessor.Event.NET_VOLUME_CHANGED);
                 blockchainProcessor.removePerformanceStatsListener(performanceStatsListener);
                 blockchainProcessor.removeListener(blockPoppedListener, BlockchainProcessor.Event.BLOCK_MANUAL_POPPED);
@@ -1599,12 +1610,9 @@ public class SynchronizationMetricsPanel extends JPanel {
         }
     }
 
-    public void onForkCacheChanged() {
+    public void onForkCacheStats(BlockchainProcessor.ForkCacheStats stats) {
         chartUpdateExecutor.submit(() -> {
-            synchronized (updateLock) {
-                int forkCacheSize = Signum.getBlockchainProcessor().getForkCacheSize();
-                SwingUtilities.invokeLater(() -> updateForkCacheStatus(forkCacheSize));
-            }
+            SwingUtilities.invokeLater(() -> updateForkCacheStatus(stats.forkCacheSize, stats.restoreBlocksCount));
         });
     }
 
@@ -1687,7 +1695,7 @@ public class SynchronizationMetricsPanel extends JPanel {
         }
         bar.setBorder(BorderFactory.createEmptyBorder());
         bar.setPreferredSize(size);
-        bar.setMinimumSize(size);
+        bar.setMinimumSize(new Dimension(10, size.height));
         bar.setString(initialString);
         bar.setValue(min);
         setupProgressBarFont(bar);
@@ -2044,9 +2052,12 @@ public class SynchronizationMetricsPanel extends JPanel {
                 val -> String.format("%.2f - max: %.2f", val, sysTxPerBlockMax), 100);
     }
 
-    private void updateForkCacheStatus(int forkCacheSize) {
+    private void updateForkCacheStatus(int forkCacheSize, int restoreBlocksCount) {
         forkCacheProgressBar.setValue(forkCacheSize);
         forkCacheProgressBar.setString(forkCacheSize + " / " + Constants.MAX_ROLLBACK);
+
+        restoreCacheProgressBar.setValue(restoreBlocksCount);
+        restoreCacheProgressBar.setString(restoreBlocksCount + " / " + Constants.MAX_ROLLBACK);
     }
 
     private void updateUnconfirmedTxCount(int count) {
