@@ -1663,7 +1663,7 @@ public class NodeConfigurationPanel extends JPanel {
         wrapper.putClientProperty("hostField", manualPanel.getHostField());
         wrapper.putClientProperty("portField", manualPanel.getPortField());
         wrapper.putClientProperty("dbNameField", manualPanel.getDbNameField());
-        wrapper.putClientProperty("postfixField", manualPanel.getPostfixField());
+        wrapper.putClientProperty("suffixField", manualPanel.getSuffixField());
         wrapper.putClientProperty("userField", manualPanel.getUserField());
         wrapper.putClientProperty("passField", manualPanel.getPassField());
 
@@ -1671,7 +1671,7 @@ public class NodeConfigurationPanel extends JPanel {
         wrapper.putClientProperty("hostLabel", manualPanel.getHostLabel());
         wrapper.putClientProperty("portLabel", manualPanel.getPortLabel());
         wrapper.putClientProperty("dbNameLabel", manualPanel.getDbNameLabel());
-        wrapper.putClientProperty("postfixLabel", manualPanel.getPostfixLabel());
+        wrapper.putClientProperty("suffixLabel", manualPanel.getSuffixLabel());
         wrapper.putClientProperty("userLabel", manualPanel.getUserLabel());
         wrapper.putClientProperty("passLabel", manualPanel.getPassLabel());
 
@@ -1681,7 +1681,7 @@ public class NodeConfigurationPanel extends JPanel {
         wrapper.putClientProperty("pDbCombo", profilePanel.getDbCombo());
         wrapper.putClientProperty("pHostCombo", profilePanel.getHostField());
         wrapper.putClientProperty("pPortField", profilePanel.getPortField());
-        wrapper.putClientProperty("pPostfixField", profilePanel.getPostfixField());
+        wrapper.putClientProperty("pSuffixField", profilePanel.getSuffixField());
         wrapper.putClientProperty("pUserCombo", profilePanel.getUserCombo());
         wrapper.putClientProperty("pPassField", profilePanel.getPassField());
         wrapper.putClientProperty("pEngineLabel", profilePanel.getEngineLabel());
@@ -1689,7 +1689,7 @@ public class NodeConfigurationPanel extends JPanel {
         wrapper.putClientProperty("pDbLabel", profilePanel.getDbLabel());
         wrapper.putClientProperty("pHostLabel", profilePanel.getHostLabel());
         wrapper.putClientProperty("pPortLabel", profilePanel.getPortLabel());
-        wrapper.putClientProperty("pPostfixLabel", profilePanel.getPostfixLabel());
+        wrapper.putClientProperty("pSuffixLabel", profilePanel.getSuffixLabel());
         wrapper.putClientProperty("pUserLabel", profilePanel.getUserLabel());
         wrapper.putClientProperty("pPassLabel", profilePanel.getPassLabel());
 
@@ -2208,7 +2208,7 @@ public class NodeConfigurationPanel extends JPanel {
         JComponent hostField = (JComponent) panel.getClientProperty(useProfile ? "pHostCombo" : "hostField");
         JComponent portField = (JComponent) panel.getClientProperty(useProfile ? "pPortField" : "portField");
         JComponent dbNameField = (JComponent) panel.getClientProperty(useProfile ? "pDbCombo" : "dbNameField");
-        JComponent postfixField = (JComponent) panel.getClientProperty(useProfile ? "pPostfixField" : "postfixField");
+        JComponent suffixField = (JComponent) panel.getClientProperty(useProfile ? "pSuffixField" : "suffixField");
         JComponent userField = (JComponent) panel.getClientProperty(useProfile ? "pUserCombo" : "userField");
         JComponent passField = (JComponent) panel.getClientProperty(useProfile ? "pPassField" : "passField");
 
@@ -2216,7 +2216,7 @@ public class NodeConfigurationPanel extends JPanel {
         JLabel hostLabel = (JLabel) panel.getClientProperty(useProfile ? "pHostLabel" : "hostLabel");
         JLabel portLabel = (JLabel) panel.getClientProperty(useProfile ? "pPortLabel" : "portLabel");
         JLabel dbNameLabel = (JLabel) panel.getClientProperty(useProfile ? "pDbLabel" : "dbLabel");
-        JLabel postfixLabel = (JLabel) panel.getClientProperty(useProfile ? "pPostfixLabel" : "postfixLabel");
+        JLabel suffixLabel = (JLabel) panel.getClientProperty(useProfile ? "pSuffixLabel" : "suffixLabel");
         JLabel userLabel = (JLabel) panel.getClientProperty(useProfile ? "pUserLabel" : "userLabel");
         JLabel passLabel = (JLabel) panel.getClientProperty(useProfile ? "pPassLabel" : "passLabel");
 
@@ -2241,9 +2241,9 @@ public class NodeConfigurationPanel extends JPanel {
         updateJdbcPart(dbNameField, dbNameLabel, "Database:", dbVal, savedParts.get("dbName"),
                 appliedParts.get("dbName"));
 
-        String postfixVal = getCompValue(postfixField);
-        updateJdbcPart(postfixField, postfixLabel, "Postfix:", postfixVal, savedParts.get("postfix"),
-                appliedParts.get("postfix"));
+        String suffixVal = getCompValue(suffixField);
+        updateJdbcPart(suffixField, suffixLabel, "Suffix:", suffixVal, savedParts.get("suffix"),
+                appliedParts.get("suffix"));
 
         String userKey = Props.DB_USERNAME.getName();
         String passKey = Props.DB_PASSWORD.getName();
@@ -2300,7 +2300,7 @@ public class NodeConfigurationPanel extends JPanel {
         parts.put("host", "");
         parts.put("port", "");
         parts.put("dbName", "");
-        parts.put("postfix", "");
+        parts.put("suffix", "");
         if (url == null || url.isEmpty())
             return parts;
         if (url.startsWith("jdbc:sqlite:")) {
@@ -2317,7 +2317,7 @@ public class NodeConfigurationPanel extends JPanel {
                 parts.put("host", matcher.group(2));
                 parts.put("port", matcher.group(3) != null ? matcher.group(3) : "");
                 parts.put("dbName", matcher.group(4));
-                parts.put("postfix", matcher.group(5) != null ? matcher.group(5) : "");
+                parts.put("suffix", matcher.group(5) != null ? matcher.group(5) : "");
             }
         }
         return parts;

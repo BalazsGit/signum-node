@@ -13,10 +13,10 @@ public class JdbcProfileConfigurationPanel extends JPanel {
     private final JComboBox<DatabaseConfigurationUtils.DbInstance> dbCombo;
     private final JComboBox<String> hostCombo;
     private final JTextField portField;
-    private final JTextField postfixField;
+    private final JTextField suffixField;
     private final JComboBox<DatabaseConfigurationUtils.DbUser> userCombo;
     private final JPasswordField passField;
-    private final JLabel engineLabel, profileLabel, dbLabel, hostLabel, portLabel, postfixLabel, userLabel, passLabel;
+    private final JLabel engineLabel, profileLabel, dbLabel, hostLabel, portLabel, suffixLabel, userLabel, passLabel;
     private final JCheckBox showPass;
     private final JTextField resultField;
     private final String confFolder;
@@ -37,7 +37,7 @@ public class JdbcProfileConfigurationPanel extends JPanel {
         hostCombo.setEditable(true);
         hostCombo.setSelectedItem("localhost");
         portField = new JTextField();
-        postfixField = new JTextField();
+        suffixField = new JTextField();
         userCombo = new JComboBox<>();
         passField = new JPasswordField();
         passField.setEditable(false);
@@ -54,13 +54,13 @@ public class JdbcProfileConfigurationPanel extends JPanel {
         dbLabel = new JLabel("Database:");
         hostLabel = new JLabel("Host:");
         portLabel = new JLabel("Port:");
-        postfixLabel = new JLabel("Postfix:");
+        suffixLabel = new JLabel("Suffix:");
         userLabel = new JLabel("User:");
         passLabel = new JLabel("Password:");
 
         ConfigurationUtils.styleInputComponent(hostCombo);
         ConfigurationUtils.styleInputComponent(portField);
-        ConfigurationUtils.styleInputComponent(postfixField);
+        ConfigurationUtils.styleInputComponent(suffixField);
         ConfigurationUtils.styleInputComponent(passField);
 
         add(engineLabel, "gapright 5");
@@ -73,8 +73,8 @@ public class JdbcProfileConfigurationPanel extends JPanel {
         add(hostCombo, "growx, wrap");
         add(portLabel, "gapright 5");
         add(portField, "growx, wrap");
-        add(postfixLabel, "gapright 5");
-        add(postfixField, "growx, wrap");
+        add(suffixLabel, "gapright 5");
+        add(suffixField, "growx, wrap");
         add(userLabel, "gapright 5");
         add(userCombo, "growx, wrap");
         add(passLabel, "gapright 5");
@@ -131,7 +131,7 @@ public class JdbcProfileConfigurationPanel extends JPanel {
         };
         ((JTextField) hostCombo.getEditor().getEditorComponent()).getDocument().addDocumentListener(dl);
         portField.getDocument().addDocumentListener(dl);
-        postfixField.getDocument().addDocumentListener(dl);
+        suffixField.getDocument().addDocumentListener(dl);
 
         userCombo.addActionListener(e -> {
             Object selected = userCombo.getSelectedItem();
@@ -189,7 +189,7 @@ public class JdbcProfileConfigurationPanel extends JPanel {
             updateFieldsFromUrl(db.url);
         } else {
             portField.setText("");
-            postfixField.setText("");
+            suffixField.setText("");
             passField.setText("");
         }
         updatePreview();
@@ -202,13 +202,13 @@ public class JdbcProfileConfigurationPanel extends JPanel {
         if (url.startsWith("jdbc:sqlite:")) {
             hostCombo.setSelectedItem("");
             portField.setText("");
-            postfixField.setText("");
+            suffixField.setText("");
         } else {
             Matcher m = DatabaseConfigurationUtils.JDBC_URL_PATTERN.matcher(url);
             if (m.find()) {
                 hostCombo.setSelectedItem(m.group(2));
                 portField.setText(m.group(3) != null ? m.group(3) : "");
-                postfixField.setText(m.group(5) != null ? m.group(5) : "");
+                suffixField.setText(m.group(5) != null ? m.group(5) : "");
             }
         }
     }
@@ -234,9 +234,9 @@ public class JdbcProfileConfigurationPanel extends JPanel {
         if (!port.isEmpty())
             sb.append(":").append(port);
         sb.append("/").append(dbName);
-        String postfix = postfixField.getText().trim();
-        if (!postfix.isEmpty())
-            sb.append(postfix);
+        String suffix = suffixField.getText().trim();
+        if (!suffix.isEmpty())
+            sb.append(suffix);
         return sb.toString();
     }
 
@@ -268,8 +268,8 @@ public class JdbcProfileConfigurationPanel extends JPanel {
         return portField;
     }
 
-    public JComponent getPostfixField() {
-        return postfixField;
+    public JComponent getSuffixField() {
+        return suffixField;
     }
 
     public JComponent getUserCombo() {
@@ -300,8 +300,8 @@ public class JdbcProfileConfigurationPanel extends JPanel {
         return portLabel;
     }
 
-    public JLabel getPostfixLabel() {
-        return postfixLabel;
+    public JLabel getSuffixLabel() {
+        return suffixLabel;
     }
 
     public JLabel getUserLabel() {

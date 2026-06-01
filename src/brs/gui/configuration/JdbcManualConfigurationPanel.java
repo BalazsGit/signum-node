@@ -10,8 +10,8 @@ import java.util.regex.Matcher;
 public class JdbcManualConfigurationPanel extends JPanel {
     private final JComboBox<DatabaseConfigurationPanel.DatabaseEngine> engineCombo;
     private final JComboBox<String> hostCombo;
-    private final JTextField portField, dbNameField, postfixField, userField;
-    private final JLabel engineLabel, hostLabel, portLabel, dbNameLabel, postfixLabel, userLabel, passLabel;
+    private final JTextField portField, dbNameField, suffixField, userField;
+    private final JLabel engineLabel, hostLabel, portLabel, dbNameLabel, suffixLabel, userLabel, passLabel;
     private final JPasswordField passField;
     private final JTextField resultField;
     private final JCheckBox showPass;
@@ -28,7 +28,7 @@ public class JdbcManualConfigurationPanel extends JPanel {
         hostCombo.setSelectedItem("localhost");
         portField = new JTextField();
         dbNameField = new JTextField();
-        postfixField = new JTextField();
+        suffixField = new JTextField();
         userField = new JTextField();
         passField = new JPasswordField();
         showPass = new JCheckBox("Show Password");
@@ -42,7 +42,7 @@ public class JdbcManualConfigurationPanel extends JPanel {
         hostLabel = new JLabel("Host:");
         portLabel = new JLabel("Port:");
         dbNameLabel = new JLabel("Database:");
-        postfixLabel = new JLabel("Postfix:");
+        suffixLabel = new JLabel("Suffix:");
         userLabel = new JLabel("Username:");
         passLabel = new JLabel("Password:");
 
@@ -50,7 +50,7 @@ public class JdbcManualConfigurationPanel extends JPanel {
         ConfigurationUtils.fixComponentSize(hostCombo);
         ConfigurationUtils.styleInputComponent(portField);
         ConfigurationUtils.styleInputComponent(dbNameField);
-        ConfigurationUtils.styleInputComponent(postfixField);
+        ConfigurationUtils.styleInputComponent(suffixField);
         ConfigurationUtils.styleInputComponent(userField);
         ConfigurationUtils.styleInputComponent(passField);
 
@@ -62,8 +62,8 @@ public class JdbcManualConfigurationPanel extends JPanel {
         add(portField, "growx, wrap");
         add(dbNameLabel, "gapright 5");
         add(dbNameField, "growx, wrap");
-        add(postfixLabel, "gapright 5");
-        add(postfixField, "growx, wrap");
+        add(suffixLabel, "gapright 5");
+        add(suffixField, "growx, wrap");
         add(userLabel, "gapright 5");
         add(userField, "growx, wrap");
         add(passLabel, "gapright 5");
@@ -81,7 +81,7 @@ public class JdbcManualConfigurationPanel extends JPanel {
             boolean sqlite = engine == DatabaseConfigurationPanel.DatabaseEngine.SQLITE;
             hostCombo.setEnabled(!sqlite);
             portField.setEnabled(!sqlite);
-            postfixField.setEnabled(!sqlite);
+            suffixField.setEnabled(!sqlite);
             userField.setEnabled(!sqlite);
             passField.setEnabled(!sqlite);
             showPass.setEnabled(!sqlite);
@@ -118,7 +118,7 @@ public class JdbcManualConfigurationPanel extends JPanel {
         ((JTextField) hostCombo.getEditor().getEditorComponent()).getDocument().addDocumentListener(dl);
         portField.getDocument().addDocumentListener(dl);
         dbNameField.getDocument().addDocumentListener(dl);
-        postfixField.getDocument().addDocumentListener(dl);
+        suffixField.getDocument().addDocumentListener(dl);
         userField.getDocument().addDocumentListener(dl);
         passField.getDocument().addDocumentListener(dl);
     }
@@ -144,7 +144,7 @@ public class JdbcManualConfigurationPanel extends JPanel {
                 hostCombo.setSelectedItem(m.group(2));
                 portField.setText(m.group(3) != null ? m.group(3) : "");
                 dbNameField.setText(m.group(4));
-                postfixField.setText(m.group(5) != null ? m.group(5) : "");
+                suffixField.setText(m.group(5) != null ? m.group(5) : "");
             }
         }
         updatePreview();
@@ -161,8 +161,8 @@ public class JdbcManualConfigurationPanel extends JPanel {
         if (!portField.getText().trim().isEmpty())
             sb.append(":").append(portField.getText().trim());
         sb.append("/").append(dbNameField.getText());
-        if (!postfixField.getText().trim().isEmpty())
-            sb.append(postfixField.getText().trim());
+        if (!suffixField.getText().trim().isEmpty())
+            sb.append(suffixField.getText().trim());
         return sb.toString();
     }
 
@@ -195,8 +195,8 @@ public class JdbcManualConfigurationPanel extends JPanel {
         return dbNameField;
     }
 
-    public JComponent getPostfixField() {
-        return postfixField;
+    public JComponent getSuffixField() {
+        return suffixField;
     }
 
     public JComponent getUserField() {
@@ -231,8 +231,8 @@ public class JdbcManualConfigurationPanel extends JPanel {
         return dbNameLabel;
     }
 
-    public JLabel getPostfixLabel() {
-        return postfixLabel;
+    public JLabel getSuffixLabel() {
+        return suffixLabel;
     }
 
     public JLabel getUserLabel() {
