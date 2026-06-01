@@ -106,6 +106,8 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     private String runningProfileName;
     private String activeProfileName;
     private String loadedProfileName;
+    private JLabel step3HeaderLabel;
+    private JPanel step3ContentPanel;
     private JLabel step2HeaderLabel;
     private JPanel dbControlPanel;
     private JPanel step2ContentPanel;
@@ -127,6 +129,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     private DatabaseEngine currentEngine = DatabaseEngine.MARIADB;
     private boolean isInitialized = false;
     private JLabel step1StatusIcon; // Status icon for download/install step
+    private int consoleHeight = 250;
     private JComboBox<String> majorVersionCombo;
     private JComboBox<String> minorVersionCombo;
     private JComboBox<String> patchVersionCombo;
@@ -592,10 +595,40 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         consoleScroll.setBorder(BorderFactory.createEmptyBorder());
         consoleWrapper.add(consoleScroll, BorderLayout.CENTER);
 
+        JPanel resizer = new JPanel();
+        resizer.setPreferredSize(new Dimension(10, 5));
+        resizer.setCursor(Cursor.getPredefinedCursor(Cursor.S_RESIZE_CURSOR));
+        resizer.setOpaque(false);
+        MouseAdapter resizerAdapter = new MouseAdapter() {
+            private int startY;
+            private int startH;
+
+            @Override
+            public void mousePressed(MouseEvent e) {
+                startY = e.getYOnScreen();
+                startH = consoleWrapper.getHeight();
+            }
+
+            @Override
+            public void mouseDragged(MouseEvent e) {
+                int newH = Math.max(100, startH + (e.getYOnScreen() - startY));
+                consoleHeight = newH;
+                consoleWrapper.setPreferredSize(new Dimension(consoleWrapper.getWidth(), newH));
+                dbControlPanel.revalidate();
+            }
+        };
+        resizer.addMouseListener(resizerAdapter);
+        resizer.addMouseMotionListener(resizerAdapter);
+
         // --- Console Input Section ---
         JPanel consoleInputPanel = new JPanel(new BorderLayout(5, 0));
         consoleInputPanel.setOpaque(false);
         consoleInputPanel.setBorder(BorderFactory.createEmptyBorder(5, 0, 5, 0));
+
+        JPanel southContainer = new JPanel(new BorderLayout());
+        southContainer.setOpaque(false);
+        southContainer.add(consoleInputPanel, BorderLayout.CENTER);
+        southContainer.add(resizer, BorderLayout.SOUTH);
 
         JComponent commandSymbol = new JComponent() {
             @Override
@@ -664,7 +697,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         consoleInputPanel.add(consoleInputField, BorderLayout.CENTER);
         consoleInputPanel.add(consoleBtnRow, BorderLayout.EAST);
 
-        consoleWrapper.add(consoleInputPanel, BorderLayout.SOUTH);
+        consoleWrapper.add(southContainer, BorderLayout.SOUTH);
 
         dbControlPanel.add(consoleWrapper, "growx, h pref!, hidemode 3");
 
@@ -690,17 +723,17 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
 
         // Step 2: Run and Set up Database
         addSectionHeader(dbSettingsPanel, "Step 2: Initialize Database Engine", step2StatusIcon, false);
-        JPanel step2ContentPanel = new JPanel(new MigLayout("fillx, insets 0 25 0 0, gap 5", "[][grow]", ""));
-        step2ContentPanel.setOpaque(false);
-        populateStep2Content(step2ContentPanel);
-        dbSettingsPanel.add(step2ContentPanel, "span, growx, wrap");
+        this.step2ContentPanel = new JPanel(new MigLayout("fillx, insets 0 25 0 0, gap 5", "[][grow]", ""));
+        this.step2ContentPanel.setOpaque(false);
+        populateStep2Content(this.step2ContentPanel);
+        dbSettingsPanel.add(this.step2ContentPanel, "span, growx, wrap, hidemode 3");
 
         // New Step 3: Configure Database and Users
         addSectionHeader(dbSettingsPanel, "Step 3: Configure Database and Users", step3StatusIcon, false);
-        JPanel step3ContentPanel = new JPanel(new MigLayout("fillx, insets 0 25 0 0, gap 5", "[][grow]", ""));
-        step3ContentPanel.setOpaque(false);
-        populateStep3Content(step3ContentPanel); // New method for original Step 2 content
-        dbSettingsPanel.add(step3ContentPanel, "span, growx, wrap");
+        this.step3ContentPanel = new JPanel(new MigLayout("fillx, insets 0 25 0 0, gap 5", "[][grow]", ""));
+        this.step3ContentPanel.setOpaque(false);
+        populateStep3Content(this.step3ContentPanel); // New method for original Step 2 content
+        dbSettingsPanel.add(this.step3ContentPanel, "span, growx, wrap, hidemode 3");
 
         refreshProfileList(); // This will also call updateMainVersionComboBox
         // updateVersionComboBox(); // Redundant call, refreshProfileList already calls
@@ -800,7 +833,6 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
 
     // Renamed and modified from original populateStep2Content
     private void populateStep2Content(JPanel panel) {
-        this.step2ContentPanel = panel;
         refreshStep2DynamicContent();
     }
 
@@ -1521,16 +1553,30 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             updatePermissionPanelState("appUserPermissions", currentProfile.getAppUserPermissions(), true);
         }
 
-        // Update status icons after all components are initialized
-        if (step1StatusIcon != null && step2StatusIcon != null && step3StatusIcon != null) {
-            Boolean s1 = currentProfile.isStep1Completed();
-            Boolean s2 = currentProfile.isStep2Completed();
-            Boolean s3 = currentProfile.isStep3Completed();
+        boolean step1Finished = currentProfile != null && currentProfile.isStep1Completed();
+        boolean step2Finished = step1Finished && currentProfile.isStep2Completed();
+        boolean step3Finished = step2Finished && currentProfile.isStep3Completed();
 
-            setStepStatus(step1StatusIcon, s1);
-            setStepStatus(step2StatusIcon, s2);
-            setStepStatus(step3StatusIcon, s3);
-        }
+        if (step1StatusIcon != null)
+            setStepStatus(step1StatusIcon, step1Finished);
+        if (step2StatusIcon != null)
+            setStepStatus(step2StatusIcon, step2Finished);
+        if (step3StatusIcon != null)
+            setStepStatus(step3StatusIcon, step3Finished);
+
+        if (step2HeaderLabel != null)
+            step2HeaderLabel.setVisible(step1Finished);
+        if (step2StatusIcon != null)
+            step2StatusIcon.setVisible(step1Finished);
+        if (step2ContentPanel != null)
+            step2ContentPanel.setVisible(step1Finished);
+
+        if (step3HeaderLabel != null)
+            step3HeaderLabel.setVisible(step2Finished);
+        if (step3StatusIcon != null)
+            step3StatusIcon.setVisible(step2Finished);
+        if (step3ContentPanel != null)
+            step3ContentPanel.setVisible(step2Finished);
 
         if (step2HeaderLabel != null && currentProfile != null) {
             String configName = currentOsName.equalsIgnoreCase("windows") ? "my.ini" : "my.cnf";
@@ -3367,8 +3413,11 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         if (title.contains("Step 2")) {
             step2HeaderLabel = label;
         }
+        if (title.contains("Step 3")) {
+            step3HeaderLabel = label;
+        }
 
-        String commonGap = (isFirst ? "" : "gaptop 15, ") + "gapbottom 5";
+        String commonGap = (isFirst ? "" : "gaptop 15, ") + "gapbottom 5, hidemode 3";
         if (statusIcon != null) {
             row.labelConstraints = commonGap + ", split 2, growx";
             row.extra = statusIcon; // Store icon in extra to prevent loss during filtering
@@ -3822,7 +3871,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         isConsoleExpanded = !isConsoleExpanded;
         consoleChevron.setDrawing(isConsoleExpanded ? CustomDrawings.Chevron.UP : CustomDrawings.Chevron.DOWN);
 
-        final int targetHeight = isConsoleExpanded ? 250 : 0;
+        final int targetHeight = isConsoleExpanded ? consoleHeight : 0;
         final int startHeight = consoleWrapper.getHeight();
 
         consoleAnimator = new Timer(10, new ActionListener() {
