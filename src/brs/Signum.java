@@ -370,8 +370,53 @@ public final class Signum {
         loadWallet(propertyService);
     }
 
+    private static void ensureDatabaseDirectory(PropertyService propertyService) {
+        String dbUrl = propertyService.getString(Props.DB_URL);
+        if (dbUrl != null && dbUrl.toLowerCase().startsWith("jdbc:sqlite:")) {
+            String pathPart = dbUrl.substring("jdbc:sqlite:".length());
+
+            // Handle file URIs according to RFC 2396 (e.g. file:./db/ or file:///path/)
+            if (pathPart.toLowerCase().startsWith("file:")) {
+                pathPart = pathPart.substring(5);
+                // Clean unnecessary leading slashes for local filesystem
+                if (pathPart.startsWith("///")) {
+                    pathPart = pathPart.substring(2);
+                } else if (pathPart.startsWith("//") && !pathPart.startsWith("//", 2)) {
+                    pathPart = pathPart.substring(2);
+                }
+            }
+
+            // Skip in-memory or special databases
+            if (pathPart.isEmpty() || pathPart.equalsIgnoreCase(":memory:") || pathPart.startsWith(":")) {
+                return;
+            }
+
+            // Strip parameters (e.g. ?cache=shared)
+            int queryIdx = pathPart.indexOf('?');
+            if (queryIdx != -1) {
+                pathPart = pathPart.substring(0, queryIdx);
+            }
+
+            try {
+                // Resolve the path using PathUtils. This ensures that relative
+                // paths are anchored to the application root, regardless of
+                // the CWD (Current Working Directory).
+                Path dbPath = PathUtils.resolvePath(pathPart);
+                Path parent = dbPath.getParent();
+                if (parent != null && Files.notExists(parent)) {
+                    Files.createDirectories(parent);
+                    logger.info("Created missing database directory: {}", parent.toAbsolutePath());
+                }
+            } catch (Exception e) {
+                logger.warn("Failed to ensure database directory exists: {}", e.getMessage());
+            }
+        }
+    }
+
     private static void loadWallet(PropertyService propertyService) {
         Signum.propertyService = propertyService;
+
+        ensureDatabaseDirectory(propertyService);
 
         shutdownManager = new ShutdownManager(propertyService);
 
