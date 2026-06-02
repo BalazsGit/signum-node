@@ -42,6 +42,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,6 +62,9 @@ public class LookAndFeelPanel extends JPanel {
     private JButton reloadProfileBtn;
     private JButton refreshProfilesBtn;
     private JTabbedPane tabbedPane;
+    private final Consumer<String> onLinkAction;
+    private final Supplier<String> activeNodeProfileSupplier;
+    private final Supplier<String> linkedProfileSupplier;
 
     private static final String DEFAULT_PROFILE_NAME = "gui";
 
@@ -77,10 +82,14 @@ public class LookAndFeelPanel extends JPanel {
         return colorSettingsPanel;
     }
 
-    public LookAndFeelPanel(Runnable restartAction, Runnable backAction) {
+    public LookAndFeelPanel(Runnable restartAction, Runnable backAction, Consumer<String> onLinkAction,
+            Supplier<String> activeNodeProfileSupplier, Supplier<String> linkedProfileSupplier) {
         super(new BorderLayout());
         this.backAction = backAction;
         instance = this;
+        this.onLinkAction = onLinkAction;
+        this.activeNodeProfileSupplier = activeNodeProfileSupplier;
+        this.linkedProfileSupplier = linkedProfileSupplier;
 
         // Determine initial state from file BEFORE the UI is created
         String lastProfile = DEFAULT_PROFILE_NAME;
@@ -211,6 +220,11 @@ public class LookAndFeelPanel extends JPanel {
         add(tabbedPane, BorderLayout.CENTER);
 
         loadProfiles(profileComboBox);
+    }
+
+    public void updateLinkCheckbox() {
+        if (activeNodeProfileSupplier == null || linkedProfileSupplier == null)
+            return;
     }
 
     private void updateProfileButtonStates() {
@@ -637,6 +651,8 @@ public class LookAndFeelPanel extends JPanel {
                     settings.addProperty("lastSelectedLafProfile", newProfileName);
                 }
 
+                updateLoadedStateFromProfile(newProfileName);
+
                 try (BufferedWriter writer = Files.newBufferedWriter(settingsPath, StandardCharsets.UTF_8)) {
                     Gson gson = new GsonBuilder().setPrettyPrinting().create();
                     writer.write(gson.toJson(settings));
@@ -646,6 +662,7 @@ public class LookAndFeelPanel extends JPanel {
                 profileComboBox.removeItem(oldProfileName);
                 profileComboBox.addItem(newProfileName);
                 profileComboBox.setSelectedItem(newProfileName);
+                updateLinkCheckbox();
 
                 JOptionPane.showMessageDialog(this,
                         "Profile '" + oldProfileName + "' renamed to '" + newProfileName + "' successfully.", "Success",
@@ -912,6 +929,7 @@ public class LookAndFeelPanel extends JPanel {
                             SignumGUI.updateAllUIs();
                             colorSettingsPanel.setProfileOverrides(colorOverrides);
                             updateLoadedStateFromProfile(profileName);
+                            updateLinkCheckbox();
 
                             FlatAnimatedLafChange.hideSnapshotWithAnimation();
 
