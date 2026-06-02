@@ -977,7 +977,9 @@ public class SignumGUI extends JFrame {
         }
 
         SignumGUI.loadLookAndFeelSettings(args);
-        new SignumGUI("Signum Node", Props.ICON_LOCATION.getDefaultValue(), Signum.VERSION.toString(), args);
+        SwingUtilities.invokeLater(() -> {
+            new SignumGUI("Signum Node", Props.ICON_LOCATION.getDefaultValue(), Signum.VERSION.toString(), args);
+        });
     }
 
     public SignumGUI(String programName, String iconLocation, String version, String[] args) {
@@ -3230,10 +3232,14 @@ public class SignumGUI extends JFrame {
                 text = buffer.toString();
                 buffer.setLength(0);
             }
-            append(text);
+            processAppend(text);
         }
 
-        private void append(String text) {
+        private synchronized void append(String text) {
+            buffer.append(text);
+        }
+
+        private void processAppend(String text) {
             SwingUtilities.invokeLater(() -> {
                 StyledDocument doc = textPane.getStyledDocument();
                 String[] lines = text.split("(?<=\\n)");
