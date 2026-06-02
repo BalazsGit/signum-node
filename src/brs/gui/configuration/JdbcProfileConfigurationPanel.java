@@ -150,6 +150,7 @@ public class JdbcProfileConfigurationPanel extends JPanel {
     private void refreshProfiles() {
         isProgrammatic = true;
         profileCombo.removeAllItems();
+        profileCombo.addItem("");
         currentProfile = null;
         DatabaseConfigurationPanel.DatabaseEngine engine = (DatabaseConfigurationPanel.DatabaseEngine) engineCombo
                 .getSelectedItem();
