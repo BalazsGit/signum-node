@@ -37,6 +37,8 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -194,7 +196,7 @@ public class DatabaseConfigurationPanel extends JPanel {
         // tabs.
         SQLiteConfigurationPanel sqliteConfig = new SQLiteConfigurationPanel();
         PostgreSQLConfigurationPanel postgresqlConfig = new PostgreSQLConfigurationPanel();
-        MariaDBConfigurationPanel mariadbConfig = new MariaDBConfigurationPanel(this.restartAction, this.confFolder,
+        this.mariadbConfig = new MariaDBConfigurationPanel(this.restartAction, this.confFolder,
                 this.backAction);
 
         tabbedPane.addTab("SQLite", sqliteConfig);
@@ -203,6 +205,8 @@ public class DatabaseConfigurationPanel extends JPanel {
 
         add(tabbedPane, BorderLayout.CENTER);
     }
+
+    private final MariaDBConfigurationPanel mariadbConfig;
 
     static class PropertyRow {
         final String propertyKey;
