@@ -397,7 +397,7 @@ public class PostgresProfile {
         List<String> command = Arrays.asList(initExe.toAbsolutePath().toString(), "-D",
                 dataPath.toAbsolutePath().toString(), "-U", adminUsername, "--auth=md5", "--pwfile=pw.txt");
 
-        // Jelszó fájl átmeneti létrehozása
+        // Temporary creation of password file
         Path pwFile = getBaseDir().resolve("pw.txt");
         Files.write(pwFile, adminPassword.getBytes(StandardCharsets.UTF_8));
 

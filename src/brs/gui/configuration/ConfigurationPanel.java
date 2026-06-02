@@ -89,7 +89,7 @@ public class ConfigurationPanel extends JPanel {
                     DatabaseConfigurationPanel.DatabaseEngine engine = DatabaseConfigurationPanel.DatabaseEngine
                             .fromDisplayName(parts[0]);
                     if (engine != null) {
-                        // Adatbázis fül belső logikájának értesítése
+                        // Notify internal logic of the Database tab
                         for (Component c : dbConfig.getComponents()) {
                             if (c instanceof JTabbedPane) {
                                 JTabbedPane dbTabs = (JTabbedPane) c;

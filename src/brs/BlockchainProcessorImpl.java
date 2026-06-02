@@ -3564,7 +3564,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
                 Block targetBlock = blockchain.getBlockAtHeight(height);
                 if (targetBlock == null) {
-                    logger.error("Visszagörgetés sikertelen: A(z) {} magasságon a blokk nem található az adatbázisban!",
+                    logger.error("Rollback failed: Block at height {} not found in the database!",
                             height);
                     return Collections.emptyList();
                 }

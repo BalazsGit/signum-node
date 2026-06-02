@@ -492,7 +492,7 @@ public class ConfigurationUtils {
     }
 
     /**
-     * Beolvassa a logging konfigurációt a prioritási sorrendnek megfelelően.
+     * Reads the logging configuration according to the priority order.
      */
     public static LoggerProfile loadEffectiveLoggerProfile(String confFolder, String profileName) {
         LoggerProfile effective = new LoggerProfile(profileName);
@@ -502,18 +502,18 @@ public class ConfigurationUtils {
         Path logConfPath = confPath.resolve(Signum.NODE_LOGGING_SUBFOLDER);
         Path pathToLoad = null;
 
-        // 1. Keresés az aktív név alapján
+        // 1. Search based on the active name
         Path specificPath = logConfPath.resolve(profileName + ".properties");
         if (Files.exists(specificPath)) {
             pathToLoad = specificPath;
         } else {
-            // 2. Fallback logging.properties
+            // 2. Fallback to logging.properties
             if (!Signum.LOGGING_PROPERTIES_NAME.equals(profileName)) {
                 Path fallbackPath = logConfPath.resolve(Signum.LOGGING_PROPERTIES_NAME + ".properties");
                 if (Files.exists(fallbackPath))
                     pathToLoad = fallbackPath;
             }
-            // 3. Fallback defaultokra (logging mappában, majd conf mappában)
+            // 3. Fallback to defaults (in logging folder, then in conf folder)
             if (pathToLoad == null) {
                 Path defSub = logConfPath.resolve(Signum.DEFAULT_LOGGING_PROPERTIES_NAME + ".properties");
                 if (Files.exists(defSub)) {
@@ -540,7 +540,7 @@ public class ConfigurationUtils {
     }
 
     /**
-     * Beolvassa a node konfigurációt a prioritási sorrendnek megfelelően.
+     * Reads the node configuration according to the priority order.
      */
     public static NodeProfile loadEffectiveNodeProfile(String confFolder, String profileName) {
         NodeProfile effective = new NodeProfile(profileName);
@@ -548,18 +548,18 @@ public class ConfigurationUtils {
         Path nodeConfPath = confPath.resolve(Signum.NODE_SUBFOLDER);
         Path pathToLoad = null;
 
-        // 1. Keresés az aktív név alapján
+        // 1. Search based on the active name
         Path specificPath = nodeConfPath.resolve(profileName + ".properties");
         if (Files.exists(specificPath)) {
             pathToLoad = specificPath;
         } else {
-            // 2. Fallback node.properties-re
+            // 2. Fallback to node.properties
             if (!Signum.PROPERTIES_NAME.equals(profileName)) {
                 Path fallbackPath = nodeConfPath.resolve(Signum.PROPERTIES_NAME + ".properties");
                 if (Files.exists(fallbackPath))
                     pathToLoad = fallbackPath;
             }
-            // 3. & 4. Fallback defaultokra (node mappában, majd conf mappában)
+            // 3. & 4. Fallback to defaults (in node folder, then in conf folder)
             if (pathToLoad == null) {
                 Path defSub = nodeConfPath.resolve(Signum.DEFAULT_PROPERTIES_NAME + ".properties");
                 if (Files.exists(defSub)) {
@@ -583,7 +583,7 @@ public class ConfigurationUtils {
     }
 
     /**
-     * Beolvas egy Look and Feel profilt a gui-settings.json fájlból.
+     * Reads a Look and Feel profile from the gui-settings.json file.
      */
     public static LookAndFeelProfile loadLookAndFeelProfile(Path settingsPath, String profileName) {
         LookAndFeelProfile profile = new LookAndFeelProfile(profileName);
