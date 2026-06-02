@@ -34,8 +34,12 @@ public class GlassPane extends JPanel {
     private void loadResources() {
         URL svgUrl = getClass().getClassLoader().getResource(GuiResources.SIGNUM_NODE_WHITE_SVG);
         if (svgUrl != null) {
-            SVGLoader loader = new SVGLoader();
-            this.svgDocument = loader.load(svgUrl);
+            try {
+                SVGLoader loader = new SVGLoader();
+                this.svgDocument = loader.load(svgUrl);
+            } catch (Exception e) {
+                System.err.println("Failed to load SVG resources: " + e.getMessage());
+            }
         } else {
             System.err.println("SVG not found: " + GuiResources.SIGNUM_NODE_WHITE_SVG);
         }
