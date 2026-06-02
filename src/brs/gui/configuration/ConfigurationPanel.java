@@ -2,6 +2,7 @@ package brs.gui.configuration;
 
 import brs.gui.GuiConstants;
 import brs.gui.configuration.databaseConfiguration.DatabaseConfigurationPanel;
+import brs.gui.configuration.databaseConfiguration.DatabaseEnginePanel;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 
@@ -57,14 +58,63 @@ public class ConfigurationPanel extends JPanel {
         // We pass null for the internal 'switch' actions as they are now handled by
         // tabs
         nodeConfig = new NodeConfigurationPanel(restartAction, confFolder, backAction, null);
-        loggerConfig = new LoggerConfigurationPanel(restartAction, confFolder, backAction, null);
+        loggerConfig = new LoggerConfigurationPanel(restartAction, confFolder, backAction, null,
+                name -> nodeConfig.setLinkedLoggingProfile(name),
+                () -> nodeConfig.getLoadedProfileName(),
+                () -> nodeConfig.getLinkedLoggingProfile());
         dbConfig = new DatabaseConfigurationPanel(restartAction, confFolder, backAction);
-        lafConfig = new LookAndFeelPanel(restartAction, backAction);
+        lafConfig = new LookAndFeelPanel(restartAction, backAction,
+                name -> nodeConfig.setLinkedLafProfile(name),
+                () -> nodeConfig.getLoadedProfileName(),
+                () -> nodeConfig.getLinkedLafProfile());
 
         tabbedPane.addTab("Node", nodeConfig);
         tabbedPane.addTab("Logger", loggerConfig);
         tabbedPane.addTab("Database", dbConfig);
         tabbedPane.addTab("Look & Feel", lafConfig);
+
+        tabbedPane.addChangeListener(e -> {
+            int index = tabbedPane.getSelectedIndex();
+
+            if (index == 1) { // Logger
+                loggerConfig.updateLinkCheckbox();
+                String linked = nodeConfig.getLinkedLoggingProfile();
+                if (linked != null && !linked.isEmpty()) {
+                    loggerConfig.loadProfile(linked);
+                }
+            } else if (index == 2) { // Database
+                String linked = nodeConfig.getLinkedDbProfile();
+                if (linked != null && linked.contains(":")) {
+                    String[] parts = linked.split(":");
+                    DatabaseConfigurationPanel.DatabaseEngine engine = DatabaseConfigurationPanel.DatabaseEngine
+                            .fromDisplayName(parts[0]);
+                    if (engine != null) {
+                        // Adatbázis fül belső logikájának értesítése
+                        for (Component c : dbConfig.getComponents()) {
+                            if (c instanceof JTabbedPane) {
+                                JTabbedPane dbTabs = (JTabbedPane) c;
+                                for (int i = 0; i < dbTabs.getTabCount(); i++) {
+                                    if (dbTabs.getTitleAt(i).equalsIgnoreCase(engine.getDisplayName())) {
+                                        dbTabs.setSelectedIndex(i);
+                                        Component enginePanel = dbTabs.getComponentAt(i);
+                                        if (enginePanel instanceof DatabaseEnginePanel) {
+                                            ((DatabaseEnginePanel) enginePanel).loadProfile(parts[1], null);
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if (index == 3) { // LAF
+                lafConfig.updateLinkCheckbox();
+                String linked = nodeConfig.getLinkedLafProfile();
+                if (linked != null && !linked.isEmpty()) {
+                    lafConfig.loadProfile(linked);
+                }
+            }
+        });
 
         add(tabbedPane, BorderLayout.CENTER);
         updateUI(); // Apply initial styles
