@@ -39,6 +39,7 @@ import java.util.Properties;
 import java.util.Set;
 import org.slf4j.Logger;
 import java.util.function.Supplier;
+import java.util.function.Consumer;
 import org.slf4j.LoggerFactory;
 
 public class LoggerConfigurationPanel extends JPanel {
@@ -84,14 +85,22 @@ public class LoggerConfigurationPanel extends JPanel {
     private String activeProfileName;
     private String loadedProfileName;
     private boolean isProgrammaticChange = false;
+    private JCheckBox linkToNodeCheck;
+    private final Consumer<String> onLinkAction;
+    private final Supplier<String> activeNodeProfileSupplier;
+    private final Supplier<String> linkedProfileSupplier;
 
     public LoggerConfigurationPanel(Runnable restartAction, String confFolder, Runnable backAction,
-            Runnable switchAction) {
+            Runnable switchAction, Consumer<String> onLinkAction, Supplier<String> activeNodeProfileSupplier,
+            Supplier<String> linkedProfileSupplier) {
         super(new BorderLayout());
         this.restartAction = restartAction;
         this.confFolder = confFolder;
         this.backAction = backAction;
         this.switchAction = switchAction;
+        this.onLinkAction = onLinkAction;
+        this.activeNodeProfileSupplier = activeNodeProfileSupplier;
+        this.linkedProfileSupplier = linkedProfileSupplier;
 
         // Determine the currently applied profile name from metadata once at startup
         this.runningProfileName = Signum.getActiveLoggingProfile();
@@ -209,6 +218,7 @@ public class LoggerConfigurationPanel extends JPanel {
         GuiUtils.addHorizontalScrollPadding(profileScrollPane, profilePanel, new Insets(5, 10, 5, 5));
 
         refreshProfileList();
+        updateLinkCheckbox();
 
         addHierarchyListener(e -> {
             if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0 && isShowing()) {
@@ -348,7 +358,7 @@ public class LoggerConfigurationPanel extends JPanel {
         addLoggerCreationGui(mainContentPanel);
 
         // Push everything to top
-        verticalFiller = new JLabel();
+        JLabel verticalFiller = new JLabel();
         mainContentPanel.add(verticalFiller, "pushy");
 
         // --- Content Container (CardLayout for Settings vs Search Results) ---
@@ -694,6 +704,7 @@ public class LoggerConfigurationPanel extends JPanel {
                             this.props.putAll(propsToSave);
                             this.propertiesFile = targetFile;
 
+                            updateLinkCheckbox();
                             refreshProfileList();
                             profileComboBox.setSelectedItem(name);
                         } finally {
@@ -726,7 +737,7 @@ public class LoggerConfigurationPanel extends JPanel {
         }
     }
 
-    private void loadProfile(String profileName) {
+    public void loadProfile(String profileName) {
         if (profileName == null || profileName.trim().isEmpty()
                 || profileName.equals(loadedProfileName)) {
             return;
@@ -747,6 +758,7 @@ public class LoggerConfigurationPanel extends JPanel {
                             this.loadedProfileName = profileName;
                             updateDirtyStatus();
                             isProgrammaticChange = false;
+                            updateLinkCheckbox();
                             updateProfileComboBoxColor();
                         } catch (Exception e) {
                             JOptionPane.showMessageDialog(this, "Error loading profile file: " + e.getMessage(),
@@ -948,6 +960,7 @@ public class LoggerConfigurationPanel extends JPanel {
                 this.props.putAll(propsToSave);
                 this.propertiesFile = targetFile;
                 updateDirtyStatus();
+                updateLinkCheckbox();
                 updateUIFromProperties(propsToSave);
                 updateProfileComboBoxColor();
             } catch (IOException e) {
@@ -972,6 +985,15 @@ public class LoggerConfigurationPanel extends JPanel {
         JOptionPane.showMessageDialog(this,
                 "All settings reset to application defaults. Remember to save if you want to keep these changes.",
                 "Reset to Defaults", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    void updateLinkCheckbox() {
+        if (linkToNodeCheck == null || activeNodeProfileSupplier == null || linkedProfileSupplier == null)
+            return;
+        String activeNode = activeNodeProfileSupplier.get();
+        linkToNodeCheck.setText("Link to Node: " + (activeNode != null ? activeNode : "None"));
+        String linked = linkedProfileSupplier.get();
+        linkToNodeCheck.setSelected(loadedProfileName != null && loadedProfileName.equals(linked));
     }
 
     private void updateProfileButtonStates() {
@@ -1011,6 +1033,10 @@ public class LoggerConfigurationPanel extends JPanel {
             if (ConfigurationUtils.confirmAndRenameProfile(this, oldFile, newFile, oldProfileName, newProfileName)) {
                 refreshProfileList();
                 profileComboBox.setSelectedItem(newProfileName);
+                if (oldProfileName.equals(loadedProfileName)) {
+                    this.loadedProfileName = newProfileName;
+                    this.propertiesFile = newFile;
+                }
                 if (oldProfileName.equals(activeProfileName)) {
                     ConfigurationUtils.updateAppliedProfile(ConfigurationUtils
                             .getProfileMetadataPath(confFolder, Signum.NODE_LOGGING_SUBFOLDER),
@@ -1018,6 +1044,7 @@ public class LoggerConfigurationPanel extends JPanel {
                     activeProfileName = newProfileName;
                 }
                 updateProfileComboBoxColor();
+                updateLinkCheckbox();
                 updateDirtyStatus();
 
                 JOptionPane.showMessageDialog(this,
