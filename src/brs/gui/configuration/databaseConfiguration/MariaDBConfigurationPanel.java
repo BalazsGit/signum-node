@@ -49,6 +49,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.awt.event.ActionEvent;
@@ -106,6 +107,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     private String runningProfileName;
     private String activeProfileName;
     private String loadedProfileName;
+
     private JLabel step3HeaderLabel;
     private JPanel step3ContentPanel;
     private JLabel step2HeaderLabel;
