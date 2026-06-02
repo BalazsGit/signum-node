@@ -17,6 +17,9 @@ import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
 
+import com.google.gson.*;
+
+import java.awt.event.ActionListener;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.text.SimpleAttributeSet;
@@ -25,6 +28,8 @@ import java.awt.*;
 import java.awt.event.HierarchyEvent;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.Reader;
+import java.io.Writer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Files;
@@ -48,6 +53,11 @@ public class NodeConfigurationPanel extends JPanel {
     private final Map<String, String> helpTexts = new HashMap<>();
     private final Map<String, String> defaultValues = new HashMap<>();
     private final Runnable restartAction;
+
+    // Linked Profiles UI
+    private JdbcProfileConfigurationPanel linkedDbPanel;
+    private JComboBox<String> linkedLogCombo;
+    private JComboBox<String> linkedLafCombo;
 
     private final Runnable backAction;
     private final Runnable switchAction;
@@ -113,6 +123,8 @@ public class NodeConfigurationPanel extends JPanel {
         loadAppliedProperties();
         initHelpTexts();
         initUI();
+        loadProfileLinks(this.loadedProfileName);
+        refreshLinkedProfileLists();
     }
 
     private void initUI() {
@@ -458,6 +470,26 @@ public class NodeConfigurationPanel extends JPanel {
         finalizeCategoryPanel(netPanel);
         categoryTabbedPane.addTab("Network Constants", createScrollPane(netPanel));
 
+        // --- Linked Profiles ---
+        currentAddingTabIndex = 8;
+        JPanel linkedPanel = createCategoryPanel();
+        addSectionHeader(linkedPanel, "Linked Profiles", true);
+        linkedLogCombo = new JComboBox<>();
+        linkedLafCombo = new JComboBox<>();
+        addLinkedProfileRowWithButtons(linkedPanel, "Logger Profile:", linkedLogCombo, "logging");
+        addLinkedProfileRowWithButtons(linkedPanel, "Look and Feel Profile:", linkedLafCombo, "laf");
+
+        addSectionHeader(linkedPanel, "Linked Database Profile Detail:", false);
+        linkedDbPanel = new JdbcProfileConfigurationPanel(confFolder, () -> {
+            if (!isProgrammaticChange) {
+                updateDirtyStatus();
+            }
+        });
+        linkedPanel.add(linkedDbPanel, "span, growx, wrap");
+
+        finalizeCategoryPanel(linkedPanel);
+        categoryTabbedPane.addTab("Linked Profiles", createScrollPane(linkedPanel));
+
         // --- Content Container (CardLayout for Tabs vs Search Results) ---
         contentCardLayout = new CardLayout();
         contentContainer = new JPanel(contentCardLayout);
@@ -610,6 +642,123 @@ public class NodeConfigurationPanel extends JPanel {
         updateProfileButtonStates();
     }
 
+    public String getLoadedProfileName() {
+        return loadedProfileName;
+    }
+
+    private void refreshLinkedProfileLists() {
+        isProgrammaticChange = true;
+
+        // Logging Profiles
+        linkedLogCombo.removeAllItems();
+        linkedLogCombo.addItem("");
+        Path loggingPath = PathUtils.resolvePath(confFolder).resolve(Signum.NODE_LOGGING_SUBFOLDER);
+        ConfigurationUtils.fetchProfileNames(loggingPath, Signum.DEFAULT_LOGGING_PROPERTIES_NAME + ".properties")
+                .forEach(linkedLogCombo::addItem);
+        if (!Signum.LOGGING_PROPERTIES_NAME.equals(Signum.DEFAULT_LOGGING_PROPERTIES_NAME)) {
+            linkedLogCombo.addItem(Signum.LOGGING_PROPERTIES_NAME);
+        }
+
+        // LAF Profiles (from gui-settings.json)
+        linkedLafCombo.removeAllItems();
+        linkedLafCombo.addItem("");
+        try {
+            Path settingsPath = PathUtils.resolvePath(Props.SETTINGS_DIR.getDefaultValue())
+                    .resolve("gui-settings.json");
+            if (Files.exists(settingsPath)) {
+                JsonObject settings = JsonParser.parseReader(Files.newBufferedReader(settingsPath)).getAsJsonObject();
+                if (settings.has("lookAndFeelProfiles")) {
+                    settings.getAsJsonObject("lookAndFeelProfiles").keySet().forEach(linkedLafCombo::addItem);
+                }
+            }
+        } catch (Exception e) {
+            /* ignore */ }
+
+        // Apply priority selection: 1. linked, 2. active
+        String currentLinkedLog = getLinkedLoggingProfile();
+        linkedLogCombo.setSelectedItem(currentLinkedLog != null && !currentLinkedLog.isEmpty() ? currentLinkedLog
+                : Signum.getActiveLoggingProfile());
+        String currentLinkedLaf = getLinkedLafProfile();
+        linkedLafCombo
+                .setSelectedItem(currentLinkedLaf != null && !currentLinkedLaf.isEmpty() ? currentLinkedLaf : "gui");
+
+        isProgrammaticChange = false;
+    }
+
+    private void loadProfileLinks(String profileName) {
+        isProgrammaticChange = true;
+        if (linkedDbPanel != null) {
+            ((JComboBox<?>) linkedDbPanel.getProfileCombo()).setSelectedItem("");
+        }
+        linkedLogCombo.setSelectedItem("");
+        linkedLafCombo.setSelectedItem("");
+
+        Path metadataPath = ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER);
+        if (Files.exists(metadataPath)) {
+            try (Reader reader = Files.newBufferedReader(metadataPath)) {
+                JsonObject metadata = JsonParser.parseReader(reader).getAsJsonObject();
+                if (metadata.has("profileLinks") && metadata.getAsJsonObject("profileLinks").has(profileName)) {
+                    JsonObject links = metadata.getAsJsonObject("profileLinks").getAsJsonObject(profileName);
+                    if (links.has("database")) {
+                        String dbLink = links.get("database").getAsString();
+                        if (dbLink.contains(":")) {
+                            String[] parts = dbLink.split(":");
+                            ((JComboBox<?>) linkedDbPanel.getEngineCombo()).setSelectedItem(
+                                    DatabaseConfigurationPanel.DatabaseEngine.fromDisplayName(parts[0]));
+                            ((JComboBox<?>) linkedDbPanel.getProfileCombo()).setSelectedItem(parts[1]);
+                        }
+                    }
+                    if (links.has("logging"))
+                        linkedLogCombo.setSelectedItem(links.get("logging").getAsString());
+                    if (links.has("laf"))
+                        linkedLafCombo.setSelectedItem(links.get("laf").getAsString());
+                }
+            } catch (Exception e) {
+                LOGGER.error("Error loading profile links from JSON", e);
+            }
+        }
+        isProgrammaticChange = false;
+    }
+
+    private void saveProfileLinks(String profileName) {
+        Path metadataPath = ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER);
+        JsonObject metadata = new JsonObject();
+        if (Files.exists(metadataPath)) {
+            try (Reader reader = Files.newBufferedReader(metadataPath)) {
+                metadata = JsonParser.parseReader(reader).getAsJsonObject();
+            } catch (Exception e) {
+                /* start new if corrupt */ }
+        }
+
+        if (!metadata.has("profileLinks")) {
+            metadata.add("profileLinks", new JsonObject());
+        }
+        JsonObject allLinks = metadata.getAsJsonObject("profileLinks");
+
+        JsonObject currentLinks = new JsonObject();
+        String db = getLinkedDbProfile();
+        String log = (String) linkedLogCombo.getSelectedItem();
+        String laf = (String) linkedLafCombo.getSelectedItem();
+
+        if ((db != null && !db.isEmpty()) || (log != null && !log.isEmpty()) || (laf != null && !laf.isEmpty())) {
+            if (db != null && !db.isEmpty())
+                currentLinks.addProperty("database", db);
+            if (log != null && !log.isEmpty())
+                currentLinks.addProperty("logging", log);
+            if (laf != null && !laf.isEmpty())
+                currentLinks.addProperty("laf", laf);
+            allLinks.add(profileName, currentLinks);
+        } else {
+            allLinks.remove(profileName);
+        }
+
+        try (Writer writer = Files.newBufferedWriter(metadataPath)) {
+            new GsonBuilder().setPrettyPrinting().create().toJson(metadata, writer);
+        } catch (Exception e) {
+            LOGGER.error("Error saving profile links to JSON", e);
+        }
+    }
+
     private void updateProfileComboBoxColor() {
         ConfigurationUtils.updateProfileComboBoxColor(profileComboBox, runningProfileName, activeProfileName);
     }
@@ -718,6 +867,7 @@ public class NodeConfigurationPanel extends JPanel {
                         } finally {
                             isProgrammaticChange = false;
                         }
+                        saveProfileLinks(name);
                         updateProfileComboBoxColor();
                         updateProfileComboBoxColor();
 
@@ -768,6 +918,7 @@ public class NodeConfigurationPanel extends JPanel {
                             updateUIFromProperties(loaded);
                             this.propertiesFile = targetFile;
                             this.loadedProfileName = profileName;
+                            loadProfileLinks(profileName);
                             updateDirtyStatus();
                             isProgrammaticChange = false;
                             updateProfileComboBoxColor();
@@ -1423,6 +1574,12 @@ public class NodeConfigurationPanel extends JPanel {
         }
     }
 
+    private void addSectionHeader(JPanel panel, String title, boolean isFirst) {
+        JLabel label = new JLabel(title);
+        label.setFont(UIManager.getFont("Label.font").deriveFont(Font.BOLD, 14f));
+        panel.add(label, (isFirst ? "" : "gaptop 15, ") + "span, growx, wrap, gapbottom 5");
+    }
+
     private void addProperty(JPanel panel, Prop<?> prop, String labelText, String[] options, boolean editable) {
         // Label
         PropertyRow row = new PropertyRow(prop, labelText, panel, currentAddingTabIndex);
@@ -1624,7 +1781,7 @@ public class NodeConfigurationPanel extends JPanel {
         JPanel wrapper = new JPanel(new MigLayout("insets 0, fillx, gap 2", "[grow]", "[]5[]"));
         wrapper.setOpaque(false);
 
-        JCheckBox useProfileCheck = new JCheckBox("Connect Database Profile");
+        JCheckBox useProfileCheck = new JCheckBox("Linked Database Profile");
         useProfileCheck.setOpaque(false);
         wrapper.add(useProfileCheck, "wrap");
 
@@ -1646,6 +1803,22 @@ public class NodeConfigurationPanel extends JPanel {
         cardPanel.add(manualPanel, "MANUAL");
         cardPanel.add(profilePanel, "PROFILE");
         wrapper.add(cardPanel, "growx");
+
+        JComboBox<?> engineCombo = (JComboBox<?>) profilePanel.getEngineCombo();
+        JComboBox<?> profileCombo = (JComboBox<?>) profilePanel.getProfileCombo();
+
+        // Add sync listener to profile panel
+        ActionListener profileSyncListener = e -> {
+            if (isProgrammaticChange)
+                return;
+            String engine = engineCombo.getSelectedItem().toString();
+            String profile = (String) profileCombo.getSelectedItem();
+            if (useProfileCheck.isSelected() && profile != null) {
+                setLinkedDbProfile(engine + ":" + profile);
+            }
+        };
+        engineCombo.addActionListener(profileSyncListener);
+        profileCombo.addActionListener(profileSyncListener);
 
         useProfileCheck.addActionListener(e -> {
             cardLayout.show(cardPanel, useProfileCheck.isSelected() ? "PROFILE" : "MANUAL");
@@ -1823,6 +1996,146 @@ public class NodeConfigurationPanel extends JPanel {
 
         row.input = passwordField;
         allPropertyRows.add(row);
+    }
+
+    private void addLinkedProfileRow(JPanel panel, String labelText, JComboBox<String> combo) {
+        panel.add(new JLabel(labelText), "align label");
+        ConfigurationUtils.fixComponentSize(combo);
+        panel.add(combo, "split 2, growx, height pref!");
+
+        combo.addActionListener(e -> {
+            if (isProgrammaticChange)
+                return;
+            updateDirtyStatus();
+        });
+
+        JButton helpBtn = new HelpButton();
+        panel.add(helpBtn, "wrap");
+        panel.add(new JSeparator(), "span, growx, wrap, gaptop 2, gapbottom 2");
+    }
+
+    private void addLinkedProfileRowWithButtons(JPanel panel, String labelText, JComboBox<String> combo, String type) {
+        panel.add(new JLabel(labelText), "align label");
+        ConfigurationUtils.fixComponentSize(combo);
+
+        combo.setRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected,
+                    boolean cellHasFocus) {
+                Component c = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+                if (isSelected || value == null)
+                    return c;
+
+                String val = value.toString();
+                String linked = type.equals("logging") ? getLinkedLoggingProfile() : getLinkedLafProfile();
+                String active = type.equals("logging") ? Signum.getActiveLoggingProfile() : "gui";
+
+                if (val.equals(linked)) {
+                    c.setForeground(GuiColors.getSaved());
+                } else if (val.equals(active)) {
+                    c.setForeground(GuiColors.getApplied());
+                }
+                return c;
+            }
+        });
+
+        JButton refreshBtn = new JButton(IconFontSwing.buildIcon(FontAwesome.REFRESH, GuiConstants.getHelpIconSize(),
+                GuiColors.getApplied()));
+        refreshBtn.setToolTipText("Update link in profile immediately");
+        refreshBtn.addActionListener(e -> {
+            saveProfileLinks(loadedProfileName);
+            updateDirtyStatus();
+            combo.repaint();
+        });
+
+        JButton deleteBtn = new JButton(
+                IconFontSwing.buildIcon(FontAwesome.TRASH, GuiConstants.getHelpIconSize(), GuiColors.getContrastRed()));
+        deleteBtn.setToolTipText("Remove link");
+        deleteBtn.addActionListener(e -> {
+            isProgrammaticChange = true;
+            combo.setSelectedItem("");
+            isProgrammaticChange = false;
+            saveProfileLinks(loadedProfileName);
+            updateDirtyStatus();
+        });
+
+        JPanel comboPanel = new JPanel(new MigLayout("insets 0", "[grow][pref!][pref!]", "[]"));
+        comboPanel.setOpaque(false);
+        comboPanel.add(combo, "growx");
+        comboPanel.add(refreshBtn);
+        comboPanel.add(deleteBtn);
+
+        panel.add(comboPanel, "split 2, growx, height pref!");
+        panel.add(new HelpButton(), "wrap");
+        panel.add(new JSeparator(), "span, growx, wrap, gaptop 2, gapbottom 2");
+    }
+
+    private void syncDbProfileSelection(String value) {
+        JComponent jdbcComp = propertyComponents.get(Props.DB_URL.getName());
+        if (jdbcComp != null) {
+            JdbcProfileConfigurationPanel pp = (JdbcProfileConfigurationPanel) jdbcComp
+                    .getClientProperty("profilePanel");
+            JCheckBox cb = (JCheckBox) jdbcComp.getClientProperty("useProfileCheck");
+            if (pp != null && value != null && value.contains(":")) {
+                String[] parts = value.split(":");
+                isProgrammaticChange = true;
+                ((JComboBox<?>) pp.getEngineCombo())
+                        .setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.fromDisplayName(parts[0]));
+                ((JComboBox<?>) pp.getProfileCombo()).setSelectedItem(parts[1]);
+                if (cb != null)
+                    cb.setSelected(true);
+                isProgrammaticChange = false;
+            }
+        }
+    }
+
+    public String getLinkedDbProfile() {
+        if (linkedDbPanel == null)
+            return "";
+        Object engine = ((JComboBox<?>) linkedDbPanel.getEngineCombo()).getSelectedItem();
+        Object profile = ((JComboBox<?>) linkedDbPanel.getProfileCombo()).getSelectedItem();
+        if (engine == null || profile == null || profile.toString().isEmpty())
+            return "";
+        return engine.toString() + ":" + profile.toString();
+    }
+
+    public String getLinkedLoggingProfile() {
+        return (linkedLogCombo != null) ? (String) linkedLogCombo.getSelectedItem() : "";
+    }
+
+    public String getLinkedLafProfile() {
+        return (linkedLafCombo != null) ? (String) linkedLafCombo.getSelectedItem() : "";
+    }
+
+    public void setLinkedDbProfile(String value) {
+        isProgrammaticChange = true;
+        if (linkedDbPanel != null) {
+            if (value == null || value.isEmpty()) {
+                ((JComboBox<?>) linkedDbPanel.getProfileCombo()).setSelectedItem("");
+            } else if (value.contains(":")) {
+                String[] parts = value.split(":");
+                ((JComboBox<DatabaseConfigurationPanel.DatabaseEngine>) linkedDbPanel.getEngineCombo())
+                        .setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.fromDisplayName(parts[0]));
+                ((JComboBox<String>) linkedDbPanel.getProfileCombo()).setSelectedItem(parts[1]);
+            }
+            syncDbProfileSelection(value);
+        }
+        isProgrammaticChange = false;
+        saveProfileLinks(loadedProfileName);
+    }
+
+    public void setLinkedLoggingProfile(String value) {
+        isProgrammaticChange = true;
+        linkedLogCombo.setSelectedItem(value != null ? value : "");
+        isProgrammaticChange = false;
+        saveProfileLinks(loadedProfileName);
+    }
+
+    public void setLinkedLafProfile(String value) {
+        isProgrammaticChange = true;
+        linkedLafCombo.setSelectedItem(value != null ? value : "");
+        isProgrammaticChange = false;
+        saveProfileLinks(loadedProfileName);
     }
 
     private void addListProperty(JPanel panel, Prop<?> prop, String labelText) {
