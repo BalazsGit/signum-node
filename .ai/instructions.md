@@ -10,19 +10,19 @@ Signum Node: Java 21 blockchain implementation with energy-efficient Proof-of-Co
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Presentation Layer                       │
-│    brs.web.api.http.handler (REST APIs)                    │
-│    brs.web.api.ws (WebSocket APIs)                         │
+│    application.module.brs.web.api.http.handler (REST APIs)                    │
+│    application.module.brs.web.api.ws (WebSocket APIs)                         │
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
 │                   Business Logic Layer                     │
-│    brs.services (interfaces)                               │
-│    brs.services.impl (implementations)                     │
+│    application.module.brs.services (interfaces)                               │
+│    application.module.brs.services.impl (implementations)                     │
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
 │                   Data Access Layer                        │
-│    brs.db.store (data access interfaces & implementations) │
+│    application.module.brs.db.store (data access interfaces & implementations) │
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
@@ -93,7 +93,7 @@ public class GetAccountCommand extends APIRequestHandler {
 
 **Security Requirements:**
 - Validate API parameters using ParameterParser
-- Use existing crypto utilities (brs.crypto package)
+- Use existing crypto utilities  (application.module.brs.crypto package)
 - Never implement custom cryptographic functions
 - Sanitize all database inputs
 
@@ -272,10 +272,10 @@ import org.json.simple.JSONObject;
 import org.json.simple.JSONStreamAware;
 
 // Project core
-import brs.*;
-import brs.services.*;
-import brs.db.store.*;
-import brs.web.api.http.common.*;
+import application.module.brs.*;
+import application.module.brs.services.*;
+import application.module.brs.db.store.*;
+import application.module.brs.web.api.http.common.*;
 ```
 
 ## Remember

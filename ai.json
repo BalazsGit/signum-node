@@ -9,9 +9,9 @@
     "architecture": {
       "pattern": "layered",
       "layers": [
-        "presentation (brs.web.api.http.handler)",
-        "business (brs.services.impl)", 
-        "data_access (brs.db.store)",
+        "presentation  (application.module.brs.web.api.http.handler)",
+        "business  (application.module.brs.services.impl)", 
+        "data_access  (application.module.brs.db.store)",
         "database (sqlite/mariadb/postgresql)"
       ],
       "dependency_injection": "constructor_only",
@@ -58,7 +58,7 @@
   "project_structure": {
     "main_entry": "signum.Launcher",
     "core_packages": {
-      "services": "brs.services (interfaces), brs.services.impl (implementations)",
+      "services": "brs.services (interfaces), application.module.brs.services.impl (implementations)",
       "data_access": "brs.db.store",
       "web_api": "brs.web.api.http.handler",
       "smart_contracts": "brs.at",
@@ -124,7 +124,7 @@
     "logging": "org.slf4j.Logger, org.slf4j.LoggerFactory",
     "testing": "org.junit.jupiter.api.*, org.mockito.*, static org.junit.jupiter.api.Assertions.*, static org.mockito.Mockito.*",
     "json": "org.json.simple.JSONObject, org.json.simple.JSONStreamAware",
-    "project": "brs.*, brs.services.*, brs.db.store.*, brs.web.api.http.common.*"
+    "project": "brs.*, application.module.brs.services.*, application.module.brs.db.store.*, application.module.brs.web.api.http.common.*"
   },
   "ai_instructions": {
     "primary_goal": "Generate clean, tested, enterprise-grade code for blockchain infrastructure",

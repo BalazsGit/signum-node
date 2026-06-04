@@ -1,0 +1,51 @@
+package application.module.brs.web.api.http.handler;
+
+import application.module.brs.Account;
+import application.module.brs.SignumException;
+import application.module.brs.services.AccountService;
+import application.module.brs.services.ParameterService;
+import application.module.brs.util.Convert;
+import application.module.brs.web.api.http.ApiServlet;
+import application.module.brs.web.api.http.common.LegacyDocTag;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+
+import jakarta.servlet.http.HttpServletRequest;
+
+import static application.module.brs.web.api.http.common.Parameters.ACCOUNTS_RESPONSE;
+import static application.module.brs.web.api.http.common.Parameters.ACCOUNT_PARAMETER;
+
+public final class GetAccountsWithRewardRecipient extends ApiServlet.JsonRequestHandler {
+
+    private final ParameterService parameterService;
+    private final AccountService accountService;
+
+    public GetAccountsWithRewardRecipient(ParameterService parameterService, AccountService accountService) {
+        super(new LegacyDocTag[] { LegacyDocTag.ACCOUNTS, LegacyDocTag.MINING, LegacyDocTag.INFO }, ACCOUNT_PARAMETER);
+        this.parameterService = parameterService;
+        this.accountService = accountService;
+    }
+
+    @Override
+    protected JsonElement processRequest(HttpServletRequest req) throws SignumException {
+        JsonObject response = new JsonObject();
+
+        Account targetAccount = parameterService.getAccount(req);
+
+        JsonArray accounts = new JsonArray();
+
+        for (Account.RewardRecipientAssignment assignment : accountService
+                .getAccountsWithRewardRecipient(targetAccount.getId())) {
+            accounts.add(Convert.toUnsignedLong(assignment.getAccountId()));
+        }
+
+        if (accountService.getRewardRecipientAssignment(targetAccount) == null) {
+            accounts.add(Convert.toUnsignedLong(targetAccount.getId()));
+        }
+
+        response.add(ACCOUNTS_RESPONSE, accounts);
+
+        return response;
+    }
+}

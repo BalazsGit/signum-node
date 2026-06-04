@@ -1,11 +1,11 @@
 package signum;
 
-import brs.Signum;
-import brs.props.Props;
-import brs.util.LoggerConfigurator;
+import application.module.brs.Signum;
+import application.module.brs.props.Props;
+import application.module.brs.util.LoggerConfigurator;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import brs.util.PathUtils;
+import application.module.brs.util.PathUtils;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.HelpFormatter;
@@ -109,7 +109,8 @@ public class Launcher {
                 }
                 // Add formatted string to GUI buffer to ensure uniform appearance in console
                 Signum.BOOTSTRAP_LOGS
-                        .add(String.format("[%s] %s brs.util.LoggerConfigurator - %s", level, ts, content));
+                        .add(String.format("[%s] %s application.module.brs.util.LoggerConfigurator - %s", level, ts,
+                                content));
             }
         }
 

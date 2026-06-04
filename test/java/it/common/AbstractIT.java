@@ -2,12 +2,12 @@ package it.common;
 
 import static org.powermock.api.mockito.PowerMockito.mockStatic;
 
-import brs.Signum;
-import brs.common.TestInfrastructure;
-import brs.peer.Peers;
-import brs.peer.ProcessBlock;
-import brs.props.CaselessProperties;
-import brs.props.Props;
+import application.module.brs.Signum;
+import application.module.brs.common.TestInfrastructure;
+import application.module.brs.peer.Peers;
+import application.module.brs.peer.ProcessBlock;
+import application.module.brs.props.CaselessProperties;
+import application.module.brs.props.Props;
 import com.google.gson.JsonObject;
 import java.util.Properties;
 import org.junit.After;
@@ -19,8 +19,8 @@ import org.powermock.modules.junit4.PowerMockRunner;
 
 // TODO: Remove this and add javadoc and rename type
 @SuppressWarnings({
-    "checkstyle:MissingJavadocTypeCheck",
-    "checkstyle:AbbreviationAsWordInNameCheck" })
+        "checkstyle:MissingJavadocTypeCheck",
+        "checkstyle:AbbreviationAsWordInNameCheck" })
 
 @RunWith(PowerMockRunner.class)
 @PrepareForTest(Peers.class)
@@ -31,7 +31,7 @@ public abstract class AbstractIT {
 
     protected APISender apiSender = new APISender();
 
-    //TODO: Remove suppression and add javadoc
+    // TODO: Remove suppression and add javadoc
     @SuppressWarnings("checkstyle:MissingJavadocMethodCheck")
     @Before
     public void setUp() {

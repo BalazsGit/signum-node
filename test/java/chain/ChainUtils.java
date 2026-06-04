@@ -1,6 +1,6 @@
 package chain;
 
-import brs.Signum;
+import application.module.brs.Signum;
 import signumj.Constants;
 import signumj.crypto.SignumCrypto;
 import signumj.entity.SignumAddress;
@@ -18,32 +18,32 @@ public class ChainUtils {
     static final String PASS2 = "a test passphrase 2";
     static final String PASS3 = "a test passphrase 3";
     static final String PASS4 = "a test passphrase 4";
-    
+
     static final SignumAddress ACCOUNT1 = SignumCrypto.getInstance().getAddressFromPassphrase(PASS1);
     static final SignumAddress ACCOUNT2 = SignumCrypto.getInstance().getAddressFromPassphrase(PASS2);
     static final SignumAddress ACCOUNT3 = SignumCrypto.getInstance().getAddressFromPassphrase(PASS3);
     static final SignumAddress ACCOUNT4 = SignumCrypto.getInstance().getAddressFromPassphrase(PASS4);
-    
+
     public static boolean setupNode() {
-        if(nodeService != null) {
+        if (nodeService != null) {
             return true;
         }
-        
+
         // a mock node with memory DB
-        String[] args = {"-l", "-c", "conf/junit"};
+        String[] args = { "-l", "-c", "conf/junit" };
         Signum.main(args);
 
         crypto = SignumCrypto.getInstance();
         nodeService = new HttpNodeService(Constants.HTTP_NODE_LOCAL_TESTNET, "mock-node-testing");
         long startupTime = System.currentTimeMillis();
-        while(System.currentTimeMillis() - startupTime < 10000) {
+        while (System.currentTimeMillis() - startupTime < 10000) {
             // we wait for the node to boot
             try {
                 Thread.sleep(1000);
             } catch (InterruptedException e) {
                 break;
             }
-            try{
+            try {
                 nodeService.getBlockChainStatus().blockingGet();
 
                 // make the accounts to have some balance
@@ -53,26 +53,24 @@ public class ChainUtils {
                 forgeBlock(PASS4);
 
                 return true;
-            }
-            catch (Exception e) {
+            } catch (Exception e) {
             }
         }
         return false;
     }
-    
-    public static void forgeBlock(String pass, TransactionBroadcast ... txs) {
+
+    public static void forgeBlock(String pass, TransactionBroadcast... txs) {
         for (int i = 0; i < 4; i++) {
             // retries
             boolean allFound = true;
-            for(TransactionBroadcast tx : txs){
+            for (TransactionBroadcast tx : txs) {
                 try {
                     Transaction txConfirmed = nodeService.getTransaction(tx.getTransactionId()).blockingGet();
                     if (txConfirmed.getBlockHeight() == Integer.MAX_VALUE) {
                         allFound = false;
                         break;
                     }
-                }
-                catch (Exception e){
+                } catch (Exception e) {
                     allFound = false;
                 }
             }
@@ -82,13 +80,14 @@ public class ChainUtils {
             forgeBlock(pass);
         }
     }
-    
+
     public static void forgeBlock() {
         forgeBlock(PASS1);
     }
-    
+
     /**
-     * Forge block by mock mining for the given passphrase with the given millis timeout.
+     * Forge block by mock mining for the given passphrase with the given millis
+     * timeout.
      *
      * Just for testing purposes.
      */
@@ -99,11 +98,11 @@ public class ChainUtils {
             long height = nodeService.getMiningInfoSingle().blockingGet().getHeight();
             long startTimer = System.currentTimeMillis();
             nodeService.submitNonce(pass, "0", null).blockingGet();
-            while(true) {
+            while (true) {
                 Thread.sleep(50);
                 long newHeight = nodeService.getMiningInfoSingle().blockingGet().getHeight();
                 long timeElapsed = System.currentTimeMillis() - startTimer;
-                if(newHeight > height || timeElapsed > timeout) {
+                if (newHeight > height || timeElapsed > timeout) {
                     break;
                 }
             }
@@ -111,15 +110,17 @@ public class ChainUtils {
             e.printStackTrace();
         }
     }
-    
+
     /**
-     * Get the transaction bytes, verify, sign, broadcast, and confirm the tx in a block
+     * Get the transaction bytes, verify, sign, broadcast, and confirm the tx in a
+     * block
+     * 
      * @param pass
      * @param tb
      */
     public static TransactionBroadcast confirm(String pass, TransactionBuilder tb) {
-        byte []utx = nodeService.generateTransaction(tb).blockingGet();
-        if(!tb.verify(utx)) {
+        byte[] utx = nodeService.generateTransaction(tb).blockingGet();
+        if (!tb.verify(utx)) {
             throw new IllegalArgumentException("transaction bytes do not match");
         }
         byte[] stx = crypto.signTransaction(pass, utx);
