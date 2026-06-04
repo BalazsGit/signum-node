@@ -50,6 +50,14 @@ public class NodeConfigurationPanel extends JPanel {
     private static final Logger LOGGER = LoggerFactory.getLogger(NodeConfigurationPanel.class);
     private final Map<String, Supplier<String>> valueSuppliers = new HashMap<>();
     private final Map<String, JComponent> propertyComponents = new HashMap<>();
+
+    private static final String KEY_PROFILE_LINKS = "profileLinks";
+    private static final String KEY_DATABASE = "database";
+    private static final String KEY_LOGGING = "logging";
+    private static final String KEY_LAF = "laf";
+    private static final String KEY_DB_AUTO_START = "dbAutoStart";
+    private static final String KEY_DB_AUTO_STOP = "dbAutoStop";
+
     private final Map<String, String> helpTexts = new HashMap<>();
     private final Map<String, String> defaultValues = new HashMap<>();
     private final Runnable restartAction;
@@ -58,6 +66,14 @@ public class NodeConfigurationPanel extends JPanel {
     private JdbcProfileConfigurationPanel linkedDbPanel;
     private JComboBox<String> linkedLogCombo;
     private JComboBox<String> linkedLafCombo;
+    private JCheckBox autoStartDbCheck;
+    private JCheckBox autoStopDbCheck;
+
+    private String savedLinkedLog = "";
+    private String savedLinkedLaf = "";
+    private String savedLinkedDb = "";
+    private boolean savedDbAutoStart = false;
+    private boolean savedDbAutoStop = false;
 
     private final Runnable backAction;
     private final Runnable switchAction;
@@ -81,6 +97,7 @@ public class NodeConfigurationPanel extends JPanel {
     private String activeProfileName;
     private String loadedProfileName;
     private int currentAddingTabIndex = -1;
+    private int linkedProfilesTabIndex = -1;
     private boolean isProgrammaticChange = false;
 
     public NodeConfigurationPanel(Runnable restartAction, String confFolder, Runnable backAction,
@@ -124,7 +141,6 @@ public class NodeConfigurationPanel extends JPanel {
         initHelpTexts();
         initUI();
         loadProfileLinks(this.loadedProfileName);
-        refreshLinkedProfileLists();
     }
 
     private void initUI() {
@@ -471,20 +487,51 @@ public class NodeConfigurationPanel extends JPanel {
         categoryTabbedPane.addTab("Network Constants", createScrollPane(netPanel));
 
         // --- Linked Profiles ---
-        currentAddingTabIndex = 8;
+        linkedProfilesTabIndex = categoryTabbedPane.getTabCount();
+        currentAddingTabIndex = linkedProfilesTabIndex;
+
         JPanel linkedPanel = createCategoryPanel();
         addSectionHeader(linkedPanel, "Linked Profiles", true);
         linkedLogCombo = new JComboBox<>();
         linkedLafCombo = new JComboBox<>();
-        addLinkedProfileRowWithButtons(linkedPanel, "Logger Profile:", linkedLogCombo, "logging");
-        addLinkedProfileRowWithButtons(linkedPanel, "Look and Feel Profile:", linkedLafCombo, "laf");
+        addLinkedProfileRowWithButtons(linkedPanel, "Logger Profile:", linkedLogCombo, KEY_LOGGING);
+        addLinkedProfileRowWithButtons(linkedPanel, "Look and Feel Profile:", linkedLafCombo, KEY_LAF);
 
         addSectionHeader(linkedPanel, "Linked Database Profile Detail:", false);
+
+        autoStartDbCheck = new JCheckBox("Auto Start Database");
+        autoStopDbCheck = new JCheckBox("Auto Stop Database");
+        autoStartDbCheck.setOpaque(false);
+        autoStopDbCheck.setOpaque(false);
+
+        linkedPanel.add(autoStartDbCheck, "split 2, gapleft 10");
+        linkedPanel.add(autoStopDbCheck, "wrap, gapbottom 10");
+
+        // Add listener to linkedDbPanel's engineCombo to update checkbox state
+        ((JComboBox<DatabaseConfigurationPanel.DatabaseEngine>) linkedDbPanel.getEngineCombo()).addActionListener(e -> {
+            if (!isProgrammaticChange) {
+                updateAutoDbCheckboxesState();
+                updateDirtyStatus(); // State change might make it dirty
+            }
+        });
+
+        // Listener for autoStart/Stop checkboxes
+        ActionListener linkedCheckListener = e -> {
+            if (!isProgrammaticChange) {
+                updateDirtyStatus();
+            }
+        };
+        autoStartDbCheck.addActionListener(linkedCheckListener);
+        autoStopDbCheck.addActionListener(linkedCheckListener);
+
         linkedDbPanel = new JdbcProfileConfigurationPanel(confFolder, () -> {
             if (!isProgrammaticChange) {
                 updateDirtyStatus();
             }
         });
+
+        // Initial state update for autoStart/Stop checkboxes
+        updateAutoDbCheckboxesState();
         linkedPanel.add(linkedDbPanel, "span, growx, wrap");
 
         finalizeCategoryPanel(linkedPanel);
@@ -687,36 +734,54 @@ public class NodeConfigurationPanel extends JPanel {
 
     private void loadProfileLinks(String profileName) {
         isProgrammaticChange = true;
+        refreshLinkedProfileLists();
+
         if (linkedDbPanel != null) {
             ((JComboBox<?>) linkedDbPanel.getProfileCombo()).setSelectedItem("");
         }
         linkedLogCombo.setSelectedItem("");
         linkedLafCombo.setSelectedItem("");
+        autoStartDbCheck.setSelected(true);
+        autoStopDbCheck.setSelected(true);
 
         Path metadataPath = ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER);
         if (Files.exists(metadataPath)) {
             try (Reader reader = Files.newBufferedReader(metadataPath)) {
                 JsonObject metadata = JsonParser.parseReader(reader).getAsJsonObject();
-                if (metadata.has("profileLinks") && metadata.getAsJsonObject("profileLinks").has(profileName)) {
-                    JsonObject links = metadata.getAsJsonObject("profileLinks").getAsJsonObject(profileName);
-                    if (links.has("database")) {
-                        String dbLink = links.get("database").getAsString();
+                if (metadata.has(KEY_PROFILE_LINKS) && metadata.getAsJsonObject(KEY_PROFILE_LINKS).has(profileName)) {
+                    JsonObject links = metadata.getAsJsonObject(KEY_PROFILE_LINKS).getAsJsonObject(profileName);
+                    if (links.has(KEY_DATABASE)) {
+                        String dbLink = links.get(KEY_DATABASE).getAsString();
                         if (dbLink.contains(":")) {
                             String[] parts = dbLink.split(":");
-                            ((JComboBox<?>) linkedDbPanel.getEngineCombo()).setSelectedItem(
-                                    DatabaseConfigurationPanel.DatabaseEngine.fromDisplayName(parts[0]));
-                            ((JComboBox<?>) linkedDbPanel.getProfileCombo()).setSelectedItem(parts[1]);
+                            ((JComboBox<DatabaseConfigurationPanel.DatabaseEngine>) linkedDbPanel.getEngineCombo())
+                                    .setSelectedItem(
+                                            DatabaseConfigurationPanel.DatabaseEngine.fromDisplayName(parts[0]));
+                            ((JComboBox<String>) linkedDbPanel.getProfileCombo()).setSelectedItem(parts[1]);
                         }
                     }
-                    if (links.has("logging"))
-                        linkedLogCombo.setSelectedItem(links.get("logging").getAsString());
-                    if (links.has("laf"))
-                        linkedLafCombo.setSelectedItem(links.get("laf").getAsString());
+                    if (links.has(KEY_LOGGING))
+                        linkedLogCombo.setSelectedItem(links.get(KEY_LOGGING).getAsString());
+                    if (links.has(KEY_LAF))
+                        linkedLafCombo.setSelectedItem(links.get(KEY_LAF).getAsString());
+                    if (links.has(KEY_DB_AUTO_START))
+                        autoStartDbCheck.setSelected(links.get(KEY_DB_AUTO_START).getAsBoolean());
+                    if (links.has(KEY_DB_AUTO_STOP))
+                        autoStopDbCheck.setSelected(links.get(KEY_DB_AUTO_STOP).getAsBoolean());
                 }
             } catch (Exception e) {
                 LOGGER.error("Error loading profile links from JSON", e);
             }
         }
+
+        updateAutoDbCheckboxesState();
+
+        savedLinkedLog = getLinkedLoggingProfile();
+        savedLinkedLaf = getLinkedLafProfile();
+        savedLinkedDb = getLinkedDbProfile();
+        savedDbAutoStart = autoStartDbCheck.isSelected();
+        savedDbAutoStop = autoStopDbCheck.isSelected();
+
         isProgrammaticChange = false;
     }
 
@@ -730,26 +795,43 @@ public class NodeConfigurationPanel extends JPanel {
                 /* start new if corrupt */ }
         }
 
-        if (!metadata.has("profileLinks")) {
-            metadata.add("profileLinks", new JsonObject());
+        if (!metadata.has(KEY_PROFILE_LINKS)) {
+            metadata.add(KEY_PROFILE_LINKS, new JsonObject());
         }
-        JsonObject allLinks = metadata.getAsJsonObject("profileLinks");
+        JsonObject allLinks = metadata.getAsJsonObject(KEY_PROFILE_LINKS);
 
         JsonObject currentLinks = new JsonObject();
         String db = getLinkedDbProfile();
         String log = (String) linkedLogCombo.getSelectedItem();
         String laf = (String) linkedLafCombo.getSelectedItem();
+        boolean autoStart = autoStartDbCheck.isSelected();
+        boolean autoStop = autoStopDbCheck.isSelected();
 
-        if ((db != null && !db.isEmpty()) || (log != null && !log.isEmpty()) || (laf != null && !laf.isEmpty())) {
+        if ((db != null && !db.isEmpty()) || (log != null && !log.isEmpty()) || (laf != null && !laf.isEmpty())
+                || autoStart || autoStop) {
             if (db != null && !db.isEmpty())
-                currentLinks.addProperty("database", db);
+                currentLinks.addProperty(KEY_DATABASE, db);
             if (log != null && !log.isEmpty())
-                currentLinks.addProperty("logging", log);
+                currentLinks.addProperty(KEY_LOGGING, log);
             if (laf != null && !laf.isEmpty())
-                currentLinks.addProperty("laf", laf);
+                currentLinks.addProperty(KEY_LAF, laf);
+            currentLinks.addProperty(KEY_DB_AUTO_START, autoStart);
+            currentLinks.addProperty(KEY_DB_AUTO_STOP, autoStop);
+
             allLinks.add(profileName, currentLinks);
+
+            savedLinkedLog = log != null ? log : "";
+            savedLinkedLaf = laf != null ? laf : "";
+            savedLinkedDb = db != null ? db : "";
+            savedDbAutoStart = autoStart;
+            savedDbAutoStop = autoStop;
         } else {
             allLinks.remove(profileName);
+            savedLinkedLog = "";
+            savedLinkedLaf = "";
+            savedLinkedDb = "";
+            savedDbAutoStart = false;
+            savedDbAutoStop = false;
         }
 
         try (Writer writer = Files.newBufferedWriter(metadataPath)) {
@@ -1094,6 +1176,7 @@ public class NodeConfigurationPanel extends JPanel {
                 this.savedProfile = new NodeProfile(name);
                 this.savedProfile.setProperties(propsToSave);
                 this.propertiesFile = targetFile;
+                loadProfileLinks(name);
                 updateDirtyStatus();
                 updateUIFromProperties(propsToSave);
                 updateProfileComboBoxColor();
@@ -1113,6 +1196,7 @@ public class NodeConfigurationPanel extends JPanel {
         }
         isProgrammaticChange = true;
         updateUIFromProperties(defaultProps);
+        loadProfileLinks(loadedProfileName);
         updateDirtyStatus();
         refreshUIColors();
         isProgrammaticChange = false;
@@ -1316,6 +1400,31 @@ public class NodeConfigurationPanel extends JPanel {
         return !current.trim().equals(saved.trim());
     }
 
+    private void updateAutoDbCheckboxesState() {
+        if (linkedDbPanel == null || autoStartDbCheck == null || autoStopDbCheck == null) {
+            return;
+        }
+        JComboBox<DatabaseConfigurationPanel.DatabaseEngine> engineCombo = (JComboBox<DatabaseConfigurationPanel.DatabaseEngine>) linkedDbPanel
+                .getEngineCombo();
+        DatabaseConfigurationPanel.DatabaseEngine selectedEngine = (DatabaseConfigurationPanel.DatabaseEngine) engineCombo
+                .getSelectedItem();
+
+        boolean enableCheckboxes = (selectedEngine != null
+                && selectedEngine != DatabaseConfigurationPanel.DatabaseEngine.SQLITE);
+
+        autoStartDbCheck.setEnabled(enableCheckboxes);
+        autoStopDbCheck.setEnabled(enableCheckboxes);
+
+        // If disabled (SQLite), ensure they are unchecked to avoid confusion.
+        if (!enableCheckboxes) {
+            boolean wasProgrammatic = isProgrammaticChange;
+            isProgrammaticChange = true;
+            autoStartDbCheck.setSelected(false);
+            autoStopDbCheck.setSelected(false);
+            isProgrammaticChange = wasProgrammatic;
+        }
+    }
+
     private void updateDirtyStatus() {
         boolean overallDirty = false;
         for (int i = 0; i < categoryTabbedPane.getTabCount(); i++) {
@@ -1326,6 +1435,11 @@ public class NodeConfigurationPanel extends JPanel {
                     break;
                 }
             }
+
+            if (i == linkedProfilesTabIndex && !tabDirty) {
+                tabDirty = isLinkedProfileDirty();
+            }
+
             String title = categoryTabbedPane.getTitleAt(i);
             if (tabDirty) {
                 if (!title.endsWith(" *"))
@@ -1342,6 +1456,14 @@ public class NodeConfigurationPanel extends JPanel {
         if (saveProfileBtn.getParent() != null) {
             saveProfileBtn.getParent().revalidate();
         }
+    }
+
+    private boolean isLinkedProfileDirty() {
+        return !savedLinkedLog.equals(getLinkedLoggingProfile()) ||
+                !savedLinkedLaf.equals(getLinkedLafProfile()) ||
+                !savedLinkedDb.equals(getLinkedDbProfile()) ||
+                (autoStartDbCheck.isEnabled() && savedDbAutoStart != autoStartDbCheck.isSelected()) ||
+                (autoStopDbCheck.isEnabled() && savedDbAutoStop != autoStopDbCheck.isSelected());
     }
 
     private void applyProfile() {
@@ -2027,8 +2149,8 @@ public class NodeConfigurationPanel extends JPanel {
                     return c;
 
                 String val = value.toString();
-                String linked = type.equals("logging") ? getLinkedLoggingProfile() : getLinkedLafProfile();
-                String active = type.equals("logging") ? Signum.getActiveLoggingProfile() : "gui";
+                String linked = KEY_LOGGING.equals(type) ? getLinkedLoggingProfile() : getLinkedLafProfile();
+                String active = KEY_LOGGING.equals(type) ? Signum.getActiveLoggingProfile() : "gui";
 
                 if (val.equals(linked)) {
                     c.setForeground(GuiColors.getSaved());
@@ -2036,6 +2158,12 @@ public class NodeConfigurationPanel extends JPanel {
                     c.setForeground(GuiColors.getApplied());
                 }
                 return c;
+            }
+        });
+
+        combo.addActionListener(e -> {
+            if (!isProgrammaticChange) {
+                updateDirtyStatus();
             }
         });
 
@@ -2100,11 +2228,13 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     public String getLinkedLoggingProfile() {
-        return (linkedLogCombo != null) ? (String) linkedLogCombo.getSelectedItem() : "";
+        String sel = (linkedLogCombo != null) ? (String) linkedLogCombo.getSelectedItem() : "";
+        return sel != null ? sel : "";
     }
 
     public String getLinkedLafProfile() {
-        return (linkedLafCombo != null) ? (String) linkedLafCombo.getSelectedItem() : "";
+        String sel = (linkedLafCombo != null) ? (String) linkedLafCombo.getSelectedItem() : "";
+        return sel != null ? sel : "";
     }
 
     public void setLinkedDbProfile(String value) {

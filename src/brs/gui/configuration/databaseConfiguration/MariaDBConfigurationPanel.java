@@ -88,7 +88,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     private JPanel searchResultsPanel;
     private CardLayout contentCardLayout;
     private JButton downloadBtn;
-    private JButton applyProfileBtn;
+    private JButton saveProfileBtn;
     private JButton renameProfileBtn;
     private JButton deleteProfileBtn;
     private JButton newProfileBtn;
@@ -101,6 +101,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     private JTextPane consoleTextPane;
     private JPanel consoleWrapper;
     private CustomDrawingComponent consoleChevron;
+    private JLabel consoleTitle;
     private boolean isConsoleExpanded = false;
     private Timer consoleAnimator;
     private JComponent verticalFiller;
@@ -440,10 +441,10 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         newProfileBtn.addActionListener(e -> createNewProfile());
         profilePanel.add(newProfileBtn);
 
-        applyProfileBtn = new JButton("Apply Profile");
-        applyProfileBtn.setToolTipText("Apply selected profile to the node");
-        applyProfileBtn.addActionListener(e -> applyProfile());
-        profilePanel.add(applyProfileBtn);
+        saveProfileBtn = new JButton("Save Profile");
+        saveProfileBtn.setToolTipText("Save and apply selected profile to the node");
+        saveProfileBtn.addActionListener(e -> saveProfile());
+        profilePanel.add(saveProfileBtn);
 
         renameProfileBtn = new JButton("Rename Profile");
         renameProfileBtn.setToolTipText("Rename selected profile");
@@ -569,7 +570,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             }
         });
 
-        JLabel consoleTitle = new JLabel("Console Output");
+        consoleTitle = new JLabel("Console Output");
         consoleTitle.setFont(UIManager.getFont("Label.font").deriveFont(Font.BOLD, 13f));
         consoleTitle.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         consoleTitle.addMouseListener(new MouseAdapter() {
@@ -1134,6 +1135,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         final JProgressBar progressBar = new JProgressBar(0, 100);
         progressBar.setStringPainted(true);
         final JLabel statusLabel = new JLabel("Preparing...");
+        statusLabel.setFont(UIManager.getFont("Label.font"));
 
         JPanel progressPanel = new JPanel(new MigLayout("fillx, insets 20", "[grow]", "[]10[]"));
         progressPanel.add(statusLabel, "wrap");
@@ -1143,6 +1145,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
                 "Changing Admin Credentials", Dialog.ModalityType.APPLICATION_MODAL);
         progressDialog.add(progressPanel);
         progressDialog.pack();
+        progressDialog.setMinimumSize(new Dimension(450, progressDialog.getHeight()));
         progressDialog.setLocationRelativeTo(this);
 
         if (!isConsoleExpanded)
@@ -1215,6 +1218,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         final JProgressBar progressBar = new JProgressBar(0, 100);
         progressBar.setStringPainted(true);
         final JLabel statusLabel = new JLabel("Connecting...");
+        statusLabel.setFont(UIManager.getFont("Label.font"));
 
         JPanel progressPanel = new JPanel(new MigLayout("fillx, insets 20", "[grow]", "[]10[]"));
         progressPanel.add(statusLabel, "wrap");
@@ -1224,6 +1228,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
                 "Creating Database", Dialog.ModalityType.APPLICATION_MODAL);
         progressDialog.add(progressPanel);
         progressDialog.pack();
+        progressDialog.setMinimumSize(new Dimension(450, progressDialog.getHeight()));
         progressDialog.setLocationRelativeTo(this);
 
         new SwingWorker<Boolean, ProgressInfo>() {
@@ -1296,6 +1301,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         final JProgressBar progressBar = new JProgressBar(0, 100);
         progressBar.setStringPainted(true);
         final JLabel statusLabel = new JLabel("Updating database...");
+        statusLabel.setFont(UIManager.getFont("Label.font"));
 
         JPanel progressPanel = new JPanel(new MigLayout("fillx, insets 20", "[grow]", "[]10[]"));
         progressPanel.add(statusLabel, "wrap");
@@ -1305,6 +1311,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
                 "Updating Database", Dialog.ModalityType.APPLICATION_MODAL);
         progressDialog.add(progressPanel);
         progressDialog.pack();
+        progressDialog.setMinimumSize(new Dimension(450, progressDialog.getHeight()));
         progressDialog.setLocationRelativeTo(this);
 
         new SwingWorker<Void, ProgressInfo>() {
@@ -1352,6 +1359,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         final JProgressBar progressBar = new JProgressBar(0, 100);
         progressBar.setStringPainted(true);
         final JLabel statusLabel = new JLabel("Removing database...");
+        statusLabel.setFont(UIManager.getFont("Label.font"));
 
         JPanel progressPanel = new JPanel(new MigLayout("fillx, insets 20", "[grow]", "[]10[]"));
         progressPanel.add(statusLabel, "wrap");
@@ -1361,6 +1369,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
                 "Removing Database", Dialog.ModalityType.APPLICATION_MODAL);
         progressDialog.add(progressPanel);
         progressDialog.pack();
+        progressDialog.setMinimumSize(new Dimension(450, progressDialog.getHeight()));
         progressDialog.setLocationRelativeTo(this);
 
         new SwingWorker<Void, ProgressInfo>() {
@@ -1478,6 +1487,9 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
                 }
             }
         }
+        if (consoleTitle != null) {
+            consoleTitle.setFont(UIManager.getFont("Label.font").deriveFont(Font.BOLD, 13f));
+        }
         updateProfileButtonsUI();
         if (startDbBtn != null) {
             startDbBtn.setIcon(
@@ -1492,7 +1504,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     private void updateProfileButtonsUI() {
         if (profileComboBox != null)
             ConfigurationUtils.fixComponentSize(profileComboBox);
-        ConfigurationUtils.configureProfileToolbar(newProfileBtn, null, applyProfileBtn, renameProfileBtn,
+        ConfigurationUtils.configureProfileToolbar(newProfileBtn, null, saveProfileBtn, renameProfileBtn,
                 deleteProfileBtn, reloadProfileBtn, refreshProfilesBtn, null);
     }
 
@@ -2292,6 +2304,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         final JProgressBar progressBar = new JProgressBar(0, 100);
         progressBar.setStringPainted(true);
         final JLabel statusLabel = new JLabel("Preparing installation...");
+        statusLabel.setFont(UIManager.getFont("Label.font"));
 
         JPanel panel = new JPanel(new MigLayout("fillx, insets 20", "[grow]", "[]10[]"));
         panel.add(statusLabel, "wrap");
@@ -2406,6 +2419,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         final JProgressBar progressBar = new JProgressBar(0, 100);
         progressBar.setStringPainted(true);
         final JLabel statusLabel = new JLabel("Preparing initialization...");
+        statusLabel.setFont(UIManager.getFont("Label.font"));
 
         JPanel panel = new JPanel(new MigLayout("fillx, insets 20", "[grow]", "[]10[]"));
         panel.add(statusLabel, "wrap");
@@ -3029,10 +3043,18 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         // 2. Start worker (UI trigger)
         final JProgressBar progressBar = new JProgressBar(0, 100);
         progressBar.setStringPainted(true);
+        final JLabel statusLabel = new JLabel("Running setup...");
+        statusLabel.setFont(UIManager.getFont("Label.font"));
+
+        JPanel panel = new JPanel(new MigLayout("fillx, insets 20", "[grow]", "[]10[]"));
+        panel.add(statusLabel, "wrap");
+        panel.add(progressBar, "growx");
+
         final JDialog progressDialog = new JDialog((Window) SwingUtilities.getWindowAncestor(this), "Setup Progress",
                 Dialog.ModalityType.APPLICATION_MODAL);
-        progressDialog.add(progressBar);
+        progressDialog.add(panel);
         progressDialog.pack();
+        progressDialog.setMinimumSize(new Dimension(450, progressDialog.getHeight()));
         progressDialog.setLocationRelativeTo(this);
 
         new SwingWorker<Void, ProgressInfo>() {
@@ -3056,7 +3078,8 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             protected void process(List<ProgressInfo> chunks) {
                 ProgressInfo info = chunks.get(chunks.size() - 1);
                 progressBar.setValue(info.progress);
-                progressBar.setString(info.message);
+                statusLabel.setText(info.message);
+                appendLog(info.message);
             }
 
             @Override
@@ -3134,6 +3157,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
 
         renameProfileBtn.setEnabled(!isNoProfileSelected);
         deleteProfileBtn.setEnabled(!isNoProfileSelected);
+        saveProfileBtn.setEnabled(!isNoProfileSelected);
 
         // Data Folder should not be modifiable after successful database initialization
         // (Step 2)
@@ -3523,7 +3547,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         loadProfile(currentEngine, loadedProfileName);
     }
 
-    private void applyProfile() {
+    private void saveProfile() {
         String selected = (String) profileComboBox.getSelectedItem();
         if (selected == null)
             return;
@@ -3603,7 +3627,8 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             return;
         }
 
-        String newName = JOptionPane.showInputDialog(this, "Enter new name for profile '" + oldName + "':", oldName);
+        String newName = (String) JOptionPane.showInputDialog(this, "Enter new name for profile '" + oldName + "':",
+                "Rename Profile", JOptionPane.PLAIN_MESSAGE, null, null, oldName);
         if (newName == null || newName.trim().isEmpty() || newName.equals(oldName))
             return;
 
@@ -3619,30 +3644,120 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
                 return;
             }
 
-            Files.move(oldPath, newPath);
+            // Check if Node is running this profile and if DB instance is active
+            boolean isRunning = oldName.equals(runningProfileName) && currentProfile != null
+                    && currentProfile.isInstanceRunning();
 
-            // Update applied profile if the renamed one was active
-            String applied = ConfigurationUtils
-                    .loadAppliedProfile(
-                            ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.DATABASE_SUBFOLDER));
-            if (applied != null && applied.equals(currentEngine.toString() + ":" + oldName)) {
-                ConfigurationUtils.updateAppliedProfile(
-                        ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.DATABASE_SUBFOLDER),
-                        currentEngine.toString() + ":" + newName);
+            if (isRunning) {
+                int choice = JOptionPane.showConfirmDialog(this,
+                        "The profile '" + oldName + "' is currently in use.\n" +
+                                "Renaming it will cause the Node and Database to shut down and restart automatically.\n\n"
+                                +
+                                "Do you want to proceed?",
+                        "Confirm Node Restart",
+                        JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                if (choice != JOptionPane.YES_OPTION)
+                    return;
             }
 
-            this.loadedProfileName = newName;
-            this.activeProfilePath = newPath;
-            refreshProfileList();
-            profileComboBox.setSelectedItem(newName);
-
-            JOptionPane.showMessageDialog(this, "Profile renamed successfully.", "Success",
-                    JOptionPane.INFORMATION_MESSAGE);
-        } catch (IOException e) {
-            logger.error("Error renaming profile: {}", e.getMessage());
-            JOptionPane.showMessageDialog(this, "Error renaming folder: " + e.getMessage(), "Error",
-                    JOptionPane.ERROR_MESSAGE);
+            executeRenameProfileWorker(oldName, newName, oldPath, newPath, isRunning);
+        } catch (Exception e) {
+            logger.error("Error determining paths for rename: {}", e.getMessage());
         }
+    }
+
+    private void executeRenameProfileWorker(String oldName, String newName, Path oldPath, Path newPath,
+            boolean isRunning) {
+        final JProgressBar progressBar = new JProgressBar(0, 100);
+        progressBar.setStringPainted(true);
+        final JLabel statusLabel = new JLabel("Preparing...");
+
+        JPanel progressPanel = new JPanel(new MigLayout("fillx, insets 20", "[grow]", "[]10[]"));
+        progressPanel.add(statusLabel, "wrap");
+        progressPanel.add(progressBar, "growx");
+
+        final JDialog progressDialog = new JDialog((Window) SwingUtilities.getWindowAncestor(this),
+                "Renaming Profile", Dialog.ModalityType.APPLICATION_MODAL);
+        progressDialog.add(progressPanel);
+        progressDialog.pack();
+        progressDialog.setLocationRelativeTo(this);
+
+        if (!isConsoleExpanded)
+            toggleConsole();
+        appendLog("\n--- Renaming MariaDB profile: " + oldName + " -> " + newName + " ---");
+
+        new SwingWorker<Void, ProgressInfo>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                if (isRunning) {
+                    publish(new ProgressInfo("Stopping Signum Node core...", 10));
+                    Signum.shutdownNode();
+                    Thread.sleep(2000);
+
+                    if (currentProfile != null && currentProfile.isInstanceRunning()) {
+                        publish(new ProgressInfo("Stopping MariaDB instance...", 30));
+                        currentProfile.stopInstance((msg, p) -> publish(new ProgressInfo(msg, 30 + (p / 5))));
+                    }
+                }
+
+                publish(new ProgressInfo("Moving profile folder...", 60));
+                Files.move(oldPath, newPath);
+
+                publish(new ProgressInfo("Updating metadata...", 70));
+                ConfigurationUtils.updateAppliedProfile(
+                        ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.DATABASE_SUBFOLDER),
+                        DatabaseEngine.MARIADB.getDisplayName() + ":" + newName);
+
+                if (oldName.equals(loadedProfileName)) {
+                    loadedProfileName = newName;
+                    activeProfilePath = newPath;
+                    if (currentProfile != null)
+                        currentProfile.setProfileName(newName);
+                }
+                if (oldName.equals(runningProfileName)) {
+                    runningProfileName = newName;
+                    activeProfileName = newName;
+                }
+
+                if (isRunning) {
+                    publish(new ProgressInfo("Restarting MariaDB instance...", 80));
+                    if (currentProfile != null) {
+                        currentProfile.ensureInstanceRunning((msg, p) -> publish(new ProgressInfo(msg, 80 + (p / 10))));
+                    }
+
+                    publish(new ProgressInfo("Restarting Signum Node core...", 95));
+                    Signum.startNode();
+                }
+
+                return null;
+            }
+
+            @Override
+            protected void process(List<ProgressInfo> chunks) {
+                ProgressInfo info = chunks.get(chunks.size() - 1);
+                statusLabel.setText(info.message);
+                progressBar.setValue(info.progress);
+                appendLog(info.message);
+            }
+
+            @Override
+            protected void done() {
+                progressDialog.dispose();
+                try {
+                    get();
+                    refreshProfileList();
+                    profileComboBox.setSelectedItem(newName);
+                    updateUIFromData();
+                    JOptionPane.showMessageDialog(MariaDBConfigurationPanel.this, "Profile renamed successfully.");
+                } catch (Exception e) {
+                    logger.error("Rename operation failed", e);
+                    JOptionPane.showMessageDialog(MariaDBConfigurationPanel.this,
+                            "Error: " + (e.getCause() != null ? e.getCause().getMessage() : e.getMessage()), "Error",
+                            JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
+        progressDialog.setVisible(true);
     }
 
     private void deleteProfile(String name) {
@@ -3939,10 +4054,18 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
 
         final JProgressBar progressBar = new JProgressBar(0, 100);
         progressBar.setStringPainted(true);
+        final JLabel statusLabel = new JLabel("Preparing...");
+        statusLabel.setFont(UIManager.getFont("Label.font"));
+
+        JPanel progressPanel = new JPanel(new MigLayout("fillx, insets 20", "[grow]", "[]10[]"));
+        progressPanel.add(statusLabel, "wrap");
+        progressPanel.add(progressBar, "growx");
+
         final JDialog progressDialog = new JDialog((Window) SwingUtilities.getWindowAncestor(this),
                 actionName + " MariaDB", Dialog.ModalityType.APPLICATION_MODAL);
-        progressDialog.add(progressBar);
+        progressDialog.add(progressPanel);
         progressDialog.pack();
+        progressDialog.setMinimumSize(new Dimension(450, progressDialog.getHeight()));
         progressDialog.setLocationRelativeTo(this);
 
         new SwingWorker<Void, ProgressInfo>() {
@@ -3966,7 +4089,8 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             protected void process(List<ProgressInfo> chunks) {
                 ProgressInfo info = chunks.get(chunks.size() - 1);
                 progressBar.setValue(info.progress);
-                progressBar.setString(info.message);
+                statusLabel.setText(info.message);
+                appendLog(info.message);
             }
 
             @Override

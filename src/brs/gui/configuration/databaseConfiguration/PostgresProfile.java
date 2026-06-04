@@ -318,6 +318,14 @@ public class PostgresProfile {
         return configuration.getOrDefault(CFG_PORT, DEFAULT_PORT);
     }
 
+    public void setProfileName(String profileName) {
+        this.profileName = profileName;
+        this.profileRoot = (profileName != null && !profileName.trim().isEmpty())
+                ? PathUtils.resolvePath(DatabaseConfigurationUtils.DATABASE_BASE_DIR)
+                        .resolve(DatabaseConfigurationPanel.DatabaseEngine.POSTGRESQL.toString()).resolve(profileName)
+                : null;
+    }
+
     public String getAdminUsername() {
         return adminUsername;
     }

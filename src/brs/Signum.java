@@ -335,6 +335,21 @@ public final class Signum {
         isInitialized.set(false);
     }
 
+    /**
+     * Shuts down the node core services.
+     */
+    public static void shutdownNode() {
+        shutdown(false);
+    }
+
+    /**
+     * Re-initializes and starts the node core services.
+     */
+    public static void startNode() {
+        initShutdown();
+        init(CONF_FOLDER);
+    }
+
     public static void init(CaselessProperties customProperties) {
         if (isInitialized.compareAndSet(false, true)) {
             ensureLogger();

@@ -194,8 +194,12 @@ public class DatabaseConfigurationPanel extends JPanel {
         // Initialize sub-panels
         // Null is passed for the internal 'switch' actions as they are now handled by
         // tabs.
-        SQLiteConfigurationPanel sqliteConfig = new SQLiteConfigurationPanel();
-        PostgreSQLConfigurationPanel postgresqlConfig = new PostgreSQLConfigurationPanel();
+        SQLiteConfigurationPanel sqliteConfig = new SQLiteConfigurationPanel(this.restartAction, 
+                this.confFolder, 
+                this.backAction);
+        PostgreSQLConfigurationPanel postgresqlConfig = new PostgreSQLConfigurationPanel(this.restartAction,
+                this.confFolder,
+                this.backAction);
         this.mariadbConfig = new MariaDBConfigurationPanel(this.restartAction, this.confFolder,
                 this.backAction);
 
