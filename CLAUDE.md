@@ -39,12 +39,12 @@ Signum Node is the reference implementation of the Signum blockchain - a cryptoc
 
 ### Main Entry Points
 - `signum.Launcher` - Main application launcher (handles GUI vs headless mode)
-- `brs.Signum` - Core blockchain node implementation
+- `node.Signum` - Core blockchain node implementation
 - Application starts in `Launcher.main()` → `Signum.main()`
 
 ### Core Packages Structure
 
-#### Database Layer (`brs.db`)
+#### Database Layer (`node.db`)
 - `sql/` - SQL implementations for different database types (SQLite, MariaDB, PostgreSQL)
 - `store/` - Data access layer with service interfaces
 - `cache/` - Database caching implementation
@@ -56,25 +56,25 @@ Signum Node is the reference implementation of the Signum blockchain - a cryptoc
 - `TransactionProcessor` - Transaction validation and processing
 - `Generator` - Block mining/generation logic
 
-#### Services Layer (`brs.services`)
+#### Services Layer (`node.services`)
 - Service interfaces in main package, implementations in `impl/`
 - Key services: `AccountService`, `TransactionService`, `BlockService`, `ATService` (smart contracts)
 
-#### Smart Contracts (`brs.at`)
+#### Smart Contracts (`node.at`)
 - AT (Automated Transactions) - Signum's smart contract system
 - `AtController` - Smart contract execution engine
 - `AtApi` - Smart contract API interface
 
-#### Network Layer (`brs.peer`)
+#### Network Layer (`node.peer`)
 - P2P networking implementation
 - Peer discovery and communication protocols
 
-#### Web API (`brs.web`)
+#### Web API (`node.web`)
 - `api/http/handler/` - REST API endpoints
 - `api/ws/` - WebSocket implementations
 - `server/` - Jetty web server configuration
 
-#### Asset Exchange (`brs.assetexchange`)
+#### Asset Exchange (`node.assetexchange`)
 - Digital asset trading functionality
 - Order management and trade execution
 
@@ -82,7 +82,7 @@ Signum Node is the reference implementation of the Signum blockchain - a cryptoc
 - Properties loaded from `conf/node-default.properties` (defaults)
 - User overrides in `conf/node.properties`
 - Network-specific configs in `conf/mainnet/`, `conf/testnet/`
-- `brs.props.PropertyService` handles configuration management
+- `node.props.PropertyService` handles configuration management
 
 ### Multi-Network Support
 - `signum.net.NetworkParameters` - Network configuration base
@@ -142,10 +142,10 @@ Signum Node is the reference implementation of the Signum blockchain - a cryptoc
 - **Single Responsibility**: Each class should have ONE reason to change
 - **Layer Separation**: Keep business logic separate from data access, presentation, and infrastructure
 - **Package Organization**: Follow existing package structure strictly
-  - `brs.services` - Business logic interfaces
-  - `brs.services.impl` - Business logic implementations
-  - `brs.db.store` - Data access layer
-  - `brs.web.api.http.handler` - API presentation layer
+  - `node.services` - Business logic interfaces
+  - `node.services.impl` - Business logic implementations
+  - `node.db.store` - Data access layer
+  - `node.web.api.http.handler` - API presentation layer
 
 #### 2. Dependency Injection Pattern
 - Use constructor injection for required dependencies
@@ -174,7 +174,7 @@ blockchainProcessor.addListener(listener, BlockchainProcessor.Event.AFTER_BLOCK_
 Generator generator = mockMining ? new MockGenerator(...) : new GeneratorImpl(...);
 ```
 
-**Command Pattern** - For API handlers (see `brs.web.api.http.handler`)
+**Command Pattern** - For API handlers (see `node.web.api.http.handler`)
 ```java
 // Each API endpoint is a command that can be executed
 public abstract class APIRequestHandler {
@@ -306,7 +306,7 @@ public void transferAsset(long fromId, long toId, long assetId, long quantity) {
 - Never trust client-provided data
 
 **Cryptographic Operations:**
-- Use existing crypto utilities in `brs.crypto` package
+- Use existing crypto utilities in `node.crypto` package
 - Never implement custom cryptographic algorithms
 - Use secure random number generation
 

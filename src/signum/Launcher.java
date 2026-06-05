@@ -1,11 +1,12 @@
 package signum;
 
-import application.module.brs.Signum;
-import application.module.brs.props.Props;
-import application.module.brs.util.LoggerConfigurator;
+import application.module.node.Signum;
+import application.module.node.props.Props;
+import application.module.node.util.LoggerConfigurator;
+import application.module.node.db.sql.Db;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import application.module.brs.util.PathUtils;
+import application.module.node.util.PathUtils;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.HelpFormatter;
@@ -30,6 +31,7 @@ import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.TimeUnit;
+import java.util.Scanner;
 
 public class Launcher {
 
@@ -41,7 +43,7 @@ public class Launcher {
         // This helps avoid IllegalAccessException on modern JREs (17/21+)
         // when the LogManager tries to initialize via LoggerFactory calls.
         if (System.getProperty("java.util.logging.manager") == null) {
-            System.setProperty("java.util.logging.manager", "brs.util.SignumLogManager");
+            System.setProperty("java.util.logging.manager", "application.module.node.util.SignumLogManager");
         }
     }
 
@@ -109,7 +111,7 @@ public class Launcher {
                 }
                 // Add formatted string to GUI buffer to ensure uniform appearance in console
                 Signum.BOOTSTRAP_LOGS
-                        .add(String.format("[%s] %s application.module.brs.util.LoggerConfigurator - %s", level, ts,
+                        .add(String.format("[%s] %s application.module.node.util.LoggerConfigurator - %s", level, ts,
                                 content));
             }
         }
@@ -138,8 +140,24 @@ public class Launcher {
         }
 
         if (canRunGui) {
+            // The SignumGUI module should call Db.setRepairConfirmationHandler
+            // with a popup implementation during its own initialization.
             launchGui(args);
         } else {
+            // Headless mode: provide a console-based confirmation handler
+            Db.setRepairConfirmationHandler(message -> {
+                System.out.println("\n[!!!] ADATBÁZIS VALIDÁCIÓS HIBA [!!!]");
+                System.out.println("Részletek: " + message);
+                System.out.println(
+                        "\nÚgy tűnik, megváltozott a kód szerkezete. Szeretné lefuttatni a Flyway javítást (repair)?");
+                System.out.print("Írja be, hogy 'igen' a folytatáshoz: ");
+
+                Scanner scanner = new Scanner(System.in);
+                if (scanner.hasNextLine()) {
+                    return "igen".equalsIgnoreCase(scanner.nextLine().trim());
+                }
+                return false;
+            });
             Signum.main(args);
         }
     }
@@ -195,7 +213,7 @@ public class Launcher {
         try {
             // Use reflection to load SignumGUI to avoid hard dependency if the GUI module
             // is missing
-            Class.forName("brs.gui.SignumGUI")
+            Class.forName("application.module.node.gui.SignumGUI")
                     .getDeclaredMethod("main", String[].class)
                     .invoke(null, (Object) args);
         } catch (ClassNotFoundException | NoSuchMethodException | IllegalAccessException

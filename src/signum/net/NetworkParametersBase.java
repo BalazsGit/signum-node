@@ -5,16 +5,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
-import application.module.brs.Transaction;
-import application.module.brs.TransactionType;
-import application.module.brs.fluxcapacitor.FluxValue;
-import application.module.brs.fluxcapacitor.FluxValue.ValueChange;
-import application.module.brs.fluxcapacitor.HistoricalMoments;
-import application.module.brs.web.api.http.ApiServlet.HttpRequestHandler;
-import application.module.brs.props.Prop;
-import application.module.brs.web.api.http.common.APITransactionManager;
-import application.module.brs.services.AccountService;
-import application.module.brs.services.ParameterService;
+import application.module.node.Transaction;
+import application.module.node.TransactionType;
+import application.module.node.fluxcapacitor.FluxValue;
+import application.module.node.fluxcapacitor.FluxValue.ValueChange;
+import application.module.node.fluxcapacitor.HistoricalMoments;
+import application.module.node.web.api.http.ApiServlet.HttpRequestHandler;
+import application.module.node.props.Prop;
+import application.module.node.web.api.http.common.APITransactionManager;
+import application.module.node.services.AccountService;
+import application.module.node.services.ParameterService;
 
 public class NetworkParametersBase implements NetworkParameters {
 

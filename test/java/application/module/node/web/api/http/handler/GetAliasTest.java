@@ -1,0 +1,59 @@
+package application.module.node.web.api.http.handler;
+
+import application.module.node.Alias;
+import application.module.node.Alias.Offer;
+import application.module.node.common.QuickMocker;
+import application.module.node.services.AliasService;
+import application.module.node.services.ParameterService;
+import application.module.node.util.JSON;
+import application.module.node.web.api.http.common.ParameterException;
+import com.google.gson.JsonObject;
+import org.junit.Before;
+import org.junit.Test;
+
+import jakarta.servlet.http.HttpServletRequest;
+
+import static application.module.node.web.api.http.common.ResultFields.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+public class GetAliasTest {
+
+    private GetAlias t;
+
+    private ParameterService mockParameterService;
+    private AliasService mockAliasService;
+
+    @Before
+    public void setUp() {
+        mockParameterService = mock(ParameterService.class);
+        mockAliasService = mock(AliasService.class);
+
+        t = new GetAlias(mockParameterService, mockAliasService);
+    }
+
+    @Test
+    public void processRequest() throws ParameterException {
+        final Alias mockAlias = mock(Alias.class);
+        when(mockAlias.getAliasName()).thenReturn("mockAliasName");
+
+        final Offer mockOffer = mock(Offer.class);
+        when(mockOffer.getPriceNqt()).thenReturn(123L);
+        when(mockOffer.getBuyerId()).thenReturn(345L);
+
+        final HttpServletRequest req = QuickMocker.httpServletRequest();
+
+        when(mockParameterService.getAlias(eq(req))).thenReturn(mockAlias);
+        when(mockAliasService.getOffer(eq(mockAlias))).thenReturn(mockOffer);
+
+        final JsonObject result = (JsonObject) t.processRequest(req);
+        assertNotNull(result);
+        assertEquals(mockAlias.getAliasName(), JSON.getAsString(result.get(ALIAS_NAME_RESPONSE)));
+        assertEquals("" + mockOffer.getPriceNqt(), JSON.getAsString(result.get(PRICE_NQT_RESPONSE)));
+        assertEquals("" + mockOffer.getBuyerId(), JSON.getAsString(result.get(BUYER_RESPONSE)));
+    }
+
+}

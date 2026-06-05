@@ -10,19 +10,19 @@ Signum Node: Java 21 blockchain implementation with energy-efficient Proof-of-Co
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Presentation Layer                       │
-│    application.module.brs.web.api.http.handler (REST APIs)                    │
-│    application.module.brs.web.api.ws (WebSocket APIs)                         │
+│    application.module.node.web.api.http.handler (REST APIs)                    │
+│    application.module.node.web.api.ws (WebSocket APIs)                         │
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
 │                   Business Logic Layer                     │
-│    application.module.brs.services (interfaces)                               │
-│    application.module.brs.services.impl (implementations)                     │
+│    application.module.node.services (interfaces)                               │
+│    application.module.node.services.impl (implementations)                     │
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
 │                   Data Access Layer                        │
-│    application.module.brs.db.store (data access interfaces & implementations) │
+│    application.module.node.db.store (data access interfaces & implementations) │
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
@@ -93,7 +93,7 @@ public class GetAccountCommand extends APIRequestHandler {
 
 **Security Requirements:**
 - Validate API parameters using ParameterParser
-- Use existing crypto utilities  (application.module.brs.crypto package)
+- Use existing crypto utilities  (application.module.node.crypto package)
 - Never implement custom cryptographic functions
 - Sanitize all database inputs
 
@@ -242,14 +242,14 @@ Before submitting code, verify:
 
 ## Key Packages Reference
 
-- `brs.services.*` - Business logic interfaces and implementations
-- `brs.db.store.*` - Data access layer
-- `brs.web.api.http.*` - REST API handlers
-- `brs.at.*` - Smart contract (Automated Transaction) system
-- `brs.peer.*` - P2P networking
-- `brs.assetexchange.*` - Digital asset trading
-- `brs.crypto.*` - Cryptographic utilities
-- `brs.props.*` - Configuration management
+- `node.services.*` - Business logic interfaces and implementations
+- `node.db.store.*` - Data access layer
+- `node.web.api.http.*` - REST API handlers
+- `node.at.*` - Smart contract (Automated Transaction) system
+- `node.peer.*` - P2P networking
+- `node.assetexchange.*` - Digital asset trading
+- `node.crypto.*` - Cryptographic utilities
+- `node.props.*` - Configuration management
 
 ## Common Imports
 ```java
@@ -272,10 +272,10 @@ import org.json.simple.JSONObject;
 import org.json.simple.JSONStreamAware;
 
 // Project core
-import application.module.brs.*;
-import application.module.brs.services.*;
-import application.module.brs.db.store.*;
-import application.module.brs.web.api.http.common.*;
+import application.module.node.*;
+import application.module.node.services.*;
+import application.module.node.db.store.*;
+import application.module.node.web.api.http.common.*;
 ```
 
 ## Remember

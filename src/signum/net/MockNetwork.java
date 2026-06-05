@@ -1,6 +1,6 @@
 package signum.net;
 
-import application.module.brs.props.Props;
+import application.module.node.props.Props;
 
 public class MockNetwork extends TestnetNetwork {
 
@@ -30,8 +30,8 @@ public class MockNetwork extends TestnetNetwork {
         setProperty(Props.SMART_ALIASES_HEIGHT, "0");
         setProperty(Props.DEV_NEXT_FORK_BLOCK_HEIGHT, "0");
 
-        setProperty(Props.BRS_CHECKPOINT_HEIGHT, "-1");
-        setProperty(Props.BRS_CHECKPOINT_HASH, "");
+        setProperty(Props.NODE_CHECKPOINT_HEIGHT, "-1");
+        setProperty(Props.NODE_CHECKPOINT_HASH, "");
         setProperty(Props.DB_URL, "jdbc:sqlite:file:./db/signum.sqlite-mock.db");
     }
 }

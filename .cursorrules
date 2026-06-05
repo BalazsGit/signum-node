@@ -12,14 +12,14 @@ Signum Node is a Java 21 blockchain implementation using Gradle, with embedded S
 - Follow strict layered architecture: Services → Stores → Database
 - Use dependency injection (constructor injection only)
 - Never access database directly from business logic
-- Package organization: application.module.brs.services (interfaces) → application.module.brs.services.impl (implementations) → application.module.brs.db.store (data access)
+- Package organization: application.module.node.services (interfaces) → application.module.node.services.impl (implementations) → application.module.node.db.store (data access)
 
 ### Design Patterns (Gang of Four)
 Apply these patterns when appropriate:
 - Factory Pattern: Object creation with variants (see DatabaseInstanceFactory)
 - Observer Pattern: Event handling (BlockchainProcessor listeners)
 - Strategy Pattern: Algorithm variants (Generator implementations)
-- Command Pattern: API handlers  (application.module.brs.web.api.http.handler)
+- Command Pattern: API handlers  (application.module.node.web.api.http.handler)
 - Template Method: Common processing patterns
 
 ### Testing Requirements (MANDATORY)
@@ -47,7 +47,7 @@ For EVERY new class/method:
 
 ### Security Requirements
 - Validate all API parameters using ParameterParser
-- Use existing crypto utilities in application.module.brs.crypto package
+- Use existing crypto utilities in application.module.node.crypto package
 - Never implement custom cryptographic algorithms
 - Sanitize database inputs (JOOQ handles SQL injection)
 

@@ -1,0 +1,55 @@
+package application.module.node.web.api.http.handler;
+
+import application.module.node.Account;
+import application.module.node.Attachment;
+import application.module.node.Blockchain;
+import application.module.node.SignumException;
+import application.module.node.Constants;
+import application.module.node.services.AccountService;
+import application.module.node.services.ParameterService;
+import application.module.node.web.api.http.common.APITransactionManager;
+import application.module.node.web.api.http.common.LegacyDocTag;
+import application.module.node.web.api.http.common.ParameterParser;
+import com.google.gson.JsonElement;
+
+import jakarta.servlet.http.HttpServletRequest;
+
+import static application.module.node.web.api.http.common.JSONResponses.NOT_ENOUGH_FUNDS;
+import static application.module.node.web.api.http.common.JSONResponses.ERROR_NOT_ALLOWED;
+import static application.module.node.web.api.http.common.Parameters.AMOUNT_NQT_PARAMETER;
+
+public final class RemoveCommitment extends CreateTransaction {
+
+    private final ParameterService parameterService;
+    private final Blockchain blockchain;
+
+    public RemoveCommitment(ParameterService parameterService, Blockchain blockchain, AccountService accountService,
+            APITransactionManager apiTransactionManager) {
+        super(new LegacyDocTag[] { LegacyDocTag.ACCOUNTS, LegacyDocTag.MINING, LegacyDocTag.CREATE_TRANSACTION },
+                apiTransactionManager, AMOUNT_NQT_PARAMETER);
+        this.parameterService = parameterService;
+        this.blockchain = blockchain;
+    }
+
+    @Override
+    protected JsonElement processRequest(HttpServletRequest req) throws SignumException {
+        final Account account = parameterService.getSenderAccount(req);
+        long amountNQT = ParameterParser.getAmountNQT(req);
+
+        int nBlocksMined = blockchain.getBlocksCount(account.getId(), blockchain.getHeight() - Constants.MAX_ROLLBACK,
+                blockchain.getHeight());
+        if (nBlocksMined > 0) {
+            // need to wait since the last block mined to remove any commitment
+            return ERROR_NOT_ALLOWED;
+        }
+
+        long committedAmountNQT = blockchain.getCommittedAmount(account.getId(), blockchain.getHeight(),
+                blockchain.getHeight(), null);
+        if (committedAmountNQT < amountNQT) {
+            return NOT_ENOUGH_FUNDS;
+        }
+        Attachment attachment = new Attachment.CommitmentRemove(amountNQT, blockchain.getHeight());
+        return createTransaction(req, account, attachment);
+    }
+
+}

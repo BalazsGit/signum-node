@@ -1,6 +1,6 @@
 package it.common;
 
-import application.module.brs.common.TestInfrastructure;
+import application.module.node.common.TestInfrastructure;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.apache.http.HttpHost;
@@ -18,7 +18,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import static application.module.brs.web.api.http.common.Parameters.*;
+import static application.module.node.web.api.http.common.Parameters.*;
 
 public class APISender {
 

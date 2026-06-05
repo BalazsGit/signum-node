@@ -1,6 +1,6 @@
 package signum.net;
 
-import application.module.brs.props.Props;
+import application.module.node.props.Props;
 
 public class TestnetNetwork2 extends TestnetNetwork {
 

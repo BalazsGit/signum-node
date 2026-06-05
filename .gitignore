@@ -5,7 +5,7 @@
 .idea
 *.log
 /conf/logging.properties
-/conf/brs.properties
+/conf/node.properties
 /conf/node.properties
 _config.yml
 /html/ui/doc/*

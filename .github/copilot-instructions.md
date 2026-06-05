@@ -14,11 +14,11 @@ Signum Node is a Java 21 blockchain implementation with:
 
 ### Layer Separation (MANDATORY)
 ```
-Presentation Layer  (application.module.brs.web.api.http.handler) 
+Presentation Layer  (application.module.node.web.api.http.handler) 
     ↓
-Business Logic Layer  (application.module.brs.services.impl)
+Business Logic Layer  (application.module.node.services.impl)
     ↓  
-Data Access Layer  (application.module.brs.db.store)
+Data Access Layer  (application.module.node.db.store)
     ↓
 Database Layer (SQLite/MariaDB/PostgreSQL)
 ```
@@ -250,9 +250,9 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 // Project-specific
-import application.module.brs.services.*;
-import application.module.brs.db.store.*;
-import application.module.brs.web.api.http.common.*;
+import application.module.node.services.*;
+import application.module.node.db.store.*;
+import application.module.node.web.api.http.common.*;
 ```
 
 Generate clean, tested, enterprise-grade code that supports maintainable blockchain infrastructure.

@@ -9,9 +9,9 @@
     "architecture": {
       "pattern": "layered",
       "layers": [
-        "presentation  (application.module.brs.web.api.http.handler)",
-        "business  (application.module.brs.services.impl)", 
-        "data_access  (application.module.brs.db.store)",
+        "presentation  (application.module.node.web.api.http.handler)",
+        "business  (application.module.node.services.impl)", 
+        "data_access  (application.module.node.db.store)",
         "database (sqlite/mariadb/postgresql)"
       ],
       "dependency_injection": "constructor_only",
@@ -42,7 +42,7 @@
     },
     "security": {
       "parameter_validation": "ParameterParser",
-      "crypto_utilities": "brs.crypto_package_only",
+      "crypto_utilities": "node.crypto_package_only",
       "no_custom_crypto": true,
       "input_sanitization": "required",
       "sql_injection_protection": "jooq_prepared_statements"
@@ -58,14 +58,14 @@
   "project_structure": {
     "main_entry": "signum.Launcher",
     "core_packages": {
-      "services": "brs.services (interfaces), application.module.brs.services.impl (implementations)",
-      "data_access": "brs.db.store",
-      "web_api": "brs.web.api.http.handler",
-      "smart_contracts": "brs.at",
-      "networking": "brs.peer",
-      "asset_exchange": "brs.assetexchange",
-      "crypto": "brs.crypto",
-      "configuration": "brs.props"
+      "services": "node.services (interfaces), application.module.node.services.impl (implementations)",
+      "data_access": "node.db.store",
+      "web_api": "node.web.api.http.handler",
+      "smart_contracts": "node.at",
+      "networking": "node.peer",
+      "asset_exchange": "node.assetexchange",
+      "crypto": "node.crypto",
+      "configuration": "node.props"
     }
   },
   "build_system": {
@@ -124,7 +124,7 @@
     "logging": "org.slf4j.Logger, org.slf4j.LoggerFactory",
     "testing": "org.junit.jupiter.api.*, org.mockito.*, static org.junit.jupiter.api.Assertions.*, static org.mockito.Mockito.*",
     "json": "org.json.simple.JSONObject, org.json.simple.JSONStreamAware",
-    "project": "brs.*, application.module.brs.services.*, application.module.brs.db.store.*, application.module.brs.web.api.http.common.*"
+    "project": "node.*, application.module.node.services.*, application.module.node.db.store.*, application.module.node.web.api.http.common.*"
   },
   "ai_instructions": {
     "primary_goal": "Generate clean, tested, enterprise-grade code for blockchain infrastructure",

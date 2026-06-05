@@ -6,7 +6,7 @@ This template defines the review criteria and format that Claude AI uses when re
 
 ### 1. 🔒 Security Review
 - **Input Validation**: All external inputs properly validated
-- **Cryptographic Operations**: Only use existing utilities in `brs.crypto`
+- **Cryptographic Operations**: Only use existing utilities in `node.crypto`
 - **SQL Injection**: Proper use of JOOQ prepared statements
 - **Authentication/Authorization**: Proper access controls
 - **Sensitive Data**: No secrets, keys, or sensitive info in code
@@ -14,7 +14,7 @@ This template defines the review criteria and format that Claude AI uses when re
 ### 2. 🏗️ Architecture Compliance
 - **Layer Separation**: API → Services → Stores → Database
 - **Dependency Injection**: Constructor injection only
-- **Package Structure**: Follows `brs.*` organization
+- **Package Structure**: Follows `node.*` organization
 - **Interface Segregation**: Services depend on interfaces
 - **Single Responsibility**: One reason to change per class
 
@@ -104,21 +104,21 @@ This template defines the review criteria and format that Claude AI uses when re
 
 ## File-Specific Review Focus
 
-### Java Service Classes (`brs.services.impl.*`)
+### Java Service Classes (`node.services.impl.*`)
 - Constructor dependency injection
 - Interface implementation compliance
 - Business logic separation
 - Error handling and validation
 - Unit test coverage
 
-### API Handlers (`brs.web.api.http.handler.*`)
+### API Handlers (`node.web.api.http.handler.*`)
 - Command pattern implementation
 - Parameter validation using `ParameterService`
 - Proper exception handling
 - JSON response formatting
 - Security input validation
 
-### Data Stores (`brs.db.store.*`)
+### Data Stores (`node.db.store.*`)
 - JOOQ usage for SQL safety
 - Proper transaction handling
 - Result set pagination

@@ -2,12 +2,12 @@ package it.common;
 
 import static org.powermock.api.mockito.PowerMockito.mockStatic;
 
-import application.module.brs.Signum;
-import application.module.brs.common.TestInfrastructure;
-import application.module.brs.peer.Peers;
-import application.module.brs.peer.ProcessBlock;
-import application.module.brs.props.CaselessProperties;
-import application.module.brs.props.Props;
+import application.module.node.Signum;
+import application.module.node.common.TestInfrastructure;
+import application.module.node.peer.Peers;
+import application.module.node.peer.ProcessBlock;
+import application.module.node.props.CaselessProperties;
+import application.module.node.props.Props;
 import com.google.gson.JsonObject;
 import java.util.Properties;
 import org.junit.After;

@@ -2,10 +2,10 @@ package signum.net;
 
 import java.util.Arrays;
 
-import application.module.brs.fluxcapacitor.FluxValue;
-import application.module.brs.fluxcapacitor.FluxValues;
-import application.module.brs.fluxcapacitor.HistoricalMoments;
-import application.module.brs.props.Props;
+import application.module.node.fluxcapacitor.FluxValue;
+import application.module.node.fluxcapacitor.FluxValues;
+import application.module.node.fluxcapacitor.HistoricalMoments;
+import application.module.node.props.Props;
 
 public class TestnetNetwork extends NetworkParametersBase {
 
@@ -41,9 +41,9 @@ public class TestnetNetwork extends NetworkParametersBase {
         setProperty(Props.SMART_ALIASES_HEIGHT, "521300");
         setProperty(Props.ALIAS_RENEWAL_FREQUENCY, "1440");
 
-        setProperty(Props.BRS_CHECKPOINT_HEIGHT, "381300");
-        setProperty(Props.BRS_CHECKPOINT_HASH, "f0846a5d9f43801498316011601dd7c90fa7a20bd95295f2a5fba032bcdeb495");
-        setProperty(Props.BRS_PK_CHECKS, "900bb3db35adb8a8;c7e083683bbbc831;");
+        setProperty(Props.NODE_CHECKPOINT_HEIGHT, "381300");
+        setProperty(Props.NODE_CHECKPOINT_HASH, "f0846a5d9f43801498316011601dd7c90fa7a20bd95295f2a5fba032bcdeb495");
+        setProperty(Props.NODE_PK_CHECKS, "900bb3db35adb8a8;c7e083683bbbc831;");
 
         setProperty(Props.PK_BLOCK_HEIGHT, "500080");
         setProperty(Props.PK2_BLOCK_HEIGHT, "500080");

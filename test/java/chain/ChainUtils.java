@@ -1,6 +1,6 @@
 package chain;
 
-import application.module.brs.Signum;
+import application.module.node.Signum;
 import signumj.Constants;
 import signumj.crypto.SignumCrypto;
 import signumj.entity.SignumAddress;

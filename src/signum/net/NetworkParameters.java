@@ -2,12 +2,12 @@ package signum.net;
 
 import java.util.Map;
 
-import application.module.brs.Transaction;
-import application.module.brs.TransactionType;
-import application.module.brs.web.api.http.common.APITransactionManager;
-import application.module.brs.web.api.http.ApiServlet.HttpRequestHandler;
-import application.module.brs.services.AccountService;
-import application.module.brs.services.ParameterService;
+import application.module.node.Transaction;
+import application.module.node.TransactionType;
+import application.module.node.web.api.http.common.APITransactionManager;
+import application.module.node.web.api.http.ApiServlet.HttpRequestHandler;
+import application.module.node.services.AccountService;
+import application.module.node.services.ParameterService;
 
 public interface NetworkParameters {
 
