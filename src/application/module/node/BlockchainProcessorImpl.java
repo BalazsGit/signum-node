@@ -818,6 +818,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
                         getMoreBlocksLock.writeLock().lock();
                         try {
+                            if (!ThreadPool.running.get() || isShutdown.get()) {
+                                return;
+                            }
 
                             // Keep the download cache below the rollback limit
                             Block lastCachedBlock = downloadCache.getLastBlock();
@@ -838,6 +841,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
                             Peer peer = null;
                             do {
+                                if (!ThreadPool.running.get() || isShutdown.get()) {
+                                    return;
+                                }
                                 peer = Peers.getAnyPeer(Peer.State.CONNECTED);
                                 if (peer == null) {
                                     logger.debug("No peer connected.");
@@ -886,7 +892,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                     continue;
                                 }
                                 betterCumulativeDifficulty = new BigInteger(peerCumulativeDifficulty);
-                            } while (betterCumulativeDifficulty.compareTo(curCumulativeDifficulty) <= 0);
+                            } while (betterCumulativeDifficulty.compareTo(curCumulativeDifficulty) <= 0 
+                                    && ThreadPool.running.get() && !isShutdown.get());
 
                             logger.trace("Got a better cumulative difficulty {} than current {}.",
                                     betterCumulativeDifficulty, curCumulativeDifficulty);
@@ -1042,8 +1049,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                     logger.warn("Unhandled exception {}" + e.toString(), e);
                                     logger.warn("Unhandled exception trace: {}", Arrays.toString(e.getStackTrace()));
                                 }
-                                // executor shutdown?
-                                if (Thread.currentThread().isInterrupted() || !ThreadPool.running.get()) {
+                                // check if we are interrupted or shutdown in between blocks, if so we stop the loop and do not process the downloaded blocks
+                                if (Thread.currentThread().isInterrupted() || !ThreadPool.running.get() || isShutdown.get()) {
                                     return;
                                 }
                             } // end block loop
@@ -1089,7 +1096,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
                 String lastMilestoneBlockId = null;
 
-                while (!Thread.currentThread().isInterrupted() && ThreadPool.running.get()) {
+                while (!Thread.currentThread().isInterrupted() && ThreadPool.running.get() && !isShutdown.get()) {
                     JsonObject milestoneBlockIdsRequest = new JsonObject();
                     milestoneBlockIdsRequest.addProperty("requestType", "getMilestoneBlockIds");
                     if (lastMilestoneBlockId == null) {
@@ -1145,7 +1152,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
             private long getCommonBlockId(Peer peer, long commonBlockId) throws InterruptedException {
 
-                while (!Thread.currentThread().isInterrupted() && ThreadPool.running.get()) {
+                while (!Thread.currentThread().isInterrupted() && ThreadPool.running.get() && !isShutdown.get()) {
                     JsonObject request = new JsonObject();
                     request.addProperty("requestType", "getNextBlockIds");
                     request.addProperty("blockId", Convert.toUnsignedLong(commonBlockId));
