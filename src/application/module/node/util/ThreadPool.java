@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -17,6 +18,15 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class ThreadPool {
+
+    private static final int SHUTDOWN_GRACE_PERIOD_SECONDS = 10;
+
+    /**
+     * Jobs that are safe to interrupt immediately because they are usually
+     * blocked on network I/O and don't perform critical atomic operations.
+     */
+    private static final Set<String> INTERRUPTIBLE_JOBS = Set.of(
+            "GetMoreBlocks", "PeerConnecting", "GetCumulativeDifficulty");
 
     public static final AtomicBoolean running = new AtomicBoolean(true);
 
@@ -179,42 +189,50 @@ public final class ThreadPool {
     }
 
     public void shutdownExecutor(String name, ExecutorService executor) {
-        running.lazySet(false); // Signal all loops to stop
+        running.set(false); // Signal all loops to stop
         if (executor == null || executor.isTerminated()) {
             return;
         }
         logger.info("Stopping executor '{}'...", name);
         long shutdownStartTime = System.currentTimeMillis();
+
+        // Phase 1: Request graceful shutdown.
         executor.shutdown();
 
-        // List what is currently running ONLY for the main pool to avoid misleading
-        // logs
         if ("MainThreadPool".equals(name) && !activeThreadsJobName.isEmpty()) {
-            logger.info("The following background jobs are still executing and being awaited: {}",
+            logger.info("Waiting for essential background jobs to finish: {}",
                     new ArrayList<>(activeThreadsJobName.values()));
         }
 
         int timeout = propertyService.getInt(Props.NODE_SHUTDOWN_TIMEOUT);
-        logger.info("Waiting up to {} seconds for executor termination...", timeout);
-        try {
-            // Wait a while for existing tasks to terminate
-            if (!executor.awaitTermination(timeout, TimeUnit.SECONDS)) {
-                logger.warn("Executor service '{}' did not terminate gracefully within {}s. Forcing shutdown...", name,
-                        timeout);
+        logger.info("Waiting up to {}s for termination (grace period: {}s)...", timeout, SHUTDOWN_GRACE_PERIOD_SECONDS);
 
-                // Report exactly which threads are stuck and for how long
+        try {
+            // 1. Wait a short grace period for essential tasks to finish voluntarily
+            if (!executor.awaitTermination(SHUTDOWN_GRACE_PERIOD_SECONDS, TimeUnit.SECONDS)) {
+                logger.warn("Executor '{}' still busy after {}s. Interrupting non-essential idlers...",
+                        name, SHUTDOWN_GRACE_PERIOD_SECONDS);
+
+                // Targeted Nudge: Interrupt ONLY non-essential jobs now that grace period
+                // expired
                 activeThreadsJobName.forEach((thread, jobName) -> {
-                    Long startTime = activeThreadsStartTime.get(thread);
-                    long duration = (startTime != null) ? (System.currentTimeMillis() - startTime) : -1;
-                    logger.warn("Stuck Job: '{}' on thread '{}' (active for {} ms)", jobName,
-                            thread.getName(), duration);
+                    if (INTERRUPTIBLE_JOBS.contains(jobName)) {
+                        logger.info("  - Interrupting non-essential job: '{}'", jobName);
+                        thread.interrupt();
+                    } else {
+                        Long startTime = activeThreadsStartTime.get(thread);
+                        long duration = (startTime != null) ? (System.currentTimeMillis() - startTime) : -1;
+                        logger.info("  - Vital job still running: '{}' ({} ms)", jobName, duration);
+                    }
                 });
 
-                executor.shutdownNow(); // Cancel currently executing tasks
-                // Wait a while for tasks to respond to being cancelled
-                if (!executor.awaitTermination(10, TimeUnit.SECONDS)) {
-                    logger.error("Executor service '{}' did not terminate even after forcing shutdown (shutdownNow).",
-                            name);
+                // 2. Wait for the remaining timeout for vital tasks to finish naturally.
+                // We do NOT call shutdownNow() here yet to protect vital tasks.
+                if (!executor.awaitTermination(Math.max(1, timeout - SHUTDOWN_GRACE_PERIOD_SECONDS),
+                        TimeUnit.SECONDS)) {
+                    logger.error("Executor '{}' did not terminate after full {}s timeout. Forcing shutdownNow...",
+                            name, timeout);
+                    executor.shutdownNow(); // Final safety kill for everything
                     throw new RuntimeException("Executor service '" + name + "' failed to terminate.");
                 }
             } else {
