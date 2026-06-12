@@ -2,7 +2,6 @@ package application.module.node.gui;
 
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLaf;
-import application.module.node.gui.laf.FlatLafPrefs;
 import com.formdev.flatlaf.util.SystemInfo;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -44,7 +43,9 @@ import javax.swing.BoxLayout;
 import javax.swing.Icon;
 import application.module.node.gui.animations.RotatingSvgIcon;
 import application.module.node.gui.configuration.ConfigurationPanel;
-import application.module.node.gui.configuration.LookAndFeelPanel;
+import application.gui.glassPanel.GlassPanel;
+import application.module.appearance.AppearanceModule;
+import application.module.appearance.gui.AppearancePanel;
 import javax.swing.JDialog;
 import java.awt.geom.Rectangle2D;
 import javax.swing.JButton;
@@ -89,10 +90,6 @@ import org.apache.commons.cli.DefaultParser;
 import application.module.node.Signum;
 import application.module.node.BlockchainProcessor;
 import application.module.node.Constants;
-import application.module.node.gui.util.CustomDrawings;
-import application.module.node.gui.util.HelpButton;
-import application.module.node.gui.util.GuiUtils;
-import application.module.node.gui.util.CustomDrawingComponent;
 import application.module.node.Block;
 import application.module.node.peer.Peer;
 import application.module.node.fluxcapacitor.FluxValues;
@@ -100,15 +97,23 @@ import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.util.DurationFormatter;
 import application.module.node.util.Listener;
+import application.utils.gui.CustomDrawingComponent;
+import application.utils.gui.CustomDrawings;
+import application.utils.gui.GuiColors;
+import application.utils.gui.GuiConstants;
+import application.utils.gui.GuiFontManager;
+import application.utils.gui.GuiUtils;
+import application.utils.gui.HelpButton;
 import application.module.node.util.Convert;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
 
 @SuppressWarnings("serial")
-public class SignumGUI extends JFrame {
+public class SignumGUI extends JPanel {
     private static final String FAILED_TO_START_MESSAGE = "Signum caught exception while starting";
     private static SignumGUI instance;
+    private final JFrame parentFrame;
     private static final String UNEXPECTED_EXIT_MESSAGE = "Signum Quit unexpectedly! Exit code ";
 
     public static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("HH:mm:ss yyyy-MM-dd");
@@ -121,187 +126,8 @@ public class SignumGUI extends JFrame {
 
     private static String[] args;
 
-    static {
-        // Enable and set duration for theme transition animations early
-        System.setProperty("flatlaf.lafChangeAnimationDuration", "400");
-    }
-
-    private static Font activeCustomFont;
-    private static Font activeConsoleFont;
-
-    public static Font getActiveCustomFont() {
-        if (activeCustomFont != null) {
-            return activeCustomFont;
-        }
-        Font f = UIManager.getFont("Label.font");
-        return f != null ? f : new Font(Font.SANS_SERIF, Font.PLAIN, 12);
-    }
-
-    public static Font getActiveConsoleFont() {
-        if (activeConsoleFont != null) {
-            return activeConsoleFont;
-        }
-        Font custom = getActiveCustomFont();
-        return custom != null ? custom : new Font(Font.MONOSPACED, Font.PLAIN, 14);
-    }
-
-    private static Path getGuiSettingsPath(String[] args) {
-        String confFolder = Signum.CONF_FOLDER;
-        try {
-            CommandLine cmd = new DefaultParser().parse(Signum.CLI_OPTIONS, args);
-            if (cmd.hasOption(Signum.CONF_FOLDER_OPTION.getOpt())) {
-                confFolder = cmd.getOptionValue(Signum.CONF_FOLDER_OPTION.getOpt());
-            }
-        } catch (Exception e) {
-            LOGGER.error("Error parsing command line arguments for config folder", e);
-        }
-
-        String settingsDir = Props.SETTINGS_DIR.getDefaultValue();
-        Path confPath = application.module.node.util.PathUtils.resolvePath(confFolder);
-        Path nodePath = confPath.resolve("node");
-        Path nodePropsFile = Signum.resolvePropertiesPath(nodePath, Signum.PROPERTIES_NAME,
-                Signum.DEFAULT_PROPERTIES_NAME, confPath);
-
-        if (nodePropsFile != null && Files.exists(nodePropsFile)) {
-            try (java.io.FileInputStream in = new java.io.FileInputStream(nodePropsFile.toFile())) {
-                Properties nodeProps = new Properties();
-                nodeProps.load(in);
-                settingsDir = nodeProps.getProperty(Props.SETTINGS_DIR.getName(), settingsDir);
-            } catch (Exception e) {
-                // ignore
-            }
-        }
-        return application.module.node.util.PathUtils.resolvePath(settingsDir).resolve("gui-settings.json");
-    }
-
-    private static void loadLookAndFeelSettings(String[] args) {
-        // Initialize FlatLaf preferences early so ColorPaletteManager can access them
-        FlatLafPrefs.init("/flatlaf-settings");
-
-        Path settingsPath = getGuiSettingsPath(args);
-        String themeClassName = FlatDarkLaf.class.getName(); // Default theme
-        Map<String, Color> colorOverrides = null;
-        Font fontToApply = null;
-        Font consoleFontToApply = null;
-
-        if (Files.exists(settingsPath)) {
-            try (java.io.BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
-                JsonElement parsed = JsonParser.parseReader(reader);
-                if (parsed.isJsonObject()) {
-                    JsonObject settings = parsed.getAsJsonObject();
-                    String lastProfileName = null;
-
-                    if (settings.has("lastSelectedLafProfile")) {
-                        lastProfileName = settings.get("lastSelectedLafProfile").getAsString();
-                    }
-
-                    if (settings.has("enableGPU") && settings.get("enableGPU").getAsBoolean()) {
-                        System.setProperty("sun.java2d.opengl", "true");
-                    }
-
-                    if (lastProfileName != null && settings.has("lookAndFeelProfiles")) {
-                        JsonObject profiles = settings.getAsJsonObject("lookAndFeelProfiles");
-                        if (profiles.has(lastProfileName)) {
-                            JsonObject profileSettings = profiles.getAsJsonObject(lastProfileName);
-                            if (profileSettings.has("theme")) {
-                                themeClassName = profileSettings.get("theme").getAsString();
-                            }
-                            if (profileSettings.has("font")) {
-                                JsonObject fontSettings = profileSettings.getAsJsonObject("font");
-                                String family = fontSettings.get("family").getAsString();
-                                int style = fontSettings.get("style").getAsInt();
-                                int size = fontSettings.get("size").getAsInt();
-                                fontToApply = new Font(family, style, size);
-                            }
-                            if (profileSettings.has("consoleFont")) {
-                                JsonObject fontSettings = profileSettings.getAsJsonObject("consoleFont");
-                                String family = fontSettings.get("family").getAsString();
-                                int style = fontSettings.get("style").getAsInt();
-                                int size = fontSettings.get("size").getAsInt();
-                                consoleFontToApply = new Font(family, style, size);
-                            }
-                            if (profileSettings.has("colorOverrides")) {
-                                colorOverrides = parseColorOverrides(profileSettings.getAsJsonObject("colorOverrides"));
-                            }
-                        }
-                    } else if (settings.has("lookAndFeelSettings")) { // Fallback to old structure
-                        JsonObject lafSettings = settings.getAsJsonObject("lookAndFeelSettings");
-                        if (lafSettings.has("theme")) {
-                            themeClassName = lafSettings.get("theme").getAsString();
-                        }
-                        if (lafSettings.has("font")) {
-                            JsonObject fontSettings = lafSettings.getAsJsonObject("font");
-                            String family = fontSettings.get("family").getAsString();
-                            int style = fontSettings.get("style").getAsInt();
-                            int size = fontSettings.get("size").getAsInt();
-                            fontToApply = new Font(family, style, size);
-                        }
-                        if (lafSettings.has("consoleFont")) {
-                            JsonObject fontSettings = lafSettings.getAsJsonObject("consoleFont");
-                            String family = fontSettings.get("family").getAsString();
-                            int style = fontSettings.get("style").getAsInt();
-                            int size = fontSettings.get("size").getAsInt();
-                            consoleFontToApply = new Font(family, style, size);
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                LOGGER.warn("Could not load Look and Feel settings, using default.", e);
-            }
-        }
-
-        // Register custom defaults source for FlatLaf (accent colors, etc.)
-        String packageName = GuiResources.FLATLAF_RESOURCE_PATH;
-        if (packageName.endsWith("/")) {
-            packageName = packageName.substring(0, packageName.length() - 1);
-        }
-        FlatLaf.registerCustomDefaultsSource(packageName);
-
-        try {
-            UIManager.setLookAndFeel(themeClassName);
-            updateCommonFontKeys(fontToApply);
-            updateCommonConsoleFontKeys(consoleFontToApply);
-            ColorPaletteManager.updatePalette(colorOverrides);
-        } catch (Exception e) {
-            LOGGER.error("Failed to set Look and Feel, falling back to FlatDarkLaf.", e);
-            FlatDarkLaf.setup();
-            ColorPaletteManager.updatePalette(colorOverrides);
-        }
-    }
-
-    public static void updateCommonFontKeys(Font font) {
-        activeCustomFont = font;
-        GuiFontManager.updateUIManager(font);
-    }
-
-    public static void updateCommonConsoleFontKeys(Font font) {
-        activeConsoleFont = font;
-        GuiFontManager.updateConsoleFont(font);
-    }
-
-    /**
-     * Recursively applies a font to all components in a container.
-     * Used as a fallback for LookAndFeels that don't correctly respond to UIManager
-     * key updates on live components.
-     */
     private static void applyFontRecursively(Component comp, Font font) {
         GuiFontManager.applyFontToTree(comp, font);
-    }
-
-    private static Map<String, Color> parseColorOverrides(JsonObject overridesJson) {
-        if (overridesJson == null) {
-            return null;
-        }
-        Map<String, Color> overrides = new HashMap<>();
-        for (Map.Entry<String, JsonElement> entry : overridesJson.entrySet()) {
-            try {
-                overrides.put(entry.getKey(), Color.decode(entry.getValue().getAsString()));
-            } catch (NumberFormatException e) {
-                LOGGER.warn("Invalid color override format for key '{}': {}", entry.getKey(),
-                        entry.getValue().getAsString());
-            }
-        }
-        return overrides;
     }
 
     /**
@@ -314,80 +140,22 @@ public class SignumGUI extends JFrame {
      * (e.g., font-sized icons).
      */
     public static void updateAllUIs() {
-        Map<String, Color> overrides = new HashMap<>();
-        if (LookAndFeelPanel.getInstance() != null && LookAndFeelPanel.getInstance().getColorSettingsPanel() != null) {
-            overrides = new HashMap<>(LookAndFeelPanel.getInstance().getColorSettingsPanel().getCurrentOverrides());
-        }
+        AppearanceModule.updateAllUIs();
+    }
 
-        LookAndFeel laf = UIManager.getLookAndFeel();
-        LOGGER.info("Updating all UIs. Current LookAndFeel: {} ({})", laf.getName(), laf.getClass().getName());
-
-        // 1. Update the color palette based on the current theme and overrides
-        ColorPaletteManager.updatePalette(overrides);
-
-        // 1b. Ensure all common UI fonts are linked to the active font
-        updateCommonFontKeys(activeCustomFont);
-        updateCommonConsoleFontKeys(activeConsoleFont);
-
-        // Capture window sizes before update to prevent auto-resizing (packing)
-        // behavior
-        // of some Look and Feels or decoration switches.
-        Map<Window, Dimension> windowSizes = new HashMap<>();
-        for (Window w : Window.getWindows()) {
-            if (w.isDisplayable()) {
-                windowSizes.put(w, w.getSize());
+    private void updateConsoleStyle() {
+        if (textScrollPane != null) {
+            JTextPane tp = (JTextPane) textScrollPane.getViewport().getView();
+            Font consoleFont = AppearanceModule.getActiveConsoleFont();
+            if (tp != null && consoleFont != null) {
+                tp.setFont(consoleFont);
+                // Update existing text in the StyledDocument
+                StyledDocument doc = tp.getStyledDocument();
+                SimpleAttributeSet attrs = new SimpleAttributeSet();
+                StyleConstants.setFontFamily(attrs, consoleFont.getFamily());
+                StyleConstants.setFontSize(attrs, consoleFont.getSize());
+                doc.setCharacterAttributes(0, doc.getLength(), attrs, false);
             }
-        }
-
-        if (laf instanceof FlatLaf) {
-            // FlatLaf.updateUI() internally handles the animated transition and updates all
-            // windows efficiently.
-            FlatLaf.updateUI();
-        } else {
-            // Manual update for non-FlatLaf themes (like Nimbus)
-            for (Window window : Window.getWindows()) {
-                if (window.isDisplayable()) {
-                    LOGGER.info("Refreshing window: {} ({})", window.getName(), window.getClass().getSimpleName());
-                    SwingUtilities.updateComponentTreeUI(window);
-
-                    // Force font application for Standard L&F (excluding Nimbus per user request)
-                    if (activeCustomFont != null) {
-                        applyFontRecursively(window, activeCustomFont);
-                    }
-                    window.revalidate();
-                    window.repaint();
-                }
-            }
-        }
-
-        // Restore window sizes ONLY for non-FlatLaf themes.
-        // FlatLaf handles its own UI updates smoothly. Calling setSize during
-        // a FlatLaf animation phase can cause flickering or cancel the transition.
-        if (!(laf instanceof FlatLaf)) {
-            for (Window window : Window.getWindows()) {
-                if (window.isDisplayable() && windowSizes.containsKey(window)) {
-                    window.setSize(windowSizes.get(window));
-                }
-            }
-        }
-
-        // 3. Specialized component updates
-        if (instance != null) {
-            // Console font and content update
-            if (instance.textScrollPane != null) {
-                JTextPane tp = (JTextPane) instance.textScrollPane.getViewport().getView();
-                Font consoleFont = getActiveConsoleFont();
-                if (tp != null && consoleFont != null) {
-                    tp.setFont(consoleFont);
-                    // Update existing text in the StyledDocument
-                    StyledDocument doc = tp.getStyledDocument();
-                    SimpleAttributeSet attrs = new SimpleAttributeSet();
-                    StyleConstants.setFontFamily(attrs, consoleFont.getFamily());
-                    StyleConstants.setFontSize(attrs, consoleFont.getSize());
-                    doc.setCharacterAttributes(0, doc.getLength(), attrs, false);
-                }
-            }
-            instance.updateCustomComponents();
         }
     }
 
@@ -424,21 +192,12 @@ public class SignumGUI extends JFrame {
             SwingUtilities.updateComponentTreeUI(menuPanel);
             menuPanel.setBackground(UIManager.getColor("PopupMenu.background"));
             menuPanel.setBorder(UIManager.getBorder("PopupMenu.border"));
-            if (!isFlatLaf && activeCustomFont != null) {
-                applyFontRecursively(menuPanel, activeCustomFont);
-            }
         }
         if (menuPanelWrapper != null) {
             SwingUtilities.updateComponentTreeUI(menuPanelWrapper);
-            if (!isFlatLaf && activeCustomFont != null) {
-                applyFontRecursively(menuPanelWrapper, activeCustomFont);
-            }
         }
         if (commandPanel != null) {
             SwingUtilities.updateComponentTreeUI(commandPanel);
-            if (!isFlatLaf && activeCustomFont != null) {
-                applyFontRecursively(commandPanel, activeCustomFont);
-            }
         }
     }
 
@@ -672,12 +431,12 @@ public class SignumGUI extends JFrame {
             // Calculate position relative to layered pane
             int menuWidth = Math.max(250, menuPanel.getPreferredSize().width);
             Point p = menuButton.getLocationOnScreen();
-            SwingUtilities.convertPointFromScreen(p, getLayeredPane());
+            SwingUtilities.convertPointFromScreen(p, parentFrame.getLayeredPane());
             int x = p.x + menuButton.getWidth() - menuWidth;
             int y = p.y + menuButton.getHeight();
 
             menuPanelWrapper.setBounds(x, y, menuWidth, 0);
-            getLayeredPane().add(menuPanelWrapper, JLayeredPane.POPUP_LAYER);
+            parentFrame.getLayeredPane().add(menuPanelWrapper, JLayeredPane.POPUP_LAYER);
 
             menuPanelWrapper.add(menuPanel, BorderLayout.CENTER);
             menuPanel.setVisible(true);
@@ -723,7 +482,7 @@ public class SignumGUI extends JFrame {
             }
 
             final int startHeight = menuPanelWrapper.getHeight();
-            final int menuWidth = menuPanelWrapper.getWidth();
+            final int menuWidthVal = menuPanelWrapper.getWidth();
 
             menuPanelAnimator = new Timer(10, new ActionListener() {
                 final long startTime = System.currentTimeMillis();
@@ -736,17 +495,18 @@ public class SignumGUI extends JFrame {
                     progress = 1.0f - (float) Math.pow(1.0f - progress, 3);
 
                     int h = (int) (startHeight * (1.0f - progress));
-                    menuPanelWrapper.setSize(menuWidth, h);
+                    menuPanelWrapper.setSize(menuWidthVal, h);
                     menuPanelWrapper.revalidate();
                     menuPanelWrapper.repaint();
 
                     if (progress >= 1.0f) {
                         ((Timer) e.getSource()).stop();
                         menuPanelWrapper.removeAll();
-                        getLayeredPane().remove(menuPanelWrapper);
-                        getLayeredPane().repaint();
+                        parentFrame.getLayeredPane().remove(menuPanelWrapper);
+                        parentFrame.getLayeredPane().repaint();
                     }
                 }
+
             });
             menuPanelAnimator.start();
         }
@@ -855,6 +615,7 @@ public class SignumGUI extends JFrame {
                             parent.revalidate();
                     }
                 }
+
             });
             popOffAnimator.start();
         }
@@ -962,8 +723,14 @@ public class SignumGUI extends JFrame {
         return instance;
     }
 
+    public JTextPane getConsoleTextPane() {
+        if (textScrollPane != null) {
+            return (JTextPane) textScrollPane.getViewport().getView();
+        }
+        return null;
+    }
+
     public void showLookAndFeelSettings() {
-        configurationPanel.setSelectedTab(ConfigurationPanel.ConfigTab.LAF);
         cardLayout.show(mainCardPanel, VIEW_CONFIGURATION);
     }
 
@@ -976,37 +743,24 @@ public class SignumGUI extends JFrame {
             // ignore
         }
 
-        SignumGUI.loadLookAndFeelSettings(args);
+        AppearanceModule.setupInitialLookAndFeel(args);
         SwingUtilities.invokeLater(() -> {
-            new SignumGUI("Signum Node", Props.ICON_LOCATION.getDefaultValue(), Signum.VERSION.toString(), args);
+            JFrame frame = new JFrame();
+            SignumGUI gui = new SignumGUI(frame, "Signum Node", Props.ICON_LOCATION.getDefaultValue(),
+                    Signum.VERSION.toString(), args);
+            frame.setContentPane(gui);
+            frame.pack();
+            frame.setLocationRelativeTo(null);
+            frame.setVisible(true);
         });
     }
 
-    public SignumGUI(String programName, String iconLocation, String version, String[] args) {
-        try {
-            // SecurityManager removed (Java 17+ deprecation).
-            // Install a simple shutdown hook instead for cleanup if needed.
-            try {
-                Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                    try {
-                        // TODO: add GUI cleanup here if required
-                    } catch (Throwable t) {
-                        t.printStackTrace();
-                    }
-                }));
-            } catch (Throwable t) {
-                // ignore
-            }
-
-        } catch (UnsupportedOperationException e) {
-            // Java 17+ / 21+: Setting a SecurityManager is not supported anymore
-            System.err.println("SecurityManager not supported, skipping setup");
-        }
+    public SignumGUI(JFrame parentFrame, String programName, String iconLocation, String version, String[] args) {
         SignumGUI.args = args;
         instance = this;
+        this.parentFrame = parentFrame;
         this.programName = programName;
         this.version = version;
-        setTitle(programName + " " + version);
         this.iconLocation = iconLocation;
 
         IconFontSwing.register(FontAwesome.getIconFont());
@@ -1034,7 +788,7 @@ public class SignumGUI extends JFrame {
             LOGGER.warn("Could not register FontAwesome for HTML rendering", e);
         }
         JTextPane textPane = new JTextPane();
-        Font consoleFont = UIManager.getFont("TextPane.font");
+        Font consoleFont = AppearanceModule.getActiveConsoleFont();
         if (consoleFont == null) {
             consoleFont = new Font(Font.MONOSPACED, Font.PLAIN, 14);
         }
@@ -1072,6 +826,7 @@ public class SignumGUI extends JFrame {
         java.util.logging.Logger.getLogger("").addHandler(guiHandler);
 
         textScrollPane = new JScrollPane(textPane);
+        textScrollPane.setBorder(BorderFactory.createEmptyBorder());
         textScrollPane.getVerticalScrollBar().setUnitIncrement(16);
 
         JPanel content = new JPanel(new BorderLayout());
@@ -1098,7 +853,14 @@ public class SignumGUI extends JFrame {
                 () -> cardLayout.show(mainCardPanel, VIEW_CONSOLE));
         mainCardPanel.add(configurationPanel, VIEW_CONFIGURATION);
 
-        setContentPane(mainCardPanel);
+        // Regisztrálunk az AppearanceModule-nál az egyedi UI frissítésekre
+        AppearanceModule.registerAppearanceListener(() -> {
+            updateCustomComponents();
+            updateConsoleStyle();
+        });
+
+        setLayout(new BorderLayout());
+        add(mainCardPanel, BorderLayout.CENTER);
 
         toolBar = new JPanel(new MigLayout("insets 0, gap 0, fillx, hidemode 3", "[grow, shrink]0[pref!]", "[top]"));
 
@@ -1321,7 +1083,7 @@ public class SignumGUI extends JFrame {
                 + "This information is essential for confirming that your node is connected to the network and processing new blocks as they are created.";
         addInfoTooltip(latestBlockHeightLabel, blockInfoTooltip);
         addInfoTooltip(latestBlockTimestampLabel, blockInfoTooltip);
-        metricsPanel = new MetricsPanel(this);
+        metricsPanel = new MetricsPanel(parentFrame);
         metricsPanel.setVisible(false);
         metricsPanelWrapper = new JPanel(new BorderLayout());
         metricsPanelWrapper.add(metricsPanel, BorderLayout.CENTER);
@@ -1508,6 +1270,7 @@ public class SignumGUI extends JFrame {
 
         JScrollPane scrollPane = new JScrollPane(leftButtons);
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
+        scrollPane.getHorizontalScrollBar().setUnitIncrement(16);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
         scrollPane.setMinimumSize(new Dimension(0, 0)); // Allow toolbar to shrink and show scrollbar
         scrollPane.setOpaque(false);
@@ -1585,7 +1348,7 @@ public class SignumGUI extends JFrame {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (SwingUtilities.isLeftMouseButton(e) || SwingUtilities.isRightMouseButton(e)) {
-                    PeersDialog.showPeersDialog(SignumGUI.this);
+                    PeersDialog.showPeersDialog(parentFrame);
                 }
             }
         };
@@ -1718,56 +1481,62 @@ public class SignumGUI extends JFrame {
         bottomPanel.add(infoPanel, BorderLayout.LINE_END);
 
         try {
-            java.io.InputStream iconStream = getClass().getResourceAsStream(iconLocation);
-            if (iconStream != null) {
-                setIconImage(ImageIO.read(iconStream));
+            if (parentFrame != null && iconLocation != null) {
+                java.io.InputStream iconStream = getClass().getResourceAsStream(iconLocation);
+                if (iconStream != null) {
+                    parentFrame.setIconImage(ImageIO.read(iconStream));
+                }
             }
         } catch (IOException e) {
             e.printStackTrace();
         }
-        initGlassPane();
 
-        setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
-        addWindowListener(new WindowAdapter() {
-            @Override
-            public void windowClosing(WindowEvent e) {
-                if (trayIcon == null) {
-                    Runnable exitTask = () -> {
-                        if (JOptionPane.showConfirmDialog(SignumGUI.this,
-                                "This will stop the node. Are you sure?", "Exit and stop node",
-                                JOptionPane.YES_NO_OPTION,
-                                JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
-                            shutdown();
+        if (parentFrame != null) {
+            // initGlassPane();
+            parentFrame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
+            parentFrame.addWindowListener(new WindowAdapter() {
+                @Override
+                public void windowClosing(WindowEvent e) {
+                    if (trayIcon == null) {
+                        Runnable exitTask = () -> {
+                            if (JOptionPane.showConfirmDialog(SignumGUI.this,
+                                    "This will stop the node. Are you sure?", "Exit and stop node",
+                                    JOptionPane.YES_NO_OPTION,
+                                    JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
+                                shutdown();
+                            }
+                        };
+                        if (checkAllUnsavedChanges()) {
+                            exitTask.run();
                         }
-                    };
-                    if (checkAllUnsavedChanges()) {
-                        exitTask.run();
+                    } else {
+                        trayIcon.displayMessage("Signum GUI closed", "Note that Signum is still running",
+                                MessageType.INFO);
+                        setVisible(false);
                     }
-                } else {
-                    trayIcon.displayMessage("Signum GUI closed", "Note that Signum is still running", MessageType.INFO);
-                    setVisible(false);
                 }
-            }
-        });
+            });
 
-        // Force a re-layout and repaint of the toolbar during resize to prevent visual
-        // artifacts
-        this.addComponentListener(new java.awt.event.ComponentAdapter() {
-            @Override
-            public void componentResized(java.awt.event.ComponentEvent e) {
-                if (toolBar != null) {
-                    toolBar.revalidate();
-                    toolBar.repaint();
+            // Force a re-layout and repaint of the toolbar during resize to prevent visual
+            // artifacts
+            this.addComponentListener(new java.awt.event.ComponentAdapter() {
+                @Override
+                public void componentResized(java.awt.event.ComponentEvent e) {
+                    if (toolBar != null) {
+                        toolBar.revalidate();
+                        toolBar.repaint();
+                    }
                 }
-            }
-        });
+            });
 
-        pack();
-        Insets insets = getInsets();
-        int preferredContentWidth = Math.max(topPanel.getPreferredSize().width, metricsPanel.getPreferredSize().width);
-        setSize(preferredContentWidth + insets.left + insets.right, 800);
-        setLocationRelativeTo(null);
-        showWindow();
+            parentFrame.pack();
+            Insets insets = parentFrame.getInsets();
+            int preferredContentWidth = Math.max(topPanel.getPreferredSize().width,
+                    metricsPanel.getPreferredSize().width);
+            parentFrame.setSize(preferredContentWidth + insets.left + insets.right, 800);
+            parentFrame.setLocationRelativeTo(null);
+            showWindow();
+        }
 
         // Close menu when clicking outside
         Toolkit.getDefaultToolkit().addAWTEventListener(event -> {
@@ -1807,14 +1576,15 @@ public class SignumGUI extends JFrame {
         return configurationPanel == null || configurationPanel.checkUnsavedChanges();
     }
 
-    private void initGlassPane() {
-        JPanel glassPane = new GlassPane();
-        setGlassPane(glassPane);
-        glassPane.setVisible(true);
-    }
-
+    /*
+     * private void initGlassPane() {
+     * JPanel glassPane = new GlassPanel();
+     * parentFrame.setGlassPane(glassPane);
+     * glassPane.setVisible(true);
+     * }
+     */
     private void shutdown() {
-        JDialog shutdownDialog = new JDialog(this, "Shutting down", true);
+        JDialog shutdownDialog = new JDialog(parentFrame, "Shutting down", true);
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
@@ -2011,7 +1781,7 @@ public class SignumGUI extends JFrame {
         popupMenu.add(showItem);
         popupMenu.add(shutdownItem);
 
-        getContentPane().validate();
+        parentFrame.validate();
 
         try {
             String newIconLocation = iconLocation;
@@ -2021,7 +1791,7 @@ public class SignumGUI extends JFrame {
             if (!newIconLocation.equals(iconLocation)) {
                 // update the icon
                 iconLocation = newIconLocation;
-                setIconImage(ImageIO.read(getClass().getResourceAsStream(iconLocation)));
+                parentFrame.setIconImage(ImageIO.read(getClass().getResourceAsStream(iconLocation)));
             }
             TrayIcon newTrayIcon = new TrayIcon(
                     Toolkit.getDefaultToolkit().createImage(SignumGUI.class.getResource(iconLocation)), "Signum Node",
@@ -2114,7 +1884,7 @@ public class SignumGUI extends JFrame {
             statusMessage = "Database consistency check in progress...";
         }
 
-        waitDialog = new JDialog(SignumGUI.this, "Database Check", true);
+        waitDialog = new JDialog(parentFrame, "Database Check", true);
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
@@ -2332,7 +2102,7 @@ public class SignumGUI extends JFrame {
     void restart() {
         LOGGER.info("Restarting node...");
 
-        JDialog restartDialog = new JDialog(this, "Restarting", true);
+        JDialog restartDialog = new JDialog(parentFrame, "Restarting", true);
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
@@ -2359,7 +2129,7 @@ public class SignumGUI extends JFrame {
             public void windowOpened(WindowEvent e) {
                 new Thread(() -> {
                     saveGuiSettings();
-                    signum.Launcher.restart();
+                    application.launcher.Launcher.restart();
                 }).start();
             }
         });
@@ -2368,7 +2138,7 @@ public class SignumGUI extends JFrame {
     }
 
     private void editConf() {
-        Path nodeFolder = application.module.node.util.PathUtils.resolvePath(confFolder).resolve("node");
+        Path nodeFolder = application.utils.io.PathUtils.resolvePath(confFolder).resolve("node");
         Path path = nodeFolder.resolve(Signum.PROPERTIES_NAME);
         if (!Files.exists(path)) {
             path = nodeFolder.resolve(Signum.DEFAULT_PROPERTIES_NAME);
@@ -2836,7 +2606,7 @@ public class SignumGUI extends JFrame {
         showMetricsPanel = show;
         if (show) {
             if (metricsPanel == null) {
-                metricsPanel = new MetricsPanel(this);
+                metricsPanel = new MetricsPanel(parentFrame);
                 metricsPanel.init();
                 metricsPanel.setVisible(true);
                 metricsPanelWrapper.add(metricsPanel, BorderLayout.CENTER);
@@ -2901,6 +2671,7 @@ public class SignumGUI extends JFrame {
                             metricsPanelWrapper.revalidate();
                         }
                     }
+
                 });
                 metricsPanelAnimator.start();
             }
@@ -2963,7 +2734,7 @@ public class SignumGUI extends JFrame {
             title += " (Shutting Down...)";
         }
         final String finalTitle = title;
-        SwingUtilities.invokeLater(() -> setTitle(finalTitle));
+        SwingUtilities.invokeLater(() -> parentFrame.setTitle(finalTitle));
         if (trayIcon != null) {
             trayIcon.setToolTip(finalTitle);
         }
@@ -3094,7 +2865,7 @@ public class SignumGUI extends JFrame {
     private void loadGuiSettings() {
         try {
             String settingsDir = Signum.getPropertyService().getString(Props.SETTINGS_DIR);
-            Path settingsPath = application.module.node.util.PathUtils
+            Path settingsPath = application.utils.io.PathUtils
                     .resolvePath(Paths.get(settingsDir, "gui-settings.json").toString());
             if (Files.exists(settingsPath)) {
                 try (java.io.BufferedReader reader = Files.newBufferedReader(settingsPath)) {
@@ -3121,7 +2892,7 @@ public class SignumGUI extends JFrame {
     private void saveGuiSettings() {
         try {
             String settingsDir = Signum.getPropertyService().getString(Props.SETTINGS_DIR);
-            Path settingsPath = application.module.node.util.PathUtils
+            Path settingsPath = application.utils.io.PathUtils
                     .resolvePath(Paths.get(settingsDir, "gui-settings.json").toString());
             if (settingsPath.getParent() != null) {
                 Files.createDirectories(settingsPath.getParent());
@@ -3169,7 +2940,7 @@ public class SignumGUI extends JFrame {
     }
 
     private void onBrsStopped() {
-        SwingUtilities.invokeLater(() -> setTitle(getTitle() + " (STOPPED)"));
+        SwingUtilities.invokeLater(() -> parentFrame.setTitle(parentFrame.getTitle() + " (STOPPED)"));
         if (trayIcon != null)
             trayIcon.setToolTip(trayIcon.getToolTip() + " (STOPPED)");
     }
@@ -3267,7 +3038,7 @@ public class SignumGUI extends JFrame {
                     }
 
                     // Apply the active custom font to new lines being appended to the console
-                    Font activeFont = SignumGUI.getActiveConsoleFont();
+                    Font activeFont = AppearanceModule.getActiveConsoleFont();
                     if (activeFont != null) {
                         StyleConstants.setFontFamily(attrs, activeFont.getFamily());
                         StyleConstants.setFontSize(attrs, activeFont.getSize());

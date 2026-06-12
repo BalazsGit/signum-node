@@ -1,7 +1,9 @@
 package application.module.node.gui;
 
-import application.module.node.gui.util.HelpButton;
 import com.formdev.flatlaf.extras.FlatAnimatedLafChange;
+
+import application.utils.gui.ColorPaletteManager;
+import application.utils.gui.HelpButton;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;

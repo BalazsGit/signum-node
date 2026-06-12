@@ -2,11 +2,15 @@ package application.module.node.gui;
 
 import application.module.node.BlockchainProcessor;
 import application.module.node.peer.PeerMetric;
-import application.module.node.gui.util.ContextMenuUtils;
 import application.module.node.util.Listener;
+import application.utils.gui.ColorPaletteManager;
+import application.utils.gui.ContextMenuUtils;
+import application.utils.gui.GuiColors;
+import application.utils.gui.GuiConstants;
+import application.utils.gui.GuiFontManager;
+import application.utils.gui.TableUtils;
+import application.utils.math.MovingAverage;
 import application.module.node.Signum;
-import application.module.node.gui.util.MovingAverage;
-import application.module.node.gui.util.TableUtils;
 import application.module.node.gui.PeersDialog.PeerCategory;
 import application.module.node.peer.Peer;
 import application.module.node.peer.Peers;

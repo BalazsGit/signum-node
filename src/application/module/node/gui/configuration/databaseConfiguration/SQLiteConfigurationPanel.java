@@ -2,14 +2,16 @@ package application.module.node.gui.configuration.databaseConfiguration;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import application.module.node.gui.GuiColors;
-import application.module.node.gui.GuiConstants;
+
 import application.module.node.Signum;
 import application.module.node.gui.configuration.ConfigurationUtils;
 import application.module.node.gui.configuration.databaseConfiguration.DatabaseConfigurationPanel.DatabaseEngine;
 import application.module.node.gui.configuration.databaseConfiguration.DatabaseConfigurationPanel.PropertyRow;
-import application.module.node.gui.util.HelpButton;
-import application.module.node.util.PathUtils;
+import application.utils.gui.GuiColors;
+import application.utils.gui.GuiConstants;
+import application.utils.gui.HelpButton;
+import application.utils.io.PathUtils;
+
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import jiconfont.icons.font_awesome.FontAwesome;

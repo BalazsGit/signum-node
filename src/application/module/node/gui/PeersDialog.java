@@ -5,7 +5,8 @@ import application.module.node.Signum;
 import application.module.node.BlockchainProcessor;
 import application.module.node.peer.Peer;
 import application.module.node.util.Listener;
-import application.module.node.gui.util.TableUtils;
+import application.utils.gui.GuiColors;
+import application.utils.gui.TableUtils;
 
 import javax.swing.*;
 import javax.swing.event.DocumentEvent;

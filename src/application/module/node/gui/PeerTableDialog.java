@@ -1,12 +1,13 @@
 package application.module.node.gui;
 
-import application.module.node.gui.util.TableUtils;
-
 import javax.swing.*;
 import javax.swing.table.TableCellRenderer;
 import javax.swing.table.TableModel;
 import javax.swing.table.JTableHeader;
 import javax.swing.table.TableRowSorter;
+
+import application.utils.gui.TableUtils;
+
 import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;

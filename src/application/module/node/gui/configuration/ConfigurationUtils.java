@@ -1,10 +1,12 @@
 package application.module.node.gui.configuration;
 
-import application.module.node.gui.GuiColors;
-import application.module.node.gui.GuiConstants;
+import application.module.appearance.AppearanceProfile;
 import application.module.node.Signum;
-import application.module.node.gui.util.HelpButton;
-import application.module.node.util.PathUtils;
+import application.utils.gui.GuiColors;
+import application.utils.gui.GuiConstants;
+import application.utils.gui.HelpButton;
+import application.utils.io.PathUtils;
+
 import com.google.gson.JsonElement;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
@@ -585,8 +587,8 @@ public class ConfigurationUtils {
     /**
      * Reads a Look and Feel profile from the gui-settings.json file.
      */
-    public static LookAndFeelProfile loadLookAndFeelProfile(Path settingsPath, String profileName) {
-        LookAndFeelProfile profile = new LookAndFeelProfile(profileName);
+    public static AppearanceProfile loadLookAndFeelProfile(Path settingsPath, String profileName) {
+        AppearanceProfile profile = new AppearanceProfile(profileName);
         if (Files.notExists(settingsPath))
             return profile;
 

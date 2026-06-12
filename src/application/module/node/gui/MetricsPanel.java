@@ -1,8 +1,5 @@
 package application.module.node.gui;
 
-import application.module.node.gui.util.CustomDrawings;
-import application.module.node.gui.util.CustomDrawingComponent;
-
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
@@ -11,6 +8,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import application.utils.gui.CustomDrawingComponent;
+import application.utils.gui.CustomDrawings;
 
 @SuppressWarnings("serial")
 public class MetricsPanel extends JTabbedPane {

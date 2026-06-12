@@ -8,12 +8,13 @@ import application.module.node.props.Props;
 import application.module.node.gui.configuration.databaseConfiguration.DatabaseConfigurationPanel;
 import application.module.node.gui.configuration.databaseConfiguration.DatabaseConfigurationUtils;
 import application.module.node.util.Convert;
-import application.module.node.util.PathUtils;
-import application.module.node.gui.GuiColors;
-import application.module.node.gui.GuiConstants;
-import application.module.node.gui.util.GuiUtils;
-import application.module.node.gui.util.HelpButton;
 import jiconfont.icons.font_awesome.FontAwesome;
+import application.utils.gui.GuiColors;
+import application.utils.gui.GuiConstants;
+import application.utils.gui.GuiUtils;
+import application.utils.gui.HelpButton;
+import application.utils.gui.ResponsiveToolbarScrollPane;
+import application.utils.io.PathUtils;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
 
@@ -54,7 +55,6 @@ public class NodeConfigurationPanel extends JPanel {
     private static final String KEY_PROFILE_LINKS = "profileLinks";
     private static final String KEY_DATABASE = "database";
     private static final String KEY_LOGGING = "logging";
-    private static final String KEY_LAF = "laf";
     private static final String KEY_DB_AUTO_START = "dbAutoStart";
     private static final String KEY_DB_AUTO_STOP = "dbAutoStop";
 
@@ -65,12 +65,10 @@ public class NodeConfigurationPanel extends JPanel {
     // Linked Profiles UI
     private JdbcProfileConfigurationPanel linkedDbPanel;
     private JComboBox<String> linkedLogCombo;
-    private JComboBox<String> linkedLafCombo;
     private JCheckBox autoStartDbCheck;
     private JCheckBox autoStopDbCheck;
 
     private String savedLinkedLog = "";
-    private String savedLinkedLaf = "";
     private String savedLinkedDb = "";
     private boolean savedDbAutoStart = false;
     private boolean savedDbAutoStop = false;
@@ -148,7 +146,8 @@ public class NodeConfigurationPanel extends JPanel {
 
         // --- Profile Panel ---
         JPanel profilePanel = new JPanel(new MigLayout("insets 0, gap 5"));
-        profilePanel.setBorder(new EmptyBorder(5, 10, 5, 5));
+        profilePanel.setBorder(BorderFactory.createEmptyBorder()); // Remove internal padding, rely on scroll pane's
+                                                                   // padding
         profilePanel.add(new JLabel("Configuration Profile:"));
 
         profileComboBox = new JComboBox<>();
@@ -215,14 +214,14 @@ public class NodeConfigurationPanel extends JPanel {
         helpBtn.addActionListener(e -> showProfileHelp());
         profilePanel.add(helpBtn); // Add help button
 
-        JScrollPane profileScrollPane = new JScrollPane(profilePanel);
+        JScrollPane profileScrollPane = new ResponsiveToolbarScrollPane(profilePanel, new Insets(5, 10, 5, 5));
         profileScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         profileScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
         profileScrollPane.setBorder(BorderFactory.createEmptyBorder());
         profileScrollPane.setOpaque(false);
         profileScrollPane.getViewport().setOpaque(false);
-
-        GuiUtils.addHorizontalScrollPadding(profileScrollPane, profilePanel, new Insets(5, 10, 5, 5));
+        // GuiUtils.addHorizontalScrollPadding(profileScrollPane, profilePanel, new
+        // Insets(5, 10, 5, 5)); // Handled by ResponsiveToolbarScrollPane
 
         refreshProfileList();
 
@@ -493,9 +492,7 @@ public class NodeConfigurationPanel extends JPanel {
         JPanel linkedPanel = createCategoryPanel();
         addSectionHeader(linkedPanel, "Linked Profiles", true);
         linkedLogCombo = new JComboBox<>();
-        linkedLafCombo = new JComboBox<>();
-        addLinkedProfileRowWithButtons(linkedPanel, "Logger Profile:", linkedLogCombo, KEY_LOGGING);
-        addLinkedProfileRowWithButtons(linkedPanel, "Look and Feel Profile:", linkedLafCombo, KEY_LAF);
+        addLinkedProfileRowWithButtons(linkedPanel, "Logger Profile:", linkedLogCombo);
 
         addSectionHeader(linkedPanel, "Linked Database Profile Detail:", false);
 
@@ -713,29 +710,10 @@ public class NodeConfigurationPanel extends JPanel {
             linkedLogCombo.addItem(Signum.LOGGING_PROPERTIES_NAME);
         }
 
-        // LAF Profiles (from gui-settings.json)
-        linkedLafCombo.removeAllItems();
-        linkedLafCombo.addItem("");
-        try {
-            Path settingsPath = PathUtils.resolvePath(Props.SETTINGS_DIR.getDefaultValue())
-                    .resolve("gui-settings.json");
-            if (Files.exists(settingsPath)) {
-                JsonObject settings = JsonParser.parseReader(Files.newBufferedReader(settingsPath)).getAsJsonObject();
-                if (settings.has("lookAndFeelProfiles")) {
-                    settings.getAsJsonObject("lookAndFeelProfiles").keySet().forEach(linkedLafCombo::addItem);
-                }
-            }
-        } catch (Exception e) {
-            /* ignore */ }
-
         // Apply priority selection: 1. linked, 2. active
         String currentLinkedLog = getLinkedLoggingProfile();
         linkedLogCombo.setSelectedItem(currentLinkedLog != null && !currentLinkedLog.isEmpty() ? currentLinkedLog
                 : Signum.getActiveLoggingProfile());
-        String currentLinkedLaf = getLinkedLafProfile();
-        linkedLafCombo
-                .setSelectedItem(currentLinkedLaf != null && !currentLinkedLaf.isEmpty() ? currentLinkedLaf : "gui");
-
         isProgrammaticChange = false;
     }
 
@@ -747,7 +725,6 @@ public class NodeConfigurationPanel extends JPanel {
             ((JComboBox<?>) linkedDbPanel.getProfileCombo()).setSelectedItem("");
         }
         linkedLogCombo.setSelectedItem("");
-        linkedLafCombo.setSelectedItem("");
         autoStartDbCheck.setSelected(true);
         autoStopDbCheck.setSelected(true);
 
@@ -769,8 +746,6 @@ public class NodeConfigurationPanel extends JPanel {
                     }
                     if (links.has(KEY_LOGGING))
                         linkedLogCombo.setSelectedItem(links.get(KEY_LOGGING).getAsString());
-                    if (links.has(KEY_LAF))
-                        linkedLafCombo.setSelectedItem(links.get(KEY_LAF).getAsString());
                     if (links.has(KEY_DB_AUTO_START))
                         autoStartDbCheck.setSelected(links.get(KEY_DB_AUTO_START).getAsBoolean());
                     if (links.has(KEY_DB_AUTO_STOP))
@@ -784,7 +759,6 @@ public class NodeConfigurationPanel extends JPanel {
         updateAutoDbCheckboxesState();
 
         savedLinkedLog = getLinkedLoggingProfile();
-        savedLinkedLaf = getLinkedLafProfile();
         savedLinkedDb = getLinkedDbProfile();
         savedDbAutoStart = autoStartDbCheck.isSelected();
         savedDbAutoStop = autoStopDbCheck.isSelected();
@@ -810,32 +784,27 @@ public class NodeConfigurationPanel extends JPanel {
         JsonObject currentLinks = new JsonObject();
         String db = getLinkedDbProfile();
         String log = (String) linkedLogCombo.getSelectedItem();
-        String laf = (String) linkedLafCombo.getSelectedItem();
         boolean autoStart = autoStartDbCheck.isSelected();
         boolean autoStop = autoStopDbCheck.isSelected();
 
-        if ((db != null && !db.isEmpty()) || (log != null && !log.isEmpty()) || (laf != null && !laf.isEmpty())
+        if ((db != null && !db.isEmpty()) || (log != null && !log.isEmpty())
                 || autoStart || autoStop) {
             if (db != null && !db.isEmpty())
                 currentLinks.addProperty(KEY_DATABASE, db);
             if (log != null && !log.isEmpty())
                 currentLinks.addProperty(KEY_LOGGING, log);
-            if (laf != null && !laf.isEmpty())
-                currentLinks.addProperty(KEY_LAF, laf);
             currentLinks.addProperty(KEY_DB_AUTO_START, autoStart);
             currentLinks.addProperty(KEY_DB_AUTO_STOP, autoStop);
 
             allLinks.add(profileName, currentLinks);
 
             savedLinkedLog = log != null ? log : "";
-            savedLinkedLaf = laf != null ? laf : "";
             savedLinkedDb = db != null ? db : "";
             savedDbAutoStart = autoStart;
             savedDbAutoStop = autoStop;
         } else {
             allLinks.remove(profileName);
             savedLinkedLog = "";
-            savedLinkedLaf = "";
             savedLinkedDb = "";
             savedDbAutoStart = false;
             savedDbAutoStop = false;
@@ -1467,7 +1436,6 @@ public class NodeConfigurationPanel extends JPanel {
 
     private boolean isLinkedProfileDirty() {
         return !savedLinkedLog.equals(getLinkedLoggingProfile()) ||
-                !savedLinkedLaf.equals(getLinkedLafProfile()) ||
                 !savedLinkedDb.equals(getLinkedDbProfile()) ||
                 (autoStartDbCheck.isEnabled() && savedDbAutoStart != autoStartDbCheck.isSelected()) ||
                 (autoStopDbCheck.isEnabled() && savedDbAutoStop != autoStopDbCheck.isSelected());
@@ -2143,7 +2111,7 @@ public class NodeConfigurationPanel extends JPanel {
         panel.add(new JSeparator(), "span, growx, wrap, gaptop 2, gapbottom 2");
     }
 
-    private void addLinkedProfileRowWithButtons(JPanel panel, String labelText, JComboBox<String> combo, String type) {
+    private void addLinkedProfileRowWithButtons(JPanel panel, String labelText, JComboBox<String> combo) {
         panel.add(new JLabel(labelText), "align label");
         ConfigurationUtils.fixComponentSize(combo);
 
@@ -2156,8 +2124,8 @@ public class NodeConfigurationPanel extends JPanel {
                     return c;
 
                 String val = value.toString();
-                String linked = KEY_LOGGING.equals(type) ? getLinkedLoggingProfile() : getLinkedLafProfile();
-                String active = KEY_LOGGING.equals(type) ? Signum.getActiveLoggingProfile() : "gui";
+                String linked = getLinkedLoggingProfile();
+                String active = Signum.getActiveLoggingProfile();
 
                 if (val.equals(linked)) {
                     c.setForeground(GuiColors.getSaved());
@@ -2239,11 +2207,6 @@ public class NodeConfigurationPanel extends JPanel {
         return sel != null ? sel : "";
     }
 
-    public String getLinkedLafProfile() {
-        String sel = (linkedLafCombo != null) ? (String) linkedLafCombo.getSelectedItem() : "";
-        return sel != null ? sel : "";
-    }
-
     public void setLinkedDbProfile(String value) {
         isProgrammaticChange = true;
         if (linkedDbPanel != null) {
@@ -2264,13 +2227,6 @@ public class NodeConfigurationPanel extends JPanel {
     public void setLinkedLoggingProfile(String value) {
         isProgrammaticChange = true;
         linkedLogCombo.setSelectedItem(value != null ? value : "");
-        isProgrammaticChange = false;
-        saveProfileLinks(loadedProfileName);
-    }
-
-    public void setLinkedLafProfile(String value) {
-        isProgrammaticChange = true;
-        linkedLafCombo.setSelectedItem(value != null ? value : "");
         isProgrammaticChange = false;
         saveProfileLinks(loadedProfileName);
     }

@@ -32,12 +32,13 @@ import application.module.node.transactionduplicates.TransactionDuplicatesChecke
 import application.module.node.unconfirmedtransactions.UnconfirmedTransactionStore;
 import application.module.node.util.Convert;
 import application.module.node.util.DownloadCacheImpl;
-import application.module.node.util.PathUtils;
 import application.module.node.util.JSON;
 import application.module.node.util.Listener;
 import application.module.node.util.DurationFormatter;
 import application.module.node.util.Listeners;
 import application.module.node.util.ThreadPool;
+import application.utils.io.PathUtils;
+
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -892,7 +893,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                     continue;
                                 }
                                 betterCumulativeDifficulty = new BigInteger(peerCumulativeDifficulty);
-                            } while (betterCumulativeDifficulty.compareTo(curCumulativeDifficulty) <= 0 
+                            } while (betterCumulativeDifficulty.compareTo(curCumulativeDifficulty) <= 0
                                     && ThreadPool.running.get() && !isShutdown.get());
 
                             logger.trace("Got a better cumulative difficulty {} than current {}.",
@@ -1049,8 +1050,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                     logger.warn("Unhandled exception {}" + e.toString(), e);
                                     logger.warn("Unhandled exception trace: {}", Arrays.toString(e.getStackTrace()));
                                 }
-                                // check if we are interrupted or shutdown in between blocks, if so we stop the loop and do not process the downloaded blocks
-                                if (Thread.currentThread().isInterrupted() || !ThreadPool.running.get() || isShutdown.get()) {
+                                // check if we are interrupted or shutdown in between blocks, if so we stop the
+                                // loop and do not process the downloaded blocks
+                                if (Thread.currentThread().isInterrupted() || !ThreadPool.running.get()
+                                        || isShutdown.get()) {
                                     return;
                                 }
                             } // end block loop

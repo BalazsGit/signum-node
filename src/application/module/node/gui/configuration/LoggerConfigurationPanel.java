@@ -1,13 +1,8 @@
 package application.module.node.gui.configuration;
 
 import application.module.node.props.Props;
-import application.module.node.util.PathUtils;
 import application.module.node.Signum;
-import application.module.node.gui.GuiColors;
-import application.module.node.gui.GuiConstants;
-import application.module.node.gui.GuiFontManager;
-import application.module.node.gui.util.GuiUtils;
-import application.module.node.gui.util.HelpButton;
+
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
@@ -26,6 +21,15 @@ import java.awt.event.HierarchyEvent;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.FileInputStream;
+
+import application.utils.gui.GuiColors;
+import application.utils.gui.GuiConstants;
+import application.utils.gui.GuiFontManager;
+import application.utils.gui.GuiUtils;
+import application.utils.gui.HelpButton;
+import application.utils.gui.ResponsiveToolbarScrollPane;
+import application.utils.io.PathUtils;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -141,7 +145,8 @@ public class LoggerConfigurationPanel extends JPanel {
 
         // --- Profile Panel ---
         JPanel profilePanel = new JPanel(new MigLayout("insets 0, gap 5"));
-        profilePanel.setBorder(new EmptyBorder(5, 10, 5, 5));
+        profilePanel.setBorder(BorderFactory.createEmptyBorder()); // Remove internal padding, rely on scroll pane's
+                                                                   // padding
         profilePanel.add(new JLabel("Configuration Profile:"));
 
         profileComboBox = new JComboBox<>();
@@ -208,14 +213,14 @@ public class LoggerConfigurationPanel extends JPanel {
         helpBtn.addActionListener(e -> showProfileHelp()); // Add help button
         profilePanel.add(helpBtn);
 
-        JScrollPane profileScrollPane = new JScrollPane(profilePanel);
+        JScrollPane profileScrollPane = new ResponsiveToolbarScrollPane(profilePanel, new Insets(5, 10, 5, 5));
         profileScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         profileScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
         profileScrollPane.setBorder(BorderFactory.createEmptyBorder());
         profileScrollPane.setOpaque(false);
         profileScrollPane.getViewport().setOpaque(false);
-
-        GuiUtils.addHorizontalScrollPadding(profileScrollPane, profilePanel, new Insets(5, 10, 5, 5));
+        // GuiUtils.addHorizontalScrollPadding(profileScrollPane, profilePanel, new
+        // Insets(5, 10, 5, 5)); // Handled by ResponsiveToolbarScrollPane
 
         refreshProfileList();
         updateLinkCheckbox();

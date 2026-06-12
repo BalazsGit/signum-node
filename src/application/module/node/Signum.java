@@ -45,7 +45,6 @@ import application.module.node.services.impl.TransactionServiceImpl;
 import application.module.node.statistics.StatisticsManagerImpl;
 import application.module.node.util.DownloadCacheImpl;
 import application.module.node.util.LoggerConfigurator;
-import application.module.node.util.PathUtils;
 import application.module.node.util.ThreadPool;
 import application.module.node.util.Time;
 import application.module.node.web.api.http.common.APITransactionManager;
@@ -53,6 +52,8 @@ import application.module.node.web.api.http.common.APITransactionManagerImpl;
 import application.module.node.web.server.WebServer;
 import application.module.node.web.server.WebServerContext;
 import application.module.node.web.server.WebServerImpl;
+import application.utils.io.PathUtils;
+
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.BufferedReader;
@@ -86,9 +87,9 @@ public final class Signum {
     public static final String APPLICATION = "BRS";
 
     public static final String CONF_FOLDER = "../conf";
-    public static final String NODE_SUBFOLDER = "node";
-    public static final String NODE_LOGGING_SUBFOLDER = "node-logging";
     public static final String DATABASE_SUBFOLDER = "database";
+    public static final String NODE_SUBFOLDER = NodeModule.ID;
+    public static final String NODE_LOGGING_SUBFOLDER = NODE_SUBFOLDER + "/logging";
 
     public static final String NODE_CONF_DIR = NODE_SUBFOLDER;
     public static final String LOGGING_CONF_DIR = NODE_LOGGING_SUBFOLDER;
@@ -374,6 +375,15 @@ public final class Signum {
         Path loggingPath = confPath.resolve(LOGGING_CONF_DIR);
         Path loggingFileToLoad = resolvePropertiesPath(loggingPath, LOGGING_PROPERTIES_NAME + ".properties",
                 DEFAULT_LOGGING_PROPERTIES_NAME + ".properties", confPath);
+
+        try {
+            if (Files.notExists(loggingPath)) {
+                Files.createDirectories(loggingPath);
+                logger.info("Created missing logging configuration directory: {}", loggingPath.toAbsolutePath());
+            }
+        } catch (IOException e) {
+            logger.warn("Failed to create logging configuration directory: {}", loggingPath.toAbsolutePath(), e);
+        }
         if (loggingFileToLoad != null) {
             String fileName = loggingPath.relativize(loggingFileToLoad).toString();
             if (fileName.endsWith(".properties")) {
@@ -743,12 +753,13 @@ public final class Signum {
     }
 
     public static void processCommand(String command) {
+        ensureLogger();
         logger.debug("received command: >{}<", command);
         if (command.equals(".shutdown")) {
             shutdown(false);
             System.exit(0);
         } else if (command.equals(".restart")) {
-            signum.Launcher.restart();
+            application.launcher.Launcher.restart();
         } else if (command.equals(".autoresolve")) {
             blockchainProcessor.manualResolveDatabaseConsistency();
         } else if (command.equals(".pause") || command.equals(".stop")) {

@@ -1,8 +1,8 @@
 package application.module.node.gui.configuration;
 
-import application.module.node.gui.GuiConstants;
 import application.module.node.gui.configuration.databaseConfiguration.DatabaseConfigurationPanel;
 import application.module.node.gui.configuration.databaseConfiguration.DatabaseEnginePanel;
+import application.utils.gui.GuiConstants;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 
@@ -22,7 +22,6 @@ public class ConfigurationPanel extends JPanel {
     private final NodeConfigurationPanel nodeConfig;
     private final LoggerConfigurationPanel loggerConfig;
     private final DatabaseConfigurationPanel dbConfig;
-    private final LookAndFeelPanel lafConfig;
     private final Runnable backAction;
     private final JButton backButton;
     private final JLabel titleLabel;
@@ -63,15 +62,10 @@ public class ConfigurationPanel extends JPanel {
                 () -> nodeConfig.getLoadedProfileName(),
                 () -> nodeConfig.getLinkedLoggingProfile());
         dbConfig = new DatabaseConfigurationPanel(restartAction, confFolder, backAction);
-        lafConfig = new LookAndFeelPanel(restartAction, backAction,
-                name -> nodeConfig.setLinkedLafProfile(name),
-                () -> nodeConfig.getLoadedProfileName(),
-                () -> nodeConfig.getLinkedLafProfile());
 
         tabbedPane.addTab("Node", nodeConfig);
         tabbedPane.addTab("Logger", loggerConfig);
         tabbedPane.addTab("Database", dbConfig);
-        tabbedPane.addTab("Look & Feel", lafConfig);
 
         tabbedPane.addChangeListener(e -> {
             int index = tabbedPane.getSelectedIndex();
@@ -107,12 +101,6 @@ public class ConfigurationPanel extends JPanel {
                         }
                     }
                 }
-            } else if (index == 3) { // LAF
-                lafConfig.updateLinkCheckbox();
-                String linked = nodeConfig.getLinkedLafProfile();
-                if (linked != null && !linked.isEmpty()) {
-                    lafConfig.loadProfile(linked);
-                }
             }
         });
 
@@ -134,7 +122,7 @@ public class ConfigurationPanel extends JPanel {
         }
         // if (!dbConfig.checkUnsavedChangesAndProceed(null, null))
         // return false;
-        return lafConfig.checkUnsavedChangesAndProceed(true, null, null);
+        return true;
     }
 
     public void loadAppliedProperties() {
@@ -143,7 +131,7 @@ public class ConfigurationPanel extends JPanel {
     }
 
     public enum ConfigTab {
-        NODE, LOGGER, DATABASE, LAF
+        NODE, LOGGER, DATABASE
     }
 
     @Override

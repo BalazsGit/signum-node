@@ -1,6 +1,5 @@
 package application.module.node.gui;
 
-import application.module.node.gui.util.ContextMenuUtils;
 import net.miginfocom.swing.MigLayout;
 import org.jfree.chart.ChartFactory;
 import org.jfree.chart.ChartPanel;
@@ -33,8 +32,13 @@ import java.util.function.Consumer;
 import application.module.node.Transaction;
 import application.module.node.TransactionProcessor;
 import application.module.node.util.Listener;
+import application.utils.gui.ColorPaletteManager;
+import application.utils.gui.ContextMenuUtils;
+import application.utils.gui.GuiColors;
+import application.utils.gui.GuiConstants;
+import application.utils.gui.GuiFontManager;
+import application.utils.math.MovingAverage;
 import application.module.node.Signum;
-import application.module.node.gui.util.MovingAverage;
 import application.module.node.Block;
 import application.module.node.BlockchainProcessor;
 import application.module.node.props.Props;

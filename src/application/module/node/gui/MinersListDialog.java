@@ -4,7 +4,8 @@ import application.module.node.Generator;
 import application.module.node.Signum;
 import application.module.node.gui.BlockGenerationMetricsPanel.MinerEntry;
 import application.module.node.util.Convert;
-import application.module.node.gui.util.TableUtils;
+import application.utils.gui.GuiColors;
+import application.utils.gui.TableUtils;
 import signumj.entity.SignumAddress;
 import signumj.entity.SignumID;
 

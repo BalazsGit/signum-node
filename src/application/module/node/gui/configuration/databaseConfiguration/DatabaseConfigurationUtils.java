@@ -1,6 +1,5 @@
 package application.module.node.gui.configuration.databaseConfiguration;
 
-import application.module.node.util.PathUtils;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
@@ -15,6 +14,9 @@ import java.awt.*;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+
+import application.utils.io.PathUtils;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

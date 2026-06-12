@@ -2,6 +2,8 @@ package application.module.node;
 
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
+import application.utils.io.PathUtils;
+
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
@@ -19,7 +21,6 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.List;
-import application.module.node.util.PathUtils;
 import java.util.Map;
 
 public class ShutdownManager {

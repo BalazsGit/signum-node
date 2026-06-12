@@ -7,7 +7,8 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 
 import application.module.node.gui.configuration.databaseConfiguration.DatabaseConfigurationUtils.ProgressListener;
-import application.module.node.util.PathUtils;
+import application.utils.io.PathUtils;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
