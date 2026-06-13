@@ -842,7 +842,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
                             Peer peer = null;
                             do {
-                                if (!ThreadPool.running.get() || isShutdown.get()) {
+                                if (!ThreadPool.running.get() || isShutdown.get() || getMoreBlocksAutoPause.get()) {
                                     return;
                                 }
                                 peer = Peers.getAnyPeer(Peer.State.CONNECTED);
@@ -894,7 +894,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                 }
                                 betterCumulativeDifficulty = new BigInteger(peerCumulativeDifficulty);
                             } while (betterCumulativeDifficulty.compareTo(curCumulativeDifficulty) <= 0
-                                    && ThreadPool.running.get() && !isShutdown.get());
+                                    && ThreadPool.running.get() && !isShutdown.get() && !getMoreBlocksAutoPause.get());
 
                             logger.trace("Got a better cumulative difficulty {} than current {}.",
                                     betterCumulativeDifficulty, curCumulativeDifficulty);
@@ -975,6 +975,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                             for (JsonElement o : nextBlocks) {
                                 int height = lastBlock.getHeight() + 1;
                                 blockData = JSON.getAsJsonObject(o);
+                                if (getMoreBlocksAutoPause.get() || isShutdown.get()) {
+                                    break;
+                                }
                                 try {
                                     if (Signum.getFluxCapacitor().getValue(FluxValues.POC_PLUS, height)
                                             && height - blockchain.getHeight() >= Constants.MAX_ROLLBACK) {
@@ -1099,7 +1102,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
                 String lastMilestoneBlockId = null;
 
-                while (!Thread.currentThread().isInterrupted() && ThreadPool.running.get() && !isShutdown.get()) {
+                while (!Thread.currentThread().isInterrupted() && ThreadPool.running.get() && !isShutdown.get()
+                        && !getMoreBlocksAutoPause.get()) {
                     JsonObject milestoneBlockIdsRequest = new JsonObject();
                     milestoneBlockIdsRequest.addProperty("requestType", "getMilestoneBlockIds");
                     if (lastMilestoneBlockId == null) {
@@ -1155,7 +1159,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
             private long getCommonBlockId(Peer peer, long commonBlockId) throws InterruptedException {
 
-                while (!Thread.currentThread().isInterrupted() && ThreadPool.running.get() && !isShutdown.get()) {
+                while (!Thread.currentThread().isInterrupted() && ThreadPool.running.get() && !isShutdown.get()
+                        && !getMoreBlocksAutoPause.get()) {
                     JsonObject request = new JsonObject();
                     request.addProperty("requestType", "getNextBlockIds");
                     request.addProperty("blockId", Convert.toUnsignedLong(commonBlockId));
