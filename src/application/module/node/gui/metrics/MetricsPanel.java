@@ -278,12 +278,12 @@ public class MetricsPanel extends JTabbedPane {
     }
 
     /**
-     * Felüldefiniáljuk a repaint-et, hogy minden rajzolási igény esetén
-     * ellenőrizzük és frissítsük a hover állapotot, ha az egér a tabok felett van.
+     * Overrides repaint to check and update the hover state
+     * whenever a repaint is requested, if the mouse is over the tabs.
      */
     @Override
     public void repaint(long tm, int x, int y, int width, int height) {
-        // Ne frissítsük a hovert animáció közben, hogy ne terheljük az EDT-t
+        // Do not update hover during animation to avoid overloading the EDT
         if (hoverHelper != null && (animationTimer == null || !animationTimer.isRunning())) {
             hoverHelper.handleRepaint(this);
         }
@@ -291,9 +291,8 @@ public class MetricsPanel extends JTabbedPane {
     }
 
     /**
-     * Felüldefiniáljuk a revalidate-et is, mert az elrendezés változása (pl.
-     * animáció vagy tartalomfrissítés)
-     * gyakran okozza a hover állapot elvesztését.
+     * Overrides revalidate as layout changes (e.g., animation or content updates)
+     * often cause the loss of hover state.
      */
     @Override
     public void revalidate() {

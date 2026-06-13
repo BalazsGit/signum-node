@@ -10,9 +10,10 @@ public class ModuleRegistry {
     private final List<Module> modules = new ArrayList<>();
 
     public void discoverModules() {
-        // Professzionális megoldás: Java ServiceLoader használata
-        // Ehhez a modulok META-INF/services/application.api.Module fájljában kell
-        // regisztrálni az impl-eket
+        // Professional solution: Use Java ServiceLoader
+        // For this, module implementations must be registered in the
+        // META-INF/services/application.api.Module file
+        // to be discovered.
         ServiceLoader<Module> loader = ServiceLoader.load(Module.class);
         for (Module module : loader) {
             modules.add(module);

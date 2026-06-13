@@ -43,6 +43,7 @@ import javax.swing.BoxLayout;
 import javax.swing.Icon;
 import application.module.node.gui.animations.RotatingSvgIcon;
 import application.module.node.gui.configuration.ConfigurationPanel;
+import application.gui.glassPanel.GlassPanelManager;
 import application.module.node.gui.dialog.PeersDialog;
 import application.module.node.gui.metrics.MetricsPanel;
 import application.gui.glassPanel.GlassPanel;
@@ -665,8 +666,8 @@ public class SignumGUI extends JPanel {
                     int h = (int) (targetHeight * progress);
                     commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), h));
 
-                    // Mivel a bottomPanel validateRoot lett, szólnunk kell a felette lévő
-                    // rétegnek is, hogy változott a SOUTH komponens magassága.
+                    // Since bottomPanel became a validateRoot, we need to notify the layer above it
+                    // that the height of the SOUTH component has changed.
                     mainCardPanel.revalidate();
                     mainCardPanel.repaint();
 
@@ -850,7 +851,7 @@ public class SignumGUI extends JPanel {
         mainCardPanel.add(configurationPanel, VIEW_CONFIGURATION);
 
         // Regisztrálunk az AppearanceModule-nál az egyedi UI frissítésekre
-        AppearanceModule.registerAppearanceListener(() -> {
+        AppearanceModule.registerAppearanceListener(() -> { // Register for custom UI updates with the AppearanceModule
             updateCustomComponents();
             updateConsoleStyle();
         });
@@ -1498,7 +1499,6 @@ public class SignumGUI extends JPanel {
         }
 
         if (parentFrame != null) {
-            initGlassPane();
             parentFrame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
             parentFrame.addWindowListener(new WindowAdapter() {
                 @Override
@@ -1580,12 +1580,6 @@ public class SignumGUI extends JPanel {
 
     private boolean checkAllUnsavedChanges() {
         return configurationPanel == null || configurationPanel.checkUnsavedChanges();
-    }
-
-    private void initGlassPane() {
-        JPanel glassPane = new GlassPanel();
-        parentFrame.setGlassPane(glassPane);
-        glassPane.setVisible(true);
     }
 
     private void shutdown() {

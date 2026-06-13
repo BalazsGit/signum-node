@@ -31,26 +31,28 @@ public class NodeModule implements Module {
 
     @Override
     public void init(ModuleContext context) {
+        // Module initialization, e.g., loading resources, registering listeners
         this.context = context;
-        // A modul inicializálása, pl. erőforrások betöltése, listenerek regisztrálása
     }
 
     @Override
     public void start() {
+        // Module startup, e.g., starting background processes
         // A modul indítása, pl. háttérfolyamatok elindítása
     }
 
     @Override
     public void stop() {
+        // Module shutdown, e.g., releasing resources
         // A modul leállítása, pl. erőforrások felszabadítása
     }
 
     @Override
     public JComponent getUI() {
-        // Ha még nincs létrehozva a GUI, példányosítjuk a SignumGUI-t.
-        // A SignumGUI most már JPanel, így közvetlenül beágyazható.
+        // If the GUI has not been created yet, instantiate SignumGUI.
+        // SignumGUI is now a JPanel, so it can be directly embedded.
         if (gui == null) {
-            // A parentFrame lekérése a konténerből a biztonságos dialóguskezeléshez
+            // Retrieve the parentFrame from the container for safe dialog handling
             JFrame parentFrame = null;
             for (java.awt.Frame f : java.awt.Frame.getFrames()) {
                 if (f instanceof JFrame) {

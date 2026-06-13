@@ -216,12 +216,11 @@ public class GlassPanelAnimationScheduler implements ActionListener {
         long deltaTimeMs = currentTime - lastUpdateTime;
         lastUpdateTime = currentTime;
 
-        // A CopyOnWriteArrayList használata biztonságosabb a ConcurrentHashMap.values()
-        // iterálásánál,
-        // ha az update metódus eltávolíthat animációkat.
-        // Bár a ConcurrentHashMap is kezeli a konkurens módosításokat, ez a
-        // megközelítés
-        // biztosítja, hogy az iteráció egy pillanatfelvételen történjen.
+        // Using CopyOnWriteArrayList is safer when iterating over
+        // ConcurrentHashMap.values()
+        // if the update method can remove animations.
+        // Although ConcurrentHashMap handles concurrent modifications, this approach
+        // ensures that the iteration occurs on a snapshot.
         List<GlassPanelAnimation> animationsSnapshot = new CopyOnWriteArrayList<>(activeAnimations.values());
 
         boolean animationStateChanged = false;
@@ -229,8 +228,8 @@ public class GlassPanelAnimationScheduler implements ActionListener {
         for (GlassPanelAnimation animation : animationsSnapshot) {
             if (!animation.update(deltaTimeMs)) {
                 // Az animáció befejeződött, eltávolítjuk
+                // The animation has finished, remove it
                 activeAnimations.remove(animation.getType());
-                System.out.println("[DEBUG-Scheduler] Animation finished and removed: " + animation.getType());
                 animationStateChanged = true; // Jelöljük, hogy történt változás
             }
         }

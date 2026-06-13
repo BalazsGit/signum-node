@@ -15,7 +15,7 @@ import java.net.URL;
 public class GlassPanel extends JPanel {
 
     private SVGDocument svgDocument;
-    private final float baseAlpha; // Az alapértelmezett alfa érték, ha nincs animáció
+    private final float baseAlpha; // The default alpha value if no animation is active
     private double fixedRotation = 0.0; // A közvetlenül beállított forgatás
     private double zoom = 1.0; // A közvetlenül beállított zoom
     private double fixedX = 0.0;
@@ -28,7 +28,7 @@ public class GlassPanel extends JPanel {
         this.baseAlpha = 0.01f;
         setOpaque(false);
         setFocusable(false);
-        loadResources();
+        loadResources(); // Load SVG resources
         setEnabled(false); // Teljesen tiltsuk le az interakciókat ezen a rétegen
         setRequestFocusEnabled(false);
 
@@ -51,29 +51,29 @@ public class GlassPanel extends JPanel {
     }
 
     /**
-     * Elindítja a "lélegző" animációt.
+     * Starts the "breathing" fade animation.
      */
     public void startBreathingFadeAnimation() {
         scheduler.addAnimation(new BreathingFadeAnimation(baseAlpha));
     }
 
     /**
-     * Leállítja a "lélegző" animációt.
+     * Stops the "breathing" fade animation.
      */
     public void stopBreathingFadeAnimation() {
         scheduler.removeAnimation("BreathingFade");
     }
 
     public void startBreathingSizeAnimation() {
-        scheduler.addAnimation(new BreathingSizeAnimation((float) zoom));
+        scheduler.addAnimation(new BreathingSizeAnimation((float) zoom)); // Start breathing size animation
     }
 
     public void stopBreathingSizeAnimation() {
-        scheduler.removeAnimation("BreathingSize");
+        scheduler.removeAnimation("BreathingSize"); // Stop breathing size animation
     }
 
     public void startRotateRightAnimation() {
-        scheduler.addAnimation(new RotateRightAnimation());
+        scheduler.addAnimation(new RotateRightAnimation()); // Start clockwise rotation animation
     }
 
     public void stopRotateRightAnimation() {
@@ -81,7 +81,7 @@ public class GlassPanel extends JPanel {
     }
 
     public void startRotateLeftAnimation() {
-        scheduler.addAnimation(new RotateLeftAnimation());
+        scheduler.addAnimation(new RotateLeftAnimation()); // Start counter-clockwise rotation animation
     }
 
     public void stopRotateLeftAnimation() {
@@ -89,21 +89,21 @@ public class GlassPanel extends JPanel {
     }
 
     /**
-     * Elindítja a "fade-in" animációt.
+     * Starts the "fade-in" animation.
      */
     public void startFadeInAnimation() {
         scheduler.addAnimation(new FadeInAnimation(baseAlpha));
     }
 
     /**
-     * Leállítja a "fade-in" animációt.
+     * Stops the "fade-in" animation.
      */
     public void stopFadeInAnimation() {
         scheduler.removeAnimation("FadeIn");
     }
 
-    // A GlassPanelAnimationScheduler hívja meg a GlassPanel aktuális alfa értékének
-    // beállításához
+    // Called by GlassPanelAnimationScheduler to set the GlassPanel's current alpha
+    // value
     public void setEffectiveAlpha(float alpha) {
         // Ezt a metódust a scheduler hívja meg, hogy beállítsa a kombinált alfa értéket
         // A paintComponent majd ezt az értéket fogja használni
@@ -111,14 +111,15 @@ public class GlassPanel extends JPanel {
         // schedulertől
     }
 
-    // A GlassPanelAnimationScheduler hívja meg a GlassPanel aktuális forgatási
-    // értékének beállításához
+    // Called by GlassPanelAnimationScheduler to set the GlassPanel's current
+    // rotation value
     public void setEffectiveRotation(double rotation) {
         // Hasonlóan az alfához, a paintComponent közvetlenül lekérdezi a schedulertől
     }
 
-    // Közvetlen forgatás beállítása (nem animált)
+    // Direct rotation setting (non-animated)
     public void setRotation(double degrees) {
+        // Set the rotation directly (non-animated)
         this.fixedRotation = Math.toRadians(degrees);
         scheduler.setDefaultRotation(this.fixedRotation);
         repaint(); // Azonnali újrarajzolás a változás megjelenítéséhez
@@ -126,6 +127,7 @@ public class GlassPanel extends JPanel {
 
     // Közvetlen zoom beállítása (nem animált)
     public void setZoom(double zoom) {
+        // Set the zoom directly (non-animated)
         if (Double.compare(this.zoom, zoom) != 0) {
             this.zoom = zoom;
             scheduler.setDefaultSize((float) zoom);
@@ -134,6 +136,7 @@ public class GlassPanel extends JPanel {
     }
 
     public void setPosition(double x, double y) {
+        // Set the position directly (non-animated)
         this.fixedX = x;
         this.fixedY = y;
         repaint();
@@ -159,10 +162,10 @@ public class GlassPanel extends JPanel {
     }
 
     public void setFixedAlpha(float alpha) {
-        // Note: the scheduler currently uses baseAlpha as baseline
+        // Note: the scheduler currently uses baseAlpha as the baseline
     }
 
-    @Override
+    @Override // Overrides the paintComponent method to draw the SVG document with animations
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
 
