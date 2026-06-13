@@ -1,8 +1,9 @@
-package application.module.node.gui;
+package application.module.node.gui.dialog;
 
 import application.module.node.Generator;
 import application.module.node.Signum;
-import application.module.node.gui.BlockGenerationMetricsPanel.MinerEntry;
+import application.module.node.gui.metrics.BlockGenerationMetricsPanel;
+import application.module.node.gui.metrics.BlockGenerationMetricsPanel.MinerEntry;
 import application.module.node.util.Convert;
 import application.utils.gui.GuiColors;
 import application.utils.gui.TableUtils;
@@ -263,8 +264,9 @@ public class MinersListDialog extends JFrame {
         if (nodeMinersModel == null || networkMinersModel == null)
             return;
 
-        Map<Long, Long> historyCounts = history.stream()
-                .collect(Collectors.groupingBy(e -> e.generatorId, Collectors.counting()));
+        Map<Long, Long> historyCounts = history.stream().collect(
+                Collectors.groupingBy(BlockGenerationMetricsPanel.BlockHistoryEntry::getGeneratorId,
+                        Collectors.counting()));
 
         // --- Node Miners Data ---
         List<Object[]> nodeMinersData = new ArrayList<>();
@@ -279,8 +281,8 @@ public class MinersListDialog extends JFrame {
             List<MinerEntry> entries = historyEntry.getValue();
             Map<Long, BigInteger> bestPerMiner = new HashMap<>();
             for (MinerEntry entry : entries) {
-                if (entry.deadline != null) {
-                    bestPerMiner.merge(entry.accountId, entry.deadline, (a, b) -> a.compareTo(b) < 0 ? a : b);
+                if (entry.getDeadline() != null) {
+                    bestPerMiner.merge(entry.getAccountId(), entry.getDeadline(), (a, b) -> a.compareTo(b) < 0 ? a : b);
                 }
             }
             for (Map.Entry<Long, BigInteger> entry : bestPerMiner.entrySet()) {
@@ -292,7 +294,7 @@ public class MinersListDialog extends JFrame {
         List<MinerEntry> currentEntries = nodeHistory.get(nextHeight);
         if (currentEntries != null) {
             for (MinerEntry entry : currentEntries) {
-                nodeStats.computeIfAbsent(entry.accountId, k -> new NodeMinerStats()).isActive = true;
+                nodeStats.computeIfAbsent(entry.getAccountId(), k -> new NodeMinerStats()).isActive = true;
             }
         }
 
@@ -323,10 +325,10 @@ public class MinersListDialog extends JFrame {
         for (int i = 1; i < history.size(); i++) {
             BlockGenerationMetricsPanel.BlockHistoryEntry prev = history.get(i - 1);
             BlockGenerationMetricsPanel.BlockHistoryEntry curr = history.get(i);
-            if (curr.height == prev.height + 1) {
-                long diff = Math.max(0, (long) curr.timestamp - prev.timestamp);
-                networkStats.computeIfAbsent(curr.generatorId, k -> new NetworkMinerStats())
-                        .add(BigInteger.valueOf(diff), curr.height);
+            if (curr.getHeight() == prev.getHeight() + 1) {
+                long diff = Math.max(0, (long) curr.getTimestamp() - prev.getTimestamp());
+                networkStats.computeIfAbsent(curr.getGeneratorId(), k -> new NetworkMinerStats())
+                        .add(BigInteger.valueOf(diff), curr.getHeight());
             }
         }
 

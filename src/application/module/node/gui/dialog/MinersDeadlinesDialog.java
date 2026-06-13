@@ -1,9 +1,10 @@
-package application.module.node.gui;
+package application.module.node.gui.dialog;
 
 import javax.swing.*;
 import javax.swing.table.TableColumn;
 import javax.swing.table.TableRowSorter;
 
+import application.module.node.gui.metrics.BlockGenerationMetricsPanel;
 import application.utils.gui.TableUtils;
 
 import javax.swing.table.JTableHeader;

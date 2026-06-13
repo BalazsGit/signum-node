@@ -1,4 +1,4 @@
-package application.module.node.gui;
+package application.module.node.gui.dialog;
 
 import application.module.node.Block;
 import application.module.node.Signum;

@@ -43,6 +43,8 @@ import javax.swing.BoxLayout;
 import javax.swing.Icon;
 import application.module.node.gui.animations.RotatingSvgIcon;
 import application.module.node.gui.configuration.ConfigurationPanel;
+import application.module.node.gui.dialog.PeersDialog;
+import application.module.node.gui.metrics.MetricsPanel;
 import application.gui.glassPanel.GlassPanel;
 import application.module.appearance.AppearanceModule;
 import application.module.appearance.gui.AppearancePanel;
@@ -663,19 +665,17 @@ public class SignumGUI extends JPanel {
                     int h = (int) (targetHeight * progress);
                     commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), h));
 
-                    if (commandPanelWrapper.getParent() instanceof JComponent) {
-                        ((JComponent) commandPanelWrapper.getParent()).revalidate();
-                        ((JComponent) commandPanelWrapper.getParent()).repaint();
-                    }
+                    // Mivel a bottomPanel validateRoot lett, szólnunk kell a felette lévő
+                    // rétegnek is, hogy változott a SOUTH komponens magassága.
+                    mainCardPanel.revalidate();
+                    mainCardPanel.repaint();
 
                     scrollToBottom.run();
 
                     if (progress >= 1.0f) {
                         ((Timer) e.getSource()).stop();
                         commandPanelWrapper.setPreferredSize(null);
-                        if (commandPanelWrapper.getParent() instanceof JComponent) {
-                            ((JComponent) commandPanelWrapper.getParent()).revalidate();
-                        }
+                        mainCardPanel.revalidate();
                         SwingUtilities.invokeLater(scrollToBottom);
                     }
                 }
@@ -697,10 +697,8 @@ public class SignumGUI extends JPanel {
                     int h = (int) (startHeight * (1.0f - progress));
                     commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), h));
 
-                    if (commandPanelWrapper.getParent() instanceof JComponent) {
-                        ((JComponent) commandPanelWrapper.getParent()).revalidate();
-                        ((JComponent) commandPanelWrapper.getParent()).repaint();
-                    }
+                    mainCardPanel.revalidate();
+                    mainCardPanel.repaint();
 
                     scrollToBottom.run();
 
@@ -708,9 +706,7 @@ public class SignumGUI extends JPanel {
                         ((Timer) e.getSource()).stop();
                         commandPanelWrapper.removeAll();
                         commandPanelWrapper.setPreferredSize(new Dimension(0, 0));
-                        if (commandPanelWrapper.getParent() instanceof JComponent) {
-                            ((JComponent) commandPanelWrapper.getParent()).revalidate();
-                        }
+                        mainCardPanel.revalidate();
                         SwingUtilities.invokeLater(scrollToBottom);
                     }
                 }
@@ -1056,7 +1052,12 @@ public class SignumGUI extends JPanel {
         syncProgressBar.setMaximumSize(GuiConstants.PROGRESS_BAR_SIZE_SMALL);
         syncProgressBar.setMinimumSize(GuiConstants.PROGRESS_BAR_SIZE_SMALL);
 
-        JPanel latestBlockInfoPanel = new JPanel(new MigLayout("insets 0, hidemode 3, gap 0"));
+        JPanel latestBlockInfoPanel = new JPanel(new MigLayout("insets 0, hidemode 3, gap 0")) {
+            @Override
+            public boolean isValidateRoot() {
+                return true;
+            }
+        };
         latestBlockHeightLabel = new JLabel("Latest block: -");
         latestBlockTimestampLabel = new JLabel("Timestamp: -");
         JSeparator separator = new JSeparator(SwingConstants.VERTICAL);
@@ -1311,7 +1312,12 @@ public class SignumGUI extends JPanel {
 
         // Use MigLayout for infoPanel to allow precise vertical alignment
         infoPanel = new JPanel(
-                new MigLayout("insets 0, fillx, hidemode 3, gap 0", "[][][][][][][][][][][][][][grow]", "[]"));
+                new MigLayout("insets 0, fillx, hidemode 3, gap 0", "[][][][][][][][][][][][][][grow]", "[]")) {
+            @Override
+            public boolean isValidateRoot() {
+                return true;
+            }
+        };
 
         content.add(topPanel, BorderLayout.NORTH);
         content.add(textScrollPane, BorderLayout.CENTER);
@@ -1492,7 +1498,7 @@ public class SignumGUI extends JPanel {
         }
 
         if (parentFrame != null) {
-            // initGlassPane();
+            initGlassPane();
             parentFrame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
             parentFrame.addWindowListener(new WindowAdapter() {
                 @Override
@@ -1576,13 +1582,12 @@ public class SignumGUI extends JPanel {
         return configurationPanel == null || configurationPanel.checkUnsavedChanges();
     }
 
-    /*
-     * private void initGlassPane() {
-     * JPanel glassPane = new GlassPanel();
-     * parentFrame.setGlassPane(glassPane);
-     * glassPane.setVisible(true);
-     * }
-     */
+    private void initGlassPane() {
+        JPanel glassPane = new GlassPanel();
+        parentFrame.setGlassPane(glassPane);
+        glassPane.setVisible(true);
+    }
+
     private void shutdown() {
         JDialog shutdownDialog = new JDialog(parentFrame, "Shutting down", true);
         JPanel panel = new JPanel();

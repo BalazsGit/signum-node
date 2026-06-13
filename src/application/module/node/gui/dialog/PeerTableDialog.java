@@ -1,4 +1,4 @@
-package application.module.node.gui;
+package application.module.node.gui.dialog;
 
 import javax.swing.*;
 import javax.swing.table.TableCellRenderer;
@@ -6,6 +6,7 @@ import javax.swing.table.TableModel;
 import javax.swing.table.JTableHeader;
 import javax.swing.table.TableRowSorter;
 
+import application.module.node.gui.metrics.PeerMetricsPanel;
 import application.utils.gui.TableUtils;
 
 import java.awt.*;

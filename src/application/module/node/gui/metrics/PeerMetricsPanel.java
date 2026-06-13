@@ -1,4 +1,4 @@
-package application.module.node.gui;
+package application.module.node.gui.metrics;
 
 import application.module.node.BlockchainProcessor;
 import application.module.node.peer.PeerMetric;
@@ -11,7 +11,9 @@ import application.utils.gui.GuiFontManager;
 import application.utils.gui.TableUtils;
 import application.utils.math.MovingAverage;
 import application.module.node.Signum;
-import application.module.node.gui.PeersDialog.PeerCategory;
+import application.module.node.gui.dialog.PeerTableDialog;
+import application.module.node.gui.dialog.PeersDialog;
+import application.module.node.gui.dialog.PeersDialog.PeerCategory;
 import application.module.node.peer.Peer;
 import application.module.node.peer.Peers;
 import net.miginfocom.swing.MigLayout;
@@ -442,7 +444,12 @@ public class PeerMetricsPanel extends JPanel {
 
         // --- Peer Counts (Overview Tab) ---
         JPanel overviewPanel = new JPanel(
-                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[]5![]5![grow, fill]", "[top]"));
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[]5![]5![grow, fill]", "[top]")) {
+            @Override
+            public boolean isValidateRoot() {
+                return true;
+            }
+        };
         overviewPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
 
         // Left Side: Metrics + Chart
@@ -474,7 +481,12 @@ public class PeerMetricsPanel extends JPanel {
         overviewPanel.add(overviewChartPanel, "aligny top");
 
         // Right Side: Tables
-        JPanel tablesWrapper = new JPanel(new BorderLayout());
+        JPanel tablesWrapper = new JPanel(new BorderLayout()) {
+            @Override
+            public boolean isValidateRoot() {
+                return true;
+            }
+        };
         TitledBorder titledBorder = BorderFactory.createTitledBorder("Peers");
         tablesWrapper.setBorder(titledBorder);
 
@@ -524,7 +536,12 @@ public class PeerMetricsPanel extends JPanel {
         tablesWrapper.setPreferredSize(new Dimension(250, GuiConstants.CHART_DIMENSION_MEDIUM.height));
         tablesWrapper.setMinimumSize(new Dimension(250, GuiConstants.CHART_DIMENSION_MEDIUM.height));
 
-        overviewTablesPane = new JTabbedPane();
+        overviewTablesPane = new JTabbedPane() {
+            @Override
+            public boolean isValidateRoot() {
+                return true;
+            }
+        };
         overviewTablesPane.setBorder(BorderFactory.createEmptyBorder());
 
         // 1. Connected Tab
@@ -2844,5 +2861,10 @@ public class PeerMetricsPanel extends JPanel {
             return String.format("%.0fk", count / 1000.0);
         }
         return String.valueOf(count);
+    }
+
+    @Override
+    public boolean isValidateRoot() {
+        return true;
     }
 }

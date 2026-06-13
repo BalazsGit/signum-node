@@ -1,4 +1,4 @@
-package application.module.node.gui;
+package application.module.node.gui.metrics;
 
 import javax.swing.*;
 import java.awt.*;
@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 
 import application.utils.gui.CustomDrawingComponent;
 import application.utils.gui.CustomDrawings;
+import application.utils.gui.TabbedPaneHoverHelper;
 
 @SuppressWarnings("serial")
 public class MetricsPanel extends JTabbedPane {
@@ -25,6 +26,7 @@ public class MetricsPanel extends JTabbedPane {
     private int lastSelectedIndex = 1;
     private final CustomDrawingComponent toggleTab;
     private Timer animationTimer;
+    private final TabbedPaneHoverHelper hoverHelper = new TabbedPaneHoverHelper();
 
     // Dedicated executors for each panel to ensure isolation and prevent starvation
     private final ExecutorService syncExecutor;
@@ -61,19 +63,34 @@ public class MetricsPanel extends JTabbedPane {
         peerMetricsPanel = new PeerMetricsPanel(parentFrame, peerExecutor);
 
         // Create wrappers for collapsing animation
-        syncWrapper = new JPanel(new BorderLayout());
+        syncWrapper = new JPanel(new BorderLayout()) {
+            @Override
+            public boolean isValidateRoot() {
+                return true;
+            }
+        };
         JScrollPane syncScrollPane = new JScrollPane(syncPanel);
         syncScrollPane.setBorder(BorderFactory.createEmptyBorder());
         syncScrollPane.getVerticalScrollBar().setUnitIncrement(16);
         syncWrapper.add(syncScrollPane, BorderLayout.CENTER);
 
-        blockGenWrapper = new JPanel(new BorderLayout());
+        blockGenWrapper = new JPanel(new BorderLayout()) {
+            @Override
+            public boolean isValidateRoot() {
+                return true;
+            }
+        };
         JScrollPane blockGenScrollPane = new JScrollPane(blockGenPanel);
         blockGenScrollPane.setBorder(BorderFactory.createEmptyBorder());
         blockGenScrollPane.getVerticalScrollBar().setUnitIncrement(16);
         blockGenWrapper.add(blockGenScrollPane, BorderLayout.CENTER);
 
-        peerWrapper = new JPanel(new BorderLayout());
+        peerWrapper = new JPanel(new BorderLayout()) {
+            @Override
+            public boolean isValidateRoot() {
+                return true;
+            }
+        };
         JScrollPane peerScrollPane = new JScrollPane(peerMetricsPanel);
         peerScrollPane.setBorder(BorderFactory.createEmptyBorder());
         peerScrollPane.getVerticalScrollBar().setUnitIncrement(16);
@@ -89,6 +106,12 @@ public class MetricsPanel extends JTabbedPane {
 
         toggleTab = new CustomDrawingComponent(isExpanded ? CustomDrawings.Chevron.UP : CustomDrawings.Chevron.DOWN);
         setTabComponentAt(0, toggleTab);
+        toggleTab.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                toggleExpanded();
+            }
+        });
 
         // Tab 1: Sync
         addTab("Sync", syncWrapper);
@@ -130,10 +153,11 @@ public class MetricsPanel extends JTabbedPane {
         int targetHeight;
         int startHeight;
 
-        // Calculate max natural height of content
-        int h1 = syncPanel.getPreferredSize().height;
-        int h2 = blockGenPanel.getPreferredSize().height;
-        int h3 = peerMetricsPanel.getPreferredSize().height;
+        // Calculate max natural height of wrappers (containing scrollpanes)
+        setWrappersHeight(null);
+        int h1 = syncWrapper.getPreferredSize().height;
+        int h2 = blockGenWrapper.getPreferredSize().height;
+        int h3 = peerWrapper.getPreferredSize().height;
         int naturalHeight = Math.max(h1, Math.max(h2, h3));
 
         if (expanding) {
@@ -148,7 +172,10 @@ public class MetricsPanel extends JTabbedPane {
                 }
             }
         } else {
-            startHeight = naturalHeight;
+            // Use actual visible height as start point for collapse animation to avoid
+            // "invisible" start
+            startHeight = Math.max(syncWrapper.getHeight(),
+                    Math.max(blockGenWrapper.getHeight(), peerWrapper.getHeight()));
             targetHeight = 0;
             if (getSelectedIndex() != 0) {
                 lastSelectedIndex = getSelectedIndex();
@@ -248,5 +275,32 @@ public class MetricsPanel extends JTabbedPane {
         syncPanel.setUiOptimizationEnabled(enabled);
         blockGenPanel.setUiOptimizationEnabled(enabled);
         peerMetricsPanel.setUiOptimizationEnabled(enabled);
+    }
+
+    /**
+     * Felüldefiniáljuk a repaint-et, hogy minden rajzolási igény esetén
+     * ellenőrizzük és frissítsük a hover állapotot, ha az egér a tabok felett van.
+     */
+    @Override
+    public void repaint(long tm, int x, int y, int width, int height) {
+        // Ne frissítsük a hovert animáció közben, hogy ne terheljük az EDT-t
+        if (hoverHelper != null && (animationTimer == null || !animationTimer.isRunning())) {
+            hoverHelper.handleRepaint(this);
+        }
+        super.repaint(tm, x, y, width, height);
+    }
+
+    /**
+     * Felüldefiniáljuk a revalidate-et is, mert az elrendezés változása (pl.
+     * animáció vagy tartalomfrissítés)
+     * gyakran okozza a hover állapot elvesztését.
+     */
+    @Override
+    public void revalidate() {
+        super.revalidate();
+        // Csak akkor szinkronizáljunk hovert, ha nincs mozgásban a panel
+        if (hoverHelper != null && (animationTimer == null || !animationTimer.isRunning())) {
+            hoverHelper.handleRevalidate(this);
+        }
     }
 }

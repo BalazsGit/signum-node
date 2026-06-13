@@ -1,4 +1,4 @@
-package application.module.node.gui;
+package application.module.node.gui.metrics;
 
 import application.module.node.Account;
 import application.module.node.Block;
@@ -7,6 +7,8 @@ import application.module.node.Constants;
 import application.module.node.Generator;
 import application.module.node.Signum;
 import application.module.node.fluxcapacitor.FluxValues;
+import application.module.node.gui.dialog.MinersDeadlinesDialog;
+import application.module.node.gui.dialog.MinersListDialog;
 import application.module.node.util.Convert;
 import application.module.node.util.DurationFormatter;
 import application.module.node.util.Listener;
@@ -125,7 +127,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
     private JLabel baseTargetLabel;
 
-    static final int CHART_HISTORY_SIZE = 1000;
+    public static final int CHART_HISTORY_SIZE = 1000;
     private final List<BlockHistoryEntry> recentGenerators = new CopyOnWriteArrayList<>();
     private int movingAverageWindow = 100;
     private int currentZoomRange = CHART_HISTORY_SIZE;
@@ -725,7 +727,12 @@ public class BlockGenerationMetricsPanel extends JPanel {
         rightMetricsPanel.add(createControlsPanel());
 
         // --- Miners Table (Center) ---
-        JPanel tablePanel = new JPanel(new BorderLayout(0, 0));
+        JPanel tablePanel = new JPanel(new BorderLayout(0, 0)) {
+            @Override
+            public boolean isValidateRoot() {
+                return true;
+            }
+        };
         TitledBorder titledBorder = BorderFactory.createTitledBorder("Miners & Deadlines");
         tablePanel.setBorder(titledBorder);
 
@@ -2533,7 +2540,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
         popup.show(e.getComponent(), e.getX(), e.getY());
     }
 
-    static String getLegendHtml() {
+    public static String getLegendHtml() {
         return "<html><body style='width: 350px'>" +
                 "<h3>Table Legend & Information</h3>" +
                 "<b>Row Colors (Text):</b><br>" +
@@ -2678,7 +2685,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
     }
 
     // --- Block History Entry Class ---
-    static class BlockHistoryEntry {
+    public static class BlockHistoryEntry {
         final long blockId;
         final long generatorId;
         final int height;
@@ -2689,6 +2696,22 @@ public class BlockGenerationMetricsPanel extends JPanel {
             this.generatorId = generatorId;
             this.height = height;
             this.timestamp = timestamp;
+        }
+
+        public long getBlockId() {
+            return blockId;
+        }
+
+        public long getGeneratorId() {
+            return generatorId;
+        }
+
+        public int getHeight() {
+            return height;
+        }
+
+        public int getTimestamp() {
+            return timestamp;
         }
     }
 
@@ -2703,8 +2726,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
     }
 
     // --- Miner Entry Class ---
-    static class MinerEntry implements Comparable<MinerEntry> {
-        enum Type {
+    public static class MinerEntry implements Comparable<MinerEntry> {
+        public enum Type {
             WINNER_LOCAL,
             WINNER_REMOTE,
             ACTIVE_LOCAL,
@@ -2733,6 +2756,38 @@ public class BlockGenerationMetricsPanel extends JPanel {
             this.blockId = blockId;
         }
 
+        public long getAccountId() {
+            return accountId;
+        }
+
+        public String getAccountRS() {
+            return accountRS;
+        }
+
+        public String getMinerName() {
+            return minerName;
+        }
+
+        public BigInteger getDeadline() {
+            return deadline;
+        }
+
+        public Type getType() {
+            return type;
+        }
+
+        public int getHeight() {
+            return height;
+        }
+
+        public long getTimestamp() {
+            return timestamp;
+        }
+
+        public long getBlockId() {
+            return blockId;
+        }
+
         @Override
         public int compareTo(MinerEntry o) {
             boolean thisLocal = isLocal(this.type);
@@ -2748,7 +2803,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
     }
 
     // --- Custom Renderer ---
-    static class MinerTableCellRenderer extends DefaultTableCellRenderer implements javax.swing.plaf.UIResource {
+    public static class MinerTableCellRenderer extends DefaultTableCellRenderer implements javax.swing.plaf.UIResource {
         @Override
         public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus,
                 int row, int column) {
@@ -2804,7 +2859,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
     // --- Table Model ---
 
-    static class MinersTableModel extends AbstractTableModel {
+    public static class MinersTableModel extends AbstractTableModel {
         public static final String COL_HEIGHT = "Height";
         public static final String COL_IO = "I/O";
         public static final String COL_BLOCK_ID = "Block ID";
@@ -2878,5 +2933,10 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 return MinerEntry.class;
             return String.class;
         }
+    }
+
+    @Override
+    public boolean isValidateRoot() {
+        return true;
     }
 }
