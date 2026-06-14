@@ -535,8 +535,10 @@ public class PeerMetricsPanel extends JPanel {
         tablesWrapper.addMouseListener(titleMouseAdapter);
         tablesWrapper.addMouseMotionListener(titleMouseAdapter);
 
-        tablesWrapper.setPreferredSize(new Dimension(250, GuiConstants.CHART_DIMENSION_MEDIUM.height));
-        tablesWrapper.setMinimumSize(new Dimension(250, GuiConstants.CHART_DIMENSION_MEDIUM.height));
+        tablesWrapper.setPreferredSize(
+                new Dimension(GuiConstants.TABLE_PANEL_WIDTH, GuiConstants.CHART_DIMENSION_MEDIUM.height));
+        tablesWrapper.setMinimumSize(
+                new Dimension(GuiConstants.TABLE_PANEL_WIDTH, GuiConstants.CHART_DIMENSION_MEDIUM.height));
 
         overviewTablesPane = new JTabbedPane() {
             @Override
@@ -868,8 +870,10 @@ public class PeerMetricsPanel extends JPanel {
         scrollPane.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0)); // NOSONAR
         scrollPane.setViewportBorder(null); // NOSONAR
         tablePanel.add(scrollPane, BorderLayout.CENTER);
-        tablePanel.setPreferredSize(new Dimension(250, GuiConstants.CHART_DIMENSION_MEDIUM.height));
-        tablePanel.setMinimumSize(new Dimension(250, GuiConstants.CHART_DIMENSION_MEDIUM.height));
+        tablePanel.setPreferredSize(
+                new Dimension(GuiConstants.TABLE_PANEL_WIDTH, GuiConstants.CHART_DIMENSION_MEDIUM.height));
+        tablePanel.setMinimumSize(
+                new Dimension(GuiConstants.TABLE_PANEL_WIDTH, GuiConstants.CHART_DIMENSION_MEDIUM.height));
 
         filterTextField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             public void changedUpdate(javax.swing.event.DocumentEvent e) {

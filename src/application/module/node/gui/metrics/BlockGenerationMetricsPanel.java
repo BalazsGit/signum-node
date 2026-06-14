@@ -906,10 +906,10 @@ public class BlockGenerationMetricsPanel extends JPanel {
         tableScrollPane.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
         tableScrollPane.setViewportBorder(null); // NOSONAR
         tablePanel.add(tableScrollPane, BorderLayout.CENTER);
-        tablePanel.setPreferredSize(new Dimension(250, GuiConstants.CHART_DIMENSION_LARGE.height)); // Fixed size to
-                                                                                                    // prevent
-                                                                                                    // expansion
-        tablePanel.setMinimumSize(new Dimension(250, GuiConstants.CHART_DIMENSION_LARGE.height));
+        tablePanel.setPreferredSize(
+                new Dimension(GuiConstants.TABLE_PANEL_WIDTH, GuiConstants.CHART_DIMENSION_LARGE.height));
+        tablePanel.setMinimumSize(
+                new Dimension(GuiConstants.TABLE_PANEL_WIDTH, GuiConstants.CHART_DIMENSION_LARGE.height));
 
         add(leftMetricsPanel, "growy, aligny top");
         add(chartPanel, "growy");

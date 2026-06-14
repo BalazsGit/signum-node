@@ -42,4 +42,5 @@ public final class GuiConstants {
     public static final Dimension CHART_DIMENSION_NET_SPLIT = new Dimension(320, 60);
     public static final Dimension PIE_CHART_DIMENSION = new Dimension(300, 180);
     public static final int SLIDER_WIDTH = 150;
+    public static final int TABLE_PANEL_WIDTH = 300;
 }
