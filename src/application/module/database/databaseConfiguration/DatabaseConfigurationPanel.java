@@ -1,4 +1,4 @@
-package application.module.node.gui.configuration.databaseConfiguration;
+package application.module.database.databaseConfiguration;
 
 import application.module.node.Constants;
 import application.module.node.props.Prop;

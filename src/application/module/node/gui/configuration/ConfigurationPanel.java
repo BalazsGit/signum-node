@@ -1,7 +1,7 @@
 package application.module.node.gui.configuration;
 
-import application.module.node.gui.configuration.databaseConfiguration.DatabaseConfigurationPanel;
-import application.module.node.gui.configuration.databaseConfiguration.DatabaseEnginePanel;
+import application.module.database.databaseConfiguration.DatabaseConfigurationPanel;
+import application.module.database.databaseConfiguration.DatabaseEnginePanel;
 import application.utils.gui.GuiConstants;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;

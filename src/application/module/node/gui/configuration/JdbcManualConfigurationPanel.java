@@ -1,9 +1,11 @@
 package application.module.node.gui.configuration;
 
-import application.module.node.gui.configuration.databaseConfiguration.DatabaseConfigurationPanel;
-import application.module.node.gui.configuration.databaseConfiguration.DatabaseConfigurationUtils;
 import net.miginfocom.swing.MigLayout;
 import javax.swing.*;
+
+import application.module.database.databaseConfiguration.DatabaseConfigurationPanel;
+import application.module.database.databaseConfiguration.DatabaseConfigurationUtils;
+
 import java.awt.*;
 import java.util.regex.Matcher;
 

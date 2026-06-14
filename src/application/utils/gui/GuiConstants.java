@@ -33,7 +33,7 @@ public final class GuiConstants {
 
     public static final int ICON_SIZE_DIALOG = 32;
     public static final Dimension PROGRESS_BAR_SIZE_SMALL = new Dimension(150, 20);
-    public static final Dimension PROGRESS_BAR_SIZE_MEDIUM = new Dimension(200, 20);
+    public static final Dimension PROGRESS_BAR_SIZE_MEDIUM = new Dimension(250, 20);
     public static final Dimension PROGRESS_BAR_SIZE_LARGE = new Dimension(350, 20);
     public static final Dimension VERTICAL_SEPARATOR_SIZE = new Dimension(2, 20);
 

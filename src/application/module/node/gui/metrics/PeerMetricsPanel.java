@@ -8,6 +8,7 @@ import application.utils.gui.ContextMenuUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiFontManager;
+import application.utils.gui.SmartTable;
 import application.utils.gui.TableUtils;
 import application.utils.math.MovingAverage;
 import application.module.node.Signum;
@@ -73,7 +74,7 @@ public class PeerMetricsPanel extends JPanel {
     private static final int AXIS_LINES = 0;
     private static final int AXIS_BARS = 1;
 
-    private static final int[] MA_WINDOW_VALUES = { 10, 100, 200, 300, 400, 500 };
+    private static final int[] MA_WINDOW_VALUES = { 1, 10, 100, 500 };
 
     private static final BasicStroke CHART_STROKE = new BasicStroke(1.2f);
 
@@ -444,7 +445,8 @@ public class PeerMetricsPanel extends JPanel {
 
         // --- Peer Counts (Overview Tab) ---
         JPanel overviewPanel = new JPanel(
-                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[]5![]5![grow, fill]", "[top]")) {
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[]5![]5![grow, fill]",
+                        "[grow, fill]")) {
             @Override
             public boolean isValidateRoot() {
                 return true;
@@ -477,8 +479,8 @@ public class PeerMetricsPanel extends JPanel {
         addToggleListener(allLabel, overviewChartPanel, allSeries.getKey().toString());
         addToggleListener(blacklistedLabel, overviewChartPanel, blacklistedSeries.getKey().toString());
 
-        overviewPanel.add(metricsOverview, "aligny top");
-        overviewPanel.add(overviewChartPanel, "aligny top");
+        overviewPanel.add(metricsOverview, "growy, aligny top");
+        overviewPanel.add(overviewChartPanel, "growy");
 
         // Right Side: Tables
         JPanel tablesWrapper = new JPanel(new BorderLayout()) {
@@ -682,7 +684,8 @@ public class PeerMetricsPanel extends JPanel {
             MetricType type) {
 
         JPanel panel = new JPanel(
-                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[]5![]5![grow, fill]", "[top]"));
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[]5![]5![grow, fill]",
+                        "[grow, fill]"));
         panel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
 
         JPanel metricsPanel = new JPanel(
@@ -738,14 +741,14 @@ public class PeerMetricsPanel extends JPanel {
         addToggleListener(absMinLabel, chartPanel, absMinSeries.getKey().toString());
         addToggleListener(absMaxLabel, chartPanel, absMaxSeries.getKey().toString());
 
-        panel.add(metricsPanel, "aligny top");
-        panel.add(chartPanel, "aligny top");
+        panel.add(metricsPanel, "growy, aligny top");
+        panel.add(chartPanel, "growy");
 
         // Table Section (Center)
         PeersTableModel model = new PeersTableModel(type);
         final PeerMetricTableCellRenderer renderer = new PeerMetricTableCellRenderer(responseTimeColorKey,
                 countColorKey);
-        JTable table = new JTable(model) {
+        JTable table = new SmartTable(model) {
             @Override
             public void updateUI() {
                 super.updateUI();
@@ -932,7 +935,7 @@ public class PeerMetricsPanel extends JPanel {
         JLabel maWindowLabel = createLabel("MA Window", null, maWindowTooltip);
 
         int currentWindow = movingAverageWindow;
-        int initialSliderValue = 1; // Default to 100
+        int initialSliderValue = 2; // Default to 100 (index in MA_WINDOW_VALUES)
         for (int i = 0; i < MA_WINDOW_VALUES.length; i++) {
             if (currentWindow == MA_WINDOW_VALUES[i]) {
                 initialSliderValue = i;
@@ -1216,7 +1219,6 @@ public class PeerMetricsPanel extends JPanel {
         ChartPanel chartPanel = new ChartPanel(chart);
         chartPanel.setPreferredSize(GuiConstants.CHART_DIMENSION_MEDIUM);
         chartPanel.setMinimumSize(GuiConstants.CHART_DIMENSION_MEDIUM);
-        chartPanel.setMaximumSize(GuiConstants.CHART_DIMENSION_MEDIUM);
         chartPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
         chartPanel.setDisplayToolTips(true);
         ToolTipManager.sharedInstance().registerComponent(chartPanel);
@@ -1344,7 +1346,6 @@ public class PeerMetricsPanel extends JPanel {
         ChartPanel chartPanel = new ChartPanel(chart);
         chartPanel.setPreferredSize(GuiConstants.CHART_DIMENSION_MEDIUM);
         chartPanel.setMinimumSize(GuiConstants.CHART_DIMENSION_MEDIUM);
-        chartPanel.setMaximumSize(GuiConstants.CHART_DIMENSION_MEDIUM);
         chartPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
         chartPanel.setDisplayToolTips(true);
         ToolTipManager.sharedInstance().registerComponent(chartPanel);

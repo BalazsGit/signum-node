@@ -1,12 +1,12 @@
-package application.module.node.gui.configuration.databaseConfiguration;
+package application.module.database.databaseConfiguration;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
+import application.module.database.databaseConfiguration.DatabaseConfigurationPanel.DatabaseEngine;
+import application.module.database.databaseConfiguration.DatabaseConfigurationPanel.PropertyRow;
 import application.module.node.Signum;
 import application.module.node.gui.configuration.ConfigurationUtils;
-import application.module.node.gui.configuration.databaseConfiguration.DatabaseConfigurationPanel.DatabaseEngine;
-import application.module.node.gui.configuration.databaseConfiguration.DatabaseConfigurationPanel.PropertyRow;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.HelpButton;

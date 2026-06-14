@@ -19,9 +19,11 @@ public class MetricsPanel extends JTabbedPane {
     private final SynchronizationMetricsPanel syncPanel;
     private final BlockGenerationMetricsPanel blockGenPanel;
     private final PeerMetricsPanel peerMetricsPanel;
+    private final NetworkMetricsPanel networkMetricsPanel;
     private final JPanel syncWrapper;
     private final JPanel blockGenWrapper;
     private final JPanel peerWrapper;
+    private final JPanel networkWrapper;
     private boolean isExpanded = true;
     private int lastSelectedIndex = 1;
     private final CustomDrawingComponent toggleTab;
@@ -32,6 +34,7 @@ public class MetricsPanel extends JTabbedPane {
     private final ExecutorService syncExecutor;
     private final ExecutorService blockGenExecutor;
     private final ExecutorService peerExecutor;
+    private final ExecutorService networkExecutor;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(MetricsPanel.class);
 
@@ -58,9 +61,16 @@ public class MetricsPanel extends JTabbedPane {
             return t;
         });
 
+        networkExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "Network-Metrics-Worker");
+            t.setDaemon(true);
+            return t;
+        });
+
         syncPanel = new SynchronizationMetricsPanel(parentFrame, syncExecutor);
         blockGenPanel = new BlockGenerationMetricsPanel(parentFrame, blockGenExecutor);
         peerMetricsPanel = new PeerMetricsPanel(parentFrame, peerExecutor);
+        networkMetricsPanel = new NetworkMetricsPanel(parentFrame, networkExecutor);
 
         // Create wrappers for collapsing animation
         syncWrapper = new JPanel(new BorderLayout()) {
@@ -96,6 +106,17 @@ public class MetricsPanel extends JTabbedPane {
         peerScrollPane.getVerticalScrollBar().setUnitIncrement(16);
         peerWrapper.add(peerScrollPane, BorderLayout.CENTER);
 
+        networkWrapper = new JPanel(new BorderLayout()) {
+            @Override
+            public boolean isValidateRoot() {
+                return true;
+            }
+        };
+        JScrollPane networkScrollPane = new JScrollPane(networkMetricsPanel);
+        networkScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        networkScrollPane.getVerticalScrollBar().setUnitIncrement(16);
+        networkWrapper.add(networkScrollPane, BorderLayout.CENTER);
+
         // Tabs at the bottom
         setTabPlacement(JTabbedPane.BOTTOM);
 
@@ -121,6 +142,9 @@ public class MetricsPanel extends JTabbedPane {
 
         // Tab 3: Peer Metrics
         addTab("Peer Metrics", peerWrapper);
+
+        // Tab 4: Network
+        addTab("Network", networkWrapper);
 
         setSelectedIndex(1); // Default to Sync
 
@@ -158,7 +182,8 @@ public class MetricsPanel extends JTabbedPane {
         int h1 = syncWrapper.getPreferredSize().height;
         int h2 = blockGenWrapper.getPreferredSize().height;
         int h3 = peerWrapper.getPreferredSize().height;
-        int naturalHeight = Math.max(h1, Math.max(h2, h3));
+        int h4 = networkWrapper.getPreferredSize().height;
+        int naturalHeight = Math.max(h1, Math.max(h2, Math.max(h3, h4)));
 
         if (expanding) {
             startHeight = 0;
@@ -174,8 +199,8 @@ public class MetricsPanel extends JTabbedPane {
         } else {
             // Use actual visible height as start point for collapse animation to avoid
             // "invisible" start
-            startHeight = Math.max(syncWrapper.getHeight(),
-                    Math.max(blockGenWrapper.getHeight(), peerWrapper.getHeight()));
+            startHeight = Math.max(syncWrapper.getHeight(), Math.max(blockGenWrapper.getHeight(),
+                    Math.max(peerWrapper.getHeight(), networkWrapper.getHeight())));
             targetHeight = 0;
             if (getSelectedIndex() != 0) {
                 lastSelectedIndex = getSelectedIndex();
@@ -221,6 +246,7 @@ public class MetricsPanel extends JTabbedPane {
         updateWrapperHeight(syncWrapper, syncPanel, height);
         updateWrapperHeight(blockGenWrapper, blockGenPanel, height);
         updateWrapperHeight(peerWrapper, peerMetricsPanel, height);
+        updateWrapperHeight(networkWrapper, networkMetricsPanel, height);
     }
 
     private void updateWrapperHeight(JPanel wrapper, JComponent content, Integer height) {
@@ -239,6 +265,7 @@ public class MetricsPanel extends JTabbedPane {
         syncPanel.init();
         blockGenPanel.init();
         peerMetricsPanel.init();
+        networkMetricsPanel.init();
     }
 
     public void shutdown() {
@@ -257,10 +284,16 @@ public class MetricsPanel extends JTabbedPane {
         } catch (Throwable t) {
             LOGGER.warn("Error shutting down peer metrics panel", t);
         }
+        try {
+            networkMetricsPanel.shutdown();
+        } catch (Throwable t) {
+            LOGGER.warn("Error shutting down network metrics panel", t);
+        }
 
         shutdownExecutor(syncExecutor, "sync");
         shutdownExecutor(blockGenExecutor, "blockGen");
         shutdownExecutor(peerExecutor, "peer");
+        shutdownExecutor(networkExecutor, "network");
     }
 
     private void shutdownExecutor(ExecutorService executor, String name) {
@@ -275,6 +308,7 @@ public class MetricsPanel extends JTabbedPane {
         syncPanel.setUiOptimizationEnabled(enabled);
         blockGenPanel.setUiOptimizationEnabled(enabled);
         peerMetricsPanel.setUiOptimizationEnabled(enabled);
+        networkMetricsPanel.setUiOptimizationEnabled(enabled);
     }
 
     /**

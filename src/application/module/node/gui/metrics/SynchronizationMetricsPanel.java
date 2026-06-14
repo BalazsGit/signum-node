@@ -195,7 +195,7 @@ public class SynchronizationMetricsPanel extends JPanel {
 
     private static final BasicStroke CHART_STROKE = new BasicStroke(1.2f);
 
-    private static final int[] MA_WINDOW_VALUES = { 10, 100, 200, 300, 400, 500 };
+    private static final int[] MA_WINDOW_VALUES = { 1, 10, 100, 500 };
 
     private final ExecutorService chartUpdateExecutor;
     private final Object updateLock = new Object();
@@ -349,7 +349,6 @@ public class SynchronizationMetricsPanel extends JPanel {
         };
         chartPanel.setPreferredSize(GuiConstants.CHART_DIMENSION_LARGE);
         chartPanel.setMinimumSize(GuiConstants.CHART_DIMENSION_LARGE);
-        chartPanel.setMaximumSize(GuiConstants.CHART_DIMENSION_LARGE);
         chartPanel.setDisplayToolTips(true);
         ToolTipManager.sharedInstance().registerComponent(chartPanel);
         return chartPanel;
@@ -483,7 +482,6 @@ public class SynchronizationMetricsPanel extends JPanel {
         };
         chartPanel.setPreferredSize(GuiConstants.CHART_DIMENSION_MEDIUM);
         chartPanel.setMinimumSize(GuiConstants.CHART_DIMENSION_MEDIUM);
-        chartPanel.setMaximumSize(GuiConstants.CHART_DIMENSION_MEDIUM);
         chartPanel.setDisplayToolTips(true);
         ToolTipManager.sharedInstance().registerComponent(chartPanel);
         return chartPanel;
@@ -571,7 +569,6 @@ public class SynchronizationMetricsPanel extends JPanel {
         };
         chartPanel.setPreferredSize(GuiConstants.CHART_DIMENSION_NET_SPLIT);
         chartPanel.setMinimumSize(GuiConstants.CHART_DIMENSION_NET_SPLIT);
-        chartPanel.setMaximumSize(GuiConstants.CHART_DIMENSION_NET_SPLIT);
         chartPanel.setDisplayToolTips(true);
         ToolTipManager.sharedInstance().registerComponent(chartPanel);
         return chartPanel;
@@ -659,7 +656,6 @@ public class SynchronizationMetricsPanel extends JPanel {
         };
         chartPanel.setPreferredSize(GuiConstants.CHART_DIMENSION_NET_SPLIT);
         chartPanel.setMinimumSize(GuiConstants.CHART_DIMENSION_NET_SPLIT);
-        chartPanel.setMaximumSize(GuiConstants.CHART_DIMENSION_NET_SPLIT);
         chartPanel.setDisplayToolTips(true);
         ToolTipManager.sharedInstance().registerComponent(chartPanel);
         return chartPanel;
@@ -674,7 +670,7 @@ public class SynchronizationMetricsPanel extends JPanel {
     public SynchronizationMetricsPanel(JFrame parentFrame, ExecutorService sharedExecutor) {
         setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
         this.chartUpdateExecutor = sharedExecutor;
-        setLayout(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[grow]", "[top]"));
+        setLayout(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[grow]", "[grow, fill]"));
         try {
             this.parentFrame = parentFrame;
             allTransactionsPerBlockSeries = new XYSeries("All Txs/Block (MA)", true, false); // Orange
@@ -796,11 +792,11 @@ public class SynchronizationMetricsPanel extends JPanel {
         JPanel content = new JPanel(new MigLayout(
                 (migLayoutDebug ? "debug, " : "") + "insets 0, alignx center",
                 "[]5![]5![]5![]",
-                "[top]"));
+                "[grow, fill]"));
 
         // === Performance Metrics Panel ===
         JPanel performanceMetricsPanel = new JPanel(
-                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0", "[grow]5[grow]", "[top]"));
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0", "[grow]5[grow]", "[grow, fill]"));
         if (showDebugBorders) {
             performanceMetricsPanel.setBorder(BorderFactory.createLineBorder(Color.BLACK));
         }
@@ -1027,7 +1023,7 @@ public class SynchronizationMetricsPanel extends JPanel {
 
         // Performance chart
         JPanel performanceChartContainer = new JPanel(
-                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, gap 0")) {
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, gap 0", "", "[grow, fill]")) {
             @Override
             public boolean isValidateRoot() {
                 return true;
@@ -1036,8 +1032,8 @@ public class SynchronizationMetricsPanel extends JPanel {
         if (showDebugBorders) {
             performanceChartContainer.setBorder(BorderFactory.createLineBorder(Color.yellow));
         }
-        performanceChartContainer.add(performanceChartPanel);
-        performanceMetricsPanel.add(performanceChartContainer, "cell 1 0, aligny top");
+        performanceChartContainer.add(performanceChartPanel, "growy");
+        performanceMetricsPanel.add(performanceChartContainer, "cell 1 0, growy");
 
         // Add toggle listeners for performance chart
         addToggleListener(blocksPerSecondLabel, performanceChartPanel, "Blocks/Second (MA)");
@@ -1049,7 +1045,7 @@ public class SynchronizationMetricsPanel extends JPanel {
 
         // === Timing Metrics Panel ===
         JPanel timingMetricsPanel = new JPanel(
-                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0", "[grow]5[grow]", "[]0[]"));
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0", "[grow]5[grow]", "[grow, fill]0[]"));
         if (showDebugBorders) {
             timingMetricsPanel.setBorder(BorderFactory.createLineBorder(Color.BLACK));
         }
@@ -1321,7 +1317,8 @@ public class SynchronizationMetricsPanel extends JPanel {
         timingMetricsPanel.add(timingInfoPanel, "cell 0 0, growy, aligny top");
 
         // --- Timing Chart Panel ---
-        JPanel timingChartContainer = new JPanel(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, gap 0")) {
+        JPanel timingChartContainer = new JPanel(
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, gap 0", "", "[grow, fill]")) {
             @Override
             public boolean isValidateRoot() {
                 return true;
@@ -1330,13 +1327,14 @@ public class SynchronizationMetricsPanel extends JPanel {
         if (showDebugBorders) {
             timingChartContainer.setBorder(BorderFactory.createLineBorder(Color.YELLOW));
         }
-        timingChartContainer.add(timingChartPanel);
-        timingMetricsPanel.add(timingChartContainer, "cell 1 0, aligny top");
+        timingChartContainer.add(timingChartPanel, "growy");
+        timingMetricsPanel.add(timingChartContainer, "cell 1 0, growy");
         // End Timing Metrics Panel
 
         // --- Net Speed Chart Panel ---
         JPanel netSpeedChartContainer = new JPanel(
-                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, wrap 1, gapy 4", "[center]")) {
+                new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, wrap 1, gapy 4", "[center]",
+                        "[grow, fill]")) {
             @Override
             public boolean isValidateRoot() {
                 return true;
@@ -1345,8 +1343,8 @@ public class SynchronizationMetricsPanel extends JPanel {
         if (showDebugBorders) {
             netSpeedChartContainer.setBorder(BorderFactory.createLineBorder(Color.RED));
         }
-        netSpeedChartContainer.add(uploadChartPanel);
-        netSpeedChartContainer.add(downloadChartPanel, "gaptop 0");
+        netSpeedChartContainer.add(uploadChartPanel, "growy");
+        netSpeedChartContainer.add(downloadChartPanel, "growy, gaptop 0");
 
         // Separator3
         JSeparator separator3 = new JSeparator(SwingConstants.HORIZONTAL);
@@ -1426,20 +1424,20 @@ public class SynchronizationMetricsPanel extends JPanel {
         netSpeedChartContainer.add(createControlsPanel());
 
         // Add performanceMetricsPanel to main metrics panel
-        content.add(performanceMetricsPanel, "cell 0 0, aligny top");
+        content.add(performanceMetricsPanel, "cell 0 0, growy");
 
         // Vertical Separator
         JSeparator mainVerticalSeparator = new JSeparator(SwingConstants.VERTICAL);
         mainVerticalSeparator.setPreferredSize(new Dimension(2, GuiConstants.CHART_DIMENSION_LARGE.height));
         mainVerticalSeparator.setMinimumSize(new Dimension(2, GuiConstants.CHART_DIMENSION_LARGE.height));
-        content.add(mainVerticalSeparator, "cell 1 0, aligny top");
+        content.add(mainVerticalSeparator, "cell 1 0, growy");
 
         // Add timingMetricsPanel to main metrics panel
-        content.add(timingMetricsPanel, "cell 2 0, aligny top");
+        content.add(timingMetricsPanel, "cell 2 0, growy");
 
-        content.add(netSpeedChartContainer, "cell 3 0, aligny top");
+        content.add(netSpeedChartContainer, "cell 3 0, growy");
 
-        add(content, "growx, alignx center");
+        add(content, "growx, growy, alignx center");
         // END Metrics Panel
 
         addToggleListener(pushTimeLabel, timingChartPanel, "Push Time (MA)");
@@ -1485,7 +1483,7 @@ public class SynchronizationMetricsPanel extends JPanel {
                 """;
         JLabel maWindowLabel = createLabel("MA Window", tooltip, null);
 
-        int initialSliderValue = 1; // Default to 100
+        int initialSliderValue = 2; // Default to 100 (index in MA_WINDOW_VALUES)
         for (int i = 0; i < MA_WINDOW_VALUES.length; i++) {
             if (movingAverageWindow == MA_WINDOW_VALUES[i]) {
                 initialSliderValue = i;

@@ -2,11 +2,11 @@ package application.module.node.gui.configuration;
 
 import application.module.node.Signum;
 import application.module.node.crypto.Crypto;
+import application.module.database.databaseConfiguration.DatabaseConfigurationPanel;
+import application.module.database.databaseConfiguration.DatabaseConfigurationUtils;
 import application.module.node.Constants;
 import application.module.node.props.Prop;
 import application.module.node.props.Props;
-import application.module.node.gui.configuration.databaseConfiguration.DatabaseConfigurationPanel;
-import application.module.node.gui.configuration.databaseConfiguration.DatabaseConfigurationUtils;
 import application.module.node.util.Convert;
 import jiconfont.icons.font_awesome.FontAwesome;
 import application.utils.gui.GuiColors;

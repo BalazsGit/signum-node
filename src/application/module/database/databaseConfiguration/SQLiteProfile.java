@@ -1,4 +1,4 @@
-package application.module.node.gui.configuration.databaseConfiguration;
+package application.module.database.databaseConfiguration;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;

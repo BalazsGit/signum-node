@@ -1,4 +1,4 @@
-package application.module.node.gui.configuration.databaseConfiguration;
+package application.module.database.databaseConfiguration;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -6,7 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 
-import application.module.node.gui.configuration.databaseConfiguration.DatabaseConfigurationUtils.ProgressListener;
+import application.module.database.databaseConfiguration.DatabaseConfigurationUtils.ProgressListener;
 import application.utils.io.PathUtils;
 
 import org.slf4j.Logger;

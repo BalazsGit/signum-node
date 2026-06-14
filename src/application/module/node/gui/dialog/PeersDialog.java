@@ -6,6 +6,7 @@ import application.module.node.BlockchainProcessor;
 import application.module.node.peer.Peer;
 import application.module.node.util.Listener;
 import application.utils.gui.GuiColors;
+import application.utils.gui.SmartTable;
 import application.utils.gui.TableUtils;
 
 import javax.swing.*;
@@ -240,7 +241,7 @@ public class PeersDialog extends JFrame {
             add(filterPanel, BorderLayout.NORTH);
 
             tableModel = new PeersTableModel();
-            table = new JTable(tableModel) {
+            table = new SmartTable(tableModel) {
                 @Override
                 public void updateUI() {
                     super.updateUI();

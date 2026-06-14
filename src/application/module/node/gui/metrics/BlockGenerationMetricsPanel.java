@@ -18,6 +18,7 @@ import application.utils.gui.CustomDrawingIcon;
 import application.utils.gui.CustomDrawings;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
+import application.utils.gui.SmartTable;
 import application.utils.gui.GuiFontManager;
 import application.utils.gui.TableUtils;
 import application.utils.math.MovingAverage;
@@ -116,7 +117,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
     private static final BasicStroke CHART_STROKE = new BasicStroke(1.2f);
 
-    private static final int[] MA_WINDOW_VALUES = { 10, 100, 200, 300, 400, 500 };
+    private static final int[] MA_WINDOW_VALUES = { 1, 10, 100, 500 };
 
     private static final Logger logger = LoggerFactory.getLogger(BlockGenerationMetricsPanel.class);
 
@@ -241,7 +242,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
     public BlockGenerationMetricsPanel(JFrame parentFrame, ExecutorService sharedExecutor) {
         this.updateExecutor = sharedExecutor;
         setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
-        setLayout(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[]5![]5![]5![grow]", "[top]"));
+        setLayout(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[]5![]5![]5![grow]",
+                "[grow, fill]"));
         this.parentFrame = parentFrame;
         initializeColorPalette();
         layoutComponents();
@@ -786,7 +788,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
         tablePanel.add(filterPanel, BorderLayout.NORTH);
 
         minersTableModel = new MinersTableModel();
-        minersTable = new JTable(minersTableModel) {
+        minersTable = new SmartTable(minersTableModel) {
             @Override
             public void updateUI() {
                 super.updateUI();
@@ -909,9 +911,9 @@ public class BlockGenerationMetricsPanel extends JPanel {
                                                                                                     // expansion
         tablePanel.setMinimumSize(new Dimension(250, GuiConstants.CHART_DIMENSION_LARGE.height));
 
-        add(leftMetricsPanel, "aligny top");
-        add(chartPanel, "aligny top");
-        add(rightMetricsPanel, "aligny top");
+        add(leftMetricsPanel, "growy, aligny top");
+        add(chartPanel, "growy");
+        add(rightMetricsPanel, "growy, aligny top");
         add(tablePanel, "grow, aligny top");
     }
 
@@ -925,7 +927,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 """;
         JLabel maWindowLabel = createLabel("MA Window", null, maWindowTooltip);
 
-        int initialSliderValue = 1; // Default to 100
+        int initialSliderValue = 2; // Default to 100 (index in MA_WINDOW_VALUES)
         for (int i = 0; i < MA_WINDOW_VALUES.length; i++) {
             if (movingAverageWindow == MA_WINDOW_VALUES[i]) {
                 initialSliderValue = i;
@@ -1188,7 +1190,6 @@ public class BlockGenerationMetricsPanel extends JPanel {
         ChartPanel cp = new ChartPanel(chart);
         cp.setPreferredSize(GuiConstants.CHART_DIMENSION_LARGE);
         cp.setMinimumSize(GuiConstants.CHART_DIMENSION_LARGE);
-        cp.setMaximumSize(GuiConstants.CHART_DIMENSION_LARGE);
         cp.setDisplayToolTips(true);
         ToolTipManager.sharedInstance().registerComponent(cp);
         return cp;

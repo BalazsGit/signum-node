@@ -585,7 +585,7 @@ public class FlatLafPanel
         Font font = isConsole ? customConsoleFont : customFont;
         if (font == null)
             font = UIManager.getFont("Label.font");
-        Font newFont = font.deriveFont((float) (font.getSize() + 1));
+        Font newFont = font.deriveFont((float) Math.min(font.getSize() + 1, 16));
         if (isConsole) {
             customConsoleFont = newFont;
             AppearanceModule.updateCommonConsoleFontKeys(newFont);
@@ -677,7 +677,7 @@ public class FlatLafPanel
         // add font sizes
         menu.addSeparator();
         ArrayList<String> sizes = new ArrayList<>();
-        for (int i = 10; i <= 24; i++)
+        for (int i = 10; i <= 16; i++)
             sizes.add(String.valueOf(i));
         if (!sizes.contains(currentSize))
             sizes.add(currentSize);
