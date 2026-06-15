@@ -1,3 +1,4 @@
 application.module.appearance.AppearanceModule
 application.module.system.SystemConsoleModule
 application.module.node.NodeModule
+application.module.database.DatabaseModule
