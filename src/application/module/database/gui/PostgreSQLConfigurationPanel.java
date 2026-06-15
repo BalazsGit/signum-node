@@ -1,4 +1,4 @@
-package application.module.database.databaseConfiguration;
+package application.module.database.gui;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -7,8 +7,11 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
-import application.module.database.databaseConfiguration.DatabaseConfigurationPanel.DatabaseEngine;
-import application.module.database.databaseConfiguration.DatabaseConfigurationPanel.PropertyRow;
+import application.module.database.databaseConfiguration.DatabaseConfigurationUtils;
+import application.module.database.databaseConfiguration.PostgresProfile;
+import application.module.database.databaseConfiguration.DatabaseConfigurationUtils.ProgressListener;
+import application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine;
+import application.module.database.gui.DatabaseConfigurationPanel.PropertyRow;
 import application.module.node.Signum;
 import application.module.node.gui.configuration.ConfigurationUtils;
 import application.utils.gui.CustomDrawingComponent;
@@ -290,32 +293,16 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
     }
 
     @Override
-    public void setConfFolder(String f) {
-        this.confFolder = f;
-    }
-
-    @Override
-    public void setRestartAction(Runnable a) {
-        this.restartAction = a;
-    }
-
-    @Override
-    public void setBackAction(Runnable a) {
-        this.backAction = a;
-    }
-
-    @Override
     public void refreshUIColors() {
         for (Map.Entry<String, JComponent> entry : propertyComponents.entrySet()) {
             updateColor(entry.getValue(), entry.getKey());
         }
     }
 
-    public PostgreSQLConfigurationPanel(Runnable restartAction, String confFolder, Runnable backAction) {
+    public PostgreSQLConfigurationPanel() {
         super(new BorderLayout());
-        this.restartAction = restartAction;
-        this.confFolder = confFolder;
-        this.backAction = backAction;
+
+        this.confFolder = Signum.CONF_FOLDER;
 
         this.currentOsName = DatabaseConfigurationUtils.getOsName();
         this.currentOsArch = DatabaseConfigurationUtils.getOsArch();

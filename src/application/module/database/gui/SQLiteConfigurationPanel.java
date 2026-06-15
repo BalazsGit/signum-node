@@ -1,10 +1,12 @@
-package application.module.database.databaseConfiguration;
+package application.module.database.gui;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
-import application.module.database.databaseConfiguration.DatabaseConfigurationPanel.DatabaseEngine;
-import application.module.database.databaseConfiguration.DatabaseConfigurationPanel.PropertyRow;
+import application.module.database.databaseConfiguration.DatabaseConfigurationUtils;
+import application.module.database.databaseConfiguration.SQLiteProfile;
+import application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine;
+import application.module.database.gui.DatabaseConfigurationPanel.PropertyRow;
 import application.module.node.Signum;
 import application.module.node.gui.configuration.ConfigurationUtils;
 import application.utils.gui.GuiColors;
@@ -75,11 +77,10 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
             GuiConstants.getHelpIconSize(),
             GuiColors.getApplied());
 
-    public SQLiteConfigurationPanel(Runnable restartAction, String confFolder, Runnable backAction) {
+    public SQLiteConfigurationPanel() {
         super(new BorderLayout());
-        this.restartAction = restartAction;
-        this.confFolder = confFolder;
-        this.backAction = backAction;
+
+        this.confFolder = Signum.CONF_FOLDER;
 
         String lastProfile = ConfigurationUtils.loadAppliedProfile(
                 ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.DATABASE_SUBFOLDER));
@@ -667,21 +668,6 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
     @Override
     public void setGlobalSettings(JsonObject gs) {
         this.globalSettings = gs;
-    }
-
-    @Override
-    public void setConfFolder(String f) {
-        this.confFolder = f;
-    }
-
-    @Override
-    public void setRestartAction(Runnable a) {
-        this.restartAction = a;
-    }
-
-    @Override
-    public void setBackAction(Runnable a) {
-        this.backAction = a;
     }
 
     private Runnable onDirtyStatusChanged;

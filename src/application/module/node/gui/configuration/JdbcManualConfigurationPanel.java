@@ -3,8 +3,8 @@ package application.module.node.gui.configuration;
 import net.miginfocom.swing.MigLayout;
 import javax.swing.*;
 
-import application.module.database.databaseConfiguration.DatabaseConfigurationPanel;
 import application.module.database.databaseConfiguration.DatabaseConfigurationUtils;
+import application.module.database.gui.DatabaseConfigurationPanel;
 
 import java.awt.*;
 import java.util.regex.Matcher;

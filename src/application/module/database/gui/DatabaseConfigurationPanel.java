@@ -1,6 +1,8 @@
-package application.module.database.databaseConfiguration;
+package application.module.database.gui;
 
+import application.module.database.databaseConfiguration.DatabaseConfigurationUtils;
 import application.module.node.Constants;
+import application.module.node.Signum;
 import application.module.node.props.Prop;
 import application.module.node.props.Props;
 import application.utils.gui.GuiColors;
@@ -96,9 +98,7 @@ public class DatabaseConfigurationPanel extends JPanel {
     }
 
     private static final Logger logger = LoggerFactory.getLogger(DatabaseConfigurationPanel.class);
-    private final Runnable restartAction;
     private final String confFolder;
-    private final Runnable backAction;
 
     private JsonObject globalSettings = new JsonObject(); // New: For settings.json
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
@@ -151,11 +151,10 @@ public class DatabaseConfigurationPanel extends JPanel {
     private String currentOsArch; // Missing field added
     private JTabbedPane tabbedPane;
 
-    public DatabaseConfigurationPanel(Runnable restartAction, String confFolder, Runnable backAction) {
+    public DatabaseConfigurationPanel() {
         super(new BorderLayout());
-        this.restartAction = restartAction;
-        this.confFolder = confFolder;
-        this.backAction = backAction;
+
+        this.confFolder = Signum.CONF_FOLDER;
 
         this.currentOsName = DatabaseConfigurationUtils.getOsName();
         this.currentOsArch = DatabaseConfigurationUtils.getOsArch();
@@ -194,14 +193,9 @@ public class DatabaseConfigurationPanel extends JPanel {
         // Initialize sub-panels
         // Null is passed for the internal 'switch' actions as they are now handled by
         // tabs.
-        SQLiteConfigurationPanel sqliteConfig = new SQLiteConfigurationPanel(this.restartAction,
-                this.confFolder,
-                this.backAction);
-        PostgreSQLConfigurationPanel postgresqlConfig = new PostgreSQLConfigurationPanel(this.restartAction,
-                this.confFolder,
-                this.backAction);
-        this.mariadbConfig = new MariaDBConfigurationPanel(this.restartAction, this.confFolder,
-                this.backAction);
+        SQLiteConfigurationPanel sqliteConfig = new SQLiteConfigurationPanel();
+        PostgreSQLConfigurationPanel postgresqlConfig = new PostgreSQLConfigurationPanel();
+        MariaDBConfigurationPanel mariadbConfig = new MariaDBConfigurationPanel();
 
         tabbedPane.addTab("SQLite", sqliteConfig);
         tabbedPane.addTab("PostgreSQL", postgresqlConfig);
@@ -209,8 +203,6 @@ public class DatabaseConfigurationPanel extends JPanel {
 
         add(tabbedPane, BorderLayout.CENTER);
     }
-
-    private final MariaDBConfigurationPanel mariadbConfig;
 
     static class PropertyRow {
         final String propertyKey;

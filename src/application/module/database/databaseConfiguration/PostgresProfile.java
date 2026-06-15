@@ -7,6 +7,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 
 import application.module.database.databaseConfiguration.DatabaseConfigurationUtils.ProgressListener;
+import application.module.database.gui.DatabaseConfigurationPanel;
 import application.utils.io.PathUtils;
 
 import org.slf4j.Logger;

@@ -1,4 +1,4 @@
-package application.module.database.databaseConfiguration;
+package application.module.database.gui;
 
 import com.google.gson.JsonObject;
 
@@ -66,10 +66,4 @@ public interface DatabaseEnginePanel {
     void setStep2StatusIcon(JLabel label);
 
     void setGlobalSettings(JsonObject globalSettings);
-
-    void setConfFolder(String confFolder);
-
-    void setRestartAction(Runnable restartAction);
-
-    void setBackAction(Runnable backAction);
 }

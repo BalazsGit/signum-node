@@ -1,7 +1,7 @@
 package application.module.node.gui.configuration;
 
-import application.module.database.databaseConfiguration.DatabaseConfigurationPanel;
-import application.module.database.databaseConfiguration.DatabaseEnginePanel;
+import application.module.database.gui.DatabaseConfigurationPanel;
+import application.module.database.gui.DatabaseEnginePanel;
 import application.utils.gui.GuiConstants;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
@@ -61,7 +61,7 @@ public class ConfigurationPanel extends JPanel {
                 name -> nodeConfig.setLinkedLoggingProfile(name),
                 () -> nodeConfig.getLoadedProfileName(),
                 () -> nodeConfig.getLinkedLoggingProfile());
-        dbConfig = new DatabaseConfigurationPanel(restartAction, confFolder, backAction);
+        dbConfig = new DatabaseConfigurationPanel();
 
         tabbedPane.addTab("Node", nodeConfig);
         tabbedPane.addTab("Logger", loggerConfig);

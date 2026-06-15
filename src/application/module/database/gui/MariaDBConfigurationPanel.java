@@ -1,4 +1,4 @@
-package application.module.database.databaseConfiguration;
+package application.module.database.gui;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -7,8 +7,11 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
-import application.module.database.databaseConfiguration.DatabaseConfigurationPanel.DatabaseEngine;
-import application.module.database.databaseConfiguration.DatabaseConfigurationPanel.PropertyRow;
+import application.module.database.databaseConfiguration.DatabaseConfigurationUtils;
+import application.module.database.databaseConfiguration.MariadbProfile;
+import application.module.database.databaseConfiguration.DatabaseConfigurationUtils.ProgressListener;
+import application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine;
+import application.module.database.gui.DatabaseConfigurationPanel.PropertyRow;
 import application.module.node.Signum;
 import application.module.node.gui.configuration.ConfigurationUtils;
 import application.utils.gui.CustomDrawingComponent;
@@ -62,9 +65,9 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     private static final Logger logger = LoggerFactory.getLogger(MariaDBConfigurationPanel.class);
     public static final String API_BASE_URL = DatabaseConfigurationUtils.MARIA_DB_API_BASE_URL;
 
-    private final Runnable restartAction;
-    private final String confFolder;
-    private final Runnable backAction;
+    private Runnable restartAction;
+    private String confFolder;
+    private Runnable backAction;
 
     private JsonObject globalSettings = new JsonObject(); // New: For settings.json
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
@@ -320,18 +323,6 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     public void setGlobalSettings(JsonObject globalSettings) {
         this.globalSettings = globalSettings;
     }
-
-    @Override
-    public void setConfFolder(String confFolder) {
-        /* Field already set in constructor */ }
-
-    @Override
-    public void setRestartAction(Runnable restartAction) {
-        /* Field already set in constructor */ }
-
-    @Override
-    public void setBackAction(Runnable backAction) {
-        /* Field already set in constructor */ }
 
     @Override
     public void refreshUIColors() {
@@ -3928,14 +3919,12 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         return null;
     }
 
-    public MariaDBConfigurationPanel(Runnable restartAction, String confFolder, Runnable backAction) {
+    public MariaDBConfigurationPanel() {
         super(new BorderLayout());
         // add(new JLabel("MariaDB Configuration")); // This line is not needed, initUI
         // will build the panel
 
-        this.restartAction = restartAction;
-        this.confFolder = confFolder;
-        this.backAction = backAction;
+        this.confFolder = Signum.CONF_FOLDER;
 
         this.currentOsName = DatabaseConfigurationUtils.getOsName();
         this.currentOsArch = DatabaseConfigurationUtils.getOsArch();

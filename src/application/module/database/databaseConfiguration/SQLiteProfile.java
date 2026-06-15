@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import application.module.database.gui.DatabaseConfigurationPanel;
 import application.utils.io.PathUtils;
 
 import org.slf4j.Logger;
