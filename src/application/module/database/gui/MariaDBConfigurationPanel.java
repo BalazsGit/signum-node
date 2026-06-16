@@ -7,6 +7,10 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import application.module.database.api.MariaDbApiModels.DownloadEntry;
+import application.module.database.api.MariaDbApiModels.MainVersionInfo;
+import application.module.database.api.MariaDbApiModels.SubVersionInfo;
+
 import application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine;
 import application.module.database.gui.DatabaseConfigurationPanel.PropertyRow;
 import application.module.database.profile.MariadbProfile;
@@ -139,7 +143,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     private JComboBox<String> majorVersionCombo;
     private JComboBox<String> minorVersionCombo;
     private JComboBox<String> patchVersionCombo;
-    private Map<String, MariaDBConfigurationPanel.MainVersionInfo> allVersionsMap = new HashMap<>(); // Stores all
+    private Map<String, MainVersionInfo> allVersionsMap = new HashMap<>(); // Stores all
 
     // version data for the
     // current engine
@@ -339,22 +343,6 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             this.shouldDownload = shouldDownload;
             this.shouldExtract = shouldExtract;
         }
-    }
-
-    public static class MainVersionInfo {
-        public String name;
-        public List<SubVersionInfo> subVersions = new ArrayList<>();
-    }
-
-    public static class SubVersionInfo {
-        public String name;
-        public List<DownloadEntry> downloads = new ArrayList<>();
-    }
-
-    public static class DownloadEntry {
-        public String os;
-        public String arch;
-        public String file;
     }
 
     private static class ProgressInfo {
@@ -1832,10 +1820,10 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
 
         String selectedMainVersionName = major + "." + minor;
 
-        MariaDBConfigurationPanel.MainVersionInfo selectedMainVersion = allVersionsMap.get(selectedMainVersionName);
+        MainVersionInfo selectedMainVersion = allVersionsMap.get(selectedMainVersionName);
         if (selectedMainVersion != null && selectedMainVersion.subVersions != null
                 && !selectedMainVersion.subVersions.isEmpty()) {
-            for (MariaDBConfigurationPanel.SubVersionInfo sv : selectedMainVersion.subVersions) {
+            for (SubVersionInfo sv : selectedMainVersion.subVersions) {
                 String[] parts = sv.name.split("\\.");
                 if (parts.length >= 3) {
                     patchVersionCombo.addItem(parts[2]);
@@ -1881,11 +1869,11 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         String selectedMainVersionName = major + "." + minor;
         String selectedSubVersionName = selectedMainVersionName + "." + patch;
 
-        MariaDBConfigurationPanel.MainVersionInfo mainVersion = allVersionsMap.get(selectedMainVersionName);
+        MainVersionInfo mainVersion = allVersionsMap.get(selectedMainVersionName);
         if (mainVersion != null) {
             boolean versionFound = false;
             String downloadUrl = null;
-            for (MariaDBConfigurationPanel.SubVersionInfo subVersion : mainVersion.subVersions) {
+            for (SubVersionInfo subVersion : mainVersion.subVersions) {
                 if (subVersion.name.equals(selectedSubVersionName)) { // Check for exact match
                     versionFound = true;
                     downloadUrl = MariaDBConfigurationPanel.getDownloadUrlForCurrentOs(subVersion, currentOsName,
@@ -1928,11 +1916,11 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
 
         final String finalUrl = versionInfoUrl; // Use finalUrl for lambda
 
-        new SwingWorker<List<MariaDBConfigurationPanel.MainVersionInfo>, Void>() {
+        new SwingWorker<List<MainVersionInfo>, Void>() {
             // Changed Void to String for publish, but not used in this worker
             @Override
-            protected List<MariaDBConfigurationPanel.MainVersionInfo> doInBackground() throws Exception {
-                List<MariaDBConfigurationPanel.MainVersionInfo> versions = new ArrayList<>();
+            protected List<MainVersionInfo> doInBackground() throws Exception {
+                List<MainVersionInfo> versions = new ArrayList<>();
                 // This panel is dedicated to MariaDB
                 versions = MariaDBConfigurationPanel.fetchMajorReleases(finalUrl);
                 // Fallback logic if the configured URL fails for MariaDB
@@ -1945,7 +1933,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             @Override
             protected void done() {
                 try {
-                    List<MariaDBConfigurationPanel.MainVersionInfo> mainVersions = get();
+                    List<MainVersionInfo> mainVersions = get();
                     allVersionsMap.clear();
                     if (mainVersions != null && !mainVersions.isEmpty()) {
                         mainVersions.forEach(mv -> allVersionsMap.put(mv.name, mv));
@@ -1984,11 +1972,11 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     }
 
     private void fetchMariaDbPointReleases(String majorVersion) {
-        new SwingWorker<List<MariaDBConfigurationPanel.SubVersionInfo>, String>() { // Changed Void to String for
-                                                                                    // publish
+        new SwingWorker<List<SubVersionInfo>, String>() { // Changed Void to String for
+                                                          // publish
             @Override
-            protected List<MariaDBConfigurationPanel.SubVersionInfo> doInBackground() throws Exception {
-                List<MariaDBConfigurationPanel.SubVersionInfo> subVersions = new ArrayList<>();
+            protected List<SubVersionInfo> doInBackground() throws Exception {
+                List<SubVersionInfo> subVersions = new ArrayList<>();
                 // Base URL for the MariaDB API
                 String apiUrl = globalSettings.getAsJsonObject(currentEngine.getSettingsKey()).get("versionInfoUrl")
                         .getAsString();
@@ -2003,9 +1991,9 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             @Override
             protected void done() {
                 try {
-                    List<MariaDBConfigurationPanel.SubVersionInfo> results = get();
-                    MariaDBConfigurationPanel.MainVersionInfo mv = allVersionsMap.get(majorVersion); // Get the major
-                                                                                                     // version
+                    List<SubVersionInfo> results = get();
+                    MainVersionInfo mv = allVersionsMap.get(majorVersion); // Get the major
+                                                                           // version
                     // info
                     if (mv != null) {
                         mv.subVersions = results;
@@ -2013,7 +2001,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
                                 + minorVersionCombo.getSelectedItem();
                         if (majorVersion.equals(currentSelectedMain)) {
                             patchVersionCombo.removeAllItems();
-                            for (MariaDBConfigurationPanel.SubVersionInfo sv : results) {
+                            for (SubVersionInfo sv : results) {
                                 String[] parts = sv.name.split("\\.");
                                 if (parts.length >= 3) {
                                     patchVersionCombo.addItem(parts[2]);
@@ -4111,7 +4099,5 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     // JOptionPane.ERROR_MESSAGE);
     // }
     // });
-    // add(fetchReleasesButton); // This button is now part of the initUI() in
-    // populateStep1Content
-
+    //
 }

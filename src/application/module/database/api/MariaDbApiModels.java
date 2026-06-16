@@ -1,18 +1,22 @@
 package application.module.database.api;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class MariaDbApiModels {
     public static class MainVersionInfo {
-        private String version;
-        // other fields and methods
+        public String name;
+        public List<SubVersionInfo> subVersions = new ArrayList<>();
     }
 
     public static class SubVersionInfo {
-        private String subVersion;
-        // other fields and methods
+        public String name;
+        public List<DownloadEntry> downloads = new ArrayList<>();
     }
 
     public static class DownloadEntry {
-        private String url;
-        // other fields and methods
+        public String os;
+        public String arch;
+        public String file;
     }
 }

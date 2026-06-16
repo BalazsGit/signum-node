@@ -1,5 +1,6 @@
 package application.module.database.gui;
 
+import application.module.database.api.MariaDbApiModels.MainVersionInfo;
 import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.node.Constants;
 import application.module.node.Signum;
@@ -140,8 +141,8 @@ public class DatabaseConfigurationPanel extends JPanel {
     private JLabel step1StatusIcon; // Status icon for download/install step
     private JComboBox<String> mainVersionComboBox; // New: For main release versions
     private JComboBox<String> subVersionComboBox; // Renamed/Refactored from versionComboBox
-    private Map<String, MariaDBConfigurationPanel.MainVersionInfo> allVersionsMap = new HashMap<>(); // Stores all
-                                                                                                     // fetched
+    private Map<String, MainVersionInfo> allVersionsMap = new HashMap<>(); // Stores all
+                                                                           // fetched
     // version data for the
     // current engine
     private String currentOsName;
