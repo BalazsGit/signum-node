@@ -7,6 +7,9 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import application.module.database.api.PostgresApiModels;
+import application.module.database.api.PostgresApiModels.MainVersionInfo;
+import application.module.database.api.PostgresApiModels.SubVersionInfo;
 import application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine;
 import application.module.database.gui.DatabaseConfigurationPanel.PropertyRow;
 import application.module.database.profile.PostgresProfile;
@@ -109,7 +112,8 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
     private JComboBox<String> majorVersionCombo;
     private JComboBox<String> minorVersionCombo;
     private JComboBox<String> patchVersionCombo;
-    private Map<String, List<String>> allVersionsMap = new HashMap<>();
+    /** Cached version list from GitHub releases API */
+    private List<MainVersionInfo> allMainVersions;
     private String currentOsName;
     private String currentOsArch;
     private JLabel step1StatusIcon, step2StatusIcon, step3StatusIcon, step2HeaderLabel, step3HeaderLabel;
@@ -1531,35 +1535,30 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
     }
 
     private void updateMajorVersions() {
-        new SwingWorker<Map<String, List<String>>, Void>() {
+        new SwingWorker<List<MainVersionInfo>, Void>() {
             @Override
-            protected Map<String, List<String>> doInBackground() throws Exception {
-                Map<String, List<String>> map = new HashMap<>();
+            protected List<MainVersionInfo> doInBackground() throws Exception {
                 URL url = new URL(GITHUB_RELEASES_API);
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestProperty("User-Agent", "SignumConfigTool");
                 if (conn.getResponseCode() == 200) {
-                    JsonArray releases = JsonParser.parseReader(new InputStreamReader(conn.getInputStream()))
-                            .getAsJsonArray();
-                    for (JsonElement r : releases) {
-                        String tag = r.getAsJsonObject().get("tag_name").getAsString().replace("v", "");
-                        String[] parts = tag.split("\\.");
-                        if (parts.length >= 3) {
-                            String major = parts[0];
-                            map.computeIfAbsent(major, k -> new ArrayList<>()).add(tag);
-                        }
-                    }
+                    String json = new String(conn.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                    JsonArray releasesJson = JsonParser.parseString(json).getAsJsonArray();
+                    return PostgresApiModels.parseReleases(releasesJson, currentOsName, currentOsArch);
                 }
-                return map;
+                return Collections.emptyList();
             }
 
             @Override
             protected void done() {
                 try {
-                    allVersionsMap = get();
+                    allMainVersions = get();
                     majorVersionCombo.removeAllItems();
-                    allVersionsMap.keySet().stream().map(Integer::parseInt).sorted(Comparator.reverseOrder())
-                            .map(String::valueOf).forEach(majorVersionCombo::addItem);
+                    allMainVersions.stream()
+                            .sorted(Comparator
+                                    .comparingInt((MainVersionInfo v) -> Integer.parseInt(v.name))
+                                    .reversed())
+                            .forEach(v -> majorVersionCombo.addItem(v.name));
                 } catch (Exception e) {
                     logger.warn("Version fetch fail: {}", e.getMessage());
                 }
@@ -1570,10 +1569,13 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
     private void updateMinorVersions() {
         minorVersionCombo.removeAllItems();
         String major = (String) majorVersionCombo.getSelectedItem();
-        if (major != null && allVersionsMap.containsKey(major)) {
-            allVersionsMap.get(major).stream().map(v -> v.split("\\.")[1]).distinct()
-                    .map(Integer::parseInt).sorted(Comparator.reverseOrder())
-                    .map(String::valueOf).forEach(minorVersionCombo::addItem);
+        if (major != null && allMainVersions != null) {
+            Optional<MainVersionInfo> mainVer = allMainVersions.stream()
+                    .filter(v -> v.name.equals(major)).findFirst();
+            mainVer.ifPresent(v -> v.subVersions.stream()
+                    .sorted(Comparator.comparingInt((SubVersionInfo a) -> Integer.parseInt(a.name))
+                            .reversed())
+                    .forEach(a -> minorVersionCombo.addItem(a.name)));
         }
     }
 
@@ -1581,9 +1583,25 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
         patchVersionCombo.removeAllItems();
         String major = (String) majorVersionCombo.getSelectedItem();
         String minor = (String) minorVersionCombo.getSelectedItem();
-        if (major != null && minor != null && allVersionsMap.containsKey(major)) {
-            allVersionsMap.get(major).stream().filter(v -> v.startsWith(major + "." + minor))
-                    .map(v -> v.split("\\.")[2]).distinct().forEach(patchVersionCombo::addItem);
+        if (major != null && minor != null && allMainVersions != null) {
+            Optional<SubVersionInfo> subVer = allMainVersions.stream()
+                    .filter(v -> v.name.equals(major))
+                    .flatMap(v -> v.subVersions.stream().filter(a -> a.name.equals(minor)))
+                    .findFirst();
+            subVer.ifPresent(v -> v.downloads.forEach(d -> {
+                // Extract patch version from filename like
+                // embedded-postgres-binaries-windows-amd64-17.6.0.zip
+                String file = d.file;
+                if (file != null && file.contains(".zip")) {
+                    String verPart = file.replace(".zip", "");
+                    String[] parts = verPart.split("-");
+                    if (parts.length > 0) {
+                        String fullVer = parts[parts.length - 1];
+                        String[] verDots = fullVer.split("\\.");
+                        patchVersionCombo.addItem(verDots.length >= 3 ? verDots[2] : fullVer);
+                    }
+                }
+            }));
         }
     }
 
