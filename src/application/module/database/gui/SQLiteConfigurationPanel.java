@@ -3,10 +3,10 @@ package application.module.database.gui;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
-import application.module.database.databaseConfiguration.DatabaseConfigurationUtils;
-import application.module.database.databaseConfiguration.SQLiteProfile;
 import application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine;
 import application.module.database.gui.DatabaseConfigurationPanel.PropertyRow;
+import application.module.database.profile.SQLiteProfile;
+import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.node.Signum;
 import application.module.node.gui.configuration.ConfigurationUtils;
 import application.utils.gui.GuiColors;

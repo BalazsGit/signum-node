@@ -7,11 +7,11 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
-import application.module.database.databaseConfiguration.DatabaseConfigurationUtils;
-import application.module.database.databaseConfiguration.PostgresProfile;
-import application.module.database.databaseConfiguration.DatabaseConfigurationUtils.ProgressListener;
 import application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine;
 import application.module.database.gui.DatabaseConfigurationPanel.PropertyRow;
+import application.module.database.profile.PostgresProfile;
+import application.module.database.utils.DatabaseConfigurationUtils;
+import application.module.database.utils.DatabaseConfigurationUtils.ProgressListener;
 import application.module.node.Signum;
 import application.module.node.gui.configuration.ConfigurationUtils;
 import application.utils.gui.CustomDrawingComponent;

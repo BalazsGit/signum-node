@@ -1,6 +1,6 @@
 package application.module.database.gui;
 
-import application.module.database.databaseConfiguration.DatabaseConfigurationUtils;
+import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.node.Constants;
 import application.module.node.Signum;
 import application.module.node.props.Prop;
