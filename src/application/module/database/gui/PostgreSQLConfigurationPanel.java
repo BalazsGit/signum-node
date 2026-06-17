@@ -74,7 +74,7 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
     private String confFolder;
     private Runnable backAction;
 
-    private JsonObject globalSettings = new JsonObject(); // New: For settings.json
+    private GlobalSettings globalSettings = new GlobalSettings(); // Refactored: GlobalSettings POJO
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
     private PostgresProfile currentProfile; // Use PostgresProfile object
@@ -89,7 +89,7 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
             GuiColors.getContrastRed());
 
     private JButton downloadDatabaseBtn, removeDatabaseBtn;
-    private JButton saveProfileBtn, renameProfileBtn, deleteProfileBtn;
+    private JButton renameProfileBtn, deleteProfileBtn;
     private JButton newProfileBtn, reloadProfileBtn, refreshProfilesBtn;
     private JButton initializeDatabaseBtn, updateConfigFileBtn, openConfigFileBtn;
     private JComboBox<String> profileComboBox;
@@ -119,7 +119,7 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
     private JLabel step1StatusIcon, step2StatusIcon, step3StatusIcon, step2HeaderLabel, step3HeaderLabel;
     private JLabel downloadStatusLabel, installedVersionLabel, pathLabel;
     private JPanel step2ContentPanel, step3ContentPanel, dbListPanel, userListPanel;
-    private boolean isInitialized = false;
+    private boolean isInitialized = false; // Initialize to false
 
     private static final String[] COMMON_POSTGRES_PARAMS = {
             "port", "max_connections", "shared_buffers", "effective_cache_size", "maintenance_work_mem",
@@ -152,24 +152,13 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
     }
 
     @Override
-    public void loadProfile(String profileName, JsonObject globalSettings) {
+    public void loadProfile(String profileName, GlobalSettings globalSettings) {
         this.globalSettings = globalSettings;
         loadProfileInternal(profileName);
     }
 
     @Override
-    public void saveProfile(String profileName, JsonObject globalSettings) {
-        if (currentProfile != null) {
-            try {
-                currentProfile.saveToProfileJson(new HashMap<>());
-            } catch (IOException e) {
-                logger.error("Failed to save profile: {}", e.getMessage());
-            }
-        }
-    }
-
-    @Override
-    public void resetToDefaults(JsonObject gs) {
+    public void resetToDefaults(GlobalSettings gs) {
         if (currentProfile != null) {
             this.globalSettings = gs;
             this.currentProfile = new PostgresProfile(loadedProfileName);
@@ -291,7 +280,7 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
     }
 
     @Override
-    public void setGlobalSettings(JsonObject gs) {
+    public void setGlobalSettings(GlobalSettings gs) {
         this.globalSettings = gs;
         updateMajorVersions();
     }
@@ -311,7 +300,8 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
         this.currentOsName = DatabaseConfigurationUtils.getOsName();
         this.currentOsArch = DatabaseConfigurationUtils.getOsArch();
 
-        this.globalSettings = DatabaseConfigurationUtils.loadGlobalSettings();
+        JsonObject settingsJson = DatabaseConfigurationUtils.loadGlobalSettings();
+        this.globalSettings = GSON.fromJson(settingsJson, GlobalSettings.class);
         DatabaseConfigurationUtils.ensureDirectoryStructure();
 
         String lastProfile = ConfigurationUtils
@@ -356,10 +346,6 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
         newProfileBtn.addActionListener(e -> createNewProfile());
         profilePanel.add(newProfileBtn);
 
-        saveProfileBtn = new JButton("Save Profile");
-        saveProfileBtn.addActionListener(e -> saveProfile());
-        profilePanel.add(saveProfileBtn);
-
         renameProfileBtn = new JButton("Rename Profile");
         renameProfileBtn.addActionListener(e -> renameProfile((String) profileComboBox.getSelectedItem()));
         profilePanel.add(renameProfileBtn);
@@ -372,7 +358,7 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
         reloadProfileBtn.addActionListener(e -> reloadProfile());
         profilePanel.add(reloadProfileBtn);
 
-        refreshProfilesBtn = new JButton("Refresh Profiles");
+        refreshProfilesBtn = new JButton("Refresh Profiles List");
         refreshProfilesBtn.addActionListener(e -> refreshProfileList());
         profilePanel.add(refreshProfilesBtn);
 
@@ -770,7 +756,7 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
         initializeDatabaseBtn.addActionListener(e -> initializeDB());
         actions.add(initializeDatabaseBtn);
 
-        updateConfigFileBtn = new JButton("Update config");
+        updateConfigFileBtn = new JButton("Save all to postgresql.conf"); // Renamed as per request
         updateConfigFileBtn.addActionListener(e -> updateConfigFile());
         actions.add(updateConfigFileBtn);
 
@@ -1020,8 +1006,9 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
     }
 
     private void updateProfileButtonsUI() {
-        ConfigurationUtils.configureProfileToolbar(newProfileBtn, null, saveProfileBtn, renameProfileBtn,
-                deleteProfileBtn, reloadProfileBtn, refreshProfilesBtn, null);
+        // The saveProfileBtn was removed, ensure this argument is null
+        ConfigurationUtils.configureProfileToolbar(newProfileBtn, null, null, renameProfileBtn, deleteProfileBtn,
+                reloadProfileBtn, refreshProfilesBtn, null);
     }
 
     @Override
@@ -1264,7 +1251,6 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
 
         renameProfileBtn.setEnabled(hasProf);
         deleteProfileBtn.setEnabled(hasProf);
-        saveProfileBtn.setEnabled(hasProf);
         if (startDbBtn != null)
             startDbBtn.setEnabled(s1 && s2);
         if (stopDbBtn != null)

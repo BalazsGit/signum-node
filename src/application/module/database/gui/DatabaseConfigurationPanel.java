@@ -101,7 +101,7 @@ public class DatabaseConfigurationPanel extends JPanel {
     private static final Logger logger = LoggerFactory.getLogger(DatabaseConfigurationPanel.class);
     private final String confFolder;
 
-    private JsonObject globalSettings = new JsonObject(); // New: For settings.json
+    private GlobalSettings globalSettings = new GlobalSettings(); // Refactored: GlobalSettings POJO
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
     private JsonObject profileSettings = new JsonObject();
@@ -124,13 +124,11 @@ public class DatabaseConfigurationPanel extends JPanel {
     private JPanel searchResultsPanel;
     private CardLayout contentCardLayout;
     private JButton downloadBtn;
-    private JButton saveProfileBtn;
     private JButton applyProfileBtn;
     private JButton renameProfileBtn;
     private JButton deleteProfileBtn;
     private JButton newProfileBtn;
     private JButton reloadProfileBtn;
-    private JButton resetToDefaultsBtn;
     private JButton refreshProfilesBtn;
     private JPanel contentContainer;
     private JComponent verticalFiller;
@@ -160,7 +158,8 @@ public class DatabaseConfigurationPanel extends JPanel {
         this.currentOsName = DatabaseConfigurationUtils.getOsName();
         this.currentOsArch = DatabaseConfigurationUtils.getOsArch();
 
-        this.globalSettings = DatabaseConfigurationUtils.loadGlobalSettings();
+        JsonObject settingsJson = DatabaseConfigurationUtils.loadGlobalSettings();
+        this.globalSettings = GSON.fromJson(settingsJson, GlobalSettings.class);
         DatabaseConfigurationUtils.ensureDirectoryStructure();
 
         // Determine the currently applied profile name from metadata once at startup

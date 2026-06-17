@@ -13,11 +13,9 @@ public interface DatabaseEnginePanel {
 
     Path getProfilePath(String profileName);
 
-    void loadProfile(String profileName, JsonObject globalSettings);
+    void loadProfile(String profileName, GlobalSettings globalSettings);
 
-    void saveProfile(String profileName, JsonObject globalSettings);
-
-    void resetToDefaults(JsonObject globalSettings);
+    void resetToDefaults(GlobalSettings globalSettings);
 
     String getUnsavedChangesReport();
 
@@ -65,5 +63,5 @@ public interface DatabaseEnginePanel {
 
     void setStep2StatusIcon(JLabel label);
 
-    void setGlobalSettings(JsonObject globalSettings);
+    void setGlobalSettings(GlobalSettings globalSettings);
 }

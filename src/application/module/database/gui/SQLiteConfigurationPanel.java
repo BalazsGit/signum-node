@@ -53,7 +53,7 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
     private Runnable backAction;
 
     private SQLiteProfile currentProfile;
-    private JsonObject globalSettings = new JsonObject();
+    private GlobalSettings globalSettings = new GlobalSettings();
     private JsonObject appliedProfileSettings = new JsonObject();
     private final Map<String, Supplier<String>> valueSuppliers = new HashMap<>();
     private final Map<String, JComponent> propertyComponents = new HashMap<>();
@@ -64,8 +64,7 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
     private String activeProfileName = "";
 
     private JComboBox<String> profileComboBox;
-    private JButton newProfileBtn, saveProfileBtn, renameProfileBtn, deleteProfileBtn, reloadProfileBtn,
-            refreshProfilesBtn;
+    private JButton newProfileBtn, renameProfileBtn, deleteProfileBtn, reloadProfileBtn, refreshProfilesBtn;
     private JLabel pathLabel;
     private JPanel searchResultsPanel;
     private JPanel settingsContentPanel;
@@ -114,10 +113,6 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         newProfileBtn.addActionListener(e -> createNewProfile());
         profilePanel.add(newProfileBtn);
 
-        saveProfileBtn = new JButton("Save Profile");
-        saveProfileBtn.addActionListener(e -> saveProfile());
-        profilePanel.add(saveProfileBtn);
-
         renameProfileBtn = new JButton("Rename Profile");
         renameProfileBtn.addActionListener(e -> renameProfile((String) profileComboBox.getSelectedItem()));
         profilePanel.add(renameProfileBtn);
@@ -130,7 +125,7 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         reloadProfileBtn.addActionListener(e -> reloadProfile());
         profilePanel.add(reloadProfileBtn);
 
-        refreshProfilesBtn = new JButton("Refresh");
+        refreshProfilesBtn = new JButton("Refresh Profiles List");
         refreshProfilesBtn.addActionListener(e -> refreshProfileList());
         profilePanel.add(refreshProfilesBtn);
 
@@ -254,8 +249,8 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         valueSuppliers.put(SQLiteProfile.CFG_URL,
                 () -> "jdbc:sqlite:" + typeCombo.getSelectedItem() + pathField.getText());
 
-        JButton saveBtn = new JButton("Save Configuration");
-        saveBtn.addActionListener(e -> saveProfile(loadedProfileName, null));
+        JButton saveBtn = new JButton("Save all to profile.json");
+        saveBtn.addActionListener(e -> saveConfigurationToProfile());
         settingsContentPanel.add(saveBtn, "span, gaptop 10");
 
         settingsContentPanel.revalidate();
@@ -473,7 +468,6 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         boolean hasSel = profileComboBox.getSelectedItem() != null;
         renameProfileBtn.setEnabled(hasSel);
         deleteProfileBtn.setEnabled(hasSel);
-        saveProfileBtn.setEnabled(hasSel);
     }
 
     private void filterProperties(String text) {
@@ -518,13 +512,12 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
     }
 
     @Override
-    public void loadProfile(String profileName, JsonObject gs) {
+    public void loadProfile(String profileName, GlobalSettings gs) {
         this.globalSettings = gs;
         loadProfileInternal(profileName);
     }
 
-    @Override
-    public void saveProfile(String profileName, JsonObject gs) {
+    private void saveConfigurationToProfile() {
         try {
             // Sync UI to profile object
             if (valueSuppliers.containsKey(SQLiteProfile.CFG_URL)) {
@@ -542,14 +535,14 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
             currentProfile.ensureDatabaseDirectory();
 
             JOptionPane.showMessageDialog(this, "Profile saved and database directory verified.");
-            loadProfileInternal(profileName);
+            loadProfileInternal(loadedProfileName);
         } catch (IOException e) {
             logger.error("Save failed", e);
         }
     }
 
     @Override
-    public void resetToDefaults(JsonObject gs) {
+    public void resetToDefaults(GlobalSettings gs) {
         this.currentProfile = new SQLiteProfile(loadedProfileName);
         refreshSettingsUI();
     }
@@ -666,7 +659,7 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
     }
 
     @Override
-    public void setGlobalSettings(JsonObject gs) {
+    public void setGlobalSettings(GlobalSettings gs) {
         this.globalSettings = gs;
     }
 

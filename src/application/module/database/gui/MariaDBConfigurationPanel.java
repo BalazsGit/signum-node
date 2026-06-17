@@ -73,7 +73,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     private String confFolder;
     private Runnable backAction;
 
-    private JsonObject globalSettings = new JsonObject(); // New: For settings.json
+    private GlobalSettings globalSettings = new GlobalSettings(); // Refactored: GlobalSettings POJO
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
     private MariadbProfile currentProfile; // Refactored: Use MariadbProfile object
@@ -95,7 +95,6 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     private JPanel searchResultsPanel;
     private CardLayout contentCardLayout;
     private JButton downloadBtn;
-    private JButton saveProfileBtn;
     private JButton renameProfileBtn;
     private JButton deleteProfileBtn;
     private JButton newProfileBtn;
@@ -155,7 +154,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     private String currentOsArch; // Missing field added
     private JButton initializeDatabaseBtn; // New: For initializing the database
     private JButton updateConfigFileBtn; // New: For updating my.ini
-    private JButton openConfigFileBtn; // New: For opening my.ini
+    private JButton openConfigFileBtn; // New: For opening my.ini/my.cnf
     private JLabel step3StatusIcon; // New: Status icon for the new Step 3
     private JTabbedPane tabbedPane;
     private JPanel dbListPanel;
@@ -185,24 +184,13 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     }
 
     @Override
-    public void loadProfile(String profileName, JsonObject globalSettings) {
+    public void loadProfile(String profileName, GlobalSettings globalSettings) {
         this.globalSettings = globalSettings;
         loadProfile(DatabaseEngine.MARIADB, profileName);
     }
 
     @Override
-    public void saveProfile(String profileName, JsonObject globalSettings) {
-        if (currentProfile != null) {
-            try {
-                currentProfile.saveToProfileJson(new HashMap<>()); // Saves current state
-            } catch (IOException e) {
-                logger.error("Failed to save profile: {}", e.getMessage());
-            }
-        }
-    }
-
-    @Override
-    public void resetToDefaults(JsonObject globalSettings) {
+    public void resetToDefaults(GlobalSettings globalSettings) {
         if (currentProfile != null) {
             this.currentProfile = new MariadbProfile(loadedProfileName);
             refreshStep2DynamicContent();
@@ -324,7 +312,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     }
 
     @Override
-    public void setGlobalSettings(JsonObject globalSettings) {
+    public void setGlobalSettings(GlobalSettings globalSettings) {
         this.globalSettings = globalSettings;
     }
 
@@ -420,11 +408,6 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         newProfileBtn.addActionListener(e -> createNewProfile());
         profilePanel.add(newProfileBtn);
 
-        saveProfileBtn = new JButton("Save Profile");
-        saveProfileBtn.setToolTipText("Save and apply selected profile to the node");
-        saveProfileBtn.addActionListener(e -> saveProfile());
-        profilePanel.add(saveProfileBtn);
-
         renameProfileBtn = new JButton("Rename Profile");
         renameProfileBtn.setToolTipText("Rename selected profile");
         renameProfileBtn.addActionListener(e -> renameProfile((String) profileComboBox.getSelectedItem()));
@@ -440,7 +423,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         reloadProfileBtn.addActionListener(e -> reloadProfile());
         profilePanel.add(reloadProfileBtn);
 
-        refreshProfilesBtn = new JButton("Refresh Profiles");
+        refreshProfilesBtn = new JButton("Refresh Profiles List");
         refreshProfilesBtn.setToolTipText("Refresh the list of available profiles from the disk");
         refreshProfilesBtn.addActionListener(e -> refreshProfileList());
         profilePanel.add(refreshProfilesBtn);
@@ -908,9 +891,9 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         initializeDatabaseBtn.addActionListener(e -> initializeDatabase());
         configActionsPanel.add(initializeDatabaseBtn);
 
-        updateConfigFileBtn = new JButton("Update my.ini");
+        updateConfigFileBtn = new JButton("Save All to my.ini"); // Renamed as per request
         ConfigurationUtils.fixComponentSize(updateConfigFileBtn);
-        updateConfigFileBtn.setToolTipText("Rewrite the my.ini/my.cnf file with current settings.");
+        updateConfigFileBtn.setToolTipText("Save all current configuration changes to the my.ini/my.cnf file.");
         updateConfigFileBtn.addActionListener(e -> updateConfigFile());
         configActionsPanel.add(updateConfigFileBtn);
 
@@ -1483,7 +1466,8 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     private void updateProfileButtonsUI() {
         if (profileComboBox != null)
             ConfigurationUtils.fixComponentSize(profileComboBox);
-        ConfigurationUtils.configureProfileToolbar(newProfileBtn, null, saveProfileBtn, renameProfileBtn,
+        ConfigurationUtils.configureProfileToolbar(newProfileBtn, null, null, renameProfileBtn, // saveProfileBtn is now
+                                                                                                // null
                 deleteProfileBtn, reloadProfileBtn, refreshProfilesBtn, null);
     }
 
@@ -1901,10 +1885,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         patchVersionCombo.removeAllItems();
         downloadDatabaseBtn.setEnabled(false);
 
-        JsonObject engineSettings = globalSettings.getAsJsonObject(currentEngine.getSettingsKey());
-        String versionInfoUrl = (engineSettings != null && engineSettings.has("versionInfoUrl"))
-                ? engineSettings.get("versionInfoUrl").getAsString()
-                : "";
+        String versionInfoUrl = globalSettings.getSettingsForEngine(currentEngine.getSettingsKey()).getVersionInfoUrl();
 
         if (versionInfoUrl.isEmpty()) {
             if (currentEngine == DatabaseEngine.MARIADB) {
@@ -1978,8 +1959,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             protected List<SubVersionInfo> doInBackground() throws Exception {
                 List<SubVersionInfo> subVersions = new ArrayList<>();
                 // Base URL for the MariaDB API
-                String apiUrl = globalSettings.getAsJsonObject(currentEngine.getSettingsKey()).get("versionInfoUrl")
-                        .getAsString();
+                String apiUrl = globalSettings.getSettingsForEngine(currentEngine.getSettingsKey()).getVersionInfoUrl();
                 if (apiUrl.isEmpty()) {
                     apiUrl = API_BASE_URL;
                 }
@@ -3136,7 +3116,6 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
 
         renameProfileBtn.setEnabled(!isNoProfileSelected);
         deleteProfileBtn.setEnabled(!isNoProfileSelected);
-        saveProfileBtn.setEnabled(!isNoProfileSelected);
 
         // Data Folder should not be modifiable after successful database initialization
         // (Step 2)
@@ -3858,7 +3837,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     }
 
     public static String getDownloadUrlForCurrentOs(SubVersionInfo subVersion, String os, String arch,
-            JsonObject globalSettings) {
+            GlobalSettings globalSettings) {
         logger.debug("Evaluating downloads for version {}. Target OS: '{}', Target Arch: '{}'", subVersion.name, os,
                 arch);
         for (DownloadEntry entry : subVersion.downloads) {
@@ -3880,10 +3859,10 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
                     String resolvedUrl = entry.file;
 
                     if (resolvedUrl.contains("downloads.mariadb.org")) {
-                        String filename = resolvedUrl.substring(resolvedUrl.lastIndexOf('/') + 1);
-                        String version = subVersion.name;
-
-                        String platformFolder = "";
+                        String filename = resolvedUrl.substring(resolvedUrl.lastIndexOf('/') + 1); // Extract filename
+                                                                                                   // from URL
+                        String version = subVersion.name; // Get the version from subVersion
+                        String platformFolder = ""; // Determine platform-specific folder structure
                         if (os.equalsIgnoreCase("windows")) {
                             platformFolder = "winx64-packages/";
                         } else if (os.equalsIgnoreCase("linux")) {
@@ -3894,10 +3873,8 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
                         resolvedUrl = "https://archive.mariadb.org/mariadb-" + version + "/" + platformFolder
                                 + filename;
                     } else if (!resolvedUrl.toLowerCase().startsWith("http")) {
-                        JsonObject engineSettings = globalSettings.getAsJsonObject("mariaDb");
-                        if (engineSettings != null && engineSettings.has("downloadBaseUrl")) {
-                            resolvedUrl = engineSettings.get("downloadBaseUrl").getAsString() + resolvedUrl;
-                        }
+                        // Use the GlobalSettings POJO to get the downloadBaseUrl
+                        resolvedUrl = globalSettings.getMariaDb().getDownloadBaseUrl() + resolvedUrl;
                     }
 
                     return resolvedUrl;
@@ -3920,8 +3897,8 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         // Initialize currentProfile with a default empty profile name, will be
         // overwritten by loadProfile
         this.currentProfile = new MariadbProfile(null);
-
-        this.globalSettings = DatabaseConfigurationUtils.loadGlobalSettings();
+        JsonObject settingsJson = DatabaseConfigurationUtils.loadGlobalSettings(); // Load as JsonObject
+        this.globalSettings = GSON.fromJson(settingsJson, GlobalSettings.class); // Convert to GlobalSettings POJO
         DatabaseConfigurationUtils.ensureDirectoryStructure();
 
         // Determine the currently applied profile name from metadata once at startup
