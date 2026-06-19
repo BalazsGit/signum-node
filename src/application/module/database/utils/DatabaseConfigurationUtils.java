@@ -186,6 +186,30 @@ public class DatabaseConfigurationUtils {
     public static final String DEFAULT_DB_USER = "signumnode";
     public static final String DEFAULT_DB_PASSWORD = "s1gn00m_n0d3";
 
+    /**
+     * Pattern for validating database profile names.
+     * Allows only alphanumeric characters, underscores, and hyphens.
+     * Profile name must start with a letter or underscore and be 1-64 characters
+     * long.
+     */
+    private static final Pattern VALID_PROFILE_NAME_PATTERN = Pattern.compile("^[a-zA-Z_][a-zA-Z0-9_-]{0,63}$");
+
+    /**
+     * Validates a database profile name.
+     *
+     * @param profileName The profile name to validate.
+     * @return true if the profile name is valid (alphanumeric characters,
+     *         underscores,
+     *         and hyphens only; must start with a letter or underscore), false
+     *         otherwise.
+     */
+    public static boolean isValidProfileName(String profileName) {
+        if (profileName == null || profileName.isEmpty()) {
+            return false;
+        }
+        return VALID_PROFILE_NAME_PATTERN.matcher(profileName).matches();
+    }
+
     public static class DbUser {
         public String username;
         public String password;
@@ -397,11 +421,6 @@ public class DatabaseConfigurationUtils {
         // Prioritize Portable Database directory: ../database/<EngineName>
         Path base = PathUtils.resolvePath(DATABASE_BASE_DIR).resolve(engine);
 
-        // Fallback to legacy location: conf/db-profiles/<engine_lowercase>
-        if (!Files.exists(base)) {
-            base = PathUtils.resolvePath(confFolder).resolve("db-profiles").resolve(engine.toLowerCase());
-        }
-
         if (!Files.exists(base))
             return new ArrayList<>();
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(base)) {
@@ -424,16 +443,10 @@ public class DatabaseConfigurationUtils {
      * @param confFolder  The base configuration folder.
      * @param engine      The database engine name.
      * @param profileName The profile name.
-     * @return A {@link DbProfile} object or null if not found.
      */
     public static DbProfile loadProfile(String confFolder, String engine, String profileName) {
         // Try Portable directory structure first
         Path profileDir = PathUtils.resolvePath(DATABASE_BASE_DIR).resolve(engine).resolve(profileName);
-        if (!Files.exists(profileDir)) {
-            // Try legacy location
-            profileDir = PathUtils.resolvePath(confFolder).resolve("db-profiles")
-                    .resolve(engine.toLowerCase()).resolve(profileName);
-        }
 
         Path jsonPath = profileDir.resolve("profile.json");
         if (!Files.exists(jsonPath))
