@@ -9,6 +9,7 @@ import application.module.node.props.Prop;
 import application.module.node.props.Props;
 import application.module.node.util.Convert;
 import jiconfont.icons.font_awesome.FontAwesome;
+import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiUtils;

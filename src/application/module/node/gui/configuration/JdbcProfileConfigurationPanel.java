@@ -5,6 +5,7 @@ import javax.swing.*;
 
 import application.module.database.gui.DatabaseConfigurationPanel;
 import application.module.database.utils.DatabaseConfigurationUtils;
+import application.utils.gui.ConfigurationUtils;
 
 import java.util.List;
 import java.util.regex.Matcher;

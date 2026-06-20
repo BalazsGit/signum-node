@@ -6,9 +6,9 @@ import application.module.appearance.gui.AppearancePanel;
 import application.module.appearance.gui.laf.FlatLafPrefs;
 import application.module.node.Signum;
 import application.module.node.gui.GuiResources;
-import application.module.node.gui.configuration.ConfigurationUtils;
 import application.module.node.props.Props;
 import application.utils.gui.ColorPaletteManager;
+import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiFontManager;
 import application.utils.io.PathUtils;
 

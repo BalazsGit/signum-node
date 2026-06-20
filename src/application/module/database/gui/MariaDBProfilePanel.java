@@ -17,9 +17,10 @@ import application.module.database.profile.MariadbProfile;
 import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.database.utils.DatabaseConfigurationUtils.ProgressListener;
 import application.module.node.Signum;
-import application.module.node.gui.configuration.ConfigurationUtils;
+import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.CustomDrawingComponent;
 import application.utils.gui.CustomDrawings;
+import application.utils.gui.FilteredComboBoxModel;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiUtils;
@@ -390,10 +391,20 @@ public class MariaDBProfilePanel extends JPanel implements DatabaseEnginePanel {
         pathLabel.setForeground(GuiColors.getFaintText());
 
         // --- Profile Panel ---
+        // Each MariaDBProfilePanel instance is responsible for exactly one logical
+        // MariaDB profile.
+        // The selected item in this combo box determines which MariadbProfile object is
+        // currently
+        // loaded into the panel and which profile.json file is being edited/maintained
+        // here.
         JPanel profilePanel = new JPanel(new MigLayout("insets 0, gap 5"));
         profilePanel.setBorder(new EmptyBorder(5, 10, 5, 5));
         profilePanel.add(new JLabel("Configuration Profile:"));
 
+        // Profile selector: the panel should always keep this combo box aligned with
+        // the one
+        // MariadbProfile instance that this panel owns (currentProfile /
+        // loadedProfileName).
         profileComboBox = new JComboBox<>();
         profileComboBox.setEditable(false);
         profileComboBox.setPrototypeDisplayValue("XXXXXXXXXXXXXXXXXXXX");
@@ -430,13 +441,20 @@ public class MariaDBProfilePanel extends JPanel implements DatabaseEnginePanel {
 
         updateProfileButtonsUI();
 
+        // When the user changes the selected profile in the combo box, the panel must
+        // switch
+        // its ownership from the old MariadbProfile to the newly selected one.
         profileComboBox.addActionListener(e -> {
             if (!isInitialized) {
                 return;
             }
             String selected = (String) profileComboBox.getSelectedItem();
-            if (selected != null && !selected.equals(loadedProfileName)) { // Only load if different and not null
-                loadProfile(currentEngine, selected); // This will update currentEngine if changed
+            // Only reload when the UI selection truly changed; this avoids unnecessary
+            // reinitialization.
+            if (selected != null && !selected.equals(loadedProfileName)) {
+                // loadProfile() is the central entry point that replaces currentProfile and
+                // refreshes UI state.
+                loadProfile(currentEngine, selected);
             }
             updateProfileComboBoxColor();
             updateProfileButtonStates();
@@ -839,19 +857,83 @@ public class MariaDBProfilePanel extends JPanel implements DatabaseEnginePanel {
         quickAddPanel.setOpaque(false);
 
         quickAddPanel.add(new JLabel("Add Parameter:"), "align label");
-        List<String> filteredParams = new ArrayList<>();
+        List<String> allAvailableParams = new ArrayList<>();
         Set<String> visible = currentProfile != null ? currentProfile.getVisibleProperties()
                 : Collections.<String>emptySet();
         for (String p : COMMON_MARIADB_PARAMS) {
             if (!visible.contains(p))
-                filteredParams.add(p);
+                allAvailableParams.add(p);
         }
-        JComboBox<String> paramCombo = new JComboBox<>(filteredParams.toArray(new String[0]));
+        JComboBox<String> paramCombo = new JComboBox<>(new FilteredComboBoxModel<>(allAvailableParams));
         paramCombo.setEditable(true);
         paramCombo.setPrototypeDisplayValue("XXXXXXXXXXXXXXXXXXXX");
+        paramCombo.setMaximumRowCount(10);
         ConfigurationUtils.styleInputComponent(paramCombo);
         ConfigurationUtils.fixComponentSize(paramCombo);
         quickAddPanel.add(paramCombo);
+
+        // Direct access after combo creation - no invokeLater needed
+        javax.swing.ComboBoxEditor comboBoxEditor = paramCombo.getEditor();
+        Component editorComponent = comboBoxEditor.getEditorComponent();
+        if (editorComponent instanceof JTextField editorField) {
+            editorField.addMouseListener(new MouseAdapter() {
+                @Override
+                public void mousePressed(MouseEvent e) {
+                    FilteredComboBoxModel<String> model = (FilteredComboBoxModel<String>) paramCombo.getModel();
+                    model.setFilter(editorField.getText());
+                    if (model.getSize() > 0) {
+                        paramCombo.showPopup();
+                    }
+                }
+            });
+
+            editorField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+                private void filterAndShow() {
+                    SwingUtilities.invokeLater(() -> {
+                        if (!editorField.isFocusOwner()) {
+                            return;
+                        }
+
+                        String currentText = editorField.getText();
+                        if (currentText == null) {
+                            return;
+                        }
+
+                        FilteredComboBoxModel<String> model = (FilteredComboBoxModel<String>) paramCombo.getModel();
+                        String filterText = currentText.trim();
+
+                        // Keep the typed text aligned with the combo selection so the
+                        // edited item remains the active filter criterion.
+                        paramCombo.setSelectedItem(filterText);
+                        model.setSelectedItem(filterText);
+
+                        // Re-enable the real filtering path now that the editor text flow is confirmed.
+                        model.setFilter(filterText);
+
+                        int maxRows = Math.min(10, Math.max(1, model.getSize()));
+                        paramCombo.setMaximumRowCount(maxRows);
+
+                        if (!filterText.isEmpty() && model.getSize() > 0) {
+                            paramCombo.showPopup();
+                        } else if (paramCombo.isPopupVisible()) {
+                            paramCombo.hidePopup();
+                        }
+                    });
+                }
+
+                public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                    filterAndShow();
+                }
+
+                public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                    filterAndShow();
+                }
+
+                public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                    filterAndShow();
+                }
+            });
+        }
 
         JTextField paramValueField = createStyledTextField("");
         paramValueField.putClientProperty("JTextField.placeholderText", "Value");
@@ -2040,12 +2122,19 @@ public class MariaDBProfilePanel extends JPanel implements DatabaseEnginePanel {
         return textField;
     }
 
+    // Refreshes the visible profile list from disk and keeps the combo box
+    // selection consistent.
+    // This is important because the panel is designed to own exactly one
+    // MariadbProfile at a time,
+    // so the combo box must always reflect what is actually available on disk.
     private void refreshProfileList() {
         try {
             String currentSelection = (String) profileComboBox.getSelectedItem();
             profileComboBox.removeAllItems();
 
-            // Fetch profiles for the currently selected engine
+            // Fetch profiles for the currently selected engine.
+            // The engine-specific folder is the source of truth for the available MariaDB
+            // profiles.
             Path enginePath = PathUtils.resolvePath(DatabaseConfigurationUtils.DATABASE_BASE_DIR)
                     .resolve(currentEngine.toString());
 
@@ -2054,8 +2143,10 @@ public class MariaDBProfilePanel extends JPanel implements DatabaseEnginePanel {
                 fetchFolderProfiles(enginePath).forEach(profileNames::add);
             }
 
-            // Ensure the currently active or loaded profiles are included in the list
-            // (Requirement Fix)
+            // Preserve the currently active/loaded names even if they are not yet visible
+            // in the folder list.
+            // This prevents the panel from losing track of the profile it is currently
+            // responsible for.
             if (activeProfileName != null && !activeProfileName.trim().isEmpty()) {
                 profileNames.add(activeProfileName);
             }
@@ -2068,7 +2159,8 @@ public class MariaDBProfilePanel extends JPanel implements DatabaseEnginePanel {
             sortedProfiles.forEach(profileComboBox::addItem);
 
             if (profileComboBox.getItemCount() == 0) {
-                // If no profiles exist, ensure the combo box is truly empty
+                // No profile exists yet: clear the panel ownership state so the UI does not
+                // point at a stale profile.
                 profileComboBox.setSelectedItem(null);
                 this.loadedProfileName = null;
                 this.activeProfileName = null;
@@ -2089,15 +2181,17 @@ public class MariaDBProfilePanel extends JPanel implements DatabaseEnginePanel {
         updateProfileButtonStates();
     }
 
+    // Enumerates directories that represent MariaDB profiles by checking for
+    // profile.json.
+    // This keeps the selection list aligned with the actual persisted state on
+    // disk.
     private List<String> fetchFolderProfiles(Path engineFolder) {
         List<String> profiles = new ArrayList<>();
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(engineFolder)) {
             for (Path path : stream) {
                 if (Files.isDirectory(path)) {
-                    // Only consider it a profile if it contains profile.json
-                    if (Files.exists(path.resolve("profile.json"))) { // Only consider it a profile if it contains
-                                                                      // profile.json
-                                                                      // conceptually
+                    // Only treat folders with a profile.json file as valid profile containers.
+                    if (Files.exists(path.resolve("profile.json"))) {
                         profiles.add(path.getFileName().toString());
                     }
                 }
@@ -2465,13 +2559,16 @@ public class MariaDBProfilePanel extends JPanel implements DatabaseEnginePanel {
         return data;
     }
 
+    // Loads the persisted profile.json for the currently selected profile folder.
+    // This method is responsible for producing the exact MariadbProfile object that
+    // the panel will edit.
     private void loadProfileData() {
         Path jsonFile = activeProfilePath != null ? activeProfilePath.resolve("profile.json") : null;
         if (jsonFile != null && Files.exists(jsonFile)) {
             try (BufferedReader reader = Files.newBufferedReader(jsonFile, StandardCharsets.UTF_8)) {
                 JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
                 this.currentProfile = new MariadbProfile(loadedProfileName, json);
-                // After loading, set the version comboboxes if a downloaded version exists
+                // After loading, set the version comboboxes if a downloaded version exists.
                 setVersionComboBoxes(currentProfile.getDownloadedVersion());
             } catch (Exception e) {
                 logger.error("Error loading profile.json: {}", e.getMessage());
@@ -2482,6 +2579,11 @@ public class MariaDBProfilePanel extends JPanel implements DatabaseEnginePanel {
         }
     }
 
+    // Central profile switch point.
+    // This method ensures that exactly one MariadbProfile is kept in memory for the
+    // panel,
+    // and that all UI elements (combo box, path label, version controls, step
+    // state) are synchronized.
     private void loadProfile(DatabaseEngine engine, String profileName) {
         Runnable loadAction = () -> {
             tempGrantsForNewUser.clear();
@@ -2489,6 +2591,7 @@ public class MariaDBProfilePanel extends JPanel implements DatabaseEnginePanel {
             this.currentEngine = engine;
 
             if (profileName == null || profileName.trim().isEmpty()) {
+                // No profile selected: the panel should not pretend to own any profile data.
                 this.activeProfilePath = null;
                 this.currentProfile = new MariadbProfile(null);
             } else {
@@ -2498,6 +2601,8 @@ public class MariaDBProfilePanel extends JPanel implements DatabaseEnginePanel {
                 this.activeProfilePath = targetFolder;
 
                 if (!Files.exists(targetFolder)) {
+                    // The folder does not exist yet, but the panel still needs a valid in-memory
+                    // model.
                     this.currentProfile = new MariadbProfile(profileName);
                 } else {
                     try {
@@ -2514,8 +2619,8 @@ public class MariaDBProfilePanel extends JPanel implements DatabaseEnginePanel {
             pathLabel.setText("Profile Directory: "
                     + (activeProfilePath != null ? activeProfilePath.toAbsolutePath().toString() : "N/A"));
 
-            // Ensure the combo box selection matches the loaded profile name (Requirement
-            // Fix)
+            // Keep the combo box selection in sync with the profile object this panel now
+            // owns.
             if (profileComboBox != null && !objectsEqual(profileComboBox.getSelectedItem(), profileName)) {
                 profileComboBox.setSelectedItem(profileName);
             }
@@ -3501,6 +3606,10 @@ public class MariaDBProfilePanel extends JPanel implements DatabaseEnginePanel {
                 JOptionPane.INFORMATION_MESSAGE);
     }
 
+    // Reloads the profile from disk for the same single profile that this panel
+    // currently owns.
+    // Used when the user wants to discard transient UI edits and restore the
+    // persisted state.
     private void reloadProfile() {
         loadProfile(currentEngine, loadedProfileName);
     }
@@ -3890,10 +3999,17 @@ public class MariaDBProfilePanel extends JPanel implements DatabaseEnginePanel {
         return null;
     }
 
-    public MariaDBProfilePanel() {
+    // Constructor contract:
+    // The panel is created for a specific MariaDB profile name and should keep
+    // managing exactly that profile.
+    // The selected profile name is used as the initial ownership target, but the
+    // real load happens later.
+    public MariaDBProfilePanel(String mariadbProfileName) {
         super(new BorderLayout());
         // add(new JLabel("MariaDB Configuration")); // This line is not needed, initUI
         // will build the panel
+
+        this.currentProfile = new MariadbProfile(mariadbProfileName);
 
         this.confFolder = Signum.CONF_FOLDER;
 

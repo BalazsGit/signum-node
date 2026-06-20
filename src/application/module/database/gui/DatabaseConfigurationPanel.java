@@ -6,12 +6,12 @@ import application.module.node.Constants;
 import application.module.node.Signum;
 import application.module.node.props.Prop;
 import application.module.node.props.Props;
+import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
 import application.utils.io.PathUtils;
-import application.module.node.gui.configuration.ConfigurationUtils;
 import application.module.node.gui.configuration.LoggerConfigurationPanel;
 import application.module.node.gui.configuration.NodeConfigurationPanel;
 

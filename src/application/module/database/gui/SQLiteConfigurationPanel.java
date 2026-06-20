@@ -8,7 +8,7 @@ import application.module.database.gui.DatabaseConfigurationPanel.PropertyRow;
 import application.module.database.profile.SQLiteProfile;
 import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.node.Signum;
-import application.module.node.gui.configuration.ConfigurationUtils;
+import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.HelpButton;

@@ -16,7 +16,7 @@ import application.module.database.profile.PostgresProfile;
 import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.database.utils.DatabaseConfigurationUtils.ProgressListener;
 import application.module.node.Signum;
-import application.module.node.gui.configuration.ConfigurationUtils;
+import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.CustomDrawingComponent;
 import application.utils.gui.CustomDrawings;
 import application.utils.gui.GuiColors;

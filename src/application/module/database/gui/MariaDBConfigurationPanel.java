@@ -10,11 +10,10 @@ import application.module.database.gui.DatabaseConfigurationPanel.PropertyRow;
 import application.module.database.profile.MariadbProfile;
 import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.node.Signum;
+import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.io.PathUtils;
-import application.module.node.gui.configuration.ConfigurationUtils;
-
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
@@ -29,6 +28,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
@@ -55,6 +55,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     private JButton renameProfileBtn;
     private JButton deleteProfileBtn;
     private JButton reloadProfilesBtn;
+    private JTextField searchField;
 
     private String confFolder;
     private Runnable onDirtyStatusChanged;
@@ -100,7 +101,104 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         newProfileBtn.addActionListener(e -> createNewProfile());
         toolbar.add(newProfileBtn);
 
+        // Separator
+        toolbar.add(Box.createHorizontalStrut(10));
+
+        // Search field for filtering profile tabs
+        searchField = new JTextField(20);
+        searchField.setToolTipText("Search profiles...");
+        searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            @Override
+            public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                filterProfileTabs();
+            }
+
+            @Override
+            public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                filterProfileTabs();
+            }
+
+            @Override
+            public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                filterProfileTabs();
+            }
+        });
+        toolbar.add(new JLabel(" Search:"));
+        toolbar.add(searchField);
+
         return toolbar;
+    }
+
+    /**
+     * Filter profile tabs based on the search field text.
+     * Tabs matching the search query are shown, others are hidden.
+     * When search is empty, all tabs are restored.
+     */
+    private void filterProfileTabs() {
+        String query = searchField.getText().trim().toLowerCase();
+
+        if (query.isEmpty()) {
+            // Restore all tabs
+            restoreAllTabs();
+            return;
+        }
+
+        // Find matching tab names
+        List<String> matchingProfiles = new ArrayList<>();
+        for (String profileName : profilePanelMap.keySet()) {
+            if (profileName.toLowerCase().contains(query)) {
+                matchingProfiles.add(profileName);
+            }
+        }
+
+        // Remember currently selected tab
+        String currentSelectedTab = getActiveTabTitle();
+
+        // Remove non-matching tabs from tabbedPane but keep panels in map
+        // Use LinkedHashMap to preserve order
+        LinkedHashMap<String, boolean[]> visibleTabs = new LinkedHashMap<>();
+        for (String profileName : profilePanelMap.keySet()) {
+            visibleTabs.put(profileName, new boolean[] { profileName.toLowerCase().contains(query) });
+        }
+
+        // Rebuild tabbedPane with only matching tabs
+        int oldSelectedIndex = tabbedPane.getSelectedIndex();
+        tabbedPane.removeAll();
+
+        for (Map.Entry<String, boolean[]> entry : visibleTabs.entrySet()) {
+            if (entry.getValue()[0]) {
+                tabbedPane.addTab(entry.getKey(), tabIcon, profilePanelMap.get(entry.getKey()));
+            }
+        }
+
+        // Try to restore selection if the previously selected tab is still visible
+        if (currentSelectedTab != null && currentSelectedTab.toLowerCase().contains(query)) {
+            int newIndex = getTabIndex(currentSelectedTab);
+            if (newIndex >= 0) {
+                tabbedPane.setSelectedIndex(newIndex);
+            }
+        }
+    }
+
+    /**
+     * Restore all tabs to the tabbed pane (called when search field is cleared).
+     */
+    private void restoreAllTabs() {
+        String currentSelectedTab = getActiveTabTitle();
+
+        tabbedPane.removeAll();
+
+        for (String profileName : profilePanelMap.keySet()) {
+            tabbedPane.addTab(profileName, tabIcon, profilePanelMap.get(profileName));
+        }
+
+        // Restore selection
+        if (currentSelectedTab != null && profilePanelMap.containsKey(currentSelectedTab)) {
+            int tabIndex = getTabIndex(currentSelectedTab);
+            if (tabIndex >= 0) {
+                tabbedPane.setSelectedIndex(tabIndex);
+            }
+        }
     }
 
     /**
@@ -160,7 +258,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
             return; // Already exists
         }
 
-        MariaDBProfilePanel profilePanel = new MariaDBProfilePanel();
+        MariaDBProfilePanel profilePanel = new MariaDBProfilePanel(profileName);
 
         profilePanelMap.put(profileName, profilePanel);
 

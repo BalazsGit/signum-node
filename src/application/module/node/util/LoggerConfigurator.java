@@ -1,8 +1,9 @@
 package application.module.node.util;
 
 import application.module.node.Signum;
-import application.module.node.gui.configuration.ConfigurationUtils;
 import application.module.node.gui.configuration.LoggerProfile;
+import application.utils.gui.ConfigurationUtils;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
