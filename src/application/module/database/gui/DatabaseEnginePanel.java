@@ -13,9 +13,9 @@ public interface DatabaseEnginePanel {
 
     Path getProfilePath(String profileName);
 
-    void loadProfile(String profileName, GlobalSettings globalSettings);
+    // void loadProfile(String profileName, GlobalSettings globalSettings);
 
-    void resetToDefaults(GlobalSettings globalSettings);
+    // void resetToDefaults(GlobalSettings globalSettings);
 
     String getUnsavedChangesReport();
 
@@ -25,18 +25,20 @@ public interface DatabaseEnginePanel {
 
     void refreshUIColors();
 
-    void setLoadedProfileName(String name);
-
-    String getLoadedProfileName();
-
-    void setRunningProfileName(String name);
-
-    String getRunningProfileName();
-
-    void setActiveProfileName(String name);
-
-    String getActiveProfileName();
-
+    /*
+     * 
+     * void setLoadedProfileName(String name);
+     * 
+     * String getLoadedProfileName();
+     * 
+     * void setRunningProfileName(String name);
+     * 
+     * String getRunningProfileName();
+     * 
+     * void setActiveProfileName(String name);
+     * 
+     * String getActiveProfileName();
+     */
     JsonObject getCurrentProfileSettings();
 
     void setAppliedProfileSettings(JsonObject settings);

@@ -500,18 +500,15 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
 
     // --- DatabaseEnginePanel Implementation ---
 
-    @Override
     public String getEngineName() {
         return "SQLite";
     }
 
-    @Override
     public Path getProfilePath(String profileName) {
         return PathUtils.resolvePath(DatabaseConfigurationUtils.DATABASE_BASE_DIR).resolve("SQLite")
                 .resolve(profileName);
     }
 
-    @Override
     public void loadProfile(String profileName, GlobalSettings gs) {
         this.globalSettings = gs;
         loadProfileInternal(profileName);
@@ -541,7 +538,6 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         }
     }
 
-    @Override
     public void resetToDefaults(GlobalSettings gs) {
         this.currentProfile = new SQLiteProfile(loadedProfileName);
         refreshSettingsUI();
@@ -567,37 +563,30 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
     public void refreshUIColors() {
     }
 
-    @Override
     public void setLoadedProfileName(String n) {
         this.loadedProfileName = n;
     }
 
-    @Override
     public String getLoadedProfileName() {
         return loadedProfileName;
     }
 
-    @Override
     public void setRunningProfileName(String n) {
         this.runningProfileName = n;
     }
 
-    @Override
     public String getRunningProfileName() {
         return runningProfileName;
     }
 
-    @Override
     public void setActiveProfileName(String n) {
         this.activeProfileName = n;
     }
 
-    @Override
     public String getActiveProfileName() {
         return activeProfileName;
     }
 
-    @Override
     public JsonObject getCurrentProfileSettings() {
         return new JsonObject();
     }

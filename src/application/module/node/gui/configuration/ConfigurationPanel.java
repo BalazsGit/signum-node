@@ -26,6 +26,7 @@ public class ConfigurationPanel extends JPanel {
     private final JButton backButton;
     private final JLabel titleLabel;
 
+    // Todo Configuration Panel should be delete, we are usingunique panels
     public ConfigurationPanel(Runnable restartAction, String confFolder, Runnable backAction) {
         super(new BorderLayout());
         this.backAction = backAction;
@@ -92,7 +93,7 @@ public class ConfigurationPanel extends JPanel {
                                         dbTabs.setSelectedIndex(i);
                                         Component enginePanel = dbTabs.getComponentAt(i);
                                         if (enginePanel instanceof DatabaseEnginePanel) {
-                                            ((DatabaseEnginePanel) enginePanel).loadProfile(parts[1], null);
+                                            //((DatabaseEnginePanel) enginePanel).loadProfile(parts[1], null);
                                         }
                                         break;
                                     }

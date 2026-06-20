@@ -248,7 +248,7 @@ public class SignumGUI extends JPanel {
     private String version = null;
     private final String confFolder;
     private final Color iconColor;
-    private ConfigurationPanel configurationPanel;
+    // private ConfigurationPanel configurationPanel;
 
     private JLabel connectedPeersLabel;
     private JLabel peersCountLabel;
@@ -845,11 +845,12 @@ public class SignumGUI extends JPanel {
             }
         };
         mainCardPanel.add(content, VIEW_CONSOLE);
-
-        this.configurationPanel = new ConfigurationPanel(this::restart, this.confFolder,
-                () -> cardLayout.show(mainCardPanel, VIEW_CONSOLE));
-        mainCardPanel.add(configurationPanel, VIEW_CONFIGURATION);
-
+        /*
+         * this.configurationPanel = new ConfigurationPanel(this::restart,
+         * this.confFolder,
+         * () -> cardLayout.show(mainCardPanel, VIEW_CONSOLE));
+         * mainCardPanel.add(configurationPanel, VIEW_CONFIGURATION);
+         */
         // Regisztrálunk az AppearanceModule-nál az egyedi UI frissítésekre
         AppearanceModule.registerAppearanceListener(() -> { // Register for custom UI updates with the AppearanceModule
             updateCustomComponents();
@@ -925,9 +926,11 @@ public class SignumGUI extends JPanel {
                     restart();
                 }
             };
-            if (checkAllUnsavedChanges()) {
-                restartTask.run();
-            }
+            /*
+             * if (checkAllUnsavedChanges()) {
+             * restartTask.run();
+             * }
+             */
         });
 
         if (phoenixIndex.isFile() && phoenixIndex.exists()) {
@@ -1512,9 +1515,11 @@ public class SignumGUI extends JPanel {
                                 shutdown();
                             }
                         };
-                        if (checkAllUnsavedChanges()) {
-                            exitTask.run();
-                        }
+                        /*
+                         * if (checkAllUnsavedChanges()) {
+                         * exitTask.run();
+                         * }
+                         */
                     } else {
                         trayIcon.displayMessage("Signum GUI closed", "Note that Signum is still running",
                                 MessageType.INFO);
@@ -1577,10 +1582,12 @@ public class SignumGUI extends JPanel {
         // Start BRS
         new Thread(this::startSignumWithGUI).start();
     }
-
-    private boolean checkAllUnsavedChanges() {
-        return configurationPanel == null || configurationPanel.checkUnsavedChanges();
-    }
+    /*
+     * private boolean checkAllUnsavedChanges() {
+     * return configurationPanel == null ||
+     * configurationPanel.checkUnsavedChanges();
+     * }
+     */
 
     private void shutdown() {
         JDialog shutdownDialog = new JDialog(parentFrame, "Shutting down", true);
@@ -1832,9 +1839,11 @@ public class SignumGUI extends JPanel {
                 shutdown();
             }
         };
-        if (checkAllUnsavedChanges()) {
-            shutdownTask.run();
-        }
+        /*
+         * if (checkAllUnsavedChanges()) {
+         * shutdownTask.run();
+         * }
+         */
     }
 
     /**
@@ -2551,7 +2560,7 @@ public class SignumGUI extends JPanel {
                     onManualPopOffProgress();
                     onAutoPopOffProgress();
 
-                    configurationPanel.loadAppliedProperties();
+                    // configurationPanel.loadAppliedProperties();
 
                     updateLatestBlock(lastBlock, maxPeerHeight, blockTime);
                     updatePeerCount(connectedCount, allKnownCount, blacklistedCount);

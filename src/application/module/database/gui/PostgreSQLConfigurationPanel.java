@@ -151,13 +151,11 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
                 .resolve(DatabaseEngine.POSTGRESQL.toString()).resolve(profileName);
     }
 
-    @Override
     public void loadProfile(String profileName, GlobalSettings globalSettings) {
         this.globalSettings = globalSettings;
         loadProfileInternal(profileName);
     }
 
-    @Override
     public void resetToDefaults(GlobalSettings gs) {
         if (currentProfile != null) {
             this.globalSettings = gs;
@@ -185,32 +183,26 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
         return false;
     }
 
-    @Override
     public void setLoadedProfileName(String n) {
         this.loadedProfileName = n;
     }
 
-    @Override
     public String getLoadedProfileName() {
         return loadedProfileName;
     }
 
-    @Override
     public void setRunningProfileName(String n) {
         this.runningProfileName = n;
     }
 
-    @Override
     public String getRunningProfileName() {
         return runningProfileName;
     }
 
-    @Override
     public void setActiveProfileName(String n) {
         this.activeProfileName = n;
     }
 
-    @Override
     public String getActiveProfileName() {
         return activeProfileName;
     }

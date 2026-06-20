@@ -460,7 +460,7 @@ public class DatabaseConfigurationUtils {
             // Handle new MariaDB portable profile format
             if (engine.equalsIgnoreCase("MariaDB") && (json.has("createdDatabases") || json.has("createdUsers"))) {
                 try {
-                    MariadbProfile mProfile = new MariadbProfile(profileName, json);
+                    MariadbProfile mProfile = new MariadbProfile(profileName);
                     for (MariadbProfile.DatabaseInfo dbInfo : mProfile.getCreatedDatabases()) {
                         DbInstance instance = new DbInstance();
                         instance.name = dbInfo.name;

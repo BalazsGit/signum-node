@@ -3,6 +3,7 @@ package application.module.database.profile;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 
@@ -121,7 +122,9 @@ public class MariadbProfile {
     private final Set<String> keysInFile = new HashSet<>();
     private final Set<String> visibleProperties = new LinkedHashSet<>();
 
-    // Constructor for new profiles
+    // Single constructor: resolve profile root, load persisted state if the JSON
+    // file
+    // already exists, otherwise create an empty profile.json for the new profile.
     public MariadbProfile(String profileName) {
         this.profileName = profileName;
         this.profileRoot = (profileName != null && !profileName.trim().isEmpty())
@@ -129,6 +132,7 @@ public class MariadbProfile {
                         .resolve(DatabaseConfigurationPanel.DatabaseEngine.MARIADB.toString()).resolve(profileName)
                 : null;
         this.currentOsName = DatabaseConfigurationUtils.getOsName();
+
         this.installedVersion = null;
         this.downloadedVersion = null;
         this.downloadedOs = null;
@@ -137,13 +141,30 @@ public class MariadbProfile {
         this.step1Completed = false;
         this.step2Completed = false;
         this.step3Completed = false;
-        this.isReady = false; // Derived state
-        this.adminUsername = "root"; // Default admin username
-        this.adminPassword = ""; // Default empty password
+        this.isReady = false;
+        this.adminUsername = "root";
+        this.adminPassword = "";
         this.appUsername = null;
         this.appUserPassword = null;
         this.appUserPermissions = null;
+        this.configFilePath = null;
+
         initDefaultConfiguration();
+
+        if (profileRoot != null) {
+            Path profileJson = profileRoot.resolve("profile.json");
+            if (Files.exists(profileJson)) {
+                try (BufferedReader reader = Files.newBufferedReader(profileJson, StandardCharsets.UTF_8)) {
+                    JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
+                    loadFromJson(json);
+                } catch (Exception e) {
+                    logger.warn("Could not load profile metadata from {}: {}", profileJson, e.getMessage());
+                    ensureProfileJsonExists();
+                }
+            } else {
+                ensureProfileJsonExists();
+            }
+        }
     }
 
     private void initDefaultConfiguration() {
@@ -153,14 +174,7 @@ public class MariadbProfile {
         visibleProperties.add(CFG_DATADIR);
     }
 
-    // Constructor from JsonObject
-    public MariadbProfile(String profileName, JsonObject json) {
-        this.profileName = profileName;
-        this.profileRoot = (profileName != null && !profileName.trim().isEmpty())
-                ? PathUtils.resolvePath(DatabaseConfigurationUtils.DATABASE_BASE_DIR)
-                        .resolve(DatabaseConfigurationPanel.DatabaseEngine.MARIADB.toString()).resolve(profileName)
-                : null;
-        this.currentOsName = DatabaseConfigurationUtils.getOsName();
+    private void loadFromJson(JsonObject json) {
         this.installedVersion = getString(json, "installedVersion", null);
         this.downloadedVersion = getString(json, "downloadedVersion", null);
         this.downloadedOs = getString(json, "downloadedOs", null);
@@ -169,7 +183,7 @@ public class MariadbProfile {
         this.step1Completed = getBoolean(json, "step1Completed");
         this.step2Completed = getBoolean(json, "step2Completed");
         this.step3Completed = getBoolean(json, "step3Completed");
-        this.isReady = getBoolean(json, "isReady"); // Derived state
+        this.isReady = getBoolean(json, "isReady");
         this.adminUsername = getString(json, "adminUsername", "root");
         this.adminPassword = getString(json, "adminPassword", "");
         this.appUsername = getString(json, "appUsername", null);
@@ -177,14 +191,7 @@ public class MariadbProfile {
         this.appUserPermissions = getString(json, "appUserPermissions", null);
         this.configFilePath = getString(json, "configFilePath", null);
 
-        initDefaultConfiguration();
-        // Note: Configuration values and visible properties are no longer read from
-        // profile.json.
-        // The only source of truth for MariaDB settings is the actual config file
-        // (my.ini/my.cnf).
-        // If the file doesn't exist, default fields (port, datadir) are used.
-
-        // Try to load/sync values from actual config file if it exists
+        // Configuration values are sourced from the config file when available.
         loadSettingsFromConfig();
 
         if (json.has("createdDatabases") && !json.get("createdDatabases").isJsonNull()) {
@@ -218,6 +225,8 @@ public class MariadbProfile {
                 createdUsers.add(user);
             }
         }
+
+        ensureProfileJsonExists();
     }
 
     private static String getString(JsonObject json, String memberName, String defaultValue) {
@@ -227,6 +236,33 @@ public class MariadbProfile {
 
     private static boolean getBoolean(JsonObject json, String memberName) {
         return json.has(memberName) && !json.get(memberName).isJsonNull() && json.get(memberName).getAsBoolean();
+    }
+
+    private void writeProfileJson(JsonObject json) throws IOException {
+        if (profileRoot == null) {
+            return;
+        }
+        Files.createDirectories(profileRoot);
+        Path profileJson = profileRoot.resolve("profile.json");
+        try (BufferedWriter writer = Files.newBufferedWriter(profileJson, StandardCharsets.UTF_8)) {
+            writer.write(GSON.toJson(json));
+        }
+    }
+
+    public void ensureProfileJsonExists() {
+        if (profileRoot == null) {
+            return;
+        }
+
+        try {
+            Path profileJson = profileRoot.resolve("profile.json");
+            if (!Files.exists(profileJson)) {
+                writeProfileJson(toJsonObject());
+                logger.info("Created profile metadata file for profile '{}'", profileName);
+            }
+        } catch (IOException e) {
+            logger.warn("Could not create profile metadata for profile '{}': {}", profileName, e.getMessage());
+        }
     }
 
     // Convert to JsonObject for saving
@@ -497,14 +533,24 @@ public class MariadbProfile {
 
     public void setStep1Completed(boolean step1Completed) {
         this.step1Completed = step1Completed;
+        if (!step1Completed) {
+            this.step2Completed = false;
+            this.step3Completed = false;
+        }
+        updateReadiness();
     }
 
     public void setStep2Completed(boolean step2Completed) {
-        this.step2Completed = step2Completed;
+        this.step2Completed = step2Completed && this.step1Completed;
+        if (!this.step2Completed) {
+            this.step3Completed = false;
+        }
+        updateReadiness();
     }
 
     public void setStep3Completed(boolean step3Completed) {
-        this.step3Completed = step3Completed;
+        this.step3Completed = step3Completed && this.step2Completed;
+        updateReadiness();
     }
 
     public void setReady(boolean ready) {
@@ -823,6 +869,7 @@ public class MariadbProfile {
         if (profileRoot == null || updates == null) {
             return;
         }
+
         Files.createDirectories(profileRoot); // Ensure directory exists
         Path profileJson = profileRoot.resolve("profile.json");
         JsonObject json;
@@ -834,7 +881,16 @@ public class MariadbProfile {
                     json = new JsonObject();
             }
         } else {
-            json = new JsonObject(); // Create new if file doesn't exist
+            json = new JsonObject();
+        }
+
+        JsonObject snapshot = toJsonObject();
+        for (Map.Entry<String, JsonElement> entry : snapshot.entrySet()) {
+            json.add(entry.getKey(), entry.getValue());
+        }
+
+        if (profileName != null && !json.has("profileName")) {
+            json.addProperty("profileName", profileName);
         }
 
         for (Map.Entry<String, Object> entry : updates.entrySet()) {
@@ -853,9 +909,7 @@ public class MariadbProfile {
             }
         }
 
-        try (BufferedWriter writer = Files.newBufferedWriter(profileJson, StandardCharsets.UTF_8)) {
-            writer.write(GSON.toJson(json));
-        }
+        writeProfileJson(json);
         logger.info("Partial profile update for profile '{}'. Keys updated: {}", profileName,
                 String.join(", ", updates.keySet()));
     }

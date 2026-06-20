@@ -47,7 +47,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     private static final Logger logger = LoggerFactory.getLogger(MariaDBConfigurationPanel.class);
     public static final String API_BASE_URL = DatabaseConfigurationUtils.MARIA_DB_API_BASE_URL;
 
-    private final JTabbedPane tabbedPane = new JTabbedPane();
+    private final static JTabbedPane tabbedPane = new JTabbedPane();
     private final Map<String, MariaDBProfilePanel> profilePanelMap = new HashMap<>();
 
     // Toolbar components
@@ -89,6 +89,11 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
 
         // Load existing profiles on creation
         refreshProfiles();
+    }
+
+    public static int removeMariaDBProfilePanel(MariaDBProfilePanel mariaDBProfilePanel) {
+        profilePanelMap.remove(mariaDBProfilePanel.getMariaDBProfile(), mariaDBProfilePanel.getProfileName());
+        return tabbedPane.remove(mariaDBProfilePanel);
     }
 
     private JPanel createToolbar() {
@@ -243,17 +248,15 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
 
         // Use centralized profile management from db-profiles.json
         DatabaseConfigurationUtils.getProfileNames(Signum.CONF_FOLDER, "MariaDB")
-                .forEach(profileName -> addProfileTab(profileName, true));
+                .forEach(profileName -> addProfileTab(profileName));
     }
 
     /**
      * Add a profile tab to the tabbed pane.
      * 
      * @param profileName The profile name
-     * @param skipLoading If true, don't load profile data (used when panel will
-     *                    handle it)
      */
-    private void addProfileTab(String profileName, boolean skipLoading) {
+    private void addProfileTab(String profileName) {
         if (profilePanelMap.containsKey(profileName)) {
             return; // Already exists
         }
@@ -307,8 +310,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
 
                 Files.createDirectories(targetFolder);
 
-                MariadbProfile newProfile = new MariadbProfile(name);
-                newProfile.saveToProfileJson(new HashMap<>());
+                addProfileTab(name);
 
                 return true;
             } catch (Exception e) {
@@ -419,33 +421,39 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         return PathUtils.resolvePath(DatabaseConfigurationUtils.DATABASE_BASE_DIR)
                 .resolve(DatabaseEngine.MARIADB.toString());
     }
+    /*
+     * @Override
+     * public void loadProfile(String profileName, GlobalSettings globalSettings) {
+     * this.globalSettings = globalSettings;
+     * 
+     * // Check if profile tab already exists
+     * if (!profilePanelMap.containsKey(profileName)) {
+     * addProfileTab(profileName, false);
+     * }
+     * 
+     * // Select the tab
+     * int tabIndex = getTabIndex(profileName);
+     * if (tabIndex >= 0) {
+     * tabbedPane.setSelectedIndex(tabIndex);
+     * }
+     * 
+     * this.loadedProfileName = profileName;
+     * this.activeProfileName = profileName;
+     * }
+     */
+    /*
+     * @Override
+     * public void resetToDefaults(GlobalSettings globalSettings) {
+     * this.globalSettings = globalSettings;
+     * MariaDBProfilePanel activePanel = getActiveProfilePanel();
+     * if (activePanel != null) {
+     * activePanel.resetToDefaults(globalSettings);
+     * }
+     * }
+     */
 
-    @Override
-    public void loadProfile(String profileName, GlobalSettings globalSettings) {
-        this.globalSettings = globalSettings;
-
-        // Check if profile tab already exists
-        if (!profilePanelMap.containsKey(profileName)) {
-            addProfileTab(profileName, false);
-        }
-
-        // Select the tab
-        int tabIndex = getTabIndex(profileName);
-        if (tabIndex >= 0) {
-            tabbedPane.setSelectedIndex(tabIndex);
-        }
-
-        this.loadedProfileName = profileName;
-        this.activeProfileName = profileName;
-    }
-
-    @Override
-    public void resetToDefaults(GlobalSettings globalSettings) {
-        this.globalSettings = globalSettings;
-        MariaDBProfilePanel activePanel = getActiveProfilePanel();
-        if (activePanel != null) {
-            activePanel.resetToDefaults(globalSettings);
-        }
+    public static JTabbedPane getTabbedPane() {
+        return tabbedPane;
     }
 
     @Override
@@ -490,44 +498,22 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         }
     }
 
-    @Override
-    public void setLoadedProfileName(String name) {
-        this.loadedProfileName = name;
-        MariaDBProfilePanel activePanel = getActiveProfilePanel();
-        if (activePanel != null) {
-            activePanel.setLoadedProfileName(name);
-        }
-    }
-
-    @Override
     public String getLoadedProfileName() {
         return loadedProfileName != null ? loadedProfileName : getActiveTabTitle();
     }
 
-    @Override
-    public void setRunningProfileName(String name) {
-        this.runningProfileName = name;
-        for (MariaDBProfilePanel panel : profilePanelMap.values()) {
-            panel.setRunningProfileName(name);
-        }
-    }
-
-    @Override
     public String getRunningProfileName() {
         return runningProfileName;
     }
 
-    @Override
     public void setActiveProfileName(String name) {
         this.activeProfileName = name;
     }
 
-    @Override
     public String getActiveProfileName() {
         return activeProfileName != null ? activeProfileName : getActiveTabTitle();
     }
 
-    @Override
     public JsonObject getCurrentProfileSettings() {
         MariaDBProfilePanel activePanel = getActiveProfilePanel();
         if (activePanel != null) {
