@@ -3,7 +3,7 @@ package application.utils.gui;
 import application.module.appearance.AppearanceProfile;
 import application.module.node.Signum;
 import application.module.node.gui.configuration.LoggerProfile;
-import application.module.node.gui.configuration.NodeProfile;
+import application.module.node.profile.NodeProfile;
 import application.utils.io.PathUtils;
 
 import com.google.gson.JsonElement;

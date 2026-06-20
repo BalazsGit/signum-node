@@ -83,7 +83,8 @@ public class MariaDBProfilePanel extends JPanel {
     private final Map<String, JComponent> propertyComponents = new HashMap<>();
     private final Map<String, String> helpTexts = new HashMap<>();
     private final Map<String, String> defaultValues = new HashMap<>();
-    private Path activeProfilePath;
+    private Path profileRootPath;
+    private Path enginePath;
     private final Icon checkIcon = IconFontSwing.buildIcon(FontAwesome.CHECK_CIRCLE,
             GuiConstants.getHelpIconSize(),
             GuiColors.getApplied());
@@ -757,8 +758,8 @@ public class MariaDBProfilePanel extends JPanel {
         bottomPanel.add(createLegendPanel(), BorderLayout.NORTH);
 
         // File path field
-        if (activeProfilePath != null) {
-            pathLabel.setText("Profile Directory: " + activeProfilePath.toAbsolutePath().toString());
+        if (profileRootPath != null) {
+            pathLabel.setText("Profile Directory: " + profileRootPath.toAbsolutePath().toString());
         }
         bottomPanel.add(pathLabel, BorderLayout.CENTER);
 
@@ -1092,7 +1093,7 @@ public class MariaDBProfilePanel extends JPanel {
     }
 
     private void showChangeAdminCredentialsDialog() {
-        if (currentProfile == null || activeProfilePath == null) {
+        if (currentProfile == null || profileRootPath == null) {
             JOptionPane.showMessageDialog(this, "Please select or create a profile first.", "Error",
                     JOptionPane.ERROR_MESSAGE);
             return;
@@ -1609,8 +1610,8 @@ public class MariaDBProfilePanel extends JPanel {
                         : currentProfile.getDownloadedVersion();
                 setVersionComboBoxes(ver);
             }
-            if (activeProfilePath != null) {
-                pathLabel.setText("Profile Directory: " + activeProfilePath.toAbsolutePath().toString());
+            if (profileRootPath != null) {
+                pathLabel.setText("Profile Directory: " + profileRootPath.toAbsolutePath().toString());
             }
         }
 
@@ -2164,7 +2165,7 @@ public class MariaDBProfilePanel extends JPanel {
      * this.loadedProfileName = null;
      * this.activeProfileName = null;
      * this.runningProfileName = null;
-     * this.activeProfilePath = null;
+     * this.profileRootPath = null;
      * } else if (currentSelection != null &&
      * profileNames.contains(currentSelection)) {
      * profileComboBox.setSelectedItem(currentSelection);
@@ -2449,7 +2450,7 @@ public class MariaDBProfilePanel extends JPanel {
             }
         }
 
-        executeInitializationWorker(activeProfilePath, currentProfile.getPort());
+        executeInitializationWorker(profileRootPath, currentProfile.getPort());
     }
 
     private boolean validateInitializationPrerequisites() {
@@ -2463,7 +2464,7 @@ public class MariaDBProfilePanel extends JPanel {
             JOptionPane.showMessageDialog(this, "Port cannot be empty.", "Input Error", JOptionPane.ERROR_MESSAGE);
             return false;
         }
-        if (activeProfilePath == null || !Files.exists(activeProfilePath)) {
+        if (profileRootPath == null || !Files.exists(profileRootPath)) {
             JOptionPane.showMessageDialog(this, "Profile directory not found.", "Error", JOptionPane.ERROR_MESSAGE);
             return false;
         }
@@ -2571,13 +2572,13 @@ public class MariaDBProfilePanel extends JPanel {
     // This method is responsible for producing the exact MariadbProfile object that
     // the panel will edit.
     private void loadProfileData() {
-        Path jsonFile = activeProfilePath != null ? activeProfilePath.resolve("profile.json") : null;
+        Path jsonFile = profileRootPath != null ? profileRootPath.resolve("profile.json") : null;
         if (jsonFile != null && Files.exists(jsonFile)) {
             try (BufferedReader reader = Files.newBufferedReader(jsonFile, StandardCharsets.UTF_8)) {
                 JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
                 String profileName = currentProfile != null && currentProfile.getProfileName() != null
                         ? currentProfile.getProfileName()
-                        : activeProfilePath.getFileName().toString();
+                        : profileRootPath.getFileName().toString();
                 this.currentProfile = new MariadbProfile(profileName);
                 setVersionComboBoxes(currentProfile.getDownloadedVersion());
             } catch (Exception e) {
@@ -2604,14 +2605,14 @@ public class MariaDBProfilePanel extends JPanel {
      * 
      * if (profileName == null || profileName.trim().isEmpty()) {
      * // No profile selected: the panel should not pretend to own any profile data.
-     * this.activeProfilePath = null;
+     * this.profileRootPath = null;
      * this.currentProfile = new MariadbProfile(null);
      * } else {
      * Path targetFolder =
      * PathUtils.resolvePath(DatabaseConfigurationUtils.DATABASE_BASE_DIR)
      * .resolve(engine.toString())
      * .resolve(profileName);
-     * this.activeProfilePath = targetFolder;
+     * this.profileRootPath = targetFolder;
      * 
      * if (!Files.exists(targetFolder)) {
      * // The folder does not exist yet, but the panel still needs a valid in-memory
@@ -2630,7 +2631,7 @@ public class MariaDBProfilePanel extends JPanel {
      * updateUIFromData();
      * // updateProfileComboBoxColor();
      * pathLabel.setText("Profile Directory: "
-     * + (activeProfilePath != null ? activeProfilePath.toAbsolutePath().toString()
+     * + (profileRootPath != null ? profileRootPath.toAbsolutePath().toString()
      * : "N/A"));
      * 
      * // Keep the combo box selection in sync with the profile object this panel
@@ -3181,7 +3182,7 @@ public class MariaDBProfilePanel extends JPanel {
     }
 
     private void removeAndUninstallDatabase() {
-        if (currentProfile == null || activeProfilePath == null)
+        if (currentProfile == null || profileRootPath == null)
             return;
 
         String msg = String.format("Are you sure you want to uninstall MariaDB from profile '%s'?\n" +
@@ -3725,8 +3726,7 @@ public class MariaDBProfilePanel extends JPanel {
                         JOptionPane.ERROR_MESSAGE);
                 return promptForNewProfileName(suggestedName); // Re-prompt
             }
-            Path enginePath = PathUtils.resolvePath(DatabaseConfigurationUtils.DATABASE_BASE_DIR)
-                    .resolve(currentEngine.toString());
+
             if (Files.exists(enginePath.resolve(enteredName))) {
                 int overwriteChoice = JOptionPane.showConfirmDialog(this,
                         "Profile '" + enteredName + "' already exists. Use this profile?",
@@ -3752,8 +3752,7 @@ public class MariaDBProfilePanel extends JPanel {
             return;
 
         try {
-            Path enginePath = PathUtils.resolvePath(DatabaseConfigurationUtils.DATABASE_BASE_DIR)
-                    .resolve(currentEngine.toString());
+
             Path oldPath = enginePath.resolve(oldName);
             Path newPath = enginePath.resolve(newName);
 
@@ -3830,7 +3829,7 @@ public class MariaDBProfilePanel extends JPanel {
                 /*
                  * if (oldName.equals(loadedProfileName)) {
                  * loadedProfileName = newName;
-                 * activeProfilePath = newPath;
+                 * profileRootPath = newPath;
                  * if (currentProfile != null)
                  * currentProfile.setProfileName(newName);
                  * }
@@ -3913,6 +3912,7 @@ public class MariaDBProfilePanel extends JPanel {
             }
 
             MariaDBConfigurationPanel.removeMariaDBProfilePanel(this);
+            updateUIFromData();
 
             JOptionPane.showMessageDialog(this, "Profile deleted successfully.", "Success",
                     JOptionPane.INFORMATION_MESSAGE);
@@ -4076,6 +4076,9 @@ public class MariaDBProfilePanel extends JPanel {
 
         this.currentProfile = new MariadbProfile(requestedProfileName);
 
+        this.profileRootPath = currentProfile.getProfileRootPath();
+        this.enginePath = currentProfile.getEnginePath();
+
         this.confFolder = Signum.CONF_FOLDER;
         this.currentOsName = DatabaseConfigurationUtils.getOsName();
         this.currentOsArch = DatabaseConfigurationUtils.getOsArch();
@@ -4085,7 +4088,7 @@ public class MariaDBProfilePanel extends JPanel {
         DatabaseConfigurationUtils.ensureDirectoryStructure();
 
         this.currentEngine = DatabaseEngine.MARIADB;
-        this.activeProfilePath = requestedProfileName != null
+        this.profileRootPath = requestedProfileName != null
                 ? PathUtils.resolvePath(DatabaseConfigurationUtils.DATABASE_BASE_DIR)
                         .resolve(this.currentEngine.toString())
                         .resolve(requestedProfileName)
@@ -4096,7 +4099,7 @@ public class MariaDBProfilePanel extends JPanel {
         initUI();
         this.isInitialized = true;
 
-        if (this.currentProfile != null && this.activeProfilePath != null) {
+        if (this.currentProfile != null && this.profileRootPath != null) {
             loadProfileData();
             updateUIFromData();
         }

@@ -1,7 +1,7 @@
 package application.utils.gui;
 
 import application.module.node.gui.ColorSettingsPanel;
-import application.module.node.gui.SignumGUI;
+import application.module.node.gui.NodePanel;
 import application.module.appearance.gui.AppearancePanel;
 
 import javax.swing.*;
@@ -63,7 +63,7 @@ public final class ContextMenuUtils {
         popup.addSeparator();
         JMenuItem goToSettings = new JMenuItem("Open Look and Feel Settings...");
         goToSettings.addActionListener(ae -> {
-            SignumGUI gui = SignumGUI.getInstance();
+            NodePanel gui = NodePanel.getInstance();
             if (gui != null) {
                 gui.showLookAndFeelSettings();
             }

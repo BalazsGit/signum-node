@@ -2,7 +2,7 @@ package application.module.node;
 
 import application.api.Module;
 import application.api.ModuleContext;
-import application.module.node.gui.SignumGUI;
+import application.module.node.gui.NodePanel;
 import application.module.node.props.Props;
 import javax.swing.JFrame;
 import javax.swing.JComponent;
@@ -17,7 +17,7 @@ public class NodeModule implements Module {
     public static final String DISPLAY_NAME = "Node";
 
     private ModuleContext context;
-    private SignumGUI gui;
+    private NodePanel gui;
 
     @Override
     public String getId() {
@@ -62,7 +62,7 @@ public class NodeModule implements Module {
                 }
             }
 
-            gui = new SignumGUI(
+            gui = new NodePanel(
                     parentFrame,
                     "Signum Node",
                     Props.ICON_LOCATION.getDefaultValue(),

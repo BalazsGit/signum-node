@@ -1,4 +1,4 @@
-package application.module.node.gui.configuration;
+package application.module.node.profile;
 
 import java.util.Objects;
 import java.util.Properties;

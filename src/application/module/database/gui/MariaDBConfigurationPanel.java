@@ -92,18 +92,11 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     }
 
     public static void removeMariaDBProfilePanel(MariaDBProfilePanel mariaDBProfilePanel) {
-        int optionValue = JOptionPane.showConfirmDialog(tabbedPane,
-                "Are you sure you want to delete the profile '" + mariaDBProfilePanel.getMariaDBProfileName() + "'?",
-                "Delete Profile", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-        if (optionValue != JOptionPane.YES_OPTION) {
-            try {
-                profilePanelMap.remove(mariaDBProfilePanel.getMariaDBProfileName(), mariaDBProfilePanel);
-                tabbedPane.remove(mariaDBProfilePanel);
-                int ReturnValue = 0;
-            } catch (Exception e) {
-                // TODO Auto-generated catch block
-                e.printStackTrace();
-            }
+        try {
+            profilePanelMap.remove(mariaDBProfilePanel.getMariaDBProfileName(), mariaDBProfilePanel);
+            tabbedPane.remove(mariaDBProfilePanel);
+        } catch (Exception e) {
+            logger.error("Error removing MariaDBProfilePanel: {}", e.getMessage(), e);
         }
     }
 

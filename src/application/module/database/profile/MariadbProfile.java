@@ -98,7 +98,8 @@ public class MariadbProfile {
     public static final String DEFAULT_INNODB_FLUSH_VAL = "0";
 
     private String profileName;
-    private Path profileRoot;
+    private Path profileRootPath;
+    private Path enginePath;
     private final String currentOsName;
     private String installedVersion;
     private String downloadedVersion;
@@ -127,12 +128,15 @@ public class MariadbProfile {
     // already exists, otherwise create an empty profile.json for the new profile.
     public MariadbProfile(String profileName) {
         this.profileName = profileName;
-        this.profileRoot = (profileName != null && !profileName.trim().isEmpty())
+        this.profileRootPath = (profileName != null && !profileName.trim().isEmpty())
                 ? PathUtils.resolvePath(DatabaseConfigurationUtils.DATABASE_BASE_DIR)
                         .resolve(DatabaseConfigurationPanel.DatabaseEngine.MARIADB.toString()).resolve(profileName)
                 : null;
         this.currentOsName = DatabaseConfigurationUtils.getOsName();
 
+        this.enginePath = PathUtils.resolvePath(DatabaseConfigurationUtils.DATABASE_BASE_DIR)
+                .resolve(DatabaseConfigurationPanel.DatabaseEngine.MARIADB.toString());
+        this.adminPassword = "";
         this.installedVersion = null;
         this.downloadedVersion = null;
         this.downloadedOs = null;
@@ -151,8 +155,8 @@ public class MariadbProfile {
 
         initDefaultConfiguration();
 
-        if (profileRoot != null) {
-            Path profileJson = profileRoot.resolve("profile.json");
+        if (profileRootPath != null) {
+            Path profileJson = profileRootPath.resolve("profile.json");
             if (Files.exists(profileJson)) {
                 try (BufferedReader reader = Files.newBufferedReader(profileJson, StandardCharsets.UTF_8)) {
                     JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
@@ -239,23 +243,23 @@ public class MariadbProfile {
     }
 
     private void writeProfileJson(JsonObject json) throws IOException {
-        if (profileRoot == null) {
+        if (profileRootPath == null) {
             return;
         }
-        Files.createDirectories(profileRoot);
-        Path profileJson = profileRoot.resolve("profile.json");
+        Files.createDirectories(profileRootPath);
+        Path profileJson = profileRootPath.resolve("profile.json");
         try (BufferedWriter writer = Files.newBufferedWriter(profileJson, StandardCharsets.UTF_8)) {
             writer.write(GSON.toJson(json));
         }
     }
 
     public void ensureProfileJsonExists() {
-        if (profileRoot == null) {
+        if (profileRootPath == null) {
             return;
         }
 
         try {
-            Path profileJson = profileRoot.resolve("profile.json");
+            Path profileJson = profileRootPath.resolve("profile.json");
             if (!Files.exists(profileJson)) {
                 writeProfileJson(toJsonObject());
                 logger.info("Created profile metadata file for profile '{}'", profileName);
@@ -333,12 +337,12 @@ public class MariadbProfile {
     // --- Path Resolution Logic (Professional separation of concerns) ---
 
     public Path getBaseDir() {
-        if (profileRoot == null)
+        if (profileRootPath == null)
             return null;
         if (binaryFolderName != null && !binaryFolderName.isEmpty()) {
-            return profileRoot.resolve(binaryFolderName);
+            return profileRootPath.resolve(binaryFolderName);
         }
-        return profileRoot;
+        return profileRootPath;
     }
 
     public Path getBinPath() {
@@ -380,8 +384,12 @@ public class MariadbProfile {
         return profileName;
     }
 
-    public Path getProfileRoot() {
-        return profileRoot;
+    public Path getProfileRootPath() {
+        return profileRootPath;
+    }
+
+    public Path getEnginePath() {
+        return enginePath;
     }
 
     public String getInstalledVersion() {
@@ -505,7 +513,7 @@ public class MariadbProfile {
     // --- Setters ---
     public void setProfileName(String profileName) {
         this.profileName = profileName;
-        this.profileRoot = (profileName != null && !profileName.trim().isEmpty())
+        this.profileRootPath = (profileName != null && !profileName.trim().isEmpty())
                 ? PathUtils.resolvePath(DatabaseConfigurationUtils.DATABASE_BASE_DIR)
                         .resolve(DatabaseConfigurationPanel.DatabaseEngine.MARIADB.toString()).resolve(profileName)
                 : null;
@@ -810,9 +818,9 @@ public class MariadbProfile {
     }
 
     public void uninstall() throws IOException {
-        if (this.profileRoot == null)
+        if (this.profileRootPath == null)
             return;
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(this.profileRoot)) {
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(this.profileRootPath)) {
             for (Path entry : stream) {
                 if (!entry.getFileName().toString().equals("profile.json")) {
                     if (Files.isDirectory(entry)) {
@@ -861,17 +869,17 @@ public class MariadbProfile {
      * All other settings remain unchanged. This method replaces the previous
      * saveAdmin(Path, String, String) implementation.
      *
-     * @param profileRoot The root directory of the profile.
-     * @param updates     A Map containing the key-value pairs to be updated.
+     * @param profileRootPath The root directory of the profile.
+     * @param updates         A Map containing the key-value pairs to be updated.
      * @throws IOException If an I/O error occurs during file reading or writing.
      */
     public void saveToProfileJson(Map<String, Object> updates) throws IOException {
-        if (profileRoot == null || updates == null) {
+        if (profileRootPath == null || updates == null) {
             return;
         }
 
-        Files.createDirectories(profileRoot); // Ensure directory exists
-        Path profileJson = profileRoot.resolve("profile.json");
+        Files.createDirectories(profileRootPath); // Ensure directory exists
+        Path profileJson = profileRootPath.resolve("profile.json");
         JsonObject json;
 
         if (Files.exists(profileJson)) {
@@ -920,7 +928,7 @@ public class MariadbProfile {
     public void install(String downloadUrl, String version, String arch,
             ProgressListener listener) throws IOException {
         String filename = downloadUrl.substring(downloadUrl.lastIndexOf('/') + 1);
-        Path archiveFile = this.profileRoot.resolve(filename);
+        Path archiveFile = this.profileRootPath.resolve(filename);
 
         // 1. Download (if necessary)
         if (!Files.exists(archiveFile)) {
@@ -932,7 +940,7 @@ public class MariadbProfile {
         logger.info("Detected binary root folder in ZIP: {}", binaryFolderName != null ? binaryFolderName : "(none)");
 
         // 2. Extraction
-        DatabaseConfigurationUtils.extractZip(archiveFile, this.profileRoot, listener);
+        DatabaseConfigurationUtils.extractZip(archiveFile, this.profileRootPath, listener);
 
         // Update state
         this.downloadedVersion = version;

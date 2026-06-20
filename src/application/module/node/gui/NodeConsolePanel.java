@@ -113,9 +113,9 @@ import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
 
 @SuppressWarnings("serial")
-public class SignumGUI extends JPanel {
+public class NodeConsolePanel extends JPanel {
     private static final String FAILED_TO_START_MESSAGE = "Signum caught exception while starting";
-    private static SignumGUI instance;
+    private static NodeConsolePanel instance;
     private final JFrame parentFrame;
     private static final String UNEXPECTED_EXIT_MESSAGE = "Signum Quit unexpectedly! Exit code ";
 
@@ -125,7 +125,7 @@ public class SignumGUI extends JPanel {
 
     private static final int ANIMATION_DURATION_MS = 250;
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(SignumGUI.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(NodeConsolePanel.class);
 
     private static String[] args;
 
@@ -417,7 +417,7 @@ public class SignumGUI extends JPanel {
                     // Wrap the text in HTML to control the width of the dialog.
                     String htmlText = "<html><body><p style='width: 300px;'>" + text.replace("\n", "<br>")
                             + "</p></body></html>";
-                    JOptionPane.showMessageDialog(SignumGUI.this, htmlText, title, JOptionPane.PLAIN_MESSAGE);
+                    JOptionPane.showMessageDialog(NodeConsolePanel.this, htmlText, title, JOptionPane.PLAIN_MESSAGE);
                 }
             }
         });
@@ -716,7 +716,7 @@ public class SignumGUI extends JPanel {
         }
     }
 
-    public static SignumGUI getInstance() {
+    public static NodeConsolePanel getInstance() {
         return instance;
     }
 
@@ -743,7 +743,7 @@ public class SignumGUI extends JPanel {
         AppearanceModule.setupInitialLookAndFeel(args);
         SwingUtilities.invokeLater(() -> {
             JFrame frame = new JFrame();
-            SignumGUI gui = new SignumGUI(frame, "Signum Node", Props.ICON_LOCATION.getDefaultValue(),
+            NodePanel gui = new NodePanel(frame, "Signum Node", Props.ICON_LOCATION.getDefaultValue(),
                     Signum.VERSION.toString(), args);
             frame.setContentPane(gui);
             frame.pack();
@@ -752,8 +752,9 @@ public class SignumGUI extends JPanel {
         });
     }
 
-    public SignumGUI(JFrame parentFrame, String programName, String iconLocation, String version, String[] args) {
-        SignumGUI.args = args;
+    public NodeConsolePanel(JFrame parentFrame, String programName, String iconLocation, String version,
+            String[] args) {
+        NodeConsolePanel.args = args;
         instance = this;
         this.parentFrame = parentFrame;
         this.programName = programName;
@@ -919,7 +920,7 @@ public class SignumGUI extends JPanel {
         shutdownButton.addActionListener(e -> shutdownAction());
         restartButton.addActionListener(e -> {
             Runnable restartTask = () -> {
-                if (JOptionPane.showConfirmDialog(SignumGUI.this,
+                if (JOptionPane.showConfirmDialog(NodeConsolePanel.this,
                         "This will restart the node. Are you sure?", "Restart node",
                         JOptionPane.YES_NO_OPTION,
                         JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
@@ -1022,7 +1023,7 @@ public class SignumGUI extends JPanel {
                 "Enter a command in the text field and click 'Send' or press Enter.</html>";
 
         helpButton.addActionListener(e -> {
-            JOptionPane.showMessageDialog(SignumGUI.this, commandHelpText, "Command Usage",
+            JOptionPane.showMessageDialog(NodeConsolePanel.this, commandHelpText, "Command Usage",
                     JOptionPane.INFORMATION_MESSAGE);
         });
 
@@ -1048,7 +1049,7 @@ public class SignumGUI extends JPanel {
                     String title = "Synchronization Progress";
                     String htmlText = "<html><body><p style='width: 300px;'>" + syncTooltipText.replace("\n", "<br>")
                             + "</p></body></html>";
-                    JOptionPane.showMessageDialog(SignumGUI.this, htmlText, title, JOptionPane.PLAIN_MESSAGE);
+                    JOptionPane.showMessageDialog(NodeConsolePanel.this, htmlText, title, JOptionPane.PLAIN_MESSAGE);
                 }
             }
         });
@@ -1205,7 +1206,7 @@ public class SignumGUI extends JPanel {
             boolean newValue = enableGpuItem.isSelected();
             String message = "Changes to GPU acceleration will take effect after restart.\n\nWould you like to restart now?";
             String[] options = { "Restart Now", "Restart Later", "Discard" };
-            int choice = JOptionPane.showOptionDialog(SignumGUI.this, message, "GPU Acceleration Changed",
+            int choice = JOptionPane.showOptionDialog(NodeConsolePanel.this, message, "GPU Acceleration Changed",
                     JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
 
             if (choice == 0) { // Restart Now
@@ -1508,7 +1509,7 @@ public class SignumGUI extends JPanel {
                 public void windowClosing(WindowEvent e) {
                     if (trayIcon == null) {
                         Runnable exitTask = () -> {
-                            if (JOptionPane.showConfirmDialog(SignumGUI.this,
+                            if (JOptionPane.showConfirmDialog(NodeConsolePanel.this,
                                     "This will stop the node. Are you sure?", "Exit and stop node",
                                     JOptionPane.YES_NO_OPTION,
                                     JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
@@ -1800,7 +1801,7 @@ public class SignumGUI extends JPanel {
                 parentFrame.setIconImage(ImageIO.read(getClass().getResourceAsStream(iconLocation)));
             }
             TrayIcon newTrayIcon = new TrayIcon(
-                    Toolkit.getDefaultToolkit().createImage(SignumGUI.class.getResource(iconLocation)), "Signum Node",
+                    Toolkit.getDefaultToolkit().createImage(NodePanel.class.getResource(iconLocation)), "Signum Node",
                     popupMenu);
             newTrayIcon.setImage(
                     newTrayIcon.getImage().getScaledInstance(newTrayIcon.getSize().width, -1, Image.SCALE_SMOOTH));
@@ -1832,7 +1833,7 @@ public class SignumGUI extends JPanel {
 
     private void shutdownAction() {
         Runnable shutdownTask = () -> {
-            if (JOptionPane.showConfirmDialog(SignumGUI.this,
+            if (JOptionPane.showConfirmDialog(NodeConsolePanel.this,
                     "This will stop the node. Are you sure?", "Shutdown Node",
                     JOptionPane.YES_NO_OPTION,
                     JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
@@ -1962,7 +1963,7 @@ public class SignumGUI extends JPanel {
                                     && ex.getMessage().contains("already in progress")) {
                                 message = "A database check is already running in the background.";
                             }
-                            JOptionPane.showMessageDialog(SignumGUI.this, message,
+                            JOptionPane.showMessageDialog(NodeConsolePanel.this, message,
                                     "Error", JOptionPane.ERROR_MESSAGE);
                         });
                     } finally {
@@ -1974,7 +1975,7 @@ public class SignumGUI extends JPanel {
 
         waitDialog.setContentPane(panel);
         waitDialog.pack();
-        waitDialog.setLocationRelativeTo(SignumGUI.this);
+        waitDialog.setLocationRelativeTo(NodeConsolePanel.this);
         waitDialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
 
         if (isDbCheckRunning.get()) {
@@ -2003,7 +2004,7 @@ public class SignumGUI extends JPanel {
                     totalEffectiveBalanceSigna, totalEffectiveBalance);
             icon = IconFontSwing.buildIcon(FontAwesome.CHECK_CIRCLE, GuiConstants.ICON_SIZE_DIALOG,
                     new Color(0, 128, 0));
-            JOptionPane.showMessageDialog(SignumGUI.this, message, "Database Consistency Check",
+            JOptionPane.showMessageDialog(NodeConsolePanel.this, message, "Database Consistency Check",
                     JOptionPane.INFORMATION_MESSAGE, icon);
         } else {
             String inconsistencyType;
@@ -2062,7 +2063,7 @@ public class SignumGUI extends JPanel {
                 Object[] messageContent = { infoMessage, Box.createVerticalStrut(10), new JSeparator(),
                         Box.createVerticalStrut(10), activeMessage };
 
-                JOptionPane.showMessageDialog(SignumGUI.this, messageContent, title,
+                JOptionPane.showMessageDialog(NodeConsolePanel.this, messageContent, title,
                         messageType, icon);
                 return;
             }
@@ -2076,7 +2077,7 @@ public class SignumGUI extends JPanel {
             };
 
             Object[] options = { "Start Auto Resolve Database Consistency", "Cancel" };
-            int n = JOptionPane.showOptionDialog(SignumGUI.this, messageContent, "Database Consistency Check",
+            int n = JOptionPane.showOptionDialog(NodeConsolePanel.this, messageContent, "Database Consistency Check",
                     JOptionPane.YES_NO_OPTION, JOptionPane.ERROR_MESSAGE, icon, options, options[1]);
 
             if (n == 0) {

@@ -2,6 +2,7 @@ package application.module.node.gui.configuration;
 
 import application.module.node.Signum;
 import application.module.node.crypto.Crypto;
+import application.module.node.profile.NodeProfile;
 import application.module.database.gui.DatabaseConfigurationPanel;
 import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.node.Constants;
