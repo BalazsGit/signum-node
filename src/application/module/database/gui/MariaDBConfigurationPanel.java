@@ -48,7 +48,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     public static final String API_BASE_URL = DatabaseConfigurationUtils.MARIA_DB_API_BASE_URL;
 
     private final static JTabbedPane tabbedPane = new JTabbedPane();
-    private final Map<String, MariaDBProfilePanel> profilePanelMap = new HashMap<>();
+    private final static Map<String, MariaDBProfilePanel> profilePanelMap = new HashMap<>();
 
     // Toolbar components
     private JButton newProfileBtn;
@@ -91,9 +91,20 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         refreshProfiles();
     }
 
-    public static int removeMariaDBProfilePanel(MariaDBProfilePanel mariaDBProfilePanel) {
-        profilePanelMap.remove(mariaDBProfilePanel.getMariaDBProfile(), mariaDBProfilePanel.getProfileName());
-        return tabbedPane.remove(mariaDBProfilePanel);
+    public static void removeMariaDBProfilePanel(MariaDBProfilePanel mariaDBProfilePanel) {
+        int optionValue = JOptionPane.showConfirmDialog(tabbedPane,
+                "Are you sure you want to delete the profile '" + mariaDBProfilePanel.getMariaDBProfileName() + "'?",
+                "Delete Profile", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+        if (optionValue != JOptionPane.YES_OPTION) {
+            try {
+                profilePanelMap.remove(mariaDBProfilePanel.getMariaDBProfileName(), mariaDBProfilePanel);
+                tabbedPane.remove(mariaDBProfilePanel);
+                int ReturnValue = 0;
+            } catch (Exception e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+            }
+        }
     }
 
     private JPanel createToolbar() {

@@ -222,6 +222,10 @@ public class MariaDBProfilePanel extends JPanel {
         return false;
     }
 
+    public String getMariaDBProfileName() {
+        return currentProfile != null ? currentProfile.getProfileName() : null;
+    }
+
     /*
      * @Override
      * public void setLoadedProfileName(String name) {
