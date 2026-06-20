@@ -1788,28 +1788,12 @@ public class MariaDBProfilePanel extends JPanel implements DatabaseEnginePanel {
             }
             contentCardLayout.show(contentContainer, "SEARCH");
         } else {
-            // Restore components to their original panels in order
-            if (!allPropertyRows.isEmpty()) {
-                allPropertyRows.get(0).originalParent.removeAll(); // Clear the main settings panel
-            }
-            for (PropertyRow row : allPropertyRows) {
-                row.originalParent.add(row.label, row.labelConstraints);
-                if (row.input != null) {
-                    row.originalParent.add(row.input, row.inputConstraints);
-                }
-                if (row.extra != null) {
-                    row.originalParent.add(row.extra, row.extraConstraints);
-                }
-                if (row.help != null) {
-                    row.originalParent.add(row.help, row.helpConstraints);
-                }
-                if (row.separator != null) {
-                    row.originalParent.add(row.separator, row.separatorConstraints);
-                }
-            }
-            if (verticalFiller != null && !allPropertyRows.isEmpty()) {
-                allPropertyRows.get(0).originalParent.add(verticalFiller, "pushy");
-            }
+            // Clearing the search text should restore the normal settings view without
+            // rebuilding
+            // the layout from scratch. The search results panel is independent, so we only
+            // need to
+            // switch back to the original settings card and clear any stale search content.
+            searchResultsPanel.removeAll();
             contentCardLayout.show(contentContainer, "SETTINGS");
         }
         revalidate();
