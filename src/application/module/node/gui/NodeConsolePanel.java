@@ -108,6 +108,7 @@ import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
 import application.module.node.util.Convert;
+import application.module.node.profile.NodeProfile;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
@@ -743,8 +744,7 @@ public class NodeConsolePanel extends JPanel {
         AppearanceModule.setupInitialLookAndFeel(args);
         SwingUtilities.invokeLater(() -> {
             JFrame frame = new JFrame();
-            NodePanel gui = new NodePanel(frame, "Signum Node", Props.ICON_LOCATION.getDefaultValue(),
-                    Signum.VERSION.toString(), args);
+            NodePanel gui = new NodePanel(frame);
             frame.setContentPane(gui);
             frame.pack();
             frame.setLocationRelativeTo(null);
@@ -752,6 +752,24 @@ public class NodeConsolePanel extends JPanel {
         });
     }
 
+    /**
+     * Constructs a NodeConsolePanel for a specific NodeProfile instance.
+     * Used by NodeProfilePanel for multi-instance support.
+     * 
+     * @param parentFrame The parent JFrame for dialogs
+     * @param profile     The NodeProfile containing configuration
+     */
+    public NodeConsolePanel(JFrame parentFrame, NodeProfile profile) {
+        this(parentFrame,
+                "Signum Node [" + profile.getName() + "]",
+                Props.ICON_LOCATION.getDefaultValue(),
+                Signum.VERSION.toString(),
+                new String[0]);
+    }
+
+    /**
+     * Legacy constructor - stands alone (static single-instance mode).
+     */
     public NodeConsolePanel(JFrame parentFrame, String programName, String iconLocation, String version,
             String[] args) {
         NodeConsolePanel.args = args;
@@ -2108,6 +2126,29 @@ public class NodeConsolePanel extends JPanel {
         new Thread(() -> Signum.getBlockchainProcessor().popOff(count)).start();
     }
 
+    /**
+     * Public wrapper for restart - called from NodeProfilePanel
+     */
+    public void restartNode() {
+        restart();
+    }
+
+    /**
+     * Public wrapper for shutdown - called from NodeProfilePanel
+     */
+    public void stopNode() {
+        shutdown();
+    }
+
+    /**
+     * Public wrapper for starting the node - called from NodeProfilePanel.
+     * Delegates to startSignumWithGUI.
+     */
+    public void startNode() {
+        new Thread(this::startSignumWithGUI).start();
+    }
+
+    // Package-private for internal use
     void restart() {
         LOGGER.info("Restarting node...");
 

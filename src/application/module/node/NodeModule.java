@@ -62,13 +62,7 @@ public class NodeModule implements Module {
                 }
             }
 
-            gui = new NodePanel(
-                    parentFrame,
-                    "Signum Node",
-                    Props.ICON_LOCATION.getDefaultValue(),
-                    Signum.VERSION.toString(),
-                    new String[0] // Itt adhatók át a CLI argumentumok, ha szükséges
-            );
+            gui = new NodePanel(parentFrame);
         }
         return gui;
     }
