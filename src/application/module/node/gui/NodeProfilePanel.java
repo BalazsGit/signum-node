@@ -2,6 +2,8 @@ package application.module.node.gui;
 
 import application.module.appearance.AppearanceModule;
 import application.module.node.gui.configuration.NodeConfigurationPanel;
+import application.module.node.lifecycle.NodeLifecycleManager;
+import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.profile.NodeProfile;
 import application.utils.gui.GuiFontManager;
 import org.slf4j.Logger;
@@ -9,9 +11,11 @@ import org.slf4j.LoggerFactory;
 
 import javax.swing.BorderFactory;
 import javax.swing.JFrame;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTabbedPane;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.util.Properties;
 
@@ -145,12 +149,61 @@ public class NodeProfilePanel extends JPanel {
     }
 
     /**
-     * Starts the node for this profile.
+     * Starts the node for this profile via NodeLifecycleManager.
      */
     public void startNode() {
-        if (consolePanel != null) {
-            consolePanel.startNode();
-        }
+        NodeLifecycleManager.getInstance().startProfile(profile.getName());
         LOGGER.info("Start requested for profile: {}", profile.getName());
+    }
+
+    // ====================================================================
+    // Lifecycle callback methods (push-based, called from NodePanel)
+    // ====================================================================
+
+    /**
+     * Called by NodePanel when the node's lifecycle state changes.
+     */
+    public void onNodeStateChanged(NodeLifecycleState oldState, NodeLifecycleState newState) {
+        SwingUtilities.invokeLater(() -> {
+            String profileName = profile.getName();
+            LOGGER.info("[{}] State change: {} -> {}", profileName, oldState, newState);
+
+            // Update tab title to reflect state
+            int tabIndex = innerTabbedPane.indexOfTab("Console");
+            if (tabIndex >= 0) {
+                String stateIcon = switch (newState) {
+                    case RUNNING -> "▶";
+                    case PAUSED -> "❚❚";
+                    case ERROR -> "⚠";
+                    case STOPPED -> "■";
+                    default -> "";
+                };
+                innerTabbedPane.setTitleAt(tabIndex, "Console" + (stateIcon.isEmpty() ? "" : " [" + stateIcon + "]"));
+            }
+        });
+    }
+
+    /**
+     * Called by NodePanel when a status message is received.
+     */
+    public void onStatusMessage(String message) {
+        SwingUtilities.invokeLater(() -> {
+            LOGGER.debug("[{}] Status: {}", profile.getName(), message);
+        });
+    }
+
+    /**
+     * Called by NodePanel when an error occurs.
+     */
+    public void onError(String errorMessage) {
+        SwingUtilities.invokeLater(() -> {
+            LOGGER.error("[{}] Error: {}", profile.getName(), errorMessage);
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Node error: " + errorMessage,
+                    "Error - " + profile.getName(),
+                    JOptionPane.ERROR_MESSAGE
+            );
+        });
     }
 }

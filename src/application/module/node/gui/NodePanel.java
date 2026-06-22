@@ -1,6 +1,10 @@
 package application.module.node.gui;
 
 import application.module.appearance.AppearanceModule;
+import application.module.node.lifecycle.LifecycleListener;
+import application.module.node.lifecycle.NodeInstanceInfo;
+import application.module.node.lifecycle.NodeLifecycleManager;
+import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.profile.NodeProfile;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiFontManager;
@@ -8,144 +12,228 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.swing.BorderFactory;
+import javax.swing.Icon;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
 import javax.swing.JTabbedPane;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
-import java.io.InputStream;
-import java.nio.file.DirectoryStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.ArrayList;
+import java.awt.Component;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
  * Main Node panel that acts as a JTabbedPane container.
- * Discovers all NodeProfile configurations from conf/node/*.properties
- * and creates a profile tab for each one.
+ * Discovers all NodeProfile configurations and creates lightweight placeholder tabs.
+ * Heavy NodeProfilePanel instances are lazy-loaded on first tab selection.
+ *
+ * Integrates with NodeLifecycleManager for push-based lifecycle notifications.
  */
 @SuppressWarnings("serial")
-public class NodePanel extends JPanel {
+public class NodePanel extends JPanel implements LifecycleListener {
+
     private static final Logger LOGGER = LoggerFactory.getLogger(NodePanel.class);
-    private static final Path NODE_CONF_DIR = Paths.get("conf", "node");
 
     private final JFrame parentFrame;
     private final JTabbedPane profileTabbedPane;
-    private final Map<String, NodeProfilePanel> profilePanels;
+    /** Maps profile name -> actual NodeProfilePanel (after lazy-load) */
+    private final Map<String, NodeProfilePanel> loadedProfilePanels;
+    /** Tracks which placeholders have been replaced */
+    private final Map<String, Boolean> placeholderReplaced;
+    /** Singleton lifecycle manager */
+    private final NodeLifecycleManager lifecycleManager;
 
+    /**
+     * Creates the main Node panel with lazy-loaded profile tabs.
+     *
+     * @param parentFrame The parent JFrame for dialogs
+     */
     public NodePanel(JFrame parentFrame) {
         this.parentFrame = parentFrame;
-        this.profilePanels = new LinkedHashMap<>();
+        this.lifecycleManager = NodeLifecycleManager.getInstance();
+        this.loadedProfilePanels = new LinkedHashMap<>();
+        this.placeholderReplaced = new LinkedHashMap<>();
 
         setLayout(new BorderLayout());
         setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
-        profileTabbedPane = new JTabbedPane(SwingConstants.TOP);
+        profileTabbedPane = new JTabbedPane(SwingConstants.TOP) {
+            @Override
+            public void setSelectedIndex(int index) {
+                super.setSelectedIndex(index);
+                // Trigger lazy-load on tab selection
+                String selectedProfileName = getTitleAt(0); // first title is the key
+                checkAndReplacePlaceholder();
+            }
+        };
         GuiFontManager.applyDefaultFont(profileTabbedPane);
         add(profileTabbedPane, BorderLayout.CENTER);
 
-        // Discover and load all node profiles
-        List<NodeProfile> profiles = discoverNodeProfiles();
+        // Discover profiles via lifecycle manager
+        lifecycleManager.discoverProfiles();
 
-        if (profiles.isEmpty()) {
-            LOGGER.warn("No node profiles found in {}", NODE_CONF_DIR);
-            // Create a default profile if none exists
+        // Create placeholder tabs for each profile
+        lifecycleManager.getAllProfiles().forEach(info -> {
+            createPlaceholderTab(info.getProfileName());
+        });
+
+        if (profileTabbedPane.getTabCount() == 0) {
+            LOGGER.warn("No node profiles found");
             NodeProfile defaultProfile = new NodeProfile("default");
-            addProfileTab(defaultProfile);
-            profiles.add(defaultProfile);
+            createPlaceholderTab(defaultProfile.getName());
+            lifecycleManager.registerProfile("default");
         }
 
-        for (NodeProfile profile : profiles) {
-            addProfileTab(profile);
-        }
+        // Register as lifecycle listener for push-based updates
+        lifecycleManager.addListener(this);
+
+        // Initialize all profiles (lightweight, no side effects)
+        lifecycleManager.initializeAllProfiles();
+
+        // Start autostart profiles if configured
+        lifecycleManager.startAutostartProfiles();
 
         // Register for appearance updates
         AppearanceModule.registerAppearanceListener(() -> {
             GuiFontManager.applyDefaultFont(profileTabbedPane);
         });
+
+        LOGGER.info("NodePanel created with {} profile tabs", profileTabbedPane.getTabCount());
     }
 
     /**
-     * Discovers all node profiles from conf/node/*.properties files.
-     * 
-     * @return List of discovered NodeProfile objects
+     * Creates a lightweight placeholder tab for a profile.
      */
-    private List<NodeProfile> discoverNodeProfiles() {
-        List<NodeProfile> profiles = new ArrayList<>();
+    private void createPlaceholderTab(String profileName) {
+        NodePlaceholderPanel placeholder = new NodePlaceholderPanel(profileName, () -> {
+            // This callback is triggered when the placeholder becomes visible
+            SwingUtilities.invokeLater(() -> checkAndReplacePlaceholder());
+        });
 
-        if (!Files.exists(NODE_CONF_DIR)) {
-            try {
-                Files.createDirectories(NODE_CONF_DIR);
-                LOGGER.info("Created node profiles directory: {}", NODE_CONF_DIR);
-            } catch (Exception e) {
-                LOGGER.error("Could not create node profiles directory", e);
-            }
-            return profiles;
+        placeholderReplaced.put(profileName, false);
+        profileTabbedPane.addTab(profileName, placeholder);
+
+        LOGGER.debug("Created placeholder tab for profile: {}", profileName);
+    }
+
+    /**
+     * Checks if the currently selected tab is a placeholder and replaces it
+     * with the actual NodeProfilePanel (lazy-loading).
+     */
+    private void checkAndReplacePlaceholder() {
+        int selectedIndex = profileTabbedPane.getSelectedIndex();
+        if (selectedIndex < 0) {
+            return;
         }
 
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(NODE_CONF_DIR, "*.properties")) {
-            for (Path file : stream) {
-                try {
-                    String profileName = file.getFileName().toString().replace(".properties", "");
-                    NodeProfile profile = new NodeProfile(profileName);
+        String profileName = profileTabbedPane.getTitleAt(selectedIndex);
+        
+        if (Boolean.TRUE.equals(placeholderReplaced.get(profileName))) {
+            return; // Already loaded
+        }
 
-                    // Load properties from file
-                    try (InputStream is = Files.newInputStream(file)) {
-                        profile.getProperties().load(is);
-                    }
+        LOGGER.info("Lazy-loading profile panel for: {}", profileName);
 
-                    profiles.add(profile);
-                    LOGGER.info("Loaded node profile: {} from {}", profileName, file.getFileName());
-                } catch (Exception e) {
-                    LOGGER.error("Error loading profile from {}", file.getFileName(), e);
+        // Load the profile and create the actual panel
+        NodeProfile profile = NodeProfile.loadByName(profileName);
+        if (profile == null) {
+            // Create empty profile if file doesn't exist
+            profile = new NodeProfile(profileName);
+        }
+
+        NodeProfilePanel actualPanel = new NodeProfilePanel(parentFrame, profile);
+        loadedProfilePanels.put(profileName, actualPanel);
+
+        // Replace placeholder with actual panel
+        Component oldComponent = profileTabbedPane.getComponentAt(selectedIndex);
+        if (oldComponent instanceof NodePlaceholderPanel) {
+            ((NodePlaceholderPanel) oldComponent).markAsLoaded();
+        }
+
+        profileTabbedPane.setComponentAt(selectedIndex, actualPanel);
+        placeholderReplaced.put(profileName, true);
+
+        LOGGER.info("Profile panel loaded for: {}", profileName);
+    }
+
+    // ====================================================================
+    // LifecycleListener implementation (push-based)
+    // ====================================================================
+
+    @Override
+    public void onStateChanged(NodeInstanceInfo instanceInfo, NodeLifecycleState oldState, NodeLifecycleState newState) {
+        SwingUtilities.invokeLater(() -> {
+            NodeProfilePanel panel = loadedProfilePanels.get(instanceInfo.getProfileName());
+            if (panel != null) {
+                panel.onNodeStateChanged(oldState, newState);
+            }
+            updateTabIcon(instanceInfo.getProfileName(), newState);
+            LOGGER.info("State change: {} -> {} for profile {}", oldState, newState, instanceInfo.getProfileName());
+        });
+    }
+
+    @Override
+    public void onStatusMessage(NodeInstanceInfo instanceInfo, String message) {
+        SwingUtilities.invokeLater(() -> {
+            NodeProfilePanel panel = loadedProfilePanels.get(instanceInfo.getProfileName());
+            if (panel != null) {
+                panel.onStatusMessage(message);
+            }
+            LOGGER.debug("Status [{}]: {}", instanceInfo.getProfileName(), message);
+        });
+    }
+
+    @Override
+    public void onError(NodeInstanceInfo instanceInfo, String errorMessage) {
+        SwingUtilities.invokeLater(() -> {
+            NodeProfilePanel panel = loadedProfilePanels.get(instanceInfo.getProfileName());
+            if (panel != null) {
+                panel.onError(errorMessage);
+            }
+            LOGGER.error("Error [{}]: {}", instanceInfo.getProfileName(), errorMessage);
+        });
+    }
+
+    /**
+     * Updates the tab icon based on the node state.
+     */
+    private void updateTabIcon(String profileName, NodeLifecycleState state) {
+        for (int i = 0; i < profileTabbedPane.getTabCount(); i++) {
+            if (profileTabbedPane.getTitleAt(i).equals(profileName)) {
+                Icon icon = null;
+                if (state == NodeLifecycleState.ERROR) {
+                    // Use tab text with error indicator
+                    profileTabbedPane.setTitleAt(i, profileName + " ⚠");
+                } else {
+                    profileTabbedPane.setTitleAt(i, profileName);
                 }
+                profileTabbedPane.setIconAt(i, icon);
+                break;
             }
-        } catch (Exception e) {
-            LOGGER.error("Error scanning node profiles directory", e);
         }
-
-        return profiles;
     }
 
-    /**
-     * Creates and adds a new tab for the given NodeProfile.
-     * 
-     * @param profile The NodeProfile to create a tab for
-     */
-    private void addProfileTab(NodeProfile profile) {
-        NodeProfilePanel panel = new NodeProfilePanel(parentFrame, profile);
-        String displayName = profile.getName();
-        profileTabbedPane.addTab(displayName, panel);
-        profilePanels.put(displayName, panel);
-    }
+    // ====================================================================
+    // Public API
+    // ====================================================================
 
     /**
-     * Gets the NodeProfilePanel for a specific profile.
-     * 
-     * @param profileName The name of the profile
-     * @return The NodeProfilePanel or null if not found
+     * Gets the NodeProfilePanel for a specific profile (null if not yet loaded).
      */
     public NodeProfilePanel getProfilePanel(String profileName) {
-        return profilePanels.get(profileName);
+        return loadedProfilePanels.get(profileName);
     }
 
     /**
-     * Gets all profile panels.
-     * 
-     * @return Map of profile name to NodeProfilePanel
+     * Gets all currently loaded profile panels.
      */
-    public Map<String, NodeProfilePanel> getAllProfilePanels() {
-        return new LinkedHashMap<>(profilePanels);
+    public Map<String, NodeProfilePanel> getAllLoadedPanels() {
+        return new LinkedHashMap<>(loadedProfilePanels);
     }
 
     /**
      * Gets the profile tabbed pane.
-     * 
-     * @return The JTabbedPane containing all profile tabs
      */
     public JTabbedPane getProfileTabbedPane() {
         return profileTabbedPane;
@@ -153,10 +241,23 @@ public class NodePanel extends JPanel {
 
     /**
      * Gets the parent JFrame.
-     * 
-     * @return The parent JFrame
      */
     public JFrame getParentFrame() {
         return parentFrame;
+    }
+
+    /**
+     * Gets the lifecycle manager instance.
+     */
+    public NodeLifecycleManager getLifecycleManager() {
+        return lifecycleManager;
+    }
+
+    /**
+     * Cleanup: unregister listener when panel is closed.
+     */
+    public void dispose() {
+        lifecycleManager.removeListener(this);
+        LOGGER.info("NodePanel disposed, listener unregistered");
     }
 }
