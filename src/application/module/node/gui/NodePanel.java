@@ -6,26 +6,30 @@ import application.module.node.lifecycle.NodeInstanceInfo;
 import application.module.node.lifecycle.NodeLifecycleManager;
 import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.profile.NodeProfile;
-import application.utils.gui.GuiColors;
 import application.utils.gui.GuiFontManager;
+import jiconfont.icons.font_awesome.FontAwesome;
+import jiconfont.swing.IconFontSwing;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.swing.Box;
+import javax.swing.BoxLayout;
 import javax.swing.BorderFactory;
-import javax.swing.Icon;
-import javax.swing.JFrame;
+import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JProgressBar;
 import javax.swing.JTabbedPane;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
  * Main Node panel that acts as a JTabbedPane container.
- * Discovers all NodeProfile configurations and creates lightweight placeholder tabs.
+ * Dynamically loads profiles asynchronously with progress feedback.
  * Heavy NodeProfilePanel instances are lazy-loaded on first tab selection.
  *
  * Integrates with NodeLifecycleManager for push-based lifecycle notifications.
@@ -35,71 +39,184 @@ public class NodePanel extends JPanel implements LifecycleListener {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(NodePanel.class);
 
-    private final JFrame parentFrame;
-    private final JTabbedPane profileTabbedPane;
+    private JTabbedPane profileTabbedPane;
+    private JProgressBar progressBar;
+    private JLabel statusLabel;
+    
     /** Maps profile name -> actual NodeProfilePanel (after lazy-load) */
-    private final Map<String, NodeProfilePanel> loadedProfilePanels;
+    private final Map<String, NodeProfilePanel> loadedProfilePanels = new LinkedHashMap<>();
     /** Tracks which placeholders have been replaced */
-    private final Map<String, Boolean> placeholderReplaced;
+    private final Map<String, Boolean> placeholderReplaced = new LinkedHashMap<>();
     /** Singleton lifecycle manager */
-    private final NodeLifecycleManager lifecycleManager;
+    private final NodeLifecycleManager lifecycleManager = NodeLifecycleManager.getInstance();
 
     /**
-     * Creates the main Node panel with lazy-loaded profile tabs.
-     *
-     * @param parentFrame The parent JFrame for dialogs
+     * Creates the main Node panel with dynamic profile loading and progress feedback.
      */
-    public NodePanel(JFrame parentFrame) {
-        this.parentFrame = parentFrame;
-        this.lifecycleManager = NodeLifecycleManager.getInstance();
-        this.loadedProfilePanels = new LinkedHashMap<>();
-        this.placeholderReplaced = new LinkedHashMap<>();
+    public NodePanel() {
+        initialize();
+    }
+
+    /**
+     * Backward-compatible constructor accepting a parent JFrame (ignored, kept for API compatibility).
+     * @param parentFrame Parent frame (deprecated, no longer used)
+     */
+    public NodePanel(javax.swing.JFrame parentFrame) {
+        initialize();
+    }
+
+    /**
+     * Common initialization logic for all constructors.
+     */
+    private void initialize() {
 
         setLayout(new BorderLayout());
         setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
-        profileTabbedPane = new JTabbedPane(SwingConstants.TOP) {
+        // Create header panel with progress bar
+        JPanel headerPanel = createHeaderPanel();
+        add(headerPanel, BorderLayout.NORTH);
+
+        // Create tabbed pane for profiles
+        this.profileTabbedPane = new JTabbedPane(SwingConstants.TOP) {
             @Override
             public void setSelectedIndex(int index) {
                 super.setSelectedIndex(index);
-                // Trigger lazy-load on tab selection
-                String selectedProfileName = getTitleAt(0); // first title is the key
                 checkAndReplacePlaceholder();
             }
         };
         GuiFontManager.applyDefaultFont(profileTabbedPane);
         add(profileTabbedPane, BorderLayout.CENTER);
 
-        // Discover profiles via lifecycle manager
-        lifecycleManager.discoverProfiles();
-
-        // Create placeholder tabs for each profile
-        lifecycleManager.getAllProfiles().forEach(info -> {
-            createPlaceholderTab(info.getProfileName());
-        });
-
-        if (profileTabbedPane.getTabCount() == 0) {
-            LOGGER.warn("No node profiles found");
-            NodeProfile defaultProfile = new NodeProfile("default");
-            createPlaceholderTab(defaultProfile.getName());
-            lifecycleManager.registerProfile("default");
-        }
-
         // Register as lifecycle listener for push-based updates
         lifecycleManager.addListener(this);
-
-        // Initialize all profiles (lightweight, no side effects)
-        lifecycleManager.initializeAllProfiles();
-
-        // Start autostart profiles if configured
-        lifecycleManager.startAutostartProfiles();
 
         // Register for appearance updates
         AppearanceModule.registerAppearanceListener(() -> {
             GuiFontManager.applyDefaultFont(profileTabbedPane);
+            GuiFontManager.applyDefaultFont(statusLabel);
         });
 
-        LOGGER.info("NodePanel created with {} profile tabs", profileTabbedPane.getTabCount());
+        // Start async profile loading
+        startAsyncProfileLoading();
+
+        LOGGER.info("NodePanel created, starting async profile loading");
+    }
+
+    /**
+     * Creates the header panel containing status label and progress bar.
+     */
+    private JPanel createHeaderPanel() {
+        this.statusLabel = new JLabel("Loading profiles...");
+        GuiFontManager.applyDefaultFont(statusLabel);
+        
+        this.progressBar = new JProgressBar(0, 100);
+        progressBar.setStringPainted(true);
+        progressBar.setString("");
+        progressBar.setPreferredSize(new java.awt.Dimension(200, 20));
+
+        JPanel headerPanel = new JPanel();
+        headerPanel.setLayout(new BoxLayout(headerPanel, BoxLayout.X_AXIS));
+        headerPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+
+        statusLabel.setAlignmentY(CENTER_ALIGNMENT);
+        progressBar.setAlignmentY(CENTER_ALIGNMENT);
+
+        headerPanel.add(statusLabel);
+        headerPanel.add(Box.createHorizontalStrut(15));
+        headerPanel.add(Box.createHorizontalGlue());
+        headerPanel.add(progressBar);
+
+        return headerPanel;
+    }
+
+    /**
+     * Starts the async profile loading process in a background thread.
+     * Profiles are discovered, registered, initialized, and tabs are created dynamically.
+     */
+    private void startAsyncProfileLoading() {
+        Thread loaderThread = new Thread(() -> {
+            try {
+                // Discover profiles from filesystem
+                NodeProfile[] profiles = NodeProfile.loadAll();
+                int total = profiles.length;
+
+                if (total == 0) {
+                    SwingUtilities.invokeLater(() -> {
+                        updateProgress(100, "No profiles found");
+                        lifecycleManager.registerProfile("default");
+                        createPlaceholderTab("default");
+                    });
+                    return;
+                }
+
+                // Register profiles first
+                lifecycleManager.discoverProfiles();
+
+                int count = 0;
+                for (NodeProfile profile : profiles) {
+                    count++;
+                    int percentage = (count * 100) / total;
+                    
+                    final String profileName = profile.getName();
+                    final int currentCount = count;
+                    SwingUtilities.invokeLater(() -> {
+                        updateProgress(percentage, "Loading: " + profileName + " (" + currentCount + "/" + total + ")");
+                        createPlaceholderTab(profileName);
+                    });
+
+                    // Small delay for smooth animation effect
+                    try {
+                        Thread.sleep(150);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+
+                // Initialize all profiles
+                SwingUtilities.invokeLater(() -> {
+                    updateProgress(90, "Initializing nodes...");
+                    progressBar.setIndeterminate(true);
+                });
+                
+                lifecycleManager.initializeAllProfiles();
+
+                // Start autostart profiles
+                SwingUtilities.invokeLater(() -> {
+                    updateProgress(95, "Starting autostart nodes...");
+                });
+                
+                lifecycleManager.startAutostartProfiles();
+
+                // Final update - ready state
+                SwingUtilities.invokeLater(() -> {
+                    updateProgress(100, "Ready - " + total + " profiles loaded");
+                    progressBar.setIndeterminate(false);
+                    statusLabel.setForeground(new Color(76, 175, 80)); // Green
+                });
+
+                LOGGER.info("Async profile loading completed: {} profiles loaded", count);
+            } catch (Exception e) {
+                LOGGER.error("Error during async profile loading", e);
+                SwingUtilities.invokeLater(() -> {
+                    updateProgress(0, "Error loading profiles");
+                    progressBar.setForeground(Color.RED);
+                    statusLabel.setForeground(Color.RED);
+                });
+            }
+        }, "ProfileLoader");
+        loaderThread.setDaemon(true);
+        loaderThread.start();
+    }
+
+    /**
+     * Updates the progress bar and status label.
+     */
+    private void updateProgress(int percentage, String message) {
+        progressBar.setValue(percentage);
+        progressBar.setString(message + " (" + percentage + "%)");
+        statusLabel.setText(message);
     }
 
     /**
@@ -107,7 +224,6 @@ public class NodePanel extends JPanel implements LifecycleListener {
      */
     private void createPlaceholderTab(String profileName) {
         NodePlaceholderPanel placeholder = new NodePlaceholderPanel(profileName, () -> {
-            // This callback is triggered when the placeholder becomes visible
             SwingUtilities.invokeLater(() -> checkAndReplacePlaceholder());
         });
 
@@ -138,11 +254,10 @@ public class NodePanel extends JPanel implements LifecycleListener {
         // Load the profile and create the actual panel
         NodeProfile profile = NodeProfile.loadByName(profileName);
         if (profile == null) {
-            // Create empty profile if file doesn't exist
             profile = new NodeProfile(profileName);
         }
 
-        NodeProfilePanel actualPanel = new NodeProfilePanel(parentFrame, profile);
+        NodeProfilePanel actualPanel = new NodeProfilePanel(null, profile);
         loadedProfilePanels.put(profileName, actualPanel);
 
         // Replace placeholder with actual panel
@@ -197,17 +312,42 @@ public class NodePanel extends JPanel implements LifecycleListener {
 
     /**
      * Updates the tab icon based on the node state.
+     * Icons are only shown for active states (RUNNING, PAUSED, INITIALIZING, STOPPING, ERROR).
+     * Stopped/Ready/Idle profiles have no icon.
      */
     private void updateTabIcon(String profileName, NodeLifecycleState state) {
         for (int i = 0; i < profileTabbedPane.getTabCount(); i++) {
             if (profileTabbedPane.getTitleAt(i).equals(profileName)) {
-                Icon icon = null;
-                if (state == NodeLifecycleState.ERROR) {
-                    // Use tab text with error indicator
-                    profileTabbedPane.setTitleAt(i, profileName + " ⚠");
-                } else {
-                    profileTabbedPane.setTitleAt(i, profileName);
+                javax.swing.Icon icon = null;
+                String title = profileName;
+
+                switch (state) {
+                    case RUNNING:
+                        // Green play circle for running nodes
+                        icon = IconFontSwing.buildIcon(FontAwesome.CIRCLE, 10, new Color(76, 175, 80));
+                        break;
+                    case INITIALIZING:
+                    case STOPPING:
+                        // Yellow spinner for transitional states
+                        icon = IconFontSwing.buildIcon(FontAwesome.SPINNER, 14, new Color(255, 193, 7));
+                        title += " ⏳";
+                        break;
+                    case ERROR:
+                        // Red warning icon for error state
+                        icon = IconFontSwing.buildIcon(FontAwesome.EXCLAMATION_TRIANGLE, 14, new Color(244, 67, 54));
+                        title += " ⚠";
+                        break;
+                    case PAUSED:
+                        // Blue pause icon for paused state
+                        icon = IconFontSwing.buildIcon(FontAwesome.PAUSE, 14, new Color(103, 58, 183));
+                        break;
+                    default:
+                        // No icon for stopped/ready/idle states
+                        icon = null;
+                        break;
                 }
+
+                profileTabbedPane.setTitleAt(i, title);
                 profileTabbedPane.setIconAt(i, icon);
                 break;
             }
@@ -237,13 +377,6 @@ public class NodePanel extends JPanel implements LifecycleListener {
      */
     public JTabbedPane getProfileTabbedPane() {
         return profileTabbedPane;
-    }
-
-    /**
-     * Gets the parent JFrame.
-     */
-    public JFrame getParentFrame() {
-        return parentFrame;
     }
 
     /**
