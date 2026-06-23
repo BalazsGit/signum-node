@@ -660,26 +660,12 @@ public class NodeConfigurationPanel extends JPanel {
 
             String lastProfile = ConfigurationUtils
                     .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER));
-            this.activeProfileName = lastProfile != null ? lastProfile.trim() : Signum.PROPERTIES_NAME;
+            this.activeProfileName = lastProfile != null ? lastProfile.trim() : "node";
 
+            // Simplified: load all .properties profiles from conf/node/, no special base profile
             Path nodeConfPath = PathUtils.resolvePath(confFolder).resolve(Signum.NODE_SUBFOLDER);
-            String baseFileName = Signum.PROPERTIES_NAME + ".properties";
-            ConfigurationUtils.fetchProfileNames(nodeConfPath, Signum.DEFAULT_PROPERTIES_NAME + ".properties")
-                    .stream()
-                    .filter(name -> !(name + ".properties").equals(baseFileName))
+            ConfigurationUtils.fetchProfileNames(nodeConfPath, null)
                     .forEach(profileComboBox::addItem);
-
-            // Ensure the base profile is always available in the list
-            boolean hasBase = false;
-            for (int i = 0; i < profileComboBox.getItemCount(); i++) {
-                if (Signum.PROPERTIES_NAME.equals(profileComboBox.getItemAt(i))) {
-                    hasBase = true;
-                    break;
-                }
-            }
-            if (!hasBase) {
-                profileComboBox.insertItemAt(Signum.PROPERTIES_NAME, 0);
-            }
 
             if (currentSelection != null) {
                 profileComboBox.setSelectedItem(currentSelection);
