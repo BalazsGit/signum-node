@@ -155,7 +155,16 @@ public final class Signum {
     private static AtomicBoolean nodeStopped = new AtomicBoolean(false);
     private static AtomicBoolean isInitialized = new AtomicBoolean(false); // New flag for initialization
 
-    private static PropertyService loadProperties(String confFolder) {
+    /**
+     * Loads properties for a specific named profile.
+     * New simplified architecture: Hardcoded defaults (Props.java) → Profile .properties file only.
+     * No cascade, no node-default fallback, no profile.json appliedProfile lookup.
+     *
+     * @param confFolder  The base configuration folder (e.g., "conf/mainnet")
+     * @param profileName The profile name to load (without .properties extension)
+     * @return PropertyService with loaded properties, or empty one if file not found
+     */
+    public static PropertyService loadPropertiesForProfile(String confFolder, String profileName) {
         Path confPath = PathUtils.resolvePath(confFolder);
         CaselessProperties properties = new CaselessProperties();
         Path nodePath = confPath.resolve(NODE_CONF_DIR);
@@ -165,30 +174,24 @@ public final class Signum {
         if (logger != null)
             logger.info("Configurations from folder {}", confPath.toAbsolutePath());
 
-        Path fileToLoad = resolvePropertiesPath(nodePath, PROPERTIES_NAME + ".properties",
-                DEFAULT_PROPERTIES_NAME + ".properties", confPath);
+        // Direct profile lookup: conf/node/{profileName}.properties
+        Path profileFile = nodePath.resolve(profileName + ".properties");
 
-        if (fileToLoad != null) {
-            try (Reader reader = new InputStreamReader(new FileInputStream(fileToLoad.toFile()),
+        if (Files.exists(profileFile)) {
+            try (Reader reader = new InputStreamReader(new FileInputStream(profileFile.toFile()),
                     StandardCharsets.UTF_8)) {
                 if (logger != null)
-                    logger.info("Loading properties from {}", fileToLoad.toAbsolutePath());
+                    logger.info("Loading profile '{}' from {}", profileName, profileFile.toAbsolutePath());
                 properties.load(reader);
-                // Update active profile name to reflect actual file used
-                String fileName = nodePath.relativize(fileToLoad).toString();
-                if (fileName.endsWith(".properties")) {
-                    activeNodeProfile = fileName.substring(0, fileName.length() - 11);
-                }
+                activeNodeProfile = profileName;
             } catch (IOException e) {
                 if (logger != null) {
-                    Path fileName = fileToLoad.getFileName();
-                    logger.warn("Error loading {}, using internal defaults.",
-                            fileName != null ? fileName.toString() : "properties");
+                    logger.warn("Error loading profile '{}', using internal defaults.", profileName, e);
                 }
             }
         } else {
             if (logger != null)
-                logger.info("No property files found in {}. Using internal defaults.", nodePath);
+                logger.info("No profile file found for '{}'. Using internal defaults from Props.java.", profileName);
         }
 
         // Ensure SETTINGS_DIR is set if not in file
@@ -197,6 +200,16 @@ public final class Signum {
         }
 
         return new PropertyServiceImpl(properties);
+    }
+
+    /**
+     * Legacy method for backward compatibility.
+     * Loads a profile by name using the simplified architecture.
+     */
+    private static PropertyService loadProperties(String confFolder) {
+        // Default to first available profile or empty
+        String defaultProfile = PROPERTIES_NAME;
+        return loadPropertiesForProfile(confFolder, defaultProfile);
     }
 
     public static String getActiveNodeProfile() {
@@ -215,38 +228,21 @@ public final class Signum {
         activeLoggingProfile = profile;
     }
 
+    /**
+     * Resolves a properties file path directly from the given directory.
+     * Simplified: no cascade, no fallbacks, just direct file lookup.
+     *
+     * @param dir        The directory to look in
+     * @param fileName   The exact filename to resolve (e.g., "myprofile.properties")
+     * @param confPath   Unused (kept for signature compatibility, will be removed)
+     * @return The path if the file exists, null otherwise
+     * @deprecated Use direct Path.resolve() and Files.exists() instead.
+     */
+    @Deprecated
     public static Path resolvePropertiesPath(Path dir, String fileName, String defaultFileName, Path confPath) {
-        // 1. Priority: check appliedProfile in profile.json
-        Path profileJsonPath = dir.resolve("profile.json");
-        if (Files.exists(profileJsonPath)) {
-            try (BufferedReader reader = Files.newBufferedReader(profileJsonPath, StandardCharsets.UTF_8)) {
-                JsonObject profileJson = JsonParser.parseReader(reader).getAsJsonObject();
-                if (profileJson.has("appliedProfile")) {
-                    String appliedProfileName = profileJson.get("appliedProfile").getAsString();
-                    if (appliedProfileName != null && !appliedProfileName.isEmpty()) {
-                        Path profileProps = dir.resolve(appliedProfileName + ".properties");
-                        if (Files.exists(profileProps)) {
-                            return profileProps;
-                        }
-                    }
-                }
-            } catch (Exception ignored) {
-            }
-        }
-        // 2. Priority: dir/fileName
         Path propsFile = dir.resolve(fileName);
         if (Files.exists(propsFile)) {
             return propsFile;
-        }
-        // 3. Priority: dir/defaultFileName
-        Path defaultInDir = dir.resolve(defaultFileName);
-        if (Files.exists(defaultInDir)) {
-            return defaultInDir;
-        }
-        // 4. Priority: conf/defaultFileName
-        Path defaultInConf = confPath.resolve(defaultFileName);
-        if (Files.exists(defaultInConf)) {
-            return defaultInConf;
         }
         return null;
     }
