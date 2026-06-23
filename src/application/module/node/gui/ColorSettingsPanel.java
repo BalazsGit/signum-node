@@ -4,8 +4,6 @@ import com.formdev.flatlaf.extras.FlatAnimatedLafChange;
 
 import application.utils.gui.ColorPaletteManager;
 import application.utils.gui.HelpButton;
-import jiconfont.icons.font_awesome.FontAwesome;
-import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
 
 import javax.swing.*;
@@ -16,10 +14,26 @@ import java.awt.*;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
+/**
+ * Color settings panel with hierarchical module-based tab structure.
+ * <p>
+ * Tab hierarchy:
+ * <ul>
+ *   <li><b>Global</b> - Application-level color settings (applied, saved)</li>
+ *   <li><b>Node</b> - Node module colors, with sub-tabs for each panel:</li>
+ *   <ul>
+ *     <li>Peer Metrics Panel (peer.*)</li>
+ *     <li>Block Generation Panel (blockgen.*)</li>
+ *     <li>Synchronization Panel (sync.*)</li>
+ *   </ul>
+ *   <li><b>GUI Elements</b> - General GUI color settings (gui.*)</li>
+ *   <li><b>Database</b> - Placeholder for future database-specific colors</li>
+ * </ul>
+ */
 public class ColorSettingsPanel extends JPanel {
 
     private Map<String, Color> currentOverrides = new HashMap<>();
@@ -31,11 +45,50 @@ public class ColorSettingsPanel extends JPanel {
     private final List<ColorRow> allColorRows = new ArrayList<>();
     private JPanel searchResultsPanel;
     private CardLayout contentCardLayout;
-    private JTabbedPane innerTabbedPane;
+
+    /** Module-level tabbed pane: category tabs (Global, Node, GUI Elements, Database) */
+    private JTabbedPane moduleTabbedPane;
+    /** Maps module name -> component-level tabbed pane for modules with sub-tabs (e.g., Node) */
+    private final Map<String, JTabbedPane> componentTabbedPanes = new HashMap<>();
     private Runnable onChangeListener;
-    private final Map<String, Integer> categoryToTabIndex = new HashMap<>();
+
+    /** Maps "module|component" -> tab index within that module's inner tabbed pane */
+    private final Map<String, Integer> componentToTabIndex = new HashMap<>();
+    /** Tracks which modules use nested tabs vs direct content */
+    private final Map<String, Boolean> moduleUsesNestedTabs = new HashMap<>();
     private JPanel contentContainer;
     private final Map<String, String> descriptions = new HashMap<>();
+
+    /**
+     * Two-level category for color key organization.
+     * Package-private for unit test accessibility via reflection on getCategoryForKey.
+     */
+    public static class CategoryInfo {
+        final String module;
+        final String component;
+
+        CategoryInfo(String module, String component) {
+            this.module = module;
+            this.component = component;
+        }
+
+        String getHierarchicalKey() {
+            return module + "|" + component;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (obj == null || getClass() != obj.getClass()) return false;
+            CategoryInfo other = (CategoryInfo) obj;
+            return module.equals(other.module) && component.equals(other.component);
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * module.hashCode() + component.hashCode();
+        }
+    }
 
     public ColorSettingsPanel() {
         super(new BorderLayout());
@@ -90,28 +143,50 @@ public class ColorSettingsPanel extends JPanel {
         contentCardLayout = new CardLayout();
         contentContainer = new JPanel(contentCardLayout);
 
-        innerTabbedPane = new JTabbedPane();
+        // --- Module-level tabbed pane: category tabs ---
+        moduleTabbedPane = new JTabbedPane();
 
-        // Group keys by prefix
-        Map<String, List<String>> groupedKeys = allColorKeys.stream()
-                .collect(Collectors.groupingBy(this::getCategoryForKey));
+        // Group keys by hierarchical category (module -> component -> keys)
+        Map<CategoryInfo, List<String>> groupedByCategory = new LinkedHashMap<>();
+        for (String key : allColorKeys) {
+            CategoryInfo cat = getCategoryForKey(key);
+            groupedByCategory.computeIfAbsent(cat, c -> new ArrayList<>()).add(key);
+        }
 
-        // Create tabs for each category
-        createColorTab(innerTabbedPane, "General", groupedKeys.getOrDefault("General", Collections.emptyList()),
-                "General application colors for UI feedback.");
-        createColorTab(innerTabbedPane, "Peer Metrics",
-                groupedKeys.getOrDefault("Peer Metrics", Collections.emptyList()),
-                "Colors used in the Peer Metrics panel for charts and tables.");
-        createColorTab(innerTabbedPane, "Block Generation",
-                groupedKeys.getOrDefault("Block Generation", Collections.emptyList()),
-                "Colors used in the Block Generation panel for charts, pies, and tables.");
-        createColorTab(innerTabbedPane, "Synchronization",
-                groupedKeys.getOrDefault("Synchronization", Collections.emptyList()),
-                "Colors used in the Synchronization panel for performance and timing charts.");
-        createColorTab(innerTabbedPane, "GUI", groupedKeys.getOrDefault("GUI", Collections.emptyList()),
-                "General GUI element colors.");
+        // Group by module
+        Map<String, Map<String, List<String>>> moduleComponents = new LinkedHashMap<>();
+        for (Map.Entry<CategoryInfo, List<String>> entry : groupedByCategory.entrySet()) {
+            moduleComponents.computeIfAbsent(entry.getKey().module, m -> new LinkedHashMap<>())
+                    .put(entry.getKey().component, entry.getValue());
+        }
 
-        contentContainer.add(innerTabbedPane, "TABS");
+        // --- Global tab (direct content, no nesting) ---
+        moduleUsesNestedTabs.put("Global", false);
+        if (moduleComponents.containsKey("Global")) {
+            Map<String, List<String>> globalComponents = moduleComponents.get("Global");
+            createModuleTab_DirectContent("Global", globalComponents,
+                    "Application-level color settings for UI feedback across all modules.");
+        }
+
+        // --- Node tab (nested sub-tabs) ---
+        moduleUsesNestedTabs.put("Node", true);
+        if (moduleComponents.containsKey("Node")) {
+            createModuleTab_Nested("Node", moduleComponents.get("Node"),
+                    "Node module color settings for charts, tables, and status indicators.");
+        }
+
+        // --- GUI Elements tab (direct content, no nesting) ---
+        moduleUsesNestedTabs.put("GUI Elements", false);
+        if (moduleComponents.containsKey("GUI Elements")) {
+            createModuleTab_DirectContent("GUI Elements", moduleComponents.get("GUI Elements"),
+                    "General GUI element colors for the application interface.");
+        }
+
+        // --- Database tab (placeholder for future) ---
+        moduleUsesNestedTabs.put("Database", false);
+        createDatabasePlaceholderTab();
+
+        contentContainer.add(moduleTabbedPane, "TABS");
 
         searchResultsPanel = new JPanel(new MigLayout("insets 10, gapx 15", "[][][][]", ""));
         JScrollPane searchScrollPane = new JScrollPane(searchResultsPanel);
@@ -144,6 +219,182 @@ public class ColorSettingsPanel extends JPanel {
         buttonPanel.add(resetButton);
 
         add(buttonPanel, BorderLayout.SOUTH);
+    }
+
+    /**
+     * Creates a module tab with direct content (no nested sub-tabs).
+     * Used for: Global, GUI Elements.
+     */
+    private void createModuleTab_DirectContent(String moduleName, Map<String, List<String>> components, String moduleHelpText) {
+        // Merge all component keys into one panel since there's no nesting
+        List<String> allKeys = new ArrayList<>();
+        for (List<String> keys : components.values()) {
+            allKeys.addAll(keys);
+        }
+
+        if (allKeys.isEmpty()) return;
+
+        JPanel mainPanel = new JPanel(new MigLayout("insets 10, gapx 15", "[][][][][]", ""));
+        for (String key : allKeys) {
+            ColorRow row = addColorRowToPanel(key, mainPanel);
+            allColorRows.add(row);
+        }
+
+        JScrollPane scrollPane = new JScrollPane(mainPanel);
+        scrollPane.setBorder(BorderFactory.createEmptyBorder());
+        scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+
+        addModuleTab(moduleName, scrollPane, moduleHelpText);
+    }
+
+    /**
+     * Creates a module tab with nested sub-tabs inside.
+     * Used for: Node (which has Peer Metrics, Block Generation, Synchronization sub-tabs).
+     */
+    private void createModuleTab_Nested(String moduleName, Map<String, List<String>> components, String moduleHelpText) {
+        JTabbedPane innerPane = new JTabbedPane();
+        componentTabbedPanes.put(moduleName, innerPane);
+
+        int tabIndex = 0;
+        for (Map.Entry<String, List<String>> entry : components.entrySet()) {
+            String componentName = entry.getKey();
+            List<String> keys = entry.getValue();
+
+            if (keys.isEmpty()) continue;
+
+            JPanel mainPanel = new JPanel(new MigLayout("insets 10, gapx 15", "[][][][][]", ""));
+            for (String key : keys) {
+                ColorRow row = addColorRowToPanel(key, mainPanel);
+                allColorRows.add(row);
+            }
+
+            JScrollPane scrollPane = new JScrollPane(mainPanel);
+            scrollPane.setBorder(BorderFactory.createEmptyBorder());
+            scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+
+            innerPane.addTab(componentName, scrollPane);
+            componentToTabIndex.put(moduleName + "|" + componentName, tabIndex++);
+        }
+
+        addModuleTab(moduleName, innerPane, moduleHelpText);
+    }
+
+    /**
+     * Creates a placeholder tab for the Database module (no color keys yet).
+     */
+    private void createDatabasePlaceholderTab() {
+        JPanel placeholderPanel = new JPanel();
+        placeholderPanel.setLayout(new BoxLayout(placeholderPanel, BoxLayout.Y_AXIS));
+        placeholderPanel.setAlignmentX(CENTER_ALIGNMENT);
+        placeholderPanel.setBorder(BorderFactory.createEmptyBorder(40, 20, 40, 20));
+
+        JLabel messageLabel = new JLabel("Database-specific color settings will be available here.", SwingConstants.CENTER);
+        messageLabel.setForeground(UIManager.getColor("Label.foreground").darker());
+        placeholderPanel.add(Box.createVerticalGlue());
+        placeholderPanel.add(messageLabel);
+        placeholderPanel.add(Box.createVerticalGlue());
+
+        addModuleTab("Database", placeholderPanel,
+                "Placeholder for future database module color customization settings.");
+    }
+
+    /**
+     * Adds a module-level tab to the module tabbed pane with help button.
+     */
+    private void addModuleTab(String title, Component content, String helpText) {
+        moduleTabbedPane.addTab(title, content);
+        int tabIndex = moduleTabbedPane.getTabCount() - 1;
+
+        // Add help button to tab
+        JPanel tabComponent = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
+        tabComponent.setOpaque(false);
+        tabComponent.add(new JLabel(title));
+        JButton helpButton = new HelpButton();
+        helpButton.setToolTipText("Click for more info about " + title);
+        helpButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        helpButton.addActionListener(e -> {
+            JOptionPane.showMessageDialog(this,
+                    "<html><body style='width:300px;'><p>" + helpText.replace("\n", "<br>") + "</p></body></html>",
+                    "Help: " + title, JOptionPane.INFORMATION_MESSAGE);
+        });
+        tabComponent.add(helpButton);
+        moduleTabbedPane.setTabComponentAt(tabIndex, tabComponent);
+    }
+
+    /**
+     * Creates a single color row and adds it to the given panel.
+     */
+    private ColorRow addColorRowToPanel(String key, JPanel panel) {
+        ColorRow row = new ColorRow(key, panel);
+
+        JLabel keyLabel = new JLabel(key);
+        panel.add(keyLabel, "align label");
+        keyLabels.put(key, keyLabel);
+        row.keyLabel = keyLabel;
+
+        JPanel colorPreview = new JPanel();
+        colorPreview.setBorder(BorderFactory.createLineBorder(Color.GRAY));
+        colorPreview.setPreferredSize(new Dimension(100, 25));
+        panel.add(colorPreview);
+        previewPanels.put(key, colorPreview);
+        row.previewPanel = colorPreview;
+
+        JLabel valueLabel = new JLabel();
+        panel.add(valueLabel);
+        valueLabels.put(key, valueLabel);
+        row.valueLabel = valueLabel;
+
+        JButton editButton = new JButton("Edit...");
+        editButton.addActionListener(e -> {
+            Color originalColor = previewPanels.get(key).getBackground();
+            final JColorChooser colorChooser = new JColorChooser(originalColor);
+
+            colorChooser.getSelectionModel().addChangeListener(changeEvent -> {
+                Color previewColor = colorChooser.getColor();
+                if (previewColor != null) {
+                    currentOverrides.put(key, previewColor);
+                    ColorPaletteManager.applyLiveOverrides(currentOverrides);
+
+                    updateColorRow(key, previewColor);
+                    updateTabDirtyStatus();
+                    if (onChangeListener != null) {
+                        onChangeListener.run();
+                    }
+
+                    for (Window window : Window.getWindows()) {
+                        if (!(window instanceof JDialog && ((JDialog) window).isModal())) {
+                            SwingUtilities.updateComponentTreeUI(window);
+                        }
+                    }
+                }
+            });
+
+            int result = JOptionPane.showConfirmDialog(this, colorChooser, "Choose Color for '" + key + "'",
+                    JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+
+            if (result == JOptionPane.OK_OPTION) {
+                currentOverrides.put(key, colorChooser.getColor());
+                ColorPaletteManager.applyOverrides(currentOverrides);
+            } else {
+                currentOverrides.put(key, originalColor);
+                ColorPaletteManager.applyOverrides(currentOverrides);
+            }
+        });
+        panel.add(editButton);
+        row.editButton = editButton;
+
+        JButton rowHelpButton = new HelpButton();
+        rowHelpButton.setToolTipText("What is this?");
+        rowHelpButton.addActionListener(e -> {
+            String desc = descriptions.getOrDefault(key, "No description available for " + key);
+            JOptionPane.showMessageDialog(this,
+                    "<html><body style='width:300px;'><p>" + desc + "</p></body></html>",
+                    "Color Information: " + key, JOptionPane.INFORMATION_MESSAGE);
+        });
+        panel.add(rowHelpButton, "wrap");
+        row.helpButton = rowHelpButton;
+
+        return row;
     }
 
     private void initDescriptions() {
@@ -221,17 +472,22 @@ public class ColorSettingsPanel extends JPanel {
         descriptions.put("gui.help.icon", "Color of the question mark help icons.");
     }
 
-    private String getCategoryForKey(String key) {
+    /**
+     * Returns the two-level category for a color key.
+     * Maps key prefixes to module + component hierarchy.
+     */
+    private CategoryInfo getCategoryForKey(String key) {
         if (key.startsWith("peer.")) {
-            return "Peer Metrics";
+            return new CategoryInfo("Node", "Peer Metrics");
         } else if (key.startsWith("blockgen.")) {
-            return "Block Generation";
+            return new CategoryInfo("Node", "Block Generation");
         } else if (key.startsWith("sync.")) {
-            return "Synchronization";
+            return new CategoryInfo("Node", "Synchronization");
         } else if (key.startsWith("gui.")) {
-            return "GUI";
+            return new CategoryInfo("GUI Elements", "UI Colors");
         } else {
-            return "General";
+            // applied, saved, etc.
+            return new CategoryInfo("Global", "General");
         }
     }
 
@@ -239,143 +495,62 @@ public class ColorSettingsPanel extends JPanel {
         return (a == b) || (a != null && a.equals(b));
     }
 
-    private void createColorTab(JTabbedPane tabbedPane, String title, List<String> keys, String helpText) {
-        if (keys.isEmpty()) {
-            return;
-        }
-
-        JPanel mainPanel = new JPanel(new MigLayout("insets 10, gapx 15", "[][][][][]", ""));
-
-        for (String key : keys) {
-            ColorRow row = new ColorRow(key, mainPanel);
-            JLabel keyLabel = new JLabel(key);
-            mainPanel.add(keyLabel, "align label");
-            keyLabels.put(key, keyLabel);
-            row.keyLabel = keyLabel;
-
-            JPanel colorPreview = new JPanel();
-            colorPreview.setBorder(BorderFactory.createLineBorder(Color.GRAY));
-            colorPreview.setPreferredSize(new Dimension(100, 25));
-            mainPanel.add(colorPreview);
-            previewPanels.put(key, colorPreview);
-            row.previewPanel = colorPreview;
-
-            JLabel valueLabel = new JLabel();
-            mainPanel.add(valueLabel);
-            valueLabels.put(key, valueLabel);
-            row.valueLabel = valueLabel;
-
-            JButton editButton = new JButton("Edit...");
-            editButton.addActionListener(e -> {
-                Color originalColor = previewPanels.get(key).getBackground();
-                final JColorChooser colorChooser = new JColorChooser(originalColor);
-
-                colorChooser.getSelectionModel().addChangeListener(changeEvent -> {
-                    Color previewColor = colorChooser.getColor();
-                    if (previewColor != null) {
-                        currentOverrides.put(key, previewColor);
-                        ColorPaletteManager.applyLiveOverrides(currentOverrides);
-
-                        // Directly update the color preview on this panel for immediate feedback.
-                        updateColorRow(key, previewColor);
-                        updateTabDirtyStatus();
-                        if (onChangeListener != null) {
-                            onChangeListener.run();
-                        }
-
-                        // To provide a live preview across the entire application (e.g., in tables),
-                        // we need to trigger a UI update. A simple repaint() is often insufficient
-                        // when a modal dialog is active. Calling updateComponentTreeUI is more robust,
-                        // but we must exclude the modal color chooser dialog itself to prevent a
-                        // NullPointerException during its own event handling.
-                        for (Window window : Window.getWindows()) {
-                            if (!(window instanceof JDialog && ((JDialog) window).isModal())) {
-                                SwingUtilities.updateComponentTreeUI(window);
-                            }
-                        }
-                    }
-                });
-
-                int result = JOptionPane.showConfirmDialog(this, colorChooser, "Choose Color for '" + key + "'",
-                        JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
-
-                if (result == JOptionPane.OK_OPTION) {
-                    // OK was pressed. The final color is already in currentOverrides from the
-                    // ChangeListener.
-                    // We just need to make sure the final selected color is in the map and do a
-                    // full update.
-                    currentOverrides.put(key, colorChooser.getColor());
-                    ColorPaletteManager.applyOverrides(currentOverrides);
-                } else {
-                    // Cancel or 'X' was pressed. Revert to the original color and do a full update.
-                    currentOverrides.put(key, originalColor);
-                    ColorPaletteManager.applyOverrides(currentOverrides);
-                }
-            });
-            mainPanel.add(editButton);
-            row.editButton = editButton;
-
-            JButton rowHelpButton = new HelpButton();
-            rowHelpButton.setToolTipText("What is this?");
-            rowHelpButton.addActionListener(e -> {
-                String desc = descriptions.getOrDefault(key, "No description available for " + key);
-                JOptionPane.showMessageDialog(this,
-                        "<html><body style='width:300px;'><p>" + desc + "</p></body></html>",
-                        "Color Information: " + key, JOptionPane.INFORMATION_MESSAGE);
-            });
-            mainPanel.add(rowHelpButton, "wrap");
-            row.helpButton = rowHelpButton;
-
-            allColorRows.add(row);
-        }
-
-        JScrollPane scrollPane = new JScrollPane(mainPanel);
-        scrollPane.setBorder(BorderFactory.createEmptyBorder());
-        scrollPane.getVerticalScrollBar().setUnitIncrement(16);
-
-        // Create a panel for the tab component (title + help icon)
-        JPanel tabComponent = new JPanel(new FlowLayout(FlowLayout.CENTER, 5, 0));
-        tabComponent.setOpaque(false);
-        tabComponent.add(new JLabel(title));
-        JButton helpButton = new HelpButton();
-        helpButton.setToolTipText("Click for more info");
-        helpButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        helpButton.addActionListener(e -> {
-            JOptionPane.showMessageDialog(this,
-                    "<html><body style='width:300px;'><p>" + helpText.replace("\n", "<br>") + "</p></body></html>",
-                    "Help", JOptionPane.INFORMATION_MESSAGE);
-        });
-        tabComponent.add(helpButton);
-
-        tabbedPane.addTab(title, scrollPane);
-        tabbedPane.setTabComponentAt(tabbedPane.getTabCount() - 1, tabComponent);
-        categoryToTabIndex.put(title, tabbedPane.getTabCount() - 1);
-    }
-
+    /**
+     * Updates dirty (*) status on both module-level tabs and component-level sub-tabs.
+     */
     private void updateTabDirtyStatus() {
-        if (innerTabbedPane == null)
+        if (moduleTabbedPane == null)
             return;
 
-        Map<String, Boolean> categoryDirty = new HashMap<>();
+        // Determine which modules and components are dirty
+        Map<String, Boolean> moduleDirty = new HashMap<>();
+        Map<String, Boolean> componentDirty = new HashMap<>();
+
         for (String key : allColorKeys) {
-            String category = getCategoryForKey(key);
+            CategoryInfo cat = getCategoryForKey(key);
             boolean isDirty = !objectsEqual(currentOverrides.get(key), loadedProfileOverrides.get(key));
             if (isDirty) {
-                categoryDirty.put(category, true);
+                moduleDirty.put(cat.module, true);
+                componentDirty.put(cat.getHierarchicalKey(), true);
             }
         }
 
-        categoryToTabIndex.forEach((category, index) -> {
-            String title = innerTabbedPane.getTitleAt(index);
-            if (title.endsWith(" *"))
-                title = title.substring(0, title.length() - 2);
-
-            if (categoryDirty.getOrDefault(category, false)) {
-                innerTabbedPane.setTitleAt(index, title + " *");
-            } else {
-                innerTabbedPane.setTitleAt(index, title);
+        // Update module-level tab titles
+        for (int i = 0; i < moduleTabbedPane.getTabCount(); i++) {
+            Component tabComp = moduleTabbedPane.getTabComponentAt(i);
+            if (tabComp instanceof JPanel) {
+                JLabel label = findFirstLabel((JPanel) tabComp);
+                if (label != null) {
+                    String moduleName = label.getText();
+                    boolean dirty = moduleDirty.getOrDefault(moduleName, false);
+                    label.setText(dirty ? moduleName + " *" : moduleName);
+                }
             }
-        });
+        }
+
+        // Update component-level tab titles within nested modules
+        for (Map.Entry<String, JTabbedPane> entry : componentTabbedPanes.entrySet()) {
+            String moduleName = entry.getKey();
+            JTabbedPane innerPane = entry.getValue();
+            for (int i = 0; i < innerPane.getTabCount(); i++) {
+                String componentTitle = innerPane.getTitleAt(i);
+                String hierKey = moduleName + "|" + componentTitle;
+                boolean dirty = componentDirty.getOrDefault(hierKey, false);
+                innerPane.setTitleAt(i, dirty ? componentTitle + " *" : componentTitle);
+            }
+        }
+    }
+
+    /**
+     * Finds the first JLabel inside a tab component panel (used to read/update tab text).
+     */
+    private JLabel findFirstLabel(JPanel panel) {
+        for (Component comp : panel.getComponents()) {
+            if (comp instanceof JLabel) {
+                return (JLabel) comp;
+            }
+        }
+        return null;
     }
 
     private void updateColorRow(String key, Color color) {
