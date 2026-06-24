@@ -32,10 +32,15 @@ public class ProfileConfig {
 
     /**
      * Internal data structure for profiles.json.
+     * <p>
+     * Uses LinkedHashMap to preserve insertion order for profile entries.
+     * The tabOrder field stores the user-defined tab display order in the GUI.
      */
     public static class ProfileData {
         private String version = "1.0";
         private int maxConcurrentNodes = 1;
+        /** User-defined tab order for profile tabs in the NodePanel GUI. Null means default (filesystem) order. */
+        private List<String> tabOrder;
         private Map<String, ProfileEntry> profiles = new LinkedHashMap<>();
 
         public String getVersion() {
@@ -44,6 +49,14 @@ public class ProfileConfig {
 
         public int getMaxConcurrentNodes() {
             return maxConcurrentNodes;
+        }
+
+        public List<String> getTabOrder() {
+            return tabOrder;
+        }
+
+        public void setTabOrder(List<String> tabOrder) {
+            this.tabOrder = tabOrder;
         }
 
         public Map<String, ProfileEntry> getProfiles() {
@@ -242,12 +255,38 @@ public class ProfileConfig {
     }
 
     /**
+     * Gets the user-defined tab order for profile tabs.
+     * Returns null if no custom order has been set (use default filesystem order).
+     */
+    public List<String> getTabOrder() {
+        ProfileData data = load();
+        return data.getTabOrder();
+    }
+
+    /**
+     * Sets and persists the user-defined tab order for profile tabs.
+     * Pass null to reset to default (filesystem) order.
+     *
+     * @param tabOrder Ordered list of profile names representing the desired tab display order
+     */
+    public void setTabOrder(List<String> tabOrder) {
+        ProfileData data = load();
+        data.setTabOrder(tabOrder);
+        try {
+            save();
+        } catch (IOException e) {
+            LOGGER.error("Failed to save tab order", e);
+        }
+    }
+
+    /**
      * Creates a default ProfileData structure.
      */
     private ProfileData createDefault() {
         ProfileData data = new ProfileData();
         data.version = "1.0";
         data.maxConcurrentNodes = 1;
+        data.tabOrder = null; // No custom order by default
         return data;
     }
 }

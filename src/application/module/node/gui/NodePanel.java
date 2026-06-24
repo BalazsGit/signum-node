@@ -7,14 +7,14 @@ import application.module.node.lifecycle.NodeLifecycleManager;
 import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.profile.NodeProfile;
 import application.utils.gui.GuiFontManager;
-import jiconfont.icons.font_awesome.FontAwesome;
-import jiconfont.swing.IconFontSwing;
+import application.utils.gui.GuiIcons;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.BorderFactory;
+import javax.swing.Icon;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
@@ -42,11 +42,13 @@ public class NodePanel extends JPanel implements LifecycleListener {
     private JTabbedPane profileTabbedPane;
     private JProgressBar progressBar;
     private JLabel statusLabel;
-    
+
     /** Maps profile name -> actual NodeProfilePanel (after lazy-load) */
     private final Map<String, NodeProfilePanel> loadedProfilePanels = new LinkedHashMap<>();
     /** Tracks which placeholders have been replaced */
     private final Map<String, Boolean> placeholderReplaced = new LinkedHashMap<>();
+    /** Reverse lookup: profile name -> tab index for O(1) access by name */
+    private final Map<String, Integer> profileNameToTabIndex = new LinkedHashMap<>();
     /** Singleton lifecycle manager */
     private final NodeLifecycleManager lifecycleManager = NodeLifecycleManager.getInstance();
 
@@ -77,7 +79,7 @@ public class NodePanel extends JPanel implements LifecycleListener {
         JPanel headerPanel = createHeaderPanel();
         add(headerPanel, BorderLayout.NORTH);
 
-        // Create tabbed pane for profiles
+        // Create tabbed pane for profiles with SCROLL_TAB_LAYOUT policy
         this.profileTabbedPane = new JTabbedPane(SwingConstants.TOP) {
             @Override
             public void setSelectedIndex(int index) {
@@ -85,6 +87,7 @@ public class NodePanel extends JPanel implements LifecycleListener {
                 checkAndReplacePlaceholder();
             }
         };
+        profileTabbedPane.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
         GuiFontManager.applyDefaultFont(profileTabbedPane);
         add(profileTabbedPane, BorderLayout.CENTER);
 
@@ -109,7 +112,7 @@ public class NodePanel extends JPanel implements LifecycleListener {
     private JPanel createHeaderPanel() {
         this.statusLabel = new JLabel("Loading profiles...");
         GuiFontManager.applyDefaultFont(statusLabel);
-        
+
         this.progressBar = new JProgressBar(0, 100);
         progressBar.setStringPainted(true);
         progressBar.setString("");
@@ -157,7 +160,7 @@ public class NodePanel extends JPanel implements LifecycleListener {
                 for (NodeProfile profile : profiles) {
                     count++;
                     int percentage = (count * 100) / total;
-                    
+
                     final String profileName = profile.getName();
                     final int currentCount = count;
                     SwingUtilities.invokeLater(() -> {
@@ -179,14 +182,14 @@ public class NodePanel extends JPanel implements LifecycleListener {
                     updateProgress(90, "Initializing nodes...");
                     progressBar.setIndeterminate(true);
                 });
-                
+
                 lifecycleManager.initializeAllProfiles();
 
                 // Start autostart profiles
                 SwingUtilities.invokeLater(() -> {
                     updateProgress(95, "Starting autostart nodes...");
                 });
-                
+
                 lifecycleManager.startAutostartProfiles();
 
                 // Final update - ready state
@@ -229,6 +232,8 @@ public class NodePanel extends JPanel implements LifecycleListener {
 
         placeholderReplaced.put(profileName, false);
         profileTabbedPane.addTab(profileName, placeholder);
+        int tabIndex = profileTabbedPane.getTabCount() - 1;
+        profileNameToTabIndex.put(profileName, tabIndex);
 
         LOGGER.debug("Created placeholder tab for profile: {}", profileName);
     }
@@ -244,7 +249,7 @@ public class NodePanel extends JPanel implements LifecycleListener {
         }
 
         String profileName = profileTabbedPane.getTitleAt(selectedIndex);
-        
+
         if (Boolean.TRUE.equals(placeholderReplaced.get(profileName))) {
             return; // Already loaded
         }
@@ -312,46 +317,43 @@ public class NodePanel extends JPanel implements LifecycleListener {
 
     /**
      * Updates the tab icon based on the node state.
+     * Uses O(1) name-based lookup via profileNameToTabIndex map.
      * Icons are only shown for active states (RUNNING, PAUSED, INITIALIZING, STOPPING, ERROR).
      * Stopped/Ready/Idle profiles have no icon.
+     * Icon sizes scale dynamically with the global UI font size.
      */
     private void updateTabIcon(String profileName, NodeLifecycleState state) {
-        for (int i = 0; i < profileTabbedPane.getTabCount(); i++) {
-            if (profileTabbedPane.getTitleAt(i).equals(profileName)) {
-                javax.swing.Icon icon = null;
-                String title = profileName;
-
-                switch (state) {
-                    case RUNNING:
-                        // Green play circle for running nodes
-                        icon = IconFontSwing.buildIcon(FontAwesome.CIRCLE, 10, new Color(76, 175, 80));
-                        break;
-                    case INITIALIZING:
-                    case STOPPING:
-                        // Yellow spinner for transitional states
-                        icon = IconFontSwing.buildIcon(FontAwesome.SPINNER, 14, new Color(255, 193, 7));
-                        title += " ⏳";
-                        break;
-                    case ERROR:
-                        // Red warning icon for error state
-                        icon = IconFontSwing.buildIcon(FontAwesome.EXCLAMATION_TRIANGLE, 14, new Color(244, 67, 54));
-                        title += " ⚠";
-                        break;
-                    case PAUSED:
-                        // Blue pause icon for paused state
-                        icon = IconFontSwing.buildIcon(FontAwesome.PAUSE, 14, new Color(103, 58, 183));
-                        break;
-                    default:
-                        // No icon for stopped/ready/idle states
-                        icon = null;
-                        break;
-                }
-
-                profileTabbedPane.setTitleAt(i, title);
-                profileTabbedPane.setIconAt(i, icon);
-                break;
-            }
+        Integer tabIndex = profileNameToTabIndex.get(profileName);
+        if (tabIndex == null) {
+            return; // Tab not found
         }
+
+        Icon icon;
+        String titleSuffix = "";
+
+        switch (state) {
+            case RUNNING:
+                icon = GuiIcons.running(GuiIcons.sizeTiny());
+                break;
+            case INITIALIZING:
+            case STOPPING:
+                icon = GuiIcons.initializing(GuiIcons.sizeSmall());
+                titleSuffix = " \u23F3"; // Hourglass
+                break;
+            case ERROR:
+                icon = GuiIcons.error(GuiIcons.sizeSmall());
+                titleSuffix = " \u26A0"; // Warning sign
+                break;
+            case PAUSED:
+                icon = GuiIcons.paused(GuiIcons.sizeSmall());
+                break;
+            default:
+                icon = null;
+                break;
+        }
+
+        profileTabbedPane.setTitleAt(tabIndex, profileName + titleSuffix);
+        profileTabbedPane.setIconAt(tabIndex, icon);
     }
 
     // ====================================================================

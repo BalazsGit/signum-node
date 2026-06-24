@@ -471,23 +471,7 @@ public class MariaDBProfilePanel extends JPanel {
         helpBtn.addActionListener(e -> showProfileHelp());
         profilePanel.add(helpBtn);
 
-        JScrollPane profileScrollPane = new JScrollPane(profilePanel);
-        profileScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
-        profileScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
-        profileScrollPane.setBorder(BorderFactory.createEmptyBorder());
-        profileScrollPane.setOpaque(false);
-        profileScrollPane.getViewport().setOpaque(false);
-
-        GuiUtils.addHorizontalScrollPadding(profileScrollPane, profilePanel, new Insets(5, 10, 5, 5));
-
-        /*
-         * addHierarchyListener(e -> {
-         * if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0 &&
-         * isShowing()) {
-         * refreshProfileList();
-         * }
-         * });
-         */
+        JScrollPane profileScrollPane = GuiUtils.createToolbarScrollPane(profilePanel, new Insets(5, 10, 5, 5));
 
         // --- Search Panel ---
         JPanel searchPanel = new JPanel(new MigLayout("insets 5 10 5 5, fillx", "[][grow]", "[]"));

@@ -28,6 +28,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import javax.swing.JComponent;
+import javax.swing.JScrollPane;
+import javax.swing.JTabbedPane;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.text.SimpleAttributeSet;
@@ -63,6 +65,9 @@ public class AppearanceModule implements Module {
 
         // Register the icon font before any UI components are created
         IconFontSwing.register(FontAwesome.getIconFont());
+
+        // Set global tab layout policy to SCROLL_TAB_LAYOUT (scroll arrows instead of wrapping)
+        UIManager.put("TabbedPane.tabLayoutPolicy", JTabbedPane.SCROLL_TAB_LAYOUT);
 
         // Initialize FlatLaf preferences globally to prevent NPE in sub-panels
         FlatLafPrefs.init();

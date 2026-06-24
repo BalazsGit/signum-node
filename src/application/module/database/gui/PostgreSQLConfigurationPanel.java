@@ -371,11 +371,7 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
                 loadProfileInternal((String) profileComboBox.getSelectedItem());
         });
 
-        JScrollPane profileScrollPane = new JScrollPane(profilePanel);
-        profileScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
-        profileScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
-        profileScrollPane.setBorder(BorderFactory.createEmptyBorder());
-        GuiUtils.addHorizontalScrollPadding(profileScrollPane, profilePanel, new Insets(5, 10, 5, 5));
+        JScrollPane profileScrollPane = GuiUtils.createToolbarScrollPane(profilePanel, new Insets(5, 10, 5, 5));
 
         // --- Database Control Panel ---
         dbControlPanel = new JPanel(new MigLayout("insets 5 10 0 5, gap 5, fillx", "[grow]", "[]5[]0[]"));
@@ -565,12 +561,12 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
         });
         searchPanel.add(searchField, "growx");
 
-        JPanel northPanel = new JPanel(new BorderLayout());
-        JPanel northTopPanel = new JPanel(new BorderLayout());
-        northTopPanel.add(dbControlPanel, BorderLayout.NORTH);
-        northTopPanel.add(profileScrollPane, BorderLayout.CENTER);
-        northPanel.add(northTopPanel, BorderLayout.NORTH);
-        northPanel.add(searchPanel, BorderLayout.SOUTH);
+        // Unified north panel layout using MigLayout with "growx" so the toolbar
+        // row never expands vertically - consistent with NodeConsolePanel behavior.
+        JPanel northPanel = new JPanel(new MigLayout("insets 0, gap 0, fillx, wrap 1", "[grow]", "[]0[]"));
+        northPanel.add(dbControlPanel, "growx");
+        northPanel.add(profileScrollPane, "growx");
+        northPanel.add(searchPanel, "growx");
         body.add(northPanel, BorderLayout.NORTH);
 
         // --- Settings Panel ---

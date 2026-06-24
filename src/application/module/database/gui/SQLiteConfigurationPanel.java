@@ -11,6 +11,7 @@ import application.module.node.Signum;
 import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
+import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
 import application.utils.io.PathUtils;
 
@@ -94,8 +95,6 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
     }
 
     private void initUI() {
-        JPanel northPanel = new JPanel(new BorderLayout());
-
         // --- Profile Toolbar ---
         JPanel profilePanel = new JPanel(new MigLayout("insets 5 10 5 5, gap 5"));
         profilePanel.add(new JLabel("Profile:"));
@@ -129,10 +128,7 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         refreshProfilesBtn.addActionListener(e -> refreshProfileList());
         profilePanel.add(refreshProfilesBtn);
 
-        JScrollPane profileScroll = new JScrollPane(profilePanel);
-        profileScroll.setBorder(BorderFactory.createEmptyBorder());
-        profileScroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
-        northPanel.add(profileScroll, BorderLayout.NORTH);
+        JScrollPane profileScroll = GuiUtils.createToolbarScrollPane(profilePanel, new Insets(5, 10, 5, 5));
 
         // --- Search Bar ---
         JPanel searchPanel = new JPanel(new MigLayout("insets 5 10 5 5, fillx", "[][grow]"));
@@ -153,8 +149,12 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
             }
         });
         searchPanel.add(searchField, "growx");
-        northPanel.add(searchPanel, BorderLayout.SOUTH);
 
+        // Unified north panel layout using MigLayout with "growx" so the toolbar
+        // row never expands vertically - consistent with NodeConsolePanel behavior.
+        JPanel northPanel = new JPanel(new MigLayout("insets 0, gap 0, fillx, wrap 1", "[grow]", "[]0[]"));
+        northPanel.add(profileScroll, "growx");
+        northPanel.add(searchPanel, "growx");
         add(northPanel, BorderLayout.NORTH);
 
         // --- Content ---
