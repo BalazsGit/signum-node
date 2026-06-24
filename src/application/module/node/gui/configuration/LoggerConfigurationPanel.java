@@ -85,7 +85,6 @@ public class LoggerConfigurationPanel extends JPanel {
     private JPanel mainContentPanel;
     private JComboBox<String> addLoggerClassCombo;
     private JPanel contentContainer;
-    private JComponent verticalFiller;
     private String runningProfileName;
     private String activeProfileName;
     private String loadedProfileName;
@@ -363,25 +362,14 @@ public class LoggerConfigurationPanel extends JPanel {
         addSectionHeader(mainContentPanel, "Specific Logger Levels", false);
         addLoggerCreationGui(mainContentPanel);
 
-        // Push everything to top
-        JLabel verticalFiller = new JLabel();
-        mainContentPanel.add(verticalFiller, "pushy");
-
         // --- Content Container (CardLayout for Settings vs Search Results) ---
         contentCardLayout = new CardLayout();
         contentContainer = new JPanel(contentCardLayout);
 
-        JScrollPane scrollPane = new JScrollPane(mainContentPanel);
-        scrollPane.getVerticalScrollBar().setUnitIncrement(16);
-        scrollPane.setBorder(BorderFactory.createEmptyBorder());
-
-        contentContainer.add(scrollPane, "SETTINGS");
+        contentContainer.add(GuiUtils.createScrollableContentPanel(mainContentPanel), "SETTINGS");
 
         searchResultsPanel = new JPanel(new MigLayout("fillx, insets 10, gap 5", "[][grow]", ""));
-        JScrollPane searchScrollPane = new JScrollPane(searchResultsPanel);
-        searchScrollPane.getVerticalScrollBar().setUnitIncrement(16);
-        searchScrollPane.setBorder(BorderFactory.createEmptyBorder());
-        contentContainer.add(searchScrollPane, "SEARCH");
+        contentContainer.add(GuiUtils.createScrollableContentPanel(searchResultsPanel), "SEARCH");
 
         bodyPanel.add(contentContainer, BorderLayout.CENTER);
         add(bodyPanel, BorderLayout.CENTER);
@@ -536,9 +524,6 @@ public class LoggerConfigurationPanel extends JPanel {
                 }
             }
 
-            if (verticalFiller != null) {
-                mainContentPanel.add(verticalFiller, "pushy");
-            }
             contentCardLayout.show(contentContainer, "SETTINGS");
         }
         revalidate();

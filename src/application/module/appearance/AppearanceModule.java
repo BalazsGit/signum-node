@@ -66,9 +66,6 @@ public class AppearanceModule implements Module {
         // Register the icon font before any UI components are created
         IconFontSwing.register(FontAwesome.getIconFont());
 
-        // Set global tab layout policy to SCROLL_TAB_LAYOUT (scroll arrows instead of wrapping)
-        UIManager.put("TabbedPane.tabLayoutPolicy", JTabbedPane.SCROLL_TAB_LAYOUT);
-
         // Initialize FlatLaf preferences globally to prevent NPE in sub-panels
         FlatLafPrefs.init();
 
@@ -182,6 +179,9 @@ public class AppearanceModule implements Module {
             FlatDarkLaf.setup();
             ColorPaletteManager.updatePalette(null);
         }
+        // Apply global tab layout policy AFTER setLookAndFeel/setup completes.
+        // Must be set after LAF initialization as setLookAndFeel resets UIManager defaults.
+        UIManager.put("TabbedPane.tabLayoutPolicy", JTabbedPane.SCROLL_TAB_LAYOUT);
     }
 
     /**
@@ -217,6 +217,11 @@ public class AppearanceModule implements Module {
                 SwingUtilities.updateComponentTreeUI(window);
             }
         }
+
+        // Re-apply global tab layout policy after UI refresh to ensure it persists
+        // across runtime theme changes.
+        UIManager.put("TabbedPane.tabLayoutPolicy", JTabbedPane.SCROLL_TAB_LAYOUT);
+
         FlatLaf.revalidateAndRepaintAllFramesAndDialogs();
 
         // 3. Értesítjük a feliratkozottakat (pl. SignumGUI), hogy végezzék el az egyedi

@@ -103,7 +103,6 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
     private int consoleHeight = 250;
     private JPanel searchResultsPanel;
     private CardLayout contentCardLayout;
-    private JComponent verticalFiller;
     private JPanel contentContainer;
 
     private String loadedProfileName;
@@ -561,12 +560,16 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
         });
         searchPanel.add(searchField, "growx");
 
-        // Unified north panel layout using MigLayout with "growx" so the toolbar
-        // row never expands vertically - consistent with NodeConsolePanel behavior.
-        JPanel northPanel = new JPanel(new MigLayout("insets 0, gap 0, fillx, wrap 1", "[grow]", "[]0[]"));
-        northPanel.add(dbControlPanel, "growx");
-        northPanel.add(profileScrollPane, "growx");
-        northPanel.add(searchPanel, "growx");
+        // North panel structure matching MariaDBProfilePanel exactly:
+        // northTopPanel contains dbControlPanel (NORTH) + profileScrollPane (CENTER)
+        // northPanel contains northTopPanel (NORTH) + searchPanel (SOUTH)
+        JPanel northTopPanel = new JPanel(new BorderLayout());
+        northTopPanel.add(dbControlPanel, BorderLayout.NORTH);
+        northTopPanel.add(profileScrollPane, BorderLayout.CENTER);
+
+        JPanel northPanel = new JPanel(new BorderLayout());
+        northPanel.add(northTopPanel, BorderLayout.NORTH);
+        northPanel.add(searchPanel, BorderLayout.SOUTH);
         body.add(northPanel, BorderLayout.NORTH);
 
         // --- Settings Panel ---
@@ -592,22 +595,14 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
         step3ContentPanel.setOpaque(false);
         dbSettingsPanel.add(step3ContentPanel, "span, growx, wrap, hidemode 3");
 
-        verticalFiller = new JLabel();
-        dbSettingsPanel.add(verticalFiller, "pushy");
-
         // --- Content Container (CardLayout) ---
         contentCardLayout = new CardLayout();
         contentContainer = new JPanel(contentCardLayout);
 
-        JScrollPane settingsScroll = new JScrollPane(dbSettingsPanel);
-        settingsScroll.getVerticalScrollBar().setUnitIncrement(16);
-        settingsScroll.setBorder(BorderFactory.createEmptyBorder());
-        contentContainer.add(settingsScroll, "SETTINGS");
+        contentContainer.add(GuiUtils.createScrollableContentPanel(dbSettingsPanel), "SETTINGS");
 
         searchResultsPanel = new JPanel(new MigLayout("fillx, insets 10, gap 5", "[][grow]"));
-        JScrollPane searchScroll = new JScrollPane(searchResultsPanel);
-        searchScroll.setBorder(BorderFactory.createEmptyBorder());
-        contentContainer.add(searchScroll, "SEARCH");
+        contentContainer.add(GuiUtils.createScrollableContentPanel(searchResultsPanel), "SEARCH");
 
         body.add(contentContainer, BorderLayout.CENTER);
 

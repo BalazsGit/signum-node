@@ -112,7 +112,6 @@ public class MariaDBProfilePanel extends JPanel {
     private JLabel consoleTitle;
     private boolean isConsoleExpanded = false;
     private Timer consoleAnimator;
-    private JComponent verticalFiller;
     // private String runningProfileName;
     // private String activeProfileName;
     // private String loadedProfileName;
@@ -714,24 +713,17 @@ public class MariaDBProfilePanel extends JPanel {
         // updateVersionComboBox(); // Redundant call, refreshProfileList already calls
         // updateMainVersionComboBox
 
-        verticalFiller = new JLabel();
-        dbSettingsPanel.add(verticalFiller, "pushy");
 
         // --- Content Container (CardLayout for Settings vs Search Results) ---
         contentCardLayout = new CardLayout();
         contentContainer = new JPanel(contentCardLayout);
 
-        JScrollPane scrollPane = new JScrollPane(dbSettingsPanel);
-        scrollPane.getVerticalScrollBar().setUnitIncrement(16);
-        scrollPane.setBorder(BorderFactory.createEmptyBorder());
+        JScrollPane scrollPane = GuiUtils.createScrollableContentPanel(dbSettingsPanel);
 
         contentContainer.add(scrollPane, "SETTINGS");
 
         searchResultsPanel = new JPanel(new MigLayout("fillx, insets 10, gap 5", "[][grow]", ""));
-        JScrollPane searchScrollPane = new JScrollPane(searchResultsPanel);
-        searchScrollPane.getVerticalScrollBar().setUnitIncrement(16);
-        searchScrollPane.setBorder(BorderFactory.createEmptyBorder());
-        contentContainer.add(searchScrollPane, "SEARCH");
+        contentContainer.add(GuiUtils.createScrollableContentPanel(searchResultsPanel), "SEARCH");
 
         bodyPanel.add(contentContainer, BorderLayout.CENTER);
         // --- Bottom Panel with Buttons and File Path ---

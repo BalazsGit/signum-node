@@ -7,12 +7,121 @@ import java.awt.*;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 
+/**
+ * Centralized GUI utilities for consistent panel behavior across all configuration panels.
+ */
 public class GuiUtils {
+
+    /**
+     * Creates a properly structured body panel with NORTH toolbar and CENTER scrollable content.
+     * Guarantees that the scrollable content NEVER overlaps the toolbar row, even during
+     * resize or tab switching.
+     *
+     * Key guarantees:
+     * - NORTH region has strict minimum height constraints
+     * - CENTER JScrollPane uses proper layout hints with minimum size
+     * - ComponentListener ensures revalidation on parent size changes
+     *
+     * @param toolbarPanel   The toolbar content panel (buttons, search, etc.).
+     * @param scrollContent  The scrollable content panel.
+     * @return A fully configured JPanel ready for use as the main body of a configuration panel.
+     */
+    public static JPanel createConfigurationBodyPanel(JPanel toolbarPanel, JComponent scrollContent) {
+        return createConfigurationBodyPanel(toolbarPanel, scrollContent, null);
+    }
+
+    /**
+     * Creates a properly structured body panel with NORTH toolbar and CENTER scrollable content.
+     *
+     * @param toolbarPanel   The toolbar content panel (buttons, search, etc.).
+     * @param scrollContent  The scrollable content panel.
+     * @param bottomPanel    Optional SOUTH region panel (legend, status bar, etc.), or null.
+     * @return A fully configured JPanel ready for use as the main body of a configuration panel.
+     */
+    public static JPanel createConfigurationBodyPanel(JPanel toolbarPanel, JComponent scrollContent, JComponent bottomPanel) {
+        JPanel body = new JPanel(new BorderLayout());
+
+        // Wrap toolbar in a horizontal-only scroll pane for narrow windows
+        JScrollPane toolbarScroll = createToolbarScrollPane(toolbarPanel, new Insets(0, 10, 5, 10));
+        toolbarScroll.setMinimumSize(new Dimension(0, toolbarPanel.getPreferredSize().height));
+
+        // Wrap content in a vertical scroll pane
+        JScrollPane contentScroll;
+        if (scrollContent instanceof JPanel) {
+            contentScroll = createScrollableContentPanel((JPanel) scrollContent);
+        } else {
+            contentScroll = new JScrollPane(scrollContent);
+            contentScroll.setBorder(BorderFactory.createEmptyBorder());
+            contentScroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+            contentScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        }
+        contentScroll.setMinimumSize(new Dimension(100, 100));
+
+        body.add(toolbarScroll, BorderLayout.NORTH);
+        body.add(contentScroll, BorderLayout.CENTER);
+
+        if (bottomPanel != null) {
+            body.add(bottomPanel, BorderLayout.SOUTH);
+        }
+
+        // Force proper layout on resize to prevent CENTER from overlapping NORTH
+        body.addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent e) {
+                body.revalidate();
+            }
+        });
+
+        return body;
+    }
+
+    /**
+     * Creates a body panel with the toolbar already wrapped in a JScrollPane.
+     * Use this variant when the caller has already created the toolbar scroll pane.
+     *
+     * @param toolbarScroll  The already-created toolbar JScrollPane.
+     * @param scrollContent  The scrollable content panel.
+     * @param bottomPanel    Optional SOUTH region panel, or null.
+     * @return A fully configured JPanel.
+     */
+    public static JPanel createConfigurationBodyPanel(JScrollPane toolbarScroll, JComponent scrollContent, JComponent bottomPanel) {
+        JPanel body = new JPanel(new BorderLayout());
+
+        toolbarScroll.setMinimumSize(new Dimension(0, toolbarScroll.getPreferredSize().height));
+
+        JScrollPane contentScroll;
+        if (scrollContent instanceof JPanel) {
+            contentScroll = createScrollableContentPanel((JPanel) scrollContent);
+        } else if (scrollContent instanceof JScrollPane) {
+            contentScroll = (JScrollPane) scrollContent;
+        } else {
+            contentScroll = new JScrollPane(scrollContent);
+            contentScroll.setBorder(BorderFactory.createEmptyBorder());
+            contentScroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+            contentScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        }
+        contentScroll.setMinimumSize(new Dimension(100, 100));
+
+        body.add(toolbarScroll, BorderLayout.NORTH);
+        body.add(contentScroll, BorderLayout.CENTER);
+
+        if (bottomPanel != null) {
+            body.add(bottomPanel, BorderLayout.SOUTH);
+        }
+
+        body.addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent e) {
+                body.revalidate();
+            }
+        });
+
+        return body;
+    }
+
     /**
      * Configures a horizontal scroll bar listener to adjust the bottom padding of a
-     * content component
-     * when the scroll bar appears or disappears. This prevents the scroll bar from
-     * overlapping the content.
+     * content component when the scroll bar appears or disappears.
      *
      * @param scrollPane       The scroll pane containing the horizontal scroll bar.
      * @param contentComponent The component whose border should be adjusted.
@@ -30,8 +139,7 @@ public class GuiUtils {
      * @param scrollPane       The scroll pane.
      * @param contentComponent The component whose border should be adjusted.
      * @param defaultInsets    The base insets.
-     * @param onUpdate         An optional callback executed after padding is
-     *                         adjusted.
+     * @param onUpdate         An optional callback executed after padding is adjusted.
      */
     public static void addHorizontalScrollPadding(JScrollPane scrollPane, JComponent contentComponent,
             Insets defaultInsets, Runnable onUpdate) {
@@ -65,10 +173,41 @@ public class GuiUtils {
     }
 
     /**
+     * Creates a properly configured JScrollPane for scrollable content panels.
+     * Ensures consistent scrollbar behavior across all configuration panels:
+     * - No pushy fillers needed (MigLayout insets handle spacing)
+     * - Smooth scrolling with proper unit increment
+     * - Clean borders and scroll policies
+     *
+     * @param contentPanel   The content panel to wrap (typically a MigLayout panel with insets).
+     * @param unitIncrement  The scrollbar unit increment for smooth scrolling (default 16).
+     * @return A fully configured JScrollPane ready for use.
+     */
+    public static JScrollPane createScrollableContentPanel(JPanel contentPanel, int unitIncrement) {
+        JScrollPane scrollPane = new JScrollPane(contentPanel);
+        scrollPane.getVerticalScrollBar().setUnitIncrement(unitIncrement);
+        scrollPane.setBorder(BorderFactory.createEmptyBorder());
+        scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scrollPane.setOpaque(false);
+        scrollPane.getViewport().setOpaque(false);
+        return scrollPane;
+    }
+
+    /**
+     * Creates a scrollable content panel with default unit increment (16).
+     *
+     * @param contentPanel The content panel to wrap.
+     * @return A fully configured JScrollPane.
+     */
+    public static JScrollPane createScrollableContentPanel(JPanel contentPanel) {
+        return createScrollableContentPanel(contentPanel, 16);
+    }
+
+    /**
      * Creates a properly configured JScrollPane for a horizontal toolbar panel.
      * Handles scrollbar appearance/disappearance padding, keeps buttons right-aligned,
-     * and prevents vertical expansion (so the toolbar only grows horizontally).
-     * This ensures consistent behavior across all panels when the window is narrowed.
+     * and prevents vertical expansion.
      *
      * @param toolbarContent The toolbar content component (typically a JPanel with buttons).
      * @param defaultInsets  The base insets to use for the content component.
@@ -87,8 +226,7 @@ public class GuiUtils {
         JScrollBar hBar = scrollPane.getHorizontalScrollBar();
 
         // Prevent the scroll pane from expanding vertically beyond its preferred height.
-        // This ensures the toolbar row stays compact regardless of parent layout type.
-        final int initialMaxHeight = 64; // generous upper bound for one row of buttons
+        final int initialMaxHeight = 64;
         scrollPane.setMaximumSize(new Dimension(Integer.MAX_VALUE, initialMaxHeight));
 
         // Adjust padding when scrollbar appears/disappears, and scroll to right
@@ -105,8 +243,7 @@ public class GuiUtils {
             }
         });
 
-        // Initial padding check after the first layout pass to handle cases where
-        // the panel opens at a narrow width from the start.
+        // Initial padding check after the first layout pass
         SwingUtilities.invokeLater(() -> {
             if (hBar.isVisible() || hBar.isShowing()) {
                 toolbarContent.setBorder(new EmptyBorder(
