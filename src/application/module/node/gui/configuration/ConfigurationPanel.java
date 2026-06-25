@@ -3,6 +3,7 @@ package application.module.node.gui.configuration;
 import application.module.database.gui.DatabaseConfigurationPanel;
 import application.module.database.gui.DatabaseEnginePanel;
 import application.utils.gui.GuiConstants;
+import application.utils.gui.GuiUtils;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 
@@ -53,6 +54,7 @@ public class ConfigurationPanel extends JPanel {
         add(headerContainer, BorderLayout.NORTH);
 
         tabbedPane = new JTabbedPane();
+        GuiUtils.applyDefaultTabLayoutPolicy(tabbedPane);
 
         // Initialize sub-panels
         // We pass null for the internal 'switch' actions as they are now handled by

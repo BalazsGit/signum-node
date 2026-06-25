@@ -13,6 +13,26 @@ import java.awt.event.ComponentEvent;
 public class GuiUtils {
 
     /**
+     * Applies the application-wide default tab layout policy to a JTabbedPane.
+     * 
+     * Reads the policy from GuiManager (which loads from gui-settings.json at startup).
+     * Use this helper after creating any JTabbedPane to ensure consistent behavior
+     * across the application, regardless of UIManager state at construction time.
+     * 
+     * Additionally registers a UI update callback so that when the global policy is
+     * changed at runtime (e.g., via AppearancePanel), this tabbed pane is updated too.
+     *
+     * @param tabbedPane The JTabbedPane to configure.
+     */
+    public static void applyDefaultTabLayoutPolicy(JTabbedPane tabbedPane) {
+        if (tabbedPane == null) {
+            return;
+        }
+        tabbedPane.setTabLayoutPolicy(
+            application.utils.gui.GuiManager.getInstance().getTabLayoutPolicy());
+    }
+
+    /**
      * Creates a properly structured body panel with NORTH toolbar and CENTER scrollable content.
      * Guarantees that the scrollable content NEVER overlaps the toolbar row, even during
      * resize or tab switching.

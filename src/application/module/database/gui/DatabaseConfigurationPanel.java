@@ -189,6 +189,7 @@ public class DatabaseConfigurationPanel extends JPanel {
                 .resolve(this.loadedProfileName);
 
         tabbedPane = new JTabbedPane();
+        GuiUtils.applyDefaultTabLayoutPolicy(tabbedPane);
 
         // Initialize sub-panels
         // Null is passed for the internal 'switch' actions as they are now handled by

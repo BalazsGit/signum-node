@@ -76,10 +76,14 @@ public class AppearanceModule implements Module {
         }
         FlatLaf.registerCustomDefaultsSource(packageName);
 
+        // Initialize GuiManager BEFORE LAF setup so defaults are applied
+        // The signum.properties file in resources/flatlaf will be picked up automatically
+        application.utils.gui.GuiManager.getInstance().init(getGuiSettingsPath(null));
+
         // Apply saved settings
         setupInitialLookAndFeel(null);
 
-        // 2. Now it is safe to create the UI panel
+        // Now it is safe to create the UI panel
         this.settingsPanel = new AppearancePanel(null, null);
     }
 
@@ -117,6 +121,13 @@ public class AppearanceModule implements Module {
     /**
      * Sets up the Look and Feel based on saved settings.
      * Can be called before the module system is fully initialized (e.g. from main).
+     * 
+     * Init order follows FlatLaf best practices:
+     *   1. registerCustomDefaultsSource() — BEFORE any LAF setup
+     *   2. UIManager.setLookAndFeel() — LAF loads its internal defaults
+     *   3. GuiManager.applyDefaultsAfterLaf() — Our overrides on top of LAF defaults
+     *   4. Font/Color palette updates
+     *   5. Swing components created — inherit correct values
      */
     public static void setupInitialLookAndFeel(String[] args) {
         try {
@@ -166,22 +177,33 @@ public class AppearanceModule implements Module {
             FlatLaf.registerCustomDefaultsSource(packageName);
 
             if (themeClassName != null) {
+                // Step 2: Set LookAndFeel — FlatLaf loads its internal defaults here
                 UIManager.setLookAndFeel(themeClassName);
+                
+                // Step 3: Apply GuiManager defaults AFTER LAF setup.
+                // CRITICAL: Must be after setLookAndFeel() so our overrides are NOT
+                // silently overwritten by FlatLaf's internal defaults.
+                application.utils.gui.GuiManager.getInstance().applyDefaultsAfterLaf();
+                
                 updateCommonFontKeys(fontToApply);
                 updateCommonConsoleFontKeys(consoleFontToApply);
                 ColorPaletteManager.updatePalette(colorOverrides);
+                
+                logger.info("[GUI-DEBUG] Initial LAF setup complete. Theme={}, TabLayoutPolicy={}", 
+                        themeClassName, 
+                        application.utils.gui.GuiManager.getInstance().getTabLayoutPolicyName());
             } else {
                 FlatDarkLaf.setup();
+                application.utils.gui.GuiManager.getInstance().applyDefaultsAfterLaf();
                 ColorPaletteManager.updatePalette(null);
             }
         } catch (Exception e) {
             logger.warn("Could not apply saved Look and Feel, falling back to default.", e);
             FlatDarkLaf.setup();
+            // Even on fallback, apply our defaults after LAF setup
+            application.utils.gui.GuiManager.getInstance().applyDefaultsAfterLaf();
             ColorPaletteManager.updatePalette(null);
         }
-        // Apply global tab layout policy AFTER setLookAndFeel/setup completes.
-        // Must be set after LAF initialization as setLookAndFeel resets UIManager defaults.
-        UIManager.put("TabbedPane.tabLayoutPolicy", JTabbedPane.SCROLL_TAB_LAYOUT);
     }
 
     /**
@@ -219,8 +241,8 @@ public class AppearanceModule implements Module {
         }
 
         // Re-apply global tab layout policy after UI refresh to ensure it persists
-        // across runtime theme changes.
-        UIManager.put("TabbedPane.tabLayoutPolicy", JTabbedPane.SCROLL_TAB_LAYOUT);
+        // across runtime theme changes (flatlaf properties may be reset by updateUI)
+        UIManager.put("TabbedPane.tabLayoutPolicy", application.utils.gui.GuiManager.getInstance().getTabLayoutPolicy());
 
         FlatLaf.revalidateAndRepaintAllFramesAndDialogs();
 

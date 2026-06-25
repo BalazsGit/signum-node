@@ -8,6 +8,7 @@ import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.profile.NodeProfile;
 import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiIcons;
+import application.utils.gui.GuiUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,7 +80,8 @@ public class NodePanel extends JPanel implements LifecycleListener {
         JPanel headerPanel = createHeaderPanel();
         add(headerPanel, BorderLayout.NORTH);
 
-        // Create tabbed pane for profiles with SCROLL_TAB_LAYOUT policy
+        // Create tabbed pane for profiles with application-wide tab layout policy.
+        // Policy is read from GuiManager which loads from gui-settings.json at startup.
         this.profileTabbedPane = new JTabbedPane(SwingConstants.TOP) {
             @Override
             public void setSelectedIndex(int index) {
@@ -87,7 +89,8 @@ public class NodePanel extends JPanel implements LifecycleListener {
                 checkAndReplacePlaceholder();
             }
         };
-        profileTabbedPane.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
+        // Apply application-wide tab layout policy from GuiManager (global, not explicit)
+        GuiUtils.applyDefaultTabLayoutPolicy(profileTabbedPane);
         GuiFontManager.applyDefaultFont(profileTabbedPane);
         add(profileTabbedPane, BorderLayout.CENTER);
 

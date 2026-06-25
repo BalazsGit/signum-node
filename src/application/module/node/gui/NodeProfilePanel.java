@@ -6,6 +6,7 @@ import application.module.node.lifecycle.NodeLifecycleManager;
 import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.profile.NodeProfile;
 import application.utils.gui.GuiFontManager;
+import application.utils.gui.GuiUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,6 +51,8 @@ public class NodeProfilePanel extends JPanel {
 
         innerTabbedPane = new JTabbedPane(SwingConstants.TOP);
         GuiFontManager.applyDefaultFont(innerTabbedPane);
+        // Apply application-wide tab layout policy from GuiManager
+        GuiUtils.applyDefaultTabLayoutPolicy(innerTabbedPane);
 
         // Determine conf folder from profile properties or use default
         String confFolder = determineConfFolder();

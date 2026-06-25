@@ -13,6 +13,7 @@ import application.module.node.Signum;
 import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
+import application.utils.gui.GuiUtils;
 import application.utils.io.PathUtils;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
@@ -47,8 +48,10 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     private static final Logger logger = LoggerFactory.getLogger(MariaDBConfigurationPanel.class);
     public static final String API_BASE_URL = DatabaseConfigurationUtils.MARIA_DB_API_BASE_URL;
 
-    private final static JTabbedPane tabbedPane = new JTabbedPane();
-    private final static Map<String, MariaDBProfilePanel> profilePanelMap = new HashMap<>();
+    // Changed from static to instance fields so they initialize AFTER setupInitialLookAndFeel() runs
+    // This ensures JTabbedPane inherits the SCROLL_TAB_LAYOUT policy from UIManager
+    private JTabbedPane tabbedPane;
+    private final Map<String, MariaDBProfilePanel> profilePanelMap = new HashMap<>();
 
     // Toolbar components
     private JButton newProfileBtn;
@@ -74,7 +77,17 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
 
     private final Icon tabIcon = IconFontSwing.buildIcon(FontAwesome.DATABASE, iconSize, iconColor);
 
+    private static MariaDBConfigurationPanel instance;
+
+    /**
+     * Returns the singleton instance for backward compatibility with static callers.
+     */
+    public static MariaDBConfigurationPanel getInstance() {
+        return instance;
+    }
+
     public MariaDBConfigurationPanel() {
+        instance = this;
         setLayout(new BorderLayout(0, 0));
         buildUI();
     }
@@ -85,13 +98,16 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         add(toolbar, BorderLayout.NORTH);
 
         // Main content: tabbed pane for profiles
+        // Apply application-wide tab layout policy from GuiManager
+        tabbedPane = new JTabbedPane();
+        GuiUtils.applyDefaultTabLayoutPolicy(tabbedPane);
         add(tabbedPane, BorderLayout.CENTER);
 
         // Load existing profiles on creation
         refreshProfiles();
     }
 
-    public static void removeMariaDBProfilePanel(MariaDBProfilePanel mariaDBProfilePanel) {
+    public void removeMariaDBProfilePanel(MariaDBProfilePanel mariaDBProfilePanel) {
         try {
             profilePanelMap.remove(mariaDBProfilePanel.getMariaDBProfileName(), mariaDBProfilePanel);
             tabbedPane.remove(mariaDBProfilePanel);
@@ -456,7 +472,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
      * }
      */
 
-    public static JTabbedPane getTabbedPane() {
+    public JTabbedPane getTabbedPane() {
         return tabbedPane;
     }
 

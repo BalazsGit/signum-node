@@ -3887,7 +3887,7 @@ public class MariaDBProfilePanel extends JPanel {
                 }
             }
 
-            MariaDBConfigurationPanel.removeMariaDBProfilePanel(this);
+            MariaDBConfigurationPanel.getInstance().removeMariaDBProfilePanel(this);
             updateUIFromData();
 
             JOptionPane.showMessageDialog(this, "Profile deleted successfully.", "Success",
@@ -4044,7 +4044,7 @@ public class MariaDBProfilePanel extends JPanel {
         // add(new JLabel("MariaDB Configuration")); // This line is not needed, initUI
         // will build the panel
 
-        this.tabbedPane = MariaDBConfigurationPanel.getTabbedPane();
+        this.tabbedPane = MariaDBConfigurationPanel.getInstance().getTabbedPane();
 
         String requestedProfileName = (mariadbProfileName != null && !mariadbProfileName.trim().isEmpty())
                 ? mariadbProfileName.trim()

@@ -3,6 +3,7 @@ package application.module.node.gui;
 import com.formdev.flatlaf.extras.FlatAnimatedLafChange;
 
 import application.utils.gui.ColorPaletteManager;
+import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
 import net.miginfocom.swing.MigLayout;
 
@@ -145,6 +146,7 @@ public class ColorSettingsPanel extends JPanel {
 
         // --- Module-level tabbed pane: category tabs ---
         moduleTabbedPane = new JTabbedPane();
+        GuiUtils.applyDefaultTabLayoutPolicy(moduleTabbedPane);
 
         // Group keys by hierarchical category (module -> component -> keys)
         Map<CategoryInfo, List<String>> groupedByCategory = new LinkedHashMap<>();
@@ -253,6 +255,7 @@ public class ColorSettingsPanel extends JPanel {
      */
     private void createModuleTab_Nested(String moduleName, Map<String, List<String>> components, String moduleHelpText) {
         JTabbedPane innerPane = new JTabbedPane();
+        GuiUtils.applyDefaultTabLayoutPolicy(innerPane);
         componentTabbedPanes.put(moduleName, innerPane);
 
         int tabIndex = 0;
