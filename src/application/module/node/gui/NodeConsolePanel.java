@@ -879,7 +879,9 @@ public class NodeConsolePanel extends JPanel {
         setLayout(new BorderLayout());
         add(mainCardPanel, BorderLayout.CENTER);
 
-        toolBar = new JPanel(new MigLayout("insets 0, gap 0, fillx, hidemode 3", "[grow, shrink]0[pref!]", "[top]"));
+        // Toolbar with horizontal-only overflow scrolling when window is narrow.
+        // MigLayout column constraint [pref!] allows the left section to shrink below its preferred size.
+        toolBar = new JPanel(new MigLayout("insets 0, gap 0, fillx, hidemode 3", "[grow, shrink]0[pref!]", ""));
 
         JPanel leftButtons = new JPanel(new MigLayout("insets 0, gap 5, hidemode 3, aligny top"));
         leftButtons.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
@@ -1292,31 +1294,16 @@ public class NodeConsolePanel extends JPanel {
 
         menuPanelWrapper = new JPanel(new BorderLayout());
 
-        JScrollPane scrollPane = new JScrollPane(leftButtons);
-        scrollPane.setBorder(BorderFactory.createEmptyBorder());
-        scrollPane.getHorizontalScrollBar().setUnitIncrement(16);
-        scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
-        scrollPane.setMinimumSize(new Dimension(0, 0)); // Allow toolbar to shrink and show scrollbar
-        scrollPane.setOpaque(false);
-        scrollPane.getViewport().setOpaque(false);
-        scrollPane.getViewport().setScrollMode(JViewport.SIMPLE_SCROLL_MODE);
+        // Wrap the leftButtons (all buttons) in a JScrollPane for horizontal overflow.
+        // This ensures that when the window is narrow, a horizontal scrollbar appears below
+        // the button row - identical behavior to all configuration panels.
+        application.utils.gui.ResponsiveToolbarScrollPane toolbarScroll =
+                new application.utils.gui.ResponsiveToolbarScrollPane(leftButtons, new Insets(5, 5, 5, 5));
+        toolbarScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        toolbarScroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
+        toolbarScroll.getHorizontalScrollBar().setUnitIncrement(16);
 
-        // Listener to adjust bottom padding when scrollbar appears/disappears to
-        // prevent overlay
-        JScrollBar hBar = scrollPane.getHorizontalScrollBar();
-        GuiUtils.addHorizontalScrollPadding(scrollPane, leftButtons, new Insets(5, 5, 5, 5),
-                () -> SwingUtilities.invokeLater(() -> hBar.setValue(hBar.getMaximum())));
-
-        scrollPane.addComponentListener(new java.awt.event.ComponentAdapter() {
-            @Override
-            public void componentResized(java.awt.event.ComponentEvent e) {
-                if (hBar.isShowing()) {
-                    SwingUtilities.invokeLater(() -> hBar.setValue(hBar.getMaximum()));
-                }
-            }
-        });
-
-        toolBar.add(scrollPane, "growx, pushx");
+        toolBar.add(toolbarScroll, "growx, pushx");
 
         JPanel rightIconsPanel = new JPanel(new MigLayout("insets 5 5 5 10, gap 5, aligny top"));
         rightIconsPanel.setOpaque(false);
