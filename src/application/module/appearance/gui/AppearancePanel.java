@@ -182,7 +182,7 @@ public class AppearancePanel extends JPanel {
         helpBtn.addActionListener(e -> showProfileHelp()); // Add help button
         profilePanel.add(helpBtn);
 
-        JScrollPane profileScrollPane = new ResponsiveToolbarScrollPane(profilePanel, new Insets(5, 10, 5, 5));
+        JScrollPane profileScrollPane = new ResponsiveToolbarScrollPane(profilePanel, GuiConstants.TOOLBAR_INSETS);
         profileScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         profileScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
         profileScrollPane.setBorder(BorderFactory.createEmptyBorder());
@@ -196,6 +196,7 @@ public class AppearancePanel extends JPanel {
         add(northWrapper, BorderLayout.NORTH);
 
         tabbedPane = new JTabbedPane();
+        GuiUtils.applyDefaultTabLayoutPolicy(tabbedPane);
 
         FlatLafPanel themePanel = new FlatLafPanel();
         themePanel.setOnChangeListener(this::updateDirtyStatus);

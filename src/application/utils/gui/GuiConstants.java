@@ -2,6 +2,7 @@ package application.utils.gui;
 
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.Insets;
 import javax.swing.UIManager;
 
 /**
@@ -43,4 +44,18 @@ public final class GuiConstants {
     public static final Dimension PIE_CHART_DIMENSION = new Dimension(300, 180);
     public static final int SLIDER_WIDTH = 150;
     public static final int TABLE_PANEL_WIDTH = 300;
+
+    /**
+     * Standard insets for toolbar content wrapped in a JScrollPane.
+     * Used across all configuration panels and the NodeConsolePanel to ensure
+     * consistent spacing between the button row and the horizontal scrollbar.
+     * Format: top, left, bottom, right.
+     */
+    /**
+     * Standard insets for toolbar content wrapped in a JScrollPane.
+     * Used across all configuration panels and the NodeConsolePanel to ensure
+     * consistent spacing between the button row and the horizontal scrollbar.
+     * Format: top=5, left=10, bottom=2 (small gap above scrollbar), right=5.
+     */
+    public static final Insets TOOLBAR_INSETS = new Insets(5, 10, 2, 5);
 }

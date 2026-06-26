@@ -62,13 +62,13 @@ public class GuiUtils {
         JPanel body = new JPanel(new BorderLayout());
 
         // Wrap toolbar in a horizontal-only scroll pane for narrow windows
-        JScrollPane toolbarScroll = createToolbarScrollPane(toolbarPanel, new Insets(0, 10, 5, 10));
+        JScrollPane toolbarScroll = createHorizontalToolbarScrollPanel(toolbarPanel, GuiConstants.TOOLBAR_INSETS);
         toolbarScroll.setMinimumSize(new Dimension(0, toolbarPanel.getPreferredSize().height));
 
         // Wrap content in a vertical scroll pane
         JScrollPane contentScroll;
         if (scrollContent instanceof JPanel) {
-            contentScroll = createScrollableContentPanel((JPanel) scrollContent);
+            contentScroll = createVerticalScrollPanel((JPanel) scrollContent);
         } else {
             contentScroll = new JScrollPane(scrollContent);
             contentScroll.setBorder(BorderFactory.createEmptyBorder());
@@ -111,7 +111,7 @@ public class GuiUtils {
 
         JScrollPane contentScroll;
         if (scrollContent instanceof JPanel) {
-            contentScroll = createScrollableContentPanel((JPanel) scrollContent);
+            contentScroll = createVerticalScrollPanel((JPanel) scrollContent);
         } else if (scrollContent instanceof JScrollPane) {
             contentScroll = (JScrollPane) scrollContent;
         } else {
@@ -193,7 +193,8 @@ public class GuiUtils {
     }
 
     /**
-     * Creates a properly configured JScrollPane for scrollable content panels.
+     * Creates a properly configured JScrollPane for VERTICAL scrollable content panels.
+     * Use this when the content is taller than the viewport and needs vertical scrolling.
      * Ensures consistent scrollbar behavior across all configuration panels:
      * - No pushy fillers needed (MigLayout insets handle spacing)
      * - Smooth scrolling with proper unit increment
@@ -203,7 +204,7 @@ public class GuiUtils {
      * @param unitIncrement  The scrollbar unit increment for smooth scrolling (default 16).
      * @return A fully configured JScrollPane ready for use.
      */
-    public static JScrollPane createScrollableContentPanel(JPanel contentPanel, int unitIncrement) {
+    public static JScrollPane createVerticalScrollPanel(JPanel contentPanel, int unitIncrement) {
         JScrollPane scrollPane = new JScrollPane(contentPanel);
         scrollPane.getVerticalScrollBar().setUnitIncrement(unitIncrement);
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
@@ -215,25 +216,29 @@ public class GuiUtils {
     }
 
     /**
-     * Creates a scrollable content panel with default unit increment (16).
+     * Creates a vertical scroll panel with default unit increment (16).
      *
      * @param contentPanel The content panel to wrap.
      * @return A fully configured JScrollPane.
      */
-    public static JScrollPane createScrollableContentPanel(JPanel contentPanel) {
-        return createScrollableContentPanel(contentPanel, 16);
+    public static JScrollPane createVerticalScrollPanel(JPanel contentPanel) {
+        return createVerticalScrollPanel(contentPanel, 16);
     }
 
     /**
-     * Creates a properly configured JScrollPane for a horizontal toolbar panel.
+     * Creates a properly configured JScrollPane for HORIZONTAL toolbar scrolling.
+     * Use this for button rows that may overflow when the window is narrow.
      * Handles scrollbar appearance/disappearance padding, keeps buttons right-aligned,
      * and prevents vertical expansion.
+     *
+     * NOTE: Prefer ResponsiveToolbarScrollPane for new code as it provides more
+     * consistent gap behavior across all panels.
      *
      * @param toolbarContent The toolbar content component (typically a JPanel with buttons).
      * @param defaultInsets  The base insets to use for the content component.
      * @return A fully configured JScrollPane ready for use.
      */
-    public static JScrollPane createToolbarScrollPane(JComponent toolbarContent, Insets defaultInsets) {
+    public static JScrollPane createHorizontalToolbarScrollPanel(JComponent toolbarContent, Insets defaultInsets) {
         JScrollPane scrollPane = new JScrollPane(toolbarContent);
         scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);

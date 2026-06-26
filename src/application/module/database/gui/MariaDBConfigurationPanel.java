@@ -117,7 +117,7 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
     }
 
     private JPanel createToolbar() {
-        JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 5));
+        JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
 
         // New profile button
         newProfileBtn = new JButton("New Profile");

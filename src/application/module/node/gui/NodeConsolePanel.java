@@ -884,7 +884,7 @@ public class NodeConsolePanel extends JPanel {
         toolBar = new JPanel(new MigLayout("insets 0, gap 0, fillx, hidemode 3", "[grow, shrink]0[pref!]", ""));
 
         JPanel leftButtons = new JPanel(new MigLayout("insets 0, gap 5, hidemode 3, aligny top"));
-        leftButtons.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+        leftButtons.setBorder(BorderFactory.createEmptyBorder(5, 5, 0, 5));
         leftButtons.setOpaque(false);
 
         openPhoenixButton = new JButton("Phoenix Wallet");
@@ -1298,7 +1298,7 @@ public class NodeConsolePanel extends JPanel {
         // This ensures that when the window is narrow, a horizontal scrollbar appears below
         // the button row - identical behavior to all configuration panels.
         application.utils.gui.ResponsiveToolbarScrollPane toolbarScroll =
-                new application.utils.gui.ResponsiveToolbarScrollPane(leftButtons, new Insets(5, 5, 5, 5));
+                new application.utils.gui.ResponsiveToolbarScrollPane(leftButtons, GuiConstants.TOOLBAR_INSETS);
         toolbarScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         toolbarScroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
         toolbarScroll.getHorizontalScrollBar().setUnitIncrement(16);

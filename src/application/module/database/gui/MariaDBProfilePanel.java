@@ -25,6 +25,7 @@ import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
+import application.utils.gui.ResponsiveToolbarScrollPane;
 import application.utils.io.PathUtils;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
@@ -394,7 +395,7 @@ public class MariaDBProfilePanel extends JPanel {
         // loaded into the panel and which profile.json file is being edited/maintained
         // here.
         JPanel profilePanel = new JPanel(new MigLayout("insets 0, gap 5"));
-        profilePanel.setBorder(new EmptyBorder(5, 10, 5, 5));
+        profilePanel.setBorder(BorderFactory.createEmptyBorder());
         // profilePanel.add(new JLabel("Configuration Profile:"));
 
         // Profile selector: the panel should always keep this combo box aligned with
@@ -470,7 +471,7 @@ public class MariaDBProfilePanel extends JPanel {
         helpBtn.addActionListener(e -> showProfileHelp());
         profilePanel.add(helpBtn);
 
-        JScrollPane profileScrollPane = GuiUtils.createToolbarScrollPane(profilePanel, new Insets(5, 10, 5, 5));
+        JScrollPane profileScrollPane = new ResponsiveToolbarScrollPane(profilePanel, GuiConstants.TOOLBAR_INSETS);
 
         // --- Search Panel ---
         JPanel searchPanel = new JPanel(new MigLayout("insets 5 10 5 5, fillx", "[][grow]", "[]"));
@@ -718,12 +719,12 @@ public class MariaDBProfilePanel extends JPanel {
         contentCardLayout = new CardLayout();
         contentContainer = new JPanel(contentCardLayout);
 
-        JScrollPane scrollPane = GuiUtils.createScrollableContentPanel(dbSettingsPanel);
+        JScrollPane scrollPane = GuiUtils.createVerticalScrollPanel(dbSettingsPanel);
 
         contentContainer.add(scrollPane, "SETTINGS");
 
         searchResultsPanel = new JPanel(new MigLayout("fillx, insets 10, gap 5", "[][grow]", ""));
-        contentContainer.add(GuiUtils.createScrollableContentPanel(searchResultsPanel), "SEARCH");
+        contentContainer.add(GuiUtils.createVerticalScrollPanel(searchResultsPanel), "SEARCH");
 
         bodyPanel.add(contentContainer, BorderLayout.CENTER);
         // --- Bottom Panel with Buttons and File Path ---

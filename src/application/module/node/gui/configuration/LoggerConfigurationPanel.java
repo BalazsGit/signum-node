@@ -366,10 +366,10 @@ public class LoggerConfigurationPanel extends JPanel {
         contentCardLayout = new CardLayout();
         contentContainer = new JPanel(contentCardLayout);
 
-        contentContainer.add(GuiUtils.createScrollableContentPanel(mainContentPanel), "SETTINGS");
+        contentContainer.add(GuiUtils.createVerticalScrollPanel(mainContentPanel), "SETTINGS");
 
         searchResultsPanel = new JPanel(new MigLayout("fillx, insets 10, gap 5", "[][grow]", ""));
-        contentContainer.add(GuiUtils.createScrollableContentPanel(searchResultsPanel), "SEARCH");
+        contentContainer.add(GuiUtils.createVerticalScrollPanel(searchResultsPanel), "SEARCH");
 
         bodyPanel.add(contentContainer, BorderLayout.CENTER);
         add(bodyPanel, BorderLayout.CENTER);

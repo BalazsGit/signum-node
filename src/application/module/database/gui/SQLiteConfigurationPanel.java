@@ -13,6 +13,7 @@ import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
+import application.utils.gui.ResponsiveToolbarScrollPane;
 import application.utils.io.PathUtils;
 
 import com.google.gson.JsonObject;
@@ -96,7 +97,7 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
 
     private void initUI() {
         // --- Profile Toolbar ---
-        JPanel profilePanel = new JPanel(new MigLayout("insets 5 10 5 5, gap 5"));
+        JPanel profilePanel = new JPanel(new MigLayout("insets 0, gap 5"));
         profilePanel.add(new JLabel("Profile:"));
         profileComboBox = new JComboBox<>();
         profileComboBox.setPrototypeDisplayValue("XXXXXXXXXXXXXXXXXXXX");
@@ -128,7 +129,8 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         refreshProfilesBtn.addActionListener(e -> refreshProfileList());
         profilePanel.add(refreshProfilesBtn);
 
-        JScrollPane profileScroll = GuiUtils.createToolbarScrollPane(profilePanel, new Insets(5, 10, 5, 5));
+        // Wrap toolbar in a horizontal-only scroll pane for narrow windows
+        JScrollPane profileScroll = new ResponsiveToolbarScrollPane(profilePanel, GuiConstants.TOOLBAR_INSETS);
 
         // --- Search Bar ---
         JPanel searchPanel = new JPanel(new MigLayout("insets 5 10 5 5, fillx", "[][grow]"));

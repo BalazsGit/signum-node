@@ -23,6 +23,7 @@ import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
+import application.utils.gui.ResponsiveToolbarScrollPane;
 import application.utils.io.PathUtils;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
@@ -326,8 +327,8 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
         isConsoleExpanded = false;
 
         // --- Profile Panel ---
-        JPanel profilePanel = new JPanel(new MigLayout("insets 5 10 5 5, gap 5"));
-        profilePanel.setBorder(new EmptyBorder(5, 10, 5, 5));
+        JPanel profilePanel = new JPanel(new MigLayout("insets 0, gap 5"));
+        profilePanel.setBorder(BorderFactory.createEmptyBorder());
         profilePanel.add(new JLabel("Profile:"));
         profileComboBox = new JComboBox<>();
         profileComboBox.setPrototypeDisplayValue("XXXXXXXXXXXXXXXXXXXX");
@@ -370,7 +371,7 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
                 loadProfileInternal((String) profileComboBox.getSelectedItem());
         });
 
-        JScrollPane profileScrollPane = GuiUtils.createToolbarScrollPane(profilePanel, new Insets(5, 10, 5, 5));
+        JScrollPane profileScrollPane = new ResponsiveToolbarScrollPane(profilePanel, GuiConstants.TOOLBAR_INSETS);
 
         // --- Database Control Panel ---
         dbControlPanel = new JPanel(new MigLayout("insets 5 10 0 5, gap 5, fillx", "[grow]", "[]5[]0[]"));
@@ -599,10 +600,10 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
         contentCardLayout = new CardLayout();
         contentContainer = new JPanel(contentCardLayout);
 
-        contentContainer.add(GuiUtils.createScrollableContentPanel(dbSettingsPanel), "SETTINGS");
+        contentContainer.add(GuiUtils.createVerticalScrollPanel(dbSettingsPanel), "SETTINGS");
 
         searchResultsPanel = new JPanel(new MigLayout("fillx, insets 10, gap 5", "[][grow]"));
-        contentContainer.add(GuiUtils.createScrollableContentPanel(searchResultsPanel), "SEARCH");
+        contentContainer.add(GuiUtils.createVerticalScrollPanel(searchResultsPanel), "SEARCH");
 
         body.add(contentContainer, BorderLayout.CENTER);
 
