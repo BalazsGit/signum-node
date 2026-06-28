@@ -1,6 +1,8 @@
 package application.module.node.gui;
 
 import application.module.appearance.AppearanceModule;
+import application.module.node.Signum;
+import application.module.node.gui.configuration.LoggerConfigurationPanel;
 import application.module.node.gui.configuration.NodeConfigurationPanel;
 import application.module.node.lifecycle.NodeLifecycleManager;
 import application.module.node.lifecycle.NodeLifecycleState;
@@ -25,6 +27,7 @@ import java.util.Properties;
  * Acts as a JTabbedPane container with tabs for:
  * - Console (NodeConsolePanel)
  * - Configuration (NodeConfigurationPanel)
+ * - Logging (LoggerConfigurationPanel)
  */
 @SuppressWarnings("serial")
 public class NodeProfilePanel extends JPanel {
@@ -35,6 +38,7 @@ public class NodeProfilePanel extends JPanel {
     private final JTabbedPane innerTabbedPane;
     private final NodeConsolePanel consolePanel;
     private final NodeConfigurationPanel configurationPanel;
+    private final LoggerConfigurationPanel loggingPanel;
 
     /**
      * Creates a new NodeProfilePanel for the given profile.
@@ -70,6 +74,19 @@ public class NodeProfilePanel extends JPanel {
                 null // switchAction - not needed in tab mode
         );
         innerTabbedPane.addTab("Configuration", configurationPanel);
+
+        // Create Logging tab
+        loggingPanel = new LoggerConfigurationPanel(
+                this::restartNode,
+                confFolder,
+                () -> {
+                }, // backAction - not needed in tab mode
+                null, // switchAction - not needed in tab mode
+                null, // onLinkAction
+                () -> Signum.getActiveNodeProfile(),
+                () -> Signum.getActiveLoggingProfile()
+        );
+        innerTabbedPane.addTab("Logging", loggingPanel);
 
         add(innerTabbedPane, BorderLayout.CENTER);
 
@@ -130,6 +147,15 @@ public class NodeProfilePanel extends JPanel {
      */
     public NodeConfigurationPanel getConfigurationPanel() {
         return configurationPanel;
+    }
+
+    /**
+     * Gets the logging configuration panel for this profile.
+     * 
+     * @return The LoggerConfigurationPanel
+     */
+    public LoggerConfigurationPanel getLoggingPanel() {
+        return loggingPanel;
     }
 
     /**

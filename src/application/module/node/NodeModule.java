@@ -3,10 +3,9 @@ package application.module.node;
 import application.api.Module;
 import application.api.ModuleContext;
 import application.module.node.gui.NodePanel;
-import application.module.node.props.Props;
+import application.module.node.logging.NodeLoggingProvider;
 import javax.swing.JFrame;
 import javax.swing.JComponent;
-import javax.swing.SwingUtilities;
 
 /**
  * A Signum Node modul implementációja az alkalmazás keretrendszeréhez.
@@ -18,6 +17,7 @@ public class NodeModule implements Module {
 
     private ModuleContext context;
     private NodePanel gui;
+    private NodeLoggingProvider loggingProvider;
 
     @Override
     public String getId() {
@@ -37,14 +37,20 @@ public class NodeModule implements Module {
 
     @Override
     public void start() {
-        // Module startup, e.g., starting background processes
-        // A modul indítása, pl. háttérfolyamatok elindítása
+        // Register logging provider so the composite logging infrastructure
+        // knows about the Node module's built-in defaults & presets.
+        if (loggingProvider == null) {
+            loggingProvider = new NodeLoggingProvider();
+        }
+        loggingProvider.register();
     }
 
     @Override
     public void stop() {
-        // Module shutdown, e.g., releasing resources
-        // A modul leállítása, pl. erőforrások felszabadítása
+        // Unregister logging provider on shutdown
+        if (loggingProvider != null) {
+            loggingProvider.unregister();
+        }
     }
 
     @Override
