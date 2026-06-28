@@ -32,6 +32,9 @@ public final class GuiConstants {
         return font != null ? font.getSize() * 1.2f : 14f;
     }
 
+    /** Default console/monospace font size when UIManager has not loaded yet */
+    public static final int CONSOLE_FONT_SIZE_DEFAULT = 12;
+
     public static final int ICON_SIZE_DIALOG = 32;
     public static final Dimension PROGRESS_BAR_SIZE_SMALL = new Dimension(150, 20);
     public static final Dimension PROGRESS_BAR_SIZE_MEDIUM = new Dimension(250, 20);

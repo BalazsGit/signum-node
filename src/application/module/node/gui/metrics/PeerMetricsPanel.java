@@ -242,9 +242,14 @@ public class PeerMetricsPanel extends JPanel {
      * Should be called when the panel is added to the UI.
      */
     public void init() {
-        Signum.getBlockchainProcessor().addPeerMetricListener(peerMetricListener);
-        Signum.getBlockchainProcessor().addListener(peersUpdatedListener, BlockchainProcessor.Event.PEERS_UPDATED);
-
+        BlockchainProcessor processor = Signum.getBlockchainProcessor();
+        if (processor != null) {
+            processor.addPeerMetricListener(peerMetricListener);
+            processor.addListener(peersUpdatedListener, BlockchainProcessor.Event.PEERS_UPDATED);
+            logger.debug("PeerMetricsPanel listeners registered");
+        } else {
+            logger.info("BlockchainProcessor not available - PeerMetricsPanel will show empty state until node starts");
+        }
         setupThrottlingTimer();
     }
 

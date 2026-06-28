@@ -2,6 +2,7 @@ package application.module.node.gui.metrics;
 
 import application.module.node.Account;
 import application.module.node.Block;
+import application.module.node.Blockchain;
 import application.module.node.BlockchainProcessor;
 import application.module.node.Constants;
 import application.module.node.Generator;
@@ -274,10 +275,13 @@ public class BlockGenerationMetricsPanel extends JPanel {
     public void init() {
         // Initial update on EDT is fine as listeners aren't active yet
         BlockchainUpdateData data = calculateBlockchainInfo(false);
-        updateBlockchainInfoUI(data);
+        if (data != null) {
+            updateBlockchainInfoUI(data);
+        }
 
-        if (currentBlockDeadlines.isEmpty() && Signum.getGenerator() != null) {
-            Block lastBlock = Signum.getBlockchain().getLastBlock();
+        Blockchain blockchain = Signum.getBlockchain();
+        if (currentBlockDeadlines.isEmpty() && Signum.getGenerator() != null && blockchain != null) {
+            Block lastBlock = blockchain.getLastBlock();
             int nextHeight = (lastBlock != null ? lastBlock.getHeight() : 0) + 1;
             for (Generator.GeneratorState state : Signum.getGenerator().getAllGenerators()) {
                 currentBlockDeadlines.add(new MinerEntry(state.getAccountId(), state.getDeadline(),
@@ -1354,7 +1358,12 @@ public class BlockGenerationMetricsPanel extends JPanel {
     }
 
     private BlockchainUpdateData calculateBlockchainInfo(boolean updateMA) {
-        return calculateBlockchainInfo(Signum.getBlockchain().getLastBlock(), updateMA);
+        Blockchain blockchain = Signum.getBlockchain();
+        if (blockchain == null) {
+            logger.debug("Blockchain not available, returning null for blockchain info");
+            return null;
+        }
+        return calculateBlockchainInfo(blockchain.getLastBlock(), updateMA);
     }
 
     private BlockchainUpdateData calculateBlockchainInfo(Block lastBlock, boolean updateMA) {

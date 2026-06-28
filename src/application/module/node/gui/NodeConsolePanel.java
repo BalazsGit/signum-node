@@ -117,7 +117,10 @@ import net.miginfocom.swing.MigLayout;
 public class NodeConsolePanel extends JPanel {
     private static final String FAILED_TO_START_MESSAGE = "Signum caught exception while starting";
     private static NodeConsolePanel instance;
+    /** Parent frame reference (used for dialogs and window ancestor lookup) */
     private final JFrame parentFrame;
+    /** Current node profile name for hierarchical GUI settings storage */
+    private final String profileName;
     private static final String UNEXPECTED_EXIT_MESSAGE = "Signum Quit unexpectedly! Exit code ";
 
     public static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("HH:mm:ss yyyy-MM-dd");
@@ -248,7 +251,7 @@ public class NodeConsolePanel extends JPanel {
     private String programName = null;
     private String version = null;
     private final String confFolder;
-    private final Color iconColor;
+    private Color iconColor;
     // private ConfigurationPanel configurationPanel;
 
     private JLabel connectedPeersLabel;
@@ -307,7 +310,6 @@ public class NodeConsolePanel extends JPanel {
     private boolean showCommandInput = false;
     private boolean showMetricsPanel = true;
     private JCheckBox showCommandItem;
-    private JCheckBox enableGpuItem;
     private JCheckBox showMetricsItem;
     private JCheckBox skipDbCheckItem;
     private JLabel experimentalLabel;
@@ -317,6 +319,8 @@ public class NodeConsolePanel extends JPanel {
     private JPanel menuPanel;
     private Timer menuPanelAnimator;
     private boolean isMenuExpanded = false;
+    /** Cached owner frame for menu popup - ensures consistent reference between open/close cycles */
+    private JFrame menuOwnerFrame;
 
     private JLabel trimLabel;
     private JLabel autoResolveLabel;
@@ -324,7 +328,6 @@ public class NodeConsolePanel extends JPanel {
     private JSeparator experimentalSeparator;
     private JSeparator trimIconSeparator;
     private JSeparator autoResolveSeparator;
-    private boolean enableGPU = false;
 
     private final AtomicBoolean isDbCheckRunning = new AtomicBoolean(false);
 
@@ -432,15 +435,25 @@ public class NodeConsolePanel extends JPanel {
         isMenuExpanded = !isMenuExpanded;
 
         if (isMenuExpanded) {
-            // Calculate position relative to layered pane
+            // Calculate position relative to layered pane using SwingUtilities.getWindowAncestor.
+            // This pattern is independent of external frame references and follows Swing best practices.
+            Window ownerWindow = SwingUtilities.getWindowAncestor(menuButton);
+            if (ownerWindow == null || !(ownerWindow instanceof JFrame)) {
+                LOGGER.warn("Could not determine owner JFrame for menu popup");
+                isMenuExpanded = false; // Reset state on failure
+                return;
+            }
+            // Cache the frame reference for consistent use in both open and close cycles
+            menuOwnerFrame = (JFrame) ownerWindow;
+
             int menuWidth = Math.max(250, menuPanel.getPreferredSize().width);
             Point p = menuButton.getLocationOnScreen();
-            SwingUtilities.convertPointFromScreen(p, parentFrame.getLayeredPane());
+            SwingUtilities.convertPointFromScreen(p, menuOwnerFrame.getLayeredPane());
             int x = p.x + menuButton.getWidth() - menuWidth;
             int y = p.y + menuButton.getHeight();
 
             menuPanelWrapper.setBounds(x, y, menuWidth, 0);
-            parentFrame.getLayeredPane().add(menuPanelWrapper, JLayeredPane.POPUP_LAYER);
+            menuOwnerFrame.getLayeredPane().add(menuPanelWrapper, JLayeredPane.POPUP_LAYER);
 
             menuPanelWrapper.add(menuPanel, BorderLayout.CENTER);
             menuPanel.setVisible(true);
@@ -505,12 +518,19 @@ public class NodeConsolePanel extends JPanel {
 
                     if (progress >= 1.0f) {
                         ((Timer) e.getSource()).stop();
-                        menuPanelWrapper.removeAll();
-                        parentFrame.getLayeredPane().remove(menuPanelWrapper);
-                        parentFrame.getLayeredPane().repaint();
+                        try {
+                            menuPanelWrapper.removeAll();
+                            // Use cached menuOwnerFrame (consistent with opening branch)
+                            // instead of parentFrame which may be null in multi-profile mode
+                            if (menuOwnerFrame != null) {
+                                menuOwnerFrame.getLayeredPane().remove(menuPanelWrapper);
+                                menuOwnerFrame.getLayeredPane().repaint();
+                            }
+                        } catch (Exception ex) {
+                            LOGGER.warn("Error removing menu panel wrapper from layered pane", ex);
+                        }
                     }
                 }
-
             });
             menuPanelAnimator.start();
         }
@@ -760,21 +780,30 @@ public class NodeConsolePanel extends JPanel {
      * @param profile     The NodeProfile containing configuration
      */
     public NodeConsolePanel(JFrame parentFrame, NodeProfile profile) {
-        this(parentFrame,
-                "Signum Node [" + profile.getName() + "]",
-                Props.ICON_LOCATION.getDefaultValue(),
-                Signum.VERSION.toString(),
-                new String[0]);
+        this.parentFrame = parentFrame;
+        this.profileName = profile.getName();
+        this.programName = "Signum Node [" + profile.getName() + "]";
+        this.version = Signum.VERSION.toString();
+        this.iconLocation = Props.ICON_LOCATION.getDefaultValue();
+        this.confFolder = Signum.CONF_FOLDER;
+
+        IconFontSwing.register(FontAwesome.getIconFont());
+
+        // Initialize shared console UI
+        initConsoleUI();
     }
 
     /**
      * Legacy constructor - stands alone (static single-instance mode).
+     * Uses "default" as profile name for gui-settings.json hierarchy.
      */
     public NodeConsolePanel(JFrame parentFrame, String programName, String iconLocation, String version,
             String[] args) {
+        this.parentFrame = parentFrame;
+        this.profileName = "default"; // Legacy single-instance mode uses default key
+
         NodeConsolePanel.args = args;
         instance = this;
-        this.parentFrame = parentFrame;
         this.programName = programName;
         this.version = version;
         this.iconLocation = iconLocation;
@@ -792,7 +821,15 @@ public class NodeConsolePanel extends JPanel {
         }
         this.confFolder = localConfFolder;
 
-        IconFontSwing.register(FontAwesome.getIconFont());
+        // Initialize shared console UI
+        initConsoleUI();
+    }
+
+    /**
+     * Shared UI initialization for both constructors.
+     * Sets up console text pane, toolbar, buttons, hamburger menu, info panel, and starts the Signum node.
+     */
+    private void initConsoleUI() {
         try {
             GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
             InputStream fontStream = FontAwesome.class
@@ -806,7 +843,7 @@ public class NodeConsolePanel extends JPanel {
         JTextPane textPane = new JTextPane();
         Font consoleFont = AppearanceModule.getActiveConsoleFont();
         if (consoleFont == null) {
-            consoleFont = new Font(Font.MONOSPACED, Font.PLAIN, 14);
+            consoleFont = new Font(Font.MONOSPACED, Font.PLAIN, GuiConstants.CONSOLE_FONT_SIZE_DEFAULT);
         }
         textPane.setFont(consoleFont);
         iconColor = textPane.getForeground();
@@ -1219,30 +1256,7 @@ public class NodeConsolePanel extends JPanel {
         styleMenuComponent(showMetricsItem);
         menuPanel.add(showMetricsItem, "growx");
 
-        enableGpuItem = new JCheckBox("Enable GPU Acceleration");
-        enableGpuItem.setToolTipText("Enables OpenGL pipeline for smoother rendering. Requires restart.");
-        enableGpuItem.setSelected(enableGPU);
-        enableGpuItem.addActionListener(e -> {
-            boolean newValue = enableGpuItem.isSelected();
-            String message = "Changes to GPU acceleration will take effect after restart.\n\nWould you like to restart now?";
-            String[] options = { "Restart Now", "Restart Later", "Discard" };
-            int choice = JOptionPane.showOptionDialog(NodeConsolePanel.this, message, "GPU Acceleration Changed",
-                    JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
-
-            if (choice == 0) { // Restart Now
-                enableGPU = newValue;
-                saveGuiSettings();
-                restart();
-            } else if (choice == 1 || choice == JOptionPane.CLOSED_OPTION) { // Restart Later or Closed
-                enableGPU = newValue;
-                saveGuiSettings();
-            } else { // Discard (choice == 2)
-                enableGpuItem.setSelected(!newValue);
-            }
-        });
-        styleMenuComponent(enableGpuItem);
-        menuPanel.add(enableGpuItem, "growx");
-
+        // Skip DB Check on Manual Pop-off — console-specific setting for pop-off decisions
         skipDbCheckItem = new JCheckBox("Skip DB Check on Manual Pop-off");
         skipDbCheckItem.addActionListener(e -> {
             BlockchainProcessor bp = Signum.getBlockchainProcessor();
@@ -2518,9 +2532,6 @@ public class NodeConsolePanel extends JPanel {
                     if (showMetricsItem != null) {
                         showMetricsItem.setSelected(showMetricsPanel);
                     }
-                    if (enableGpuItem != null) {
-                        enableGpuItem.setSelected(enableGPU);
-                    }
 
                     if (skipDbCheckItem != null && blockchainProcessor != null) {
                         skipDbCheckItem.setSelected(blockchainProcessor.isSkipDbCheckOnManualPopOff());
@@ -2915,9 +2926,6 @@ public class NodeConsolePanel extends JPanel {
                         if (settings.has("showMetricsPanel")) {
                             showMetricsPanel = settings.get("showMetricsPanel").getAsBoolean();
                         }
-                        if (settings.has("enableGPU")) {
-                            enableGPU = settings.get("enableGPU").getAsBoolean();
-                        }
                     }
                 }
             }
@@ -2946,7 +2954,6 @@ public class NodeConsolePanel extends JPanel {
             }
             settings.addProperty("showCommandInput", showCommandInput);
             settings.addProperty("showMetricsPanel", showMetricsPanel);
-            settings.addProperty("enableGPU", enableGPU);
             try (java.io.BufferedWriter writer = Files.newBufferedWriter(settingsPath)) {
                 Gson gson = new GsonBuilder().setPrettyPrinting().create();
                 writer.write(gson.toJson(settings));

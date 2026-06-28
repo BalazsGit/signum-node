@@ -40,7 +40,9 @@ import application.utils.gui.GuiFontManager;
 import application.utils.math.MovingAverage;
 import application.module.node.Signum;
 import application.module.node.Block;
+import application.module.node.Blockchain;
 import application.module.node.BlockchainProcessor;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.props.Props;
 import application.module.node.Constants;
 import application.module.node.fluxcapacitor.FluxValues;
@@ -703,8 +705,18 @@ public class SynchronizationMetricsPanel extends JPanel {
                 maxUnverifiedQueueSize = oclUnverifiedQueueThreshold;
             }
             maxUnconfirmedTxs = Signum.getPropertyService().getInt(Props.P2P_MAX_UNCONFIRMED_TRANSACTIONS);
-            maxPayloadSize = (Signum.getFluxCapacitor().getValue(FluxValues.MAX_PAYLOAD_LENGTH,
-                    Signum.getBlockchain().getHeight()) / 1024);
+            // Defensive: blockchain and fluxCapacitor may be null if the node is not yet running
+            Blockchain blockchain = Signum.getBlockchain();
+            FluxCapacitor fluxCapacitor = Signum.getFluxCapacitor();
+            if (blockchain != null && fluxCapacitor != null) {
+                maxPayloadSize = (fluxCapacitor.getValue(FluxValues.MAX_PAYLOAD_LENGTH,
+                        blockchain.getHeight()) / 1024);
+            } else {
+                // Use hardcoded default (255*176 bytes = FluxValues.MAX_PAYLOAD_LENGTH default) so the panel can still display
+                maxPayloadSize = (255 * 176) / 1024;
+                LOGGER.info("Blockchain/FluxCapacitor not yet initialized, using default maxPayloadSize: {} KB",
+                        maxPayloadSize);
+            }
             String payloadTooltip = """
                     Shows the percentage of the block's data section (payload) that is filled with transactions. This is a measure of block space utilization and network activity.
 

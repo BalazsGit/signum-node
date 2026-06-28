@@ -147,7 +147,19 @@ public class AppearanceModule implements Module {
                     if (parsed.isJsonObject()) {
                         JsonObject settings = parsed.getAsJsonObject();
 
-                        if (settings.has("enableGPU") && settings.get("enableGPU").getAsBoolean()) {
+                        // Read enableGPU from nested "appearance" object (hierarchical storage)
+                        // Falls back to root level for backward compatibility
+                        boolean enableGPU = false;
+                        if (settings.has("appearance") && settings.get("appearance").isJsonObject()) {
+                            JsonObject appearanceObj = settings.get("appearance").getAsJsonObject();
+                            if (appearanceObj.has("enableGPU")) {
+                                enableGPU = appearanceObj.get("enableGPU").getAsBoolean();
+                            }
+                        } else if (settings.has("enableGPU")) {
+                            // Backward compatibility: read from root level
+                            enableGPU = settings.get("enableGPU").getAsBoolean();
+                        }
+                        if (enableGPU) {
                             System.setProperty("sun.java2d.opengl", "true");
                         }
 
