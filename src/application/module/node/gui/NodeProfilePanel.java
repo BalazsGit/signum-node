@@ -179,6 +179,7 @@ public class NodeProfilePanel extends JPanel {
                     case PAUSED -> "❚❚";
                     case ERROR -> "⚠";
                     case STOPPED -> "■";
+                    case WAITING_FOR_DATABASE -> "⟳";
                     default -> "";
                 };
                 innerTabbedPane.setTitleAt(tabIndex, "Console" + (stateIcon.isEmpty() ? "" : " [" + stateIcon + "]"));

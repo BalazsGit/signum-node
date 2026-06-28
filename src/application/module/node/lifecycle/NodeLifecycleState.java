@@ -6,10 +6,13 @@ package application.module.node.lifecycle;
  *
  * State Diagram:
  *
- * IDLE -> INITIALIZING -> READY <-> RUNNING <-> PAUSED -> STOPPING -> STOPPED
- * | | | |
- * +-- error --+-- error --/+-- error -/
- * \ /
+ * IDLE -> INITIALIZING -> WAITING_FOR_DATABASE -> READY <-> RUNNING <-> PAUSED -> STOPPING -> STOPPED
+ *                \      /                          |
+ *                 -> READY (direct, if DB immediate) |
+ *                  |                               |
+ *                  +-> ERROR ----------------------+
+ *
+ * All states can transition to ERROR on failure.
  * ERROR --> IDLE (reset)
  */
 public enum NodeLifecycleState {
@@ -18,7 +21,7 @@ public enum NodeLifecycleState {
     IDLE(0, "Idle", new int[] { 1 }), // can go to INITIALIZING
 
     /** Loading configuration, preparing resources (no side effects) */
-    INITIALIZING(1, "Initializing", new int[] { 2, 7 }), // READY or ERROR
+    INITIALIZING(1, "Initializing", new int[] { 2, 8, 7 }), // READY, WAITING_FOR_DATABASE, or ERROR
 
     /** Initialized and ready to start; waiting for user/start command */
     READY(2, "Ready", new int[] { 3, 5, 7 }), // RUNNING, STOPPING, ERROR
@@ -36,7 +39,10 @@ public enum NodeLifecycleState {
     STOPPED(6, "Stopped", new int[] { 0, 1 }), // IDLE or INITIALIZING
 
     /** Failed to initialize or start; must be reset to IDLE before retry */
-    ERROR(7, "Error", new int[] { 0 }); // IDLE (reset)
+    ERROR(7, "Error", new int[] { 0 }), // IDLE (reset)
+
+    /** Waiting for database connection; retry loop active until DB available or timeout */
+    WAITING_FOR_DATABASE(8, "Waiting for database", new int[] { 2, 7 }); // READY or ERROR
 
     private final String description;
     private final int[] allowedTransitions;
@@ -80,5 +86,12 @@ public enum NodeLifecycleState {
      */
     public boolean isActive() {
         return this == RUNNING || this == PAUSED;
+    }
+
+    /**
+     * Checks if this state indicates the node is waiting for external resources.
+     */
+    public boolean isWaiting() {
+        return this == WAITING_FOR_DATABASE;
     }
 }

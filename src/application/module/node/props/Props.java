@@ -141,6 +141,11 @@ public class Props {
     public static final Prop<String> DB_SQLITE_JOURNAL_MODE = new Prop<>("DB.SqliteJournalMode", "WAL");
     public static final Prop<String> DB_SQLITE_SYNCHRONOUS = new Prop<>("DB.SqliteSynchronous", "NORMAL");
 
+    // Database connection retry options (for graceful startup when DB is unavailable)
+    public static final Prop<Boolean> DB_CONNECTION_RETRY_ENABLED = new Prop<>("DB.ConnectionRetryEnabled", true);
+    public static final Prop<Integer> DB_CONNECTION_RETRY_MAX_ATTEMPTS = new Prop<>("DB.ConnectionRetryMaxAttempts", 30);
+    public static final Prop<Integer> DB_CONNECTION_RETRY_INTERVAL_MS = new Prop<>("DB.ConnectionRetryIntervalMs", 2000);
+
     // Cache Management
     public static final Prop<Integer> DB_SQLITE_CACHE_SIZE = new Prop<>("DB.SqliteCacheSize", -131072);
     public static final Prop<Integer> NODE_BLOCK_CACHE_MB = new Prop<>("node.blockCacheMB", 40);
