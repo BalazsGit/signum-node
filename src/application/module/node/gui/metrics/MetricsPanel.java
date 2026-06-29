@@ -79,8 +79,19 @@ public class MetricsPanel extends JTabbedPane {
                 return true;
             }
         };
-        JScrollPane syncScrollPane = new JScrollPane(syncPanel);
+        JScrollPane syncScrollPane = new JScrollPane(syncPanel) {
+            @Override
+            public Dimension getPreferredSize() {
+                Dimension pref = super.getPreferredSize();
+                JScrollBar hBar = getHorizontalScrollBar();
+                if (hBar != null && (hBar.isVisible() || hBar.isShowing())) {
+                    pref.height += hBar.getPreferredSize().height;
+                }
+                return pref;
+            }
+        };
         syncScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        syncScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         syncScrollPane.getVerticalScrollBar().setUnitIncrement(16);
         syncWrapper.add(syncScrollPane, BorderLayout.CENTER);
 
@@ -90,8 +101,19 @@ public class MetricsPanel extends JTabbedPane {
                 return true;
             }
         };
-        JScrollPane blockGenScrollPane = new JScrollPane(blockGenPanel);
+        JScrollPane blockGenScrollPane = new JScrollPane(blockGenPanel) {
+            @Override
+            public Dimension getPreferredSize() {
+                Dimension pref = super.getPreferredSize();
+                JScrollBar hBar = getHorizontalScrollBar();
+                if (hBar != null && (hBar.isVisible() || hBar.isShowing())) {
+                    pref.height += hBar.getPreferredSize().height;
+                }
+                return pref;
+            }
+        };
         blockGenScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        blockGenScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         blockGenScrollPane.getVerticalScrollBar().setUnitIncrement(16);
         blockGenWrapper.add(blockGenScrollPane, BorderLayout.CENTER);
 
@@ -101,8 +123,19 @@ public class MetricsPanel extends JTabbedPane {
                 return true;
             }
         };
-        JScrollPane peerScrollPane = new JScrollPane(peerMetricsPanel);
+        JScrollPane peerScrollPane = new JScrollPane(peerMetricsPanel) {
+            @Override
+            public Dimension getPreferredSize() {
+                Dimension pref = super.getPreferredSize();
+                JScrollBar hBar = getHorizontalScrollBar();
+                if (hBar != null && (hBar.isVisible() || hBar.isShowing())) {
+                    pref.height += hBar.getPreferredSize().height;
+                }
+                return pref;
+            }
+        };
         peerScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        peerScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         peerScrollPane.getVerticalScrollBar().setUnitIncrement(16);
         peerWrapper.add(peerScrollPane, BorderLayout.CENTER);
 
@@ -112,12 +145,21 @@ public class MetricsPanel extends JTabbedPane {
                 return true;
             }
         };
-        JScrollPane networkScrollPane = new JScrollPane(networkMetricsPanel);
+        JScrollPane networkScrollPane = new JScrollPane(networkMetricsPanel) {
+            @Override
+            public Dimension getPreferredSize() {
+                Dimension pref = super.getPreferredSize();
+                JScrollBar hBar = getHorizontalScrollBar();
+                if (hBar != null && (hBar.isVisible() || hBar.isShowing())) {
+                    pref.height += hBar.getPreferredSize().height;
+                }
+                return pref;
+            }
+        };
         networkScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        networkScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         networkScrollPane.getVerticalScrollBar().setUnitIncrement(16);
         networkWrapper.add(networkScrollPane, BorderLayout.CENTER);
-
-        // Tabs at the bottom
         setTabPlacement(JTabbedPane.BOTTOM);
 
         // Tab 0: Toggle
@@ -197,6 +239,13 @@ public class MetricsPanel extends JTabbedPane {
                 }
             }
         } else {
+            // Force a layout pass to ensure wrapper heights are accurate before reading them.
+            // This is critical on initial load when applyPanelVisibilityState() added the panel
+            // but wrappers may not have been fully laid out yet, causing startHeight to be
+            // calculated incorrectly (collapse animation only goes "halfway").
+            this.doLayout();
+            revalidate();
+
             // Use actual visible height as start point for collapse animation to avoid
             // "invisible" start
             startHeight = Math.max(syncWrapper.getHeight(), Math.max(blockGenWrapper.getHeight(),

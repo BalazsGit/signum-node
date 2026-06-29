@@ -2700,6 +2700,14 @@ public class NodeConsolePanel extends JPanel {
             metricsPanel.setVisible(true);
             metricsPanelWrapper.add(metricsPanel, BorderLayout.CENTER);
             metricsPanelWrapper.revalidate();
+            // Force a deferred layout pass to ensure MetricsPanel wrappers are properly sized
+            // before the user interacts with chevron collapse. Without this, startHeight in
+            // toggleExpanded() may be calculated from stale/incomplete layout data.
+            SwingUtilities.invokeLater(() -> {
+                metricsPanelWrapper.doLayout();
+                metricsPanelWrapper.revalidate();
+                metricsPanelWrapper.repaint();
+            });
             LOGGER.info("[METRICS-DEBUG] Metrics panel added to wrapper. wrapper components count={}", metricsPanelWrapper.getComponentCount());
         } else {
             LOGGER.info("[METRICS-DEBUG] applyPanelVisibilityState -> HIDING metrics panel");
