@@ -840,6 +840,7 @@ public class NodeConsolePanel extends JPanel {
         } catch (Exception e) {
             LOGGER.warn("Could not register FontAwesome for HTML rendering", e);
         }
+
         JTextPane textPane = new JTextPane();
         Font consoleFont = AppearanceModule.getActiveConsoleFont();
         if (consoleFont == null) {
@@ -1789,6 +1790,13 @@ public class NodeConsolePanel extends JPanel {
     }
 
     private TrayIcon createTrayIcon() {
+        // Guard against null parentFrame (can happen in multi-profile mode when NodeConsolePanel
+        // is embedded in a NodeProfilePanel tab rather than a standalone JFrame).
+        if (parentFrame == null) {
+            LOGGER.warn("parentFrame is null - skipping tray icon creation");
+            return null;
+        }
+
         PopupMenu popupMenu = new PopupMenu();
 
         MenuItem openPheonixWalletItem = new MenuItem("Phoenix Wallet");
@@ -2468,10 +2476,12 @@ public class NodeConsolePanel extends JPanel {
     }
 
     public void startSignumWithGUI() {
+        LOGGER.info("[METRICS-DEBUG] startSignumWithGUI() called. showMetricsPanel={}, metricsPanel={}", showMetricsPanel, metricsPanel);
         try {
             // signum.init();
             Signum.main(args);
             loadGuiSettings();
+            LOGGER.info("[METRICS-DEBUG] After Signum.main(), loaded showMetricsPanel={}, metricsPanel={}", showMetricsPanel, metricsPanel);
 
             // Now that properties are loaded, set the correct values for the GUI
             showPopOff = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
@@ -2637,16 +2647,86 @@ public class NodeConsolePanel extends JPanel {
             } catch (Exception t) {
                 LOGGER.error("Could not determine if running in testnet mode", t);
             }
-        } catch (Exception t) {
-            LOGGER.error(FAILED_TO_START_MESSAGE, t);
-            showMessage(FAILED_TO_START_MESSAGE);
-            onBrsStopped();
-            SwingUtilities.invokeLater(this::showTrayIcon);
-        }
+            } catch (Exception t) {
+                LOGGER.error("[METRICS-DEBUG] OUTER CATCH triggered! signum.main() failed. showMetricsPanel={}", showMetricsPanel, t);
+                showMessage(FAILED_TO_START_MESSAGE);
+                onBrsStopped();
+                // Even if node startup failed, still load GUI settings and apply panel visibility state
+                // so the hamburger menu checkbox state is consistent with actual UI behavior.
+                try {
+                    loadGuiSettings();
+                    LOGGER.info("[METRICS-DEBUG] Fallback loadGuiSettings done. showMetricsPanel={}", showMetricsPanel);
+                } catch (Exception loadEx) {
+                    LOGGER.warn("Could not load GUI settings during fallback", loadEx);
+                }
+                SwingUtilities.invokeLater(() -> {
+                    LOGGER.info("[METRICS-DEBUG] Fallback invokeLater started. showMetricsPanel={}, metricsPanel={}", showMetricsPanel, metricsPanel);
+                    // Apply panel visibility state first (before tray icon) to ensure MetricsPanel shows correctly
+                    // even if tray icon creation fails (e.g., parentFrame is null in multi-profile mode).
+                    applyPanelVisibilityState();
+                    try {
+                        showTrayIcon();
+                    } catch (Exception e) {
+                        LOGGER.warn("Failed to show tray icon during fallback (non-fatal)", e);
+                    }
+                });
+            }
 
     }
 
+    /**
+     * Applies panel visibility state based on loaded GUI settings.
+     * Safe to call even when Signum node is not initialized (fallback path).
+     */
+    private void applyPanelVisibilityState() {
+        LOGGER.info("[METRICS-DEBUG] applyPanelVisibilityState() called. showMetricsPanel={}, metricsPanel={}", showMetricsPanel, metricsPanel);
+
+        // Sync checkbox states with loaded settings
+        if (showCommandItem != null) {
+            showCommandItem.setSelected(showCommandInput);
+        }
+        if (showMetricsItem != null) {
+            showMetricsItem.setSelected(showMetricsPanel);
+        }
+
+        // Apply Metrics Panel visibility
+        if (showMetricsPanel) {
+            LOGGER.info("[METRICS-DEBUG] applyPanelVisibilityState -> SHOWING metrics panel");
+            if (metricsPanel == null) {
+                LOGGER.info("[METRICS-DEBUG] metricsPanel was null, creating new one");
+                metricsPanel = new MetricsPanel(parentFrame);
+            }
+            metricsPanel.init();
+            metricsPanel.setVisible(true);
+            metricsPanelWrapper.add(metricsPanel, BorderLayout.CENTER);
+            metricsPanelWrapper.revalidate();
+            LOGGER.info("[METRICS-DEBUG] Metrics panel added to wrapper. wrapper components count={}", metricsPanelWrapper.getComponentCount());
+        } else {
+            LOGGER.info("[METRICS-DEBUG] applyPanelVisibilityState -> HIDING metrics panel");
+            if (metricsPanel != null) {
+                metricsPanel.shutdown();
+            }
+            metricsPanelWrapper.removeAll();
+            metricsPanel = null;
+            metricsPanelWrapper.setPreferredSize(new Dimension(0, 0));
+            metricsPanelWrapper.setMinimumSize(new Dimension(0, 0));
+            metricsPanelWrapper.revalidate();
+        }
+
+        // Apply Command Panel visibility
+        if (showCommandInput) {
+            commandPanelWrapper.add(commandPanel, BorderLayout.CENTER);
+        } else {
+            commandPanelWrapper.setPreferredSize(new Dimension(0, 0));
+        }
+
+        toolBar.revalidate();
+        LOGGER.info("[METRICS-DEBUG] applyPanelVisibilityState done");
+    }
+
     private void updateMetricsPanelState(boolean show) {
+        LOGGER.info("[METRICS-DEBUG] updateMetricsPanelState({}) called. animator running={}", 
+            show, metricsPanelAnimator != null && metricsPanelAnimator.isRunning());
         if (metricsPanelAnimator != null && metricsPanelAnimator.isRunning()) {
             return;
         }
