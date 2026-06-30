@@ -2476,13 +2476,11 @@ public class NodeConsolePanel extends JPanel {
     }
 
     public void startSignumWithGUI() {
-        LOGGER.info("[METRICS-DEBUG] startSignumWithGUI() called. showMetricsPanel={}, metricsPanel={}", showMetricsPanel, metricsPanel);
         try {
             // signum.init();
             Signum.main(args);
             loadGuiSettings();
-            LOGGER.info("[METRICS-DEBUG] After Signum.main(), loaded showMetricsPanel={}, metricsPanel={}", showMetricsPanel, metricsPanel);
-
+            
             // Now that properties are loaded, set the correct values for the GUI
             showPopOff = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
             measurementActive = Signum.getPropertyService().getBoolean(Props.MEASUREMENT_ACTIVE);
@@ -2648,19 +2646,16 @@ public class NodeConsolePanel extends JPanel {
                 LOGGER.error("Could not determine if running in testnet mode", t);
             }
             } catch (Exception t) {
-                LOGGER.error("[METRICS-DEBUG] OUTER CATCH triggered! signum.main() failed. showMetricsPanel={}", showMetricsPanel, t);
                 showMessage(FAILED_TO_START_MESSAGE);
                 onBrsStopped();
                 // Even if node startup failed, still load GUI settings and apply panel visibility state
                 // so the hamburger menu checkbox state is consistent with actual UI behavior.
                 try {
                     loadGuiSettings();
-                    LOGGER.info("[METRICS-DEBUG] Fallback loadGuiSettings done. showMetricsPanel={}", showMetricsPanel);
-                } catch (Exception loadEx) {
+                    } catch (Exception loadEx) {
                     LOGGER.warn("Could not load GUI settings during fallback", loadEx);
                 }
                 SwingUtilities.invokeLater(() -> {
-                    LOGGER.info("[METRICS-DEBUG] Fallback invokeLater started. showMetricsPanel={}, metricsPanel={}", showMetricsPanel, metricsPanel);
                     // Apply panel visibility state first (before tray icon) to ensure MetricsPanel shows correctly
                     // even if tray icon creation fails (e.g., parentFrame is null in multi-profile mode).
                     applyPanelVisibilityState();
@@ -2679,8 +2674,7 @@ public class NodeConsolePanel extends JPanel {
      * Safe to call even when Signum node is not initialized (fallback path).
      */
     private void applyPanelVisibilityState() {
-        LOGGER.info("[METRICS-DEBUG] applyPanelVisibilityState() called. showMetricsPanel={}, metricsPanel={}", showMetricsPanel, metricsPanel);
-
+        
         // Sync checkbox states with loaded settings
         if (showCommandItem != null) {
             showCommandItem.setSelected(showCommandInput);
@@ -2691,26 +2685,25 @@ public class NodeConsolePanel extends JPanel {
 
         // Apply Metrics Panel visibility
         if (showMetricsPanel) {
-            LOGGER.info("[METRICS-DEBUG] applyPanelVisibilityState -> SHOWING metrics panel");
             if (metricsPanel == null) {
-                LOGGER.info("[METRICS-DEBUG] metricsPanel was null, creating new one");
                 metricsPanel = new MetricsPanel(parentFrame);
             }
             metricsPanel.init();
             metricsPanel.setVisible(true);
             metricsPanelWrapper.add(metricsPanel, BorderLayout.CENTER);
             metricsPanelWrapper.revalidate();
-            // Force a deferred layout pass to ensure MetricsPanel wrappers are properly sized
-            // before the user interacts with chevron collapse. Without this, startHeight in
-            // toggleExpanded() may be calculated from stale/incomplete layout data.
+            // Ensure MetricsPanel internal wrappers have stable preferred sizes after
+            // initialization. This replaces the fire-and-forget invokeLater pattern with
+            // a proper stabilization call that guarantees consistent animation data.
             SwingUtilities.invokeLater(() -> {
+                if (metricsPanel != null) {
+                    metricsPanel.ensureLayoutStability();
+                }
                 metricsPanelWrapper.doLayout();
                 metricsPanelWrapper.revalidate();
                 metricsPanelWrapper.repaint();
             });
-            LOGGER.info("[METRICS-DEBUG] Metrics panel added to wrapper. wrapper components count={}", metricsPanelWrapper.getComponentCount());
-        } else {
-            LOGGER.info("[METRICS-DEBUG] applyPanelVisibilityState -> HIDING metrics panel");
+            } else {
             if (metricsPanel != null) {
                 metricsPanel.shutdown();
             }
@@ -2729,12 +2722,10 @@ public class NodeConsolePanel extends JPanel {
         }
 
         toolBar.revalidate();
-        LOGGER.info("[METRICS-DEBUG] applyPanelVisibilityState done");
-    }
+         }
 
     private void updateMetricsPanelState(boolean show) {
-        LOGGER.info("[METRICS-DEBUG] updateMetricsPanelState({}) called. animator running={}", 
-            show, metricsPanelAnimator != null && metricsPanelAnimator.isRunning());
+        
         if (metricsPanelAnimator != null && metricsPanelAnimator.isRunning()) {
             return;
         }

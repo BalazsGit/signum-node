@@ -239,17 +239,12 @@ public class MetricsPanel extends JTabbedPane {
                 }
             }
         } else {
-            // Force a layout pass to ensure wrapper heights are accurate before reading them.
-            // This is critical on initial load when applyPanelVisibilityState() added the panel
-            // but wrappers may not have been fully laid out yet, causing startHeight to be
-            // calculated incorrectly (collapse animation only goes "halfway").
-            this.doLayout();
-            revalidate();
-
-            // Use actual visible height as start point for collapse animation to avoid
-            // "invisible" start
-            startHeight = Math.max(syncWrapper.getHeight(), Math.max(blockGenWrapper.getHeight(),
-                    Math.max(peerWrapper.getHeight(), networkWrapper.getHeight())));
+            // Use the same naturalHeight calculated from getPreferredSize() as the expanding branch.
+            // getHeight() is layout-dependent and causes race conditions when the panel was just
+            // added to the container (applyPanelVisibilityState uses invokeLater for layout).
+            // getPreferredSize() is computed synchronously by the layout manager and does not
+            // depend on whether a parent layout pass has occurred, making it safe for animation.
+            startHeight = naturalHeight;
             targetHeight = 0;
             if (getSelectedIndex() != 0) {
                 lastSelectedIndex = getSelectedIndex();
@@ -306,8 +301,28 @@ public class MetricsPanel extends JTabbedPane {
             wrapper.setPreferredSize(new Dimension(content.getPreferredSize().width, height));
             // Allow horizontal shrinking even during vertical animation/collapse to prevent
             // toolbar right-side icons from being pushed out of the window.
-            wrapper.setMinimumSize(new Dimension(0, height));
+            // Critical: use (0, 0) instead of (0, height) so the wrapper can shrink to zero
+            // regardless of child component minimum sizes (ChartPanels have large minimums).
+            wrapper.setMinimumSize(new Dimension(0, 0));
+            // Also constrain maximum height to prevent layout managers from ignoring our preference.
+            // This is critical: without it, BorderLayout may ignore preferredSize when the child's
+            // natural minimum size (from ChartPanels) is larger than the animated height.
+            wrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, Math.max(0, height)));
         }
+    }
+
+    /**
+     * Overrides getMinimumSize to allow the MetricsPanel (JTabbedPane) to collapse fully.
+     * 
+     * When collapsed, child components (ChartPanels) have large minimum sizes that would
+     * prevent the tabbed pane from shrinking. This override ensures the panel can reach 0 height.
+     */
+    @Override
+    public Dimension getMinimumSize() {
+        if (!isExpanded) {
+            return new Dimension(0, 0);
+        }
+        return super.getMinimumSize();
     }
 
     public void init() {
@@ -315,6 +330,38 @@ public class MetricsPanel extends JTabbedPane {
         blockGenPanel.init();
         peerMetricsPanel.init();
         networkMetricsPanel.init();
+    }
+
+    /**
+     * Ensures all internal wrapper components have stable, consistent preferred sizes.
+     * 
+     * When the panel is first added to its parent container (applyPanelVisibilityState),
+     * Swing's layout system operates asynchronously. The parent container may not have
+     * completed a full layout pass, which means getHeight() returns stale or incorrect
+     * values. This method forces a synchronous stabilization cycle that resets all
+     * wrapper sizes to their natural values and validates the component hierarchy,
+     * ensuring the animation system has consistent data regardless of when the user
+     * interacts with the chevron toggle.
+     * 
+     * Think of this as: "After initialization, ensure the panel is in the same state
+     * as if it had been collapsed and expanded once."
+     */
+    public void ensureLayoutStability() {
+        // Step 1: Reset all wrappers to their natural (unconstrained) preferred size.
+        // This ensures no residual height constraints from previous animation states.
+        setWrappersHeight(null);
+
+        // Step 2: Force a synchronous layout pass on the entire hierarchy.
+        // validate() propagates upward through parent containers; doLayout() computes
+        // sizes downward. Together they ensure preferredSize values are consistent.
+        this.validate();
+        this.doLayout();
+
+        // Step 3: Verify and log the natural heights for debugging purposes.
+        int h1 = syncWrapper.getPreferredSize().height;
+        int h2 = blockGenWrapper.getPreferredSize().height;
+        int h3 = peerWrapper.getPreferredSize().height;
+        int h4 = networkWrapper.getPreferredSize().height;
     }
 
     public void shutdown() {
