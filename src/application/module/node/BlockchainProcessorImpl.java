@@ -3222,12 +3222,28 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     throw new BlockNotAcceptedException(
                             "Previous block hash doesn't match for block " + block.getHeight());
                 }
-                if (block.getTimestamp() > curTime + MAX_TIMESTAMP_DIFFERENCE
-                        || block.getTimestamp() <= previousLastBlock.getTimestamp()) {
-                    throw new BlockOutOfOrderException("Invalid timestamp: " + block.getTimestamp()
-                            + " current time is " + curTime
-                            + ", previous block timestamp is " + previousLastBlock.getTimestamp() + ", peer is "
-                            + (block.getPeer() != null ? block.getPeer().getAnnouncedAddress() : " null"));
+                int blockTimestamp = block.getTimestamp();
+                int prevBlockTimestamp = previousLastBlock.getTimestamp();
+                String peerAddress = block.getPeer() != null ? block.getPeer().getAnnouncedAddress() : "null";
+
+                if (blockTimestamp > curTime + MAX_TIMESTAMP_DIFFERENCE) {
+                    int diffSeconds = blockTimestamp - curTime;
+                    throw new BlockOutOfOrderException(
+                            "BLOCK TIMESTAMP TOO FAR IN THE FUTURE - possible system clock drift detected. " +
+                            "Incoming block timestamp (" + blockTimestamp + ") is GREATER than local time (" + curTime + 
+                            ") by +" + diffSeconds + " seconds (maximum allowed: " + MAX_TIMESTAMP_DIFFERENCE + " seconds). " +
+                            "Your system clock appears to be BEHIND by approximately " + diffSeconds + " seconds. " +
+                            "ACTION: Sync your system clock with NTP (Windows: w32tm /resync, Linux: sudo ntpdate -u pool.ntp.org). " +
+                            "Peer: " + peerAddress);
+                }
+                if (blockTimestamp <= prevBlockTimestamp) {
+                    int diffFromPrev = blockTimestamp - prevBlockTimestamp;
+                    throw new BlockOutOfOrderException(
+                            "BLOCK TIMESTAMP NOT AFTER PREVIOUS BLOCK - invalid block chain ordering. " +
+                            "Incoming block timestamp (" + blockTimestamp + ") is LESS THAN or EQUAL to previous block timestamp (" + 
+                            prevBlockTimestamp + "). Difference: " + diffFromPrev + " seconds. " +
+                            "Every new block must have a strictly greater timestamp than its parent. " +
+                            "Peer: " + peerAddress);
                 }
                 if (block.getId() == 0L || blockDb.hasBlock(block.getId())) {
                     throw new BlockNotAcceptedException("Duplicate block or invalid id for block " + block.getHeight());
@@ -3256,15 +3272,27 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 int indirectsCount = 0;
 
                 for (Transaction transaction : transactions) {
-                    if (transaction.getTimestamp() > curTime + MAX_TIMESTAMP_DIFFERENCE) {
-                        throw new BlockOutOfOrderException("Invalid transaction timestamp: "
-                                + transaction.getTimestamp() + ", current time is " + curTime);
+                    int txTimestamp = transaction.getTimestamp();
+                    String txId = transaction.getStringId();
+
+                    if (txTimestamp > curTime + MAX_TIMESTAMP_DIFFERENCE) {
+                        int txDiffSeconds = txTimestamp - curTime;
+                        throw new BlockOutOfOrderException(
+                                "TRANSACTION TIMESTAMP TOO FAR IN THE FUTURE. " +
+                                "Transaction: " + txId + ", " +
+                                "Transaction timestamp: " + txTimestamp + ", " +
+                                "Local time: " + curTime + ", " +
+                                "Difference: " + txDiffSeconds + " seconds, " +
+                                "Maximum allowed: " + MAX_TIMESTAMP_DIFFERENCE + " seconds");
                     }
-                    if (transaction.getTimestamp() > block.getTimestamp() + MAX_TIMESTAMP_DIFFERENCE
+                    if (txTimestamp > block.getTimestamp() + MAX_TIMESTAMP_DIFFERENCE
                             || transaction.getExpiration() < block.getTimestamp()) {
-                        throw new TransactionNotAcceptedException("Invalid transaction timestamp "
-                                + transaction.getTimestamp() + " for transaction " + transaction.getStringId()
-                                + ", current time is " + curTime + ", block timestamp is " + block.getTimestamp(),
+                        throw new TransactionNotAcceptedException(
+                                "TRANSACTION TIMESTAMP OUTSIDE BLOCK WINDOW. " +
+                                "Transaction: " + txId + ", " +
+                                "Transaction timestamp: " + txTimestamp + ", " +
+                                "Block timestamp: " + block.getTimestamp() + ", " +
+                                "Max future allowed: " + MAX_TIMESTAMP_DIFFERENCE + " seconds",
                                 transaction);
                     }
                     if (transactionDb.hasTransaction(transaction.getId())) {
