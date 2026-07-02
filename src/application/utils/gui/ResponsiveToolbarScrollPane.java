@@ -24,10 +24,30 @@ import java.awt.event.ComponentEvent;
 public class ResponsiveToolbarScrollPane extends JScrollPane {
     private final JPanel contentWrapper;
     private final int bottomMargin;
+    /** Whether to scroll right (true) or left (false) when scrollbar appears */
+    private final boolean scrollRight;
 
+    /**
+     * Creates a ResponsiveToolbarScrollPane that scrolls right when scrollbar appears.
+     * 
+     * @param view The component to wrap
+     * @param contentInsets Insets for the content wrapper
+     */
     public ResponsiveToolbarScrollPane(Component view, Insets contentInsets) {
+        this(view, contentInsets, false);
+    }
+
+    /**
+     * Creates a ResponsiveToolbarScrollPane with configurable scroll direction.
+     * 
+     * @param view The component to wrap
+     * @param contentInsets Insets for the content wrapper
+     * @param scrollRight If true, scrolls right (end of toolbar). If false, scrolls left (start of toolbar).
+     */
+    public ResponsiveToolbarScrollPane(Component view, Insets contentInsets, boolean scrollRight) {
         super();
         this.bottomMargin = contentInsets.bottom;
+        this.scrollRight = scrollRight;
 
         // Clean borders - no extra spacing from the scroll pane itself
         setBorder(BorderFactory.createEmptyBorder());
@@ -69,8 +89,19 @@ public class ResponsiveToolbarScrollPane extends JScrollPane {
                 revalidateParent();
             }
 
+            private void scrollToEdge() {
+                SwingUtilities.invokeLater(() -> {
+                    if (scrollRight) {
+                        hBar.setValue(hBar.getMaximum());
+                    } else {
+                        hBar.setValue(0);
+                    }
+                });
+            }
+
+            @Deprecated
             private void scrollRight() {
-                SwingUtilities.invokeLater(() -> hBar.setValue(hBar.getMaximum()));
+                scrollToEdge();
             }
 
             private void revalidateParent() {
@@ -85,20 +116,30 @@ public class ResponsiveToolbarScrollPane extends JScrollPane {
             }
         });
 
-        // Keep buttons right-aligned during resize when scrollbar is visible
+        // Keep buttons aligned during resize when scrollbar is visible
         addComponentListener(new ComponentAdapter() {
             @Override
             public void componentResized(ComponentEvent e) {
                 if (hBar.isShowing()) {
-                    SwingUtilities.invokeLater(() -> hBar.setValue(hBar.getMaximum()));
+                    SwingUtilities.invokeLater(() -> {
+                        if (scrollRight) {
+                            hBar.setValue(hBar.getMaximum());
+                        } else {
+                            hBar.setValue(0);
+                        }
+                    });
                 }
             }
         });
 
-        // Initial scroll-right after first layout pass
+        // Initial scroll after first layout pass
         SwingUtilities.invokeLater(() -> {
             if (hBar.isVisible() || hBar.isShowing()) {
-                hBar.setValue(hBar.getMaximum());
+                if (scrollRight) {
+                    hBar.setValue(hBar.getMaximum());
+                } else {
+                    hBar.setValue(0);
+                }
             }
         });
     }

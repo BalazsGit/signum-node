@@ -1313,7 +1313,7 @@ public class NodeConsolePanel extends JPanel {
         // This ensures that when the window is narrow, a horizontal scrollbar appears below
         // the button row - identical behavior to all configuration panels.
         application.utils.gui.ResponsiveToolbarScrollPane toolbarScroll =
-                new application.utils.gui.ResponsiveToolbarScrollPane(leftButtons, GuiConstants.TOOLBAR_INSETS);
+                new application.utils.gui.ResponsiveToolbarScrollPane(leftButtons, GuiConstants.TOOLBAR_INSETS, true);
         toolbarScroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         toolbarScroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
         toolbarScroll.getHorizontalScrollBar().setUnitIncrement(16);
