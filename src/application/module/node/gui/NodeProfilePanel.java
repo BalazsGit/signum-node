@@ -28,6 +28,9 @@ import java.util.Properties;
  * - Console (NodeConsolePanel)
  * - Configuration (NodeConfigurationPanel)
  * - Logging (LoggerConfigurationPanel)
+ * 
+ * Features an info bar at the top displaying node runtime information:
+ * profile name, network type, lifecycle state, ports, and database info.
  */
 @SuppressWarnings("serial")
 public class NodeProfilePanel extends JPanel {
@@ -39,6 +42,7 @@ public class NodeProfilePanel extends JPanel {
     private final NodeConsolePanel consolePanel;
     private final NodeConfigurationPanel configurationPanel;
     private final LoggerConfigurationPanel loggingPanel;
+    private final NodeInfoBar infoBar;
 
     /**
      * Creates a new NodeProfilePanel for the given profile.
@@ -53,6 +57,11 @@ public class NodeProfilePanel extends JPanel {
         setLayout(new BorderLayout());
         setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
+        // Create info bar at the top (NORTH)
+        infoBar = new NodeInfoBar(profile);
+        add(infoBar, BorderLayout.NORTH);
+
+        // Create inner tabbed pane (CENTER)
         innerTabbedPane = new JTabbedPane(SwingConstants.TOP);
         GuiFontManager.applyDefaultFont(innerTabbedPane);
         // Apply application-wide tab layout policy from GuiManager
@@ -120,6 +129,10 @@ public class NodeProfilePanel extends JPanel {
         if (consolePanel != null) {
             consolePanel.restartNode();
         }
+        // Refresh info bar after restart
+        if (infoBar != null) {
+            infoBar.refreshData();
+        }
     }
 
     /**
@@ -168,6 +181,15 @@ public class NodeProfilePanel extends JPanel {
     }
 
     /**
+     * Gets the info bar for this profile panel.
+     * 
+     * @return The NodeInfoBar displaying runtime information
+     */
+    public NodeInfoBar getInfoBar() {
+        return infoBar;
+    }
+
+    /**
      * Stops the node for this profile.
      */
     public void stopNode() {
@@ -191,6 +213,7 @@ public class NodeProfilePanel extends JPanel {
 
     /**
      * Called by NodePanel when the node's lifecycle state changes.
+     * Updates both the tab title and the info bar state display.
      */
     public void onNodeStateChanged(NodeLifecycleState oldState, NodeLifecycleState newState) {
         SwingUtilities.invokeLater(() -> {
@@ -209,6 +232,11 @@ public class NodeProfilePanel extends JPanel {
                     default -> "";
                 };
                 innerTabbedPane.setTitleAt(tabIndex, "Console" + (stateIcon.isEmpty() ? "" : " [" + stateIcon + "]"));
+            }
+
+            // Update info bar to reflect new state
+            if (infoBar != null) {
+                infoBar.refreshState();
             }
         });
     }

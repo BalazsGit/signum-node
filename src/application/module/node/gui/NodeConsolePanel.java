@@ -1639,7 +1639,6 @@ public class NodeConsolePanel extends JPanel {
                 new Thread(() -> {
                     saveGuiSettings();
                     isShuttingDown = true;
-                    updateTitle();
 
                     if (elapsedTimeTimer != null) {
                         try {
@@ -2471,7 +2470,7 @@ public class NodeConsolePanel extends JPanel {
                     guiTimer.start();
                 }
             }
-            updateTitle();
+            // updateTitle() removed - title management moved to NodeInfoBar
         });
     }
 
@@ -2619,7 +2618,7 @@ public class NodeConsolePanel extends JPanel {
                     popOff100Button.setEnabled(true);
                 });
 
-                updateTitle();
+                // updateTitle() removed - title management moved to NodeInfoBar
 
                 initListeners();
                 if (Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL)) {
@@ -2837,35 +2836,6 @@ public class NodeConsolePanel extends JPanel {
      * }
      */
 
-    void updateTitle() {
-        String networkName = Signum.getPropertyService().getString(Props.NETWORK_NAME);
-
-        StringBuilder titleBuilder = new StringBuilder();
-        titleBuilder.append(this.programName + " [" + networkName + "] " + this.version);
-
-        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
-        if (blockchainProcessor != null) {
-            String dbType = blockchainProcessor.getDbType();
-            String dbVersion = blockchainProcessor.getDbVersion();
-            titleBuilder.append(" - [").append(dbType);
-            if (dbVersion != null && !dbVersion.isEmpty() && !"N/A".equals(dbVersion)) {
-                titleBuilder.append(" ").append(dbVersion);
-            }
-            titleBuilder.append("]");
-        }
-
-        String title = titleBuilder.toString();
-        if (isSyncStopped) {
-            title += " (Sync paused)";
-        } else if (isShuttingDown) {
-            title += " (Shutting Down...)";
-        }
-        final String finalTitle = title;
-        SwingUtilities.invokeLater(() -> parentFrame.setTitle(finalTitle));
-        if (trayIcon != null) {
-            trayIcon.setToolTip(finalTitle);
-        }
-    }
 
     private void updateLatestBlock(Block block, int maxPeerHeight, long blockTime) {
         if (block == null) {
@@ -3063,9 +3033,14 @@ public class NodeConsolePanel extends JPanel {
     }
 
     private void onBrsStopped() {
-        SwingUtilities.invokeLater(() -> parentFrame.setTitle(parentFrame.getTitle() + " (STOPPED)"));
-        if (trayIcon != null)
-            trayIcon.setToolTip(trayIcon.getToolTip() + " (STOPPED)");
+        // Title management has been moved to NodeInfoBar in multi-profile mode.
+        // Only update tray icon tooltip if it exists.
+        if (trayIcon != null) {
+            String currentTip = trayIcon.getToolTip();
+            if (currentTip != null && !currentTip.endsWith(" (STOPPED)")) {
+                trayIcon.setToolTip(currentTip + " (STOPPED)");
+            }
+        }
     }
 
     private void showMessage(String message) {
