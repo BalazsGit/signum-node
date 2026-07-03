@@ -2,19 +2,43 @@ package application.kernel;
 
 import application.api.Module;
 import application.api.ModuleContext;
+import application.api.Shutdownable;
 import application.gui.shell.MainFrame;
 import application.gui.shell.TabManager;
 import application.launcher.Launcher;
-import java.nio.file.Path;
-import java.util.List;
 
 import javax.swing.JComponent;
 import javax.swing.SwingUtilities;
+
+import java.nio.file.Path;
+import java.util.List;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * Central kernel that orchestrates application startup and shutdown.
+ * 
+ * Startup flow:
+ * 1. Discover modules via ServiceLoader
+ * 2. Initialize and start each module
+ * 3. Register each module with ApplicationShutdown for graceful teardown
+ * 4. Launch GUI shell (or run headless)
+ * 
+ * Shutdown flow (triggered by Shutdown button or JVM shutdown hook):
+ * 1. ApplicationShutdown executes modules in priority order (HIGHEST first)
+ * 2. Each module's stop() method is called via Shutdownable contract
+ * 3. Completion hooks execute (JVM exit)
+ * 
+ * Design note for Solution B migration: The kernel currently manages Module
+ * instances. In the future multi-instance architecture, each NodeInstance will
+ * be registered as a Shutdownable component. The boot/shutdown orchestration
+ * logic remains identical since both paths go through ApplicationShutdown.
+ */
 public class ApplicationKernel {
+
     private static final Logger logger = LoggerFactory.getLogger(ApplicationKernel.class);
+
     private final ModuleRegistry registry = new ModuleRegistry();
     private final boolean isHeadless;
     private final Path configPath;
@@ -24,10 +48,14 @@ public class ApplicationKernel {
         this.configPath = configPath;
     }
 
+    /**
+     * Boots the application: discovers modules, initializes them,
+     * registers shutdown handlers, and launches the GUI.
+     */
     public void boot() {
         logger.info("Kernel booting...");
 
-        // 1. Modulok felfedezése
+        // 1. Discover modules via ServiceLoader
         registry.discoverModules();
 
         List<Module> modules = registry.getModules();
@@ -35,7 +63,7 @@ public class ApplicationKernel {
             logger.warn("No modules discovered by ModuleRegistry! Check META-INF/services location.");
         }
 
-        // 2. Modulok inicializálása
+        // 2. Initialize and start each module
         ModuleContext context = createModuleContext();
         for (Module m : modules) {
             logger.info("Initializing module: {}", m.getDisplayName());
@@ -43,14 +71,33 @@ public class ApplicationKernel {
             m.start();
         }
 
-        // 3. UI indítása, ha nem headless
+        // 3. Register all modules with ApplicationShutdown orchestrator
+        //    Modules implement Shutdownable, so they can be managed by the shutdown system
+        ApplicationShutdown shutdown = ApplicationShutdown.getInstance();
+        for (Module m : modules) {
+            if (m instanceof Shutdownable) {
+                shutdown.register((Shutdownable) m);
+                logger.info("Registered '{}' with ApplicationShutdown (priority: {})",
+                        m.getDisplayName(), ((Shutdownable) m).getShutdownPriority());
+            }
+        }
+
+        // 4. Add JVM shutdown hook as fallback safety net
+        //    If the application is killed without going through the Shutdown button,
+        //    this hook ensures modules still get their stop() called
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            logger.info("JVM shutdown hook triggered - executing graceful shutdown");
+            shutdown.executeShutdownSequence();
+        }, "ApplicationShutdown-Hook"));
+
+        // 5. Launch UI in EDT (Event Dispatch Thread) if not headless
         if (!isHeadless) {
             SwingUtilities.invokeLater(() -> {
                 logger.info("Starting GUI Shell...");
                 MainFrame shell = new MainFrame();
                 TabManager tabManager = shell.getTabManager();
 
-                // Dinamikus tab hozzáadás a regisztrált modulok alapján
+                // Dynamically add tabs for each module's UI
                 for (Module m : registry.getModules()) {
                     JComponent moduleUI = m.getUI();
                     if (moduleUI != null) {
@@ -64,6 +111,9 @@ public class ApplicationKernel {
         }
     }
 
+    /**
+     * Creates the ModuleContext that provides shared services to all modules.
+     */
     private ModuleContext createModuleContext() {
         return new ModuleContext() {
             @Override
@@ -78,6 +128,8 @@ public class ApplicationKernel {
 
             @Override
             public void shutdown() {
+                // Use the ApplicationShutdown orchestrator instead of direct System.exit
+                ApplicationShutdown.getInstance().executeShutdownSequence();
                 System.exit(0);
             }
         };
