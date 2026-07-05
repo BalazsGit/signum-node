@@ -369,13 +369,17 @@ public class NodeConsolePanel extends JPanel {
     private MetricsPanel metricsPanel;
     private JPanel metricsPanelWrapper;
     private Timer metricsPanelAnimator;
+    private static final int COMMAND_PANEL_ANIMATION_DURATION = 250;
 
     private CustomDrawingComponent popOffToggle;
     private JButton menuButton;
     private JButton globeButton;
     private JLabel measurementLabel;
     private JPanel commandPanel;
+    private JTextField commandField;
     private JPanel contentPanel;   // Content BorderLayout inside CardLayout (holds toolbar, console, bottomPanel)
+    private JPanel consoleWrapper;
+    private JPanel bottomPanel;
     private JPanel topPanel;
     private JPanel mainCardPanel;
     private CardLayout cardLayout;
@@ -383,8 +387,10 @@ public class NodeConsolePanel extends JPanel {
     private static final String VIEW_CONFIGURATION = "CONFIGURATION";
     private boolean showCommandInput = false;
     private boolean showMetricsPanel = true;
+    private boolean commandPanelAtBottom = false;
     private JCheckBox showCommandItem;
     private JCheckBox showMetricsItem;
+    private JCheckBox commandPositionBottomItem;
     private JCheckBox skipDbCheckItem;
     private JLabel experimentalLabel;
     private JPanel commandPanelWrapper;
@@ -645,205 +651,157 @@ public class NodeConsolePanel extends JPanel {
     }
 
     private void toggleCommandPanel() {
-        if (commandPanelAnimator != null && commandPanelAnimator.isRunning()) {
-            LOGGER.info("[CommandPanel] Animation already running, ignoring toggle request");
-            return;
-        }
-
         showCommandInput = !showCommandInput;
         showCommandItem.setSelected(showCommandInput);
 
         LOGGER.info("[CommandPanel] Toggling Command Input panel: {}", showCommandInput ? "OPEN" : "CLOSE");
 
-        Runnable scrollToBottom = () -> {
+        if (showCommandInput) {
+            if (switchToConsoleAction != null) {
+                LOGGER.info("[CommandPanel] Switching to Console tab before showing command panel");
+                switchToConsoleAction.run();
+            }
+            showCommandPanelInline();
+        } else {
+            hideCommandPanelInline();
+        }
+
+        SwingUtilities.invokeLater(() -> {
             if (textScrollPane != null) {
                 JScrollBar vertical = textScrollPane.getVerticalScrollBar();
                 if (vertical != null) {
                     vertical.setValue(vertical.getMaximum());
                 }
             }
-        };
+        });
+    }
 
-        if (showCommandInput) {
-            // Switch to Console tab so the animation is visible (even when triggered from Configuration/Logging tab)
-            if (switchToConsoleAction != null) {
-                LOGGER.info("[CommandPanel] Switching to Console tab before showing command panel");
-                switchToConsoleAction.run();
-            }
+    private void showCommandPanelInline() {
+        showCommandPanelInline(commandPanelAtBottom ? BottomPanelPosition.BOTTOM : BottomPanelPosition.TOP);
+    }
 
-            // Defer all command panel modifications to run AFTER the tab switch layout completes.
-            // When NodeConsolePanel is embedded in a JTabbedPane, the tab switch triggers its own
-            // layout pass. If we modify commandPanelWrapper immediately after switching tabs, our
-            // size changes get overwritten by the pending TabLayoutManager layout. By using
-            // invokeLater, we ensure the tab layout has finished before touching the panel.
-            SwingUtilities.invokeLater(() -> {
-                // Diagnostic snapshot before modifications
-                logLayoutDiagnostics("PRE-OPEN");
-                commandPanelWrapper.add(commandPanel, BorderLayout.CENTER);
-                commandPanel.setVisible(true);
-
-                commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), 0));
-                /*
-                 * Force an immediate layout pass on the content panel so bottomPanel (and thus
-                 * commandPanelWrapper) gets actual sizes before the animation starts.
-                 * Without this, getHeight() returns 0 during close animation since layout was deferred.
-                 */
-                if (contentPanel != null) {
-                    contentPanel.doLayout();
-                }
-                if (commandPanelWrapper.getParent() instanceof JComponent) {
-                    ((JComponent) commandPanelWrapper.getParent()).revalidate();
-                    ((JComponent) commandPanelWrapper.getParent()).repaint();
-                }
-                // Ensure top-level layout is updated so the preferred size change is honored
-                SwingUtilities.invokeLater(() -> {
-                    JFrame f = (JFrame) SwingUtilities.getWindowAncestor(NodeConsolePanel.this);
-                    if (f != null) {
-                        try { f.validate(); } catch (Exception ignore) {}
-                    }
-                });
-
-                int targetHeight = commandPanel.getPreferredSize().height;
-                LOGGER.info("[CommandPanel] Starting open animation, target height: {}px", targetHeight);
-
-            commandPanelAnimator = new Timer(10, new ActionListener() {
-                final long startTime = System.currentTimeMillis();
-                final int duration = ANIMATION_DURATION_MS;
-                final long[] lastLogTime = new long[] { startTime };
-
-                @Override
-                public void actionPerformed(ActionEvent e) {
-                    long elapsed = System.currentTimeMillis() - startTime;
-                    float progress = Math.min(1.0f, (float) elapsed / duration);
-                    progress = 1.0f - (float) Math.pow(1.0f - progress, 3); // Ease out
-
-                    int h = (int) (targetHeight * progress);
-                    commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), h));
-
-                    // Ensure layout updates propagate to the top-level root pane so BorderLayout
-                    // can reallocate NORTH/CENTER sizes. Use frame rootPane when available,
-                    // otherwise fall back to this panel.
-                    Window w = SwingUtilities.getWindowAncestor(NodeConsolePanel.this);
-                    if (w instanceof JFrame) {
-                        javax.swing.JRootPane rp = ((JFrame) w).getRootPane();
-                        if (rp != null) {
-                            try { rp.revalidate(); rp.repaint(); } catch (Exception ex) {
-                                NodeConsolePanel.this.revalidate();
-                                NodeConsolePanel.this.repaint();
-                            }
-                        }
-                    } else {
-                        NodeConsolePanel.this.revalidate();
-                        NodeConsolePanel.this.repaint();
-                    }
-
-                    scrollToBottom.run();
-
-                    // Periodic diagnostic logging to aid in root-cause analysis (every ~100ms)
-                    if (System.currentTimeMillis() - lastLogTime[0] >= 100) {
-                        lastLogTime[0] = System.currentTimeMillis();
-                        logLayoutDiagnostics("ANIM-TICK");
-                    }
-
-                     if (progress >= 1.0f) {
-                         ((Timer) e.getSource()).stop();
-                         // Keep explicit target height to prevent panel from collapsing after layout pass
-                         commandPanelWrapper.setPreferredSize(
-                             new Dimension(commandPanelWrapper.getWidth(), targetHeight));
-                         /* Set maximumSize to force BorderLayout to respect our preferred height.
-                          * Without this, BorderLayout may ignore preferredSize when the child's natural
-                          * minimum size is larger. This mirrors the MetricsPanel animation pattern. */
-                         commandPanelWrapper.setMaximumSize(
-                             new Dimension(Integer.MAX_VALUE, targetHeight));
-                         /* Force layout on contentPanel (BorderLayout parent of bottomPanel) so that
-                          * commandPanelWrapper gets an actual allocated size. doLayout computes
-                          * child positions/sizes immediately without deferred validation. */
-                         if (contentPanel != null) {
-                             contentPanel.doLayout();
-                         }
-                         Window w2 = SwingUtilities.getWindowAncestor(NodeConsolePanel.this);
-                         if (w2 instanceof JFrame) {
-                             javax.swing.JRootPane rp2 = ((JFrame) w2).getRootPane();
-                             if (rp2 != null) {
-                                 try { rp2.validate(); } catch (Exception ignore) {}
-                             }
-                         } else {
-                             mainCardPanel.validate();
-                         }
-                         LOGGER.info("[CommandPanel] Open animation completed, kept size: {}x{}",
-                             commandPanelWrapper.getWidth(), targetHeight);
-                         // Final snapshot after layout work
-                         logLayoutDiagnostics("POST-OPEN");
-                         SwingUtilities.invokeLater(() -> {
-                             /* Repaint the entire root pane to ensure changes propagate up through
-                              * JTabbedPane -> NodeProfilePanel -> parent containers. Repainting only
-                              * mainCardPanel is insufficient when it's embedded in a tabbed pane. */
-                             JFrame frame = (JFrame) SwingUtilities.getWindowAncestor(NodeConsolePanel.this);
-                             if (frame != null) {
-                                 frame.getRootPane().repaint();
-                             } else {
-                                 NodeConsolePanel.this.repaint();
-                             }
-                             scrollToBottom.run();
-                         });
-                     }
-                }
-            });
-                    commandPanelAnimator.start();
-                }
-            );
-        } else {
-            final int startHeight = commandPanelWrapper.getHeight();
-            LOGGER.info("[CommandPanel] Starting close animation, start height: {}px", startHeight);
-
-            commandPanelAnimator = new Timer(10, new ActionListener() {
-                final long startTime = System.currentTimeMillis();
-                final int duration = ANIMATION_DURATION_MS;
-
-                @Override
-                public void actionPerformed(ActionEvent e) {
-                    long elapsed = System.currentTimeMillis() - startTime;
-                    float progress = Math.min(1.0f, (float) elapsed / duration);
-                    progress = 1.0f - (float) Math.pow(1.0f - progress, 3); // Ease out
-
-                    int h = (int) (startHeight * (1.0f - progress));
-                    commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), h));
-
-                    Window w3 = SwingUtilities.getWindowAncestor(NodeConsolePanel.this);
-                    if (w3 instanceof JFrame) {
-                        javax.swing.JRootPane rp3 = ((JFrame) w3).getRootPane();
-                        if (rp3 != null) {
-                            rp3.revalidate();
-                            rp3.repaint();
-                        }
-                    } else {
-                        NodeConsolePanel.this.revalidate();
-                        NodeConsolePanel.this.repaint();
-                    }
-
-                    scrollToBottom.run();
-
-                    if (progress >= 1.0f) {
-                        ((Timer) e.getSource()).stop();
-                        commandPanelWrapper.removeAll();
-                        commandPanelWrapper.setPreferredSize(new Dimension(0, 0));
-                        Window w4 = SwingUtilities.getWindowAncestor(NodeConsolePanel.this);
-                        if (w4 instanceof JFrame) {
-                            javax.swing.JRootPane rp4 = ((JFrame) w4).getRootPane();
-                            if (rp4 != null) {
-                                rp4.revalidate();
-                                rp4.repaint();
-                            }
-                        } else {
-                            NodeConsolePanel.this.revalidate();
-                        }
-                        LOGGER.info("[CommandPanel] Close animation completed");
-                        SwingUtilities.invokeLater(scrollToBottom);
-                    }
-                }
-            });
-            commandPanelAnimator.start();
+    private void showCommandPanelInline(BottomPanelPosition position) {
+        if (commandPanel == null || commandPanelWrapper == null || contentPanel == null || bottomPanel == null) {
+            LOGGER.warn("Command panel or wrapper is not initialized");
+            return;
         }
+
+        if (commandPanel.getParent() != commandPanelWrapper) {
+            if (commandPanel.getParent() instanceof java.awt.Container) {
+                ((java.awt.Container) commandPanel.getParent()).remove(commandPanel);
+            }
+            commandPanelWrapper.removeAll();
+            commandPanelWrapper.add(commandPanel, BorderLayout.CENTER);
+        }
+
+        if (position == BottomPanelPosition.BOTTOM) {
+            if (commandPanelWrapper.getParent() != bottomPanel) {
+                if (commandPanelWrapper.getParent() instanceof java.awt.Container) {
+                    ((java.awt.Container) commandPanelWrapper.getParent()).remove(commandPanelWrapper);
+                }
+                bottomPanel.add(commandPanelWrapper, BorderLayout.NORTH);
+            }
+        } else {
+            if (commandPanelWrapper.getParent() != topPanel) {
+                if (commandPanelWrapper.getParent() instanceof java.awt.Container) {
+                    ((java.awt.Container) commandPanelWrapper.getParent()).remove(commandPanelWrapper);
+                }
+                topPanel.add(commandPanelWrapper, "growx");
+            }
+        }
+
+        commandPanel.setVisible(true);
+        commandPanelWrapper.setVisible(true);
+        if (position == BottomPanelPosition.BOTTOM) {
+            bottomPanel.revalidate();
+            bottomPanel.repaint();
+        } else {
+            topPanel.revalidate();
+            topPanel.repaint();
+        }
+        contentPanel.revalidate();
+        contentPanel.repaint();
+        animateCommandPanelOpen(position);
+    }
+
+    private void hideCommandPanelInline() {
+        if (commandPanelWrapper == null) {
+            return;
+        }
+        animateCommandPanelClose();
+    }
+
+    private void animateCommandPanelOpen(BottomPanelPosition position) {
+        if (commandPanelAnimator != null && commandPanelAnimator.isRunning()) {
+            commandPanelAnimator.stop();
+        }
+
+        int targetHeight = commandPanel.getPreferredSize().height;
+        commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), 0));
+        commandPanelWrapper.revalidate();
+
+        commandPanelAnimator = new Timer(10, null);
+        long start = System.currentTimeMillis();
+        commandPanelAnimator.addActionListener(e -> {
+            float progress = Math.min(1.0f, (System.currentTimeMillis() - start) / (float) COMMAND_PANEL_ANIMATION_DURATION);
+            progress = 1 - (float) Math.pow(1 - progress, 3);
+            int height = (int) (targetHeight * progress);
+            commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), height));
+            commandPanelWrapper.revalidate();
+            commandPanelWrapper.repaint();
+            if (progress >= 1f) {
+                commandPanelAnimator.stop();
+                commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), targetHeight));
+                commandPanelWrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, targetHeight));
+                commandPanelWrapper.revalidate();
+                commandPanelWrapper.repaint();
+            }
+        });
+        commandPanelAnimator.start();
+    }
+
+    private void animateCommandPanelClose() {
+        if (commandPanelAnimator != null && commandPanelAnimator.isRunning()) {
+            commandPanelAnimator.stop();
+        }
+
+        int startHeight = commandPanelWrapper.getHeight();
+        commandPanelAnimator = new Timer(10, null);
+        long start = System.currentTimeMillis();
+        commandPanelAnimator.addActionListener(e -> {
+            float progress = Math.min(1.0f, (System.currentTimeMillis() - start) / (float) COMMAND_PANEL_ANIMATION_DURATION);
+            progress = 1 - (float) Math.pow(1 - progress, 3);
+            int height = (int) (startHeight * (1 - progress));
+            commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), Math.max(0, height)));
+            commandPanelWrapper.revalidate();
+            commandPanelWrapper.repaint();
+            if (progress >= 1f) {
+                commandPanelAnimator.stop();
+                commandPanelWrapper.removeAll();
+                commandPanelWrapper.setPreferredSize(new Dimension(0, 0));
+                commandPanelWrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, 0));
+                commandPanelWrapper.setVisible(false);
+                commandPanelWrapper.revalidate();
+                commandPanelWrapper.repaint();
+            }
+        });
+        commandPanelAnimator.start();
+    }
+
+    private void setCommandPanelAtBottom(boolean bottom) {
+        this.commandPanelAtBottom = bottom;
+        if (commandPositionBottomItem != null) {
+            commandPositionBottomItem.setSelected(bottom);
+        }
+        if (showCommandInput) {
+            hideCommandPanelInline();
+            showCommandPanelInline(bottom ? BottomPanelPosition.BOTTOM : BottomPanelPosition.TOP);
+        }
+    }
+
+    private enum BottomPanelPosition {
+        TOP,
+        BOTTOM
     }
 
     public static NodeConsolePanel getInstance() {
@@ -1125,7 +1083,7 @@ public class NodeConsolePanel extends JPanel {
 
         contentPanel.add(toolBar, BorderLayout.PAGE_START);
 
-        JPanel bottomPanel = new JPanel(new BorderLayout());
+        bottomPanel = new JPanel(new BorderLayout());
         bottomPanel.setBorder(BorderFactory.createEmptyBorder(2, 2, 2, 2));
         contentPanel.add(bottomPanel, BorderLayout.PAGE_END);
 
@@ -1146,7 +1104,7 @@ public class NodeConsolePanel extends JPanel {
             }
         };
         commandLabel.setToolTipText("Command Input");
-        JTextField commandField = new JTextField();
+        commandField = new JTextField();
         commandField.setToolTipText("Enter node command (e.g. .help, .pause, .resume)");
         JButton sendCommandButton = new JButton("Send");
 
@@ -1194,7 +1152,8 @@ public class NodeConsolePanel extends JPanel {
         commandPanel.add(buttonPanel, BorderLayout.EAST);
 
         commandPanelWrapper = new JPanel(new BorderLayout());
-        bottomPanel.add(commandPanelWrapper, BorderLayout.NORTH);
+        commandPanelWrapper.setVisible(false);
+        commandPanelWrapper.setPreferredSize(new Dimension(0, 0));
         syncProgressBar = new JProgressBar(0, 100);
         syncProgressBar.setStringPainted(true);
         syncProgressBar.setFont(UIManager.getFont("Label.font"));
@@ -1348,6 +1307,14 @@ public class NodeConsolePanel extends JPanel {
         styleMenuComponent(showCommandItem);
         menuPanel.add(showCommandItem, "growx");
 
+        commandPositionBottomItem = new JCheckBox("Show Command Input above bottom panel");
+        commandPositionBottomItem.setSelected(commandPanelAtBottom);
+        commandPositionBottomItem.addActionListener(e -> {
+            setCommandPanelAtBottom(commandPositionBottomItem.isSelected());
+        });
+        styleMenuComponent(commandPositionBottomItem);
+        menuPanel.add(commandPositionBottomItem, "growx");
+
         showMetricsItem = new JCheckBox("Show Metrics Panel");
         showMetricsItem.setSelected(showMetricsPanel);
         showMetricsItem.addActionListener(e -> {
@@ -1416,9 +1383,10 @@ public class NodeConsolePanel extends JPanel {
         leftButtons.add(popOffToggle);
 
         // Use MigLayout for better dynamic resizing support
-        topPanel = new JPanel(new MigLayout("insets 0, gap 0, fillx, wrap 1", "[grow]", "[]0[]"));
+        topPanel = new JPanel(new MigLayout("insets 0, gap 0, fillx, wrap 1", "[grow]", "[]0[]0[]"));
         topPanel.add(toolBar, "growx");
         topPanel.add(metricsPanelWrapper, "growx");
+        topPanel.add(commandPanelWrapper, "growx");
 
         // Use MigLayout for infoPanel to allow precise vertical alignment
         infoPanel = new JPanel(
@@ -1728,13 +1696,7 @@ public class NodeConsolePanel extends JPanel {
                             LOGGER.warn("Error stopping metricsPanel animator", t);
                         }
                     }
-                    if (commandPanelAnimator != null) {
-                        try {
-                            commandPanelAnimator.stop();
-                        } catch (Throwable t) {
-                            LOGGER.warn("Error stopping commandPanel animator", t);
-                        }
-                    }
+                    hideCommandPanelInline();
                     if (menuPopupController != null && menuPopupController.isOpen()) {
                         try {
                             menuPopupController.hide();
@@ -2775,9 +2737,9 @@ public class NodeConsolePanel extends JPanel {
 
         // Apply Command Panel visibility
         if (showCommandInput) {
-            commandPanelWrapper.add(commandPanel, BorderLayout.CENTER);
+            showCommandPanelInline();
         } else {
-            commandPanelWrapper.setPreferredSize(new Dimension(0, 0));
+            hideCommandPanelInline();
         }
 
         // Revalidate the full content hierarchy (toolbar -> metricsPanelWrapper -> bottomPanel/commandPanelWrapper)
