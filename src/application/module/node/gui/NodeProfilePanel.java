@@ -71,8 +71,13 @@ public class NodeProfilePanel extends JPanel {
         toolbar = new NodeToolbar(profile);
 
         // Wrap infoBar in a responsive scroll pane so info chips are accessible when window is narrow
+        // The separator border is applied to the scroll pane (not NodeInfoBar) so it appears below the scrollbar
         ResponsiveToolbarScrollPane infoBarScrollPane = new ResponsiveToolbarScrollPane(infoBar,
-                new java.awt.Insets(2, 4, 2, 4));
+                new java.awt.Insets(2, 4, 0, 4));
+        infoBarScrollPane.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, GuiColors.getSeparator()),
+                BorderFactory.createEmptyBorder(0, 0, 2, 0)
+        ));
 
         // Toolbar now includes its own internal ResponsiveToolbarScrollPane (matching ConsolePanel pattern).
         // Only add a thin border spacer panel to separate toolbar from infoBar visually.

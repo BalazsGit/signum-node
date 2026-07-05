@@ -76,10 +76,7 @@ public class NodeInfoBar extends JPanel {
      */
     private void initialize() {
         setLayout(new FlowLayout(FlowLayout.LEFT, CHIP_GAP, 5));
-        setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, GuiColors.getSeparator()),
-                BorderFactory.createEmptyBorder(2, 4, 2, 4)
-        ));
+        setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
         setOpaque(true);
 
         // Create info chips
