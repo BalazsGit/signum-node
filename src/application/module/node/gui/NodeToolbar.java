@@ -254,6 +254,7 @@ public class NodeToolbar extends JPanel {
         };
         popOffButtonsPanel.setLayout(new BoxLayout(popOffButtonsPanel, BoxLayout.X_AXIS));
         popOffButtonsPanel.setOpaque(false);
+        popOffButtonsPanel.setBorder(null);
         popOffButtonsPanel.setMinimumSize(new Dimension(0, 0));
         popOffButtonsPanel.add(popOff10Button);
         popOffButtonsPanel.add(Box.createHorizontalStrut(5));
@@ -305,9 +306,11 @@ public class NodeToolbar extends JPanel {
         updatePopOffToggleIcon();
 
         // Calculate target dimensions
+        // Use a stable height from an existing toolbar button to prevent vertical jumping during animation
         Dimension naturalSize = popOffButtonsPanel.getLayout().preferredLayoutSize(popOffButtonsPanel);
         final int targetWidth = naturalSize.width;
-        final int targetHeight = Math.max(naturalSize.height, 25);
+        final int targetHeight = editConfButton != null ? editConfButton.getPreferredSize().height
+                : Math.max(naturalSize.height, 25);
         Container parent = popOffButtonsPanel.getParent();
 
         // Find scroll pane to keep it aligned to the right during animation
