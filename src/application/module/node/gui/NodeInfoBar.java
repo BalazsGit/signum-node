@@ -29,6 +29,7 @@ import java.util.Map;
  * Information bar displayed at the top of a NodeProfilePanel tab.
  * Shows key runtime information about the node profile in a horizontal strip:
  * - Profile name
+ * - Status icon (FontAwesome, dynamic size) with detailed hover tooltip
  * - Network type (Mainnet/Testnet) with color indicator
  * - Lifecycle state with icon
  * - API port
@@ -48,6 +49,7 @@ public class NodeInfoBar extends JPanel {
 
     private final NodeProfile profile;
     private JLabel profileNameLabel;
+    private JLabel statusIconLabel;
     private JLabel networkLabel;
     private JLabel stateLabel;
     private JLabel apiPortLabel;
@@ -83,6 +85,13 @@ public class NodeInfoBar extends JPanel {
         // Create info chips
         profileNameLabel = createInfoChip("Profile", "--",
                 GuiIcons.build(FontAwesome.USER, GuiIcons.sizeTiny(), GuiColors.getButtonIcon()));
+
+        // Status icon label - FontAwesome icon next to profile name representing node state
+        // with detailed hover tooltip. Size scales dynamically with font size.
+        statusIconLabel = new JLabel();
+        statusIconLabel.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
+        GuiFontManager.applyDefaultFont(statusIconLabel);
+
         networkLabel = createInfoChip("Network", "--",
                 GuiIcons.build(FontAwesome.GLOBE, GuiIcons.sizeTiny(), GuiColors.getButtonIcon()));
         stateLabel = createInfoChip("State", "--", null);
@@ -99,6 +108,7 @@ public class NodeInfoBar extends JPanel {
 
         // Add chips to panel
         add(profileNameLabel);
+        add(statusIconLabel);
         add(networkLabel);
         add(stateLabel);
         add(apiPortLabel);
@@ -193,7 +203,7 @@ public class NodeInfoBar extends JPanel {
             }
             boolean wsEnabled = Boolean.parseBoolean(profile.getProperty("API.WebSocketEnable"));
             updateLabel(websocketPortLabel, "WebSocket", wsEnabled ? wsPort : "Disabled",
-                    GuiIcons.build(FontAwesome.BOLT, GuiIcons.sizeTiny(), 
+                    GuiIcons.build(FontAwesome.BOLT, GuiIcons.sizeTiny(),
                         wsEnabled ? GuiColors.getButtonIcon() : GuiColors.getFaintText()));
 
             // Refresh state from lifecycle manager
@@ -212,21 +222,25 @@ public class NodeInfoBar extends JPanel {
             NodeLifecycleManager manager = NodeLifecycleManager.getInstance();
             NodeInstanceInfo info = manager.getProfileStatus(profile.getName());
 
+            NodeLifecycleState state = NodeLifecycleState.IDLE;
             String stateText = "IDLE";
             Icon stateIcon = null;
 
             if (info != null) {
-                NodeLifecycleState state = info.getState();
+                state = info.getState();
                 stateText = state.name();
                 stateIcon = stateIconFor(state);
             }
 
             updateLabel(stateLabel, "State", formatStateText(stateText), stateIcon);
+
+            // Update the status icon next to profile name with detailed tooltip
+            updateStatusIcon(state, stateText);
         });
     }
 
     /**
-     * Gets the appropriate icon for a lifecycle state.
+     * Gets the appropriate icon for a lifecycle state (for state chip).
      */
     private Icon stateIconFor(NodeLifecycleState state) {
         return switch (state) {
@@ -236,6 +250,59 @@ public class NodeInfoBar extends JPanel {
             case INITIALIZING, STOPPING -> GuiIcons.initializing(GuiIcons.sizeTiny());
             default -> null;
         };
+    }
+
+    /**
+     * Updates the status icon next to the profile name with a detailed tooltip.
+     * Each lifecycle state has a dedicated FontAwesome icon and descriptive tooltip.
+     * Icon size scales dynamically with the current font size via GuiIcons.sizeSmall().
+     */
+    private void updateStatusIcon(NodeLifecycleState state, String stateDescription) {
+        int size = GuiIcons.sizeSmall();
+        Icon icon = null;
+        String tooltip = null;
+
+        switch (state) {
+            case IDLE -> {
+                icon = GuiIcons.build(FontAwesome.CIRCLE_O, size, GuiColors.getFaintText());
+                tooltip = "IDLE: Profile exists but not initialized yet";
+            }
+            case INITIALIZING -> {
+                icon = GuiIcons.build(FontAwesome.SPINNER, size, new Color(255, 193, 7));
+                tooltip = "INITIALIZING: Loading configuration and preparing resources...";
+            }
+            case READY -> {
+                icon = GuiIcons.build(FontAwesome.CHECK_CIRCLE_O, size, new Color(100, 149, 237));
+                tooltip = "READY: Initialized and ready to start. Click Start to begin.";
+            }
+            case RUNNING -> {
+                icon = GuiIcons.build(FontAwesome.CIRCLE, size, GuiColors.getPeerActive());
+                tooltip = "RUNNING: Node is actively running, P2P active, serving API";
+            }
+            case PAUSED -> {
+                icon = GuiIcons.build(FontAwesome.PAUSE, size, new Color(103, 58, 183));
+                tooltip = "PAUSED: Synchronization paused by user command";
+            }
+            case STOPPING -> {
+                icon = GuiIcons.build(FontAwesome.SPINNER, size, new Color(255, 193, 7));
+                tooltip = "STOPPING: Graceful shutdown in progress...";
+            }
+            case STOPPED -> {
+                icon = GuiIcons.build(FontAwesome.STOP, size, GuiColors.getFaintText());
+                tooltip = "STOPPED: Node cleanly stopped. Can be restarted.";
+            }
+            case ERROR -> {
+                icon = GuiIcons.build(FontAwesome.EXCLAMATION_TRIANGLE, size, GuiColors.getContrastRed());
+                tooltip = "ERROR: Node failed. Reset or restart required.";
+            }
+            case WAITING_FOR_DATABASE -> {
+                icon = GuiIcons.build(FontAwesome.DATABASE, size, new Color(255, 193, 7));
+                tooltip = "WAITING_FOR_DATABASE: Retry loop active until database available";
+            }
+        }
+
+        statusIconLabel.setIcon(icon);
+        statusIconLabel.setToolTipText(tooltip);
     }
 
     /**
@@ -332,6 +399,8 @@ public class NodeInfoBar extends JPanel {
                 GuiFontManager.applyDefaultFont(label);
             }
         }
+        // Rebuild status icon with current font size after style refresh
+        refreshState();
         revalidate();
         repaint();
     }

@@ -319,11 +319,12 @@ public class NodePanel extends JPanel implements LifecycleListener {
     }
 
     /**
-     * Updates the tab icon based on the node state.
+     * Updates the tab icon and tooltip based on the node state.
      * Uses O(1) name-based lookup via profileNameToTabIndex map.
-     * Icons are only shown for active states (RUNNING, PAUSED, INITIALIZING, STOPPING, ERROR).
+     * Icons are shown for active states (RUNNING, PAUSED, INITIALIZING, STOPPING, ERROR).
      * Stopped/Ready/Idle profiles have no icon.
      * Icon sizes scale dynamically with the global UI font size.
+     * Tooltip shows the current node state description on hover.
      */
     private void updateTabIcon(String profileName, NodeLifecycleState state) {
         Integer tabIndex = profileNameToTabIndex.get(profileName);
@@ -332,7 +333,6 @@ public class NodePanel extends JPanel implements LifecycleListener {
         }
 
         Icon icon;
-        String titleSuffix = "";
 
         switch (state) {
             case RUNNING:
@@ -341,22 +341,37 @@ public class NodePanel extends JPanel implements LifecycleListener {
             case INITIALIZING:
             case STOPPING:
                 icon = GuiIcons.initializing(GuiIcons.sizeSmall());
-                titleSuffix = " \u23F3"; // Hourglass
                 break;
             case ERROR:
                 icon = GuiIcons.error(GuiIcons.sizeSmall());
-                titleSuffix = " \u26A0"; // Warning sign
                 break;
             case PAUSED:
                 icon = GuiIcons.paused(GuiIcons.sizeSmall());
+                break;
+            case READY:
+                icon = GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.CHECK_CIRCLE_O, GuiIcons.sizeTiny(), new Color(100, 149, 237));
+                break;
+            case STOPPED:
+                icon = GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.STOP, GuiIcons.sizeTiny(), new Color(150, 150, 150));
+                break;
+            case IDLE:
+                icon = GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.CIRCLE_O, GuiIcons.sizeTiny(), new Color(150, 150, 150));
+                break;
+            case WAITING_FOR_DATABASE:
+                icon = GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.DATABASE, GuiIcons.sizeSmall(), new Color(255, 193, 7));
                 break;
             default:
                 icon = null;
                 break;
         }
 
-        profileTabbedPane.setTitleAt(tabIndex, profileName + titleSuffix);
+        // Keep the profile name as the tab title (no Unicode suffixes)
+        profileTabbedPane.setTitleAt(tabIndex, profileName);
         profileTabbedPane.setIconAt(tabIndex, icon);
+        
+        // Set tooltip with node state information for hover display
+        String tooltip = "Profile: " + profileName + "\nNode State: " + state.getDescription();
+        profileTabbedPane.setToolTipTextAt(tabIndex, tooltip);
     }
 
     // ====================================================================

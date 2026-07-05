@@ -9,6 +9,7 @@ import application.utils.gui.ColorPaletteManager;
 import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
+import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
 import application.utils.gui.ResponsiveToolbarScrollPane;
@@ -69,6 +70,9 @@ public class AppearancePanel extends JPanel {
     private AppearanceProfile savedProfile;
     private boolean isProgrammaticChange = false;
     private boolean lastUnsavedStatus = false;
+
+    // GPU acceleration checkbox (requires restart to take effect)
+    private JCheckBox gpuAccelerationCheckBox;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(AppearancePanel.class);
 
@@ -211,6 +215,34 @@ public class AppearancePanel extends JPanel {
         tabbedPane.addTab("Color Settings", colorSettingsPanel);
 
         add(tabbedPane, BorderLayout.CENTER);
+
+        // GPU Acceleration section at the bottom
+        JPanel gpuPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 5));
+        gpuPanel.setOpaque(false);
+        gpuPanel.setBorder(BorderFactory.createEmptyBorder(8, 4, 4, 4));
+
+        gpuAccelerationCheckBox = new JCheckBox("GPU Acceleration (sun.java2d.opengl)");
+        gpuAccelerationCheckBox.setToolTipText(
+                "Enable GPU acceleration for Java 2D rendering. " +
+                "Requires application restart to take effect. " +
+                "When enabled, sets sun.java2d.opengl=true at startup.");
+        GuiFontManager.applyDefaultFont(gpuAccelerationCheckBox);
+
+        gpuAccelerationCheckBox.addItemListener(e -> {
+            saveGpuAccelerationSetting(gpuAccelerationCheckBox.isSelected());
+        });
+
+        // Load current GPU acceleration setting
+        gpuAccelerationCheckBox.setSelected(loadGpuAccelerationSetting());
+
+        gpuPanel.add(gpuAccelerationCheckBox);
+
+        // Add separator and GPU panel at SOUTH
+        JPanel southWrapper = new JPanel(new BorderLayout());
+        southWrapper.setOpaque(false);
+        southWrapper.add(new JSeparator(SwingConstants.HORIZONTAL), BorderLayout.NORTH);
+        southWrapper.add(gpuPanel, BorderLayout.CENTER);
+        add(southWrapper, BorderLayout.SOUTH);
 
         loadProfiles(profileComboBox);
     }
@@ -1077,6 +1109,77 @@ public class AppearancePanel extends JPanel {
     private Path getGuiSettingsPath() {
         String settingsDir = Props.SETTINGS_DIR.getDefaultValue();
         return PathUtils.resolvePath(settingsDir).resolve("gui-settings.json");
+    }
+
+    // ====================================================================
+    // GPU Acceleration setting persistence
+    // ====================================================================
+
+    /**
+     * Loads the GPU acceleration setting from gui-settings.json.
+     * Reads from nested "appearance.enableGPU" or root-level "enableGPU".
+     */
+    private boolean loadGpuAccelerationSetting() {
+        try {
+            Path settingsPath = getGuiSettingsPath();
+            if (Files.exists(settingsPath)) {
+                try (BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
+                    JsonObject settings = JsonParser.parseReader(reader).getAsJsonObject();
+                    // Try nested "appearance" object first
+                    if (settings.has("appearance") && settings.get("appearance").isJsonObject()) {
+                        JsonObject appearanceObj = settings.getAsJsonObject("appearance");
+                        if (appearanceObj.has("enableGPU")) {
+                            return appearanceObj.get("enableGPU").getAsBoolean();
+                        }
+                    }
+                    // Fallback to root level for backward compatibility
+                    if (settings.has("enableGPU")) {
+                        return settings.get("enableGPU").getAsBoolean();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Failed to load GPU acceleration setting", e);
+        }
+        return false; // Default: disabled
+    }
+
+    /**
+     * Saves the GPU acceleration setting to gui-settings.json.
+     * Stores in nested "appearance.enableGPU" for organization.
+     */
+    private void saveGpuAccelerationSetting(boolean enabled) {
+        try {
+            Path settingsPath = getGuiSettingsPath();
+            JsonObject settings;
+            if (Files.exists(settingsPath)) {
+                try (BufferedReader reader = Files.newBufferedReader(settingsPath, StandardCharsets.UTF_8)) {
+                    settings = JsonParser.parseReader(reader).getAsJsonObject();
+                }
+            } else {
+                settings = new JsonObject();
+            }
+
+            // Ensure nested "appearance" object exists
+            if (!settings.has("appearance") || !settings.get("appearance").isJsonObject()) {
+                settings.add("appearance", new JsonObject());
+            }
+            settings.getAsJsonObject("appearance").addProperty("enableGPU", enabled);
+
+            Gson gson = new GsonBuilder().setPrettyPrinting().create();
+            try (BufferedWriter writer = Files.newBufferedWriter(settingsPath, StandardCharsets.UTF_8)) {
+                writer.write(gson.toJson(settings));
+            }
+
+            LOGGER.info("GPU acceleration setting saved: {}", enabled);
+        } catch (Exception e) {
+            LOGGER.error("Failed to save GPU acceleration setting", e);
+            JOptionPane.showMessageDialog(this,
+                    "Error saving GPU acceleration setting: " + e.getMessage(),
+                    "Save Error", JOptionPane.ERROR_MESSAGE);
+            // Restore checkbox state on failure
+            gpuAccelerationCheckBox.setSelected(!enabled);
+        }
     }
 
     private boolean fontsMatch(Font a, Font b) {

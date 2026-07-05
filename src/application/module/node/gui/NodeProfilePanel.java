@@ -1,36 +1,46 @@
 package application.module.node.gui;
 
 import application.module.appearance.AppearanceModule;
+import application.module.node.BlockchainProcessor;
 import application.module.node.Signum;
 import application.module.node.gui.configuration.LoggerConfigurationPanel;
 import application.module.node.gui.configuration.NodeConfigurationPanel;
 import application.module.node.lifecycle.NodeLifecycleManager;
 import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.profile.NodeProfile;
+import application.module.node.props.PropertyService;
+import application.module.node.props.Props;
+import application.utils.gui.GuiColors;
 import application.utils.gui.GuiFontManager;
+import application.utils.gui.GuiIcons;
 import application.utils.gui.GuiUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import application.utils.gui.ResponsiveToolbarScrollPane;
+
+import java.awt.BorderLayout;
+import java.awt.Desktop;
+import java.io.File;
+import java.net.URI;
+import java.nio.file.Path;
+import java.util.Properties;
 
 import javax.swing.BorderFactory;
+import javax.swing.Icon;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTabbedPane;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
-import java.awt.BorderLayout;
-import java.util.Properties;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Profile panel for a single NodeProfile instance.
- * Acts as a JTabbedPane container with tabs for:
- * - Console (NodeConsolePanel)
- * - Configuration (NodeConfigurationPanel)
- * - Logging (LoggerConfigurationPanel)
- * 
- * Features an info bar at the top displaying node runtime information:
- * profile name, network type, lifecycle state, ports, and database info.
+ * Layout structure:
+ * - NORTH: NodeInfoBar (profile name, network, state, ports)
+ * - BELOW NORTH: NodeToolbar (action buttons: Start/Stop/Restart/Sync/etc.)
+ * - CENTER: JTabbedPane with Console, Configuration, Logging tabs
  */
 @SuppressWarnings("serial")
 public class NodeProfilePanel extends JPanel {
@@ -43,63 +53,73 @@ public class NodeProfilePanel extends JPanel {
     private final NodeConfigurationPanel configurationPanel;
     private final LoggerConfigurationPanel loggingPanel;
     private final NodeInfoBar infoBar;
+    private final NodeToolbar toolbar;
+    private final String confFolder;
 
-    /**
-     * Creates a new NodeProfilePanel for the given profile.
-     * 
-     * @param parentFrame The parent JFrame for dialogs
-     * @param profile     The NodeProfile to manage
-     */
+    /** Tracks sync pause state locally since BlockchainProcessor has no getter */
+    private boolean syncPaused = false;
+
     public NodeProfilePanel(JFrame parentFrame, NodeProfile profile) {
         this.parentFrame = parentFrame;
         this.profile = profile;
+        this.confFolder = determineConfFolder();
 
         setLayout(new BorderLayout());
         setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
-        // Create info bar at the top (NORTH)
         infoBar = new NodeInfoBar(profile);
-        add(infoBar, BorderLayout.NORTH);
+        toolbar = new NodeToolbar(profile);
 
-        // Create inner tabbed pane (CENTER)
+        // Wrap infoBar in a responsive scroll pane so info chips are accessible when window is narrow
+        ResponsiveToolbarScrollPane infoBarScrollPane = new ResponsiveToolbarScrollPane(infoBar,
+                new java.awt.Insets(2, 4, 2, 4));
+
+        // Toolbar now includes its own internal ResponsiveToolbarScrollPane (matching ConsolePanel pattern).
+        // Only add a thin border spacer panel to separate toolbar from infoBar visually.
+        JPanel toolbarWrapper = new JPanel(new BorderLayout());
+        toolbarWrapper.setOpaque(false);
+        toolbarWrapper.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+        toolbarWrapper.add(toolbar, BorderLayout.CENTER);
+
+        JPanel northPanel = new JPanel(new BorderLayout());
+        northPanel.setOpaque(false);
+        northPanel.add(infoBarScrollPane, BorderLayout.NORTH);
+        northPanel.add(toolbarWrapper, BorderLayout.SOUTH);
+        add(northPanel, BorderLayout.NORTH);
+
         innerTabbedPane = new JTabbedPane(SwingConstants.TOP);
         GuiFontManager.applyDefaultFont(innerTabbedPane);
-        // Apply application-wide tab layout policy from GuiManager
         GuiUtils.applyDefaultTabLayoutPolicy(innerTabbedPane);
 
-        // Determine conf folder from profile properties or use default
-        String confFolder = determineConfFolder();
-
-        // Create Console tab
         consolePanel = new NodeConsolePanel(parentFrame, profile);
+        // Wire callback so console panel can switch to Console tab when showing command input
+        consolePanel.setSwitchToConsoleAction(() -> switchToConsoleTab());
         innerTabbedPane.addTab("Console", consolePanel);
 
-        // Create Configuration tab
         configurationPanel = new NodeConfigurationPanel(
                 this::restartNode,
-                confFolder,
+                this.confFolder,
                 () -> {
-                }, // backAction - not needed in tab mode
-                null // switchAction - not needed in tab mode
+                },
+                null
         );
         innerTabbedPane.addTab("Configuration", configurationPanel);
 
-        // Create Logging tab
         loggingPanel = new LoggerConfigurationPanel(
                 this::restartNode,
-                confFolder,
+                this.confFolder,
                 () -> {
-                }, // backAction - not needed in tab mode
-                null, // switchAction - not needed in tab mode
-                null, // onLinkAction
+                },
+                null,
+                null,
                 () -> Signum.getActiveNodeProfile(),
                 () -> Signum.getActiveLoggingProfile()
         );
         innerTabbedPane.addTab("Logging", loggingPanel);
 
         add(innerTabbedPane, BorderLayout.CENTER);
+        wireToolbarCallbacks();
 
-        // Register for appearance updates
         AppearanceModule.registerAppearanceListener(() -> {
             GuiFontManager.applyDefaultFont(innerTabbedPane);
         });
@@ -107,91 +127,131 @@ public class NodeProfilePanel extends JPanel {
         LOGGER.info("Created NodeProfilePanel for profile: {}", profile.getName());
     }
 
-    /**
-     * Determines the configuration folder path from the profile properties.
-     * 
-     * @return The conf folder path, defaults to "conf/mainnet"
-     */
+    private void wireToolbarCallbacks() {
+        toolbar.setOnRestart(this::restartNode);
+        toolbar.setOnSyncToggle(() -> {
+            toggleSync();
+            toolbar.updateSyncIcon(syncPaused);
+        });
+        toolbar.setOpenPhoenix(() -> openWebUi("/phoenix"));
+        toolbar.setOpenClassic(() -> openWebUi("/classic"));
+        toolbar.setOpenApi(() -> openWebUi("/api-doc"));
+        toolbar.setOnEditConf(this::editConf);
+        toolbar.setOnPopOff10(() -> popOff(10));
+        toolbar.setOnPopOff100(() -> popOff(100));
+        toolbar.setOnDbCheck(() -> dbCheckAction());
+        // Wire hamburger menu button: delegate to console panel, passing toolbar's menuButton for popup positioning
+        toolbar.setOnMenuToggle(() -> consolePanel.toggleMenu(toolbar.getMenuButton()));
+    }
+
+    /** Copy from NodeConsolePanel.syncButtonAction */
+    public void toggleSync() {
+        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        if (blockchainProcessor != null) {
+            syncPaused = !syncPaused;
+            blockchainProcessor.setSyncPaused(syncPaused);
+        }
+    }
+
+    /** Copy from NodeConsolePanel.editConf */
+    public void editConf() {
+        Path nodeFolder = application.utils.io.PathUtils.resolvePath(confFolder).resolve("node");
+        Path path = nodeFolder.resolve(Signum.PROPERTIES_NAME);
+        if (!java.nio.file.Files.exists(path)) {
+            path = nodeFolder.resolve(Signum.DEFAULT_PROPERTIES_NAME);
+        }
+        File file = path.toFile();
+        if (!file.exists()) {
+            JOptionPane.showMessageDialog(this,
+                    "Could not find conf file: " + Signum.PROPERTIES_NAME + " or " + Signum.DEFAULT_PROPERTIES_NAME,
+                    "File not found", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        try {
+            Desktop.getDesktop().open(file);
+        } catch (java.io.IOException e) {
+            LOGGER.error("Could not open conf file with default editor", e);
+        }
+    }
+
+    /** Copy from NodeConsolePanel.openWebUi */
+    public void openWebUi(String path) {
+        try {
+            PropertyService propertyService = Signum.getPropertyService();
+            int port = propertyService.getInt(Props.API_PORT);
+            String httpPrefix = propertyService.getBoolean(Props.API_SSL) ? "https://" : "http://";
+            String address = httpPrefix + "localhost:" + port + path;
+            try {
+                Desktop.getDesktop().browse(new URI(address));
+            } catch (Exception e) {
+                LOGGER.error("Could not open browser", e);
+            }
+        } catch (Exception e) {
+            LOGGER.error("Could not access PropertyService", e);
+        }
+    }
+
+    /** Copy from NodeConsolePanel.popOff */
+    public void popOff(int count) {
+        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        if (blockchainProcessor == null) {
+            return;
+        }
+        int height = Signum.getBlockchain().getHeight();
+        int targetHeight = Math.max(0, height - count);
+        if (!blockchainProcessor.isSkipDbCheckOnManualPopOff()) {
+            blockchainProcessor.checkDatabaseStateRequest();
+        }
+        blockchainProcessor.popOffTo(targetHeight);
+    }
+
+    /** Copy from NodeConsolePanel.dbCheckAction */
+    public void dbCheckAction() {
+        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        if (blockchainProcessor == null) {
+            JOptionPane.showMessageDialog(this, "Blockchain processor not initialized.",
+                    "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        blockchainProcessor.checkDatabaseStateRequest();
+    }
+
     private String determineConfFolder() {
         Properties props = profile.getProperties();
-
-        // Check if the profile specifies a custom conf folder
         String network = props.getProperty("network", "mainnet");
         return "conf/" + network;
     }
 
-    /**
-     * Restarts the node for this profile.
-     */
     private void restartNode() {
         LOGGER.info("Restart requested for profile: {}", profile.getName());
-        // TODO: Implement actual restart logic
         if (consolePanel != null) {
             consolePanel.restartNode();
         }
-        // Refresh info bar after restart
         if (infoBar != null) {
             infoBar.refreshData();
         }
     }
 
-    /**
-     * Gets the NodeProfile associated with this panel.
-     * 
-     * @return The NodeProfile
-     */
-    public NodeProfile getProfile() {
-        return profile;
-    }
+    public NodeProfile getProfile() { return profile; }
+    public NodeConsolePanel getConsolePanel() { return consolePanel; }
+    public NodeConfigurationPanel getConfigurationPanel() { return configurationPanel; }
+    public LoggerConfigurationPanel getLoggingPanel() { return loggingPanel; }
+    public JTabbedPane getInnerTabbedPane() { return innerTabbedPane; }
+    public NodeInfoBar getInfoBar() { return infoBar; }
+    public NodeToolbar getToolbar() { return toolbar; }
 
     /**
-     * Gets the console panel for this profile.
-     * 
-     * @return The NodeConsolePanel
+     * Switches the inner tabbed pane to the Console tab.
+     * Used by NodeConsolePanel to ensure command panel animation is visible.
      */
-    public NodeConsolePanel getConsolePanel() {
-        return consolePanel;
+    public void switchToConsoleTab() {
+        int consoleIndex = innerTabbedPane.indexOfTab("Console");
+        if (consoleIndex >= 0 && innerTabbedPane.getSelectedIndex() != consoleIndex) {
+            innerTabbedPane.setSelectedIndex(consoleIndex);
+            LOGGER.debug("Switched to Console tab for panel visibility");
+        }
     }
 
-    /**
-     * Gets the configuration panel for this profile.
-     * 
-     * @return The NodeConfigurationPanel
-     */
-    public NodeConfigurationPanel getConfigurationPanel() {
-        return configurationPanel;
-    }
-
-    /**
-     * Gets the logging configuration panel for this profile.
-     * 
-     * @return The LoggerConfigurationPanel
-     */
-    public LoggerConfigurationPanel getLoggingPanel() {
-        return loggingPanel;
-    }
-
-    /**
-     * Gets the inner tabbed pane.
-     * 
-     * @return The JTabbedPane containing Console and Configuration tabs
-     */
-    public JTabbedPane getInnerTabbedPane() {
-        return innerTabbedPane;
-    }
-
-    /**
-     * Gets the info bar for this profile panel.
-     * 
-     * @return The NodeInfoBar displaying runtime information
-     */
-    public NodeInfoBar getInfoBar() {
-        return infoBar;
-    }
-
-    /**
-     * Stops the node for this profile.
-     */
     public void stopNode() {
         if (consolePanel != null) {
             consolePanel.stopNode();
@@ -199,60 +259,64 @@ public class NodeProfilePanel extends JPanel {
         LOGGER.info("Stop requested for profile: {}", profile.getName());
     }
 
-    /**
-     * Starts the node for this profile via NodeLifecycleManager.
-     */
     public void startNode() {
         NodeLifecycleManager.getInstance().startProfile(profile.getName());
         LOGGER.info("Start requested for profile: {}", profile.getName());
     }
 
-    // ====================================================================
-    // Lifecycle callback methods (push-based, called from NodePanel)
-    // ====================================================================
-
-    /**
-     * Called by NodePanel when the node's lifecycle state changes.
-     * Updates both the tab title and the info bar state display.
-     */
     public void onNodeStateChanged(NodeLifecycleState oldState, NodeLifecycleState newState) {
         SwingUtilities.invokeLater(() -> {
             String profileName = profile.getName();
             LOGGER.info("[{}] State change: {} -> {}", profileName, oldState, newState);
 
-            // Update tab title to reflect state
-            int tabIndex = innerTabbedPane.indexOfTab("Console");
-            if (tabIndex >= 0) {
-                String stateIcon = switch (newState) {
-                    case RUNNING -> "▶";
-                    case PAUSED -> "❚❚";
-                    case ERROR -> "⚠";
-                    case STOPPED -> "■";
-                    case WAITING_FOR_DATABASE -> "⟳";
-                    default -> "";
-                };
-                innerTabbedPane.setTitleAt(tabIndex, "Console" + (stateIcon.isEmpty() ? "" : " [" + stateIcon + "]"));
+            int consoleIndex = innerTabbedPane.indexOfTab("Console");
+            if (consoleIndex >= 0) {
+                // Use getDescription() instead of Unicode symbols to avoid square characters
+                String stateText = newState.getDescription();
+                innerTabbedPane.setTitleAt(consoleIndex,
+                        "Console" + (stateText.isEmpty() ? "" : " [" + stateText + "]"));
+                // Add tooltip with detailed state information for hover
+                innerTabbedPane.setToolTipTextAt(consoleIndex,
+                        "Node State: " + stateText + "\nProfile: " + profile.getName());
+                // Set state icon in the Console tab title so the user can see node state at a glance
+                Icon stateIcon = getStateIcon(newState);
+                innerTabbedPane.setIconAt(consoleIndex, stateIcon);
             }
 
-            // Update info bar to reflect new state
             if (infoBar != null) {
                 infoBar.refreshState();
+            }
+
+            if (toolbar != null) {
+                toolbar.updateButtonStates(newState);
             }
         });
     }
 
     /**
-     * Called by NodePanel when a status message is received.
+     * Returns a FontAwesome-based icon for the given node lifecycle state.
+     * Used to display state indicators in the inner JTabbedPane tab titles.
      */
+    private Icon getStateIcon(NodeLifecycleState state) {
+        int size = GuiIcons.sizeTiny();
+        return switch (state) {
+            case RUNNING -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.CIRCLE, size, GuiColors.getPeerActive());
+            case PAUSED -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.PAUSE, size, new java.awt.Color(103, 58, 183));
+            case ERROR -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.EXCLAMATION_TRIANGLE, size, GuiColors.getContrastRed());
+            case INITIALIZING, STOPPING -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.SPINNER, size, new java.awt.Color(255, 193, 7));
+            case READY -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.CHECK_CIRCLE_O, size, new java.awt.Color(100, 149, 237));
+            case STOPPED -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.STOP, size, GuiColors.getFaintText());
+            case IDLE -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.CIRCLE_O, size, GuiColors.getFaintText());
+            case WAITING_FOR_DATABASE -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.DATABASE, size, new java.awt.Color(255, 193, 7));
+        };
+    }
+
     public void onStatusMessage(String message) {
         SwingUtilities.invokeLater(() -> {
             LOGGER.debug("[{}] Status: {}", profile.getName(), message);
         });
     }
 
-    /**
-     * Called by NodePanel when an error occurs.
-     */
     public void onError(String errorMessage) {
         SwingUtilities.invokeLater(() -> {
             LOGGER.error("[{}] Error: {}", profile.getName(), errorMessage);
