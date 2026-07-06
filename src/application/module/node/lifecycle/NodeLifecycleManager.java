@@ -353,6 +353,234 @@ public class NodeLifecycleManager {
     }
 
     // ====================================================================
+    // Operating substate management (nested state machine within RUNNING)
+    // ====================================================================
+
+    /**
+     * Reports current sync progress. The manager evaluates hysteresis thresholds
+     * and updates the operating substate accordingly.
+     * <p>
+     * Hysteresis logic (moved from GUI layer to enforce proper architecture):
+     * <ul>
+     *   <li>SYNC_IDLE → SYNCING: missingBlocks > thresholdHigh (default: 10)</li>
+     *   <li>SYNCING → SYNC_IDLE: missingBlocks <= thresholdLow (default: 1)</li>
+     * </ul>
+     * This prevents rapid state oscillation when the node is near the sync boundary.
+     *
+     * @param profileName   the node profile to update
+     * @param missingBlocks number of blocks behind the network
+     */
+    public void reportSyncProgress(String profileName, long missingBlocks) {
+        NodeInstanceInfo info = getProfileStatus(profileName);
+        if (info == null) {
+            LOGGER.warn("Cannot report sync progress: profile '{}' not found", profileName);
+            return;
+        }
+
+        // Always update the missing blocks count for UI queries
+        info.setMissingBlocks(missingBlocks);
+
+        NodeOperatingState currentSubstate = info.getOperatingState();
+
+        // Don't change substate while paused (user or system)
+        if (currentSubstate.isPaused()) {
+            LOGGER.debug("Profile '{}' sync progress reported but ignored: currently {}", profileName, currentSubstate);
+            return;
+        }
+
+        NodeOperatingState newSubstate = evaluateSyncSubstate(info, missingBlocks);
+        if (newSubstate != currentSubstate) {
+            applyOperatingStateTransition(info, currentSubstate, newSubstate, missingBlocks);
+        }
+    }
+
+    /**
+     * Evaluates what the operating substate should be given the current state
+     * and missing block count. Uses hysteresis to prevent rapid oscillation.
+     */
+    private NodeOperatingState evaluateSyncSubstate(NodeInstanceInfo info, long missingBlocks) {
+        NodeOperatingState current = info.getOperatingState();
+        int thresholdHi = info.getHysteresisThresholdHi();
+        int thresholdLo = info.getHysteresisThresholdLo();
+
+        switch (current) {
+            case SYNC_IDLE:
+            case GENERATING:
+                // Transition to SYNCING only when significantly behind
+                return missingBlocks > thresholdHi ? NodeOperatingState.SYNCING : current;
+
+            case SYNCING:
+                // Transition back to SYNC_IDLE only when essentially caught up
+                return missingBlocks <= thresholdLo ? NodeOperatingState.SYNC_IDLE : current;
+
+            default:
+                // PAUSED_USER, PAUSED_SYSTEM should not reach here (guarded above)
+                return current;
+        }
+    }
+
+    /**
+     * Applies an operating substate transition with proper timing tracking
+     * and listener notification.
+     */
+    private void applyOperatingStateTransition(NodeInstanceInfo info,
+                                               NodeOperatingState oldSubstate,
+                                               NodeOperatingState newSubstate,
+                                               long missingBlocks) {
+        LOGGER.info("Profile '{}' operating state: {} → {} (missingBlocks={})",
+                info.getProfileName(), oldSubstate, newSubstate, missingBlocks);
+
+        if (newSubstate == NodeOperatingState.SYNCING) {
+            // Starting a sync session
+            info.setSyncStartTime(System.currentTimeMillis());
+            info.setStatusMessage("Syncing... " + missingBlocks + " blocks behind");
+        } else if (oldSubstate == NodeOperatingState.SYNCING && newSubstate == NodeOperatingState.SYNC_IDLE) {
+            // Finished a sync session - accumulate time
+            long sessionDuration = System.currentTimeMillis() - info.getSyncStartTime();
+            info.setAccumulatedSyncTimeMs(info.getAccumulatedSyncTimeMs() + sessionDuration);
+            info.setSyncEndTime(System.currentTimeMillis());
+            info.setStatusMessage("Fully synchronized");
+        }
+
+        if (info.setOperatingState(newSubstate)) {
+            notifyOperatingStateChanged(info, oldSubstate, newSubstate);
+        } else {
+            LOGGER.warn("Failed to transition operating state for '{}': {} → {}",
+                    info.getProfileName(), oldSubstate, newSubstate);
+        }
+    }
+
+    /**
+     * Pauses blockchain synchronization by user command (.pause or GUI button).
+     *
+     * @param profileName the node profile to pause
+     */
+    public void pauseSyncByUser(String profileName) {
+        NodeInstanceInfo info = getProfileStatus(profileName);
+        if (info == null) {
+            LOGGER.warn("Cannot pause sync: profile '{}' not found", profileName);
+            return;
+        }
+
+        NodeOperatingState current = info.getOperatingState();
+        if (current.isUserPaused()) {
+            LOGGER.debug("Profile '{}' already paused by user", profileName);
+            return;
+        }
+
+        NodeOperatingState previous = current;
+        if (info.setOperatingState(NodeOperatingState.PAUSED_USER)) {
+            // If we were syncing, accumulate the partial session time
+            if (current == NodeOperatingState.SYNCING) {
+                long partialSession = System.currentTimeMillis() - info.getSyncStartTime();
+                info.setAccumulatedSyncTimeMs(info.getAccumulatedSyncTimeMs() + partialSession);
+                info.setSyncEndTime(System.currentTimeMillis());
+            }
+            info.setStatusMessage("Sync paused by user");
+            notifyOperatingStateChanged(info, previous, NodeOperatingState.PAUSED_USER);
+            LOGGER.info("Profile '{}' sync paused by user", profileName);
+        }
+    }
+
+    /**
+     * Resumes blockchain synchronization after user-initiated pause.
+     *
+     * @param profileName the node profile to resume
+     */
+    public void resumeSyncByUser(String profileName) {
+        NodeInstanceInfo info = getProfileStatus(profileName);
+        if (info == null) {
+            LOGGER.warn("Cannot resume sync: profile '{}' not found", profileName);
+            return;
+        }
+
+        NodeOperatingState current = info.getOperatingState();
+        if (!current.isUserPaused()) {
+            LOGGER.debug("Profile '{}' not paused by user, current state: {}", profileName, current);
+            return;
+        }
+
+        // Resume to SYNCING; reportSyncProgress will correct if already caught up
+        if (info.setOperatingState(NodeOperatingState.SYNCING)) {
+            info.setSyncStartTime(System.currentTimeMillis());
+            info.setStatusMessage("Resuming sync...");
+            notifyOperatingStateChanged(info, current, NodeOperatingState.SYNCING);
+            LOGGER.info("Profile '{}' sync resumed by user", profileName);
+        }
+    }
+
+    /**
+     * Temporarily pauses synchronization for a system operation (DB check, pop-off, trim).
+     * The previous substate is saved so {@link #resumeSyncBySystem(String)} can restore it.
+     *
+     * @param profileName the node profile to pause
+     * @param reason      description of the system operation causing the pause (for logging)
+     */
+    public void pauseSyncBySystem(String profileName, String reason) {
+        NodeInstanceInfo info = getProfileStatus(profileName);
+        if (info == null) {
+            LOGGER.warn("Cannot system-pause sync: profile '{}' not found", profileName);
+            return;
+        }
+
+        NodeOperatingState current = info.getOperatingState();
+        if (current.isSystemPaused()) {
+            LOGGER.debug("Profile '{}' already system-paused", profileName);
+            return;
+        }
+
+        NodeOperatingState previous = current;
+        if (info.setOperatingState(NodeOperatingState.PAUSED_SYSTEM)) {
+            // If we were syncing, accumulate partial session
+            if (current == NodeOperatingState.SYNCING) {
+                long partialSession = System.currentTimeMillis() - info.getSyncStartTime();
+                info.setAccumulatedSyncTimeMs(info.getAccumulatedSyncTimeMs() + partialSession);
+                info.setSyncEndTime(System.currentTimeMillis());
+            }
+            info.setStatusMessage("System pause: " + reason);
+            notifyOperatingStateChanged(info, previous, NodeOperatingState.PAUSED_SYSTEM);
+            LOGGER.info("Profile '{}' sync paused by system: {}", profileName, reason);
+        }
+    }
+
+    /**
+     * Resumes synchronization after a system operation completes.
+     * Restores to the appropriate substate based on current sync lag.
+     *
+     * @param profileName the node profile to resume
+     */
+    public void resumeSyncBySystem(String profileName) {
+        NodeInstanceInfo info = getProfileStatus(profileName);
+        if (info == null) {
+            LOGGER.warn("Cannot system-resume sync: profile '{}' not found", profileName);
+            return;
+        }
+
+        NodeOperatingState current = info.getOperatingState();
+        if (!current.isSystemPaused()) {
+            LOGGER.debug("Profile '{}' not system-paused, current state: {}", profileName, current);
+            return;
+        }
+
+        // Restore based on current missing blocks (same logic as reportSyncProgress)
+        long missingBlocks = info.getMissingBlocks();
+        NodeOperatingState restoredState = evaluateSyncSubstate(info, missingBlocks);
+        // Temporarily set current to allow transition from PAUSED_SYSTEM
+        info.forceOperatingState(current); // no-op, just ensure consistency
+
+        if (info.setOperatingState(restoredState)) {
+            if (restoredState == NodeOperatingState.SYNCING) {
+                info.setSyncStartTime(System.currentTimeMillis());
+                info.setStatusMessage("Sync resumed... " + missingBlocks + " blocks behind");
+            } else {
+                info.setStatusMessage("Fully synchronized");
+            }
+            notifyOperatingStateChanged(info, current, restoredState);
+            LOGGER.info("Profile '{}' sync resumed by system: PAUSED_SYSTEM → {}", profileName, restoredState);
+        }
+    }
+
+    // ====================================================================
     // Observer pattern - Lifecycle listeners
     // ====================================================================
 
@@ -378,6 +606,18 @@ public class NodeLifecycleManager {
                 listener.onStateChanged(info, oldState, newState);
             } catch (Exception e) {
                 LOGGER.error("Error notifying listener {}", listener.getClass().getSimpleName(), e);
+            }
+        }
+    }
+
+    private void notifyOperatingStateChanged(NodeInstanceInfo info,
+                                             NodeOperatingState oldSubstate,
+                                             NodeOperatingState newSubstate) {
+        for (LifecycleListener listener : listeners) {
+            try {
+                listener.onOperatingStateChanged(info, oldSubstate, newSubstate);
+            } catch (Exception e) {
+                LOGGER.error("Error notifying operating state change to {}", listener.getClass().getSimpleName(), e);
             }
         }
     }
