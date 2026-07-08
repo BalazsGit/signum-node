@@ -7,6 +7,7 @@ import application.module.node.Generator;
 import application.module.node.ShutdownManager;
 import application.module.node.TransactionProcessorImpl;
 import application.module.node.assetexchange.AssetExchange;
+import application.module.node.db.sql.DbContext;
 import application.module.node.db.store.Dbs;
 import application.module.node.db.store.Stores;
 import application.module.node.fluxcapacitor.FluxCapacitor;
@@ -78,6 +79,9 @@ public final class NodeCoreContext {
     // =========================================================================
     // Infrastructure components
     // =========================================================================
+
+    /** Per-instance database context with isolated connection pool. */
+    private DbContext dbContext;
 
     /** Per-instance database connection pool manager. */
     private Stores stores;
@@ -244,6 +248,8 @@ public final class NodeCoreContext {
         this.fluxCapacitor = application.module.node.Signum.getFluxCapacitor();
         this.stores = application.module.node.Signum.getStores();
         this.dbs = application.module.node.Signum.getDbs();
+        // Capture the per-instance DbContext created by Db.init()
+        this.dbContext = application.module.node.db.sql.Db.getActiveContext();
     }
 
     /**
@@ -302,6 +308,15 @@ public final class NodeCoreContext {
 
     public Dbs getDbs() {
         return dbs;
+    }
+
+    /**
+     * Returns the per-instance {@link DbContext}.
+     *
+     * @return the database context for this node instance
+     */
+    public DbContext getDbContext() {
+        return dbContext;
     }
 
     public ThreadPool getThreadPool() {

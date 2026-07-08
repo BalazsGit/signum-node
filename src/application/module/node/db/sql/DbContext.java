@@ -5,13 +5,12 @@ import application.module.node.db.cache.DBCacheManagerImpl;
 import application.module.node.db.sql.dialects.DatabaseInstance;
 import application.module.node.db.sql.dialects.DatabaseInstanceFactory;
 import application.module.node.db.store.Dbs;
+import application.module.node.db.sql.SqlDbs;
 import application.module.node.props.PropertyService;
-import com.zaxxer.hikari.HikariConfig;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.exception.FlywayValidateException;
 import org.jooq.*;
 import org.jooq.conf.Settings;
-import org.jooq.conf.StatementType;
 import org.jooq.impl.DSL;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,7 +18,6 @@ import org.slf4j.LoggerFactory;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -27,102 +25,84 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 
 /**
- * Database utility that provides static access to the currently active
- * {@link DbContext}.
+ * Per-instance database context that encapsulates all state previously held
+ * as static fields in {@link Db}.
  * <p>
- * <h2>Backwards Compatibility</h2>
- * All static methods delegate to the active {@link DbContext} instance so that
- * existing code continues to work without changes. New code should prefer
- * direct {@link DbContext} access for true multi-instance support.
+ * Each {@code DbContext} manages its own:
+ * <ul>
+ *   <li>{@link DatabaseInstance} with isolated Hikari connection pool</li>
+ *   <li>{@link Flyway} migration instance</li>
+ *   <li>{@link DBCacheManagerImpl} cache manager</li>
+ *   <li>Thread-local transaction state (connection, caches, batches)</li>
+ * </ul>
  * </p>
  *
- * <h2>Migration Path</h2>
+ * <h2>Usage</h2>
  * <pre>{@code
- * // OLD (still works via static delegate):
- * Db.getConnection();
- * Db.beginTransaction();
- *
- * // NEW (instance-scoped, supports multiple profiles):
- * DbContext dbContext = nodeCoreContext.getDbContext();
- * dbContext.getConnection();
- * dbContext.beginTransaction();
+ * DbContext dbContext = new DbContext();
+ * dbContext.init(propertyService, cacheManager);
+ * // ... use dbContext.getConnection(), dbContext.beginTransaction(), etc.
+ * dbContext.shutdown();
  * }</pre>
  *
  * @since 4.0
  */
-public final class Db {
+public final class DbContext {
 
-    private static final Logger logger = LoggerFactory.getLogger(Db.class);
-
-    // ========================================================================
-    // Static delegate target
-    // ========================================================================
-
-    /**
-     * The currently active database context. Set during node initialization.
-     * Multiple nodes can each have their own DbContext; this field points to
-     * the last-initialized one for backwards compatibility.
-     */
-    private static volatile DbContext activeContext;
-
-    /**
-     * Sets the active {@link DbContext} that all static methods will delegate to.
-     * Call this once during node bootstrap.
-     *
-     * @param context the database context to activate
-     */
-    public static void setActiveContext(DbContext context) {
-        activeContext = context;
-    }
-
-    /**
-     * Returns the currently active {@link DbContext}.
-     *
-     * @throws IllegalStateException if no context has been set
-     */
-    public static DbContext getActiveContext() {
-        if (activeContext == null) {
-            throw new IllegalStateException(
-                    "No active DbContext. Call Db.setActiveContext() during initialization.");
-        }
-        return activeContext;
-    }
+    private static final Logger logger = LoggerFactory.getLogger(DbContext.class);
 
     // ========================================================================
-    // Legacy static state (kept for backwards compatibility bridge)
+    // Instance state (was static in Db.java)
     // ========================================================================
 
-    private static final ThreadLocal<Connection> localConnection = new ThreadLocal<>();
-    private static final ThreadLocal<Map<String, Map<SignumKey, Object>>> transactionCaches = new ThreadLocal<>();
-    private static final ThreadLocal<Map<String, Map<SignumKey, Object>>> transactionBatches = new ThreadLocal<>();
-    private static DBCacheManagerImpl dbCacheManager;
-    private static Flyway flyway;
-    private static DatabaseInstance databaseInstance;
+    /** Per-instance connection pool managed by the database dialect implementation. */
+    private DatabaseInstance databaseInstance;
 
-    private static Predicate<String> repairConfirmationHandler = msg -> {
+    /** Flyway migration runner for this instance. */
+    private Flyway flyway;
+
+    /** Cache manager associated with this database context. */
+    private DBCacheManagerImpl dbCacheManager;
+
+    /** Thread-local connection for transaction scoping. */
+    private final ThreadLocal<Connection> localConnection = new ThreadLocal<>();
+
+    /** Thread-local per-table cache inside a transaction. */
+    private final ThreadLocal<Map<String, Map<SignumKey, Object>>> transactionCaches = new ThreadLocal<>();
+
+    /** Thread-local per-table batch inside a transaction. */
+    private final ThreadLocal<Map<String, Map<SignumKey, Object>>> transactionBatches = new ThreadLocal<>();
+
+    /** Handler that confirms whether to auto-repair Flyway validation failures. */
+    private Predicate<String> repairConfirmationHandler = msg -> {
         logger.error(
                 "Database validation failed, but no confirmation handler is registered. Skipping automated repair.");
         return false;
     };
 
     // ========================================================================
-    // Legacy init (backwards-compat bridge)
+    // Construction
+    // ========================================================================
+
+    /** Creates a new, uninitialized context. Call {@link #init(PropertyService, DBCacheManagerImpl)} to bootstrap. */
+    public DbContext() {
+    }
+
+    // ========================================================================
+    // Lifecycle
     // ========================================================================
 
     /**
-     * Initialises the database using the legacy static API.
-     * <p>
-     * This method populates both the static fields AND creates a new
-     * {@link DbContext} so that new code path also works.
-     * </p>
+     * Initialises the database context: creates the dialect-specific instance,
+     * runs Flyway migrations, and stores the cache manager reference.
      *
      * @param propertyService  resolved properties for this profile
      * @param dbCacheManager   cache manager to associate with this context
      */
-    public static void init(PropertyService propertyService, DBCacheManagerImpl dbCacheManager) {
+    public void init(PropertyService propertyService, DBCacheManagerImpl dbCacheManager) {
         try {
-            Db.dbCacheManager = dbCacheManager;
-            Db.databaseInstance = DatabaseInstanceFactory.createInstance(propertyService);
+            this.dbCacheManager = dbCacheManager;
+            this.databaseInstance = DatabaseInstanceFactory.createInstance(propertyService);
             logger.info("Using SQL Backend with Dialect {} - Version {}", databaseInstance.getDialect().getName(),
                     getDatabaseVersion());
 
@@ -130,7 +110,7 @@ public final class Db {
             String sqlMigrations = databaseInstance.getMigrationSqlScriptPath();
             logger.info("Flyway scanning locations: Java: [{}], SQL: [{}]", javaMigrations, sqlMigrations);
 
-            HikariConfig config = databaseInstance.getConfig();
+            var config = databaseInstance.getConfig();
             flyway = Flyway.configure()
                     .dataSource(config.getJdbcUrl(), config.getUsername(), config.getPassword())
                     .baselineOnMigrate(true)
@@ -158,26 +138,22 @@ public final class Db {
             logger.info("Running flyway migration");
             flyway.migrate();
             databaseInstance.onStartup();
-
-            // Also create and set a DbContext instance for new code paths
-            DbContext dbContext = new DbContext();
-            dbContext.init(propertyService, dbCacheManager);
-            setActiveContext(dbContext);
-
         } catch (Exception e) {
             throw new RuntimeException(e.toString(), e);
         }
     }
 
-    public static void setRepairConfirmationHandler(Predicate<String> handler) {
+    /**
+     * Sets a custom handler that is invoked when Flyway validation fails.
+     *
+     * @param handler returns {@code true} to authorise automatic repair
+     */
+    public void setRepairConfirmationHandler(Predicate<String> handler) {
         repairConfirmationHandler = handler;
-        // Also propagate to active context if available
-        if (activeContext != null) {
-            activeContext.setRepairConfirmationHandler(handler);
-        }
     }
 
-    public static void clean() {
+    /** Drops and re-creates the schema (development utility). */
+    public void clean() {
         try {
             flyway.clean();
             flyway.migrate();
@@ -186,48 +162,49 @@ public final class Db {
         }
     }
 
-    private Db() {
-    } // never
-
-    // ========================================================================
-    // Static delegates to active DbContext (backwards compatibility)
-    // ========================================================================
-
-    public static Dbs getDbsByDatabaseType() {
-        if (activeContext != null) {
-            return activeContext.getDbsByDatabaseType();
-        }
-        return new application.module.node.db.sql.SqlDbs();
-    }
-
-    public static void analyzeTables() {
-        // currently no-op
-    }
-
-    public static void shutdown() {
-        if (activeContext != null) {
-            activeContext.shutdown();
-        }
-        // Also shutdown legacy static state if it was used directly
+    /**
+     * Gracefully shuts down this database context, closing the connection pool.
+     */
+    public void shutdown() {
         Throwable firstException = null;
-        if (databaseInstance != null && (activeContext == null ||
-                activeContext.getDatabaseInstance() != databaseInstance)) {
+        if (databaseInstance != null) {
             try {
                 databaseInstance.onShutdown();
             } catch (Throwable t) {
-                logger.error("Error shutting down legacy database instance", t);
+                logger.error("Error shutting down database instance", t);
                 firstException = t;
             }
         }
+        // Clear all ThreadLocals to prevent memory leaks
+        localConnection.remove();
+        transactionCaches.remove();
+        transactionBatches.remove();
         if (firstException != null) {
             if (firstException instanceof RuntimeException) {
                 throw (RuntimeException) firstException;
             }
-            throw new RuntimeException("Error during Db shutdown", firstException);
+            throw new RuntimeException("Error during DbContext shutdown", firstException);
         }
     }
 
-    private static void executeStatement(String statement) {
+    // ========================================================================
+    // Database access helpers
+    // ========================================================================
+
+    /**
+     * Returns the {@link Dbs} implementation for the current dialect.
+     */
+    public Dbs getDbsByDatabaseType() {
+        return new SqlDbs();
+    }
+
+    /** Currently a no-op placeholder for future query analysis support. */
+    public void analyzeTables() {
+        // currently no-op
+    }
+
+    /** Executes a raw SQL statement (internal utility). */
+    private void executeStatement(String statement) {
         try {
             Connection con = databaseInstance.getDataSource().getConnection();
             Statement stmt = con.createStatement();
@@ -237,25 +214,25 @@ public final class Db {
         }
     }
 
-    public static void backup(String filename) {
-        if (activeContext != null) {
-            activeContext.backup(filename);
-        } else {
-            logger.error("Backup not yet implemented for {}", databaseInstance.getDialect());
-        }
+    /** Backup support (not yet implemented for SQL backends). */
+    public void backup(String filename) {
+        logger.error("Backup not yet implemented for {}", databaseInstance.getDialect());
     }
 
-    private static Connection getPooledConnection() throws SQLException {
-        if (activeContext != null) {
-            return activeContext.getConnection();
-        }
+    // ========================================================================
+    // Connection management
+    // ========================================================================
+
+    /** Retrieves a connection from the Hikari pool. */
+    private Connection getPooledConnection() throws SQLException {
         return databaseInstance.getDataSource().getConnection();
     }
 
-    public static Connection getConnection() throws SQLException {
-        if (activeContext != null) {
-            return activeContext.getConnection();
-        }
+    /**
+     * Returns the current thread's transaction connection if one exists,
+     * otherwise a new pooled connection with auto-commit enabled.
+     */
+    public Connection getConnection() throws SQLException {
         Connection con = localConnection.get();
         if (con != null) {
             return con;
@@ -267,22 +244,22 @@ public final class Db {
         return con;
     }
 
-    public static <T> T fetchWithDSLContext(Function<DSLContext, T> function) {
-        if (activeContext != null) {
-            return activeContext.fetchWithDSLContext(function);
-        }
+    // ========================================================================
+    // JOOQ DSL context helpers
+    // ========================================================================
+
+    /** Executes a function inside a fresh {@link DSLContext} and returns the result. */
+    public <T> T fetchWithDSLContext(Function<DSLContext, T> function) {
         return function.apply(getDSLContext());
     }
 
-    public static void useDSLContext(Consumer<DSLContext> consumer) {
-        if (activeContext != null) {
-            activeContext.useDSLContext(consumer);
-        } else {
-            consumer.accept(getDSLContext());
-        }
+    /** Provides a {@link DSLContext} to the given consumer. */
+    public void useDSLContext(Consumer<DSLContext> consumer) {
+        consumer.accept(getDSLContext());
     }
 
-    private static DSLContext getDSLContext() {
+    /** Creates a {@link DSLContext} bound to the current transaction or pool. */
+    private DSLContext getDSLContext() {
         Connection con = localConnection.get();
         Settings settings = new Settings();
         settings.setRenderSchema(Boolean.FALSE);
@@ -294,7 +271,12 @@ public final class Db {
         }
     }
 
-    static <V> Map<SignumKey, V> getCache(String tableName) {
+    // ========================================================================
+    // Transaction-scoped cache / batch access
+    // ========================================================================
+
+    /** Returns the per-table cache map for the current transaction. */
+    <V> Map<SignumKey, V> getCache(String tableName) {
         if (!isInTransaction()) {
             throw new IllegalStateException("Not in transaction");
         }
@@ -302,7 +284,8 @@ public final class Db {
         return (Map<SignumKey, V>) transactionCaches.get().computeIfAbsent(tableName, k -> new LinkedHashMap<>());
     }
 
-    static <V> Map<SignumKey, V> getBatch(String tableName) {
+    /** Returns the per-table batch map for the current transaction. */
+    <V> Map<SignumKey, V> getBatch(String tableName) {
         if (!isInTransaction()) {
             throw new IllegalStateException("Not in transaction");
         }
@@ -310,24 +293,22 @@ public final class Db {
         return (Map<SignumKey, V>) transactionBatches.get().computeIfAbsent(tableName, k -> new LinkedHashMap<>());
     }
 
-    public static boolean isInTransaction() {
-        if (activeContext != null) {
-            return activeContext.isInTransaction();
-        }
+    /** Returns {@code true} if the current thread is inside an active transaction. */
+    public boolean isInTransaction() {
         return localConnection.get() != null;
     }
 
-    public static SQLDialect getDialect() {
-        if (activeContext != null) {
-            return activeContext.getDialect();
-        }
+    /** Returns the SQL dialect in use. */
+    public SQLDialect getDialect() {
         return getDSLContext().dialect();
     }
 
-    public static Connection beginTransaction() {
-        if (activeContext != null) {
-            return activeContext.beginTransaction();
-        }
+    // ========================================================================
+    // Transaction lifecycle
+    // ========================================================================
+
+    /** Begins a new transaction on the current thread. */
+    public Connection beginTransaction() {
         if (localConnection.get() != null) {
             throw new IllegalStateException("Transaction already in progress");
         }
@@ -343,11 +324,8 @@ public final class Db {
         }
     }
 
-    public static void commitTransaction() {
-        if (activeContext != null) {
-            activeContext.commitTransaction();
-            return;
-        }
+    /** Commits the current transaction. */
+    public void commitTransaction() {
         Connection con = localConnection.get();
         if (con == null) {
             throw new IllegalStateException("Not in transaction");
@@ -359,11 +337,8 @@ public final class Db {
         }
     }
 
-    public static void rollbackTransaction() {
-        if (activeContext != null) {
-            activeContext.rollbackTransaction();
-            return;
-        }
+    /** Rolls back the current transaction and flushes caches. */
+    public void rollbackTransaction() {
         Connection con = localConnection.get();
         if (con == null) {
             throw new IllegalStateException("Not in transaction");
@@ -378,11 +353,8 @@ public final class Db {
         dbCacheManager.flushCache();
     }
 
-    public static void endTransaction() {
-        if (activeContext != null) {
-            activeContext.endTransaction();
-            return;
-        }
+    /** Ends the current transaction, releasing all thread-local state. */
+    public void endTransaction() {
         Connection con = localConnection.get();
         if (con == null) {
             throw new IllegalStateException("Not in transaction");
@@ -395,11 +367,12 @@ public final class Db {
         DbUtils.close(con);
     }
 
-    public static void optimizeTable(String tableName) {
-        if (activeContext != null) {
-            activeContext.optimizeTable(tableName);
-            return;
-        }
+    // ========================================================================
+    // Maintenance
+    // ========================================================================
+
+    /** Optimizes / vacuums the given table (dialect-specific). */
+    public void optimizeTable(String tableName) {
         useDSLContext(ctx -> {
             try {
                 switch (ctx.dialect()) {
@@ -420,7 +393,12 @@ public final class Db {
         });
     }
 
-    private static String getDatabaseVersion() {
+    // ========================================================================
+    // Diagnostics
+    // ========================================================================
+
+    /** Returns the human-readable database version string. */
+    private String getDatabaseVersion() {
         String version = "N/A";
         try {
             DSLContext ctx = getDSLContext();
@@ -437,5 +415,15 @@ public final class Db {
             logger.warn("Failed to fetch version");
         }
         return version;
+    }
+
+    /** Returns the underlying {@link DatabaseInstance}. */
+    public DatabaseInstance getDatabaseInstance() {
+        return databaseInstance;
+    }
+
+    /** Returns the associated cache manager. */
+    public DBCacheManagerImpl getCacheManager() {
+        return dbCacheManager;
     }
 }
