@@ -1,11 +1,14 @@
 package application.module.node.lifecycle;
 
-import application.module.node.Signum;
 import application.module.node.profile.NodeProfile;
 import application.module.node.profile.ProfileConfig;
+import application.module.node.instance.NodeCoreContext;
+import application.module.node.instance.NodeCoreContextBuilder;
+import application.module.node.instance.NodeCoreContextManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -48,22 +51,6 @@ public class NodeLifecycleManager {
             instance = new NodeLifecycleManager();
         }
         return instance;
-    }
-
-    /**
-     * Resets the singleton. Use only for testing.
-     */
-    public static synchronized void resetInstance() {
-        if (instance != null) {
-            instance.getAllProfiles().forEach(info -> {
-                try {
-                    instance.stopProfile(info.getProfileName());
-                } catch (Exception e) {
-                    LOGGER.warn("Failed to stop profile {} during reset", info.getProfileName(), e);
-                }
-            });
-        }
-        instance = null;
     }
 
     // ====================================================================
@@ -143,7 +130,10 @@ public class NodeLifecycleManager {
     }
 
     /**
-     * Starts the node for a profile. This delegates to Signum core.
+     * Starts the node for a profile using NodeCoreContext.
+     * The actual initialization runs asynchronously in a background thread to
+     * avoid blocking the caller (e.g., GUI). Lifecycle listeners are notified
+     * when startup completes or fails.
      */
     public void startProfile(String profileName) {
         NodeInstanceInfo info = getProfileStatus(profileName);
@@ -175,33 +165,45 @@ public class NodeLifecycleManager {
         info.setStatusMessage("Starting node...");
         info.markStarted();
 
-        try {
-            // Start Signum in a background thread - only the first call actually
-            // initializes
-            NodeProfile profile = NodeProfile.loadByName(profileName);
-            if (profile != null) {
-                String confFolder = profile.getProperty("conf.folder", "conf");
-                String[] args = new String[] { "--c", confFolder };
-
-                Thread startThread = new Thread(() -> Signum.main(args), "Node-" + profileName);
-                startThread.setDaemon(true);
-                startThread.start();
-            }
-
-            info.setStatusMessage("Running");
-            notifyStatusMessage(info, "Node started successfully");
-            LOGGER.info("Profile '{}' started", profileName);
-        } catch (Exception e) {
-            LOGGER.error("Failed to start profile '{}'", profileName, e);
-            info.setState(NodeLifecycleState.ERROR);
-            info.setErrorMessage(e.getMessage());
-            notifyStateChanged(info, NodeLifecycleState.RUNNING, NodeLifecycleState.ERROR);
-            notifyError(info, e.getMessage());
+        // Resolve profile configuration (final for lambda capture)
+        final String confFolderPath;
+        NodeProfile profile = NodeProfile.loadByName(profileName);
+        if (profile != null) {
+            confFolderPath = profile.getProperty("conf.folder", "conf");
+        } else {
+            confFolderPath = "conf";
         }
+
+        // Build the NodeCoreContext asynchronously to avoid blocking the caller
+        // (e.g., GUI thread). Use a dedicated daemon thread.
+        Thread starterThread = new Thread(() -> {
+            try {
+                NodeCoreContext context = new NodeCoreContextBuilder(profileName, Paths.get(confFolderPath)).build();
+                context.start();
+
+                // Register with the global manager and store reference in info
+                NodeCoreContextManager.getInstance().register(profileName, context);
+                info.setCoreContext(context);
+
+                info.setStatusMessage("Running");
+                notifyStatusMessage(info, "Node started successfully");
+                LOGGER.info("Profile '{}' started with NodeCoreContext", profileName);
+            } catch (Exception e) {
+                LOGGER.error("Failed to start profile '{}'", profileName, e);
+                info.setState(NodeLifecycleState.ERROR);
+                info.setErrorMessage(e.getMessage());
+                notifyStateChanged(info, NodeLifecycleState.RUNNING, NodeLifecycleState.ERROR);
+                notifyError(info, e.getMessage());
+            }
+        }, "Node-Starter-" + profileName);
+        starterThread.setDaemon(true);
+        starterThread.start();
     }
 
     /**
      * Stops the node for a profile gracefully.
+     * Delegates to the NodeCoreContext.stop() if a context exists,
+     * otherwise performs a no-op (profile was never truly started).
      */
     public void stopProfile(String profileName) {
         NodeInstanceInfo info = getProfileStatus(profileName);
@@ -220,7 +222,15 @@ public class NodeLifecycleManager {
         info.setStatusMessage("Stopping...");
 
         try {
-            Signum.shutdownNode();
+            NodeCoreContext context = info.getCoreContext();
+            if (context != null) {
+                context.stop();
+                NodeCoreContextManager.getInstance().unregister(profileName);
+                info.setCoreContext(null);
+            } else {
+                LOGGER.debug("Profile '{}' had no running context, skipping shutdown", profileName);
+            }
+
             info.setState(NodeLifecycleState.STOPPED);
             info.markStopped();
             info.setStatusMessage("Stopped");
@@ -598,6 +608,29 @@ public class NodeLifecycleManager {
      */
     public void removeListener(LifecycleListener listener) {
         listeners.remove(listener);
+    }
+
+    /**
+     * Resets the singleton. Use only for testing.
+     * Only stops profiles that have an active NodeCoreContext (i.e., were truly started).
+     * Profiles that were merely registered but never started are safely ignored.
+     */
+    public static synchronized void resetInstance() {
+        if (instance != null) {
+            instance.getAllProfiles().forEach(info -> {
+                try {
+                    // Only stop profiles with an active context to avoid NPE
+                    // when Signum was never initialized
+                    if (info.getCoreContext() != null) {
+                        instance.stopProfile(info.getProfileName());
+                    }
+                } catch (Exception e) {
+                    LOGGER.warn("Failed to stop profile {} during reset", info.getProfileName(), e);
+                }
+            });
+        }
+        instance = null;
+        NodeCoreContextManager.resetInstance();
     }
 
     private void notifyStateChanged(NodeInstanceInfo info, NodeLifecycleState oldState, NodeLifecycleState newState) {

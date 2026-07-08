@@ -20,13 +20,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Unit tests for operating substate management in {@link NodeLifecycleManager}.
  * Follows AAA pattern (Arrange-Act-Assert).
- *
- * TODO: Fix setUp/tearDown - Currently 2 tests fail because resetInstance() calls
- * Signum.shutdownNode() which requires Signum.logger to be initialized. The logger
- * is null in test environment causing NPE. This needs to be fixed in the production
- * code by making resetInstance() safer (e.g., checking if profiles were actually
- * started before calling stopProfile). Returning to this after BlockchainProcessor
- * integration is complete.
  */
 class NodeLifecycleManagerSubstateTest {
 
@@ -38,13 +31,7 @@ class NodeLifecycleManagerSubstateTest {
 
     @BeforeEach
     void setUp() {
-        // TODO: resetInstance() causes NPE in tearDown because Signum.logger is null.
-        // Remove this call once resetInstance() is fixed to only stop started profiles.
-        try {
-            NodeLifecycleManager.resetInstance();
-        } catch (Exception ignored) {
-            // Suppress NPE from Signum.shutdownNode in test environment
-        }
+        NodeLifecycleManager.resetInstance();
         manager = NodeLifecycleManager.getInstance();
         manager.registerProfile(TEST_PROFILE);
         listener = new TestListener();
@@ -53,14 +40,9 @@ class NodeLifecycleManagerSubstateTest {
 
     @AfterEach
     void tearDown() {
-        // TODO: resetInstance() calls stopProfile on all registered profiles including
-        // those never started, triggering Signum.shutdownNode() NPE. Fix in production
-        // code to skip non-started profiles. For now, suppress the exception.
-        try {
-            NodeLifecycleManager.resetInstance();
-        } catch (Exception ignored) {
-            // Ignore NPE from Signum.logger being null in test environment
-        }
+        // resetInstance() now safely skips profiles that were never started
+        // (no active coreContext), so no need for try-catch suppression.
+        NodeLifecycleManager.resetInstance();
     }
 
     // --- reportSyncProgress hysteresis tests ---

@@ -1,5 +1,7 @@
 package application.module.node.lifecycle;
 
+import application.module.node.instance.NodeCoreContext;
+
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -39,6 +41,10 @@ public class NodeInstanceInfo {
     private volatile int hysteresisThresholdHi = 10;
     /** Lower threshold: SYNCING -> SYNC_IDLE when missingBlocks drops to or below this (default: 1) */
     private volatile int hysteresisThresholdLo = 1;
+
+    // --- NodeCoreContext reference ---
+    /** Reference to the running NodeCoreContext for this profile (null if not started) */
+    private volatile NodeCoreContext coreContext;
 
     public NodeInstanceInfo(String profileName) {
         this.profileName = profileName;
@@ -250,6 +256,23 @@ public class NodeInstanceInfo {
         this.hysteresisThresholdLo = hysteresisThresholdLo;
     }
 
+    // --- NodeCoreContext accessors ---
+
+    /**
+     * Gets the NodeCoreContext for this profile instance.
+     * Returns null if the profile has not been started yet.
+     */
+    public NodeCoreContext getCoreContext() {
+        return coreContext;
+    }
+
+    /**
+     * Sets the NodeCoreContext reference when the profile is started.
+     */
+    public void setCoreContext(NodeCoreContext coreContext) {
+        this.coreContext = coreContext;
+    }
+
     // --- Computed sync duration helpers ---
 
     /**
@@ -283,6 +306,7 @@ public class NodeInstanceInfo {
                 ", apiPort=" + apiPort +
                 ", p2pPort=" + p2pPort +
                 ", missingBlocks=" + missingBlocks +
+                ", coreContext=" + (coreContext != null ? "present" : "null") +
                 '}';
     }
 }
