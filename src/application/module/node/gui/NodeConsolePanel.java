@@ -96,6 +96,7 @@ import org.apache.commons.cli.DefaultParser;
 
 import application.module.node.Signum;
 import application.module.node.BlockchainProcessor;
+import application.module.node.instance.NodeCoreContext;
 import application.module.node.Constants;
 import application.module.node.Block;
 import application.module.node.peer.Peer;
@@ -136,6 +137,37 @@ public class NodeConsolePanel extends JPanel {
     private static final Logger LOGGER = LoggerFactory.getLogger(NodeConsolePanel.class);
 
     private static String[] args;
+
+    /**
+     * Per-instance NodeCoreContext reference injected by NodeProfilePanel.
+     * Provides access to BlockchainProcessor, PropertyService, DbContext, etc.
+     * for this specific node profile, replacing static Signum.getXxx() calls.
+     * May be null in legacy single-instance mode or before the node starts.
+     */
+    private NodeCoreContext nodeContext;
+
+    /**
+     * Injects the per-instance NodeCoreContext into this console panel.
+     * Called by NodeProfilePanel after construction so that all node component
+     * access goes through the instance context rather than static Signum calls.
+     *
+     * @param context the node core context for this profile (may be null)
+     */
+    public void setNodeContext(NodeCoreContext context) {
+        this.nodeContext = context;
+    }
+
+    /**
+     * Returns the injected NodeCoreContext, or falls back to the legacy
+     * static bridge via NodeCoreContextManager.getActive() if not set.
+     */
+    NodeCoreContext getNodeContext() {
+        if (nodeContext != null) {
+            return nodeContext;
+        }
+        // Fallback: try to get from manager for backwards compatibility
+        return application.module.node.instance.NodeCoreContextManager.getInstance().getActive();
+    }
 
     private static void applyFontRecursively(Component comp, Font font) {
         GuiFontManager.applyFontToTree(comp, font);
