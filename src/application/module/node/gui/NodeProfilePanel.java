@@ -5,6 +5,7 @@ import application.module.node.BlockchainProcessor;
 import application.module.node.Signum;
 import application.module.node.gui.configuration.LoggerConfigurationPanel;
 import application.module.node.gui.configuration.NodeConfigurationPanel;
+import application.module.node.instance.NodeCoreContext;
 import application.module.node.lifecycle.NodeLifecycleManager;
 import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.profile.NodeProfile;
@@ -41,6 +42,10 @@ import org.slf4j.LoggerFactory;
  * - NORTH: NodeInfoBar (profile name, network, state, ports)
  * - BELOW NORTH: NodeToolbar (action buttons: Start/Stop/Restart/Sync/etc.)
  * - CENTER: JTabbedPane with Console, Configuration, Logging tabs
+ * <p>
+ * Uses constructor-injected {@link NodeCoreContext} for per-instance access to
+ * BlockchainProcessor, PropertyService, Blockchain, etc., replacing the previous
+ * static {@code Signum.getXxx()} calls.
  */
 @SuppressWarnings("serial")
 public class NodeProfilePanel extends JPanel {
@@ -48,6 +53,8 @@ public class NodeProfilePanel extends JPanel {
 
     private final JFrame parentFrame;
     private final NodeProfile profile;
+    /** Per-instance node context (may be null if the node has not been started yet). */
+    private final NodeCoreContext context;
     private final JTabbedPane innerTabbedPane;
     private final NodeConsolePanel consolePanel;
     private final NodeConfigurationPanel configurationPanel;
@@ -59,9 +66,19 @@ public class NodeProfilePanel extends JPanel {
     /** Tracks sync pause state locally since BlockchainProcessor has no getter */
     private boolean syncPaused = false;
 
-    public NodeProfilePanel(JFrame parentFrame, NodeProfile profile) {
+    /**
+     * Creates a profile panel with an injected NodeCoreContext.
+     * The context provides per-instance access to BlockchainProcessor, PropertyService, etc.,
+     * replacing the previous static Signum.getXxx() calls.
+     *
+     * @param parentFrame Parent JFrame for dialogs
+     * @param profile     The node profile
+     * @param context     Per-instance node context (may be null if not yet started)
+     */
+    public NodeProfilePanel(JFrame parentFrame, NodeProfile profile, NodeCoreContext context) {
         this.parentFrame = parentFrame;
         this.profile = profile;
+        this.context = context;
         this.confFolder = determineConfFolder();
 
         setLayout(new BorderLayout());
@@ -97,6 +114,10 @@ public class NodeProfilePanel extends JPanel {
         GuiUtils.applyDefaultTabLayoutPolicy(innerTabbedPane);
 
         consolePanel = new NodeConsolePanel(parentFrame, profile);
+        // Inject context into console panel for per-instance access
+        if (context != null) {
+            consolePanel.setNodeContext(context);
+        }
         // Wire callback so console panel can switch to Console tab when showing command input
         consolePanel.setSwitchToConsoleAction(() -> switchToConsoleTab());
         innerTabbedPane.addTab("Console", consolePanel);
@@ -117,8 +138,8 @@ public class NodeProfilePanel extends JPanel {
                 },
                 null,
                 null,
-                () -> Signum.getActiveNodeProfile(),
-                () -> Signum.getActiveLoggingProfile()
+                () -> profile.getName(),
+                () -> "logging"
         );
         innerTabbedPane.addTab("Logging", loggingPanel);
 
@@ -151,7 +172,7 @@ public class NodeProfilePanel extends JPanel {
 
     /** Copy from NodeConsolePanel.syncButtonAction */
     public void toggleSync() {
-        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        BlockchainProcessor blockchainProcessor = context != null ? context.getBlockchainProcessor() : null;
         if (blockchainProcessor != null) {
             syncPaused = !syncPaused;
             blockchainProcessor.setSyncPaused(syncPaused);
@@ -182,7 +203,13 @@ public class NodeProfilePanel extends JPanel {
     /** Copy from NodeConsolePanel.openWebUi */
     public void openWebUi(String path) {
         try {
-            PropertyService propertyService = Signum.getPropertyService();
+            PropertyService propertyService = context != null ? context.getPropertyService() : null;
+            if (propertyService == null) {
+                JOptionPane.showMessageDialog(this,
+                        "PropertyService not available. Node may not be started.",
+                        "Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
             int port = propertyService.getInt(Props.API_PORT);
             String httpPrefix = propertyService.getBoolean(Props.API_SSL) ? "https://" : "http://";
             String address = httpPrefix + "localhost:" + port + path;
@@ -198,11 +225,12 @@ public class NodeProfilePanel extends JPanel {
 
     /** Copy from NodeConsolePanel.popOff */
     public void popOff(int count) {
-        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        BlockchainProcessor blockchainProcessor = context != null ? context.getBlockchainProcessor() : null;
         if (blockchainProcessor == null) {
             return;
         }
-        int height = Signum.getBlockchain().getHeight();
+        int height = context != null && context.getBlockchain() != null 
+                ? context.getBlockchain().getHeight() : 0;
         int targetHeight = Math.max(0, height - count);
         if (!blockchainProcessor.isSkipDbCheckOnManualPopOff()) {
             blockchainProcessor.checkDatabaseStateRequest();
@@ -212,7 +240,7 @@ public class NodeProfilePanel extends JPanel {
 
     /** Copy from NodeConsolePanel.dbCheckAction */
     public void dbCheckAction() {
-        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        BlockchainProcessor blockchainProcessor = context != null ? context.getBlockchainProcessor() : null;
         if (blockchainProcessor == null) {
             JOptionPane.showMessageDialog(this, "Blockchain processor not initialized.",
                     "Error", JOptionPane.ERROR_MESSAGE);
@@ -244,6 +272,8 @@ public class NodeProfilePanel extends JPanel {
     public JTabbedPane getInnerTabbedPane() { return innerTabbedPane; }
     public NodeInfoBar getInfoBar() { return infoBar; }
     public NodeToolbar getToolbar() { return toolbar; }
+    /** Returns the injected NodeCoreContext (null if node not started). */
+    public NodeCoreContext getContext() { return context; }
 
     /**
      * Switches the inner tabbed pane to the Console tab.
