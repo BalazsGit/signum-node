@@ -1,6 +1,8 @@
 package application.module.node.gui;
 
 import application.module.appearance.AppearanceModule;
+import application.module.node.instance.NodeCoreContext;
+import application.module.node.instance.NodeCoreContextManager;
 import application.module.node.lifecycle.LifecycleListener;
 import application.module.node.lifecycle.NodeInstanceInfo;
 import application.module.node.lifecycle.NodeLifecycleManager;
@@ -265,7 +267,12 @@ public class NodePanel extends JPanel implements LifecycleListener {
             profile = new NodeProfile(profileName);
         }
 
-        NodeProfilePanel actualPanel = new NodeProfilePanel(null, profile);
+        // Wire the per-instance NodeCoreContext from the manager.
+        // If the node hasn't been started yet, context will be null - that's fine,
+        // the panel handles null context gracefully.
+        NodeCoreContext context = NodeCoreContextManager.getInstance().get(profileName);
+
+        NodeProfilePanel actualPanel = new NodeProfilePanel(null, profile, context);
         loadedProfilePanels.put(profileName, actualPanel);
 
         // Replace placeholder with actual panel
