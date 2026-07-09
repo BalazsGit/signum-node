@@ -72,6 +72,10 @@ public class ProfileConfig {
         private boolean autoStart = false;
         private boolean enabled = true;
         private String description = "";
+        /** Reference to a named logging profile (e.g., "debug", "quiet", "verbose"). Optional. */
+        private String loggingProfile;
+        /** Per-module logging level presets (e.g., {"node": "debug", "database": "quiet"}). Optional. */
+        private Map<String, String> loggingPresets;
 
         public ProfileEntry() {
         }
@@ -113,6 +117,38 @@ public class ProfileConfig {
 
         public void setDescription(String description) {
             this.description = description;
+        }
+
+        /**
+         * Gets the logging profile reference for this node profile.
+         * @return the logging profile name (e.g., "debug", "quiet"), or null if not set
+         */
+        public String getLoggingProfile() {
+            return loggingProfile;
+        }
+
+        /**
+         * Sets the logging profile reference for this node profile.
+         * @param loggingProfile the logging profile name, or null to clear
+         */
+        public void setLoggingProfile(String loggingProfile) {
+            this.loggingProfile = loggingProfile;
+        }
+
+        /**
+         * Gets per-module logging level presets.
+         * @return unmodifiable map of module ID to log level strings, or null if not set
+         */
+        public Map<String, String> getLoggingPresets() {
+            return loggingPresets != null ? Collections.unmodifiableMap(loggingPresets) : null;
+        }
+
+        /**
+         * Sets per-module logging level presets.
+         * @param loggingPresets map of module ID to log level strings, or null to clear
+         */
+        public void setLoggingPresets(Map<String, String> loggingPresets) {
+            this.loggingPresets = loggingPresets;
         }
     }
 
@@ -276,6 +312,64 @@ public class ProfileConfig {
             save();
         } catch (IOException e) {
             LOGGER.error("Failed to save tab order", e);
+        }
+    }
+
+    /**
+     * Gets the logging profile reference for a profile.
+     *
+     * @param profileName the profile name
+     * @return the logging profile name (e.g., "debug", "quiet"), or null if not set
+     */
+    public String getLoggingProfile(String profileName) {
+        ProfileData data = load();
+        ProfileEntry entry = data.getProfiles().get(profileName);
+        return entry != null ? entry.getLoggingProfile() : null;
+    }
+
+    /**
+     * Sets and persists the logging profile reference for a profile.
+     *
+     * @param profileName the profile name
+     * @param loggingProfile the logging profile name, or null to clear
+     */
+    public void setLoggingProfile(String profileName, String loggingProfile) {
+        ProfileData data = load();
+        ProfileEntry entry = data.getProfiles().computeIfAbsent(profileName, k -> new ProfileEntry());
+        entry.setLoggingProfile(loggingProfile);
+        try {
+            save();
+        } catch (IOException e) {
+            LOGGER.error("Failed to save logging profile for {}", profileName, e);
+        }
+    }
+
+    /**
+     * Gets the per-module logging presets for a profile.
+     *
+     * @param profileName the profile name
+     * @return unmodifiable map of module ID to log level strings, or null if not set
+     */
+    public Map<String, String> getLoggingPresets(String profileName) {
+        ProfileData data = load();
+        ProfileEntry entry = data.getProfiles().get(profileName);
+        return entry != null ? entry.getLoggingPresets() : null;
+    }
+
+    /**
+     * Sets and persists the per-module logging presets for a profile.
+     *
+     * @param profileName the profile name
+     * @param loggingPresets map of module ID to log level strings, or null to clear
+     */
+    public void setLoggingPresets(String profileName, Map<String, String> loggingPresets) {
+        ProfileData data = load();
+        ProfileEntry entry = data.getProfiles().computeIfAbsent(profileName, k -> new ProfileEntry());
+        entry.setLoggingPresets(loggingPresets);
+        try {
+            save();
+        } catch (IOException e) {
+            LOGGER.error("Failed to save logging presets for {}", profileName, e);
         }
     }
 
