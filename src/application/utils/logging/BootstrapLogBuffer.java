@@ -167,7 +167,7 @@ public final class BootstrapLogBuffer {
             throw new IllegalArgumentException("ProfileLogRouter must not be null");
         }
         List<String> snapshot = getEntries();
-        for (java.util.Map.Entry<String, ProfileLogContext> entry : router.getAllContexts().entrySet()) {
+        for (java.util.Map.Entry<LogRoutingKey, ProfileLogContext> entry : router.getAllContexts().entrySet()) {
             ProfileLogContext context = entry.getValue();
             for (String line : snapshot) {
                 context.dispatchText(line);

@@ -6,6 +6,7 @@ import application.utils.logging.event.LogSubscriber;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -18,48 +19,83 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *   <li>Provides filtering (by level, module, text) via subscriber-level filters</li>
  *   <li>Manages subscriber lifecycle (add/remove/dispose)</li>
  * </ul>
- * <p>
+ *
+ * <h3>Multi-Module Support (V2.3)</h3>
+ * <p>V2.3 introduces a {@code moduleId} field, so contexts from different modules
+ * with identical profile names are kept separate via a composite {@link LogRoutingKey}.</p>
+ *
  * <h3>Lifecycle</h3>
  * <ol>
- *   <li>Create instance with profile name</li>
+ *   <li>Create instance with module ID + profile name</li>
  *   <li>Call {@link #start()} to register with the global {@link ProfileLogRouter}</li>
  *   <li>Add subscribers via {@link #addSubscriber(LogSubscriber)}</li>
  *   <li>Call {@link #close()} to unregister and clean up (AutoCloseable)</li>
  * </ol>
- * </p>
- * <p>
- * Performance: O(n) subscriber iteration where n is typically small (1-3 per profile).
- * Thread-safe: Safe for concurrent dispatch from multiple threads via CopyOnWriteArrayList.
- * </p>
+ *
+ * <p><b>Performance:</b> O(n) subscriber iteration where n is typically small (1-3 per profile).</p>
+ * <p><b>Thread-safe:</b> Safe for concurrent dispatch from multiple threads via CopyOnWriteArrayList.</p>
  *
  * @see ProfileLogRouter
  * @see LogSubscriber
  * @see LogEvent
+ * @see LogRoutingKey
  */
 public final class ProfileLogContext implements AutoCloseable {
 
+    private final String moduleId;
     private final String profileName;
+    private final LogRoutingKey routingKey;
     private final CopyOnWriteArrayList<LogSubscriber> subscribers = new CopyOnWriteArrayList<>();
     private volatile boolean active = false;
 
     /**
-     * Creates a new context for the given profile.
+     * Creates a new context for the given module and profile.
      * <p>
      * The context is inactive until {@link #start()} is called.
      * </p>
      *
-     * @param profileName the unique profile name (e.g., "mainnet-prune")
+     * @param moduleId    the module identifier (e.g., "node", "database"), never null or empty
+     * @param profileName the unique profile name within that module, never null or empty
+     * @throws IllegalArgumentException if either parameter is null or empty
      */
-    public ProfileLogContext(String profileName) {
-        if (profileName == null || profileName.isEmpty()) {
-            throw new IllegalArgumentException("Profile name must not be null or empty");
+    public ProfileLogContext(String moduleId, String profileName) {
+        this.moduleId = Objects.requireNonNull(moduleId, "Module ID must not be null");
+        this.profileName = Objects.requireNonNull(profileName, "Profile name must not be null");
+        if (moduleId.isEmpty()) {
+            throw new IllegalArgumentException("Module ID must not be empty");
         }
-        this.profileName = profileName;
+        if (profileName.isEmpty()) {
+            throw new IllegalArgumentException("Profile name must not be empty");
+        }
+        this.routingKey = LogRoutingKey.of(moduleId, profileName);
     }
 
-    /** @return the unique profile name */
+    /**
+     * Creates a context with a default module ID.
+     * <p><b>Warning:</b> Using "default" as module ID means profiles created with this
+     * constructor cannot coexist with same-named profiles in other modules.</p>
+     *
+     * @param profileName the profile name, never null or empty
+     * @deprecated Use {@link #ProfileLogContext(String, String)} for proper module isolation
+     */
+    @Deprecated
+    public ProfileLogContext(String profileName) {
+        this("default", Objects.requireNonNull(profileName, "Profile name must not be null"));
+    }
+
+    /** @return the module identifier (e.g., "node", "database") */
+    public String getModuleId() {
+        return moduleId;
+    }
+
+    /** @return the unique profile name within the module */
     public String getProfileName() {
         return profileName;
+    }
+
+    /** @return the composite routing key (moduleId:profileName) used by ProfileLogRouter */
+    public LogRoutingKey getRoutingKey() {
+        return routingKey;
     }
 
     /** @return true if this context is registered with the global router */
@@ -86,6 +122,7 @@ public final class ProfileLogContext implements AutoCloseable {
      * Adds a subscriber to receive log events for this profile.
      *
      * @param subscriber the subscriber to add (never null)
+     * @throws NullPointerException if subscriber is null
      */
     public void addSubscriber(LogSubscriber subscriber) {
         if (subscriber == null) {
@@ -130,7 +167,7 @@ public final class ProfileLogContext implements AutoCloseable {
                 }
             } catch (Exception e) {
                 // Protect one subscriber from breaking others
-                System.err.println("[ProfileLogContext] Subscriber error in '" + profileName + "': " + e.getMessage());
+                System.err.println("[ProfileLogContext] Subscriber error in '" + routingKey + "': " + e.getMessage());
             }
         }
     }
@@ -157,7 +194,7 @@ public final class ProfileLogContext implements AutoCloseable {
         if (!active) {
             return;
         }
-        ProfileLogRouter.getInstance().unregisterContext(profileName);
+        ProfileLogRouter.getInstance().unregisterContext(routingKey);
         active = false;
 
         // Dispose all subscribers
@@ -165,7 +202,7 @@ public final class ProfileLogContext implements AutoCloseable {
             try {
                 subscriber.dispose();
             } catch (Exception e) {
-                System.err.println("[ProfileLogContext] Dispose error in '" + profileName + "': " + e.getMessage());
+                System.err.println("[ProfileLogContext] Dispose error in '" + routingKey + "': " + e.getMessage());
             }
         }
         subscribers.clear();
@@ -174,7 +211,8 @@ public final class ProfileLogContext implements AutoCloseable {
     @Override
     public String toString() {
         return "ProfileLogContext{" +
-                "profile='" + profileName + '\'' +
+                "module='" + moduleId + '\'' +
+                ", profile='" + profileName + '\'' +
                 ", active=" + active +
                 ", subscribers=" + subscribers.size() +
                 '}';
