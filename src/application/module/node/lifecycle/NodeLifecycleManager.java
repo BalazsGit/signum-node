@@ -5,6 +5,7 @@ import application.module.node.profile.ProfileConfig;
 import application.module.node.instance.NodeCoreContext;
 import application.module.node.instance.NodeCoreContextBuilder;
 import application.module.node.instance.NodeCoreContextManager;
+import application.utils.logging.ProfileThreadContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -176,7 +177,9 @@ public class NodeLifecycleManager {
 
         // Build the NodeCoreContext asynchronously to avoid blocking the caller
         // (e.g., GUI thread). Use a dedicated daemon thread.
-        Thread starterThread = new Thread(() -> {
+        // Wrap with ProfileThreadContext so all logs emitted during startup are
+        // routed to the correct profile's console panel via MDC routing.
+        Runnable startupTask = () -> {
             try {
                 NodeCoreContext context = new NodeCoreContextBuilder(profileName, Paths.get(confFolderPath)).build();
                 context.start();
@@ -195,7 +198,12 @@ public class NodeLifecycleManager {
                 notifyStateChanged(info, NodeLifecycleState.RUNNING, NodeLifecycleState.ERROR);
                 notifyError(info, e.getMessage());
             }
-        }, "Node-Starter-" + profileName);
+        };
+
+        Thread starterThread = new Thread(
+                ProfileThreadContext.wrap(startupTask, "node", profileName),
+                "Node-Starter-" + profileName
+        );
         starterThread.setDaemon(true);
         starterThread.start();
     }

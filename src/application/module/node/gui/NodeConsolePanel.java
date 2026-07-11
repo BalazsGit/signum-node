@@ -113,6 +113,7 @@ import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
 import application.module.node.util.Convert;
+import application.utils.logging.ProfileLogContext;
 import application.module.node.profile.NodeProfile;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
@@ -126,6 +127,12 @@ public class NodeConsolePanel extends JPanel {
     private final JFrame parentFrame;
     /** Current node profile name for hierarchical GUI settings storage */
     private final String profileName;
+
+    /** Per-profile logging context for isolated log routing */
+    private ProfileLogContext logContext;
+
+    /** GUI subscriber that renders log events to the console JTextPane */
+    private ProfileConsoleSubscriber consoleSubscriber;
     private static final String UNEXPECTED_EXIT_MESSAGE = "Signum Quit unexpectedly! Exit code ";
 
     public static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("HH:mm:ss yyyy-MM-dd");
@@ -952,31 +959,12 @@ public class NodeConsolePanel extends JPanel {
         caret.setUpdatePolicy(DefaultCaret.ALWAYS_UPDATE);
         textPane.setEditable(false);
 
-        // Setup the GUI log capture
-        TextAreaOutputStream taos = new TextAreaOutputStream(textPane, null, false, true);
+        // Setup per-profile log routing (replaces legacy global JUL handler)
+        // This ensures logs from this profile only appear in this console panel
+        initProfileLogging(textPane);
 
-        // 1. Flush bootstrap logs from Launcher/Signum
-        Signum.BOOTSTRAP_LOGS.forEach(line -> taos.write((line + "\n").getBytes(StandardCharsets.UTF_8)));
-        Signum.BOOTSTRAP_LOGS.clear();
-
-        // 2. Add a JUL Handler to capture all live logs directly into the text pane
-        java.util.logging.Handler guiHandler = new java.util.logging.Handler() {
-            @Override
-            public void publish(java.util.logging.LogRecord record) {
-                taos.append(new application.module.node.util.BriefLogFormatter().format(record));
-            }
-
-            @Override
-            public void flush() {
-                taos.flush();
-            }
-
-            @Override
-            public void close() throws SecurityException {
-            }
-        };
-        guiHandler.setLevel(java.util.logging.Level.ALL);
-        java.util.logging.Logger.getLogger("").addHandler(guiHandler);
+        // Flush legacy bootstrap logs directly to the console for backward compatibility
+        flushBootstrapLogsToConsole(textPane);
 
         // No global debug logger in production; Popup auto-close logic is instantiated
         // when a popup is opened by the owning component.
@@ -3352,5 +3340,59 @@ public class NodeConsolePanel extends JPanel {
                 currentIconColor = color;
             }
         }
+    }
+
+    // ── Per-Profile Logging Integration ────────────────────────────────────────
+
+    /**
+     * Initializes per-profile log routing for this console panel.
+     * Creates a ProfileLogContext registered with the global ProfileLogRouter,
+     * and attaches a ProfileConsoleSubscriber to render events in the given JTextPane.
+     *
+     * @param textPane the target JTextPane for log display
+     */
+    private void initProfileLogging(JTextPane textPane) {
+        // Create per-profile logging context (module="node", profile=profileName)
+        logContext = new ProfileLogContext("node", profileName);
+        logContext.start();
+
+        // Create subscriber that renders log events to the console JTextPane
+        consoleSubscriber = new ProfileConsoleSubscriber(profileName, textPane.getStyledDocument());
+        logContext.addSubscriber(consoleSubscriber);
+    }
+
+    /**
+     * Flushes any buffered bootstrap logs to the console for backward compatibility.
+     * Legacy code may have written to Signum.BOOTSTRAP_LOGS before the router was installed.
+     *
+     * @param textPane the target JTextPane
+     */
+    private void flushBootstrapLogsToConsole(JTextPane textPane) {
+        // Flush legacy static bootstrap logs for backward compatibility
+        // BootstrapLogBuffer is managed at the ProfileLogRouter level and will be
+        // flushed automatically when the router redistributes buffered entries.
+        if (!Signum.BOOTSTRAP_LOGS.isEmpty()) {
+            TextAreaOutputStream taos = new TextAreaOutputStream(textPane, null, false, true);
+            Signum.BOOTSTRAP_LOGS.forEach(line -> taos.append((line + "\n")));
+            Signum.BOOTSTRAP_LOGS.clear();
+        }
+    }
+
+    /**
+     * Cleans up logging resources when this panel is removed from its parent container.
+     * Called automatically by the Swing container management system.
+     */
+    @Override
+    public void removeNotify() {
+        // Clean up profile logging context
+        if (consoleSubscriber != null) {
+            consoleSubscriber.dispose();
+            consoleSubscriber = null;
+        }
+        if (logContext != null) {
+            logContext.close();
+            logContext = null;
+        }
+        super.removeNotify();
     }
 }
