@@ -745,7 +745,9 @@ public class NodeConsolePanel extends JPanel {
                 if (commandPanelWrapper.getParent() instanceof java.awt.Container) {
                     ((java.awt.Container) commandPanelWrapper.getParent()).remove(commandPanelWrapper);
                 }
-                topPanel.add(commandPanelWrapper, "growx");
+                // "h 0:" allows MigLayout to resize this component's row from height 0 upward,
+                // enabling smooth expand/collapse animations (without it the row locks at natural size)
+                topPanel.add(commandPanelWrapper, "growx, h 0:");
             }
         }
 
@@ -760,7 +762,10 @@ public class NodeConsolePanel extends JPanel {
         }
         contentPanel.revalidate();
         contentPanel.repaint();
-        animateCommandPanelOpen(position);
+        // Use invokeLater to ensure layout is fully computed before animation starts
+        // This is especially important for MigLayout (topPanel) where the initial
+        // preferredSize calculation may not be ready immediately after revalidate()
+        SwingUtilities.invokeLater(() -> animateCommandPanelOpen(position));
     }
 
     private void hideCommandPanelInline() {
@@ -786,12 +791,25 @@ public class NodeConsolePanel extends JPanel {
             progress = 1 - (float) Math.pow(1 - progress, 3);
             int height = (int) (targetHeight * progress);
             commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), height));
+            // Update maximumSize as well so MigLayout knows the row can grow during animation
+            commandPanelWrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, height));
+            // Also revalidate parent container for MigLayout compatibility
+            // MigLayout does not automatically respond to preferredSize changes of children
+            Component parent = commandPanelWrapper.getParent();
+            if (parent != null) {
+                parent.revalidate();
+                parent.repaint();
+            }
             commandPanelWrapper.revalidate();
             commandPanelWrapper.repaint();
             if (progress >= 1f) {
                 commandPanelAnimator.stop();
                 commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), targetHeight));
                 commandPanelWrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, targetHeight));
+                if (parent != null) {
+                    parent.revalidate();
+                    parent.repaint();
+                }
                 commandPanelWrapper.revalidate();
                 commandPanelWrapper.repaint();
             }
@@ -805,6 +823,8 @@ public class NodeConsolePanel extends JPanel {
         }
 
         int startHeight = commandPanelWrapper.getHeight();
+        // Capture parent reference for MigLayout compatibility
+        Component parent = commandPanelWrapper.getParent();
         commandPanelAnimator = new Timer(10, null);
         long start = System.currentTimeMillis();
         commandPanelAnimator.addActionListener(e -> {
@@ -812,6 +832,11 @@ public class NodeConsolePanel extends JPanel {
             progress = 1 - (float) Math.pow(1 - progress, 3);
             int height = (int) (startHeight * (1 - progress));
             commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), Math.max(0, height)));
+            // Also revalidate parent container for MigLayout compatibility
+            if (parent != null) {
+                parent.revalidate();
+                parent.repaint();
+            }
             commandPanelWrapper.revalidate();
             commandPanelWrapper.repaint();
             if (progress >= 1f) {
@@ -820,6 +845,11 @@ public class NodeConsolePanel extends JPanel {
                 commandPanelWrapper.setPreferredSize(new Dimension(0, 0));
                 commandPanelWrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, 0));
                 commandPanelWrapper.setVisible(false);
+                // Final revalidate of parent for MigLayout compatibility
+                if (parent != null) {
+                    parent.revalidate();
+                    parent.repaint();
+                }
                 commandPanelWrapper.revalidate();
                 commandPanelWrapper.repaint();
             }
@@ -1174,6 +1204,8 @@ public class NodeConsolePanel extends JPanel {
         commandPanelWrapper = new JPanel(new BorderLayout());
         commandPanelWrapper.setVisible(false);
         commandPanelWrapper.setPreferredSize(new Dimension(0, 0));
+        // Allow wrapper to shrink to 0 height for animation compatibility with MigLayout
+        commandPanelWrapper.setMinimumSize(new Dimension(0, 0));
         syncProgressBar = new JProgressBar(0, 100);
         syncProgressBar.setStringPainted(true);
         syncProgressBar.setFont(UIManager.getFont("Label.font"));
