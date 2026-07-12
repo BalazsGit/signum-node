@@ -19,6 +19,16 @@ public class NodeProfile {
     private static final Path NODE_CONF_DIR = Paths.get("conf", "node");
 
     /**
+     * Property key for per-profile logging preset selection.
+     * When set in the node profile's .properties file (e.g., logging.preset=verbose),
+     * LoggingProfileManager uses this to apply the specified preset for the 'node' module.
+     */
+    public static final String PROPERTY_LOGGING_PRESET = "logging.preset";
+
+    /** Default logging preset when not specified in profile */
+    public static final String DEFAULT_LOGGING_PRESET = "standard";
+
+    /**
      * Set of reserved profile names that are excluded from profile discovery and cannot be
      * used when saving new profiles.
      * <p>
@@ -74,6 +84,42 @@ public class NodeProfile {
         } else {
             properties.setProperty(key, value);
         }
+    }
+
+    // ── Logging Configuration ──────────────────────────────────────────
+
+    /**
+     * Returns the logging preset name configured for this profile.
+     * Falls back to {@link #DEFAULT_LOGGING_PRESET} if not set.
+     *
+     * @return logging preset name (never null or empty)
+     */
+    public String getLoggingPreset() {
+        String preset = properties.getProperty(PROPERTY_LOGGING_PRESET);
+        if (preset == null || preset.isEmpty()) {
+            return DEFAULT_LOGGING_PRESET;
+        }
+        return preset.trim();
+    }
+
+    /**
+     * Sets the logging preset for this profile.
+     *
+     * @param preset the preset name (e.g., "minimal", "standard", "verbose", "debug")
+     */
+    public void setLoggingPreset(String preset) {
+        if (preset == null || preset.isEmpty()) {
+            properties.remove(PROPERTY_LOGGING_PRESET);
+        } else {
+            properties.setProperty(PROPERTY_LOGGING_PRESET, preset.trim());
+        }
+    }
+
+    /**
+     * Returns true if this profile has an explicit logging preset configured.
+     */
+    public boolean hasLoggingPreset() {
+        return properties.containsKey(PROPERTY_LOGGING_PRESET);
     }
 
     /**

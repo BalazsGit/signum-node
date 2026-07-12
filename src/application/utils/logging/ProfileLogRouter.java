@@ -1,10 +1,13 @@
 package application.utils.logging;
 
 import application.utils.logging.event.LogEvent;
+import application.utils.logging.event.LogSubscriber;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.LogManager;
@@ -64,6 +67,12 @@ public final class ProfileLogRouter {
     private final Handler julHandler;
     private volatile boolean installed = false;
 
+    /**
+     * Global subscribers receive ALL log events regardless of routing key.
+     * Used by SystemConsoleSubscriber to aggregate logs from every profile.
+     */
+    private final List<LogSubscriber> globalSubscribers = new CopyOnWriteArrayList<>();
+
     private ProfileLogRouter() {
         this.julHandler = new RouterJULHandler();
     }
@@ -112,6 +121,52 @@ public final class ProfileLogRouter {
     /** @return true if the JUL handler is currently installed on the root logger */
     public boolean isInstalled() {
         return installed;
+    }
+
+    // -------------------------- Global Subscribers --------------------------
+
+    /**
+     * Registers a global subscriber that receives ALL log events (broadcast).
+     * Used by the System Console to aggregate logs from every profile.
+     *
+     * @param subscriber the subscriber to add (never null)
+     */
+    public void addGlobalSubscriber(LogSubscriber subscriber) {
+        if (subscriber == null) {
+            throw new NullPointerException("Subscriber must not be null");
+        }
+        globalSubscribers.add(subscriber);
+    }
+
+    /**
+     * Removes a global subscriber and calls its dispose().
+     *
+     * @param subscriber the subscriber to remove
+     * @return true if found and removed
+     */
+    public boolean removeGlobalSubscriber(LogSubscriber subscriber) {
+        boolean removed = globalSubscribers.remove(subscriber);
+        if (removed) {
+            subscriber.dispose();
+        }
+        return removed;
+    }
+
+    /**
+     * Dispatches a log event to all global subscribers.
+     * Called internally by the RouterJULHandler on every publish().
+     */
+    void dispatchToGlobalSubscribers(LogEvent event) {
+        for (LogSubscriber subscriber : globalSubscribers) {
+            try {
+                var filter = subscriber.getFilter();
+                if (filter == null || filter.matches(event)) {
+                    subscriber.onLogEvent(event);
+                }
+            } catch (Exception e) {
+                System.err.println("[ProfileLogRouter] Global subscriber error: " + e.getMessage());
+            }
+        }
     }
 
     /**
@@ -226,10 +281,15 @@ public final class ProfileLogRouter {
         public void publish(LogRecord record) {
             LogRoutingKey key = ProfileThreadContext.getRoutingKey();
 
+            LogEvent event = LogEvent.from(record);
+
+            // Always broadcast to global subscribers (SystemConsole, etc.)
+            dispatchToGlobalSubscribers(event);
+
             if (key == null || key.isEmpty()) {
                 // Unassigned log (bootstrap, system-level) → broadcast to ALL contexts
                 for (ProfileLogContext ctx : profileMap.values()) {
-                    ctx.dispatch(LogEvent.from(record));
+                    ctx.dispatch(event);
                 }
                 return;
             }
@@ -237,10 +297,10 @@ public final class ProfileLogRouter {
             // Targeted routing using composite key (moduleId:profileName)
             ProfileLogContext context = profileMap.get(key);
             if (context != null) {
-                context.dispatch(LogEvent.from(record));
+                context.dispatch(event);
             }
             // If context is null, the module+profile combination is not yet started
-            // or already stopped → drop silently
+            // or already stopped → drop silently (global subscriber already got it)
         }
 
         @Override

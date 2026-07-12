@@ -1,8 +1,6 @@
 package application.module.node.gui;
 
 import java.awt.Color;
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import java.util.List;
 import javax.swing.SwingUtilities;
 import javax.swing.text.BadLocationException;
@@ -14,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import application.utils.logging.ConsoleColorScheme;
+import application.utils.logging.TerminalFormatLogFormatter;
 import application.utils.logging.event.LogEvent;
 import application.utils.logging.event.LogEventBatcher;
 import application.utils.logging.event.LogFilter;
@@ -49,10 +48,18 @@ import application.utils.logging.event.LogSubscriber;
  * Created once for the global SystemConsole panel. When disposed,
  * {@link #dispose()} flushes remaining buffered events and stops the batcher.
  * </p>
+ * <p>
+ * <h3>Log Format</h3>
+ * Uses {@link TerminalFormatLogFormatter} to produce terminal-matching output with profile tag:
+ * <pre>
+ *   [INFO] 2026-07-12 13:52:20 <hdhdh>: application.module.node.Signum - Initializing...
+ * </pre>
+ * </p>
  *
  * @see ConsoleColorScheme
  * @see ProfileConsoleSubscriber
  * @see LogEventBatcher
+ * @see TerminalFormatLogFormatter
  */
 public final class SystemConsoleSubscriber implements LogSubscriber {
 
@@ -78,6 +85,9 @@ public final class SystemConsoleSubscriber implements LogSubscriber {
 
     /** Dynamic filter; volatile for safe concurrent reads without synchronization */
     private volatile LogFilter filter;
+
+    /** Terminal-format log formatter (singleton, shared across all instances) */
+    private final TerminalFormatLogFormatter formatter = TerminalFormatLogFormatter.INSTANCE;
 
     // ── Constructors ─────────────────────────────────────────────────────
 
@@ -222,54 +232,18 @@ public final class SystemConsoleSubscriber implements LogSubscriber {
 
     /**
      * Formats a log event for the aggregated system console.
-     * Includes profile tag: [{LEVEL}] {PROFILE}: message
+     * Uses {@link TerminalFormatLogFormatter} with profile tag to match terminal output:
+     * <pre>
+     *   [LEVEL] yyyy-MM-dd HH:mm:ss <profile>: loggerName - message
+     * </pre>
+     * For events without a profile, uses "<system>" as the tag.
      */
     private String formatAggregatedLine(LogEvent event) {
-        StringBuilder sb = new StringBuilder(160);
-
-        // [LEVEL]
-        sb.append('[').append(event.getLevel().getDisplayName()).append(']');
-        sb.append(' ');
-
-        // Timestamp
-        sb.append(formatTimestamp(event.getTimestamp()));
-        sb.append(' ');
-
-        // Profile tag (colored in practice via the attrs)
-        String profile = event.getProfileName();
-        if (profile != null && !profile.isEmpty()) {
-            sb.append("<").append(profile).append(">: ");
-        } else {
-            sb.append("<system>: ");
+        String profileTag = event.getProfileName();
+        if (profileTag == null || profileTag.isEmpty()) {
+            profileTag = "system";
         }
-
-        // Message
-        String msg = event.getMessage();
-        if (msg != null) {
-            sb.append(msg);
-        }
-
-        // Stack trace
-        Throwable throwable = event.getThrowable();
-        if (throwable != null) {
-            sb.append('\n');
-            StringWriter sw = new StringWriter();
-            throwable.printStackTrace(new PrintWriter(sw));
-            sb.append(sw.toString());
-        }
-
-        sb.append('\n');
-        return sb.toString();
-    }
-
-    /**
-     * Formats a timestamp: "yyyy-MM-dd HH:mm:ss".
-     */
-    private static String formatTimestamp(long millis) {
-        java.util.Date date = new java.util.Date(millis);
-        return java.text.SimpleDateFormat.getDateInstance(java.text.SimpleDateFormat.MEDIUM).format(date)
-                + " "
-                + java.text.SimpleDateFormat.getTimeInstance(java.text.SimpleDateFormat.MEDIUM).format(date);
+        return formatter.formatWithProfile(event, profileTag);
     }
 
     // ── Color Resolution & Blending ─────────────────────────────────────

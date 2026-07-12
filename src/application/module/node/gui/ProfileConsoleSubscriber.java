@@ -1,8 +1,6 @@
 package application.module.node.gui;
 
 import java.awt.Color;
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import javax.swing.SwingUtilities;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.SimpleAttributeSet;
@@ -13,6 +11,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import application.utils.logging.ProfileLogContext;
+import application.utils.logging.TerminalFormatLogFormatter;
 import application.utils.logging.event.LogEvent;
 import application.utils.logging.event.LogEventBatcher;
 import application.utils.logging.event.LogFilter;
@@ -39,10 +38,18 @@ import application.utils.logging.event.LogSubscriber;
  * Created per NodeConsolePanel instance. When the panel is disposed,
  * {@link #dispose()} flushes remaining buffered events and stops the batcher.
  * </p>
+ * <p>
+ * <h3>Log Format</h3>
+ * Uses {@link TerminalFormatLogFormatter} to produce terminal-matching output:
+ * <pre>
+ *   [INFO] 2026-07-12 13:52:20 application.module.node.Signum - Initializing...
+ * </pre>
+ * </p>
  *
  * @see ProfileLogContext
  * @see LogEventBatcher
  * @see LogSubscriber
+ * @see TerminalFormatLogFormatter
  */
 public final class ProfileConsoleSubscriber implements LogSubscriber {
 
@@ -75,6 +82,9 @@ public final class ProfileConsoleSubscriber implements LogSubscriber {
 
     /** Optional filter; when non-null only matching events are processed */
     private final LogFilter filter;
+
+    /** Terminal-format log formatter (singleton, shared across all instances) */
+    private final TerminalFormatLogFormatter formatter = TerminalFormatLogFormatter.INSTANCE;
 
     // ── Constructors ────────────────────────────────────────────────────
 
@@ -188,46 +198,13 @@ public final class ProfileConsoleSubscriber implements LogSubscriber {
 
     /**
      * Formats a single log event into a display-ready text string.
-     * Format: [{LEVEL}] yyyy-MM-dd HH:mm:ss - message (optional stack trace)
+     * Uses {@link TerminalFormatLogFormatter} to match terminal output exactly:
+     * <pre>
+     *   [LEVEL] yyyy-MM-dd HH:mm:ss loggerName - message
+     * </pre>
      */
     private String formatLogLine(LogEvent event) {
-        StringBuilder sb = new StringBuilder(128);
-
-        // [LEVEL]
-        sb.append('[').append(event.getLevel().getDisplayName()).append(']');
-        sb.append(' ');
-
-        // Timestamp
-        sb.append(formatTimestamp(event.getTimestamp()));
-        sb.append(" - ");
-
-        // Message
-        String msg = event.getMessage();
-        if (msg != null) {
-            sb.append(msg);
-        }
-
-        // Stack trace
-        Throwable throwable = event.getThrowable();
-        if (throwable != null) {
-            sb.append('\n');
-            StringWriter sw = new StringWriter();
-            throwable.printStackTrace(new PrintWriter(sw));
-            sb.append(sw.toString());
-        }
-
-        sb.append('\n');
-        return sb.toString();
-    }
-
-    /**
-     * Formats a timestamp in milliseconds to "yyyy-MM-dd HH:mm:ss".
-     */
-    private static String formatTimestamp(long millis) {
-        java.util.Date date = new java.util.Date(millis);
-        return java.text.SimpleDateFormat.getDateInstance(java.text.SimpleDateFormat.MEDIUM).format(date)
-                + " "
-                + java.text.SimpleDateFormat.getTimeInstance(java.text.SimpleDateFormat.MEDIUM).format(date);
+        return formatter.format(event);
     }
 
     // ── Color Resolution ────────────────────────────────────────────────

@@ -2,20 +2,46 @@ package application.module.system;
 
 import application.api.Module;
 import application.api.ModuleContext;
+import application.module.appearance.AppearanceModule;
+import application.module.node.Signum;
+import application.module.node.gui.ConsoleFilterHeader;
+import application.module.node.gui.SystemConsoleSubscriber;
+import application.utils.logging.ProfileLogRouter;
+import application.utils.logging.event.LogFilter;
+
 import javax.swing.*;
 import javax.swing.text.BadLocationException;
+import javax.swing.text.SimpleAttributeSet;
+import javax.swing.text.StyleConstants;
+import javax.swing.text.StyledDocument;
 import java.awt.*;
 import java.awt.event.ActionListener;
-import java.util.logging.Level;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.logging.Logger;
-import application.module.appearance.AppearanceModule; // Import for Laf updates
-import application.module.node.Signum;
 
+/**
+ * System Console module that aggregates ALL log events from every running profile.
+ * <p>
+ * Architecture:
+ * <pre>
+ *   ProfileLogRouter.RouterJULHandler.publish(LogRecord)
+ *       |
+ *       +-- dispatchToGlobalSubscribers() --> SystemConsoleSubscriber -> this UI
+ *       |
+ *       +-- ProfileLogContext.dispatch() --> ProfileConsoleSubscriber -> Profile UI tab
+ * </pre>
+ * <p>
+ * Uses {@link SystemConsoleSubscriber} (not a raw JUL Handler) for proper terminal-format
+ * log output, profile-based color coding, batch rendering, and filter support.
+ * </p>
+ */
 public class SystemConsoleModule implements Module {
     private JComponent mainPanel;
-    private JTextArea textArea; // Keep a reference to the text area
-    private ConsoleHandler consoleHandler; // Custom log handler
-    private Runnable appearanceListener; // Listener for Look and Feel changes
+    private JTextPane textPane;
+    private SystemConsoleSubscriber subscriber;
+    private ConsoleFilterHeader filterHeader;
+    private Runnable appearanceListener;
 
     private static final Logger logger = Logger.getLogger(SystemConsoleModule.class.getName());
 
@@ -33,59 +59,126 @@ public class SystemConsoleModule implements Module {
     public void init(ModuleContext context) {
         this.mainPanel = createUI();
 
-        // Regisztráljuk a naplókezelőt a gyökér loggerhez
-        Logger rootLogger = Logger.getLogger("");
-        consoleHandler = new ConsoleHandler(textArea, 2000);
-        consoleHandler.setLevel(Level.INFO);
-        rootLogger.addHandler(consoleHandler);
+        // Install ProfileLogRouter if not already installed (ensures global subscriber routing works)
+        ProfileLogRouter.getInstance().install();
 
-        // Feliratkozás a kinézet változásaira
+        // Create and register the SystemConsoleSubscriber as a global subscriber.
+        // It receives ALL log events from every profile via ProfileLogRouter dispatch.
+        StyledDocument doc = (StyledDocument) textPane.getDocument();
+        subscriber = new SystemConsoleSubscriber(doc);
+        ProfileLogRouter.getInstance().addGlobalSubscriber(subscriber);
+
+        // Wire filter header → subscriber filter chain
+        if (filterHeader != null) {
+            filterHeader.setProfiles("(all)"); // Will be updated dynamically as profiles start
+            filterHeader.rebuildFilter(); // Initialize with default filter state
+        }
+
+        // Flush bootstrap logs that occurred before GUI initialized
+        flushBootstrapLogs();
+
+        // Subscribe to appearance (LAF) changes
         appearanceListener = () -> {
             if (mainPanel != null) {
                 SwingUtilities.updateComponentTreeUI(mainPanel);
-                // A konzol betűtípust explicit újra beállítjuk a biztonság kedvéért
-                textArea.setFont(AppearanceModule.getActiveConsoleFont());
+                textPane.setFont(AppearanceModule.getActiveConsoleFont());
             }
         };
         AppearanceModule.registerAppearanceListener(appearanceListener);
+    }
 
-        // Bootstrap logok betöltése, amik a GUI indulása előtt keletkeztek
+    /**
+     * Flushes bootstrap logs that occurred before GUI initialized.
+     */
+    private void flushBootstrapLogs() {
+        // Signum.BOOTSTRAP_LOGS is a synchronized ArrayList - copy to avoid holding lock during EDT dispatch
+        ArrayList<String> snapshot;
         synchronized (Signum.BOOTSTRAP_LOGS) {
-            for (String log : Signum.BOOTSTRAP_LOGS) {
-                textArea.append(log + "\n");
-            }
+            snapshot = new ArrayList<>(Signum.BOOTSTRAP_LOGS);
         }
-        textArea.append("--- System Console initialized ---\n");
-        textArea.setCaretPosition(textArea.getDocument().getLength());
+        for (String log : snapshot) {
+            appendBootstrapLine(log);
+        }
+        appendBootstrapLine("--- System Console initialized ---");
+    }
+
+    /**
+     * Appends a plain bootstrap line directly to the document (bypasses subscriber batching).
+     */
+    private void appendBootstrapLine(final String line) {
+        if (line == null || line.isEmpty()) {
+            return;
+        }
+        SwingUtilities.invokeLater(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    StyledDocument doc = (StyledDocument) textPane.getDocument();
+                    int len = doc.getLength();
+                    SimpleAttributeSet attrs = new SimpleAttributeSet();
+                    Color fg = UIManager.getColor("TextArea.foreground");
+                    if (fg != null) {
+                        StyleConstants.setForeground(attrs, fg);
+                    }
+                    doc.insertString(len, line + "\n", attrs);
+                    textPane.setCaretPosition(doc.getLength());
+                } catch (BadLocationException e) {
+                    logger.warning("BadLocationException appending bootstrap log: " + e.getMessage());
+                }
+            }
+        });
+    }
+
+    /**
+     * Sets the active filter on this console module.
+     * Called externally when profile list changes or filter state needs updating.
+     */
+    public void setActiveFilter(LogFilter filter) {
+        if (subscriber != null) {
+            subscriber.setFilter(filter);
+        }
+    }
+
+    /**
+     * Updates the profile dropdown in the filter header with current profiles.
+     */
+    public void updateProfileList(java.util.List<String> profiles) {
+        if (filterHeader != null) {
+            SwingUtilities.invokeLater(() -> filterHeader.setProfiles(profiles));
+        }
     }
 
     private JComponent createUI() {
         JPanel panel = new JPanel(new BorderLayout(5, 5));
         panel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
-        JLabel titleLabel = new JLabel("System Console");
-        titleLabel.setFont(UIManager.getFont("Label.font").deriveFont(Font.BOLD, 14f));
-        titleLabel.setHorizontalAlignment(SwingConstants.CENTER);
-        panel.add(titleLabel, BorderLayout.NORTH);
+        // Filter toolbar (top) — callback is invoked AFTER init() creates subscriber,
+        // so we guard against null. The filterHeader.rebuildFilter() in init() will
+        // push the default filter through this same callback path.
+        filterHeader = new ConsoleFilterHeader(combinedFilter -> {
+            if (subscriber != null) {
+                subscriber.setFilter(combinedFilter);
+            }
+        });
+        panel.add(filterHeader, BorderLayout.NORTH);
 
-        textArea = new JTextArea() {
+        // Use JTextPane (supports StyledDocument) instead of JTextArea.
+        // SystemConsoleSubscriber writes to StyledDocument for color-coded output.
+        textPane = new JTextPane() {
             @Override
             public void updateUI() {
                 super.updateUI();
-                // Re-apply style on Look and Feel changes
                 setBackground(UIManager.getColor("TextArea.background"));
                 setForeground(UIManager.getColor("TextArea.foreground"));
                 setFont(AppearanceModule.getActiveConsoleFont());
             }
         };
-        textArea.setEditable(false);
-        textArea.setBackground(UIManager.getColor("TextArea.background"));
-        textArea.setForeground(UIManager.getColor("TextArea.foreground"));
-        textArea.setFont(AppearanceModule.getActiveConsoleFont());
-        textArea.setLineWrap(true);
-        textArea.setWrapStyleWord(true);
+        textPane.setEditable(false);
+        textPane.setBackground(UIManager.getColor("TextArea.background"));
+        textPane.setForeground(UIManager.getColor("TextArea.foreground"));
+        textPane.setFont(AppearanceModule.getActiveConsoleFont());
 
-        JScrollPane scrollPane = new JScrollPane(textArea);
+        JScrollPane scrollPane = new JScrollPane(textPane);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_ALWAYS);
         panel.add(scrollPane, BorderLayout.CENTER);
 
@@ -100,7 +193,6 @@ public class SystemConsoleModule implements Module {
             String cmd = inputField.getText().trim();
             if (!cmd.isEmpty()) {
                 logger.info("Executing command: " + cmd);
-                // A parancs feldolgozása külön szálon, hogy ne fagyassza le a UI-t
                 new Thread(() -> Signum.processCommand(cmd)).start();
                 inputField.setText("");
             }
@@ -126,14 +218,14 @@ public class SystemConsoleModule implements Module {
 
     @Override
     public void stop() {
-        // Erőforrások felszabadítása
-        Logger rootLogger = Logger.getLogger("");
-        if (consoleHandler != null) {
-            rootLogger.removeHandler(consoleHandler);
-            consoleHandler.close();
+        // Unregister the global subscriber
+        if (subscriber != null) {
+            ProfileLogRouter.getInstance().removeGlobalSubscriber(subscriber);
+            subscriber = null;
         }
         if (appearanceListener != null) {
             AppearanceModule.removeAppearanceListener(appearanceListener);
+            appearanceListener = null;
         }
     }
 
@@ -142,41 +234,10 @@ public class SystemConsoleModule implements Module {
         return mainPanel;
     }
 
-    // Belső osztály a logok JTextArea-ba irányításához
-    private static class ConsoleHandler extends java.util.logging.Handler {
-        private final JTextArea textArea;
-        private final int maxLines;
-
-        public ConsoleHandler(JTextArea textArea, int maxLines) {
-            this.textArea = textArea;
-            this.maxLines = maxLines;
-            setFormatter(new java.util.logging.SimpleFormatter());
-        }
-
-        @Override
-        public void publish(java.util.logging.LogRecord record) {
-            if (!isLoggable(record))
-                return;
-            String msg = getFormatter().format(record);
-            SwingUtilities.invokeLater(() -> {
-                if (textArea.getLineCount() > maxLines) {
-                    try {
-                        int endOfFirstLine = textArea.getLineEndOffset(0);
-                        textArea.replaceRange("", 0, endOfFirstLine);
-                    } catch (BadLocationException ignored) {
-                    }
-                }
-                textArea.append(msg);
-                textArea.setCaretPosition(textArea.getDocument().getLength());
-            });
-        }
-
-        @Override
-        public void flush() {
-        }
-
-        @Override
-        public void close() throws SecurityException {
-        }
+    /**
+     * Returns the active SystemConsoleSubscriber (for external access if needed).
+     */
+    public SystemConsoleSubscriber getSubscriber() {
+        return subscriber;
     }
 }

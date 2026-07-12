@@ -183,6 +183,84 @@ class NodeProfileTest {
     }
 
     // =====================================================================
+    // Logging preset methods
+    // =====================================================================
+
+    @Nested
+    @DisplayName("Logging Preset Methods")
+    class LoggingPresetTests {
+
+        @Test
+        @DisplayName("getLoggingPreset returns default 'standard' when not set")
+        void getLoggingPreset_GivenNotSet_ReturnsDefault() {
+            // Arrange
+            NodeProfile profile = new NodeProfile("test");
+
+            // Act
+            String result = profile.getLoggingPreset();
+
+            // Assert
+            assertEquals(NodeProfile.DEFAULT_LOGGING_PRESET, result);
+        }
+
+        @Test
+        @DisplayName("getLoggingPreset returns configured preset")
+        void getLoggingPreset_GivenVerbose_ReturnsVerbose() {
+            // Arrange
+            NodeProfile profile = new NodeProfile("test");
+            profile.setLoggingPreset("verbose");
+
+            // Act
+            String result = profile.getLoggingPreset();
+
+            // Assert
+            assertEquals("verbose", result);
+        }
+
+        @Test
+        @DisplayName("setLoggingPreset with empty string clears the preset")
+        void setLoggingPreset_GivenEmptyString_ClearsPreset() {
+            // Arrange
+            NodeProfile profile = new NodeProfile("test");
+            profile.setLoggingPreset("debug");
+
+            // Act
+            profile.setLoggingPreset("");
+
+            // Assert
+            assertEquals(NodeProfile.DEFAULT_LOGGING_PRESET, profile.getLoggingPreset());
+            assertFalse(profile.hasLoggingPreset());
+        }
+
+        @Test
+        @DisplayName("hasLoggingPreset returns true when preset is set")
+        void hasLoggingPreset_GivenPresetSet_ReturnsTrue() {
+            // Arrange
+            NodeProfile profile = new NodeProfile("test");
+            profile.setLoggingPreset("minimal");
+
+            // Act & Assert
+            assertTrue(profile.hasLoggingPreset());
+        }
+
+        @Test
+        @DisplayName("hasLoggingPreset returns false when preset is not set")
+        void hasLoggingPreset_GivenNotSet_ReturnsFalse() {
+            // Arrange
+            NodeProfile profile = new NodeProfile("test");
+
+            // Act & Assert
+            assertFalse(profile.hasLoggingPreset());
+        }
+
+        @Test
+        @DisplayName("PROPERTY_LOGGING_PRESET constant has expected value")
+        void propertyKey_HasExpectedValue() {
+            assertEquals("logging.preset", NodeProfile.PROPERTY_LOGGING_PRESET);
+        }
+    }
+
+    // =====================================================================
     // loadAll() / loadByName() - static method tests
     // =====================================================================
 

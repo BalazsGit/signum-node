@@ -2,6 +2,8 @@ package application.module.node.util;
 
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
+import application.utils.logging.MdcPropagatingThreadFactory;
+import application.utils.logging.ProfileThreadContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -112,7 +114,11 @@ public final class ThreadPool {
         logger.info("Using {} msec Thread delay", propertyService.getInt(Props.BLOCK_PROCESS_THREAD_DELAY));
         int totalThreads = backgroundJobs.size() + backgroundJobsCores.size() * cores;
         logger.debug("Starting {} background jobs", totalThreads);
-        scheduledThreadPool = Executors.newScheduledThreadPool(totalThreads);
+        // Use MdcPropagatingThreadFactory so child threads inherit the parent's MDC context.
+        // Since NodeLifecycleManager wraps startup in ProfileThreadContext.wrap(module, profile),
+        // all scheduled workers will carry module="node" + profile=<profileName> for proper log routing.
+        scheduledThreadPool = Executors.newScheduledThreadPool(
+                totalThreads, new MdcPropagatingThreadFactory("Node-Worker-", true));
         for (Map.Entry<Runnable, Long> entry : backgroundJobs.entrySet()) {
             final Runnable inner = entry.getKey();
             final String name = backgroundJobNames.get(inner);
@@ -248,15 +254,18 @@ public final class ThreadPool {
     private void runAll(List<Runnable> jobs) {
         List<Thread> threads = new ArrayList<>();
         final StringBuffer errors = new StringBuffer();
+        // Capture current MDC so spawned startup threads also carry the routing context.
+        String capturedModule = ProfileThreadContext.getModuleId();
+        String capturedProfile = ProfileThreadContext.getProfile();
         for (final Runnable runnable : jobs) {
-            Thread thread = new Thread(() -> {
+            Thread thread = new Thread(ProfileThreadContext.wrap(() -> {
                 try {
                     runnable.run();
                 } catch (Exception t) {
                     errors.append(t.getMessage()).append('\n');
                     throw t;
                 }
-            });
+            }, capturedModule, capturedProfile));
             thread.setDaemon(true);
             thread.start();
             threads.add(thread);

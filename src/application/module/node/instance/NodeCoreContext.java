@@ -13,6 +13,9 @@ import application.module.node.db.store.Stores;
 import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.props.CaselessProperties;
 import application.module.node.props.PropertyService;
+import application.utils.logging.ProfileThreadContext;
+import application.utils.logging.ProfileLogRouter;
+import application.utils.logging.ProfileLoggingApplier;
 import application.module.node.services.AccountService;
 import application.module.node.services.AliasService;
 import application.module.node.services.BlockService;
@@ -217,12 +220,20 @@ public final class NodeCoreContext {
      * phases the code will be fully migrated here.
      */
     private void doInitialize() {
-        // Phase 1: Delegate to Signum.init() with our PropertyService so that
-        // all static fields are still populated (backwards-compat bridge).
-        // The captured references below will be populated via getter access.
+        // ── Step 1: Apply per-profile logging configuration ──
+        // Resolution priority: profiles.json loggingPresets → profiles.json loggingProfile
+        // → NodeProfile.properties logging.preset → hardcoded default ("standard")
+        ProfileLoggingApplier.apply(confFolder.toString(), profileName);
+
+        // ── Step 2: Tag current thread with module+profile for log routing ──
+        // ProfileThreadContext sets MDC context so that all SLF4J → JUL →
+        // ProfileLogRouter events emitted on this thread carry the correct
+        // module ID + profile name and are routed to the right UI console tabs.
+        ProfileThreadContext.setContext("node", profileName);
+
+        // ── Step 3: Delegate to Signum.init() ──
         try {
             application.module.node.Signum.init((CaselessProperties) propertyService);
-            // After init, capture references from Signum static state
             captureComponentReferences();
         } catch (NodeStartupException e) {
             throw e;
@@ -263,6 +274,8 @@ public final class NodeCoreContext {
             logger.error("Error during shutdown of profile '{}'", profileName, e);
         } finally {
             started.set(false);
+            // Clear MDC routing context so orphaned events are not misrouted.
+            ProfileThreadContext.clear();
         }
     }
 
