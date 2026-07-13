@@ -1,0 +1,36 @@
+---
+description: Node module component and config resolution diagram
+---
+flowchart BT
+    subgraph Node_Module["Node Module"]
+        Signum[Signum]
+        ProfileConfig[ProfileConfig]
+        LifecycleMgr[NodeLifecycleManager]
+        BlockchainProc[BlockchainProcessorImpl]
+        LoggingProv[NodeLoggingProvider]
+    end
+
+    subgraph Config_System["Config System"]
+        ConfigPath[ModuleConfigPath]
+        PropsSvc[PropertiesService]
+        LogMgr[LoggingProfileManager]
+    end
+
+    subgraph Resources["Resources JAR"]
+        NodeDef[/conf/node/profiles/ profile-default.properties]
+        LogDef[/conf/node/logging/ logging-default.properties]
+    end
+
+    subgraph Runtime["Runtime User"]
+        UserNode[conf/node/ {profile}.properties]
+        UserLog[conf/node/logging.properties]
+    end
+
+    Signum --> ConfigPath
+    ConfigPath --> NodeDef
+    ConfigPath --> LogDef
+    ConfigPath --> UserNode
+    ConfigPath --> UserLog
+    LoggingProv --> LogMgr
+    LifecycleMgr --> PropsSvc
+    ProfileConfig --> ConfigPath

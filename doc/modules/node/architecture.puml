@@ -1,0 +1,37 @@
+@startuml Node Architecture
+skinparam componentStyle rectangle
+
+package "Node Module" {
+  [Signum] as Signum
+  [ProfileConfig] as ProfileConfig
+  [NodeLifecycleManager] as LifecycleMgr
+  [BlockchainProcessorImpl] as BlockchainProc
+  [NodeLoggingProvider] as LoggingProv
+}
+
+package "Config System" {
+  [ModuleConfigPath] as ConfigPath
+  [PropertiesService] as PropsSvc
+  [LoggingProfileManager] as LogMgr
+}
+
+package "Resources (JAR)" {
+  ["/conf/node/profiles/\nprofile-default.properties"] as NodeDef
+  ["/conf/node/logging/\nlogging-default.properties"] as LogDef
+}
+
+package "Runtime (User)" {
+  ["conf/node/{profile}.properties"] as UserNode
+  ["conf/node/logging.properties"] as UserLog
+}
+
+Signum --> ConfigPath
+ConfigPath --> NodeDef
+ConfigPath --> LogDef
+ConfigPath --> UserNode
+ConfigPath --> UserLog
+LoggingProv --> LogMgr
+LifecycleMgr --> PropsSvc
+ProfileConfig --> ConfigPath
+
+@enduml
