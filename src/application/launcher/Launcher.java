@@ -3,6 +3,7 @@ package application.launcher;
 import application.kernel.ApplicationKernel;
 import application.module.node.util.LoggerConfigurator;
 import application.utils.io.PathUtils;
+import application.utils.logging.ProfileLogRouter;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
@@ -84,6 +85,15 @@ public class Launcher {
             initLogs = LoggerConfigurator.init(confFolder);
         } catch (Exception e) {
             System.err.println("Failed to initialize LoggerConfigurator: " + e.getMessage());
+        }
+
+        // Install ProfileLogRouter EARLY so ALL log events from module init/start are captured
+        // and routed to both profile-specific subscribers and global subscribers (SystemConsole).
+        // This must happen before ApplicationKernel.boot() which calls module init()/start().
+        try {
+            ProfileLogRouter.getInstance().install();
+        } catch (Exception e) {
+            System.err.println("[Launcher] Failed to install ProfileLogRouter: " + e.getMessage());
         }
 
         logger = LoggerFactory.getLogger(Launcher.class);

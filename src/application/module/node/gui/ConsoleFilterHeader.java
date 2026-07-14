@@ -308,8 +308,8 @@ public final class ConsoleFilterHeader extends JPanel {
             return null;
         }
         String value = selected.toString().trim();
-        if (value.isEmpty()) {
-            return null; // Empty = accept all profiles
+        if (value.isEmpty() || "(all)".equalsIgnoreCase(value)) {
+            return null; // Empty or "(all)" = accept all profiles
         }
         return ProfileFilter.including(value);
     }

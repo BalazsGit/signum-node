@@ -39,7 +39,7 @@ import java.util.logging.LogRecord;
  * <h3>Routing Rules</h3>
  * <ul>
  *   <li>If MDC has module+profile set → route to that specific context only (O(1) HashMap lookup)</li>
- *   <li>If MDC is empty (bootstrap/system logs) → broadcast to ALL registered contexts</li>
+ *   <li>If MDC is empty (bootstrap/system/global GUI logs) → only global subscribers (SystemConsole) receive the event</li>
  * </ul>
  *
  * <h3>Multi-Module Support (V2.3)</h3>
@@ -287,10 +287,9 @@ public final class ProfileLogRouter {
             dispatchToGlobalSubscribers(event);
 
             if (key == null || key.isEmpty()) {
-                // Unassigned log (bootstrap, system-level) → broadcast to ALL contexts
-                for (ProfileLogContext ctx : profileMap.values()) {
-                    ctx.dispatch(event);
-                }
+                // Unassigned log (bootstrap, system-level, global GUI components)
+                // → Only global subscribers (SystemConsole) receive it.
+                // Profile-specific consoles should NOT see these logs.
                 return;
             }
 

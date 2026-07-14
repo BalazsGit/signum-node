@@ -986,7 +986,11 @@ public class NodeConsolePanel extends JPanel {
         iconColor = textPane.getForeground();
         this.dbConsistencyColor = GuiColors.getButtonIcon();
         DefaultCaret caret = (DefaultCaret) textPane.getCaret();
-        caret.setUpdatePolicy(DefaultCaret.ALWAYS_UPDATE);
+        // NEVER_UPDATE: disable forced auto-scroll so the user can freely scroll
+        // through older logs without being yanked back to the bottom on every
+        // document modification. The scrollbar will only move when new content
+        // is actually appended and the user is already viewing the end.
+        caret.setUpdatePolicy(DefaultCaret.NEVER_UPDATE);
         textPane.setEditable(false);
 
         // Setup per-profile log routing (replaces legacy global JUL handler)
