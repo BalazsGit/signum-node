@@ -27,5 +27,36 @@ Step 4: User override (empty at init)
 | `/conf/node/profiles/profile-default.properties` | `conf/node/{profile}.properties` | Node config values |
 | `/conf/node/logging/logging-default.properties` | `conf/node/logging.properties` | Logging levels |
 
-## Utility Class
-- `application.utils.config.ModuleConfigPath` — Path resolution and stream loading
+## Logging Architecture
+
+The Node module uses the centralized logging framework (`ModuleLogger` hierarchy) for all log output:
+
+### Active Components
+
+| Class | Role |
+|-------|------|
+| `NodeLoggingProvider` | Provides node-specific logging presets to `LoggingProfileManager` |
+| `NodeLoggingProfile` | Defines node module log levels, appenders, patterns |
+| `ProfileLogger` | Per-profile logger instance held by each `NodeCoreContext` |
+
+### GUI Console Integration
+
+| Component | Subscribes To | Purpose |
+|-----------|--------------|---------|
+| `SystemConsoleSubscriber` | `SystemLogger` | Displays all logs from all modules/profiles |
+| `ProfileConsoleSubscriber` | `ProfileLogger` | Displays logs for a specific node profile only |
+| `NodeConsolePanel` | Both above | Tabbed console view in GUI |
+
+### Deprecated (Legacy Bridge)
+
+The following classes are marked `@Deprecated` and retained for backward compatibility during the SLF4J→JUL bridge migration period:
+
+- `ProfileLogRouter` — JUL handler that routes events to profile contexts
+- `ProfileThreadContext` — MDC wrapper for thread-local routing
+- `ProfileLogContext` — Legacy subscriber registry per profile
+
+New code should use `ProfileLogger` directly (constructor injection) rather than relying on MDC-based routing.
+
+### Diagrams
+
+- **[architecture.puml](./architecture.puml)** / **[architecture.mmd](./architecture.mmd)** — Component diagram including logging framework

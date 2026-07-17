@@ -113,8 +113,8 @@ import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
 import application.module.node.util.Convert;
-import application.utils.logging.ProfileLogContext;
 import application.module.node.profile.NodeProfile;
+import application.utils.logging.ProfileLogger;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
@@ -128,11 +128,12 @@ public class NodeConsolePanel extends JPanel {
     /** Current node profile name for hierarchical GUI settings storage */
     private final String profileName;
 
-    /** Per-profile logging context for isolated log routing */
-    private ProfileLogContext logContext;
-
     /** GUI subscriber that renders log events to the console JTextPane */
     private ProfileConsoleSubscriber consoleSubscriber;
+
+    /** Reference to the ProfileLogger for cleanup on panel disposal */
+    private ProfileLogger profileLogger;
+
     private static final String UNEXPECTED_EXIT_MESSAGE = "Signum Quit unexpectedly! Exit code ";
 
     public static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("HH:mm:ss yyyy-MM-dd");
@@ -993,17 +994,18 @@ public class NodeConsolePanel extends JPanel {
         caret.setUpdatePolicy(DefaultCaret.NEVER_UPDATE);
         textPane.setEditable(false);
 
-        // Setup per-profile log routing (replaces legacy global JUL handler)
-        // This ensures logs from this profile only appear in this console panel
-        initProfileLogging(textPane);
-
-        // Flush legacy bootstrap logs directly to the console for backward compatibility
-        flushBootstrapLogsToConsole(textPane);
-
         // No global debug logger in production; Popup auto-close logic is instantiated
         // when a popup is opened by the owning component.
 
         textScrollPane = new JScrollPane(textPane);
+        textScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        textScrollPane.getVerticalScrollBar().setUnitIncrement(16);
+
+        // Setup per-profile log routing with smart auto-scroll support
+        initProfileLogging(textPane, textScrollPane);
+
+        // Flush legacy bootstrap logs directly to the console for backward compatibility
+        flushBootstrapLogsToConsole(textPane);
         textScrollPane.setBorder(BorderFactory.createEmptyBorder());
         textScrollPane.getVerticalScrollBar().setUnitIncrement(16);
 
@@ -3382,19 +3384,33 @@ public class NodeConsolePanel extends JPanel {
 
     /**
      * Initializes per-profile log routing for this console panel.
-     * Creates a ProfileLogContext registered with the global ProfileLogRouter,
-     * and attaches a ProfileConsoleSubscriber to render events in the given JTextPane.
+     * Uses ProfileLogger from NodeProfile architecture (new logger system).
+     * The ProfileLogger forwards events to SystemLogger automatically,
+     * and the ProfileConsoleSubscriber renders them in the given JTextPane.
      *
-     * @param textPane the target JTextPane for log display
+     * @param textPane   the target JTextPane for log display
+     * @param scrollPane the parent JScrollPane for smart auto-scroll behavior (null to disable)
      */
-    private void initProfileLogging(JTextPane textPane) {
-        // Create per-profile logging context (module="node", profile=profileName)
-        logContext = new ProfileLogContext("node", profileName);
-        logContext.start();
+    private void initProfileLogging(JTextPane textPane, JScrollPane scrollPane) {
+        // Load or create NodeProfile for this profile name and get its ProfileLogger.
+        // The ProfileLogger is part of the new centralized logger architecture:
+        //   SLF4J/Logback → ProfileLogger → (forward to SystemLogger) + GUI subscribers
+        NodeProfile nodeProfile = NodeProfile.loadByName(profileName);
+        if (nodeProfile == null) {
+            // Fallback: create a new profile if file doesn't exist yet
+            nodeProfile = new NodeProfile(profileName);
+        }
+
+        profileLogger = nodeProfile.getLogger();
 
         // Create subscriber that renders log events to the console JTextPane
         consoleSubscriber = new ProfileConsoleSubscriber(profileName, textPane.getStyledDocument());
-        logContext.addSubscriber(consoleSubscriber);
+        // Enable smart auto-scroll: only scroll when user is near the bottom
+        if (scrollPane != null) {
+            consoleSubscriber.setScrollPane(scrollPane);
+        }
+        // Subscribe directly to ProfileLogger instead of legacy ProfileLogContext
+        profileLogger.addSubscriber(consoleSubscriber);
     }
 
     /**
@@ -3420,15 +3436,15 @@ public class NodeConsolePanel extends JPanel {
      */
     @Override
     public void removeNotify() {
-        // Clean up profile logging context
+        // Clean up profile logging subscriber
+        if (consoleSubscriber != null && profileLogger != null) {
+            profileLogger.removeSubscriber(consoleSubscriber);
+        }
         if (consoleSubscriber != null) {
             consoleSubscriber.dispose();
             consoleSubscriber = null;
         }
-        if (logContext != null) {
-            logContext.close();
-            logContext = null;
-        }
+        profileLogger = null;
         super.removeNotify();
     }
 }

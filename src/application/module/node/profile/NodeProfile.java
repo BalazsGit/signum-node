@@ -3,11 +3,13 @@ package application.module.node.profile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import application.utils.io.PathUtils;
+import application.utils.logging.ProfileLogger;
+
 import java.io.InputStream;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -16,12 +18,10 @@ import java.util.Set;
 
 public class NodeProfile {
     private static final Logger LOGGER = LoggerFactory.getLogger(NodeProfile.class);
-    private static final Path NODE_CONF_DIR = Paths.get("conf", "node");
+    private static final Path NODE_CONF_DIR = PathUtils.resolvePath("conf/node");
 
     /**
      * Property key for per-profile logging preset selection.
-     * When set in the node profile's .properties file (e.g., logging.preset=verbose),
-     * LoggingProfileManager uses this to apply the specified preset for the 'node' module.
      */
     public static final String PROPERTY_LOGGING_PRESET = "logging.preset";
 
@@ -31,27 +31,12 @@ public class NodeProfile {
     /**
      * Set of reserved profile names that are excluded from profile discovery and cannot be
      * used when saving new profiles.
-     * <p>
-     * These names correspond to informational template files containing only commented-out
-     * default settings. Users can open these files manually to explore available configuration
-     * options, but they are not intended to be loaded or saved as active profiles since they
-     * carry no uncommented (active) configuration values.
-     * </p>
-     * <ul>
-     *   <li>{@code node-default} — default node configuration reference</li>
-     *   <li>{@code logging-default} — default logging configuration reference</li>
-     * </ul>
-     * <p>
-     * We use an explicit allow-list of reserved names rather than a generic suffix pattern
-     * (like {@code endsWith("-default")}) to avoid incorrectly blocking user profiles that
-     * happen to end with "-default" (e.g., "my-custom-default"). Only the specific reserved
-     * names defined here are excluded.
-     * </p>
      */
     private static final Set<String> RESERVED_PROFILE_NAMES = Set.of("node-default", "logging-default");
 
     private final Properties properties = new Properties();
     private final String profileName;
+    private volatile ProfileLogger logger;
 
     public NodeProfile(String profileName) {
         this.profileName = profileName;
@@ -86,13 +71,50 @@ public class NodeProfile {
         }
     }
 
+    // ── Centralized Logger Integration ─────────────────────────────────
+
+    /**
+     * Returns the ProfileLogger for this profile, lazily creating it on first access.
+     * The logger is auto-configured to forward events to SystemLogger.
+     *
+     * @return the ProfileLogger instance (never null)
+     */
+    public ProfileLogger getLogger() {
+        if (logger == null) {
+            synchronized (this) {
+                if (logger == null) {
+                    logger = new ProfileLogger("node", profileName);
+                }
+            }
+        }
+        return logger;
+    }
+
+    /**
+     * Returns an SLF4J Logger adapter backed by this profile's ProfileLogger.
+     * Use this instead of LoggerFactory.getLogger() in Services that belong to this profile.
+     *
+     * @return the SLF4J Logger adapter (never null)
+     */
+    public org.slf4j.Logger getSlf4jLogger() {
+        return new NodeProfileAdapter(getLogger());
+    }
+
+    /**
+     * Closes the ProfileLogger when this profile is shut down.
+     * Should be called during profile cleanup.
+     */
+    public void closeLogger() {
+        if (logger != null) {
+            logger.close();
+        }
+    }
+
     // ── Logging Configuration ──────────────────────────────────────────
 
     /**
      * Returns the logging preset name configured for this profile.
      * Falls back to {@link #DEFAULT_LOGGING_PRESET} if not set.
-     *
-     * @return logging preset name (never null or empty)
      */
     public String getLoggingPreset() {
         String preset = properties.getProperty(PROPERTY_LOGGING_PRESET);
@@ -104,8 +126,6 @@ public class NodeProfile {
 
     /**
      * Sets the logging preset for this profile.
-     *
-     * @param preset the preset name (e.g., "minimal", "standard", "verbose", "debug")
      */
     public void setLoggingPreset(String preset) {
         if (preset == null || preset.isEmpty()) {
@@ -122,10 +142,10 @@ public class NodeProfile {
         return properties.containsKey(PROPERTY_LOGGING_PRESET);
     }
 
+    // ── Static Factory Methods ─────────────────────────────────────────
+
     /**
      * Discovers all node profiles from conf/node/*.properties files.
-     *
-     * @return Array of loaded NodeProfile objects
      */
     public static NodeProfile[] loadAll() {
         List<NodeProfile> profiles = new ArrayList<>();
@@ -140,10 +160,6 @@ public class NodeProfile {
                 try {
                     String profileName = file.getFileName().toString().replace(".properties", "");
 
-                    // Skip reserved profile names: these are informational template files
-                    // containing only commented-out default settings for user reference.
-                    // They are not intended to be loaded as active profiles since they have
-                    // no uncommented configuration values. See RESERVED_PROFILE_NAMES for details.
                     if (isReservedProfileName(profileName)) {
                         LOGGER.debug("Skipping reserved profile name: {}", profileName);
                         continue;
@@ -168,21 +184,7 @@ public class NodeProfile {
     }
 
     /**
-     * Checks if a profile name is reserved and should be excluded from discovery and saving.
-     * <p>
-     * Reserved names like {@code node-default} and {@code logging-default} are informational
-     * template files containing only commented-out default settings for user reference.
-     * These files are NOT loadable as active profiles since they contain no uncommented
-     * configuration values. Users can manually open these files to explore available options.
-     * </p>
-     * <p>
-     * We use an explicit set of reserved names (not a suffix pattern) so that user profiles
-     * ending with "-default" (e.g., "my-custom-default") are not incorrectly blocked.
-     * Only the specific names in {@link #RESERVED_PROFILE_NAMES} are excluded.
-     * </p>
-     *
-     * @param profileName the profile name (without .properties extension)
-     * @return true if this name is reserved and should be excluded from discovery/saving
+     * Checks if a profile name is reserved.
      */
     public static boolean isReservedProfileName(String profileName) {
         return profileName != null && RESERVED_PROFILE_NAMES.contains(profileName);
@@ -190,9 +192,6 @@ public class NodeProfile {
 
     /**
      * Loads a specific profile by name from conf/node/{name}.properties.
-     *
-     * @param profileName the name of the profile (without .properties extension)
-     * @return The loaded NodeProfile, or null if not found
      */
     public static NodeProfile loadByName(String profileName) {
         Path profileFile = NODE_CONF_DIR.resolve(profileName + ".properties");
@@ -212,6 +211,8 @@ public class NodeProfile {
             return null;
         }
     }
+
+    // ── Object Contract ────────────────────────────────────────────────
 
     @Override
     public boolean equals(Object o) {

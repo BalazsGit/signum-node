@@ -37,7 +37,17 @@ import org.slf4j.MDC;
  * @see ProfileLogContext
  * @see LogRoutingKey
  * @see org.slf4j.MDC
+ *
+ * @deprecated This class is part of the legacy MDC-based logging architecture.
+ * New code should use explicit {@link application.utils.logging.ProfileLogger} instances
+ * held by each profile (NodeProfile, DatabaseProfile, etc.) rather than relying on
+ * thread-local MDC context for log routing.
+ * <p>This class is retained for backward compatibility during the migration period
+ * (LOGGER_ARCHITECTURE_PLAN Phase 4) and will be removed in a future release.</p>
+ * @see application.utils.logging.ProfileLogger
+ * @see application.utils.logging.SystemLogger
  */
+@Deprecated
 public final class ProfileThreadContext {
 
     private ProfileThreadContext() {

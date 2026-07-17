@@ -1,6 +1,7 @@
 package application.module.node.gui;
 
 import java.awt.Color;
+import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.SimpleAttributeSet;
@@ -24,7 +25,7 @@ import application.utils.logging.event.LogSubscriber;
  * <p>
  * Architecture:
  * <pre>
- *   ProfileLogContext → ProfileConsoleSubscriber → LogEventBatcher → EDT → StyledDocument
+ *   ProfileLogger("node.mainnet") → ProfileConsoleSubscriber → LogEventBatcher → EDT → StyledDocument
  * </pre>
  * <p>
  * <h3>Thread Safety</h3>
@@ -83,6 +84,16 @@ public final class ProfileConsoleSubscriber implements LogSubscriber {
     /** Optional filter; when non-null only matching events are processed */
     private final LogFilter filter;
 
+    /**
+     * Optional JScrollPane reference for smart auto-scroll.
+     * When set, the console will only auto-scroll to the bottom if the user
+     * is already viewing near the bottom (>80% of scroll range), similar to VS Code terminal behavior.
+     */
+    private volatile JScrollPane scrollPane;
+
+    /** Threshold (0.0-1.0): only auto-scroll when scrollbar is at or above this percentage of max position */
+    private static final double SMART_SCROLL_THRESHOLD = 0.8;
+
     /** Terminal-format log formatter (singleton, shared across all instances) */
     private final TerminalFormatLogFormatter formatter = TerminalFormatLogFormatter.INSTANCE;
 
@@ -122,6 +133,23 @@ public final class ProfileConsoleSubscriber implements LogSubscriber {
         // BatchConsumer runs on EDT; appends events to StyledDocument in bulk
         batcher = new LogEventBatcher(this::appendBatch);
         batcher.start();
+    }
+
+    /**
+     * Sets the parent JScrollPane to enable smart auto-scroll behavior.
+     * When a scrollPane is provided, the console will only auto-scroll to the bottom
+     * when the user is already viewing near the bottom of the content (above 80% threshold).
+     * This prevents unwanted scroll-jumping when the user reads older logs.
+     *
+     * @param pane the JScrollPane that contains the console text component (null to disable smart scroll)
+     */
+    public void setScrollPane(JScrollPane pane) {
+        this.scrollPane = pane;
+    }
+
+    /** @return the current JScrollPane reference for smart auto-scroll, or null if disabled */
+    public JScrollPane getScrollPane() {
+        return scrollPane;
     }
 
     // ── LogSubscriber Implementation ────────────────────────────────────
@@ -189,9 +217,50 @@ public final class ProfileConsoleSubscriber implements LogSubscriber {
             // Enforce max line count by trimming oldest lines
             enforceMaxLines();
 
+            // Smart auto-scroll: only scroll to bottom if user is already near the bottom
+            maybeScrollToEnd();
+
         } catch (BadLocationException e) {
             LOGGER.error("[ProfileConsoleSubscriber:{}] BadLocationException during batch append", profileName, e);
         }
+    }
+
+    // ── Smart Auto-Scroll ────────────────────────────────────────────────
+
+    /**
+     * Scrolls the console to the end only if the user is already viewing near the bottom.
+     * Similar to VS Code terminal: new content auto-scrolls when the user is at the bottom,
+     * but does not jump when the user has scrolled up to read older content.
+     */
+    private void maybeScrollToEnd() {
+        JScrollPane pane = scrollPane;
+        if (pane == null) {
+            return;
+        }
+
+        javax.swing.JScrollBar verticalBar = pane.getVerticalScrollBar();
+        if (verticalBar == null) {
+            return;
+        }
+
+        int max = verticalBar.getMaximum();
+        int extent = verticalBar.getVisibleAmount();
+        int current = verticalBar.getValue();
+
+        // Calculate the effective scrollable range
+        int scrollableRange = max - extent;
+        if (scrollableRange <= 0) {
+            // Content fits entirely in viewport – nothing to scroll
+            return;
+        }
+
+        // Check if user is viewing at or below the threshold (near bottom)
+        double positionRatio = (double) current / scrollableRange;
+        if (positionRatio >= SMART_SCROLL_THRESHOLD) {
+            // User is near bottom: scroll to end
+            verticalBar.setValue(max);
+        }
+        // Otherwise: user scrolled up, do not disturb their view position
     }
 
     // ── Log Line Formatting ─────────────────────────────────────────────

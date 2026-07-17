@@ -1,6 +1,7 @@
 package application.utils.logging;
 
 import application.utils.logging.event.LogEvent;
+import application.utils.logging.event.LogLevel;
 import application.utils.logging.event.LogSubscriber;
 import application.utils.logging.event.LogFilter;
 
@@ -13,32 +14,23 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Unit tests for {@link BootstrapLogBuffer}.
  * <p>
- * Verifies bounded circular buffer behavior, capacity management, flush operations,
- * and thread-safety of the bootstrap log capture mechanism.
+ * Verifies bounded circular buffer behavior, capacity management, flush operations
+ * to SystemLogger / ModuleLogger, and thread-safety of the bootstrap log capture mechanism.
  * </p>
  */
 @DisplayName("BootstrapLogBuffer Tests")
 class BootstrapLogBufferTest {
 
-    private ProfileLogRouter router;
-
-    @BeforeEach
-    void setUp() {
-        ProfileLogRouter.resetInstance();
-        ProfileThreadContext.clear();
-        router = ProfileLogRouter.getInstance();
-    }
-
     @AfterEach
     void tearDown() {
-        ProfileThreadContext.clear();
-        ProfileLogRouter.resetInstance();
+        SystemLogger.resetInstance();
     }
 
     // ------------------------ Constructor ------------------------
@@ -319,24 +311,23 @@ class BootstrapLogBufferTest {
         }
     }
 
-    // ------------------------ flushToContext() ------------------------
+    // ------------------------ flushToSystemLogger() ------------------------
 
     @Nested
-    @DisplayName("flushToContext(ProfileLogContext)")
-    class FlushToContextTests {
+    @DisplayName("flushToSystemLogger()")
+    class FlushToSystemLoggerTests {
 
         @Test
-        @DisplayName("flush delivers all entries to context")
-        void flushToContext_GivenEntries_DeliversAll() {
-            List<String> received = Collections.synchronizedList(new ArrayList<>());
-            ProfileLogContext context = createCollectingContext(received);
-            context.start();
+        @DisplayName("flush delivers all entries to SystemLogger")
+        void flushToSystemLogger_GivenEntries_DeliversAll() {
+            CopyOnWriteArrayList<String> received = new CopyOnWriteArrayList<>();
+            SystemLogger.getInstance().addSubscriber(new TestLogSubscriber(received::add));
 
             BootstrapLogBuffer buffer = new BootstrapLogBuffer(10);
             buffer.add("log line 1");
             buffer.add("log line 2");
 
-            buffer.flushToContext(context);
+            buffer.flushToSystemLogger();
 
             assertEquals(2, received.size());
             assertTrue(received.contains("log line 1"));
@@ -345,48 +336,85 @@ class BootstrapLogBufferTest {
 
         @Test
         @DisplayName("flush with empty buffer is safe")
-        void flushToContext_GivenEmptyBuffer_IsSafe() {
-            List<String> received = Collections.synchronizedList(new ArrayList<>());
-            ProfileLogContext context = createCollectingContext(received);
-            context.start();
+        void flushToSystemLogger_GivenEmptyBuffer_IsSafe() {
+            CopyOnWriteArrayList<String> received = new CopyOnWriteArrayList<>();
+            SystemLogger.getInstance().addSubscriber(new TestLogSubscriber(received::add));
 
             BootstrapLogBuffer buffer = new BootstrapLogBuffer(10);
 
-            assertDoesNotThrow(() -> buffer.flushToContext(context));
+            assertDoesNotThrow(() -> buffer.flushToSystemLogger());
             assertEquals(0, received.size());
-        }
-
-        @Test
-        @DisplayName("flush with null context throws")
-        void flushToContext_GivenNullContext_ThrowsIllegalArgumentException() {
-            BootstrapLogBuffer buffer = new BootstrapLogBuffer(10);
-
-            assertThrows(IllegalArgumentException.class, () -> buffer.flushToContext(null));
         }
     }
 
-    // ------------------------ flushAllToContexts() ------------------------
+    // ------------------------ flushToLogger() ------------------------
 
     @Nested
-    @DisplayName("flushAllToContexts(ProfileLogRouter)")
-    class FlushAllToContextsTests {
+    @DisplayName("flushToLogger(ModuleLogger)")
+    class FlushToLoggerTests {
 
         @Test
-        @DisplayName("flush distributes to all registered contexts")
-        void flushAllToContexts_GivenMultipleContexts_DistributesToAll() {
-            List<String> nodeReceived = Collections.synchronizedList(new ArrayList<>());
-            List<String> dbReceived = Collections.synchronizedList(new ArrayList<>());
+        @DisplayName("flush delivers all entries to target ModuleLogger")
+        void flushToLogger_GivenEntries_DeliversAll() {
+            CopyOnWriteArrayList<String> received = new CopyOnWriteArrayList<>();
+            ProfileLogger logger = new ProfileLogger("node", "test");
+            logger.addSubscriber(new TestLogSubscriber(received::add));
 
-            ProfileLogContext nodeCtx = createCollectingContext("node", "mainnet", nodeReceived);
-            ProfileLogContext dbCtx = createCollectingContext("database", "mainnet", dbReceived);
+            BootstrapLogBuffer buffer = new BootstrapLogBuffer(10);
+            buffer.add("to profile 1");
+            buffer.add("to profile 2");
 
-            router.registerContext(nodeCtx);
-            router.registerContext(dbCtx);
+            buffer.flushToLogger(logger);
+
+            assertEquals(2, received.size());
+            assertTrue(received.contains("to profile 1"));
+            assertTrue(received.contains("to profile 2"));
+        }
+
+        @Test
+        @DisplayName("flush with null logger throws")
+        void flushToLogger_GivenNull_ThrowsIllegalArgumentException() {
+            BootstrapLogBuffer buffer = new BootstrapLogBuffer(10);
+
+            assertThrows(IllegalArgumentException.class, () -> buffer.flushToLogger(null));
+        }
+
+        @Test
+        @DisplayName("flush with empty buffer is safe")
+        void flushToLogger_GivenEmptyBuffer_IsSafe() {
+            ProfileLogger logger = new ProfileLogger("node", "test");
+            BootstrapLogBuffer buffer = new BootstrapLogBuffer(10);
+
+            assertDoesNotThrow(() -> buffer.flushToLogger(logger));
+        }
+    }
+
+    // ------------------------ flushAllToLoggers() ------------------------
+
+    @Nested
+    @DisplayName("flushAllToLoggers(Iterable<ModuleLogger>)")
+    class FlushAllToLoggersTests {
+
+        @Test
+        @DisplayName("flush distributes to all provided loggers")
+        void flushAllToLoggers_GivenMultipleLoggers_DistributesToAll() {
+            CopyOnWriteArrayList<String> nodeReceived = new CopyOnWriteArrayList<>();
+            CopyOnWriteArrayList<String> dbReceived = new CopyOnWriteArrayList<>();
+
+            ProfileLogger nodeLogger = new ProfileLogger("node", "mainnet");
+            nodeLogger.addSubscriber(new TestLogSubscriber(nodeReceived::add));
+
+            ProfileLogger dbLogger = new ProfileLogger("database", "mainnet");
+            dbLogger.addSubscriber(new TestLogSubscriber(dbReceived::add));
+
+            List<ModuleLogger> loggers = new ArrayList<>();
+            loggers.add(nodeLogger);
+            loggers.add(dbLogger);
 
             BootstrapLogBuffer buffer = new BootstrapLogBuffer(10);
             buffer.add("shared log");
 
-            buffer.flushAllToContexts(router);
+            buffer.flushAllToLoggers(loggers);
 
             assertEquals(1, nodeReceived.size());
             assertEquals(1, dbReceived.size());
@@ -395,42 +423,64 @@ class BootstrapLogBufferTest {
         }
 
         @Test
-        @DisplayName("flush with no registered contexts is safe")
-        void flushAllToContexts_GivenNoContexts_IsSafe() {
+        @DisplayName("flush with empty list is safe")
+        void flushAllToLoggers_GivenEmptyList_IsSafe() {
             BootstrapLogBuffer buffer = new BootstrapLogBuffer(10);
             buffer.add("orphan log");
 
-            assertDoesNotThrow(() -> buffer.flushAllToContexts(router));
+            assertDoesNotThrow(() -> buffer.flushAllToLoggers(Collections.emptyList()));
         }
 
         @Test
-        @DisplayName("flush with null router throws")
-        void flushAllToContexts_GivenNullRouter_ThrowsIllegalArgumentException() {
+        @DisplayName("flush with null iterable throws")
+        void flushAllToLoggers_GivenNull_ThrowsIllegalArgumentException() {
             BootstrapLogBuffer buffer = new BootstrapLogBuffer(10);
 
-            assertThrows(IllegalArgumentException.class, () -> buffer.flushAllToContexts(null));
+            assertThrows(IllegalArgumentException.class, () -> buffer.flushAllToLoggers(null));
+        }
+
+        @Test
+        @DisplayName("flush skips null loggers in list")
+        void flushAllToLoggers_GivenNullInList_SkipsThem() {
+            CopyOnWriteArrayList<String> received = new CopyOnWriteArrayList<>();
+            ProfileLogger logger = new ProfileLogger("node", "mainnet");
+            logger.addSubscriber(new TestLogSubscriber(received::add));
+
+            List<ModuleLogger> loggers = new ArrayList<>();
+            loggers.add(null);
+            loggers.add(logger);
+            loggers.add(null);
+
+            BootstrapLogBuffer buffer = new BootstrapLogBuffer(10);
+            buffer.add("msg");
+
+            assertDoesNotThrow(() -> buffer.flushAllToLoggers(loggers));
+            assertEquals(1, received.size());
         }
     }
 
     // ------------------------ Test Helpers ------------------------
 
-    private ProfileLogContext createCollectingContext(List<String> received) {
-        return createCollectingContext("test", "default", received);
-    }
+    /**
+     * Simple LogSubscriber that captures messages via an add callback.
+     */
+    private static class TestLogSubscriber implements LogSubscriber {
+        private final java.util.function.Consumer<String> onMessage;
 
-    private ProfileLogContext createCollectingContext(String moduleId, String profileName, List<String> received) {
-        ProfileLogContext context = new ProfileLogContext(moduleId, profileName);
-        context.addSubscriber(new LogSubscriber() {
-            @Override
-            public void onLogEvent(LogEvent event) {
-                received.add(event.getMessage());
-            }
+        TestLogSubscriber(java.util.function.Consumer<String> onMessage) {
+            this.onMessage = onMessage;
+        }
 
-            @Override
-            public LogFilter getFilter() {
-                return null;
+        @Override
+        public void onLogEvent(LogEvent event) {
+            if (onMessage != null && event.getMessage() != null) {
+                onMessage.accept(event.getMessage());
             }
-        });
-        return context;
+        }
+
+        @Override
+        public LogFilter getFilter() {
+            return null;
+        }
     }
 }

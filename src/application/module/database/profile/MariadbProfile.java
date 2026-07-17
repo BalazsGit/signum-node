@@ -11,6 +11,7 @@ import application.module.database.gui.DatabaseConfigurationPanel;
 import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.database.utils.DatabaseConfigurationUtils.ProgressListener;
 import application.utils.io.PathUtils;
+import application.utils.logging.ProfileLogger;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,8 +29,50 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public class MariadbProfile {
-    private static final Logger logger = LoggerFactory.getLogger(MariadbProfile.class);
+    /** Legacy SLF4J logger — used only for class-level diagnostics during bootstrap.
+     *  Once the ProfileLogger is initialized, use {@link #getSlf4jLogger()} instead. */
+    private static final Logger LOG = LoggerFactory.getLogger(MariadbProfile.class);
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
+
+    // ── Centralized Logger Integration ─────────────────────────────────
+    private volatile ProfileLogger logger;
+
+    /**
+     * Returns the ProfileLogger for this database profile, lazily creating it on first access.
+     * The logger is auto-configured to forward events to SystemLogger.
+     *
+     * @return the ProfileLogger instance (never null)
+     */
+    public ProfileLogger getLogger() {
+        if (logger == null) {
+            synchronized (this) {
+                if (logger == null) {
+                    logger = new ProfileLogger("database", profileName);
+                }
+            }
+        }
+        return logger;
+    }
+
+    /**
+     * Returns an SLF4J Logger adapter backed by this profile's ProfileLogger.
+     * Use this instead of LoggerFactory.getLogger() in components that belong to this profile.
+     *
+     * @return the SLF4J Logger adapter (never null)
+     */
+    public Logger getSlf4jLogger() {
+        return new DatabaseProfileAdapter(getLogger());
+    }
+
+    /**
+     * Closes the ProfileLogger when this profile is shut down.
+     * Should be called during profile cleanup.
+     */
+    public void closeLogger() {
+        if (logger != null) {
+            logger.close();
+        }
+    }
 
     public static class DatabaseInfo {
         public String id;
@@ -156,13 +199,13 @@ public class MariadbProfile {
         initDefaultConfiguration();
 
         if (profileRootPath != null) {
-            Path profileJson = profileRootPath.resolve("profile.json");
+        Path profileJson = profileRootPath.resolve("profile.json");
             if (Files.exists(profileJson)) {
                 try (BufferedReader reader = Files.newBufferedReader(profileJson, StandardCharsets.UTF_8)) {
                     JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
                     loadFromJson(json);
                 } catch (Exception e) {
-                    logger.warn("Could not load profile metadata from {}: {}", profileJson, e.getMessage());
+                    LOG.warn("Could not load profile metadata from {}: {}", profileJson, e.getMessage());
                     ensureProfileJsonExists();
                 }
             } else {
@@ -262,10 +305,10 @@ public class MariadbProfile {
             Path profileJson = profileRootPath.resolve("profile.json");
             if (!Files.exists(profileJson)) {
                 writeProfileJson(toJsonObject());
-                logger.info("Created profile metadata file for profile '{}'", profileName);
+                LOG.info("Created profile metadata file for profile '{}'", profileName);
             }
         } catch (IOException e) {
-            logger.warn("Could not create profile metadata for profile '{}': {}", profileName, e.getMessage());
+            LOG.warn("Could not create profile metadata for profile '{}': {}", profileName, e.getMessage());
         }
     }
 
@@ -639,10 +682,10 @@ public class MariadbProfile {
             Map<String, Object> updates = new HashMap<>();
             updates.put("createdDatabases", this.createdDatabases); // Save the whole list
             saveToProfileJson(updates);
-            logger.info("Database ID '{}' (Name: '{}') updated to Name: '{}' in profile '{}'.", id, oldName, newName,
+            LOG.info("Database ID '{}' (Name: '{}') updated to Name: '{}' in profile '{}'.", id, oldName, newName,
                     profileName);
         } else {
-            logger.warn("Attempted to update non-existent database ID '{}' in profile '{}'.", id, profileName);
+            LOG.warn("Attempted to update non-existent database ID '{}' in profile '{}'.", id, profileName);
             throw new IllegalArgumentException("Database ID '" + id + "' not found.");
         }
     }
@@ -658,7 +701,7 @@ public class MariadbProfile {
             Map<String, Object> updates = new HashMap<>();
             updates.put("createdDatabases", this.createdDatabases); // Save the whole list
             saveToProfileJson(updates);
-            logger.info("Database ID '{}' (Name: '{}') removed from profile '{}'.", id, dbName, profileName);
+            LOG.info("Database ID '{}' (Name: '{}') removed from profile '{}'.", id, dbName, profileName);
         }
     }
 
@@ -747,9 +790,9 @@ public class MariadbProfile {
             // TODO: Also execute DROP USER in MariaDB
             createdUsers.removeIf(u -> u.id.equals(id));
             Map<String, Object> updates = new HashMap<>();
-            updates.put("createdUsers", this.createdUsers);
-            saveToProfileJson(updates);
-            logger.info("User ID '{}' removed from profile '{}'.", id, profileName);
+        updates.put("createdUsers", this.createdUsers);
+        saveToProfileJson(updates);
+        LOG.info("User ID '{}' removed from profile '{}'.", id, profileName);
         }
     }
 
@@ -761,7 +804,7 @@ public class MariadbProfile {
         Map<String, Object> updates = new HashMap<>();
         updates.put("createdUsers", this.createdUsers);
         saveToProfileJson(updates);
-        logger.info("Password for user ID '{}' updated in profile '{}'.", userId, profileName);
+        LOG.info("Password for user ID '{}' updated in profile '{}'.", userId, profileName);
     }
 
     public void addUserGrant(String userId, String dbId, String permissions) throws IOException {
@@ -772,14 +815,14 @@ public class MariadbProfile {
         Map<String, Object> updates = new HashMap<>();
         updates.put("createdUsers", this.createdUsers);
         saveToProfileJson(updates);
-        logger.info("Grant for user ID '{}' on DB '{}' with permissions '{}' added/updated in profile '{}'.", userId,
+        LOG.info("Grant for user ID '{}' on DB '{}' with permissions '{}' added/updated in profile '{}'.", userId,
                 dbId, permissions, profileName);
     }
 
     public void removeUserGrant(String userId, String dbId) throws IOException {
         createdUsers.stream().filter(u -> u.id.equals(userId)).findFirst().ifPresent(u -> {
             u.grants.removeIf(g -> g.databaseId.equals(dbId));
-            logger.info("Grant for user ID '{}' on DB '{}' removed from profile '{}'.", userId, dbId, profileName);
+            LOG.info("Grant for user ID '{}' on DB '{}' removed from profile '{}'.", userId, dbId, profileName);
         });
         Map<String, Object> updates = new HashMap<>();
         updates.put("createdUsers", this.createdUsers);
@@ -918,7 +961,7 @@ public class MariadbProfile {
         }
 
         writeProfileJson(json);
-        logger.info("Partial profile update for profile '{}'. Keys updated: {}", profileName,
+        LOG.info("Partial profile update for profile '{}'. Keys updated: {}", profileName,
                 String.join(", ", updates.keySet()));
     }
 
@@ -937,7 +980,7 @@ public class MariadbProfile {
 
         // Detect root folder inside the zip
         this.binaryFolderName = DatabaseConfigurationUtils.detectRootFolder(archiveFile);
-        logger.info("Detected binary root folder in ZIP: {}", binaryFolderName != null ? binaryFolderName : "(none)");
+        LOG.info("Detected binary root folder in ZIP: {}", binaryFolderName != null ? binaryFolderName : "(none)");
 
         // 2. Extraction
         DatabaseConfigurationUtils.extractZip(archiveFile, this.profileRootPath, listener);
@@ -973,7 +1016,7 @@ public class MariadbProfile {
         if (configPath == null)
             return;
 
-        logger.info("Writing MariaDB configuration to {}", configPath.toAbsolutePath());
+        LOG.info("Writing MariaDB configuration to {}", configPath.toAbsolutePath());
         Files.createDirectories(configPath.getParent());
 
         try (BufferedWriter writer = Files.newBufferedWriter(configPath, StandardCharsets.UTF_8)) {
@@ -1048,7 +1091,7 @@ public class MariadbProfile {
                 }
             }
         } catch (IOException e) {
-            logger.error("Error reading MariaDB config file: {}", e.getMessage());
+            LOG.error("Error reading MariaDB config file: {}", e.getMessage());
         }
     }
 
@@ -1061,7 +1104,7 @@ public class MariadbProfile {
         Path dataPath = getDataPath();
         Path configPath = getConfigPath();
 
-        logger.info("Starting MariaDB initialization. BaseDir: {}, DataPath: {}, ConfigPath: {}",
+        LOG.info("Starting MariaDB initialization. BaseDir: {}, DataPath: {}, ConfigPath: {}",
                 baseDir.toAbsolutePath(), dataPath.toAbsolutePath(), configPath.toAbsolutePath());
 
         listener.onProgress("Preparing data directory...", 10);
@@ -1077,7 +1120,7 @@ public class MariadbProfile {
         Path exePath = getInstallExecutablePath();
         if (!Files.exists(exePath)) {
             String errorMsg = "Database initialization executable not found at: " + exePath.toAbsolutePath();
-            logger.error(errorMsg);
+            LOG.error(errorMsg);
             throw new FileNotFoundException(errorMsg);
         }
         List<String> command = Arrays.asList(exePath.toAbsolutePath().toString(), "--datadir=" + getDataDirectory());
@@ -1317,9 +1360,9 @@ public class MariadbProfile {
                             user.username, host, user.password));
                     stmt.execute(String.format("ALTER USER '%s'@'%s' IDENTIFIED BY '%s'",
                             user.username, host, user.password));
-                    logger.info("Ensured user exists: {}@{}", user.username, host);
+                    LOG.info("Ensured user exists: {}@{}", user.username, host);
                 } catch (java.sql.SQLException e) {
-                    logger.error("Failed to create/alter user {}@{}", user.username, host, e);
+                    LOG.error("Failed to create/alter user {}@{}", user.username, host, e);
                     throw e;
                 }
 

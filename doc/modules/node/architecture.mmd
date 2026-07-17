@@ -1,5 +1,5 @@
 ---
-description: Node module component and config resolution diagram
+description: Node module component, config resolution, and logging architecture diagram
 ---
 flowchart BT
     subgraph Node_Module["Node Module"]
@@ -8,6 +8,7 @@ flowchart BT
         LifecycleMgr[NodeLifecycleManager]
         BlockchainProc[BlockchainProcessorImpl]
         LoggingProv[NodeLoggingProvider]
+        NodeCoreCtx[NodeCoreContext]
     end
 
     subgraph Config_System["Config System"]
@@ -26,6 +27,31 @@ flowchart BT
         UserLog[conf/node/logging.properties]
     end
 
+    subgraph Logging_Framework["Logging Framework"]
+        direction TB
+        ModuleLogger[ModuleLogger Interface]
+        LoggerImpl[LoggerImpl Abstract]
+        SystemLogger[SystemLogger Singleton]
+        ProfileLogger[ProfileLogger Per-Profile]
+        
+        ModuleLogger -.-> LoggerImpl
+        LoggerImpl --> SystemLogger
+        LoggerImpl --> ProfileLogger
+    end
+
+    subgraph Legacy_Deprecated["Legacy - Deprecated"]
+        direction TB
+        ProfileLogRouter[ProfileLogRouter @Deprecated]
+        ProfileThreadCtx[ProfileThreadContext @Deprecated]
+        ProfileLogCtx[ProfileLogContext @Deprecated]
+    end
+
+    subgraph GUI_Consoles["GUI Consoles"]
+        SysConsole[SystemConsoleSubscriber]
+        ProfConsole[ProfileConsoleSubscriber]
+    end
+
+    %% Config Resolution
     Signum --> ConfigPath
     ConfigPath --> NodeDef
     ConfigPath --> LogDef
@@ -34,3 +60,13 @@ flowchart BT
     LoggingProv --> LogMgr
     LifecycleMgr --> PropsSvc
     ProfileConfig --> ConfigPath
+
+    %% Logging Architecture
+    NodeCoreCtx --> ProfileLogger
+    SystemLogger --> SysConsole
+    ProfileLogger --> ProfConsole
+    
+    %% Legacy Bridge (Deprecated)
+    ProfileLogRouter -.->|JUL Bridge| SystemLogger
+    ProfileThreadCtx -.->|MDC Routing| ProfileLogRouter
+    ProfileLogCtx -.->|Subscriber Registry| ProfileLogRouter

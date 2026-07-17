@@ -54,7 +54,17 @@ import java.util.logging.LogRecord;
  * @see ProfileLogContext
  * @see LogRoutingKey
  * @see LogEvent
+ *
+ * @deprecated This class is part of the legacy MDC-based logging architecture.
+ * New code should use {@link application.utils.logging.SystemLogger} for global/system-level
+ * logging and {@link application.utils.logging.ProfileLogger} for per-profile logging.
+ * These provide explicit subscriber management without MDC/thread-context coupling.
+ * <p>This class is retained for backward compatibility during the migration period
+ * (LOGGER_ARCHITECTURE_PLAN Phase 4) and will be removed in a future release.</p>
+ * @see application.utils.logging.SystemLogger
+ * @see application.utils.logging.ProfileLogger
  */
+@Deprecated
 public final class ProfileLogRouter {
 
     private static volatile ProfileLogRouter instance;

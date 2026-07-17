@@ -6,20 +6,19 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Bounded circular buffer for capturing log events before the ProfileLogRouter is installed.
+ * Bounded circular buffer for capturing log events before the {@link SystemLogger} is fully wired.
  * <p>
  * This bridge replaces the legacy {@code Signum.BOOTSTRAP_LOGS} static list with a
  * capacity-limited, thread-safe buffer. It stores log lines produced during application
- * startup (bootstrap phase) and flushes them to the appropriate profile context once
- * the router is ready.
+ * startup (bootstrap phase) and flushes them to the {@link SystemLogger} once the logging
+ * infrastructure is ready.
  * </p>
  * <p>
  * <h3>Lifecycle</h3>
  * <ol>
  *   <li>Create instance before any logging occurs</li>
- *   <li>Call {@link #add(String)} for each bootstrap log line (or use {@link #addRaw(java.util.logging.LogRecord)})</li>
- *   <li>After ProfileLogRouter is installed, call {@link #flushToContext(ProfileLogContext)} or
- *       {@link #flushAllToContexts(ProfileLogRouter)}</li>
+ *   <li>Call {@link #add(String)} for each bootstrap log line</li>
+ *   <li>After SystemLogger is wired, call {@link #flushToSystemLogger()} to replay all buffered lines</li>
  *   <li>Call {@link #clear()} to release memory</li>
  * </ol>
  * </p>
@@ -137,40 +136,55 @@ public final class BootstrapLogBuffer {
     }
 
     /**
-     * Flushes all buffered entries to the given ProfileLogContext as raw text events.
+     * Flushes all buffered entries to the {@link SystemLogger} as INFO-level events.
      * <p>
-     * Each buffered line is dispatched as a simple text log event. After flushing,
+     * Each buffered line is dispatched as a log event to the SystemLogger so that
+     * the System Console receives all bootstrap logs. After flushing,
      * consider calling {@link #clear()} if the entries should be discarded.
      * </p>
-     *
-     * @param context the profile-specific context to receive flushed entries
      */
-    public void flushToContext(ProfileLogContext context) {
-        if (context == null) {
-            throw new IllegalArgumentException("ProfileLogContext must not be null");
-        }
+    public void flushToSystemLogger() {
+        SystemLogger logger = SystemLogger.getInstance();
         List<String> snapshot = getEntries();
         for (String line : snapshot) {
-            // Dispatch raw text as a simple log event to the subscriber
-            context.dispatchText(line);
+            logger.info(line);
         }
     }
 
     /**
-     * Flushes all buffered entries to every registered context in the given router.
-     * Used during startup to distribute bootstrap logs to all active profiles.
+     * Flushes all buffered entries to a specific {@link ProfileLogger}.
+     * <p>
+     * Use this when you need bootstrap logs in a profile-specific console.
+     * </p>
      *
-     * @param router the global router containing all profile contexts
+     * @param logger the profile-specific logger to receive flushed entries (never null)
      */
-    public void flushAllToContexts(ProfileLogRouter router) {
-        if (router == null) {
-            throw new IllegalArgumentException("ProfileLogRouter must not be null");
+    public void flushToLogger(ModuleLogger logger) {
+        if (logger == null) {
+            throw new IllegalArgumentException("ModuleLogger must not be null");
         }
         List<String> snapshot = getEntries();
-        for (java.util.Map.Entry<LogRoutingKey, ProfileLogContext> entry : router.getAllContexts().entrySet()) {
-            ProfileLogContext context = entry.getValue();
-            for (String line : snapshot) {
-                context.dispatchText(line);
+        for (String line : snapshot) {
+            logger.info(line);
+        }
+    }
+
+    /**
+     * Flushes all buffered entries to every provided logger.
+     * Used during startup to distribute bootstrap logs to multiple targets.
+     *
+     * @param loggers the collection of loggers to receive flushed entries (never null)
+     */
+    public void flushAllToLoggers(Iterable<ModuleLogger> loggers) {
+        if (loggers == null) {
+            throw new IllegalArgumentException("Loggers iterable must not be null");
+        }
+        List<String> snapshot = getEntries();
+        for (ModuleLogger logger : loggers) {
+            if (logger != null) {
+                for (String line : snapshot) {
+                    logger.info(line);
+                }
             }
         }
     }

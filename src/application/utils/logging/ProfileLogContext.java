@@ -39,7 +39,17 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * @see LogSubscriber
  * @see LogEvent
  * @see LogRoutingKey
+ *
+ * @deprecated This class is part of the legacy MDC-based logging architecture.
+ * New code should use {@link application.utils.logging.ProfileLogger} directly,
+ * which provides the same subscriber management without coupling to
+ * {@link ProfileLogRouter} or MDC thread context.
+ * <p>This class is retained for backward compatibility during the migration period
+ * (LOGGER_ARCHITECTURE_PLAN Phase 4) and will be removed in a future release.</p>
+ * @see application.utils.logging.ProfileLogger
+ * @see application.utils.logging.LoggerImpl
  */
+@Deprecated
 public final class ProfileLogContext implements AutoCloseable {
 
     private final String moduleId;

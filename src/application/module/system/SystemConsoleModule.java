@@ -6,7 +6,7 @@ import application.module.appearance.AppearanceModule;
 import application.module.node.Signum;
 import application.module.node.gui.ConsoleFilterHeader;
 import application.module.node.gui.SystemConsoleSubscriber;
-import application.utils.logging.ProfileLogRouter;
+import application.utils.logging.SystemLogger;
 import application.utils.logging.event.LogFilter;
 
 import javax.swing.*;
@@ -39,6 +39,7 @@ import java.util.logging.Logger;
 public class SystemConsoleModule implements Module {
     private JComponent mainPanel;
     private JTextPane textPane;
+    private JScrollPane scrollPane;
     private SystemConsoleSubscriber subscriber;
     private ConsoleFilterHeader filterHeader;
     private Runnable appearanceListener;
@@ -59,14 +60,15 @@ public class SystemConsoleModule implements Module {
     public void init(ModuleContext context) {
         this.mainPanel = createUI();
 
-        // Install ProfileLogRouter if not already installed (ensures global subscriber routing works)
-        ProfileLogRouter.getInstance().install();
-
-        // Create and register the SystemConsoleSubscriber as a global subscriber.
-        // It receives ALL log events from every profile via ProfileLogRouter dispatch.
+        // Create and register the SystemConsoleSubscriber with SystemLogger.
+        // SystemLogger receives ALL log events forwarded from ProfileLogger instances,
+        // providing a unified view equivalent to terminal output.
+        // Flow: SLF4J/Logback → JUL Handler → ProfileLogRouter → ProfileLogger → SystemLogger → this UI
         StyledDocument doc = (StyledDocument) textPane.getDocument();
         subscriber = new SystemConsoleSubscriber(doc);
-        ProfileLogRouter.getInstance().addGlobalSubscriber(subscriber);
+        // Enable smart auto-scroll: only scroll when user is near the bottom
+        subscriber.setScrollPane(scrollPane);
+        SystemLogger.getInstance().addSubscriber(subscriber);
 
         // Wire filter header → subscriber filter chain
         if (filterHeader != null) {
@@ -178,9 +180,9 @@ public class SystemConsoleModule implements Module {
         textPane.setForeground(UIManager.getColor("TextArea.foreground"));
         textPane.setFont(AppearanceModule.getActiveConsoleFont());
 
-        JScrollPane scrollPane = new JScrollPane(textPane);
-        scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_ALWAYS);
-        panel.add(scrollPane, BorderLayout.CENTER);
+        this.scrollPane = new JScrollPane(textPane);
+        this.scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_ALWAYS);
+        panel.add(this.scrollPane, BorderLayout.CENTER);
 
         // Command input area
         JPanel inputPanel = new JPanel(new BorderLayout(5, 5));
@@ -218,9 +220,9 @@ public class SystemConsoleModule implements Module {
 
     @Override
     public void stop() {
-        // Unregister the global subscriber
+        // Unregister from SystemLogger
         if (subscriber != null) {
-            ProfileLogRouter.getInstance().removeGlobalSubscriber(subscriber);
+            SystemLogger.getInstance().removeSubscriber(subscriber);
             subscriber = null;
         }
         if (appearanceListener != null) {

@@ -24,7 +24,15 @@ import java.util.concurrent.ThreadFactory;
  *
  * @see ProfileThreadContext
  * @see org.slf4j.MDC
+ *
+ * @deprecated This class relies on the legacy MDC-based routing architecture.
+ * New code should pass {@link application.utils.logging.ProfileLogger} instances
+ * explicitly to thread pools via constructor injection, eliminating the need
+ * for MDC context propagation. This class is retained for backward compatibility
+ * during the migration period (LOGGER_ARCHITECTURE_PLAN Phase 4) and will be
+ * removed in a future release.
  */
+@Deprecated
 public final class MdcPropagatingThreadFactory implements ThreadFactory {
 
     private final ThreadFactory delegate;

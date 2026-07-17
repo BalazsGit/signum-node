@@ -7,6 +7,7 @@ package "Node Module" {
   [NodeLifecycleManager] as LifecycleMgr
   [BlockchainProcessorImpl] as BlockchainProc
   [NodeLoggingProvider] as LoggingProv
+  [NodeCoreContext] as NodeCoreCtx
 }
 
 package "Config System" {
@@ -25,6 +26,29 @@ package "Runtime (User)" {
   ["conf/node/logging.properties"] as UserLog
 }
 
+package "Logging Framework" {
+  interface ModuleLogger
+  abstract LoggerImpl
+  [SystemLogger\n(Singleton)] as SystemLogger
+  [ProfileLogger\n(Per-Profile)] as ProfileLogger
+  
+  ModuleLogger ..|> LoggerImpl
+  LoggerImpl <|-- SystemLogger
+  LoggerImpl <|-- ProfileLogger
+}
+
+package "Legacy - Deprecated" {
+  [ProfileLogRouter\n@Deprecated] as ProfileLogRouter
+  [ProfileThreadContext\n@Deprecated] as ProfileThreadCtx
+  [ProfileLogContext\n@Deprecated] as ProfileLogCtx
+}
+
+package "GUI Consoles" {
+  [SystemConsoleSubscriber] as SysConsole
+  [ProfileConsoleSubscriber] as ProfConsole
+}
+
+' Config Resolution
 Signum --> ConfigPath
 ConfigPath --> NodeDef
 ConfigPath --> LogDef
@@ -33,5 +57,15 @@ ConfigPath --> UserLog
 LoggingProv --> LogMgr
 LifecycleMgr --> PropsSvc
 ProfileConfig --> ConfigPath
+
+' Logging Architecture
+NodeCoreCtx --> ProfileLogger
+SystemLogger --> SysConsole
+ProfileLogger --> ProfConsole
+
+' Legacy Bridge (Deprecated)
+ProfileLogRouter ..> SystemLogger : JUL Bridge
+ProfileThreadCtx ..> ProfileLogRouter : MDC Routing
+ProfileLogCtx ..> ProfileLogRouter : Subscriber Registry
 
 @enduml
