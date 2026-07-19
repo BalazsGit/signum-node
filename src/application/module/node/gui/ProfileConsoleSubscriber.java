@@ -1,23 +1,15 @@
 package application.module.node.gui;
 
 import java.awt.Color;
+import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
-import javax.swing.text.BadLocationException;
-import javax.swing.text.SimpleAttributeSet;
-import javax.swing.text.StyleConstants;
 import javax.swing.text.StyledDocument;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import application.utils.logging.ProfileLogContext;
-import application.utils.logging.TerminalFormatLogFormatter;
 import application.utils.logging.event.LogEvent;
-import application.utils.logging.event.LogEventBatcher;
 import application.utils.logging.event.LogFilter;
 import application.utils.logging.event.LogLevel;
-import application.utils.logging.event.LogSubscriber;
+import application.utils.logging.gui.BaseConsoleSubscriber;
 
 /**
  * Log subscriber that routes log events to a Swing JTextPane (StyledDocument)
@@ -30,14 +22,13 @@ import application.utils.logging.event.LogSubscriber;
  * <p>
  * <h3>Thread Safety</h3>
  * Events arrive from arbitrary threads via the routing system. The subscriber
- * delegates all StyledDocument mutations to the EDT via {@link LogEventBatcher},
- * which accumulates events and flushes them using time/count thresholds
- * (default: 200ms / 50 events).
+ * delegates all StyledDocument mutations to the EDT via {@link application.utils.logging.event.LogEventBatcher},
+ * which accumulates events and flushes them using time/count thresholds.
  * </p>
  * <p>
  * <h3>Lifecycle</h3>
  * Created per NodeConsolePanel instance. When the panel is disposed,
- * {@link #dispose()} flushes remaining buffered events and stops the batcher.
+ * {@link BaseConsoleSubscriber#dispose()} flushes remaining buffered events and stops the batcher.
  * </p>
  * <p>
  * <h3>Log Format</h3>
@@ -47,14 +38,10 @@ import application.utils.logging.event.LogSubscriber;
  * </pre>
  * </p>
  *
- * @see ProfileLogContext
- * @see LogEventBatcher
- * @see LogSubscriber
- * @see TerminalFormatLogFormatter
+ * @see BaseConsoleSubscriber
+ * @see SystemConsoleSubscriber
  */
-public final class ProfileConsoleSubscriber implements LogSubscriber {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(ProfileConsoleSubscriber.class);
+public final class ProfileConsoleSubscriber extends BaseConsoleSubscriber {
 
     /** Default maximum console line count to prevent unbounded memory growth */
     public static final int DEFAULT_MAX_LINES = 500;
@@ -75,27 +62,22 @@ public final class ProfileConsoleSubscriber implements LogSubscriber {
 
     // ── Fields ──────────────────────────────────────────────────────────
 
+    /** Profile name for diagnostics (immutable) */
     private final String profileName;
-    private final LogEventBatcher batcher;
-    private final StyledDocument document;
-    private final int maxLines;
-    private volatile boolean disposed = false;
-
-    /** Optional filter; when non-null only matching events are processed */
-    private final LogFilter filter;
 
     /**
-     * Optional JScrollPane reference for smart auto-scroll.
+     * Optional JScrollPane reference for legacy smart auto-scroll.
      * When set, the console will only auto-scroll to the bottom if the user
-     * is already viewing near the bottom (>80% of scroll range), similar to VS Code terminal behavior.
+     * is already viewing near the bottom (>92% of scroll range).
+     * <p>
+     * NOTE: This is a legacy API. Prefer using {@link #getScrollController()} for
+     * modern smart-scroll integration via {@link application.utils.gui.SmartScrollController}.
+     * </p>
      */
     private volatile JScrollPane scrollPane;
 
-    /** Threshold (0.0-1.0): only auto-scroll when scrollbar is at or above this percentage of max position */
-    private static final double SMART_SCROLL_THRESHOLD = 0.8;
-
-    /** Terminal-format log formatter (singleton, shared across all instances) */
-    private final TerminalFormatLogFormatter formatter = TerminalFormatLogFormatter.INSTANCE;
+    /** Smart scroll threshold: only auto-scroll when user is at or above 92% of scroll range */
+    private static final double SMART_SCROLL_THRESHOLD = 0.92;
 
     // ── Constructors ────────────────────────────────────────────────────
 
@@ -118,27 +100,17 @@ public final class ProfileConsoleSubscriber implements LogSubscriber {
      * @param filter      optional event filter (null = accept all)
      */
     public ProfileConsoleSubscriber(String profileName, StyledDocument document, int maxLines, LogFilter filter) {
-        if (document == null) {
-            throw new NullPointerException("StyledDocument must not be null");
-        }
-        if (maxLines <= 0) {
-            throw new IllegalArgumentException("maxLines must be positive, got: " + maxLines);
-        }
+        super(document, maxLines, filter);
 
         this.profileName = profileName;
-        this.document = document;
-        this.maxLines = maxLines;
-        this.filter = filter;
-
-        // BatchConsumer runs on EDT; appends events to StyledDocument in bulk
-        batcher = new LogEventBatcher(this::appendBatch);
-        batcher.start();
     }
+
+    // ── Legacy ScrollPane API (backward compatibility) ───────────────────
 
     /**
      * Sets the parent JScrollPane to enable smart auto-scroll behavior.
      * When a scrollPane is provided, the console will only auto-scroll to the bottom
-     * when the user is already viewing near the bottom of the content (above 80% threshold).
+     * when the user is already viewing near the bottom of the content (above 92% threshold).
      * This prevents unwanted scroll-jumping when the user reads older logs.
      *
      * @param pane the JScrollPane that contains the console text component (null to disable smart scroll)
@@ -152,128 +124,16 @@ public final class ProfileConsoleSubscriber implements LogSubscriber {
         return scrollPane;
     }
 
-    // ── LogSubscriber Implementation ────────────────────────────────────
+    // ── Template Method Hooks ────────────────────────────────────────────
 
     @Override
-    public void onLogEvent(LogEvent event) {
-        if (disposed) {
-            return;
-        }
-        batcher.enqueue(event);
-    }
-
-    @Override
-    public LogFilter getFilter() {
-        return filter;
-    }
-
-    @Override
-    public void dispose() {
-        if (disposed) {
-            return;
-        }
-        disposed = true;
-        // Flush any remaining buffered events, then stop the timer
-        batcher.stop();
-    }
-
-    // ── EDT Batch Consumer ──────────────────────────────────────────────
-
-    /**
-     * Appends a batch of log events to the StyledDocument.
-     * Called on the EDT by {@link LogEventBatcher}.
-     */
-    @SuppressWarnings("unchecked")
-    private void appendBatch(java.util.List<LogEvent> events) {
-        if (disposed || events.isEmpty()) {
-            return;
-        }
-
-        // Ensure all document mutations run on EDT
-        if (!SwingUtilities.isEventDispatchThread()) {
-            SwingUtilities.invokeLater(() -> appendBatch(events));
-            return;
-        }
-
-        try {
-            int docLength = document.getLength();
-
-            for (LogEvent event : events) {
-                String text = formatLogLine(event);
-                if (text == null || text.isEmpty()) {
-                    continue;
-                }
-
-                SimpleAttributeSet attrs = new SimpleAttributeSet();
-                Color levelColor = resolveColor(event.getLevel());
-                if (levelColor != null) {
-                    StyleConstants.setForeground(attrs, levelColor);
-                }
-
-                document.insertString(docLength, text, attrs);
-                docLength = document.getLength();
-            }
-
-            // Enforce max line count by trimming oldest lines
-            enforceMaxLines();
-
-            // Smart auto-scroll: only scroll to bottom if user is already near the bottom
-            maybeScrollToEnd();
-
-        } catch (BadLocationException e) {
-            LOGGER.error("[ProfileConsoleSubscriber:{}] BadLocationException during batch append", profileName, e);
-        }
-    }
-
-    // ── Smart Auto-Scroll ────────────────────────────────────────────────
-
-    /**
-     * Scrolls the console to the end only if the user is already viewing near the bottom.
-     * Similar to VS Code terminal: new content auto-scrolls when the user is at the bottom,
-     * but does not jump when the user has scrolled up to read older content.
-     */
-    private void maybeScrollToEnd() {
-        JScrollPane pane = scrollPane;
-        if (pane == null) {
-            return;
-        }
-
-        javax.swing.JScrollBar verticalBar = pane.getVerticalScrollBar();
-        if (verticalBar == null) {
-            return;
-        }
-
-        int max = verticalBar.getMaximum();
-        int extent = verticalBar.getVisibleAmount();
-        int current = verticalBar.getValue();
-
-        // Calculate the effective scrollable range
-        int scrollableRange = max - extent;
-        if (scrollableRange <= 0) {
-            // Content fits entirely in viewport – nothing to scroll
-            return;
-        }
-
-        // Check if user is viewing at or below the threshold (near bottom)
-        double positionRatio = (double) current / scrollableRange;
-        if (positionRatio >= SMART_SCROLL_THRESHOLD) {
-            // User is near bottom: scroll to end
-            verticalBar.setValue(max);
-        }
-        // Otherwise: user scrolled up, do not disturb their view position
-    }
-
-    // ── Log Line Formatting ─────────────────────────────────────────────
-
-    /**
-     * Formats a single log event into a display-ready text string.
-     * Uses {@link TerminalFormatLogFormatter} to match terminal output exactly:
-     * <pre>
-     *   [LEVEL] yyyy-MM-dd HH:mm:ss loggerName - message
-     * </pre>
-     */
-    private String formatLogLine(LogEvent event) {
+    protected String formatLine(LogEvent event) {
         return formatter.format(event);
+    }
+
+    @Override
+    protected Color resolveLineColor(LogEvent event) {
+        return resolveColor(event.getLevel());
     }
 
     // ── Color Resolution ────────────────────────────────────────────────
@@ -289,82 +149,63 @@ public final class ProfileConsoleSubscriber implements LogSubscriber {
         }
     }
 
-    // ── Line Trimming ───────────────────────────────────────────────────
+    // ── Legacy Smart Auto-Scroll (backward compat hook) ──────────────────
 
     /**
-     * Removes oldest lines when the document exceeds maxLines.
-     * This prevents unbounded memory growth during long-running nodes.
+     * Scrolls the console to the end only if the user is already viewing near the bottom.
+     * Similar to VS Code terminal: new content auto-scrolls when the user is at the bottom,
+     * but does not jump when the user has scrolled up to read older content.
+     * <p>
+     * This is invoked after the base class batch-append via {@link #onBatchAppended()}.
+     * </p>
      */
-    private void enforceMaxLines() throws BadLocationException {
-        int docLength = document.getLength();
-        if (docLength == 0) {
+    private void maybeScrollToEnd() {
+        JScrollPane pane = scrollPane;
+        if (pane == null) {
             return;
         }
 
-        // Count actual lines by scanning newline characters
-        int lineCount = countLines(document);
-        if (lineCount <= maxLines) {
+        JScrollBar verticalBar = pane.getVerticalScrollBar();
+        if (verticalBar == null) {
             return;
         }
 
-        // Calculate lines to remove
-        int excessLines = lineCount - maxLines;
+        int max = verticalBar.getMaximum();
+        int extent = verticalBar.getVisibleAmount();
+        int current = verticalBar.getValue();
 
-        // Remove from the beginning: find the end position of excessLines
-        int removeLength = 0;
-        int removed = 0;
-        int docLen = document.getLength();
+        // Calculate the effective scrollable range
+        int scrollableRange = max - extent;
 
-        while (removed < excessLines && removeLength < docLen) {
-            String ch;
-            try {
-                ch = document.getText(removeLength, 1);
-            } catch (BadLocationException e) {
-                break;
-            }
-            if ("\n".equals(ch)) {
-                removed++;
-            }
-            removeLength++;
+        if (scrollableRange <= 0) {
+            // Content fits entirely in viewport – nothing to scroll
+            return;
         }
 
-        if (removeLength > 0) {
-            document.remove(0, removeLength);
+        // Check if user is viewing at or below the threshold (near bottom)
+        double positionRatio = (double) current / scrollableRange;
+        if (positionRatio >= SMART_SCROLL_THRESHOLD) {
+            // User is near bottom: scroll to end
+            verticalBar.setValue(max);
         }
     }
 
     /**
-     * Counts lines in the StyledDocument by counting newline characters.
+     * Called after the base class completes a batch append.
+     * Overridden to apply legacy smart-scroll behavior when a JScrollPane
+     * was set via {@link #setScrollPane(JScrollPane)}.
      */
-    private static int countLines(StyledDocument doc) throws BadLocationException {
-        int count = 1; // At least one line if there's content
-        String text = doc.getText(0, doc.getLength());
-        for (int i = 0; i < text.length(); i++) {
-            if (text.charAt(i) == '\n') {
-                count++;
-            }
+    protected void onBatchAppended() {
+        if (scrollPane != null && SwingUtilities.isEventDispatchThread()) {
+            maybeScrollToEnd();
         }
-        return count;
     }
 
-    // ── Convenience: Flush on demand ────────────────────────────────────
+    // ── Diagnostics ─────────────────────────────────────────────────────
 
-    /**
-     * Forces an immediate flush of all buffered events.
-     * Useful before panel disposal or visibility changes.
-     */
-    public void flush() {
-        batcher.flush();
-    }
-
-    /** @return the number of events waiting in the batch buffer */
-    public int pendingCount() {
-        return batcher.pendingCount();
-    }
-
-    /** @return true if this subscriber has been disposed */
-    public boolean isDisposed() {
-        return disposed;
+    /** @return the profile name associated with this subscriber */
+    public String getProfileName() {
+        return profileName;
     }
 
     @Override

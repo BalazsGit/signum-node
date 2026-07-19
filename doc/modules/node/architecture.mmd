@@ -39,6 +39,12 @@ flowchart BT
         LoggerImpl --> ProfileLogger
     end
 
+    subgraph New_Bridge["New JUL→SystemLogger Bridge"]
+        direction TB
+        SysRouterHandler[SystemLogRouterHandler]
+        JulBridge[SLF4J → slf4j-jdk14 → JUL LogManager]
+    end
+
     subgraph Legacy_Deprecated["Legacy - Deprecated"]
         direction TB
         ProfileLogRouter[ProfileLogRouter @Deprecated]
@@ -49,6 +55,7 @@ flowchart BT
     subgraph GUI_Consoles["GUI Consoles"]
         SysConsole[SystemConsoleSubscriber]
         ProfConsole[ProfileConsoleSubscriber]
+        NodeConsolePanel[NodeConsolePanel TextAreaOutputStream]
     end
 
     %% Config Resolution
@@ -61,12 +68,21 @@ flowchart BT
     LifecycleMgr --> PropsSvc
     ProfileConfig --> ConfigPath
 
+    %% New JUL→SystemLogger Bridge (Active)
+    JulBridge -->|publish(LogRecord)| SysRouterHandler
+    SysRouterHandler -->|"LogEvent.from()"| SystemLogger
+
     %% Logging Architecture
     NodeCoreCtx --> ProfileLogger
     SystemLogger --> SysConsole
     ProfileLogger --> ProfConsole
+    ProfileLogger -.->|forwardToSystem| SystemLogger
     
-    %% Legacy Bridge (Deprecated)
-    ProfileLogRouter -.->|JUL Bridge| SystemLogger
+    %% Bootstrap Logs
+    NodeConsolePanel -->|"bootstrap logs"| ProfConsole
+
+    %% Legacy Bridge (Deprecated - still active for external libs)
+    JulBridge -.->|legacy handler| ProfileLogRouter
+    ProfileLogRouter -.->|globalSubscribers| SysConsole
     ProfileThreadCtx -.->|MDC Routing| ProfileLogRouter
     ProfileLogCtx -.->|Subscriber Registry| ProfileLogRouter

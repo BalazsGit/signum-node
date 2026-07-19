@@ -115,6 +115,9 @@ import application.utils.gui.HelpButton;
 import application.module.node.util.Convert;
 import application.module.node.profile.NodeProfile;
 import application.utils.logging.ProfileLogger;
+import application.utils.gui.console.ConsoleInputPosition;
+import application.utils.gui.console.ConsolePanelConfiguration;
+import application.utils.gui.console.UnifiedConsolePanel;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
@@ -128,7 +131,11 @@ public class NodeConsolePanel extends JPanel {
     /** Current node profile name for hierarchical GUI settings storage */
     private final String profileName;
 
-    /** GUI subscriber that renders log events to the console JTextPane */
+    /** Unified Console Panel - centralized composition of console output + command input */
+    private UnifiedConsolePanel unifiedConsole;
+
+    /** @deprecated Use unifiedConsole.getSubscriber() instead */
+    @Deprecated
     private ProfileConsoleSubscriber consoleSubscriber;
 
     /** Reference to the ProfileLogger for cleanup on panel disposal */
@@ -318,6 +325,35 @@ public class NodeConsolePanel extends JPanel {
         // popup wrapper is managed by MenuPopupController
         if (commandPanel != null) {
             SwingUtilities.updateComponentTreeUI(commandPanel);
+        }
+    }
+
+    /**
+     * Updates the command position checkbox text and icon to reflect current position.
+     * BOTTOM → "Command Panel Down"
+     * TOP    → "Command Panel Up"
+     */
+    private void updateCommandPositionText() {
+        if (commandPositionBottomItem == null) {
+            return;
+        }
+        // Determine current effective position
+        boolean isBottom;
+        if (unifiedConsole != null) {
+            isBottom = unifiedConsole.getEffectiveCommandPosition() == ConsoleInputPosition.BOTTOM;
+        } else {
+            isBottom = commandPanelAtBottom;
+        }
+        if (isBottom) {
+            commandPositionBottomItem.setIcon(IconFontSwing.buildIcon(FontAwesome.CHEVRON_DOWN, GuiConstants.getToolBarIconSize(),
+                    UIManager.getColor("Label.foreground")));
+            commandPositionBottomItem.setText(" Command Panel Down");
+            commandPositionBottomItem.setToolTipText("Move command input panel to bottom of console");
+        } else {
+            commandPositionBottomItem.setIcon(IconFontSwing.buildIcon(FontAwesome.CHEVRON_UP, GuiConstants.getToolBarIconSize(),
+                    UIManager.getColor("Label.foreground")));
+            commandPositionBottomItem.setText(" Command Panel Up");
+            commandPositionBottomItem.setToolTipText("Move command input panel to top of console");
         }
     }
 
@@ -690,6 +726,11 @@ public class NodeConsolePanel extends JPanel {
         }
     }
 
+    /**
+     * @deprecated Replaced by UnifiedConsolePanel.setShowCommandInput(boolean).
+     * Retained for backward compatibility (null-safe when commandPanel is null).
+     */
+    @Deprecated
     private void toggleCommandPanel() {
         showCommandInput = !showCommandInput;
         showCommandItem.setSelected(showCommandInput);
@@ -706,20 +747,38 @@ public class NodeConsolePanel extends JPanel {
             hideCommandPanelInline();
         }
 
+        LOGGER.info("[ScrollDebug] toggleCommandPanel: about to invokeLater scroll to bottom");
         SwingUtilities.invokeLater(() -> {
             if (textScrollPane != null) {
                 JScrollBar vertical = textScrollPane.getVerticalScrollBar();
                 if (vertical != null) {
-                    vertical.setValue(vertical.getMaximum());
+                    int maxVal = vertical.getMaximum();
+                    int currentBefore = vertical.getValue();
+                    LOGGER.info("[ScrollDebug] toggleCommandPanel: setting scrollbar from {} to {}", currentBefore, maxVal);
+                    vertical.setValue(maxVal);
+                } else {
+                    LOGGER.info("[ScrollDebug] toggleCommandPanel: vertical scrollbar is null");
                 }
+            } else {
+                LOGGER.info("[ScrollDebug] toggleCommandPanel: textScrollPane is null");
             }
         });
     }
 
+    /**
+     * @deprecated Replaced by UnifiedConsolePanel command input panel.
+     * Null-safe: returns immediately when commandPanel/commandPanelWrapper are null.
+     */
+    @Deprecated
     private void showCommandPanelInline() {
         showCommandPanelInline(commandPanelAtBottom ? BottomPanelPosition.BOTTOM : BottomPanelPosition.TOP);
     }
 
+    /**
+     * @deprecated Replaced by UnifiedConsolePanel command input panel.
+     * Null-safe: returns immediately when components are null.
+     */
+    @Deprecated
     private void showCommandPanelInline(BottomPanelPosition position) {
         if (commandPanel == null || commandPanelWrapper == null || contentPanel == null || bottomPanel == null) {
             LOGGER.warn("Command panel or wrapper is not initialized");
@@ -769,6 +828,11 @@ public class NodeConsolePanel extends JPanel {
         SwingUtilities.invokeLater(() -> animateCommandPanelOpen(position));
     }
 
+    /**
+     * @deprecated Replaced by UnifiedConsolePanel command input panel.
+     * Null-safe: returns immediately when commandPanelWrapper is null.
+     */
+    @Deprecated
     private void hideCommandPanelInline() {
         if (commandPanelWrapper == null) {
             return;
@@ -776,6 +840,11 @@ public class NodeConsolePanel extends JPanel {
         animateCommandPanelClose();
     }
 
+    /**
+     * @deprecated Replaced by UnifiedConsolePanel ConsoleInputPanel animation.
+     * Null-safe: no-op when commandPanel is null.
+     */
+    @Deprecated
     private void animateCommandPanelOpen(BottomPanelPosition position) {
         if (commandPanelAnimator != null && commandPanelAnimator.isRunning()) {
             commandPanelAnimator.stop();
@@ -818,6 +887,11 @@ public class NodeConsolePanel extends JPanel {
         commandPanelAnimator.start();
     }
 
+    /**
+     * @deprecated Replaced by UnifiedConsolePanel ConsoleInputPanel animation.
+     * Null-safe: no-op when commandPanel is null.
+     */
+    @Deprecated
     private void animateCommandPanelClose() {
         if (commandPanelAnimator != null && commandPanelAnimator.isRunning()) {
             commandPanelAnimator.stop();
@@ -858,6 +932,11 @@ public class NodeConsolePanel extends JPanel {
         commandPanelAnimator.start();
     }
 
+    /**
+     * @deprecated Replaced by UnifiedConsolePanel configuration.
+     * Kept for backward compatibility with legacy menu checkbox.
+     */
+    @Deprecated
     private void setCommandPanelAtBottom(boolean bottom) {
         this.commandPanelAtBottom = bottom;
         if (commandPositionBottomItem != null) {
@@ -878,7 +957,16 @@ public class NodeConsolePanel extends JPanel {
         return instance;
     }
 
+    /**
+     * @deprecated Use unifiedConsole.getTextPane() directly.
+     * Delegating getter for backward compatibility.
+     */
+    @Deprecated
     public JTextPane getConsoleTextPane() {
+        if (unifiedConsole != null) {
+            return unifiedConsole.getTextPane();
+        }
+        // Fallback to legacy textScrollPane if unifiedConsole not yet initialized
         if (textScrollPane != null) {
             return (JTextPane) textScrollPane.getViewport().getView();
         }
@@ -978,36 +1066,68 @@ public class NodeConsolePanel extends JPanel {
             LOGGER.warn("Could not register FontAwesome for HTML rendering", e);
         }
 
-        JTextPane textPane = new JTextPane();
+        // ── UnifiedConsolePanel creation (replaces direct JTextPane + ProfileConsoleSubscriber) ──
+        unifiedConsole = new UnifiedConsolePanel(
+            ConsolePanelConfiguration.profileConsole(profileName)
+                .withShowFilterHeader(true)
+                .withShowCommandInput(false)  // Command input is managed via hamburger menu toggle
+                .withCommandPosition(ConsoleInputPosition.BOTTOM)
+                .withAnimateCommandInput(true)
+                .withCommandInputVisible(false)
+                .withEnableCommandToggle(true)
+                .withMaxLines(OUTPUT_MAX_LINES)
+                .withCommandHandler(cmd -> {
+                    new Thread(() -> Signum.processCommand(cmd)).start();
+                })
+                .withEnableSmartScroll(true),
+            ProfileConsoleSubscriber.class
+        );
+
+        // Backward-compatible aliases for code that still references textScrollPane/textPane directly
+        textScrollPane = unifiedConsole.getScrollPane();
+        textScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        textScrollPane.getVerticalScrollBar().setUnitIncrement(16);
+        
+        JTextPane textPane = unifiedConsole.getTextPane();
         Font consoleFont = AppearanceModule.getActiveConsoleFont();
         if (consoleFont == null) {
             consoleFont = new Font(Font.MONOSPACED, Font.PLAIN, GuiConstants.CONSOLE_FONT_SIZE_DEFAULT);
         }
-        textPane.setFont(consoleFont);
         iconColor = textPane.getForeground();
         this.dbConsistencyColor = GuiColors.getButtonIcon();
-        DefaultCaret caret = (DefaultCaret) textPane.getCaret();
-        // NEVER_UPDATE: disable forced auto-scroll so the user can freely scroll
-        // through older logs without being yanked back to the bottom on every
-        // document modification. The scrollbar will only move when new content
-        // is actually appended and the user is already viewing the end.
+
+        // Flush legacy static bootstrap logs directly to the console for backward compatibility
+        flushLegacyBootstrapLogs(textPane);
+
+        // Scroll to bottom after bootstrap logs are rendered so the console
+        // shows the latest content when the user first opens the tab.
+        GuiUtils.scrollToBottom(textScrollPane);
+        textScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        textScrollPane.getVerticalScrollBar().setUnitIncrement(16);
+
+        /* ── LEGACY CODE COMMENTED OUT (preserved for reference) ──
+        JTextPane legacyTextPane = new JTextPane();
+        Font legacyConsoleFont = AppearanceModule.getActiveConsoleFont();
+        if (legacyConsoleFont == null) {
+            legacyConsoleFont = new Font(Font.MONOSPACED, Font.PLAIN, GuiConstants.CONSOLE_FONT_SIZE_DEFAULT);
+        }
+        legacyTextPane.setFont(legacyConsoleFont);
+        iconColor = legacyTextPane.getForeground();
+        this.dbConsistencyColor = GuiColors.getButtonIcon();
+        DefaultCaret legacyCaret = (DefaultCaret) legacyTextPane.getCaret();
         caret.setUpdatePolicy(DefaultCaret.NEVER_UPDATE);
-        textPane.setEditable(false);
+        legacyTextPane.setEditable(false);
 
         // No global debug logger in production; Popup auto-close logic is instantiated
         // when a popup is opened by the owning component.
 
-        textScrollPane = new JScrollPane(textPane);
+        textScrollPane = new JScrollPane(legacyTextPane);
         textScrollPane.setBorder(BorderFactory.createEmptyBorder());
         textScrollPane.getVerticalScrollBar().setUnitIncrement(16);
 
         // Setup per-profile log routing with smart auto-scroll support
-        initProfileLogging(textPane, textScrollPane);
-
-        // Flush legacy bootstrap logs directly to the console for backward compatibility
-        flushBootstrapLogsToConsole(textPane);
-        textScrollPane.setBorder(BorderFactory.createEmptyBorder());
-        textScrollPane.getVerticalScrollBar().setUnitIncrement(16);
+        initProfileLogging(legacyTextPane, textScrollPane);
+        ── LEGACY CODE END ── */
 
         contentPanel = new JPanel(new BorderLayout());
         contentPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
@@ -1143,43 +1263,43 @@ public class NodeConsolePanel extends JPanel {
         bottomPanel.setBorder(BorderFactory.createEmptyBorder(2, 2, 2, 2));
         contentPanel.add(bottomPanel, BorderLayout.PAGE_END);
 
-        // Command Input Panel
+        /* ── LEGACY: Command Input Panel replaced by UnifiedConsolePanel.ConsoleInputPanel ──
+         * The unified console now handles command input internally via its built-in ConsoleInputPanel.
+         * Hamburger menu toggle calls unifiedConsole.setShowCommandInput(true/false) with animation.
+         * These fields remain declared (but null) for backward compatibility with legacy methods.
+         */
+
+        /* ── LEGACY CODE COMMENTED OUT (preserved for reference) ──
         commandPanel = new JPanel(new BorderLayout(0, 0));
         commandPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
-        JComponent commandLabel = new JComponent() {
-            @Override
-            protected void paintComponent(Graphics g) {
+        JComponent legacyCommandLabel = new JComponent() {
+            @Override protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
                 CustomDrawings.COMMAND_SYMBOL.draw((Graphics2D) g, getWidth(), getHeight(), GuiColors.getButtonIcon());
             }
-
-            @Override
-            public Dimension getPreferredSize() {
+            @Override public Dimension getPreferredSize() {
                 int size = Math.round(GuiConstants.getToolBarIconSize());
                 return new Dimension(size, size);
             }
         };
-        commandLabel.setToolTipText("Command Input");
+        legacyCommandLabel.setToolTipText("Command Input");
         commandField = new JTextField();
         commandField.setToolTipText("Enter node command (e.g. .help, .pause, .resume)");
-        JButton sendCommandButton = new JButton("Send");
-
-        ActionListener sendAction = e -> {
+        JButton legacySendButton = new JButton("Send");
+        ActionListener legacySendAction = e -> {
             String cmd = commandField.getText().trim();
             if (!cmd.isEmpty()) {
                 LOGGER.info("Executing command: " + cmd);
-                // Let the core handle all commands. The GUI will update via listeners.
                 new Thread(() -> Signum.processCommand(cmd)).start();
                 commandField.setText("");
             }
         };
-        commandField.addActionListener(sendAction);
-        sendCommandButton.addActionListener(sendAction);
-        JButton helpButton = new HelpButton();
-        helpButton.setToolTipText("Command Help");
-        helpButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-
-        String commandHelpText = "<html><b>Available Commands:</b><br>" +
+        commandField.addActionListener(legacySendAction);
+        legacySendButton.addActionListener(legacySendAction);
+        JButton legacyHelpButton = new HelpButton();
+        legacyHelpButton.setToolTipText("Command Help");
+        legacyHelpButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        String legacyCommandHelpText = "<html><b>Available Commands:</b><br>" +
                 "<ul>" +
                 "<li><b>.help</b> - Displays available commands in the log.</li>" +
                 "<li><b>.pause</b> - Pauses blockchain synchronization.</li>" +
@@ -1189,29 +1309,25 @@ public class NodeConsolePanel extends JPanel {
                 "<li><b>.autoresolve</b> - Triggers manual database consistency resolution.</li>" +
                 "<li><b>.trim</b> - Schedules a database trim.</li>" +
                 "<li><b>.dbcheck</b> - Performs a database consistency check.</li>" +
-                "<li><b>.popoff &lt;n&gt;</b> - Pops off the last n blocks (e.g., .popoff 10).</li>" +
+                "<li><b>.popoff <n></b> - Pops off the last n blocks (e.g., .popoff 10).</li>" +
                 "</ul>" +
                 "Enter a command in the text field and click 'Send' or press Enter.</html>";
-
-        helpButton.addActionListener(e -> {
-            JOptionPane.showMessageDialog(NodeConsolePanel.this, commandHelpText, "Command Usage",
+        legacyHelpButton.addActionListener(e -> {
+            JOptionPane.showMessageDialog(NodeConsolePanel.this, legacyCommandHelpText, "Command Usage",
                     JOptionPane.INFORMATION_MESSAGE);
         });
-
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
-        buttonPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-        buttonPanel.add(sendCommandButton);
-        buttonPanel.add(helpButton);
-
-        commandPanel.add(commandLabel, BorderLayout.WEST);
+        JPanel legacyButtonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
+        legacyButtonPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+        legacyButtonPanel.add(legacySendButton);
+        legacyButtonPanel.add(legacyHelpButton);
+        commandPanel.add(legacyCommandLabel, BorderLayout.WEST);
         commandPanel.add(commandField, BorderLayout.CENTER);
-        commandPanel.add(buttonPanel, BorderLayout.EAST);
-
+        commandPanel.add(legacyButtonPanel, BorderLayout.EAST);
         commandPanelWrapper = new JPanel(new BorderLayout());
         commandPanelWrapper.setVisible(false);
         commandPanelWrapper.setPreferredSize(new Dimension(0, 0));
-        // Allow wrapper to shrink to 0 height for animation compatibility with MigLayout
         commandPanelWrapper.setMinimumSize(new Dimension(0, 0));
+        ── LEGACY CODE END ── */
         syncProgressBar = new JProgressBar(0, 100);
         syncProgressBar.setStringPainted(true);
         syncProgressBar.setFont(UIManager.getFont("Label.font"));
@@ -1361,14 +1477,29 @@ public class NodeConsolePanel extends JPanel {
 
         showCommandItem = new JCheckBox("Show Command Input");
         showCommandItem.setSelected(showCommandInput);
-        showCommandItem.addActionListener(e -> toggleCommandPanel());
+        // Delegate to UnifiedConsolePanel for animated command input toggle
+        showCommandItem.addActionListener(e -> {
+            boolean newState = showCommandItem.isSelected();
+            if (unifiedConsole != null) {
+                unifiedConsole.setShowCommandInput(newState);
+            }
+            showCommandInput = newState;
+        });
         styleMenuComponent(showCommandItem);
         menuPanel.add(showCommandItem, "growx");
 
-        commandPositionBottomItem = new JCheckBox("Show Command Input above bottom panel");
+        commandPositionBottomItem = new JCheckBox();
+        updateCommandPositionText();
         commandPositionBottomItem.setSelected(commandPanelAtBottom);
         commandPositionBottomItem.addActionListener(e -> {
-            setCommandPanelAtBottom(commandPositionBottomItem.isSelected());
+            // Toggle: if currently BOTTOM (checked), switch to TOP; otherwise switch to BOTTOM
+            boolean goingToBottom = commandPositionBottomItem.isSelected();
+            ConsoleInputPosition newPosition = goingToBottom ? ConsoleInputPosition.BOTTOM : ConsoleInputPosition.TOP;
+            if (unifiedConsole != null) {
+                unifiedConsole.setCommandPosition(newPosition);
+            }
+            this.commandPanelAtBottom = goingToBottom;
+            updateCommandPositionText();
         });
         styleMenuComponent(commandPositionBottomItem);
         menuPanel.add(commandPositionBottomItem, "growx");
@@ -1444,7 +1575,11 @@ public class NodeConsolePanel extends JPanel {
         topPanel = new JPanel(new MigLayout("insets 0, gap 0, fillx, wrap 1", "[grow]", "[]0[]0[]"));
         topPanel.add(toolBar, "growx");
         topPanel.add(metricsPanelWrapper, "growx");
-        topPanel.add(commandPanelWrapper, "growx");
+        /* ── LEGACY: commandPanelWrapper replaced by UnifiedConsolePanel.ConsoleInputPanel ──
+         * Command input is now handled internally by UnifiedConsolePanel.
+         * This line commented out because commandPanelWrapper is null after legacy code removal.
+         */
+        // topPanel.add(commandPanelWrapper, "growx");
 
         // Use MigLayout for infoPanel to allow precise vertical alignment
         infoPanel = new JPanel(
@@ -1456,7 +1591,8 @@ public class NodeConsolePanel extends JPanel {
         };
 
         contentPanel.add(topPanel, BorderLayout.NORTH);
-        contentPanel.add(textScrollPane, BorderLayout.CENTER);
+        // Use unifiedConsole (contains filter header + console output + command input) as CENTER
+        contentPanel.add(unifiedConsole, BorderLayout.CENTER);
 
         // --- Time Labels ---
         String tooltip;
@@ -3141,28 +3277,36 @@ public class NodeConsolePanel extends JPanel {
         });
     }
 
+    /**
+     * Push-based OutputStream that renders stdout/stderr to a Swing JTextPane.
+     * <p>
+     * Replaced the old polling Timer (500ms interval) with a coalesced push model:
+     * each {@code write()} schedules at most one EDT flush via {@link SwingUtilities#invokeLater}.
+     * The {@link AtomicBoolean} flag ensures multiple rapid writes produce a single UI update,
+     * eliminating unnecessary document mutations and spurious scroll-jumps.
+     * </p>
+     */
     private static class TextAreaOutputStream extends OutputStream {
+        /** Smart scroll threshold: only auto-scroll when user is at or above 90% of scroll range */
+        private static final double SMART_SCROLL_THRESHOLD = 0.9;
+
         private final JTextPane textPane;
+        private final JScrollPane scrollPane;
         private final PrintStream actualOutput;
         private final StringBuilder buffer = new StringBuilder();
-        private final Timer timer;
+        /** Coalescing guard: ensures only one pending flush is scheduled per write burst */
+        private final AtomicBoolean flushScheduled = new AtomicBoolean(false);
         private final boolean isError;
 
         private TextAreaOutputStream(JTextPane textPane, PrintStream actualOutput, boolean isError) {
-            this(textPane, actualOutput, isError, true);
+            this(textPane, null, actualOutput, isError);
         }
 
-        private TextAreaOutputStream(JTextPane textPane, PrintStream actualOutput, boolean isError, boolean useTimer) {
+        private TextAreaOutputStream(JTextPane textPane, JScrollPane scrollPane, PrintStream actualOutput, boolean isError) {
             this.textPane = textPane;
+            this.scrollPane = scrollPane;
             this.actualOutput = actualOutput;
             this.isError = isError;
-            if (useTimer) {
-                this.timer = new Timer(500, e -> flush());
-                this.timer.setRepeats(true);
-                this.timer.start();
-            } else {
-                this.timer = null;
-            }
         }
 
         @Override
@@ -3185,76 +3329,146 @@ public class NodeConsolePanel extends JPanel {
                 actualOutput.print(string);
             }
             buffer.append(string);
+            // Push-based: schedule flush on EDT (coalesced – only one pending at a time)
+            scheduleFlush();
+        }
+
+        /**
+         * Schedules a single buffered flush on the EDT.
+         * Uses CAS to coalesce multiple calls into one pending update.
+         */
+        private void scheduleFlush() {
+            if (flushScheduled.compareAndSet(false, true)) {
+                SwingUtilities.invokeLater(this::doFlush);
+            }
+        }
+
+        /** Drains the buffer and updates the UI (runs on EDT). Resets the coalescing flag. */
+        private synchronized void doFlush() {
+            try {
+                if (buffer.length() == 0) {
+                    return; // Nothing to render
+                }
+                String text = buffer.toString();
+                buffer.setLength(0);
+                processAppend(text);
+            } finally {
+                flushScheduled.set(false); // Allow next write burst to schedule again
+            }
         }
 
         @Override
         public void flush() {
-            String text;
-            synchronized (this) {
-                if (buffer.length() == 0)
-                    return;
-                text = buffer.toString();
-                buffer.setLength(0);
-            }
-            processAppend(text);
+            // Synchronous flush: ensure all pending buffered data is rendered.
+            // If a flush is already pending on EDT, it will drain; otherwise schedule one.
+            scheduleFlush();
         }
 
+        /** Directly appends text to the internal buffer (used by legacy bootstrap flush). */
         private synchronized void append(String text) {
             buffer.append(text);
         }
 
         private void processAppend(String text) {
-            SwingUtilities.invokeLater(() -> {
-                StyledDocument doc = textPane.getStyledDocument();
-                String[] lines = text.split("(?<=\\n)");
+            // Already running on EDT via invokeLater, but double-check for safety
+            if (!SwingUtilities.isEventDispatchThread()) {
+                SwingUtilities.invokeLater(() -> processAppend(text));
+                return;
+            }
 
-                for (String line : lines) {
-                    SimpleAttributeSet attrs = new SimpleAttributeSet();
-                    Color color = null;
+            StyledDocument doc = textPane.getStyledDocument();
+            int docLengthBefore = doc.getLength();
+            String[] lines = text.split("(?<=\\n)");
 
-                    if (line.contains("ERROR") || line.contains("SEVERE")) {
-                        color = new Color(255, 100, 100);
-                    } else if (line.contains("WARN") || line.contains("WARNING")) {
-                        color = new Color(255, 200, 100);
-                    } else if (line.contains("TRACE") || line.contains("FINER") || line.contains("FINEST")) {
-                        color = new Color(150, 150, 150);
-                    } else if (line.contains("DEBUG") || line.contains("FINE")) {
-                        color = new Color(180, 180, 180);
-                    } else if (line.contains("CONFIG")) {
-                        color = new Color(100, 200, 200);
-                    } else if (isError && !line.contains("INFO")) {
-                        color = new Color(255, 100, 100);
-                    }
+            for (String line : lines) {
+                SimpleAttributeSet attrs = new SimpleAttributeSet();
+                Color color = null;
 
-                    // Apply the active custom font to new lines being appended to the console
-                    Font activeFont = AppearanceModule.getActiveConsoleFont();
-                    if (activeFont != null) {
-                        StyleConstants.setFontFamily(attrs, activeFont.getFamily());
-                        StyleConstants.setFontSize(attrs, activeFont.getSize());
-                    }
-
-                    if (color != null) {
-                        StyleConstants.setForeground(attrs, color);
-                    }
-
-                    try {
-                        doc.insertString(doc.getLength(), line, attrs);
-                    } catch (BadLocationException e) {
-                        // ignore
-                    }
+                if (line.contains("ERROR") || line.contains("SEVERE")) {
+                    color = new Color(255, 100, 100);
+                } else if (line.contains("WARN") || line.contains("WARNING")) {
+                    color = new Color(255, 200, 100);
+                } else if (line.contains("TRACE") || line.contains("FINER") || line.contains("FINEST")) {
+                    color = new Color(150, 150, 150);
+                } else if (line.contains("DEBUG") || line.contains("FINE")) {
+                    color = new Color(180, 180, 180);
+                } else if (line.contains("CONFIG")) {
+                    color = new Color(100, 200, 200);
+                } else if (isError && !line.contains("INFO")) {
+                    color = new Color(255, 100, 100);
                 }
 
-                Element root = doc.getDefaultRootElement();
-                while (root.getElementCount() > OUTPUT_MAX_LINES) {
-                    try {
-                        Element firstLine = root.getElement(0);
-                        doc.remove(0, firstLine.getEndOffset());
-                    } catch (BadLocationException e) {
-                        break;
-                    }
+                // Apply the active custom font to new lines being appended to the console
+                Font activeFont = AppearanceModule.getActiveConsoleFont();
+                if (activeFont != null) {
+                    StyleConstants.setFontFamily(attrs, activeFont.getFamily());
+                    StyleConstants.setFontSize(attrs, activeFont.getSize());
                 }
-                textPane.setCaretPosition(doc.getLength());
-            });
+
+                if (color != null) {
+                    StyleConstants.setForeground(attrs, color);
+                }
+
+                try {
+                    doc.insertString(doc.getLength(), line, attrs);
+                } catch (BadLocationException e) {
+                    // ignore
+                }
+            }
+
+            // Enforce max line count by trimming oldest lines
+            Element root = doc.getDefaultRootElement();
+            while (root.getElementCount() > OUTPUT_MAX_LINES) {
+                try {
+                    Element firstLine = root.getElement(0);
+                    doc.remove(0, firstLine.getEndOffset());
+                } catch (BadLocationException e) {
+                    break;
+                }
+            }
+
+            // Smart scroll: only adjust scrollbar if content actually changed.
+            // This prevents false scroll jumps when the buffer was empty.
+            if (doc.getLength() > docLengthBefore) {
+                maybeScrollToEnd(textPane, scrollPane);
+            }
+        }
+
+        /**
+         * Scrolls the console to the end only if the user is already viewing near the bottom.
+         * Similar to VS Code terminal: new content auto-scrolls when at the bottom,
+         * but does not jump when the user has scrolled up to read older content.
+         */
+        private static void maybeScrollToEnd(JTextPane tp, JScrollPane pane) {
+            if (pane == null) {
+                LOGGER.info("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: pane=null, returning early");
+                return;
+            }
+            javax.swing.JScrollBar verticalBar = pane.getVerticalScrollBar();
+            if (verticalBar == null) {
+                LOGGER.info("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: verticalBar=null, returning early");
+                return;
+            }
+            int max = verticalBar.getMaximum();
+            int extent = verticalBar.getVisibleAmount();
+            int current = verticalBar.getValue();
+            int scrollableRange = max - extent;
+            
+            double ratioForLog = scrollableRange > 0 ? (double) current / scrollableRange : Double.NaN;
+            LOGGER.info("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: max={}, extent={}, current={}, scrollableRange={}, ratio={}, threshold={}", 
+                max, extent, current, scrollableRange, ratioForLog, SMART_SCROLL_THRESHOLD);
+            
+            if (scrollableRange <= 0) {
+                LOGGER.info("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: scrollableRange<=0, no scroll needed");
+                return;
+            }
+            double positionRatio = (double) current / scrollableRange;
+            if (positionRatio >= SMART_SCROLL_THRESHOLD) {
+                LOGGER.info("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: WILL SCROLL - ratio={} >= threshold={}", positionRatio, SMART_SCROLL_THRESHOLD);
+                verticalBar.setValue(max);
+            } else {
+                LOGGER.info("[ScrollDebug] TextAreaOutputStream.maybeScrollToEnd: NO SCROLL - ratio={} < threshold={} (user reading old logs)", positionRatio, SMART_SCROLL_THRESHOLD);
+            }
         }
     }
 
@@ -3414,29 +3628,48 @@ public class NodeConsolePanel extends JPanel {
     }
 
     /**
-     * Flushes any buffered bootstrap logs to the console for backward compatibility.
-     * Legacy code may have written to Signum.BOOTSTRAP_LOGS before the router was installed.
+     * Flushes legacy static bootstrap logs to the console for backward compatibility.
+     * <p>
+     * Old code may have written directly to {@code Signum.BOOTSTRAP_LOGS} before the
+     * new ProfileLogRouter was installed. This method renders those leftover entries
+     * so the user does not lose early startup output.
+     * </p>
+     * <p>
+     * Note: The modern buffering mechanism ({@link application.utils.logging.BootstrapLogBuffer})
+     * is managed at the {@link application.utils.logging.ProfileLogRouter} level and flushes
+     * automatically; this method only handles the deprecated static list.
+     * </p>
      *
-     * @param textPane the target JTextPane
+     * @param textPane the target JTextPane, never null
      */
-    private void flushBootstrapLogsToConsole(JTextPane textPane) {
-        // Flush legacy static bootstrap logs for backward compatibility
+    private void flushLegacyBootstrapLogs(JTextPane textPane) {
+        // Flush legacy static bootstrap logs for backward compatibility.
         // BootstrapLogBuffer is managed at the ProfileLogRouter level and will be
         // flushed automatically when the router redistributes buffered entries.
-        if (!Signum.BOOTSTRAP_LOGS.isEmpty()) {
-            TextAreaOutputStream taos = new TextAreaOutputStream(textPane, null, false, true);
-            Signum.BOOTSTRAP_LOGS.forEach(line -> taos.append((line + "\n")));
-            Signum.BOOTSTRAP_LOGS.clear();
+        if (Signum.BOOTSTRAP_LOGS.isEmpty()) {
+            return;
         }
+        // Create output stream without timer (push-based model schedules flush on write)
+        TextAreaOutputStream taos = new TextAreaOutputStream(textPane, textScrollPane, null, false);
+        for (String line : Signum.BOOTSTRAP_LOGS) {
+            taos.append(line + "\n");
+        }
+        // Trigger a final flush to render all buffered bootstrap lines
+        taos.flush();
+        Signum.BOOTSTRAP_LOGS.clear();
     }
 
     /**
-     * Cleans up logging resources when this panel is removed from its parent container.
-     * Called automatically by the Swing container management system.
+     * Cleans up resources when this panel is removed from its parent container.
+     * Delegates to UnifiedConsolePanel for proper disposal of subscriber + smart scroll controller.
      */
     @Override
     public void removeNotify() {
-        // Clean up profile logging subscriber
+        // Delegate cleanup to unifiedConsole (disposes subscriber, detaches scroll controller)
+        if (unifiedConsole != null) {
+            unifiedConsole.dispose();
+        }
+        /* ── LEGACY CODE COMMENTED OUT ──
         if (consoleSubscriber != null && profileLogger != null) {
             profileLogger.removeSubscriber(consoleSubscriber);
         }
@@ -3445,6 +3678,7 @@ public class NodeConsolePanel extends JPanel {
             consoleSubscriber = null;
         }
         profileLogger = null;
+        ── LEGACY CODE END ── */
         super.removeNotify();
     }
 }

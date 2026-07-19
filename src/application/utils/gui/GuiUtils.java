@@ -7,10 +7,15 @@ import java.awt.*;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Centralized GUI utilities for consistent panel behavior across all configuration panels.
  */
 public class GuiUtils {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(GuiUtils.class);
 
     /**
      * Applies the application-wide default tab layout policy to a JTabbedPane.
@@ -281,5 +286,69 @@ public class GuiUtils {
         });
 
         return scrollPane;
+    }
+
+    /**
+     * Scrolls a JScrollPane to the bottom (end of content) after layout is complete.
+     * Use this for console/log panels that should show the latest content on initial display,
+     * while still allowing the user to scroll up and read older content without being yanked back.
+     *
+     * The call is wrapped in {@link SwingUtilities#invokeLater} to ensure the vertical scrollbar
+     * has been laid out and has a valid maximum value.
+     *
+     * @param scrollPane the JScrollPane to scroll to the bottom (must have a vertical scrollbar)
+     */
+    public static void scrollToBottom(JScrollPane scrollPane) {
+        if (scrollPane == null) {
+            return;
+        }
+        
+        // Capture caller info for debugging
+        StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
+        final String caller;
+        if (stackTrace.length > 3) {
+            StackTraceElement callerElement = stackTrace[3];
+            caller = callerElement.getClassName() + "." + callerElement.getMethodName() + "(" + callerElement.getFileName() + ":" + callerElement.getLineNumber() + ")";
+        } else {
+            caller = "unknown";
+        }
+        
+        LOGGER.info("[ScrollDebug] GuiUtils.scrollToBottom called from: {}", caller);
+        
+        SwingUtilities.invokeLater(() -> {
+            JScrollBar vBar = scrollPane.getVerticalScrollBar();
+            if (vBar != null) {
+                int max = vBar.getMaximum();
+                int extent = vBar.getVisibleAmount();
+                int currentBefore = vBar.getValue();
+                LOGGER.info("[ScrollDebug] GuiUtils.scrollToBottom executing: max={}, extent={}, currentBefore={}, caller={}", 
+                    max, extent, currentBefore, caller);
+                vBar.setValue(vBar.getMaximum());
+                int currentAfter = vBar.getValue();
+                LOGGER.info("[ScrollDebug] GuiUtils.scrollToBottom done: currentAfter={}", currentAfter);
+            } else {
+                LOGGER.info("[ScrollDebug] GuiUtils.scrollToBottom: vBar=null");
+            }
+        });
+    }
+
+    /**
+     * Scrolls a JTextPane to the end of its document after layout is complete.
+     * Use this when you need to position the caret at the end but the scroll pane
+     * is not directly available.
+     *
+     * @param textPane the JTextPane to scroll to the end
+     */
+    public static void scrollToDocumentEnd(JTextPane textPane) {
+        if (textPane == null) {
+            return;
+        }
+        SwingUtilities.invokeLater(() -> {
+            try {
+                textPane.setCaretPosition(textPane.getDocument().getLength());
+            } catch (Exception ignored) {
+                // Document may not be ready yet
+            }
+        });
     }
 }

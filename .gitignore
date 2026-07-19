@@ -37,3 +37,6 @@ launch.json
 *.log.lck
 
 result
+
+# Implementation plans (local development artifacts)
+/implementation_plan/
