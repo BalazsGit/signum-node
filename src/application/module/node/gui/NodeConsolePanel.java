@@ -106,6 +106,7 @@ import application.module.node.props.Props;
 import application.module.node.util.DurationFormatter;
 import application.module.node.util.Listener;
 import application.utils.gui.CustomDrawingComponent;
+import application.utils.gui.CustomDrawingIcon;
 import application.utils.gui.CustomDrawings;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
@@ -345,12 +346,12 @@ public class NodeConsolePanel extends JPanel {
             isBottom = commandPanelAtBottom;
         }
         if (isBottom) {
-            commandPositionBottomItem.setIcon(IconFontSwing.buildIcon(FontAwesome.CHEVRON_DOWN, GuiConstants.getToolBarIconSize(),
+            commandPositionBottomItem.setIcon(new CustomDrawingIcon(CustomDrawings.Chevron.DOWN,
                     UIManager.getColor("Label.foreground")));
             commandPositionBottomItem.setText(" Command Panel Down");
             commandPositionBottomItem.setToolTipText("Move command input panel to bottom of console");
         } else {
-            commandPositionBottomItem.setIcon(IconFontSwing.buildIcon(FontAwesome.CHEVRON_UP, GuiConstants.getToolBarIconSize(),
+            commandPositionBottomItem.setIcon(new CustomDrawingIcon(CustomDrawings.Chevron.UP,
                     UIManager.getColor("Label.foreground")));
             commandPositionBottomItem.setText(" Command Panel Up");
             commandPositionBottomItem.setToolTipText("Move command input panel to top of console");

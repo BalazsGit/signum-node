@@ -8,6 +8,17 @@
  * <p>
  * Thread-safe: all public methods delegate to the EDT when called off-thread.
  * </p>
+ * <p>
+ * <h3>Push-based Event Notification</h3>
+ * Listeners registered via {@link #onStateChanged(Consumer)} are notified on the
+ * EDT whenever the scroll state changes. The boolean parameter indicates whether
+ * the floating "scroll to bottom" button should be visible:
+ * <ul>
+ *   <li>{@code true}  = PAUSED + new content below (show button)</li>
+ *   <li>{@code false} = FOLLOWING or no new content (hide button)</li>
+ * </ul>
+ * This completely replaces any timer-based polling pattern.
+ * </p>
  *
  * <h3>State Machine</h3>
  * <pre>
@@ -21,6 +32,9 @@ package application.utils.gui;
 
 import java.awt.event.AdjustmentEvent;
 import java.awt.event.AdjustmentListener;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Consumer;
 
 import javax.swing.JScrollBar;
 import javax.swing.JScrollPane;
@@ -46,6 +60,12 @@ public final class SmartScrollController {
     private boolean following = true;
     private boolean hasNewContentBelow = false;
     private AdjustmentListener adjustmentListener;
+    
+    /** Suppresses adjustment events during programmatic scrolls */
+    private boolean isSuppressingEvents = false;
+    
+    /** Push-based listeners notified on state changes (no polling) */
+    private final List<Consumer<Boolean>> stateChangeListeners = new ArrayList<>();
 
     // ── Performance counters (low-overhead, no allocation) ────────────────
 
@@ -74,6 +94,56 @@ public final class SmartScrollController {
             throw new IllegalArgumentException("threshold must be 0.0-1.0, got: " + threshold);
         }
         this.threshold = threshold;
+    }
+
+    // ── Push-based State Change Listeners ────────────────────────────────
+
+    /**
+     * Registers a push-based listener that is called on the EDT whenever the
+     * scroll state changes. The boolean parameter indicates whether the caller
+     * should show a "scroll to bottom" UI element:
+     * <ul>
+     *   <li>{@code true}  = user scrolled up AND there is new content below</li>
+     *   <li>{@code false} = following mode OR no unread content below</li>
+     * </ul>
+     * This replaces any timer-based polling pattern for detecting scroll state.
+     *
+     * @param listener callback (never null)
+     */
+    public void onStateChanged(Consumer<Boolean> listener) {
+        if (listener == null) {
+            throw new NullPointerException("Listener must not be null");
+        }
+        stateChangeListeners.add(listener);
+    }
+
+    /**
+     * Removes a previously registered state change listener.
+     *
+     * @param listener the callback to remove
+     */
+    public void removeStateChangeListener(Consumer<Boolean> listener) {
+        stateChangeListeners.remove(listener);
+    }
+
+    /**
+     * Notifies all registered listeners about a state change.
+     * Always runs on EDT.
+     *
+     * @param showButton true to signal that the scroll-to-bottom button should appear
+     */
+    private void fireStateChanged(boolean showButton) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(() -> fireStateChanged(showButton));
+            return;
+        }
+        for (Consumer<Boolean> listener : stateChangeListeners) {
+            try {
+                listener.accept(showButton);
+            } catch (Exception e) {
+                LOGGER.warn("SmartScrollController listener error", e);
+            }
+        }
     }
 
     // ── Attachment ───────────────────────────────────────────────────────
@@ -142,6 +212,8 @@ public final class SmartScrollController {
         } else {
             hasNewContentBelow = true;
             skippedScrolls++;
+            // Push event: new content arrived while paused → show button
+            fireStateChanged(true);
         }
 
         // Periodic summary log - no per-call allocation, only every N calls
@@ -160,6 +232,11 @@ public final class SmartScrollController {
     private void onScrollbarAdjustment(AdjustmentEvent evt) {
         if (!SwingUtilities.isEventDispatchThread()) {
             SwingUtilities.invokeLater(() -> onScrollbarAdjustment(evt));
+            return;
+        }
+
+        // Ignore events triggered by programmatic scrolls
+        if (isSuppressingEvents) {
             return;
         }
 
@@ -183,6 +260,8 @@ public final class SmartScrollController {
                     wasFollowing ? "FOLLOWING" : "PAUSED",
                     following ? "FOLLOWING" : "PAUSED",
                     String.format("%.3f", ratio), threshold);
+            // Push event to listeners on state change
+            fireStateChanged(!following && hasNewContentBelow);
         }
     }
 
@@ -210,6 +289,8 @@ public final class SmartScrollController {
         scrollToBottomInternal(bar);
         following = true;
         hasNewContentBelow = false;
+        // Push event: button should be hidden after scrolling to bottom
+        fireStateChanged(false);
     }
 
     // ── State accessors ──────────────────────────────────────────────────
@@ -279,7 +360,15 @@ public final class SmartScrollController {
         int extent = bar.getVisibleAmount();
         int scrollableRange = max - extent;
         if (scrollableRange > 0) {
-            bar.setValue(max);
+            // Suppress adjustment events during programmatic scroll to prevent
+            // the listener from interpreting this as user intent
+            boolean wasSuppressing = isSuppressingEvents;
+            try {
+                isSuppressingEvents = true;
+                bar.setValue(max);
+            } finally {
+                isSuppressingEvents = wasSuppressing;
+            }
         }
     }
 

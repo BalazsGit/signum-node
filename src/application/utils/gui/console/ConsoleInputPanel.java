@@ -7,11 +7,12 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.util.function.Consumer;
 
+import application.utils.gui.CustomDrawingComponent;
+import application.utils.gui.CustomDrawings;
+
 import javax.swing.JButton;
-import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
-import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.border.EmptyBorder;
@@ -35,7 +36,8 @@ public final class ConsoleInputPanel extends JPanel {
 
     // ── UI Components ────────────────────────────────────────────────────
 
-    private JLabel promptLabel;
+    /** Custom-drawn chevron-right icon as prompt (dynamically sized and colored) */
+    private CustomDrawingComponent promptChevron;
     private JTextField commandField;
     private JButton sendButton;
 
@@ -73,11 +75,11 @@ public final class ConsoleInputPanel extends JPanel {
         setLayout(new BorderLayout(4, 0));
         setBorder(new EmptyBorder(4, 8, 4, 8));
 
-        // Prompt label: ">" aligned left
-        promptLabel = new JLabel(">");
-        promptLabel.setHorizontalAlignment(SwingConstants.RIGHT);
-        promptLabel.setPreferredSize(new Dimension(20, promptLabel.getPreferredSize().height));
-        promptLabel.setToolTipText("Command prompt");
+        // Prompt chevron: custom-drawn Chevron.RIGHT icon (dynamically sized to font, colored via GuiColors)
+        // scaleFactor 0.8 makes it slightly smaller than toolbar icons to match the text field height
+        promptChevron = new CustomDrawingComponent(CustomDrawings.Chevron.RIGHT, 0.8f);
+        promptChevron.setPreferredSize(new Dimension(20, 20));
+        promptChevron.setToolTipText("Command prompt");
 
         // Command text field: fills available horizontal space
         commandField = new JTextField();
@@ -92,8 +94,8 @@ public final class ConsoleInputPanel extends JPanel {
         commandField.addActionListener(sendAction);
         sendButton.addActionListener(sendAction);
 
-        // Assemble: WEST=prompt, CENTER=field, EAST=button
-        add(promptLabel, BorderLayout.WEST);
+        // Assemble: WEST=prompt chevron, CENTER=field, EAST=button
+        add(promptChevron, BorderLayout.WEST);
         add(commandField, BorderLayout.CENTER);
         add(sendButton, BorderLayout.EAST);
     }
@@ -159,7 +161,7 @@ public final class ConsoleInputPanel extends JPanel {
         this.enabled = enabled;
         commandField.setEnabled(enabled);
         sendButton.setEnabled(enabled);
-        promptLabel.setEnabled(enabled);
+        promptChevron.setEnabled(enabled);
         setOpaque(enabled);
     }
 
