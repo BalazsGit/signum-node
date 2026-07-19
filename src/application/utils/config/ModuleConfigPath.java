@@ -10,7 +10,7 @@ import java.util.logging.Logger;
 /**
  * Handles module configuration file paths using a hybrid resolution strategy:
  * <pre>
- *   1. Runtime user override:  conf/{module}/{file}.properties        (if exists)
+ *   1. Runtime user override:  ../conf/{module}/{file}.properties        (if exists)
  *   2. Classpath default:      classpath:/conf/{module}/{file}-default.properties
  * </pre>
  *
@@ -24,7 +24,7 @@ public final class ModuleConfigPath {
     private static final Logger LOGGER = Logger.getLogger(ModuleConfigPath.class.getName());
 
     /** Base directory for runtime (user-editable) configuration. */
-    private static final String RUNTIME_CONF_ROOT = "conf";
+    private static final String RUNTIME_CONF_ROOT = ConfigPaths.RUNTIME_CONF_ROOT;
 
     /** Classpath prefix for embedded default configuration. */
     private static final String CLASSPATH_PREFIX = "/conf/";
@@ -39,7 +39,7 @@ public final class ModuleConfigPath {
 
     /**
      * Returns the runtime (user-editable) path for a given module config file.
-     * <p>Example: module="node", file="logging" → conf/node/logging.properties</p>
+     * <p>Example: module="node", file="logging" → ../conf/node/logging.properties</p>
      *
      * @param moduleId module identifier (e.g., "node", "database")
      * @param fileName logical file name without extension (e.g., "node", "logging")

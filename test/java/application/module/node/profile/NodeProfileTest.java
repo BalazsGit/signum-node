@@ -28,13 +28,13 @@ class NodeProfileTest {
     class IsReservedProfileNameTests {
 
         @Test
-        @DisplayName("returns true for 'node-default' reserved profile name")
-        void isReservedProfileName_GivenNodeDefault_ReturnsTrue() {
+        @DisplayName("returns true for 'profile-default' reserved profile name")
+        void isReservedProfileName_GivenProfileDefault_ReturnsTrue() {
             // Act
-            boolean result = NodeProfile.isReservedProfileName("node-default");
+            boolean result = NodeProfile.isReservedProfileName("profile-default");
 
             // Assert
-            assertTrue(result, "'node-default' is a reserved template name and should be excluded");
+            assertTrue(result, "'profile-default' is a reserved template name and should be excluded");
         }
 
         @Test
@@ -293,6 +293,45 @@ class NodeProfileTest {
 
             // Assert
             assertNull(result);
+        }
+    }
+
+    // =====================================================================
+    // PropertiesProfileEntity contract
+    // =====================================================================
+
+    @Nested
+    @DisplayName("PropertiesProfileEntity Contract")
+    class ProfileEntityContractTests {
+
+        @Test
+        @DisplayName("NodeProfile implements getName() correctly")
+        void implementsGetName() {
+            NodeProfile profile = new NodeProfile("entity_test");
+            assertEquals("entity_test", profile.getName());
+        }
+
+        @Test
+        @DisplayName("NodeProfile implements getProperties() correctly")
+        void implementsGetProperties() {
+            NodeProfile profile = new NodeProfile("entity_test");
+            assertNotNull(profile.getProperties());
+            assertTrue(profile.getProperties() instanceof Properties);
+        }
+
+        @Test
+        @DisplayName("NodeProfile implements setProperties() correctly")
+        void implementsSetProperties() {
+            // Arrange
+            NodeProfile profile = new NodeProfile("entity_test");
+            Properties props = new Properties();
+            props.setProperty("test.key", "test.value");
+
+            // Act
+            profile.setProperties(props);
+
+            // Assert
+            assertEquals("test.value", profile.getProperty("test.key"));
         }
     }
 }

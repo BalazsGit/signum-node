@@ -1,5 +1,7 @@
 package application.utils.logging;
 
+import application.utils.config.PropertiesProfileLoader;
+
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
@@ -22,6 +24,10 @@ import org.slf4j.LoggerFactory;
  * <h3>Design Pattern: Factory + Strategy</h3>
  * Each provider acts as a factory for its module's logging data and provides
  * swappable strategies (presets) the user can select at runtime.
+ * <p>
+ * Profile discovery and loading are delegated to {@link PropertiesProfileLoader},
+ * which is specifically designed for Java {@code .properties}-based logging presets.
+ * Other profile formats (e.g., JSON-based database profiles) use their own loaders.
  *
  * <h3>Usage Example</h3>
  * <pre>{@code
@@ -37,12 +43,17 @@ import org.slf4j.LoggerFactory;
  * }</pre>
  *
  * @see ModuleLoggingProfile
+ * @see PropertiesProfileLoader
  * @see LoggingModuleRegistry
  * @see LoggingProfileManager
  */
 public abstract class ModuleLoggingProvider {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ModuleLoggingProvider.class);
+
+    /** Reserved logging profile names excluded from discovery. */
+    private static final java.util.Set<String> RESERVED_LOGGING_NAMES =
+            Collections.singleton("logging-default");
 
     // ── Mandatory ─────────────────────────────────────────────────────
 
@@ -64,7 +75,7 @@ public abstract class ModuleLoggingProvider {
 
     /**
      * Returns the config path for this module's logging files.
-     * Resolves to: {@code conf/{moduleId}/logging/}
+     * Resolves to: {@code confFolder/{moduleId}/{loggingSubDir}/}
      *
      * @param confFolder Base configuration folder (e.g. "conf/mainnet")
      * @return Full path to the module's logging subdirectory
@@ -76,32 +87,38 @@ public abstract class ModuleLoggingProvider {
     }
 
     /**
+     * Returns the logging category name used with {@link PropertiesProfileLoader}.
+     * Defaults to the module's logging subdirectory from the profile.
+     */
+    protected String getLoggingCategory() {
+        return getProfile().getLoggingSubDir();
+    }
+
+    /**
      * Scans the module's logging directory and returns discovered profile names.
+     * Delegates to {@link PropertiesProfileLoader#discoverProfiles}.
+     * <p>
      * Profile name is the file stem (without {@code .properties} extension).
+     * Reserved names (e.g., {@code logging-default}) are excluded.
      *
+     * @param confFolder Base configuration folder
      * @return Unmodifiable list of profile names found on disk (never null)
      */
     public List<String> discoverProfiles(String confFolder) {
-        Path loggingDir = getLoggingConfigPath(confFolder);
-        if (!java.nio.file.Files.exists(loggingDir)) {
-            LOGGER.debug("Module '{}' has no logging directory at {}", getModuleId(), loggingDir);
-            return Collections.emptyList();
-        }
-        try (var stream = java.nio.file.Files.list(loggingDir)) {
-            return stream.filter(p -> !java.nio.file.Files.isDirectory(p))
-                    .map(p -> p.getFileName().toString())
-                    .filter(name -> name.endsWith(".properties"))
-                    .map(name -> name.substring(0, name.length() - 11))
-                    .sorted()
-                    .toList();
+        try {
+            return PropertiesProfileLoader.discoverProfiles(
+                    confFolder, getModuleId(), getLoggingCategory(), RESERVED_LOGGING_NAMES);
         } catch (Exception e) {
-            LOGGER.warn("Failed to scan logging profiles for module '{}': {}", getModuleId(), e.getMessage());
+            LOGGER.warn("Failed to scan logging profiles for module '{}': {}",
+                    getModuleId(), e.getMessage());
             return Collections.emptyList();
         }
     }
 
     /**
      * Loads a named profile file from this module's logging directory into Properties.
+     * Delegates to {@link PropertiesProfileLoader#loadProfile}.
+     * <p>
      * Returns an empty Properties if the file does not exist.
      *
      * @param confFolder  Base configuration folder
@@ -109,19 +126,18 @@ public abstract class ModuleLoggingProvider {
      * @return Loaded properties (never null)
      */
     public Properties loadProfileFile(String confFolder, String profileName) {
-        Path file = getLoggingConfigPath(confFolder).resolve(profileName + ".properties");
-        Properties props = new Properties();
-        if (!java.nio.file.Files.exists(file)) {
-            LOGGER.debug("Profile file not found: {}", file);
+        try {
+            Properties props = PropertiesProfileLoader.loadProfile(
+                    confFolder, getModuleId(), getLoggingCategory(), profileName);
+            if (!props.isEmpty()) {
+                LOGGER.info("Loaded {} properties for preset '{}'", props.size(), profileName);
+            }
             return props;
-        }
-        try (var is = java.nio.file.Files.newInputStream(file)) {
-            props.load(is);
-            LOGGER.info("Loaded {} properties from {}", props.size(), file.getFileName());
         } catch (Exception e) {
-            LOGGER.error("Failed to load profile '{}' for module '{}'", profileName, getModuleId(), e);
+            LOGGER.error("Failed to load profile '{}' for module '{}'",
+                    profileName, getModuleId(), e);
+            return new Properties();
         }
-        return props;
     }
 
     // ── Registration helpers ──────────────────────────────────────────
