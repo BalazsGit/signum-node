@@ -298,6 +298,9 @@ public final class PropertiesProfileLoader {
 
     /**
      * Overloaded convenience that loads the classpath resource automatically.
+     * <p>
+     * If the classpath resource does not exist (e.g., module has no embedded default),
+     * this method gracefully skips synchronization without throwing an exception.
      *
      * @param confRoot           base configuration root
      * @param moduleId           module identifier
@@ -310,7 +313,8 @@ public final class PropertiesProfileLoader {
 
         InputStream is = PropertiesProfileLoader.class.getResourceAsStream(classpathResourceName);
         if (is == null) {
-            throw new IllegalArgumentException("Classpath resource not found: " + classpathResourceName);
+            // Module may not have this embedded resource - gracefully skip
+            return;
         }
         syncDefaultFile(confRoot, moduleId, category, defaultFileName, is);
     }
@@ -318,18 +322,22 @@ public final class PropertiesProfileLoader {
     // ── Empty Placeholder Creation ─────────────────────────────────────
 
     /**
-     * Ensures empty placeholder properties-files exist ONLY when no user profiles
-     * are discovered (excluding reserved/default names).
+     * Ensures a fallback properties-file exists when NO user profiles are discovered
+     * (excluding reserved/default names).
+     * <p>
+     * This is a failure recovery mechanism: if no user-defined profiles are present,
+     * an empty placeholder is created so that {@link #loadAll} can still return at
+     * least one valid profile. If file creation succeeds, this is NOT an error
+     * condition - the newly created file becomes the active profile.
      * <p>
      * If at least one custom profile exists in the directory, this method does nothing.
-     * This prevents polluting the conf/ directory with unnecessary empty files when
-     * the user already has active profiles configured.
      *
      * @param confRoot      base configuration root
      * @param moduleId      module identifier
      * @param category      profile category
      * @param reservedNames set of reserved names to exclude from discovery
      * @param placeholderName name for the empty placeholder (without .properties extension)
+     * @throws RuntimeException if file creation fails (true error condition)
      */
     public static void ensureEmptyPlaceholderIfNoProfiles(String confRoot, String moduleId,
             String category, Set<String> reservedNames, String placeholderName) {
@@ -348,7 +356,7 @@ public final class PropertiesProfileLoader {
                 Files.createDirectories(file.getParent());
                 Files.createFile(file);
             } catch (IOException e) {
-                throw new RuntimeException("Failed to create empty placeholder: " + file, e);
+                throw new RuntimeException("Failed to create fallback properties-profile: " + file, e);
             }
         }
     }
@@ -366,6 +374,62 @@ public final class PropertiesProfileLoader {
             Set<String> reservedNames,
             String profilePlaceholder, String loggingPlaceholder) {
 
+        ensureEmptyPlaceholderIfNoProfiles(confRoot, moduleId, DEFAULT_CATEGORY_PROFILES,
+                reservedNames, profilePlaceholder);
+        ensureEmptyPlaceholderIfNoProfiles(confRoot, moduleId, DEFAULT_CATEGORY_LOGGING,
+                reservedNames, loggingPlaceholder);
+    }
+
+    // ── Module Initialization (Centralized Bootstrap) ────────────────────
+
+    /**
+     * Full module bootstrap sequence for properties-based configurations.
+     * <p>
+     * Executes the following steps in order:
+     * <ol>
+     *   <li>Ensure profile and logging directories exist</li>
+     *   <li>Sync default files from classpath resources using SHA-256 hash comparison</li>
+     *   <li>Create fallback placeholder profiles if no user profiles are discovered</li>
+     * </ol>
+     * <p>
+     * This centralizes all initialization logic so every module follows the same
+     * pattern. Call this ONCE per module during application startup, before any
+     * profile loading occurs.
+     * <p>
+     * Example usage:
+     * <pre>{@code
+     * // Initialize node module profiles and logging configs
+     * PropertiesProfileLoader.initializeModule(
+     *         "../conf", "node", reservedNames, "node", "logging");
+     * }</pre>
+     *
+     * @param confRoot           base configuration root (e.g., "../conf")
+     * @param moduleId           module identifier (e.g., "node", "database", "system")
+     * @param reservedNames      set of reserved profile names to exclude from discovery
+     * @param profilePlaceholder fallback profile name for profiles category
+     * @param loggingPlaceholder fallback profile name for logging category
+     * @throws RuntimeException if any initialization step fails irrecoverably
+     */
+    public static void initializeModule(String confRoot, String moduleId,
+            Set<String> reservedNames,
+            String profilePlaceholder, String loggingPlaceholder) {
+
+        // Step 1: Ensure directories exist
+        ensureProfileDirExists(confRoot, moduleId, DEFAULT_CATEGORY_PROFILES);
+        ensureProfileDirExists(confRoot, moduleId, DEFAULT_CATEGORY_LOGGING);
+
+        // Step 2: Sync default files from classpath resources (SHA-256 hash comparison)
+        String profileDefaultResource = "/conf/" + moduleId + "/" + DEFAULT_CATEGORY_PROFILES
+                + "/" + DEFAULT_MODULE_DEFAULT_FILENAME;
+        syncDefaultFileFromClasspath(confRoot, moduleId, DEFAULT_CATEGORY_PROFILES,
+                DEFAULT_MODULE_DEFAULT_FILENAME, profileDefaultResource);
+
+        String loggingDefaultResource = "/conf/" + moduleId + "/" + DEFAULT_CATEGORY_LOGGING
+                + "/" + DEFAULT_LOGGING_DEFAULT_FILENAME;
+        syncDefaultFileFromClasspath(confRoot, moduleId, DEFAULT_CATEGORY_LOGGING,
+                DEFAULT_LOGGING_DEFAULT_FILENAME, loggingDefaultResource);
+
+        // Step 3: Create fallback placeholder profiles if no user profiles discovered
         ensureEmptyPlaceholderIfNoProfiles(confRoot, moduleId, DEFAULT_CATEGORY_PROFILES,
                 reservedNames, profilePlaceholder);
         ensureEmptyPlaceholderIfNoProfiles(confRoot, moduleId, DEFAULT_CATEGORY_LOGGING,

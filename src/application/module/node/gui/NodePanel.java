@@ -145,6 +145,9 @@ public class NodePanel extends JPanel implements LifecycleListener {
     private void startAsyncProfileLoading() {
         Thread loaderThread = new Thread(() -> {
             try {
+                // Initialize profiles first: sync defaults, create fallback placeholders if needed
+                NodeProfile.initialize();
+
                 // Discover profiles from filesystem
                 NodeProfile[] profiles = NodeProfile.loadAll();
                 int total = profiles.length;

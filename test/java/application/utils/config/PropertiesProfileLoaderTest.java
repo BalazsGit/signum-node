@@ -604,6 +604,94 @@ class PropertiesProfileLoaderTest {
     }
 
     // =====================================================================
+    // initializeModule() - Centralized Bootstrap
+    // =====================================================================
+
+    @Nested
+    @DisplayName("initializeModule()")
+    class InitializeModuleTests {
+
+        @Test
+        @DisplayName("creates profile and logging directories when they do not exist")
+        void initializeModule_GivenMissingDirs_CreatesBoth() throws Exception {
+            // Arrange
+            String confRoot = tempDir.toString();
+            String moduleId = "new-module";
+            Set<String> reserved = RESERVED;
+
+            // Act
+            PropertiesProfileLoader.initializeModule(
+                    confRoot, moduleId, reserved, "fallback", "logging-fallback");
+
+            // Assert - directories created
+            Path profilesDir = tempDir.resolve(moduleId + "/profiles");
+            Path loggingDir = tempDir.resolve(moduleId + "/logging");
+            assertTrue(Files.exists(profilesDir), "Profiles directory should exist");
+            assertTrue(Files.exists(loggingDir), "Logging directory should exist");
+        }
+
+        @Test
+        @DisplayName("creates fallback placeholder profile when no user profiles exist")
+        void initializeModule_GivenNoUserProfiles_CreatesFallback() throws Exception {
+            // Arrange
+            String confRoot = tempDir.toString();
+            String moduleId = "fallback-module";
+            Set<String> reserved = RESERVED;
+
+            // Act
+            PropertiesProfileLoader.initializeModule(
+                    confRoot, moduleId, reserved, "my-fallback", "logging-fallback");
+
+            // Assert - fallback profile created
+            Path fallbackFile = tempDir.resolve(moduleId + "/profiles/my-fallback.properties");
+            assertTrue(Files.exists(fallbackFile), "Fallback profile should be created");
+        }
+
+        @Test
+        @DisplayName("does not create fallback when user profiles already exist")
+        void initializeModule_GivenUserProfilesExists_DoesNotCreateFallback() throws Exception {
+            // Arrange
+            String confRoot = tempDir.toString();
+            String moduleId = "existing-module";
+            Path profilesDir = tempDir.resolve(moduleId + "/profiles");
+            Path loggingDir = tempDir.resolve(moduleId + "/logging");
+            Files.createDirectories(profilesDir);
+            Files.createDirectories(loggingDir);
+            createPropertiesFile(profilesDir, "user-profile.properties", "key=value");
+            Set<String> reserved = RESERVED;
+
+            // Act
+            PropertiesProfileLoader.initializeModule(
+                    confRoot, moduleId, reserved, "my-fallback", "logging-fallback");
+
+            // Assert - no fallback created
+            Path fallbackFile = profilesDir.resolve("my-fallback.properties");
+            assertFalse(Files.exists(fallbackFile), "Fallback should NOT be created when user profile exists");
+        }
+
+        @Test
+        @DisplayName("gracefully skips sync when classpath resource does not exist but still creates dirs and fallback")
+        void initializeModule_GivenMissingResource_SkipsSyncButCreatesFallback() throws Exception {
+            // Arrange
+            String confRoot = tempDir.toString();
+            String moduleId = "no-resource-module";
+            Set<String> reserved = RESERVED;
+
+            // Act - should not throw, gracefully skips missing classpath resources
+            PropertiesProfileLoader.initializeModule(
+                    confRoot, moduleId, reserved, "fallback", "logging-fallback");
+
+            // Assert - directories and fallback created even without classpath resources
+            Path profilesDir = tempDir.resolve(moduleId + "/profiles");
+            Path loggingDir = tempDir.resolve(moduleId + "/logging");
+            assertTrue(Files.exists(profilesDir), "Profiles directory should exist");
+            assertTrue(Files.exists(loggingDir), "Logging directory should exist");
+            Path fallbackFile = profilesDir.resolve("fallback.properties");
+            assertTrue(Files.exists(fallbackFile), "Fallback profile should be created");
+        }
+    }
+
+    // =====================================================================
     // Constants
     // =====================================================================
 

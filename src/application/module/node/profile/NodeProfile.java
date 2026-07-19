@@ -323,15 +323,16 @@ public class NodeProfile implements PropertiesProfileEntity {
 
     /**
      * Full initialization: sync defaults + create placeholders if needed.
-     * Call this once during application startup.
+     * <p>
+     * Delegates to {@link PropertiesProfileLoader#initializeModule} for centralized
+     * bootstrap of both profile and logging configurations.
+     * <p>
+     * Call this once during application startup, before any profile loading occurs.
      */
     public static void initialize() {
-        PropertiesProfileLoader.ensureProfileDirExists(CONF_ROOT, MODULE_ID, CATEGORY);
-        PropertiesProfileLoader.ensureProfileDirExists(CONF_ROOT, MODULE_ID,
-                PropertiesProfileLoader.DEFAULT_CATEGORY_LOGGING);
-        syncDefaultProfileFile();
-        syncDefaultLoggingFile();
-        ensureEmptyPlaceholdersIfNeeded();
+        PropertiesProfileLoader.initializeModule(
+                CONF_ROOT, MODULE_ID, RESERVED_PROFILE_NAMES,
+                "node", "logging");
     }
 
     // ── Object Contract ────────────────────────────────────────────────
