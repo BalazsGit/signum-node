@@ -52,6 +52,9 @@ import application.module.node.web.api.http.common.APITransactionManagerImpl;
 import application.module.node.web.server.WebServer;
 import application.module.node.web.server.WebServerContext;
 import application.module.node.web.server.WebServerImpl;
+import application.module.node.profile.NodeProfile;
+import application.utils.config.ConfigPaths;
+import application.utils.config.PropertiesProfileLoader;
 import application.utils.io.PathUtils;
 
 import com.google.gson.JsonObject;
@@ -156,26 +159,25 @@ public final class Signum {
     private static AtomicBoolean isInitialized = new AtomicBoolean(false); // New flag for initialization
 
     /**
-     * Loads properties for a specific named profile.
-     * New simplified architecture: Hardcoded defaults (Props.java) → Profile .properties file only.
-     * No cascade, no node-default fallback, no profile.json appliedProfile lookup.
+     * Loads properties for a specific named profile using the unified PropertiesProfileLoader.
+     * Architecture: Hardcoded defaults (Props.java) → Profile .properties file only.
+     * Path schema: ../conf/node/profiles/{profileName}.properties
      *
-     * @param confFolder  The base configuration folder (e.g., "conf/mainnet")
+     * @param confFolder  The base configuration folder (e.g., "../conf")
      * @param profileName The profile name to load (without .properties extension)
      * @return PropertyService with loaded properties, or empty one if file not found
      */
     public static PropertyService loadPropertiesForProfile(String confFolder, String profileName) {
-        Path confPath = PathUtils.resolvePath(confFolder);
         CaselessProperties properties = new CaselessProperties();
-        Path nodePath = confPath.resolve(NODE_CONF_DIR);
+
+        // Use unified profile loader for path resolution: ../conf/node/profiles/{profileName}.properties
+        Path profileFile = PropertiesProfileLoader.resolveProfileFile(
+                ConfigPaths.RUNTIME_CONF_ROOT, "node", "profiles", profileName);
 
         if (logger != null)
             logger.info("Initializing Signum Node version {}", VERSION);
         if (logger != null)
-            logger.info("Configurations from folder {}", confPath.toAbsolutePath());
-
-        // Direct profile lookup: conf/node/{profileName}.properties
-        Path profileFile = nodePath.resolve(profileName + ".properties");
+            logger.info("Looking for profile '{}' at {}", profileName, profileFile.toAbsolutePath());
 
         if (Files.exists(profileFile)) {
             try (Reader reader = new InputStreamReader(new FileInputStream(profileFile.toFile()),
@@ -365,6 +367,10 @@ public final class Signum {
         }
 
         ensureLogger();
+
+        // Initialize unified profile system: sync default files (hash-based) + create empty placeholders if needed
+        // This ensures ../conf/node/profiles/ and ../conf/node/logging/ directories exist with proper defaults
+        NodeProfile.initialize();
 
         // Resolve logging properties priority
         Path confPath = PathUtils.resolvePath(confFolder);

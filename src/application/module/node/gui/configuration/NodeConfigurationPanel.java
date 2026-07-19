@@ -113,9 +113,8 @@ public class NodeConfigurationPanel extends JPanel {
         this.activeProfileName = this.runningProfileName;
         this.loadedProfileName = this.runningProfileName;
 
-        // Use the detected profile to resolve the properties file path
-        this.propertiesFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_SUBFOLDER,
-                this.loadedProfileName + ".properties");
+        // Use the unified profile loader to resolve the properties file path
+        this.propertiesFile = ConfigurationUtils.resolveNodeProfilePath(this.loadedProfileName);
         ConfigurationUtils.ensureConfigFileExists(this.propertiesFile);
 
         this.savedProfile = new NodeProfile(this.loadedProfileName);
@@ -662,9 +661,8 @@ public class NodeConfigurationPanel extends JPanel {
                     .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER));
             this.activeProfileName = lastProfile != null ? lastProfile.trim() : "node";
 
-            // Simplified: load all .properties profiles from conf/node/, no special base profile
-            Path nodeConfPath = PathUtils.resolvePath(confFolder).resolve(Signum.NODE_SUBFOLDER);
-            ConfigurationUtils.fetchProfileNames(nodeConfPath, null)
+            // Load all .properties profiles from unified profiles directory
+            ConfigurationUtils.fetchProfileNames(ConfigurationUtils.getNodeProfilesDir(), null)
                     .forEach(profileComboBox::addItem);
 
             if (currentSelection != null) {
@@ -691,8 +689,8 @@ public class NodeConfigurationPanel extends JPanel {
         // Logging Profiles
         linkedLogCombo.removeAllItems();
         linkedLogCombo.addItem("");
-        Path loggingPath = PathUtils.resolvePath(confFolder).resolve(Signum.NODE_LOGGING_SUBFOLDER);
-        ConfigurationUtils.fetchProfileNames(loggingPath, Signum.DEFAULT_LOGGING_PROPERTIES_NAME + ".properties")
+        ConfigurationUtils.fetchProfileNames(ConfigurationUtils.getNodeLoggingDir(),
+                Signum.DEFAULT_LOGGING_PROPERTIES_NAME + ".properties")
                 .forEach(linkedLogCombo::addItem);
         if (!Signum.LOGGING_PROPERTIES_NAME.equals(Signum.DEFAULT_LOGGING_PROPERTIES_NAME)) {
             linkedLogCombo.addItem(Signum.LOGGING_PROPERTIES_NAME);
@@ -884,8 +882,7 @@ public class NodeConfigurationPanel extends JPanel {
                 if (value == saveBtn) {
                     String name = nameField.getText().trim();
                     try {
-                        Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_SUBFOLDER,
-                                name + ".properties");
+                        Path targetFile = ConfigurationUtils.resolveNodeProfilePath(name);
                         if (Files.exists(targetFile)) {
                             int choice = JOptionPane.showConfirmDialog(this,
                                     "Profile '" + name + "' already exists. Do you want to overwrite it?",
@@ -952,8 +949,7 @@ public class NodeConfigurationPanel extends JPanel {
 
         checkUnsavedChangesAndProceed(
                 () -> {
-                    Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_SUBFOLDER,
-                            profileName + ".properties");
+                    Path targetFile = ConfigurationUtils.resolveNodeProfilePath(profileName);
                     if (Files.exists(targetFile)) {
                         Properties loaded = new Properties();
                         try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
@@ -1073,8 +1069,7 @@ public class NodeConfigurationPanel extends JPanel {
                 }
             }
 
-            Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_SUBFOLDER,
-                    loadedProfileName + ".properties");
+            Path targetFile = ConfigurationUtils.resolveNodeProfilePath(loadedProfileName);
             if (Files.exists(targetFile)) {
                 Properties loaded = new Properties();
                 try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
@@ -1102,8 +1097,7 @@ public class NodeConfigurationPanel extends JPanel {
                     || (Signum.NODE_SUBFOLDER + "-default").equalsIgnoreCase(name.trim()))
                 return;
 
-            Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_SUBFOLDER,
-                    name + ".properties");
+            Path targetFile = ConfigurationUtils.resolveNodeProfilePath(name);
             if (Files.exists(targetFile)) {
                 JOptionPane.showMessageDialog(this, "Profile '" + name + "' already exists.", "Error",
                         JOptionPane.ERROR_MESSAGE);
@@ -1200,10 +1194,8 @@ public class NodeConfigurationPanel extends JPanel {
         }
 
         try {
-            Path oldFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_SUBFOLDER,
-                    oldProfileName + ".properties");
-            Path newFile = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_SUBFOLDER,
-                    newProfileName + ".properties");
+            Path oldFile = ConfigurationUtils.resolveNodeProfilePath(oldProfileName);
+            Path newFile = ConfigurationUtils.resolveNodeProfilePath(newProfileName);
 
             if (ConfigurationUtils.confirmAndRenameProfile(this, oldFile, newFile, oldProfileName, newProfileName)) {
                 refreshProfileList();
@@ -1256,8 +1248,7 @@ public class NodeConfigurationPanel extends JPanel {
         }
 
         try {
-            Path file = ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_SUBFOLDER,
-                    profileName + ".properties");
+            Path file = ConfigurationUtils.resolveNodeProfilePath(profileName);
             if (Files.exists(file)) {
                 Files.delete(file);
                 refreshProfileList();
@@ -2782,7 +2773,7 @@ public class NodeConfigurationPanel extends JPanel {
             return;
 
         Properties propsToSave = getPropertiesFromUI();
-        Path targetFile = ConfigurationUtils.resolveProfilePath(confFolder, "node", loadedProfileName + ".properties");
+        Path targetFile = ConfigurationUtils.resolveNodeProfilePath(loadedProfileName);
 
         try {
             ConfigurationUtils.savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());

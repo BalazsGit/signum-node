@@ -152,8 +152,7 @@ public class NodePanel extends JPanel implements LifecycleListener {
                 if (total == 0) {
                     SwingUtilities.invokeLater(() -> {
                         updateProgress(100, "No profiles found");
-                        lifecycleManager.registerProfile("default");
-                        createPlaceholderTab("default");
+                        // No profiles - placeholder not needed since discoverProfiles handles it
                     });
                     return;
                 }

@@ -381,8 +381,8 @@ public class LoggerConfigurationPanel extends JPanel {
         // Legend
         bottomPanel.add(createLegendPanel(), BorderLayout.NORTH);
 
-        // File path field
-        JLabel pathLabel = new JLabel("Configuration File: " + propertiesFile.getFileName().toString());
+        // File path field (full absolute path for consistency with Configuration tab)
+        JLabel pathLabel = new JLabel("Configuration File: " + propertiesFile.toAbsolutePath().toString());
         pathLabel.setForeground(GuiColors.getFaintText());
         bottomPanel.add(pathLabel, BorderLayout.CENTER);
 
@@ -546,7 +546,7 @@ public class LoggerConfigurationPanel extends JPanel {
 
             this.activeProfileName = Signum.getActiveLoggingProfile();
 
-            Path loggingConfPath = PathUtils.resolvePath(confFolder).resolve(Signum.NODE_LOGGING_SUBFOLDER);
+            Path loggingConfPath = ConfigurationUtils.getNodeLoggingDir();
             String baseFileName = Signum.LOGGING_PROPERTIES_NAME + ".properties";
             ConfigurationUtils
                     .fetchProfileNames(loggingConfPath, Signum.DEFAULT_LOGGING_PROPERTIES_NAME + ".properties")
@@ -757,8 +757,8 @@ public class LoggerConfigurationPanel extends JPanel {
                                     JOptionPane.ERROR_MESSAGE);
                             // Revert to headless fallback
                             isProgrammaticChange = true;
-                            profileComboBox.setSelectedItem(Signum.NODE_LOGGING_SUBFOLDER);
-                            loadProfile(Signum.NODE_LOGGING_SUBFOLDER + "-default");
+                            profileComboBox.setSelectedItem("logging-default");
+                            loadProfile("logging-default");
                             isProgrammaticChange = false;
                         }
                     }
@@ -1168,8 +1168,7 @@ public class LoggerConfigurationPanel extends JPanel {
     }
 
     private Path getProfileMetadataPath() {
-        return PathUtils.resolvePath(confFolder).resolve(Signum.NODE_LOGGING_SUBFOLDER)
-                .resolve("profile.json");
+        return ConfigurationUtils.getNodeLoggingDir().resolve("profile.json");
     }
 
     private void handleBack() {
@@ -1809,8 +1808,7 @@ public class LoggerConfigurationPanel extends JPanel {
     }
 
     private Path getPropertiesPath(String profileName) {
-        String fileName = profileName + ".properties";
-        return ConfigurationUtils.resolveProfilePath(confFolder, Signum.NODE_LOGGING_SUBFOLDER, fileName);
+        return ConfigurationUtils.resolveLoggingProfilePath(profileName);
     }
 
     private static class PropertyRow {
