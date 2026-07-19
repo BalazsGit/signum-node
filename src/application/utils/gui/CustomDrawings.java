@@ -47,22 +47,25 @@ public class CustomDrawings {
      */
     public enum ChevronStyle {
         /**
-         * Heavy (sharp) chevron — narrow angle with a tall peak.
-         * Arrow height spans ~25% of available space (divisor 4.0).
+         * Heavy chevron — tall peak, narrow angle, sharp appearance.
+         * Small divisor produces large arrowHeight relative to bounding box.
+         * Arrow height spans ~55% of available space (divisor 1.8).
          */
-        HEAVY(4.0),
+        HEAVY(1.8),
 
         /**
          * Standard chevron — natural, well-balanced proportions.
+         * Medium divisor for a moderate peak that works in most contexts.
          * Arrow height spans ~40% of available space (divisor 2.5).
          */
         STANDARD(2.5),
 
         /**
-         * Flat chevron — wide angle with a shallow profile.
-         * Arrow height spans ~33% of available space (divisor 3.0).
+         * Flat chevron — shallow profile, wide angle, subtle appearance.
+         * Large divisor produces small arrowHeight for a gentle curve.
+         * Arrow height spans ~22% of available space (divisor 4.5).
          */
-        FLAT(3.0);
+        FLAT(4.5);
 
         private final double heightDivisor;
 
