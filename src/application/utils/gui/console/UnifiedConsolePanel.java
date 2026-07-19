@@ -392,8 +392,13 @@ public final class UnifiedConsolePanel extends JPanel {
 
     /**
      * Changes the command input panel's vertical position at runtime.
-     * Moves the panel between TOP (PAGE_START, above console output)
-     * and BOTTOM (SOUTH, below console output).
+     * Moves the panel between TOP (above console output)
+     * and BOTTOM (below console output).
+     * <p>
+     * When animation is enabled ({@code config.isAnimateCommandInput()}), the panel
+     * first collapses at its current location, then repositions, then expands at the new location.
+     * When animation is disabled, the position change is instant.
+     * </p>
      * <p>
      * This is EDT-safe: calls from background threads are delegated to the event dispatch thread.
      * </p>
@@ -410,23 +415,64 @@ public final class UnifiedConsolePanel extends JPanel {
         }
         if (inputPanel == null) {
             // No panel to move; just update config so lazy init uses the new position
-            // (config is immutable, but we track runtime position separately)
             this.runtimeCommandPosition = position;
             return;
         }
-        // Remove from current position
+
+        ConsoleInputPosition current = getEffectiveCommandPosition();
+        if (current == position) {
+            // No actual change
+            return;
+        }
+
+        this.runtimeCommandPosition = position;
+
+        if (config.isAnimateCommandInput()) {
+            animatePositionChange(position);
+        } else {
+            instantPositionChange(position);
+        }
+    }
+
+    /**
+     * Instantly moves the input panel to the new position without animation.
+     */
+    private void instantPositionChange(ConsoleInputPosition position) {
         remove(inputPanel);
-        // Add to new position
         if (position == ConsoleInputPosition.BOTTOM) {
             add(inputPanel, BorderLayout.SOUTH);
         } else {
-            // TOP position: place inside headerRegion below filterHeader
             ensureHeaderRegion();
             headerRegion.add(inputPanel, BorderLayout.CENTER);
         }
-        this.runtimeCommandPosition = position;
         revalidate();
         repaint();
+    }
+
+    /**
+     * Animates a position change: collapse at current position → reposition → expand at new position.
+     * The collapse-to-reposition transition is triggered via the {@code onCollapsedListener} callback.
+     */
+    private void animatePositionChange(final ConsoleInputPosition newPosition) {
+        // Wire callback: after collapse finishes, reposition then expand
+        inputPanel.setOnCollapsedListener(() -> {
+            // Remove from old position and add to new position while collapsed (zero height)
+            remove(inputPanel);
+            if (newPosition == ConsoleInputPosition.BOTTOM) {
+                add(inputPanel, BorderLayout.SOUTH);
+            } else {
+                ensureHeaderRegion();
+                headerRegion.add(inputPanel, BorderLayout.CENTER);
+            }
+            revalidate();
+            repaint();
+            // Expand at new position
+            inputPanel.show(true);
+            // Clear callback after use
+            inputPanel.setOnCollapsedListener(null);
+        });
+        // Start collapse animation at current position
+        inputPanel.hide(true);
     }
 
     /**

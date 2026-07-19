@@ -58,6 +58,9 @@ public final class ConsoleInputPanel extends JPanel {
     /** Tracks whether panel is logically visible (expanded state) */
     private boolean expanded = true;
 
+    /** Callback triggered when collapse animation completes (used by position change) */
+    private Runnable onCollapsedListener;
+
     // ── Constructor ──────────────────────────────────────────────────────
 
     /** Creates the panel and initializes all UI components. */
@@ -198,6 +201,16 @@ public final class ConsoleInputPanel extends JPanel {
     /** @return the Send JButton */
     public JButton getSendButton() {
         return sendButton;
+    }
+
+    /**
+     * Sets a callback invoked when collapse animation completes.
+     * Used by {@link UnifiedConsolePanel} to reposition after collapse, then expand at new location.
+     *
+     * @param listener the callback (null to clear)
+     */
+    public void setOnCollapsedListener(Runnable listener) {
+        this.onCollapsedListener = listener;
     }
 
     // ── Visibility with Animation Support ────────────────────────────────
@@ -367,6 +380,10 @@ public final class ConsoleInputPanel extends JPanel {
                 setMaximumSize(new Dimension(Integer.MAX_VALUE, 0));
                 setBorder(new EmptyBorder(0, 0, 0, 0));
                 revalidateAndRepaintParents();
+                // Notify listener so caller can reposition before expand
+                if (onCollapsedListener != null) {
+                    onCollapsedListener.run();
+                }
             }
         });
         animationTimer.start();
