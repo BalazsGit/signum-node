@@ -78,10 +78,9 @@ public final class ConsoleInputPanel extends JPanel {
         setLayout(new BorderLayout(4, 0));
         setBorder(new EmptyBorder(4, 8, 4, 8));
 
-        // Prompt chevron: custom-drawn Chevron.RIGHT icon (dynamically sized to font, colored via GuiColors)
-        // scaleFactor 0.8 makes it slightly smaller than toolbar icons to match the text field height
-        promptChevron = new CustomDrawingComponent(CustomDrawings.Chevron.RIGHT, 0.8f);
-        promptChevron.setPreferredSize(new Dimension(20, 20));
+        // Prompt chevron: custom-drawn Chevron.STANDARD.RIGHT icon at normal size
+        promptChevron = new CustomDrawingComponent(CustomDrawings.Chevron.Standard.RIGHT, 1.0f);
+        promptChevron.setPreferredSize(new Dimension(24, 24));
         promptChevron.setToolTipText("Command prompt");
 
         // Command text field: fills available horizontal space

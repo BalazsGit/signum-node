@@ -49,9 +49,9 @@ public class CustomDrawings {
         /**
          * Heavy chevron — tall peak, narrow angle, sharp appearance.
          * Small divisor produces large arrowHeight relative to bounding box.
-         * Arrow height spans ~55% of available space (divisor 1.8).
+         * Arrow height spans ~67% of available space (divisor 1.5).
          */
-        HEAVY(1.8),
+        HEAVY(1.5),
 
         /**
          * Standard chevron — natural, well-balanced proportions.
