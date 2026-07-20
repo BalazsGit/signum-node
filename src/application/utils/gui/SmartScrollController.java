@@ -64,6 +64,13 @@ public final class SmartScrollController {
     /** Suppresses adjustment events during programmatic scrolls */
     private boolean isSuppressingEvents = false;
     
+    /**
+     * Panel visibility flag: when false, contentAppended() does not trigger scrolling.
+     * This prevents scroll jumping when the console tab is not actively visible.
+     * Default is true for backward compatibility.
+     */
+    private volatile boolean panelActive = true;
+    
     /** Push-based listeners notified on state changes (no polling) */
     private final List<Consumer<Boolean>> stateChangeListeners = new ArrayList<>();
 
@@ -179,8 +186,12 @@ public final class SmartScrollController {
 
     /**
      * Call this method after appending new content to the console.
-     * If currently following, scrolls to the bottom. Otherwise raises the
-     * "new content below" flag so the arrow button can appear.
+     * If currently following AND the panel is active (visible), scrolls to the bottom.
+     * Otherwise raises the "new content below" flag so the arrow button can appear.
+     * <p>
+     * When {@link #setPanelActive(boolean) panelActive} is false (panel not visible),
+     * scrolling is suppressed but counters still track calls for debugging.
+     * </p>
      * <p>
      * Emits a periodic [ScrollDebug] summary every {@value #SUMMARY_INTERVAL} calls
      * showing efficiency metrics (no allocation overhead).
@@ -205,11 +216,17 @@ public final class SmartScrollController {
             return;
         }
 
-        if (following) {
+        // Only scroll when the panel is active (visible to user)
+        // This prevents scroll jumping during background log processing
+        if (panelActive && following) {
             scrollToBottomInternal(bar);
             hasNewContentBelow = false;
             actualScrolls++;
+        } else if (!panelActive) {
+            // Panel not visible: track but don't scroll
+            skippedScrolls++;
         } else {
+            // Panel visible but not following (user scrolled up)
             hasNewContentBelow = true;
             skippedScrolls++;
             // Push event: new content arrived while paused → show button
@@ -224,6 +241,30 @@ public final class SmartScrollController {
                     totalCalls, actualScrolls, skippedScrolls, stateTransitions, 
                     String.format("%.1f", efficiency));
         }
+    }
+
+    // ── Panel Visibility Control ─────────────────────────────────────────
+
+    /**
+     * Sets whether this controller should actively scroll when content is appended.
+     * <p>
+     * When {@code active} is {@code false}, {@link #contentAppended()} calls will
+     * still update internal counters but will NOT trigger scrolling. This is useful
+     * when the console panel is not visible (e.g., another tab is selected) to prevent
+     * scroll position jumping and reduce unnecessary layout passes.
+     * </p>
+     *
+     * @param active true to enable auto-scrolling on new content, false to suppress it
+     */
+    public void setPanelActive(boolean active) {
+        this.panelActive = active;
+    }
+
+    /**
+     * @return true if this controller will actively scroll on new content
+     */
+    public boolean isPanelActive() {
+        return panelActive;
     }
 
     // ── User scroll detection ────────────────────────────────────────────

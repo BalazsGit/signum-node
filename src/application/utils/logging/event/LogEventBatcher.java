@@ -67,8 +67,15 @@ public final class LogEventBatcher implements AutoCloseable {
     private final AtomicBoolean running;
     private final AtomicBoolean flushPending;
 
+    /**
+     * Lazy-activation timer: only scheduled when there are events to flush.
+     * Uses single-shot scheduling (not fixed-rate) to avoid CPU waste during idle periods.
+     */
     private java.util.Timer flushTimer;
     private volatile boolean started;
+    
+    /** Tracks whether a delayed flush task is currently scheduled */
+    private volatile boolean flushTaskScheduled = false;
 
     /**
      * Creates a batcher with default thresholds (200ms delay, 50 events max).
@@ -107,7 +114,12 @@ public final class LogEventBatcher implements AutoCloseable {
     }
 
     /**
-     * Starts the delay-based flush timer.
+     * Starts the lazy-activation flush timer infrastructure.
+     * <p>
+     * Unlike the previous fixed-rate approach, this creates a daemon Timer that is only
+     * activated on-demand via {@link #scheduleDelayedFlush()}. During idle periods
+     * (no pending events), no timer tasks execute, eliminating unnecessary CPU wakeups.
+     * </p>
      * Must be called before enqueueing events if using automatic delay-based flushing.
      */
     public void start() {
@@ -119,19 +131,40 @@ public final class LogEventBatcher implements AutoCloseable {
                 return;
             }
             flushTimer = new java.util.Timer("LogEventBatcher-Flush-" + System.identityHashCode(this), true);
-            flushTimer.scheduleAtFixedRate(new java.util.TimerTask() {
+            started = true;
+        }
+    }
+    
+    /**
+     * Schedules a single-shot delayed flush task.
+     * If a task is already scheduled, it is cancelled and rescheduled (resetting the delay).
+     * This provides coalescing behavior: rapid successive enqueues only trigger one flush.
+     */
+    private void scheduleDelayedFlush() {
+        if (!started) {
+            return;
+        }
+        synchronized (this) {
+            if (!started || !running.get()) {
+                return;
+            }
+            // Cancel any existing pending task to coalesce rapid enqueues
+            if (flushTaskScheduled) {
+                return; // Already scheduled, no need to reschedule
+            }
+            java.util.TimerTask task = new java.util.TimerTask() {
                 @Override
                 public void run() {
-                    if (!running.get()) {
-                        this.cancel();
-                        return;
+                    synchronized (LogEventBatcher.this) {
+                        flushTaskScheduled = false;
                     }
-                    if (count.get() > 0) {
+                    if (running.get() && count.get() > 0) {
                         flushInternal(false);
                     }
                 }
-            }, maxDelayMs, maxDelayMs);
-            started = true;
+            };
+            flushTimer.schedule(task, maxDelayMs);
+            flushTaskScheduled = true;
         }
     }
 
@@ -140,6 +173,11 @@ public final class LogEventBatcher implements AutoCloseable {
      * <p>
      * If the buffer reaches capacity, an immediate flush is triggered.
      * Thread-safe: uses atomic index operations.
+     * </p>
+     * <p>
+     * Lazy activation: after enqueueing, a single-shot delayed flush task is scheduled.
+     * Rapid successive enqueues coalesce into one flush (the delay timer is not restarted).
+     * During idle periods with no pending events, no timer runs at all.
      * </p>
      *
      * @param event the event to enqueue (never null)
@@ -161,12 +199,12 @@ public final class LogEventBatcher implements AutoCloseable {
         }
         count.incrementAndGet();
 
-        // Schedule delayed flush if not already pending
+        // Schedule lazy single-shot delayed flush
         if (!started) {
-            // Without timer, dispatch immediately but still batch in EDT
+            // Without timer infrastructure, dispatch immediately but still batch in EDT
             scheduleEdtFlush();
-        } else if (flushPending.compareAndSet(false, true)) {
-            // Timer will pick this up on next tick
+        } else {
+            scheduleDelayedFlush();
         }
     }
 
@@ -196,6 +234,12 @@ public final class LogEventBatcher implements AutoCloseable {
         if (!running.compareAndSet(true, false)) {
             return; // Already stopped
         }
+        
+        // Cancel any pending delayed flush task
+        synchronized (this) {
+            flushTaskScheduled = false;
+        }
+        
         flushInternal(true);
 
         synchronized (this) {

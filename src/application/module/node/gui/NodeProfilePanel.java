@@ -25,11 +25,14 @@ import java.nio.file.Path;
 import java.util.Properties;
 
 import javax.swing.BorderFactory;
+import javax.swing.DefaultSingleSelectionModel;
 import javax.swing.Icon;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JTabbedPane;
+import javax.swing.event.ChangeEvent;
+import javax.swing.event.ChangeListener;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 
@@ -145,12 +148,37 @@ public class NodeProfilePanel extends JPanel {
 
         add(innerTabbedPane, BorderLayout.CENTER);
         wireToolbarCallbacks();
+        wireConsoleVisibilityTracking();
 
         AppearanceModule.registerAppearanceListener(() -> {
             GuiFontManager.applyDefaultFont(innerTabbedPane);
         });
 
         LOGGER.info("Created NodeProfilePanel for profile: {}", profile.getName());
+    }
+
+    /**
+     * Wires a ChangeListener to the inner tabbed pane to track when the Console tab
+     * is selected/deselected. When visible, auto-scrolling is enabled; when hidden,
+     * scrolling is suppressed to prevent layout jumping and reduce background CPU usage.
+     */
+    private void wireConsoleVisibilityTracking() {
+        int consoleIndex = innerTabbedPane.indexOfTab("Console");
+        if (consoleIndex < 0) {
+            return;
+        }
+
+        ChangeListener listener = e -> {
+            boolean consoleSelected = innerTabbedPane.getSelectedIndex() == consoleIndex;
+            if (consolePanel != null && consolePanel.getUnifiedConsole() != null) {
+                if (consoleSelected) {
+                    consolePanel.getUnifiedConsole().onPanelActivated();
+                } else {
+                    consolePanel.getUnifiedConsole().onPanelDeactivated();
+                }
+            }
+        };
+        innerTabbedPane.addChangeListener(listener);
     }
 
     private void wireToolbarCallbacks() {

@@ -959,6 +959,15 @@ public class NodeConsolePanel extends JPanel {
     }
 
     /**
+     * Returns the underlying UnifiedConsolePanel instance.
+     * Used by NodeProfilePanel to control scroll visibility on tab switching.
+     * @return the unified console panel, or null if not initialized
+     */
+    public UnifiedConsolePanel getUnifiedConsole() {
+        return unifiedConsole;
+    }
+
+    /**
      * @deprecated Use unifiedConsole.getTextPane() directly.
      * Delegating getter for backward compatibility.
      */

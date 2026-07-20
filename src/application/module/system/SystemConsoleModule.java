@@ -92,7 +92,11 @@ public class SystemConsoleModule implements Module {
 
     /**
      * Flushes bootstrap logs that occurred before GUI initialized.
-     * Writes directly to the text pane document, bypassing subscriber batching.
+     * <p>
+     * All lines are written in a SINGLE EDT dispatch to prevent multiple competing
+     * scroll-to-bottom calls. Each line would previously trigger its own invokeLater,
+     * causing scrollbar position jumping during panel initialization.
+     * </p>
      */
     private void flushBootstrapLogs() {
         JTextPane textPane = unifiedPanel.getTextPane();
@@ -106,25 +110,20 @@ public class SystemConsoleModule implements Module {
             snapshot = new ArrayList<>(Signum.BOOTSTRAP_LOGS);
         }
 
-        for (String log : snapshot) {
-            appendBootstrapLine(textPane, log);
-        }
-        appendBootstrapLine(textPane, "--- System Console initialized ---");
-    }
+        // Consolidate all bootstrap lines into ONE EDT callback to prevent scroll jumping
+        final ArrayList<String> linesToAppend = new ArrayList<>(snapshot);
+        linesToAppend.add("--- System Console initialized ---");
 
-    /**
-     * Appends a plain bootstrap line directly to the document.
-     */
-    private static void appendBootstrapLine(final JTextPane textPane, final String line) {
-        if (line == null || line.isEmpty()) {
-            return;
-        }
         SwingUtilities.invokeLater(() -> {
             try {
                 StyledDocument doc = (StyledDocument) textPane.getDocument();
-                int len = doc.getLength();
                 SimpleAttributeSet attrs = new SimpleAttributeSet();
-                doc.insertString(len, line + "\n", attrs);
+                for (String line : linesToAppend) {
+                    if (line != null && !line.isEmpty()) {
+                        int len = doc.getLength();
+                        doc.insertString(len, line + "\n", attrs);
+                    }
+                }
             } catch (BadLocationException e) {
                 // Ignore - document may have been disposed
             }

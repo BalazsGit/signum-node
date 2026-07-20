@@ -502,6 +502,34 @@ public final class UnifiedConsolePanel extends JPanel {
         }
     }
 
+    // ── Visibility Management ───────────────────────────────────────────
+
+    /**
+     * Called when this panel becomes visible (tab selected, window activated).
+     * Enables smart scroll auto-follow and performs a consolidated scroll-to-bottom.
+     * <p>
+     * This prevents multiple competing scroll-to-bottom calls during initialization
+     * by deferring the first scroll until the panel is actually shown to the user.
+     * </p>
+     */
+    public void onPanelActivated() {
+        if (subscriber != null && subscriber.getScrollController() != null) {
+            subscriber.getScrollController().setPanelActive(true);
+            // Single consolidated scroll after all pending EDT tasks are processed
+            SwingUtilities.invokeLater(() -> scrollToBottom());
+        }
+    }
+
+    /**
+     * Called when this panel becomes invisible (tab deselected, window iconified).
+     * Disables smart scroll auto-follow to prevent unnecessary scrolling and layout passes.
+     */
+    public void onPanelDeactivated() {
+        if (subscriber != null && subscriber.getScrollController() != null) {
+            subscriber.getScrollController().setPanelActive(false);
+        }
+    }
+
     // ── Lifecycle ───────────────────────────────────────────────────────
 
     /**
