@@ -28,13 +28,13 @@ class NodeProfileTest {
     class IsReservedProfileNameTests {
 
         @Test
-        @DisplayName("returns true for 'profile-default' reserved profile name")
-        void isReservedProfileName_GivenProfileDefault_ReturnsTrue() {
+        @DisplayName("returns true for 'node-default' reserved profile name")
+        void isReservedProfileName_GivenNodeDefault_ReturnsTrue() {
             // Act
-            boolean result = NodeProfile.isReservedProfileName("profile-default");
+            boolean result = NodeProfile.isReservedProfileName("node-default");
 
             // Assert
-            assertTrue(result, "'profile-default' is a reserved template name and should be excluded");
+            assertTrue(result, "'node-default' is a reserved template name and should be excluded");
         }
 
         @Test
@@ -51,8 +51,7 @@ class NodeProfileTest {
         @DisplayName("returns false for user profile ending with '-default' (exact-name matching, not suffix)")
         void isReservedProfileName_GivenCustomDefaultSuffix_ReturnsFalse() {
             // Act & Assert
-            // We use exact-name matching (not endsWith) so user profiles like these are allowed
-            assertFalse(NodeProfile.isReservedProfileName("test-profile-default"));
+            // We use exact-name matching (not endsWith) so user profiles like these are allowed\n            assertFalse(NodeProfile.isReservedProfileName("test-node-default"));
             assertFalse(NodeProfile.isReservedProfileName("my-custom-default"));
             assertFalse(NodeProfile.isReservedProfileName("some-module-default"));
         }

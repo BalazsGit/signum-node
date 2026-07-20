@@ -63,10 +63,10 @@ public final class ModuleConfigPath {
 
     /**
      * Returns the classpath resource for a module profile default.
-     * <p>Example: module="node" → /conf/node/profiles/profile-default.properties</p>
+     * <p>Example: module="node" → /conf/node/profiles/node-default.properties</p>
      */
     public static String getProfileClassPathResource(String moduleId) {
-        return CLASSPATH_PREFIX + moduleId + "/profiles/profile-default.properties";
+        return CLASSPATH_PREFIX + moduleId + "/profiles/" + moduleId + "-default.properties";
     }
 
     // -----------------------------------------------------------------

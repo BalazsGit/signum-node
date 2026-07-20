@@ -177,9 +177,9 @@ tasks.register('dist', Zip) {
     }
 
     from(file("$buildDir/empty.properties")) { into "conf/node"; rename { "node.properties" } }
-    from(file("$buildDir/empty.properties")) { into "conf/node-logging"; rename { "logging.properties" } }
-    from("conf/node-default.properties") { into "conf/node" } // Copy default properties from root to subfolder
-    from("conf/logging-default.properties") { into "conf/node-logging" } // Copy default properties from root to subfolder
+    from(file("$buildDir/empty.properties")) { into "conf/node/logging"; rename { "logging.properties" } }
+    from("resources/conf/node/profiles") { into "conf/node/profiles" } // Copy default node profile from resources
+    from("resources/conf/node/logging") { into "conf/node/logging" } // Copy default node logging config from resources
     into('html') { from "html" }
     from "LICENSE.txt"
     from "README.md"
@@ -306,8 +306,8 @@ tasks.register('zipWinExe', Zip) {
 
     from(file("$buildDir/empty.properties")) { into "conf/node"; rename { "node.properties" } }
     from(file("$buildDir/empty.properties")) { into "conf/node/logging"; rename { "logging.properties" } }
-    from("conf/node-default.properties") { into "conf/node" } // Copy default properties from root to subfolder
-    from("conf/logging-default.properties") { into "conf/node/logging" } // Copy default properties from root to subfolder
+    from("resources/conf/node/profiles") { into "conf/node/profiles" } // Copy default node profile from resources
+    from("resources/conf/node/logging") { into "conf/node/logging" } // Copy default node logging config from resources
     into('html') { from "html" }
     from "LICENSE.txt"
     from "README.md"

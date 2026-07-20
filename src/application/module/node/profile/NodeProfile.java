@@ -28,7 +28,7 @@ import java.util.Set;
  * <h3>Reserved Profile Names</h3>
  * The following names are excluded from discovery:
  * <ul>
- *   <li>{@code profile-default} - default template (not a runnable profile)</li>
+ *   <li>{@code node-default} - default template (not a runnable profile)</li>
  *   <li>{@code logging-default} - logging default template</li>
  * </ul>
  *
@@ -48,9 +48,8 @@ public class NodeProfile implements PropertiesProfileEntity {
     /** Profile category (subdirectory under module). */
     static final String CATEGORY = PropertiesProfileLoader.DEFAULT_CATEGORY_PROFILES;
 
-    /** Default profile file name. */
-    static final String DEFAULT_PROFILE_FILENAME =
-            PropertiesProfileLoader.DEFAULT_MODULE_DEFAULT_FILENAME;
+    /** Default profile file name (follows {module}-default.properties convention). */
+    static final String DEFAULT_PROFILE_FILENAME = MODULE_ID + "-default.properties";
 
     /** Default logging file name. */
     static final String DEFAULT_LOGGING_FILENAME =
@@ -66,7 +65,7 @@ public class NodeProfile implements PropertiesProfileEntity {
      * Set of reserved profile names that are excluded from profile discovery
      * and cannot be used when saving new profiles.
      */
-    static final Set<String> RESERVED_PROFILE_NAMES = Set.of("profile-default", "logging-default");
+    static final Set<String> RESERVED_PROFILE_NAMES = Set.of("node-default", "logging-default");
 
     private final String profileName;
     private final Properties properties = new Properties();
@@ -287,7 +286,7 @@ public class NodeProfile implements PropertiesProfileEntity {
      */
     public static void syncDefaultProfileFile() {
         InputStream is = NodeProfile.class.getResourceAsStream(
-                "/conf/node/profiles/profile-default.properties");
+                "/conf/node/profiles/node-default.properties");
         if (is != null) {
             PropertiesProfileLoader.syncDefaultFile(
                     CONF_ROOT, MODULE_ID, CATEGORY, DEFAULT_PROFILE_FILENAME, is);

@@ -276,20 +276,21 @@ public final class PropertiesProfileLoader {
         }
 
         try {
-            // Step 1: Compute hash of the classpath resource
-            String resourceHash = computeSha256(classpathResource);
+            // Read entire resource into memory first so we can hash AND copy from it
+            byte[] resourceBytes = classpathResource.readAllBytes();
+            String resourceHash = computeSha256(new java.io.ByteArrayInputStream(resourceBytes));
 
             if (!Files.exists(target)) {
                 // Create directory structure if needed
                 Files.createDirectories(target.getParent());
-                copyStream(classpathResource, target);
+                Files.write(target, resourceBytes);
                 return;
             }
 
             // Step 2: Compare hashes — only overwrite if different
             String fileHash = computeSha256(Files.newInputStream(target));
             if (!fileHash.equals(resourceHash)) {
-                copyStream(classpathResource, target);
+                Files.write(target, resourceBytes);
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to sync default properties-file: " + target, e);
@@ -419,10 +420,12 @@ public final class PropertiesProfileLoader {
         ensureProfileDirExists(confRoot, moduleId, DEFAULT_CATEGORY_LOGGING);
 
         // Step 2: Sync default files from classpath resources (SHA-256 hash comparison)
+        // Uses module-specific default filename: {module}-default.properties
+        String moduleDefaultFilename = moduleId + "-default.properties";
         String profileDefaultResource = "/conf/" + moduleId + "/" + DEFAULT_CATEGORY_PROFILES
-                + "/" + DEFAULT_MODULE_DEFAULT_FILENAME;
+                + "/" + moduleDefaultFilename;
         syncDefaultFileFromClasspath(confRoot, moduleId, DEFAULT_CATEGORY_PROFILES,
-                DEFAULT_MODULE_DEFAULT_FILENAME, profileDefaultResource);
+                moduleDefaultFilename, profileDefaultResource);
 
         String loggingDefaultResource = "/conf/" + moduleId + "/" + DEFAULT_CATEGORY_LOGGING
                 + "/" + DEFAULT_LOGGING_DEFAULT_FILENAME;
