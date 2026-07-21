@@ -279,14 +279,18 @@ public final class UnifiedConsolePanel extends JPanel {
 
     /**
      * Wires the floating scroll-to-bottom button visibility to the SmartScrollController
-     * using a push-based event listener (no polling). The button appears when the controller
-     * signals PAUSED + new content below, and disappears on FOLLOWING or no unread content.
+     * using a push-based event listener (no polling). The button fades in when the controller
+     * signals PAUSED + new content below, and fades out on FOLLOWING or no unread content.
      */
     private void wireScrollButtonVisibility(SmartScrollController controller) {
         // Push-based: controller calls back on state change, no timer needed
         controller.onStateChanged(show -> {
             if (scrollToBottomButton != null) {
-                scrollToBottomButton.setVisible(show);
+                if (show) {
+                    scrollToBottomButton.fadeIn();
+                } else {
+                    scrollToBottomButton.fadeOut();
+                }
             }
         });
     }
@@ -599,9 +603,12 @@ public final class UnifiedConsolePanel extends JPanel {
 
     /**
      * Releases all resources held by this panel.
-     * Disposes the subscriber, detaches scroll controller, and clears references.
+     * Disposes the subscriber, detaches scroll controller, stops fade animations, and clears references.
      */
     public void dispose() {
+        if (scrollToBottomButton != null) {
+            scrollToBottomButton.stopFadeAnimation();
+        }
         if (subscriber != null) {
             subscriber.dispose();
             subscriber = null;
@@ -622,6 +629,18 @@ public final class UnifiedConsolePanel extends JPanel {
 
         private static final int BUTTON_SIZE = 36;
         private static final int MARGIN = 12;
+
+        /** Fade duration in milliseconds (matches ConsoleInputPanel standard) */
+        private static final int FADE_DURATION_MS = 250;
+        /** Fade timer tick interval in milliseconds */
+        private static final int FADE_INTERVAL_MS = 10;
+
+        /** Current alpha value (0.0 = invisible, 1.0 = fully visible) */
+        private float buttonAlpha = 0f;
+        /** Target alpha the animation is converging toward */
+        private float targetAlpha = 0f;
+        /** Swing Timer driving the fade animation on EDT */
+        private javax.swing.Timer fadeTimer;
 
         ScrollToBottomButton() {
             setOpaque(false);
@@ -650,6 +669,71 @@ public final class UnifiedConsolePanel extends JPanel {
             });
         }
 
+        // ── Fade Animation ───────────────────────────────────────────────
+
+        /**
+         * Starts fade-in animation: makes the button visible and animates alpha from 0 to 1.
+         */
+        void fadeIn() {
+            setVisible(true);
+            targetAlpha = 1.0f;
+            ensureFadeTimerRunning();
+        }
+
+        /**
+         * Starts fade-out animation: animates alpha from current value to 0,
+         * then hides the button when animation completes.
+         */
+        void fadeOut() {
+            targetAlpha = 0.0f;
+            ensureFadeTimerRunning();
+        }
+
+        /** Starts the fade timer if not already running. */
+        private void ensureFadeTimerRunning() {
+            if (fadeTimer != null && fadeTimer.isRunning()) {
+                return;
+            }
+            fadeTimer = new javax.swing.Timer(FADE_INTERVAL_MS, e -> tickFade());
+            fadeTimer.setRepeats(true);
+            fadeTimer.start();
+        }
+
+        /**
+         * Single animation tick: advances buttonAlpha toward targetAlpha using linear steps.
+         * When the target is reached (within epsilon), stops the timer and applies final state.
+         */
+        private void tickFade() {
+            float diff = targetAlpha - buttonAlpha;
+            if (Math.abs(diff) < 0.01f) {
+                // Reached target — snap to exact value, stop timer, apply final visibility
+                buttonAlpha = targetAlpha;
+                fadeTimer.stop();
+                fadeTimer = null;
+                if (targetAlpha == 0f) {
+                    setVisible(false);
+                }
+                repaint();
+                return;
+            }
+
+            // Linear step per tick (FADE_INTERVAL_MS / FADE_DURATION_MS = 10/250 = 0.04)
+            float step = FADE_INTERVAL_MS / (float) FADE_DURATION_MS;
+            buttonAlpha += (diff > 0 ? step : -step);
+            // Clamp to [0, 1]
+            if (buttonAlpha < 0f) buttonAlpha = 0f;
+            if (buttonAlpha > 1f) buttonAlpha = 1f;
+            repaint();
+        }
+
+        /** Stops any running fade animation. Called during disposal. */
+        void stopFadeAnimation() {
+            if (fadeTimer != null && fadeTimer.isRunning()) {
+                fadeTimer.stop();
+                fadeTimer = null;
+            }
+        }
+
         @Override
         protected void paintComponent(Graphics g) {
             super.paintComponent(g);
@@ -670,17 +754,23 @@ public final class UnifiedConsolePanel extends JPanel {
             // The button is already positioned via setBounds in the JLayeredPane,
             // so we draw directly at (0, 0) relative to this panel's origin.
 
-            // Draw circle background with padding
-            Color bgColor = new Color(
-                    UIManager.getColor("Panel.background").getRed(),
-                    UIManager.getColor("Panel.background").getGreen(),
-                    UIManager.getColor("Panel.background").getBlue(),
-                    200); // Semi-transparent
-            Color borderColor = GuiColors.getButtonIcon();
+            // Base colors from theme
+            Color panelBg = UIManager.getColor("Panel.background");
+            Color baseIconColor = GuiColors.getButtonIcon();
+
+            // Apply fade alpha: background max alpha is 200, icon max alpha is 255
+            int bgAlpha = (int) (200 * buttonAlpha);
+            int iconAlpha = (int) (255 * buttonAlpha);
+            bgAlpha = Math.max(0, Math.min(255, bgAlpha));
+            iconAlpha = Math.max(0, Math.min(255, iconAlpha));
+
+            Color bgColor = new Color(panelBg.getRed(), panelBg.getGreen(), panelBg.getBlue(), bgAlpha);
+            Color iconColor = new Color(
+                    baseIconColor.getRed(), baseIconColor.getGreen(), baseIconColor.getBlue(), iconAlpha);
 
             g2.setColor(bgColor);
             g2.fill(new Ellipse2D.Double(2, 2, w - 4, h - 4));
-            g2.setColor(borderColor);
+            g2.setColor(iconColor);
             g2.setStroke(new java.awt.BasicStroke(1.5f));
             g2.draw(new Ellipse2D.Double(2, 2, w - 4, h - 4));
 
@@ -691,8 +781,7 @@ public final class UnifiedConsolePanel extends JPanel {
 
             java.awt.geom.AffineTransform oldTx = g2.getTransform();
             g2.translate(iconX, iconY);
-            g2.setColor(borderColor);
-            drawChevronDown(g2, iconSize, iconSize, borderColor);
+            drawChevronDown(g2, iconSize, iconSize, iconColor);
             g2.setTransform(oldTx);
             g2.dispose();
         }
