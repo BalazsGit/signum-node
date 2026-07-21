@@ -14,6 +14,7 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.geom.Ellipse2D;
 
+import javax.swing.JLayeredPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextPane;
@@ -167,7 +168,42 @@ public final class UnifiedConsolePanel extends JPanel {
         scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
 
-        add(scrollPane, BorderLayout.CENTER);
+        // Wrap console area in a JLayeredPane so the floating scroll-to-bottom button
+        // can overlay the text output without interfering with scrolling or selection.
+        final JLayeredPane layeredPane = new JLayeredPane();
+
+        // Add JScrollPane at the default (bottom) layer. In a JLayeredPane (null layout),
+        // we must set explicit bounds so the scroll pane fills the entire layered area.
+        scrollPane.setBorder(null);
+        scrollPane.setOpaque(false);
+        layeredPane.add(scrollPane, JLayeredPane.DEFAULT_LAYER);
+
+        // Create and add the floating scroll-to-bottom button overlay.
+        scrollToBottomButton = new ScrollToBottomButton();
+        scrollToBottomButton.setVisible(false); // Hidden by default, shown by SmartScrollController
+        layeredPane.add(scrollToBottomButton, JLayeredPane.PALETTE_LAYER);
+
+        // Layout listener: whenever the layeredPane is resized by BorderLayout, update bounds
+        // of all null-layout children (scrollPane fills entire area, button stays bottom-right).
+        layeredPane.addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent e) {
+                Dimension size = layeredPane.getSize();
+                scrollPane.setBounds(0, 0, size.width, size.height);
+                positionScrollToBottomButton();
+            }
+        });
+
+        add(layeredPane, BorderLayout.CENTER);
+
+        // Trigger initial layout after the first paint (BorderLayout has sized the layeredPane)
+        java.awt.EventQueue.invokeLater(() -> {
+            Dimension size = layeredPane.getSize();
+            if (size.width > 0 && size.height > 0) {
+                scrollPane.setBounds(0, 0, size.width, size.height);
+                positionScrollToBottomButton();
+            }
+        });
 
         // Command input at BOTTOM position (after console output)
         if (config.isShowCommandInput() && config.getCommandPosition() == ConsoleInputPosition.BOTTOM) {
@@ -253,6 +289,24 @@ public final class UnifiedConsolePanel extends JPanel {
                 scrollToBottomButton.setVisible(show);
             }
         });
+    }
+
+    /**
+     * Positions the floating scroll-to-bottom button at the bottom-right of the
+     * JScrollPane viewport, accounting for the scrollbar width.
+     */
+    private void positionScrollToBottomButton() {
+        if (scrollToBottomButton == null) {
+            return;
+        }
+        int btnW = ScrollToBottomButton.BUTTON_SIZE;
+        int btnH = ScrollToBottomButton.BUTTON_SIZE;
+        int x = scrollPane.getWidth() - btnW - ScrollToBottomButton.MARGIN;
+        int y = scrollPane.getHeight() - btnH - ScrollToBottomButton.MARGIN;
+        // Clamp to ensure the button stays inside the pane
+        x = Math.max(0, x);
+        y = Math.max(0, y);
+        scrollToBottomButton.setBounds(x, y, btnW, btnH);
     }
 
     // ── Filter Callback ─────────────────────────────────────────────────
@@ -613,14 +667,10 @@ public final class UnifiedConsolePanel extends JPanel {
                 return;
             }
 
-            // Position at bottom-right with margin
-            int x = scrollPane.getWidth() - w - MARGIN;
-            int y = scrollPane.getHeight() - h - MARGIN;
+            // The button is already positioned via setBounds in the JLayeredPane,
+            // so we draw directly at (0, 0) relative to this panel's origin.
 
-            // Move graphics origin to button position
-            g2.translate(x, y);
-
-            // Draw circle background
+            // Draw circle background with padding
             Color bgColor = new Color(
                     UIManager.getColor("Panel.background").getRed(),
                     UIManager.getColor("Panel.background").getGreen(),
@@ -634,19 +684,15 @@ public final class UnifiedConsolePanel extends JPanel {
             g2.setStroke(new java.awt.BasicStroke(1.5f));
             g2.draw(new Ellipse2D.Double(2, 2, w - 4, h - 4));
 
-            // Draw Chevron.DOWN icon inside the circle
+            // Draw Chevron.DOWN icon centered inside the circle
             int iconSize = Math.min(w, h) - 12; // Padding inside circle
             int iconX = (w - iconSize) / 2;
             int iconY = (h - iconSize) / 2;
 
-            // Save and translate for icon drawing
             java.awt.geom.AffineTransform oldTx = g2.getTransform();
             g2.translate(iconX, iconY);
             g2.setColor(borderColor);
-
-            // Draw chevron using CustomDrawings symbol with custom color
             drawChevronDown(g2, iconSize, iconSize, borderColor);
-
             g2.setTransform(oldTx);
             g2.dispose();
         }
