@@ -618,6 +618,21 @@ public class NodeConsolePanel extends JPanel {
         menuPopupController.toggle(menuPanel, sourceButton);
     }
 
+    /**
+     * Recursively searches up the component hierarchy to find an enclosing JScrollPane.
+     * Robust against intermediate wrapper panels (e.g., ResponsiveToolbarScrollPane contentWrapper).
+     */
+    private static JScrollPane findScrollPaneAncestor(Component start) {
+        Component c = start.getParent();
+        while (c != null) {
+            if (c instanceof JScrollPane) {
+                return (JScrollPane) c;
+            }
+            c = c.getParent();
+        }
+        return null;
+    }
+
     private void togglePopOffButtons() {
         if (popOffAnimator != null && popOffAnimator.isRunning()) {
             return; // Don't start a new animation if one is running
@@ -634,11 +649,9 @@ public class NodeConsolePanel extends JPanel {
                 : Math.max(naturalSize.height, 25);
         Container parent = popOffButtonsPanel.getParent();
 
-        // Find scroll pane to keep it aligned to the right during animation
-        final JScrollPane sp = (parent instanceof JPanel && parent.getParent() instanceof JViewport
-                && parent.getParent().getParent() instanceof JScrollPane)
-                        ? (JScrollPane) parent.getParent().getParent()
-                        : null;
+        // Robust scroll pane search: traverse up until we find a JScrollPane ancestor.
+        // This works regardless of intermediate wrapper panels (e.g., contentWrapper in ResponsiveToolbarScrollPane).
+        final JScrollPane sp = findScrollPaneAncestor(popOffButtonsPanel);
 
         if (showPopOff) {
             // Opening
@@ -649,6 +662,8 @@ public class NodeConsolePanel extends JPanel {
                 parent.repaint();
             }
 
+            final int finalTargetWidth = targetWidth;
+            final JScrollPane finalSp = sp;
             popOffAnimator = new Timer(10, new ActionListener() {
                 final long startTime = System.currentTimeMillis();
                 final int duration = ANIMATION_DURATION_MS;
@@ -659,19 +674,21 @@ public class NodeConsolePanel extends JPanel {
                     float progress = Math.min(1.0f, (float) elapsed / duration);
                     progress = 1.0f - (float) Math.pow(1.0f - progress, 3); // Ease out
 
-                    int w = (int) (targetWidth * progress);
+                    int w = (int) (finalTargetWidth * progress);
                     popOffButtonsPanel.setPreferredSize(new Dimension(w, targetHeight));
                     if (parent != null) {
                         parent.revalidate();
                         parent.repaint();
                     }
 
-                    // Ensure the toggle button stays pinned to the right edge during collapse
-                    if (sp != null) {
-                        JScrollBar hBar = sp.getHorizontalScrollBar();
-                        if (hBar != null && hBar.isVisible()) {
-                            hBar.setValue(hBar.getMaximum());
-                        }
+                    // Scroll-to-max deferred via invokeLater (revalidate is async)
+                    if (finalSp != null) {
+                        SwingUtilities.invokeLater(() -> {
+                            JScrollBar hBar = finalSp.getHorizontalScrollBar();
+                            if (hBar != null) {
+                                hBar.setValue(hBar.getMaximum());
+                            }
+                        });
                     }
 
                     if (progress >= 1.0f) {
@@ -679,6 +696,14 @@ public class NodeConsolePanel extends JPanel {
                         popOffButtonsPanel.setPreferredSize(null); // Reset to natural size
                         if (parent != null)
                             parent.revalidate();
+                        if (finalSp != null) {
+                            SwingUtilities.invokeLater(() -> {
+                                JScrollBar hBar = finalSp.getHorizontalScrollBar();
+                                if (hBar != null) {
+                                    hBar.setValue(hBar.getMaximum());
+                                }
+                            });
+                        }
                     }
                 }
             });
@@ -686,6 +711,7 @@ public class NodeConsolePanel extends JPanel {
         } else {
             // Closing
             final int startWidth = popOffButtonsPanel.getWidth();
+            final JScrollPane finalSp = sp;
 
             popOffAnimator = new Timer(10, new ActionListener() {
                 final long startTime = System.currentTimeMillis();
@@ -704,13 +730,14 @@ public class NodeConsolePanel extends JPanel {
                         parent.repaint();
                     }
 
-                    // Ensure the toggle button stays at the right edge during expansion if
-                    // scrolling is needed
-                    if (sp != null) {
-                        JScrollBar hBar = sp.getHorizontalScrollBar();
-                        if (hBar != null && hBar.isVisible()) {
-                            hBar.setValue(hBar.getMaximum());
-                        }
+                    // Scroll-to-max deferred via invokeLater (revalidate is async)
+                    if (finalSp != null) {
+                        SwingUtilities.invokeLater(() -> {
+                            JScrollBar hBar = finalSp.getHorizontalScrollBar();
+                            if (hBar != null) {
+                                hBar.setValue(hBar.getMaximum());
+                            }
+                        });
                     }
 
                     if (progress >= 1.0f) {
@@ -719,6 +746,14 @@ public class NodeConsolePanel extends JPanel {
                         popOffButtonsPanel.setVisible(false);
                         if (parent != null)
                             parent.revalidate();
+                        if (finalSp != null) {
+                            SwingUtilities.invokeLater(() -> {
+                                JScrollBar hBar = finalSp.getHorizontalScrollBar();
+                                if (hBar != null) {
+                                    hBar.setValue(hBar.getMaximum());
+                                }
+                            });
+                        }
                     }
                 }
 

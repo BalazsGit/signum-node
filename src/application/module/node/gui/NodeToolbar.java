@@ -294,6 +294,21 @@ public class NodeToolbar extends JPanel {
     }
 
     /**
+     * Recursively searches up the component hierarchy to find an enclosing JScrollPane.
+     * Robust against intermediate wrapper panels (e.g., ResponsiveToolbarScrollPane contentWrapper).
+     */
+    private static javax.swing.JScrollPane findScrollPaneAncestor(Component start) {
+        Component c = start.getParent();
+        while (c != null) {
+            if (c instanceof javax.swing.JScrollPane) {
+                return (javax.swing.JScrollPane) c;
+            }
+            c = c.getParent();
+        }
+        return null;
+    }
+
+    /**
      * Toggles the pop-off buttons panel with animation.
      * Mirrors NodeConsolePanel.togglePopOffButtons() exactly.
      */
@@ -306,18 +321,15 @@ public class NodeToolbar extends JPanel {
         updatePopOffToggleIcon();
 
         // Calculate target dimensions
-        // Use a stable height from an existing toolbar button to prevent vertical jumping during animation
         Dimension naturalSize = popOffButtonsPanel.getLayout().preferredLayoutSize(popOffButtonsPanel);
         final int targetWidth = naturalSize.width;
         final int targetHeight = editConfButton != null ? editConfButton.getPreferredSize().height
                 : Math.max(naturalSize.height, 25);
         Container parent = popOffButtonsPanel.getParent();
 
-        // Find scroll pane to keep it aligned to the right during animation
-        final javax.swing.JScrollPane sp = (parent instanceof JPanel && parent.getParent() instanceof javax.swing.JViewport
-                && parent.getParent().getParent() instanceof javax.swing.JScrollPane)
-                        ? (javax.swing.JScrollPane) parent.getParent().getParent()
-                        : null;
+        // Robust scroll pane search: traverse up until we find a JScrollPane ancestor.
+        // This works regardless of intermediate wrapper panels (e.g., contentWrapper in ResponsiveToolbarScrollPane).
+        final javax.swing.JScrollPane sp = findScrollPaneAncestor(popOffButtonsPanel);
 
         if (showPopOff) {
             // Opening
@@ -329,6 +341,7 @@ public class NodeToolbar extends JPanel {
             }
 
             final int finalTargetWidth = targetWidth;
+            final javax.swing.JScrollPane finalSp = sp;
             popOffAnimator = new Timer(10, new java.awt.event.ActionListener() {
                 private final long startTime = System.currentTimeMillis();
 
@@ -345,17 +358,28 @@ public class NodeToolbar extends JPanel {
                         parent.repaint();
                     }
 
-                    if (sp != null) {
-                        javax.swing.JScrollBar hBar = sp.getHorizontalScrollBar();
-                        if (hBar != null && hBar.isVisible()) {
-                            hBar.setValue(hBar.getMaximum());
-                        }
+                    // Scroll-to-max deferred via invokeLater (revalidate is async)
+                    if (finalSp != null) {
+                        SwingUtilities.invokeLater(() -> {
+                            javax.swing.JScrollBar hBar = finalSp.getHorizontalScrollBar();
+                            if (hBar != null) {
+                                hBar.setValue(hBar.getMaximum());
+                            }
+                        });
                     }
 
                     if (progress >= 1.0f) {
                         ((javax.swing.Timer) e.getSource()).stop();
                         popOffButtonsPanel.setPreferredSize(null); // Reset to natural size
                         if (parent != null) parent.revalidate();
+                        if (finalSp != null) {
+                            SwingUtilities.invokeLater(() -> {
+                                javax.swing.JScrollBar hBar = finalSp.getHorizontalScrollBar();
+                                if (hBar != null) {
+                                    hBar.setValue(hBar.getMaximum());
+                                }
+                            });
+                        }
                     }
                 }
             });
@@ -363,6 +387,7 @@ public class NodeToolbar extends JPanel {
         } else {
             // Closing
             final int startWidth = popOffButtonsPanel.getWidth();
+            final javax.swing.JScrollPane finalSp = sp;
 
             popOffAnimator = new Timer(10, new java.awt.event.ActionListener() {
                 private final long startTime = System.currentTimeMillis();
@@ -380,11 +405,14 @@ public class NodeToolbar extends JPanel {
                         parent.repaint();
                     }
 
-                    if (sp != null) {
-                        javax.swing.JScrollBar hBar = sp.getHorizontalScrollBar();
-                        if (hBar != null && hBar.isVisible()) {
-                            hBar.setValue(hBar.getMaximum());
-                        }
+                    // Scroll-to-max deferred via invokeLater (revalidate is async)
+                    if (finalSp != null) {
+                        SwingUtilities.invokeLater(() -> {
+                            javax.swing.JScrollBar hBar = finalSp.getHorizontalScrollBar();
+                            if (hBar != null) {
+                                hBar.setValue(hBar.getMaximum());
+                            }
+                        });
                     }
 
                     if (progress >= 1.0f) {
@@ -392,6 +420,14 @@ public class NodeToolbar extends JPanel {
                         popOffButtonsPanel.setPreferredSize(new Dimension(0, targetHeight));
                         popOffButtonsPanel.setVisible(false);
                         if (parent != null) parent.revalidate();
+                        if (finalSp != null) {
+                            SwingUtilities.invokeLater(() -> {
+                                javax.swing.JScrollBar hBar = finalSp.getHorizontalScrollBar();
+                                if (hBar != null) {
+                                    hBar.setValue(hBar.getMaximum());
+                                }
+                            });
+                        }
                     }
                 }
             });
