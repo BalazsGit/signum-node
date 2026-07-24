@@ -89,7 +89,7 @@ public final class Signum {
     public static final Version VERSION = Version.parse("v3.9.8");
     public static final String APPLICATION = "BRS";
 
-    public static final String CONF_FOLDER = "../conf";
+    public static final String CONF_FOLDER = "./conf";
     public static final String DATABASE_SUBFOLDER = "database";
     public static final String NODE_SUBFOLDER = NodeModule.ID;
     public static final String NODE_LOGGING_SUBFOLDER = NODE_SUBFOLDER + "/logging";
@@ -153,6 +153,18 @@ public final class Signum {
     private static WebServer webServer;
 
     private static ShutdownManager shutdownManager;
+
+    /**
+     * Sets the ShutdownManager instance from the owning NodeCoreContext.
+     * The context creates a profile-scoped ShutdownManager and registers it
+     * here so that the legacy static shutdown path in {@link #shutdown(boolean)}
+     * can still access it.
+     *
+     * @param manager the ShutdownManager for this profile
+     */
+    public static void setShutdownManager(ShutdownManager manager) {
+        shutdownManager = manager;
+    }
 
     private static AtomicBoolean isShutdown = new AtomicBoolean(false);
     private static AtomicBoolean nodeStopped = new AtomicBoolean(false);
@@ -445,7 +457,8 @@ public final class Signum {
 
         ensureDatabaseDirectory(propertyService);
 
-        shutdownManager = new ShutdownManager(propertyService);
+        // ShutdownManager is now created by NodeCoreContext.doInitialize()
+        // with the correct profile name. It is registered via setShutdownManager().
 
         String networkParametersClass = propertyService.getString(Props.NETWORK_PARAMETERS);
         NetworkParameters params = null;

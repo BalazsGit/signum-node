@@ -46,7 +46,20 @@ public class SQLiteProfile {
     }
 
     private void initDefaultConfiguration() {
-        configuration.put(CFG_URL, "jdbc:sqlite:file:./db/signum.sqlite.db");
+        // Database file is placed inside the profile's root directory:
+        // ../database/SQLite/{profileName}/signum.sqlite.db
+        // When no profile name is given, use the default "sqlite" folder.
+        String dbPath;
+        if (profileRoot != null) {
+            dbPath = profileRoot.resolve("signum.sqlite.db").toString();
+        } else {
+            // Fallback: default profile named "sqlite" under DATABASE_BASE_DIR/SQLite
+            Path fallbackRoot = PathUtils.resolvePath(DatabaseConfigurationUtils.DATABASE_BASE_DIR)
+                    .resolve(DatabaseConfigurationPanel.DatabaseEngine.SQLITE.toString())
+                    .resolve("sqlite");
+            dbPath = fallbackRoot.resolve("signum.sqlite.db").toString();
+        }
+        configuration.put(CFG_URL, "jdbc:sqlite:file:" + dbPath);
         configuration.put(CFG_JOURNAL_MODE, "WAL");
         configuration.put(CFG_CACHE_SIZE, "-131072");
     }

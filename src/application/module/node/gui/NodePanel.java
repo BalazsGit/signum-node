@@ -327,6 +327,20 @@ public class NodePanel extends JPanel implements LifecycleListener {
         });
     }
 
+    @Override
+    public void onShutdownRequested(NodeInstanceInfo instanceInfo) {
+        // Forward shutdown request to the corresponding profile panel so it can
+        // save GUI settings (metrics panel state, command input visibility, etc.)
+        NodeProfilePanel panel = loadedProfilePanels.get(instanceInfo.getProfileName());
+        if (panel != null && panel.getConsolePanel() != null) {
+            panel.getConsolePanel().saveGuiSettings();
+            LOGGER.info("Shutdown requested for profile '{}' — GUI settings saved", instanceInfo.getProfileName());
+        } else {
+            LOGGER.debug("Shutdown requested for profile '{}', no console panel found to save settings",
+                    instanceInfo.getProfileName());
+        }
+    }
+
     /**
      * Updates the tab icon and tooltip based on the node state.
      * Uses O(1) name-based lookup via profileNameToTabIndex map.

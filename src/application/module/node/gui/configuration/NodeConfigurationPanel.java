@@ -2968,7 +2968,7 @@ public class NodeConfigurationPanel extends JPanel {
         // Database
         helpTexts.put(Props.DB_URL.getName(),
                 "The JDBC connection URL. Examples:"
-                        + "<br>SQLite: <code>jdbc:sqlite:file:./db/signum.sqlite.db</code>"
+                        + "<br>SQLite: <code>jdbc:sqlite:file:../database/SQLite/sqlite/signum.sqlite.db</code>"
                         + "<br>MariaDB: <code>jdbc:mariadb://localhost:3306/signum</code>"
                         + "<br>Postgres: <code>jdbc:postgresql://localhost:5432/signum</code>");
 

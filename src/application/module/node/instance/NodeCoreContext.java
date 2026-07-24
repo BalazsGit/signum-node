@@ -226,10 +226,17 @@ public final class NodeCoreContext {
         ProfileLoggingApplier.apply(confFolder.toString(), profileName);
 
         // ── Step 2: Tag current thread with module+profile for log routing ──
-        // ProfileThreadContext sets MDC context so that all SLF4J → JUL →
+        // ProfileThreadContext sets MDC context so that all SLF4J -> JUL ->
         // ProfileLogRouter events emitted on this thread carry the correct
         // module ID + profile name and are routed to the right UI console tabs.
         ProfileThreadContext.setContext("node", profileName);
+
+        // ── Step 2.5: Create profile-scoped ShutdownManager ──
+        // The ShutdownManager persists graceful shutdown state to settings.json
+        // under the hierarchical path: module -> node -> {profileName}.
+        // Created here so each profile maintains independent shutdown tracking.
+        this.shutdownManager = new ShutdownManager(this.propertyService, this.profileName);
+        application.module.node.Signum.setShutdownManager(this.shutdownManager);
 
         // ── Step 3: Delegate to Signum.init() ──
         try {

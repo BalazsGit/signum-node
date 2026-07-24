@@ -353,6 +353,13 @@ public class NodeProfilePanel extends JPanel {
             if (toolbar != null) {
                 toolbar.updateButtonStates(newState);
             }
+
+            // Forward lifecycle events to the console panel so it can manage MetricsPanel
+            // visibility in sync with the node state. When the node reaches READY/RUNNING,
+            // Signum.getPropertyService() is available and the MetricsPanel can initialize.
+            if (consolePanel != null) {
+                consolePanel.onNodeStateChanged(oldState, newState);
+            }
         });
     }
 

@@ -20,12 +20,12 @@ public final class ConfigPaths {
     /**
      * Runtime configuration root directory.
      * <p>
-     * Points to parent of JAR location: {@code ../conf}
+     * Points to the conf directory relative to the JAR location: {@code ./conf}
      * This is where user-editable configuration files are stored.
      *
      * <h3>Directory Structure</h3>
      * <pre>{@code
-     * ../conf/
+     * ./conf/
      * ├── node/
      * │   ├── profiles/          ← Node profile configurations
      * │   │   └── *.properties
@@ -38,7 +38,7 @@ public final class ConfigPaths {
      *     └── logging/
      * }</pre>
      */
-    public static final String RUNTIME_CONF_ROOT = "../conf";
+    public static final String RUNTIME_CONF_ROOT = "./conf";
 
     /** Classpath prefix for embedded default configuration resources. */
     public static final String CLASSPATH_PREFIX = "/conf/";

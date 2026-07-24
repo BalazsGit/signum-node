@@ -30,6 +30,26 @@ public class MetricsPanel extends JTabbedPane {
     private Timer animationTimer;
     private final TabbedPaneHoverHelper hoverHelper = new TabbedPaneHoverHelper();
 
+    /** Listener notified when the panel's expanded/collapsed state changes */
+    private ExpansionListener expansionListener;
+
+    /**
+     * Callback interface for MetricsPanel expansion state changes.
+     * Allows the parent (NodeConsolePanel) to track and persist the chevron state.
+     */
+    public interface ExpansionListener {
+        /** Called when the panel is expanded or collapsed */
+        void onExpansionChanged(boolean expanded);
+    }
+
+    /**
+     * Sets the listener for expansion state changes.
+     * @param listener the listener to notify, or null to remove
+     */
+    public void setExpansionListener(ExpansionListener listener) {
+        this.expansionListener = listener;
+    }
+
     // Dedicated executors for each panel to ensure isolation and prevent starvation
     private final ExecutorService syncExecutor;
     private final ExecutorService blockGenExecutor;
@@ -207,6 +227,14 @@ public class MetricsPanel extends JTabbedPane {
         });
     }
 
+    /**
+     * Returns whether the panel is currently expanded (content visible) or collapsed.
+     * @return true if expanded, false if collapsed
+     */
+    public boolean isExpanded() {
+        return isExpanded;
+    }
+
     private void toggleExpanded() {
         if (animationTimer != null && animationTimer.isRunning()) {
             animationTimer.stop();
@@ -214,6 +242,11 @@ public class MetricsPanel extends JTabbedPane {
 
         boolean expanding = !isExpanded;
         isExpanded = expanding;
+
+        // Notify listener of expansion state change
+        if (expansionListener != null) {
+            expansionListener.onExpansionChanged(isExpanded);
+        }
         toggleTab.setDrawing(isExpanded ? CustomDrawings.Chevron.UP : CustomDrawings.Chevron.DOWN);
 
         int targetHeight;

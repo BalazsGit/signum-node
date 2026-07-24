@@ -32,6 +32,9 @@ public class Props {
     public static final Prop<String> VALUE_SUFIX = new Prop<>("node.valueSuffix", "SIGNA");
     public static final Prop<Boolean> EXPERIMENTAL = new Prop<>("node.experimental", false);
 
+    /** When true, the node starts automatically when the application launches. */
+    public static final Prop<Boolean> NODE_AUTOSTART = new Prop<>("node.autostart", false);
+
     public static final Prop<Integer> BLOCK_REWARD_START = new Prop<>("node.blockRewardStart", 10_000);
     public static final Prop<Integer> BLOCK_REWARD_CYCLE = new Prop<>("node.blockRewardCycle", 10_800);
     public static final Prop<Integer> BLOCK_REWARD_CYCLE_PERCENTAGE = new Prop<>("node.blockRewardCyclePercentage", 95);
@@ -100,8 +103,8 @@ public class Props {
     public static final Prop<String> ICON_LOCATION = new Prop<>("node.iconLocation", "/images/signum_overlay_logo.png");
 
     public static final Prop<Boolean> MEASUREMENT_ACTIVE = new Prop<>("node.measurementActive", false);
-    public static final Prop<String> MEASUREMENT_DIR = new Prop<>("node.measurementDir", "../measurement");
-    public static final Prop<String> SETTINGS_DIR = new Prop<>("node.settingsDir", "../settings");
+    public static final Prop<String> MEASUREMENT_DIR = new Prop<>("node.measurementDir", "./measurement");
+    public static final Prop<String> SETTINGS_DIR = new Prop<>("node.settingsDir", "./settings");
 
     // Checkpoint block for faster sync from empty database
     public static final Prop<Integer> NODE_CHECKPOINT_HEIGHT = new Prop<>("node.checkPointHeight", 1_418_000);
@@ -126,7 +129,12 @@ public class Props {
 
     // DB options
     public static final Prop<Boolean> DB_SKIP_CHECK = new Prop<>("DB.SkipCheck", false);
-    public static final Prop<String> DB_URL = new Prop<>("DB.Url", "jdbc:sqlite:file:./db/signum.sqlite.db");
+    // Default SQLite path points to the portable database directory structure:
+    // ./database/SQLite/{profileName}/signum.sqlite.db
+    // When using the default "sqlite" profile: ./database/SQLite/sqlite/signum.sqlite.db
+    // This value is overridden by the active node profile (see SQLiteProfile).
+    public static final Prop<String> DB_URL = new Prop<>("DB.Url", 
+            "jdbc:sqlite:file:./database/SQLite/sqlite/signum.sqlite.db");
     public static final Prop<String> DB_USERNAME = new Prop<>("DB.Username", "");
     public static final Prop<String> DB_PASSWORD = new Prop<>("DB.Password", "");
     public static final Prop<Integer> DB_CONNECTIONS = new Prop<>("DB.Connections", 30);

@@ -35,7 +35,7 @@ This document describes the complete node profile loading mechanism, including c
 All module configurations follow a standardized path schema:
 
 ```
-../conf/{module}/{category}/*.properties
+./conf/{module}/{category}/*.properties
 ```
 
 | Component | Description | Example |
@@ -46,7 +46,7 @@ All module configurations follow a standardized path schema:
 ### Concrete Directory Structure
 
 ```
-../conf/
+./conf/
 └── node/
     ├── profiles/                              ← Node profile configurations
     │   ├── profile-default.properties         ← Default template (synced from resources via SHA-256)
@@ -91,15 +91,15 @@ sequenceDiagram
     Launcher->>NodeProfile: initialize()
     Note over NodeProfile: Sync defaults, ensure placeholders
 
-    NodeProfile->>PPL: ensureProfileDirExists("../conf", "node", "profiles")
+    NodeProfile->>PPL: ensureProfileDirExists("./conf", "node", "profiles")
     NodeProfile->>PPL: syncDefaultFile(classpath resource)
     Note over PPL: SHA-256 hash comparison<br/>overwrite only if different
 
     Launcher->>NodeProfile: loadAll()
-    NodeProfile->>PPL: loadAll("../conf", "node", "profiles", reserved, factory)
+    NodeProfile->>PPL: loadAll("./conf", "node", "profiles", reserved, factory)
 
     PPL->>PPL: discoverProfiles()
-    Note over PPL: Scan ../conf/node/profiles/*.properties<br/>Exclude reserved names
+    Note over PPL: Scan ./conf/node/profiles/*.properties<br/>Exclude reserved names
 
     loop For each profile name
         PPL->>PPF: create(name)
@@ -120,7 +120,7 @@ sequenceDiagram
 | Step | Action | Source |
 |------|--------|--------|
 | 1 | Delegate to `PropertiesProfileLoader.loadAll()` | `NodeProfile.loadAll()` |
-| 2 | Resolve directory: `../conf/node/profiles/` | `PPL.resolveProfileDir()` |
+| 2 | Resolve directory: `./conf/node/profiles/` | `PPL.resolveProfileDir()` |
 | 3 | List all `*.properties` files | `Files.list()` |
 | 4 | Extract profile name from filename | `filename.substring(0, length - 11)` |
 | 5 | Skip reserved names | `RESERVED_PROFILE_NAMES` set |
@@ -166,7 +166,7 @@ resources/conf/
 
 ### SHA-256 Hash-Based Sync
 
-Default files (`profile-default.properties`, `logging-default.properties`) are automatically synchronized from classpath resources to the runtime `../conf/` directory:
+Default files (`profile-default.properties`, `logging-default.properties`) are automatically synchronized from classpath resources to the runtime `./conf/` directory:
 
 | Condition | Action |
 |-----------|--------|
@@ -203,7 +203,7 @@ if (profileCount == 0) {
 
 ```mermaid
 graph TD
-    A[../conf/node/profiles/*.properties] -->|NodeProfile.loadAll()| B[NodeProfile[]]
+    A[./conf/node/profiles/*.properties] -->|NodeProfile.loadAll()| B[NodeProfile[]]
     B -->|For each profile| C[Create NodeConsolePanel]
     C -->|ProfileLogger created| D[Subscribe to SystemLogger]
     C -->|ProfileLogger created| E[Subscribe ProfileConsoleSubscriber]

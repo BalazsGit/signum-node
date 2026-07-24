@@ -123,15 +123,26 @@ public final class DbContext {
             } catch (FlywayValidateException e) {
                 logger.warn("Database migration validation failed!");
                 logger.info("Validation details: {}", e.getMessage());
-                // Ask the UI or Console if we should attempt a repair
-                if (repairConfirmationHandler.test(e.getMessage())) {
-                    logger.info("Repairing Flyway metadata as authorized by user...");
-                    logger.debug("Flyway repair initiated.");
-                    flyway.repair();
+
+                // Check if the error is due to pending migrations on a fresh/new database.
+                // In this case, we can skip validation and proceed directly to migration,
+                // which will apply all pending migrations automatically.
+                boolean isFreshDbError = e.getMessage().contains("not applied to database");
+
+                if (isFreshDbError) {
+                    logger.info(
+                            "Detected fresh database with pending migrations — skipping validation, proceeding to migrate...");
                 } else {
-                    throw new RuntimeException(
-                            "Database validation failed and repair was not authorized. Please check your migration files.",
-                            e);
+                    // For other validation errors (e.g., checksum mismatch), ask for repair confirmation
+                    if (repairConfirmationHandler.test(e.getMessage())) {
+                        logger.info("Repairing Flyway metadata as authorized by user...");
+                        logger.debug("Flyway repair initiated.");
+                        flyway.repair();
+                    } else {
+                        throw new RuntimeException(
+                                "Database validation failed and repair was not authorized. Please check your migration files.",
+                                e);
+                    }
                 }
             }
 

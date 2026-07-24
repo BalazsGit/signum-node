@@ -58,8 +58,10 @@ public class DatabaseConfigurationUtils {
 
     /**
      * Base directory for database files and profiles.
+     * <p>
+     * Relative to the application root (JAR location), not the parent directory.
      */
-    public static final String DATABASE_BASE_DIR = "../database";
+    public static final String DATABASE_BASE_DIR = "./database";
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
     private static JsonObject cachedGlobalSettings;
 

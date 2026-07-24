@@ -143,15 +143,26 @@ public final class Db {
             } catch (FlywayValidateException e) {
                 logger.warn("Database migration validation failed!");
                 logger.info("Validation details: {}", e.getMessage());
-                // Ask the UI or Console if we should attempt a repair
-                if (repairConfirmationHandler.test(e.getMessage())) {
-                    logger.info("Repairing Flyway metadata as authorized by user...");
-                    logger.debug("Flyway repair initiated.");
-                    flyway.repair();
+
+                // Check if the error is due to pending migrations on a fresh/new database.
+                // In this case, we can skip validation and proceed directly to migration,
+                // which will apply all pending migrations automatically.
+                boolean isFreshDbError = e.getMessage().contains("not applied to database");
+
+                if (isFreshDbError) {
+                    logger.info(
+                            "Detected fresh database with pending migrations — skipping validation, proceeding to migrate...");
                 } else {
-                    throw new RuntimeException(
-                            "Database validation failed and repair was not authorized. Please check your migration files.",
-                            e);
+                    // For other validation errors (e.g., checksum mismatch), ask for repair confirmation
+                    if (repairConfirmationHandler.test(e.getMessage())) {
+                        logger.info("Repairing Flyway metadata as authorized by user...");
+                        logger.debug("Flyway repair initiated.");
+                        flyway.repair();
+                    } else {
+                        throw new RuntimeException(
+                                "Database validation failed and repair was not authorized. Please check your migration files.",
+                                e);
+                    }
                 }
             }
 
@@ -298,16 +309,32 @@ public final class Db {
         if (!isInTransaction()) {
             throw new IllegalStateException("Not in transaction");
         }
+        // Delegate to active DbContext if available (new code path uses instance-level ThreadLocals)
+        if (activeContext != null) {
+            return activeContext.getCache(tableName);
+        }
         // noinspection unchecked
-        return (Map<SignumKey, V>) transactionCaches.get().computeIfAbsent(tableName, k -> new LinkedHashMap<>());
+        Map<String, Map<SignumKey, Object>> caches = transactionCaches.get();
+        if (caches == null) {
+            throw new IllegalStateException("Transaction cache not initialized. Did you call beginTransaction()?");
+        }
+        return (Map<SignumKey, V>) caches.computeIfAbsent(tableName, k -> new LinkedHashMap<>());
     }
 
     static <V> Map<SignumKey, V> getBatch(String tableName) {
         if (!isInTransaction()) {
             throw new IllegalStateException("Not in transaction");
         }
+        // Delegate to active DbContext if available
+        if (activeContext != null) {
+            return activeContext.getBatch(tableName);
+        }
         // noinspection unchecked
-        return (Map<SignumKey, V>) transactionBatches.get().computeIfAbsent(tableName, k -> new LinkedHashMap<>());
+        Map<String, Map<SignumKey, Object>> batches = transactionBatches.get();
+        if (batches == null) {
+            throw new IllegalStateException("Transaction batch not initialized. Did you call beginTransaction()?");
+        }
+        return (Map<SignumKey, V>) batches.computeIfAbsent(tableName, k -> new LinkedHashMap<>());
     }
 
     public static boolean isInTransaction() {

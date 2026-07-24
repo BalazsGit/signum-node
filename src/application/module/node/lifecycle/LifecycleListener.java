@@ -56,4 +56,18 @@ public interface LifecycleListener extends EventListener {
      */
     default void onError(NodeInstanceInfo instanceInfo, String errorMessage) {
     }
+
+    /**
+     * Called RIGHT BEFORE a node profile is stopped.
+     * This is the centralized shutdown hook - all shutdown paths (ApplicationShutdown,
+     * button clicks, restart, etc.) go through NodeLifecycleManager which calls this
+     * before performing the actual stop.
+     *
+     * Use this callback to save GUI state, persist settings, or perform cleanup
+     * that must happen before the node stops.
+     *
+     * @param instanceInfo the instance that is about to be stopped
+     */
+    default void onShutdownRequested(NodeInstanceInfo instanceInfo) {
+    }
 }

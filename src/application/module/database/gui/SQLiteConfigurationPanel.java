@@ -220,7 +220,7 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
 
         addSectionHeader(settingsContentPanel, "Database File Configuration", true);
 
-        // Parse existing URL: jdbc:sqlite:file:./db/signum.sqlite.db
+        // Parse existing URL: jdbc:sqlite:file:../database/SQLite/{profile}/signum.sqlite.db
         String fullUrl = currentProfile.getDbUrl();
         String prefix = "jdbc:sqlite:";
         String content = fullUrl.startsWith(prefix) ? fullUrl.substring(prefix.length()) : fullUrl;

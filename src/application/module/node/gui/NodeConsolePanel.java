@@ -114,6 +114,7 @@ import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
 import application.module.node.util.Convert;
+import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.profile.NodeProfile;
 import application.utils.logging.ProfileLogger;
 import application.utils.gui.console.ConsoleInputPosition;
@@ -462,12 +463,14 @@ public class NodeConsolePanel extends JPanel {
     private CardLayout cardLayout;
     private static final String VIEW_CONSOLE = "CONSOLE";
     private static final String VIEW_CONFIGURATION = "CONFIGURATION";
-    private boolean showCommandInput = false;
-    private boolean showMetricsPanel = true;
-    private boolean commandPanelAtBottom = false;
+    private boolean showCommandInput = false;    // Default: hidden
+    private boolean showMetricsPanel = false;    // Default: hidden
+    private boolean metricsExpanded = false;     // Default: collapsed (chevron DOWN)
+    private boolean commandPanelAtBottom = true; // Default: at bottom position
     private JCheckBox showCommandItem;
     private JCheckBox showMetricsItem;
     private JCheckBox commandPositionBottomItem;
+    private JCheckBox autostartItem;
     private JCheckBox skipDbCheckItem;
     private JLabel experimentalLabel;
     private JPanel commandPanelWrapper;
@@ -756,7 +759,6 @@ public class NodeConsolePanel extends JPanel {
                         }
                     }
                 }
-
             });
             popOffAnimator.start();
         }
@@ -1098,8 +1100,16 @@ public class NodeConsolePanel extends JPanel {
     /**
      * Shared UI initialization for both constructors.
      * Sets up console text pane, toolbar, buttons, hamburger menu, info panel, and starts the Signum node.
+     * 
+     * IMPORTANT: loadGuiSettings() is called FIRST so that field defaults (showMetricsPanel, etc.)
+     * reflect persisted values BEFORE any UI elements are created. This prevents the hamburger
+     * menu checkbox from showing a stale default while the actual panel remains hidden.
      */
     private void initConsoleUI() {
+        // Load persisted GUI settings BEFORE creating any UI components so that
+        // field defaults match what the user previously saved (profile-specific keys first).
+        loadGuiSettings();
+
         try {
             GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
             InputStream fontStream = FontAwesome.class
@@ -1425,6 +1435,8 @@ public class NodeConsolePanel extends JPanel {
         addInfoTooltip(latestBlockHeightLabel, blockInfoTooltip);
         addInfoTooltip(latestBlockTimestampLabel, blockInfoTooltip);
         metricsPanel = new MetricsPanel(parentFrame);
+        // Wire ExpansionListener so that chevron toggle updates our tracked state
+        metricsPanel.setExpansionListener(expanded -> this.metricsExpanded = expanded);
         metricsPanel.setVisible(false);
         metricsPanelWrapper = new JPanel(new BorderLayout());
         metricsPanelWrapper.add(metricsPanel, BorderLayout.CENTER);
@@ -1551,11 +1563,70 @@ public class NodeConsolePanel extends JPanel {
 
         showMetricsItem = new JCheckBox("Show Metrics Panel");
         showMetricsItem.setSelected(showMetricsPanel);
+        LOGGER.info("[DEBUG-MetricsPanel] ==== hamburger checkbox created ===== initial selected={}", showMetricsPanel);
         showMetricsItem.addActionListener(e -> {
+            LOGGER.info("[DEBUG-MetricsPanel] ==== HAMBURGER CHECKBOX CLICKED ===== new checked={}", showMetricsItem.isSelected());
             updateMetricsPanelState(showMetricsItem.isSelected());
         });
         styleMenuComponent(showMetricsItem);
         menuPanel.add(showMetricsItem, "growx");
+
+        // Auto-start checkbox — controls whether this profile node starts on app launch
+        autostartItem = new JCheckBox("Auto-start on App Launch");
+        // Load autostart from hierarchical section (same structure as other GUI settings)
+        boolean autostartValue = false; // default: disabled
+        try {
+            String settingsDir = resolveSettingsDir();
+            Path settingsPath = application.utils.io.PathUtils
+                    .resolvePath(Paths.get(settingsDir, "gui-settings.json").toString());
+            if (Files.exists(settingsPath)) {
+                try (java.io.BufferedReader reader = Files.newBufferedReader(settingsPath)) {
+                    JsonElement parsed = JsonParser.parseReader(reader);
+                    if (parsed.isJsonObject()) {
+                        JsonObject profileSection = getNodeProfileSectionIfExists(parsed.getAsJsonObject());
+                        if (profileSection != null) {
+                            autostartValue = getBool(profileSection, "autostart", false);
+                        }
+                    }
+                }
+            }
+        } catch (Exception ex) {
+            LOGGER.warn("Could not load autostart setting for profile '{}'", profileName, ex);
+        }
+        autostartItem.setSelected(autostartValue);
+        autostartItem.addActionListener(e -> {
+            boolean newValue = autostartItem.isSelected();
+            // Save to hierarchical section: node.{profileName}.autostart
+            try {
+                String settingsDir = resolveSettingsDir();
+                Path settingsPath = application.utils.io.PathUtils
+                        .resolvePath(Paths.get(settingsDir, "gui-settings.json").toString());
+                if (settingsPath.getParent() != null) {
+                    Files.createDirectories(settingsPath.getParent());
+                }
+                JsonObject settings = new JsonObject();
+                if (Files.exists(settingsPath)) {
+                    try (java.io.BufferedReader reader = Files.newBufferedReader(settingsPath)) {
+                        JsonElement parsed = JsonParser.parseReader(reader);
+                        if (parsed.isJsonObject()) {
+                            settings = parsed.getAsJsonObject();
+                        }
+                    }
+                }
+                JsonObject profileSection = getOrCreateNodeProfileSection(settings);
+                profileSection.addProperty("autostart", newValue);
+                try (java.io.BufferedWriter writer = Files.newBufferedWriter(settingsPath)) {
+                    Gson gson = new GsonBuilder().setPrettyPrinting().create();
+                    writer.write(gson.toJson(settings));
+                }
+            } catch (Exception ex) {
+                LOGGER.warn("Could not save autostart setting for profile '{}'", profileName, ex);
+            }
+            LOGGER.info("Auto-start setting for profile '{}' changed to {}", profileName, newValue);
+        });
+        autostartItem.setToolTipText("When checked, this node profile will start automatically when the application launches");
+        styleMenuComponent(autostartItem);
+        menuPanel.add(autostartItem, "growx");
 
         // Skip DB Check on Manual Pop-off — console-specific setting for pop-off decisions
         skipDbCheckItem = new JCheckBox("Skip DB Check on Manual Pop-off");
@@ -1866,6 +1937,11 @@ public class NodeConsolePanel extends JPanel {
 
         // Finalize custom component states (icons, fonts for Nimbus, etc.)
         updateCustomComponents();
+
+        // Apply Metrics Panel visibility NOW so the hamburger menu checkbox state matches
+        // the actual panel on first render. This is critical in multi-profile mode where
+        // startSignumWithGUI() runs in a background thread and may not apply settings in time.
+        applyPanelVisibilityState();
 
         // Start BRS
         new Thread(this::startSignumWithGUI).start();
@@ -2931,11 +3007,16 @@ public class NodeConsolePanel extends JPanel {
 
     /**
      * Applies panel visibility state based on loaded GUI settings.
-     * Safe to call even when Signum node is not initialized (fallback path).
+     * 
+     * IMPORTANT: This method is called during initConsoleUI() BEFORE the node starts,
+     * so PropertyService is not yet available. Therefore it ONLY syncs checkbox states
+     * with loaded preferences — it does NOT call metricsPanel.init() which requires
+     * PropertyService. The actual MetricsPanel initialization/destruction is deferred
+     * to startSignumWithGUI() where PropertyService is guaranteed to be available.
      */
     private void applyPanelVisibilityState() {
         
-        // Sync checkbox states with loaded settings
+        // Sync checkbox states with loaded settings (does NOT require PropertyService)
         if (showCommandItem != null) {
             showCommandItem.setSelected(showCommandInput);
         }
@@ -2943,38 +3024,15 @@ public class NodeConsolePanel extends JPanel {
             showMetricsItem.setSelected(showMetricsPanel);
         }
 
-        // Apply Metrics Panel visibility
-        if (showMetricsPanel) {
-            if (metricsPanel == null) {
-                metricsPanel = new MetricsPanel(parentFrame);
-            }
-            metricsPanel.init();
-            metricsPanel.setVisible(true);
-            metricsPanelWrapper.add(metricsPanel, BorderLayout.CENTER);
-            metricsPanelWrapper.revalidate();
-            // Ensure MetricsPanel internal wrappers have stable preferred sizes after
-            // initialization. This replaces the fire-and-forget invokeLater pattern with
-            // a proper stabilization call that guarantees consistent animation data.
-            SwingUtilities.invokeLater(() -> {
-                if (metricsPanel != null) {
-                    metricsPanel.ensureLayoutStability();
-                }
-                metricsPanelWrapper.doLayout();
-                metricsPanelWrapper.revalidate();
-                metricsPanelWrapper.repaint();
-            });
-            } else {
-            if (metricsPanel != null) {
-                metricsPanel.shutdown();
-            }
-            metricsPanelWrapper.removeAll();
-            metricsPanel = null;
+        // Do NOT init/shutdown MetricsPanel here — it needs PropertyService which is not
+        // available during init. The actual panel visibility is handled by startSignumWithGUI().
+        // Instead, just ensure the wrapper has a stable size so toolbar layout is correct.
+        if (!showMetricsPanel) {
             metricsPanelWrapper.setPreferredSize(new Dimension(0, 0));
             metricsPanelWrapper.setMinimumSize(new Dimension(0, 0));
-            metricsPanelWrapper.revalidate();
         }
 
-        // Apply Command Panel visibility
+        // Apply Command Panel visibility (legacy code paths are null-safe / deprecated)
         if (showCommandInput) {
             showCommandPanelInline();
         } else {
@@ -2993,15 +3051,20 @@ public class NodeConsolePanel extends JPanel {
             mainCardPanel.validate();
             mainCardPanel.repaint();
         }
-         }
+    }
 
     private void updateMetricsPanelState(boolean show) {
-        
+        LOGGER.info("[DEBUG-MetricsPanel] ==== updateMetricsPanelState(show={}) CALLED ===== thread={}, showMetricsPanel={}, metricsPanel={}, animatorRunning={}",
+            show, Thread.currentThread().getName(), showMetricsPanel, metricsPanel != null ? "exists" : "null",
+            metricsPanelAnimator != null && metricsPanelAnimator.isRunning());
+
         if (metricsPanelAnimator != null && metricsPanelAnimator.isRunning()) {
+            LOGGER.warn("[DEBUG-MetricsPanel] updateMetricsPanelState: ABORTING — animator already running!");
             return;
         }
 
         showMetricsPanel = show;
+        LOGGER.info("[DEBUG-MetricsPanel] updateMetricsPanelState: showMetricsPanel={}", showMetricsPanel);
         if (show) {
             if (metricsPanel == null) {
                 metricsPanel = new MetricsPanel(parentFrame);
@@ -3069,7 +3132,6 @@ public class NodeConsolePanel extends JPanel {
                             metricsPanelWrapper.revalidate();
                         }
                     }
-
                 });
                 metricsPanelAnimator.start();
             }
@@ -3231,7 +3293,11 @@ public class NodeConsolePanel extends JPanel {
         JOptionPane.showMessageDialog(this, htmlText, title, JOptionPane.PLAIN_MESSAGE);
     }
 
-    private void loadGuiSettings() {
+    /**
+     * Loads the autostart preference for this profile from gui-settings.json.
+     * Returns false if no setting exists or on error.
+     */
+    private boolean loadAutostartSetting() {
         try {
             String settingsDir = Signum.getPropertyService().getString(Props.SETTINGS_DIR);
             Path settingsPath = application.utils.io.PathUtils
@@ -3241,21 +3307,28 @@ public class NodeConsolePanel extends JPanel {
                     JsonElement parsed = JsonParser.parseReader(reader);
                     if (parsed.isJsonObject()) {
                         JsonObject settings = parsed.getAsJsonObject();
-                        if (settings.has("showCommandInput")) {
-                            showCommandInput = settings.get("showCommandInput").getAsBoolean();
+                        // Profile-specific autostart key: "autostart.{profileName}"
+                        String key = "autostart." + profileName;
+                        if (settings.has(key)) {
+                            return settings.get(key).getAsBoolean();
                         }
-                        if (settings.has("showMetricsPanel")) {
-                            showMetricsPanel = settings.get("showMetricsPanel").getAsBoolean();
+                        // Fallback to global autostart setting
+                        if (settings.has("autostart")) {
+                            return settings.get("autostart").getAsBoolean();
                         }
                     }
                 }
             }
         } catch (Exception e) {
-            LOGGER.warn("Could not load GUI settings", e);
+            LOGGER.warn("Could not load autostart setting for profile '{}'", profileName, e);
         }
+        return false;
     }
 
-    private void saveGuiSettings() {
+    /**
+     * Saves the autostart preference for this profile to gui-settings.json.
+     */
+    private void saveAutostartSetting(boolean value) {
         try {
             String settingsDir = Signum.getPropertyService().getString(Props.SETTINGS_DIR);
             Path settingsPath = application.utils.io.PathUtils
@@ -3271,16 +3344,176 @@ public class NodeConsolePanel extends JPanel {
                         settings = parsed.getAsJsonObject();
                     }
                 } catch (Exception e) {
+                    // Use empty object on parse error
                 }
             }
-            settings.addProperty("showCommandInput", showCommandInput);
-            settings.addProperty("showMetricsPanel", showMetricsPanel);
+            // Profile-specific autostart key
+            String key = "autostart." + profileName;
+            settings.addProperty(key, value);
             try (java.io.BufferedWriter writer = Files.newBufferedWriter(settingsPath)) {
                 Gson gson = new GsonBuilder().setPrettyPrinting().create();
                 writer.write(gson.toJson(settings));
             }
         } catch (Exception e) {
-            LOGGER.error("Failed to save GUI settings", e);
+            LOGGER.error("Failed to save autostart setting for profile '{}'", profileName, e);
+        }
+    }
+
+    /**
+     * Returns the profile-specific JSON key for a given setting name,
+     * or null if no profile name is configured.
+     */
+    private String profileKey(String baseKey) {
+        return (profileName != null && !profileName.isEmpty()) ? baseKey + "." + profileName : null;
+    }
+
+    /**
+     * Resolves the settings directory for gui-settings.json.
+     * Tries PropertyService first (node running), falls back to default "settings" directory.
+     * This allows GUI settings to load even before the node starts (multi-profile mode).
+     */
+    private String resolveSettingsDir() {
+        try {
+            PropertyService ps = Signum.getPropertyService();
+            if (ps != null) {
+                return ps.getString(Props.SETTINGS_DIR);
+            }
+        } catch (Exception e) {
+            // PropertyService not available yet
+        }
+        // Default fallback: settings directory next to working directory
+        return "settings";
+    }
+
+    // ── Hierarchical GUI Settings Helpers ──────────────────────────────────────
+    // Format: { "node": { "{profileName}": { "showMetricsPanel": bool, ... } } }
+
+    private static final String GUI_MODULE_KEY = "node";
+
+    /**
+     * Safely reads a boolean from a JsonObject, returning defaultValue if missing or invalid.
+     */
+    private static boolean getBool(JsonObject obj, String key, boolean defaultValue) {
+        if (obj == null || !obj.has(key)) {
+            return defaultValue;
+        }
+        try {
+            return obj.get(key).getAsBoolean();
+        } catch (Exception e) {
+            return defaultValue;
+        }
+    }
+
+    /**
+     * Gets or creates the nested JsonObject for this module+profile: root["node"][profileName].
+     */
+    private JsonObject getOrCreateNodeProfileSection(JsonObject root) {
+        if (!root.has(GUI_MODULE_KEY)) {
+            root.add(GUI_MODULE_KEY, new JsonObject());
+        }
+        JsonObject moduleObj = root.getAsJsonObject(GUI_MODULE_KEY);
+        if (!moduleObj.has(profileName)) {
+            moduleObj.add(profileName, new JsonObject());
+        }
+        return moduleObj.getAsJsonObject(profileName);
+    }
+
+    /**
+     * Returns the nested JsonObject for this module+profile if it exists, null otherwise.
+     */
+    private JsonObject getNodeProfileSectionIfExists(JsonObject root) {
+        if (root == null || !root.has(GUI_MODULE_KEY)) {
+            return null;
+        }
+        JsonObject moduleObj = root.getAsJsonObject(GUI_MODULE_KEY);
+        if (!moduleObj.has(profileName)) {
+            return null;
+        }
+        return moduleObj.getAsJsonObject(profileName);
+    }
+
+    /**
+     * Loads all GUI panel states from the hierarchical section: node.{profileName}.
+     * Uses hardcoded defaults when no settings file exists or section is missing.
+     */
+    private void loadGuiSettings() {
+        boolean prevShowCommandInput = showCommandInput;
+        boolean prevShowMetricsPanel = showMetricsPanel;
+        boolean prevMetricsExpanded = metricsExpanded;
+        boolean prevCommandAtBottom = commandPanelAtBottom;
+
+        try {
+            String settingsDir = resolveSettingsDir();
+            Path settingsPath = application.utils.io.PathUtils
+                    .resolvePath(Paths.get(settingsDir, "gui-settings.json").toString());
+            if (Files.exists(settingsPath)) {
+                try (java.io.BufferedReader reader = Files.newBufferedReader(settingsPath)) {
+                    JsonElement parsed = JsonParser.parseReader(reader);
+                    if (parsed.isJsonObject()) {
+                        JsonObject profileSection = getNodeProfileSectionIfExists(parsed.getAsJsonObject());
+                        if (profileSection != null) {
+                            showMetricsPanel = getBool(profileSection, "showMetricsPanel", showMetricsPanel);
+                            metricsExpanded = getBool(profileSection, "metricsExpanded", metricsExpanded);
+                            showCommandInput = getBool(profileSection, "showCommandInput", showCommandInput);
+                            commandPanelAtBottom = getBool(profileSection, "commandPanelAtBottom", commandPanelAtBottom);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Could not load GUI settings for profile '{}'", profileName, e);
+        }
+
+        LOGGER.info("[GUI-Settings] profile={}, showMetricsPanel: {}->{}, metricsExpanded: {}->{}, showCommandInput: {}->{}, commandPanelAtBottom: {}->{}",
+                profileName, prevShowMetricsPanel, showMetricsPanel,
+                prevMetricsExpanded, metricsExpanded,
+                prevShowCommandInput, showCommandInput,
+                prevCommandAtBottom, commandPanelAtBottom);
+    }
+
+    /**
+     * Saves all GUI panel states to the hierarchical section: node.{profileName}.
+     * Reads the actual MetricsPanel expansion state at save time (shutdown/restart).
+     * Called by LifecycleListener.onShutdownRequested() during centralized shutdown.
+     */
+    public void saveGuiSettings() {
+        LOGGER.info("[GUI-Settings] ==== saveGuiSettings CALLED ===== profile={}, showMetricsPanel={}, metricsExpanded={}",
+                profileName, showMetricsPanel, metricsExpanded);
+        try {
+            String settingsDir = resolveSettingsDir();
+            Path settingsPath = application.utils.io.PathUtils
+                    .resolvePath(Paths.get(settingsDir, "gui-settings.json").toString());
+            if (settingsPath.getParent() != null) {
+                Files.createDirectories(settingsPath.getParent());
+            }
+            JsonObject settings = new JsonObject();
+            if (Files.exists(settingsPath)) {
+                try (java.io.BufferedReader reader = Files.newBufferedReader(settingsPath)) {
+                    JsonElement parsed = JsonParser.parseReader(reader);
+                    if (parsed.isJsonObject()) {
+                        settings = parsed.getAsJsonObject();
+                    }
+                } catch (Exception e) {
+                    // Use empty object on parse error
+                }
+            }
+
+            // Write to hierarchical section: node.{profileName}
+            JsonObject profileSection = getOrCreateNodeProfileSection(settings);
+            // Read actual expansion state from MetricsPanel at save time
+            boolean expandedState = metricsPanel != null ? metricsPanel.isExpanded() : metricsExpanded;
+            profileSection.addProperty("showMetricsPanel", showMetricsPanel);
+            profileSection.addProperty("metricsExpanded", expandedState);
+            profileSection.addProperty("showCommandInput", showCommandInput);
+            profileSection.addProperty("commandPanelAtBottom", commandPanelAtBottom);
+
+            try (java.io.BufferedWriter writer = Files.newBufferedWriter(settingsPath)) {
+                Gson gson = new GsonBuilder().setPrettyPrinting().create();
+                writer.write(gson.toJson(settings));
+            }
+            LOGGER.info("[GUI-Settings] Saved to gui-settings.json for profile '{}'", profileName);
+        } catch (Exception e) {
+            LOGGER.error("Failed to save GUI settings for profile '{}'", profileName, e);
         }
     }
 
@@ -3725,5 +3958,60 @@ public class NodeConsolePanel extends JPanel {
         profileLogger = null;
         ── LEGACY CODE END ── */
         super.removeNotify();
+    }
+
+    /**
+     * Handles node lifecycle state changes forwarded from NodeProfilePanel.
+     * <p>
+     * This is the single point of truth for synchronizing MetricsPanel visibility
+     * with the node lifecycle. When the node reaches READY or RUNNING state, this
+     * method ensures the MetricsPanel reflects the user's persisted preference
+     * ({@link #showMetricsPanel}), guaranteeing that the hamburger menu checkbox
+     * and the actual panel visibility are always consistent.
+     * </p>
+     *
+     * @param oldState the previous lifecycle state
+     * @param newState the current lifecycle state
+     */
+    public void onNodeStateChanged(NodeLifecycleState oldState, NodeLifecycleState newState) {
+        LOGGER.debug("[MetricsPanel] Lifecycle state change: {} -> {}", oldState, newState);
+
+        SwingUtilities.invokeLater(() -> {
+            // When node becomes READY/RUNNING, ensure MetricsPanel visibility matches user preference
+            if (newState == NodeLifecycleState.RUNNING || newState == NodeLifecycleState.READY) {
+                LOGGER.info("[MetricsPanel] Node reached {} — applying visibility preference: showMetricsPanel={}", 
+                    newState, showMetricsPanel);
+                
+                if (showMetricsPanel) {
+                    // Ensure the MetricsPanel is initialized and visible
+                    if (metricsPanel == null || !metricsPanel.isVisible()) {
+                        LOGGER.info("[MetricsPanel] Initializing MetricsPanel for node state {}", newState);
+                        updateMetricsPanelState(true);
+                    } else {
+                        LOGGER.debug("[MetricsPanel] MetricsPanel already active, no action needed");
+                    }
+                } else {
+                    LOGGER.debug("[MetricsPanel] User preference is to hide MetricsPanel, keeping hidden");
+                }
+
+                // Sync checkbox state to ensure consistency — this is the authoritative source of truth
+                if (showMetricsItem != null) {
+                    boolean current = showMetricsItem.isSelected();
+                    if (current != showMetricsPanel) {
+                        LOGGER.warn("[MetricsPanel] Checkbox was inconsistent! Was={}, expected={} — fixing", 
+                            current, showMetricsPanel);
+                    }
+                    showMetricsItem.setSelected(showMetricsPanel);
+                }
+            }
+
+            // When node stops, hide and shutdown MetricsPanel to release resources
+            if (newState == NodeLifecycleState.STOPPED || newState == NodeLifecycleState.IDLE) {
+                LOGGER.debug("[MetricsPanel] Node stopped — shutting down MetricsPanel");
+                if (metricsPanel != null) {
+                    updateMetricsPanelState(false);
+                }
+            }
+        });
     }
 }

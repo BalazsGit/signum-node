@@ -229,6 +229,10 @@ public class NodeLifecycleManager {
         notifyStateChanged(info, oldState, NodeLifecycleState.STOPPING);
         info.setStatusMessage("Stopping...");
 
+        // Notify listeners BEFORE stopping so they can save GUI state, etc.
+        // This is the centralized shutdown hook - all paths go through here.
+        notifyShutdownRequested(info);
+
         try {
             NodeCoreContext context = info.getCoreContext();
             if (context != null) {
@@ -679,6 +683,20 @@ public class NodeLifecycleManager {
                 listener.onError(info, errorMessage);
             } catch (Exception e) {
                 LOGGER.error("Error notifying listener {}", listener.getClass().getSimpleName(), e);
+            }
+        }
+    }
+
+    /**
+     * Notifies all listeners that a profile is about to be stopped.
+     * Listeners can use this to save GUI state, persist settings, etc.
+     */
+    private void notifyShutdownRequested(NodeInstanceInfo info) {
+        for (LifecycleListener listener : listeners) {
+            try {
+                listener.onShutdownRequested(info);
+            } catch (Exception e) {
+                LOGGER.error("Error notifying shutdown requested to {}", listener.getClass().getSimpleName(), e);
             }
         }
     }
