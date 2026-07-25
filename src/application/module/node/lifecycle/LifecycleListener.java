@@ -1,5 +1,7 @@
 package application.module.node.lifecycle;
 
+import application.module.node.profile.NodeProfile;
+
 import java.util.EventListener;
 
 /**
@@ -9,32 +11,34 @@ import java.util.EventListener;
  * <p>
  * The nested state machine model separates concerns:
  * <ul>
- *   <li>{@link #onStateChanged} - Parent lifecycle transitions (IDLE, RUNNING, STOPPED, etc.)</li>
+ *   <li>{@link #onStateChanged} - Parent lifecycle transitions (STOPPED, RUNNING, FAILED, etc.)</li>
  *   <li>{@link #onOperatingStateChanged} - Operating substate transitions within RUNNING
  *       (SYNCING, SYNC_IDLE, PAUSED_USER, PAUSED_SYSTEM, GENERATING)</li>
  * </ul>
+ *
+ * @since 4.0
  */
 public interface LifecycleListener extends EventListener {
 
     /**
      * Called when a node profile transitions from one lifecycle state to another.
      *
-     * @param instanceInfo the instance that changed
-     * @param oldState     the previous lifecycle state
-     * @param newState     the current lifecycle state
+     * @param profile  the profile that changed (runtime state via {@link NodeProfile#getRuntime()})
+     * @param oldState the previous lifecycle state
+     * @param newState the current lifecycle state
      */
-    void onStateChanged(NodeInstanceInfo instanceInfo, NodeLifecycleState oldState, NodeLifecycleState newState);
+    void onStateChanged(NodeProfile profile, NodeLifecycleState oldState, NodeLifecycleState newState);
 
     /**
      * Called when a node profile's operating substate changes within the RUNNING
      * lifecycle state. This includes sync progress, user pause/resume, and
      * system-initiated pauses (DB check, pop-off, trim).
      *
-     * @param instanceInfo  the instance that changed
-     * @param oldSubstate   the previous operating substate
-     * @param newSubstate   the current operating substate
+     * @param profile     the profile that changed
+     * @param oldSubstate the previous operating substate
+     * @param newSubstate the current operating substate
      */
-    default void onOperatingStateChanged(NodeInstanceInfo instanceInfo,
+    default void onOperatingStateChanged(NodeProfile profile,
                                          NodeOperatingState oldSubstate,
                                          NodeOperatingState newSubstate) {
     }
@@ -42,19 +46,19 @@ public interface LifecycleListener extends EventListener {
     /**
      * Called when a node profile emits a status message (optional).
      *
-     * @param instanceInfo the instance that emitted the message
-     * @param message      the status message
+     * @param profile the profile that emitted the message
+     * @param message the status message
      */
-    default void onStatusMessage(NodeInstanceInfo instanceInfo, String message) {
+    default void onStatusMessage(NodeProfile profile, String message) {
     }
 
     /**
      * Called when a node profile encounters an error (optional).
      *
-     * @param instanceInfo the instance that encountered the error
+     * @param profile      the profile that encountered the error
      * @param errorMessage description of the error
      */
-    default void onError(NodeInstanceInfo instanceInfo, String errorMessage) {
+    default void onError(NodeProfile profile, String errorMessage) {
     }
 
     /**
@@ -66,8 +70,8 @@ public interface LifecycleListener extends EventListener {
      * Use this callback to save GUI state, persist settings, or perform cleanup
      * that must happen before the node stops.
      *
-     * @param instanceInfo the instance that is about to be stopped
+     * @param profile the profile that is about to be stopped
      */
-    default void onShutdownRequested(NodeInstanceInfo instanceInfo) {
+    default void onShutdownRequested(NodeProfile profile) {
     }
 }

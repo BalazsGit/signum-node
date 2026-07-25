@@ -1,0 +1,14 @@
+{
+  "module": {
+    "node": {
+      "test-profile": {
+        "shutdownStatus": "running",
+        "startupTimestamp": 1784994490441
+      },
+      "thread-test": {
+        "shutdownStatus": "running",
+        "startupTimestamp": 1784994492429
+      }
+    }
+  }
+}

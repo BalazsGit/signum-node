@@ -3434,19 +3434,22 @@ public class NodeConsolePanel extends JPanel {
 
     /**
      * Loads all GUI panel states from the hierarchical section: node.{profileName}.
-     * Uses hardcoded defaults when no settings file exists or section is missing.
+     * If the settings file does not exist yet, creates it with default values
+     * (including autostart=false for this profile) so subsequent reads find it.
      */
     private void loadGuiSettings() {
         boolean prevShowCommandInput = showCommandInput;
         boolean prevShowMetricsPanel = showMetricsPanel;
         boolean prevMetricsExpanded = metricsExpanded;
         boolean prevCommandAtBottom = commandPanelAtBottom;
+        boolean fileExisted = false;
 
         try {
             String settingsDir = resolveSettingsDir();
             Path settingsPath = application.utils.io.PathUtils
                     .resolvePath(Paths.get(settingsDir, "gui-settings.json").toString());
             if (Files.exists(settingsPath)) {
+                fileExisted = true;
                 try (java.io.BufferedReader reader = Files.newBufferedReader(settingsPath)) {
                     JsonElement parsed = JsonParser.parseReader(reader);
                     if (parsed.isJsonObject()) {
@@ -3460,6 +3463,13 @@ public class NodeConsolePanel extends JPanel {
                     }
                 }
             }
+
+            // If file did NOT exist, create it with default values for this profile.
+            // This ensures gui-settings.json is always present after first load,
+            // and includes autostart=false so nodes don't start automatically by default.
+            if (!fileExisted) {
+                createDefaultGuiSettings(settingsDir);
+            }
         } catch (Exception e) {
             LOGGER.warn("Could not load GUI settings for profile '{}'", profileName, e);
         }
@@ -3469,6 +3479,42 @@ public class NodeConsolePanel extends JPanel {
                 prevMetricsExpanded, metricsExpanded,
                 prevShowCommandInput, showCommandInput,
                 prevCommandAtBottom, commandPanelAtBottom);
+    }
+
+    /**
+     * Creates the gui-settings.json file with default values for this profile.
+     * Includes autostart=false so nodes do NOT start automatically by default.
+     */
+    private void createDefaultGuiSettings(String settingsDir) {
+        try {
+            Path settingsPath = application.utils.io.PathUtils
+                    .resolvePath(Paths.get(settingsDir, "gui-settings.json").toString());
+            if (settingsPath.getParent() != null) {
+                Files.createDirectories(settingsPath.getParent());
+            }
+
+            JsonObject settings = new JsonObject();
+
+            // Profile-specific autostart: disabled by default
+            String autoKey = "autostart." + profileName;
+            settings.addProperty(autoKey, false);
+
+            // Hierarchical node section with defaults
+            JsonObject profileSection = getOrCreateNodeProfileSection(settings);
+            profileSection.addProperty("showMetricsPanel", false);
+            profileSection.addProperty("metricsExpanded", false);
+            profileSection.addProperty("showCommandInput", false);
+            profileSection.addProperty("commandPanelAtBottom", true);
+
+            try (java.io.BufferedWriter writer = Files.newBufferedWriter(settingsPath)) {
+                Gson gson = new GsonBuilder().setPrettyPrinting().create();
+                writer.write(gson.toJson(settings));
+            }
+
+            LOGGER.info("[GUI-Settings] Created default gui-settings.json for profile '{}'", profileName);
+        } catch (Exception e) {
+            LOGGER.warn("Failed to create default GUI settings for profile '{}'", profileName, e);
+        }
     }
 
     /**

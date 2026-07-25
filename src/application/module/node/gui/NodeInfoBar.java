@@ -1,7 +1,6 @@
 package application.module.node.gui;
 
 import application.module.appearance.AppearanceModule;
-import application.module.node.lifecycle.NodeInstanceInfo;
 import application.module.node.lifecycle.NodeLifecycleManager;
 import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.profile.NodeProfile;
@@ -217,14 +216,14 @@ public class NodeInfoBar extends JPanel {
     public void refreshState() {
         SwingUtilities.invokeLater(() -> {
             NodeLifecycleManager manager = NodeLifecycleManager.getInstance();
-            NodeInstanceInfo info = manager.getProfileStatus(profile.getName());
+            NodeProfile managedProfile = manager.getProfile(profile.getName());
 
             NodeLifecycleState state = NodeLifecycleState.IDLE;
             String stateText = "IDLE";
             Icon stateIcon = null;
 
-            if (info != null) {
-                state = info.getState();
+            if (managedProfile != null) {
+                state = managedProfile.getRuntime().getLifecycleState();
                 stateText = state.name();
                 stateIcon = stateIconFor(state);
             }

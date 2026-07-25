@@ -667,7 +667,9 @@ public final class Signum {
 
             final FeeSuggestionCalculator feeSuggestionCalculator = new FeeSuggestionCalculator(
                     blockchainProcessor,
-                    stores.getUnconfirmedTransactionStore());
+                    stores.getUnconfirmedTransactionStore(),
+                    blockchain,
+                    fluxCapacitor);
 
             webServer = new WebServerImpl(new WebServerContext(transactionProcessor,
                     blockchain,

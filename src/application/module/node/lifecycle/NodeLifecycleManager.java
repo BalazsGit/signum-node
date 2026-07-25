@@ -1,29 +1,37 @@
 package application.module.node.lifecycle;
 
+import application.module.node.logging.NodeLoggingProfile;
 import application.module.node.profile.NodeProfile;
 import application.module.node.profile.ProfileConfig;
 import application.module.node.instance.NodeCoreContext;
 import application.module.node.instance.NodeCoreContextBuilder;
 import application.module.node.instance.NodeCoreContextManager;
+import application.utils.logging.LoggingModuleRegistry;
+import application.utils.logging.ModuleLoggingProvider;
 import application.utils.logging.ProfileThreadContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.util.Collections;
 import java.util.List;
-import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.stream.Collectors;
 
 /**
  * Central manager for Node profile lifecycle operations.
  * Handles initialization, start, stop, pause and state tracking per profile.
  * Follows the Observer pattern: GUI panels register as LifecycleListeners to
  * receive status updates.
+ * <p>
+ * Stores {@link NodeProfile} objects directly; runtime state is accessed via
+ * {@link NodeProfile#getRuntime()}. This class separates business logic
+ * (node startup/shutdown) from the GUI layer, enabling clean headless mode
+ * support and testability.
  *
- * This class separates business logic (node startup/shutdown) from the GUI
- * layer, enabling clean headless mode support and testability.
+ * @since 4.0
  */
 public class NodeLifecycleManager {
 
@@ -34,12 +42,17 @@ public class NodeLifecycleManager {
      */
     private static volatile NodeLifecycleManager instance;
 
-    private final Map<String, NodeInstanceInfo> profiles;
+    /** Registered node profiles. */
+    private final List<NodeProfile> profiles;
+
+    /** Observer listeners for lifecycle events. Thread-safe list. */
     private final List<LifecycleListener> listeners;
+
+    /** Profile configuration (autostart, max concurrent nodes, etc.). */
     private final ProfileConfig profileConfig;
 
     private NodeLifecycleManager() {
-        this.profiles = new LinkedHashMap<>();
+        this.profiles = new ArrayList<>();
         this.listeners = new CopyOnWriteArrayList<>();
         this.profileConfig = new ProfileConfig();
     }
@@ -55,18 +68,17 @@ public class NodeLifecycleManager {
     }
 
     // ====================================================================
-    // Lifecycle operations
+    // Lifecycle operations (String-based API - backward compatible)
     // ====================================================================
 
     /**
-     * Discovers all node profiles from conf/node/*.properties and registers them.
+     * Discovers all node profiles from conf/node/profiles/*.properties and registers them.
      */
     public void discoverProfiles() {
         NodeProfile[] discoveredProfiles = NodeProfile.loadAll();
         for (NodeProfile profile : discoveredProfiles) {
-            if (!profiles.containsKey(profile.getName())) {
-                NodeInstanceInfo info = new NodeInstanceInfo(profile.getName());
-                profiles.put(profile.getName(), info);
+            if (!isProfileRegistered(profile.getName())) {
+                profiles.add(profile);
                 LOGGER.debug("Registered node profile: {}", profile.getName());
             }
         }
@@ -74,59 +86,55 @@ public class NodeLifecycleManager {
     }
 
     /**
-     * Registers a single profile without discovery.
-     */
-    public void registerProfile(String profileName) {
-        NodeInstanceInfo info = new NodeInstanceInfo(profileName);
-        profiles.put(profileName, info);
-        LOGGER.debug("Registered node profile: {}", profileName);
-    }
-
-    /**
      * Initializes a profile (loads config, prepares resources - no side effects).
      */
     public void initializeProfile(String profileName) {
-        NodeInstanceInfo info = getProfileStatus(profileName);
-        if (info == null) {
+        NodeProfile profile = getProfile(profileName);
+        if (profile == null) {
             LOGGER.warn("Profile '{}' not found", profileName);
             return;
         }
 
-        NodeLifecycleState oldState = info.getState();
-        if (!info.setState(NodeLifecycleState.INITIALIZING)) {
+        NodeProfileRuntime runtime = profile.getRuntime();
+        NodeLifecycleState oldState = runtime.getLifecycleState();
+        if (!runtime.setLifecycleState(NodeLifecycleState.INITIALIZING)) {
             LOGGER.debug("Cannot initialize '{}', current state: {}", profileName, oldState);
             return;
         }
 
-        notifyStateChanged(info, oldState, NodeLifecycleState.INITIALIZING);
-        info.setStatusMessage("Initializing...");
+        notifyStateChanged(profile, oldState, NodeLifecycleState.INITIALIZING);
+        runtime.setStatusMessage("Initializing...");
 
         try {
-            // Load profile properties for lightweight validation
-            NodeProfile profile = NodeProfile.loadByName(profileName);
-            if (profile != null) {
-                String apiPortStr = profile.getProperty("httpport", "8125");
-                try {
-                    info.setApiPort(Integer.parseInt(apiPortStr));
-                } catch (NumberFormatException ignored) {
-                }
-                String p2pPortStr = profile.getProperty("peer.port", "8123");
-                try {
-                    info.setP2pPort(Integer.parseInt(p2pPortStr));
-                } catch (NumberFormatException ignored) {
-                }
+            // Extract port configuration from properties
+            String apiPortStr = profile.getProperty("httpport", "8125");
+            try {
+                runtime.setApiPort(Integer.parseInt(apiPortStr));
+            } catch (NumberFormatException ignored) {
+            }
+            String p2pPortStr = profile.getProperty("peer.port", "8123");
+            try {
+                runtime.setP2pPort(Integer.parseInt(p2pPortStr));
+            } catch (NumberFormatException ignored) {
             }
 
-            info.setState(NodeLifecycleState.READY);
-            info.setStatusMessage("Ready to start");
-            notifyStateChanged(info, NodeLifecycleState.INITIALIZING, NodeLifecycleState.READY);
+            // Apply logging association from profiles.json if configured
+            String loggingProfileName = profileConfig.getLoggingProfile(profileName);
+            if (loggingProfileName != null && !loggingProfileName.isEmpty()) {
+                profile.setLoggingPreset(loggingProfileName);
+                LOGGER.debug("Applied logging preset '{}' to profile '{}'", loggingProfileName, profileName);
+            }
+
+            runtime.setLifecycleState(NodeLifecycleState.READY);
+            runtime.setStatusMessage("Ready to start");
+            notifyStateChanged(profile, NodeLifecycleState.INITIALIZING, NodeLifecycleState.READY);
             LOGGER.info("Profile '{}' initialized successfully", profileName);
         } catch (Exception e) {
             LOGGER.error("Failed to initialize profile '{}'", profileName, e);
-            info.setState(NodeLifecycleState.ERROR);
-            info.setErrorMessage(e.getMessage());
-            notifyStateChanged(info, NodeLifecycleState.INITIALIZING, NodeLifecycleState.ERROR);
-            notifyError(info, e.getMessage());
+            runtime.setLifecycleState(NodeLifecycleState.ERROR);
+            runtime.setErrorMessage(e.getMessage());
+            notifyStateChanged(profile, NodeLifecycleState.INITIALIZING, NodeLifecycleState.ERROR);
+            notifyError(profile, e.getMessage());
         }
     }
 
@@ -135,45 +143,45 @@ public class NodeLifecycleManager {
      * The actual initialization runs asynchronously in a background thread to
      * avoid blocking the caller (e.g., GUI). Lifecycle listeners are notified
      * when startup completes or fails.
+     *
+     * @param profileName the name of the profile to start
      */
     public void startProfile(String profileName) {
-        NodeInstanceInfo info = getProfileStatus(profileName);
-        if (info == null) {
+        NodeProfile profile = getProfile(profileName);
+        if (profile == null) {
             LOGGER.warn("Profile '{}' not found", profileName);
             return;
         }
 
+        NodeProfileRuntime runtime = profile.getRuntime();
+
         // Check max concurrent nodes
-        long runningCount = profiles.values().stream()
-                .filter(NodeInstanceInfo::isActive).count();
+        long runningCount = profiles.stream()
+                .map(NodeProfile::getRuntime)
+                .filter(NodeProfileRuntime::isActive)
+                .count();
         int maxConcurrent = profileConfig.getMaxConcurrentNodes();
         if (runningCount >= maxConcurrent) {
             String errorMsg = "Maximum concurrent nodes (" + maxConcurrent + ") reached. Stop another node first.";
             LOGGER.warn(errorMsg);
-            info.setState(NodeLifecycleState.ERROR);
-            info.setErrorMessage(errorMsg);
-            notifyError(info, errorMsg);
+            runtime.setLifecycleState(NodeLifecycleState.ERROR);
+            runtime.setErrorMessage(errorMsg);
+            notifyError(profile, errorMsg);
             return;
         }
 
-        NodeLifecycleState oldState = info.getState();
-        if (!info.setState(NodeLifecycleState.RUNNING)) {
+        NodeLifecycleState oldState = runtime.getLifecycleState();
+        if (!runtime.setLifecycleState(NodeLifecycleState.RUNNING)) {
             LOGGER.debug("Cannot start '{}', current state: {}", profileName, oldState);
             return;
         }
 
-        notifyStateChanged(info, oldState, NodeLifecycleState.RUNNING);
-        info.setStatusMessage("Starting node...");
-        info.markStarted();
+        notifyStateChanged(profile, oldState, NodeLifecycleState.RUNNING);
+        runtime.setStatusMessage("Starting node...");
+        runtime.markStarted();
 
         // Resolve profile configuration (final for lambda capture)
-        final String confFolderPath;
-        NodeProfile profile = NodeProfile.loadByName(profileName);
-        if (profile != null) {
-            confFolderPath = profile.getProperty("conf.folder", "conf");
-        } else {
-            confFolderPath = "conf";
-        }
+        final String confFolderPath = profile.getProperty("conf.folder", "conf");
 
         // Build the NodeCoreContext asynchronously to avoid blocking the caller
         // (e.g., GUI thread). Use a dedicated daemon thread.
@@ -184,19 +192,19 @@ public class NodeLifecycleManager {
                 NodeCoreContext context = new NodeCoreContextBuilder(profileName, Paths.get(confFolderPath)).build();
                 context.start();
 
-                // Register with the global manager and store reference in info
+                // Register with the global manager and store reference in runtime
                 NodeCoreContextManager.getInstance().register(profileName, context);
-                info.setCoreContext(context);
+                runtime.setCoreContext(context);
 
-                info.setStatusMessage("Running");
-                notifyStatusMessage(info, "Node started successfully");
+                runtime.setStatusMessage("Running");
+                notifyStatusMessage(profile, "Node started successfully");
                 LOGGER.info("Profile '{}' started with NodeCoreContext", profileName);
             } catch (Exception e) {
                 LOGGER.error("Failed to start profile '{}'", profileName, e);
-                info.setState(NodeLifecycleState.ERROR);
-                info.setErrorMessage(e.getMessage());
-                notifyStateChanged(info, NodeLifecycleState.RUNNING, NodeLifecycleState.ERROR);
-                notifyError(info, e.getMessage());
+                runtime.setLifecycleState(NodeLifecycleState.ERROR);
+                runtime.setErrorMessage(e.getMessage());
+                notifyStateChanged(profile, NodeLifecycleState.RUNNING, NodeLifecycleState.ERROR);
+                notifyError(profile, e.getMessage());
             }
         };
 
@@ -212,89 +220,339 @@ public class NodeLifecycleManager {
      * Stops the node for a profile gracefully.
      * Delegates to the NodeCoreContext.stop() if a context exists,
      * otherwise performs a no-op (profile was never truly started).
+     *
+     * @param profileName the name of the profile to stop
      */
     public void stopProfile(String profileName) {
-        NodeInstanceInfo info = getProfileStatus(profileName);
-        if (info == null) {
+        NodeProfile profile = getProfile(profileName);
+        if (profile == null) {
             LOGGER.warn("Profile '{}' not found", profileName);
             return;
         }
 
-        NodeLifecycleState oldState = info.getState();
-        if (!info.setState(NodeLifecycleState.STOPPING)) {
+        NodeProfileRuntime runtime = profile.getRuntime();
+
+        NodeLifecycleState oldState = runtime.getLifecycleState();
+        if (!runtime.setLifecycleState(NodeLifecycleState.STOPPING)) {
             LOGGER.debug("Cannot stop '{}', current state: {}", profileName, oldState);
             return;
         }
 
-        notifyStateChanged(info, oldState, NodeLifecycleState.STOPPING);
-        info.setStatusMessage("Stopping...");
+        notifyStateChanged(profile, oldState, NodeLifecycleState.STOPPING);
+        runtime.setStatusMessage("Stopping...");
 
         // Notify listeners BEFORE stopping so they can save GUI state, etc.
         // This is the centralized shutdown hook - all paths go through here.
-        notifyShutdownRequested(info);
+        notifyShutdownRequested(profile);
 
         try {
-            NodeCoreContext context = info.getCoreContext();
+            NodeCoreContext context = runtime.getCoreContext();
             if (context != null) {
                 context.stop();
                 NodeCoreContextManager.getInstance().unregister(profileName);
-                info.setCoreContext(null);
+                runtime.setCoreContext(null);
             } else {
                 LOGGER.debug("Profile '{}' had no running context, skipping shutdown", profileName);
             }
 
-            info.setState(NodeLifecycleState.STOPPED);
-            info.markStopped();
-            info.setStatusMessage("Stopped");
-            notifyStateChanged(info, NodeLifecycleState.STOPPING, NodeLifecycleState.STOPPED);
+            runtime.setLifecycleState(NodeLifecycleState.STOPPED);
+            runtime.markStopped();
+            runtime.setStatusMessage("Stopped");
+            notifyStateChanged(profile, NodeLifecycleState.STOPPING, NodeLifecycleState.STOPPED);
             LOGGER.info("Profile '{}' stopped", profileName);
         } catch (Exception e) {
             LOGGER.error("Failed to stop profile '{}'", profileName, e);
-            info.setState(NodeLifecycleState.ERROR);
-            info.setErrorMessage(e.getMessage());
-            notifyStateChanged(info, NodeLifecycleState.STOPPING, NodeLifecycleState.ERROR);
-            notifyError(info, e.getMessage());
+            runtime.setLifecycleState(NodeLifecycleState.ERROR);
+            runtime.setErrorMessage(e.getMessage());
+            notifyStateChanged(profile, NodeLifecycleState.STOPPING, NodeLifecycleState.ERROR);
+            notifyError(profile, e.getMessage());
         }
+    }
+
+    // ====================================================================
+    // Lifecycle operations (NodeProfile-based API - preferred)
+    // ====================================================================
+
+    /**
+     * Starts the node for the given profile directly.
+     * Preferred over {@link #startProfile(String)} as it avoids the string lookup.
+     *
+     * @param profile the profile to start (must not be null)
+     * @throws NullPointerException if profile is null
+     */
+    public void startProfile(NodeProfile profile) {
+        Objects.requireNonNull(profile, "profile must not be null");
+        startProfileInternal(profile);
+    }
+
+    /**
+     * Stops the node for the given profile directly.
+     * Preferred over {@link #stopProfile(String)} as it avoids the string lookup.
+     *
+     * @param profile the profile to stop (must not be null)
+     * @throws NullPointerException if profile is null
+     */
+    public void stopProfile(NodeProfile profile) {
+        Objects.requireNonNull(profile, "profile must not be null");
+        stopProfileInternal(profile);
+    }
+
+    /**
+     * Pauses block processing for the given profile.
+     * Preferred over {@link #pauseProfile(String)}.
+     *
+     * @param profile the profile to pause (must not be null)
+     * @throws NullPointerException if profile is null
+     */
+    public void pauseProfile(NodeProfile profile) {
+        Objects.requireNonNull(profile, "profile must not be null");
+        pauseProfileInternal(profile);
+    }
+
+    /**
+     * Resumes block processing for the given profile.
+     * Preferred over {@link #resumeProfile(String)}.
+     *
+     * @param profile the profile to resume (must not be null)
+     * @throws NullPointerException if profile is null
+     */
+    public void resumeProfile(NodeProfile profile) {
+        Objects.requireNonNull(profile, "profile must not be null");
+        resumeProfileInternal(profile);
+    }
+
+    /**
+     * Initializes the given profile directly.
+     * Preferred over {@link #initializeProfile(String)}.
+     *
+     * @param profile the profile to initialize (must not be null)
+     * @throws NullPointerException if profile is null
+     */
+    public void initializeProfile(NodeProfile profile) {
+        Objects.requireNonNull(profile, "profile must not be null");
+        initializeProfileInternal(profile);
     }
 
     /**
      * Pauses block processing for a running node.
      */
     public void pauseProfile(String profileName) {
-        NodeInstanceInfo info = getProfileStatus(profileName);
-        if (info == null) {
+        NodeProfile profile = getProfile(profileName);
+        if (profile == null) {
             return;
         }
 
-        NodeLifecycleState oldState = info.getState();
-        if (!info.setState(NodeLifecycleState.PAUSED)) {
+        NodeProfileRuntime runtime = profile.getRuntime();
+
+        NodeLifecycleState oldState = runtime.getLifecycleState();
+        if (!runtime.setLifecycleState(NodeLifecycleState.PAUSED)) {
             LOGGER.debug("Cannot pause '{}', current state: {}", profileName, oldState);
             return;
         }
 
-        notifyStateChanged(info, oldState, NodeLifecycleState.PAUSED);
-        info.setStatusMessage("Paused");
+        notifyStateChanged(profile, oldState, NodeLifecycleState.PAUSED);
+        runtime.setStatusMessage("Paused");
         LOGGER.info("Profile '{}' marked as paused", profileName);
     }
 
     /**
      * Resumes block processing for a paused node.
+     *
+     * @param profileName the name of the profile to resume
      */
     public void resumeProfile(String profileName) {
-        NodeInstanceInfo info = getProfileStatus(profileName);
-        if (info == null) {
+        NodeProfile profile = getProfile(profileName);
+        if (profile == null) {
             return;
         }
 
-        NodeLifecycleState oldState = info.getState();
-        if (!info.setState(NodeLifecycleState.RUNNING)) {
+        NodeProfileRuntime runtime = profile.getRuntime();
+
+        NodeLifecycleState oldState = runtime.getLifecycleState();
+        if (!runtime.setLifecycleState(NodeLifecycleState.RUNNING)) {
             LOGGER.debug("Cannot resume '{}', current state: {}", profileName, oldState);
             return;
         }
 
-        notifyStateChanged(info, oldState, NodeLifecycleState.RUNNING);
-        info.setStatusMessage("Running");
+        notifyStateChanged(profile, oldState, NodeLifecycleState.RUNNING);
+        runtime.setStatusMessage("Running");
         LOGGER.info("Profile '{}' marked as resumed", profileName);
+    }
+
+    // ====================================================================
+    // Internal lifecycle implementations (called by both String and Profile overloads)
+    // ====================================================================
+
+    private void initializeProfileInternal(NodeProfile profile) {
+        NodeProfileRuntime runtime = profile.getRuntime();
+        NodeLifecycleState oldState = runtime.getLifecycleState();
+        if (!runtime.setLifecycleState(NodeLifecycleState.INITIALIZING)) {
+            LOGGER.debug("Cannot initialize '{}', current state: {}", profile.getName(), oldState);
+            return;
+        }
+
+        notifyStateChanged(profile, oldState, NodeLifecycleState.INITIALIZING);
+        runtime.setStatusMessage("Initializing...");
+
+        try {
+            // Extract port configuration from properties
+            String apiPortStr = profile.getProperty("httpport", "8125");
+            try {
+                runtime.setApiPort(Integer.parseInt(apiPortStr));
+            } catch (NumberFormatException ignored) {
+            }
+            String p2pPortStr = profile.getProperty("peer.port", "8123");
+            try {
+                runtime.setP2pPort(Integer.parseInt(p2pPortStr));
+            } catch (NumberFormatException ignored) {
+            }
+
+            // Apply logging association from profiles.json if configured
+            String loggingProfileName = profileConfig.getLoggingProfile(profile.getName());
+            if (loggingProfileName != null && !loggingProfileName.isEmpty()) {
+                profile.setLoggingPreset(loggingProfileName);
+                LOGGER.debug("Applied logging preset '{}' to profile '{}'", loggingProfileName, profile.getName());
+            }
+
+            runtime.setLifecycleState(NodeLifecycleState.READY);
+            runtime.setStatusMessage("Ready to start");
+            notifyStateChanged(profile, NodeLifecycleState.INITIALIZING, NodeLifecycleState.READY);
+            LOGGER.info("Profile '{}' initialized successfully", profile.getName());
+        } catch (Exception e) {
+            LOGGER.error("Failed to initialize profile '{}'", profile.getName(), e);
+            runtime.setLifecycleState(NodeLifecycleState.ERROR);
+            runtime.setErrorMessage(e.getMessage());
+            notifyStateChanged(profile, NodeLifecycleState.INITIALIZING, NodeLifecycleState.ERROR);
+            notifyError(profile, e.getMessage());
+        }
+    }
+
+    private void startProfileInternal(NodeProfile profile) {
+        NodeProfileRuntime runtime = profile.getRuntime();
+
+        // Check max concurrent nodes
+        long runningCount = profiles.stream()
+                .map(NodeProfile::getRuntime)
+                .filter(NodeProfileRuntime::isActive)
+                .count();
+        int maxConcurrent = profileConfig.getMaxConcurrentNodes();
+        if (runningCount >= maxConcurrent) {
+            String errorMsg = "Maximum concurrent nodes (" + maxConcurrent + ") reached. Stop another node first.";
+            LOGGER.warn(errorMsg);
+            runtime.setLifecycleState(NodeLifecycleState.ERROR);
+            runtime.setErrorMessage(errorMsg);
+            notifyError(profile, errorMsg);
+            return;
+        }
+
+        NodeLifecycleState oldState = runtime.getLifecycleState();
+        if (!runtime.setLifecycleState(NodeLifecycleState.RUNNING)) {
+            LOGGER.debug("Cannot start '{}', current state: {}", profile.getName(), oldState);
+            return;
+        }
+
+        notifyStateChanged(profile, oldState, NodeLifecycleState.RUNNING);
+        runtime.setStatusMessage("Starting node...");
+        runtime.markStarted();
+
+        // Resolve profile configuration (final for lambda capture)
+        final String confFolderPath = profile.getProperty("conf.folder", "conf");
+
+        // Build the NodeCoreContext asynchronously to avoid blocking the caller
+        Runnable startupTask = () -> {
+            try {
+                NodeCoreContext context = new NodeCoreContextBuilder(profile.getName(), Paths.get(confFolderPath)).build();
+                context.start();
+
+                // Register with the global manager and store reference in runtime
+                NodeCoreContextManager.getInstance().register(profile.getName(), context);
+                runtime.setCoreContext(context);
+
+                runtime.setStatusMessage("Running");
+                notifyStatusMessage(profile, "Node started successfully");
+                LOGGER.info("Profile '{}' started with NodeCoreContext", profile.getName());
+            } catch (Exception e) {
+                LOGGER.error("Failed to start profile '{}'", profile.getName(), e);
+                runtime.setLifecycleState(NodeLifecycleState.ERROR);
+                runtime.setErrorMessage(e.getMessage());
+                notifyStateChanged(profile, NodeLifecycleState.RUNNING, NodeLifecycleState.ERROR);
+                notifyError(profile, e.getMessage());
+            }
+        };
+
+        Thread starterThread = new Thread(
+                ProfileThreadContext.wrap(startupTask, "node", profile.getName()),
+                "Node-Starter-" + profile.getName()
+        );
+        starterThread.setDaemon(true);
+        starterThread.start();
+    }
+
+    private void stopProfileInternal(NodeProfile profile) {
+        NodeProfileRuntime runtime = profile.getRuntime();
+
+        NodeLifecycleState oldState = runtime.getLifecycleState();
+        if (!runtime.setLifecycleState(NodeLifecycleState.STOPPING)) {
+            LOGGER.debug("Cannot stop '{}', current state: {}", profile.getName(), oldState);
+            return;
+        }
+
+        notifyStateChanged(profile, oldState, NodeLifecycleState.STOPPING);
+        runtime.setStatusMessage("Stopping...");
+
+        // Notify listeners BEFORE stopping so they can save GUI state, etc.
+        notifyShutdownRequested(profile);
+
+        try {
+            NodeCoreContext context = runtime.getCoreContext();
+            if (context != null) {
+                context.stop();
+                NodeCoreContextManager.getInstance().unregister(profile.getName());
+                runtime.setCoreContext(null);
+            } else {
+                LOGGER.debug("Profile '{}' had no running context, skipping shutdown", profile.getName());
+            }
+
+            runtime.setLifecycleState(NodeLifecycleState.STOPPED);
+            runtime.markStopped();
+            runtime.setStatusMessage("Stopped");
+            notifyStateChanged(profile, NodeLifecycleState.STOPPING, NodeLifecycleState.STOPPED);
+            LOGGER.info("Profile '{}' stopped", profile.getName());
+        } catch (Exception e) {
+            LOGGER.error("Failed to stop profile '{}'", profile.getName(), e);
+            runtime.setLifecycleState(NodeLifecycleState.ERROR);
+            runtime.setErrorMessage(e.getMessage());
+            notifyStateChanged(profile, NodeLifecycleState.STOPPING, NodeLifecycleState.ERROR);
+            notifyError(profile, e.getMessage());
+        }
+    }
+
+    private void pauseProfileInternal(NodeProfile profile) {
+        NodeProfileRuntime runtime = profile.getRuntime();
+
+        NodeLifecycleState oldState = runtime.getLifecycleState();
+        if (!runtime.setLifecycleState(NodeLifecycleState.PAUSED)) {
+            LOGGER.debug("Cannot pause '{}', current state: {}", profile.getName(), oldState);
+            return;
+        }
+
+        notifyStateChanged(profile, oldState, NodeLifecycleState.PAUSED);
+        runtime.setStatusMessage("Paused");
+        LOGGER.info("Profile '{}' marked as paused", profile.getName());
+    }
+
+    private void resumeProfileInternal(NodeProfile profile) {
+        NodeProfileRuntime runtime = profile.getRuntime();
+
+        NodeLifecycleState oldState = runtime.getLifecycleState();
+        if (!runtime.setLifecycleState(NodeLifecycleState.RUNNING)) {
+            LOGGER.debug("Cannot resume '{}', current state: {}", profile.getName(), oldState);
+            return;
+        }
+
+        notifyStateChanged(profile, oldState, NodeLifecycleState.RUNNING);
+        runtime.setStatusMessage("Running");
+        LOGGER.info("Profile '{}' marked as resumed", profile.getName());
     }
 
     // ====================================================================
@@ -305,23 +563,32 @@ public class NodeLifecycleManager {
      * Initializes all discovered profiles.
      */
     public void initializeAllProfiles() {
-        for (String profileName : profiles.keySet()) {
-            initializeProfile(profileName);
+        for (NodeProfile profile : profiles) {
+            initializeProfile(profile.getName());
         }
     }
 
     /**
-     * Starts all profiles that have autostart enabled in profiles.json.
+     * Starts all profiles that have autostart enabled in their .properties config.
      */
     public void startAutostartProfiles() {
-        List<String> autoStartNames = profileConfig.getAutoStartProfileNames();
-        LOGGER.info("Starting {} autostart profiles", autoStartNames.size());
+        List<NodeProfile> autoStartProfiles = profiles.stream()
+                .filter(profile -> {
+                    // Read autostart from profile properties (Single Source of Truth)
+                    if (!profile.isAutostart()) {
+                        return false;
+                    }
+                    // Only start if the profile is READY (initialized but not running)
+                    NodeLifecycleState state = profile.getRuntime().getLifecycleState();
+                    return state == NodeLifecycleState.READY || state == NodeLifecycleState.INITIALIZING;
+                })
+                .collect(Collectors.toList());
 
-        for (String profileName : autoStartNames) {
-            NodeInstanceInfo info = getProfileStatus(profileName);
-            if (info != null && info.getState() == NodeLifecycleState.READY) {
-                startProfile(profileName);
-            }
+        LOGGER.info("Starting {} autostart profiles: {}", autoStartProfiles.size(),
+                autoStartProfiles.stream().map(NodeProfile::getName).collect(Collectors.joining(", ")));
+
+        for (NodeProfile profile : autoStartProfiles) {
+            startProfile(profile.getName());
         }
     }
 
@@ -329,9 +596,9 @@ public class NodeLifecycleManager {
      * Stops all running profiles.
      */
     public void stopAllProfiles() {
-        profiles.values().stream()
-                .filter(NodeInstanceInfo::isActive)
-                .forEach(info -> stopProfile(info.getProfileName()));
+        profiles.stream()
+                .filter(p -> p.getRuntime().isActive())
+                .forEach(p -> stopProfile(p.getName()));
     }
 
     // ====================================================================
@@ -339,32 +606,43 @@ public class NodeLifecycleManager {
     // ====================================================================
 
     /**
-     * Gets the status of a specific profile.
+     * Gets the NodeProfile for a given name, or null if not registered.
+     *
+     * @param profileName the profile name to look up
+     * @return the {@link NodeProfile}, or null if not found
      */
-    public NodeInstanceInfo getProfileStatus(String profileName) {
-        return profiles.get(profileName);
+    public NodeProfile getProfile(String profileName) {
+        return profiles.stream()
+                .filter(p -> p.getName().equals(profileName))
+                .findFirst()
+                .orElse(null);
     }
 
     /**
-     * Gets all registered profiles.
+     * Gets all registered profiles as an unmodifiable list.
+     *
+     * @return unmodifiable list of {@link NodeProfile} objects
      */
-    public List<NodeInstanceInfo> getAllProfiles() {
-        return new ArrayList<>(profiles.values());
+    public List<NodeProfile> getAllProfiles() {
+        return Collections.unmodifiableList(new ArrayList<>(profiles));
     }
 
     /**
      * Gets the count of currently running profiles.
      */
     public int getRunningCount() {
-        return (int) profiles.values().stream().filter(NodeInstanceInfo::isActive).count();
+        return (int) profiles.stream()
+                .map(NodeProfile::getRuntime)
+                .filter(NodeProfileRuntime::isActive)
+                .count();
     }
 
     /**
      * Checks if a profile is running.
      */
     public boolean isProfileRunning(String profileName) {
-        NodeInstanceInfo info = profiles.get(profileName);
-        return info != null && info.isActive();
+        NodeProfile profile = getProfile(profileName);
+        return profile != null && profile.getRuntime().isActive();
     }
 
     /**
@@ -372,6 +650,29 @@ public class NodeLifecycleManager {
      */
     public ProfileConfig getProfileConfig() {
         return profileConfig;
+    }
+
+    /**
+     * Checks if a profile is registered by name.
+     *
+     * @param profileName the name to check
+     * @return true if a profile with this name is registered
+     */
+    private boolean isProfileRegistered(String profileName) {
+        return profiles.stream().anyMatch(p -> p.getName().equals(profileName));
+    }
+
+    /**
+     * Registers a NodeProfile directly. Package-private for testing purposes.
+     * In production, profiles are discovered via {@link #discoverProfiles()}.
+     *
+     * @param profile the profile to register
+     */
+    void addProfile(NodeProfile profile) {
+        if (profile != null && !isProfileRegistered(profile.getName())) {
+            profiles.add(profile);
+            LOGGER.debug("Manually registered node profile: {}", profile.getName());
+        }
     }
 
     // ====================================================================
@@ -384,8 +685,8 @@ public class NodeLifecycleManager {
      * <p>
      * Hysteresis logic (moved from GUI layer to enforce proper architecture):
      * <ul>
-     *   <li>SYNC_IDLE → SYNCING: missingBlocks > thresholdHigh (default: 10)</li>
-     *   <li>SYNCING → SYNC_IDLE: missingBlocks <= thresholdLow (default: 1)</li>
+     *   <li>SYNC_IDLE -> SYNCING: missingBlocks > thresholdHigh (default: 10)</li>
+     *   <li>SYNCING -> SYNC_IDLE: missingBlocks <= thresholdLow (default: 1)</li>
      * </ul>
      * This prevents rapid state oscillation when the node is near the sync boundary.
      *
@@ -393,16 +694,18 @@ public class NodeLifecycleManager {
      * @param missingBlocks number of blocks behind the network
      */
     public void reportSyncProgress(String profileName, long missingBlocks) {
-        NodeInstanceInfo info = getProfileStatus(profileName);
-        if (info == null) {
+        NodeProfile profile = getProfile(profileName);
+        if (profile == null) {
             LOGGER.warn("Cannot report sync progress: profile '{}' not found", profileName);
             return;
         }
 
-        // Always update the missing blocks count for UI queries
-        info.setMissingBlocks(missingBlocks);
+        NodeProfileRuntime runtime = profile.getRuntime();
 
-        NodeOperatingState currentSubstate = info.getOperatingState();
+        // Always update the missing blocks count for UI queries
+        runtime.setMissingBlocks(missingBlocks);
+
+        NodeOperatingState currentSubstate = runtime.getOperatingState();
 
         // Don't change substate while paused (user or system)
         if (currentSubstate.isPaused()) {
@@ -410,9 +713,9 @@ public class NodeLifecycleManager {
             return;
         }
 
-        NodeOperatingState newSubstate = evaluateSyncSubstate(info, missingBlocks);
+        NodeOperatingState newSubstate = evaluateSyncSubstate(runtime, missingBlocks);
         if (newSubstate != currentSubstate) {
-            applyOperatingStateTransition(info, currentSubstate, newSubstate, missingBlocks);
+            applyOperatingStateTransition(profile, currentSubstate, newSubstate, missingBlocks);
         }
     }
 
@@ -420,10 +723,10 @@ public class NodeLifecycleManager {
      * Evaluates what the operating substate should be given the current state
      * and missing block count. Uses hysteresis to prevent rapid oscillation.
      */
-    private NodeOperatingState evaluateSyncSubstate(NodeInstanceInfo info, long missingBlocks) {
-        NodeOperatingState current = info.getOperatingState();
-        int thresholdHi = info.getHysteresisThresholdHi();
-        int thresholdLo = info.getHysteresisThresholdLo();
+    private NodeOperatingState evaluateSyncSubstate(NodeProfileRuntime runtime, long missingBlocks) {
+        NodeOperatingState current = runtime.getOperatingState();
+        int thresholdHi = runtime.getHysteresisThresholdHi();
+        int thresholdLo = runtime.getHysteresisThresholdLo();
 
         switch (current) {
             case SYNC_IDLE:
@@ -445,30 +748,32 @@ public class NodeLifecycleManager {
      * Applies an operating substate transition with proper timing tracking
      * and listener notification.
      */
-    private void applyOperatingStateTransition(NodeInstanceInfo info,
+    private void applyOperatingStateTransition(NodeProfile profile,
                                                NodeOperatingState oldSubstate,
                                                NodeOperatingState newSubstate,
                                                long missingBlocks) {
-        LOGGER.info("Profile '{}' operating state: {} → {} (missingBlocks={})",
-                info.getProfileName(), oldSubstate, newSubstate, missingBlocks);
+        NodeProfileRuntime runtime = profile.getRuntime();
+
+        LOGGER.info("Profile '{}' operating state: {} -> {} (missingBlocks={})",
+                profile.getName(), oldSubstate, newSubstate, missingBlocks);
 
         if (newSubstate == NodeOperatingState.SYNCING) {
             // Starting a sync session
-            info.setSyncStartTime(System.currentTimeMillis());
-            info.setStatusMessage("Syncing... " + missingBlocks + " blocks behind");
+            runtime.setSyncStartTime(System.currentTimeMillis());
+            runtime.setStatusMessage("Syncing... " + missingBlocks + " blocks behind");
         } else if (oldSubstate == NodeOperatingState.SYNCING && newSubstate == NodeOperatingState.SYNC_IDLE) {
             // Finished a sync session - accumulate time
-            long sessionDuration = System.currentTimeMillis() - info.getSyncStartTime();
-            info.setAccumulatedSyncTimeMs(info.getAccumulatedSyncTimeMs() + sessionDuration);
-            info.setSyncEndTime(System.currentTimeMillis());
-            info.setStatusMessage("Fully synchronized");
+            long sessionDuration = System.currentTimeMillis() - runtime.getSyncStartTime();
+            runtime.setAccumulatedSyncTimeMs(runtime.getAccumulatedSyncTimeMs() + sessionDuration);
+            runtime.setSyncEndTime(System.currentTimeMillis());
+            runtime.setStatusMessage("Fully synchronized");
         }
 
-        if (info.setOperatingState(newSubstate)) {
-            notifyOperatingStateChanged(info, oldSubstate, newSubstate);
+        if (runtime.setOperatingState(newSubstate)) {
+            notifyOperatingStateChanged(profile, oldSubstate, newSubstate);
         } else {
-            LOGGER.warn("Failed to transition operating state for '{}': {} → {}",
-                    info.getProfileName(), oldSubstate, newSubstate);
+            LOGGER.warn("Failed to transition operating state for '{}': {} -> {}",
+                    profile.getName(), oldSubstate, newSubstate);
         }
     }
 
@@ -478,28 +783,29 @@ public class NodeLifecycleManager {
      * @param profileName the node profile to pause
      */
     public void pauseSyncByUser(String profileName) {
-        NodeInstanceInfo info = getProfileStatus(profileName);
-        if (info == null) {
+        NodeProfile profile = getProfile(profileName);
+        if (profile == null) {
             LOGGER.warn("Cannot pause sync: profile '{}' not found", profileName);
             return;
         }
 
-        NodeOperatingState current = info.getOperatingState();
+        NodeProfileRuntime runtime = profile.getRuntime();
+        NodeOperatingState current = runtime.getOperatingState();
         if (current.isUserPaused()) {
             LOGGER.debug("Profile '{}' already paused by user", profileName);
             return;
         }
 
         NodeOperatingState previous = current;
-        if (info.setOperatingState(NodeOperatingState.PAUSED_USER)) {
+        if (runtime.setOperatingState(NodeOperatingState.PAUSED_USER)) {
             // If we were syncing, accumulate the partial session time
             if (current == NodeOperatingState.SYNCING) {
-                long partialSession = System.currentTimeMillis() - info.getSyncStartTime();
-                info.setAccumulatedSyncTimeMs(info.getAccumulatedSyncTimeMs() + partialSession);
-                info.setSyncEndTime(System.currentTimeMillis());
+                long partialSession = System.currentTimeMillis() - runtime.getSyncStartTime();
+                runtime.setAccumulatedSyncTimeMs(runtime.getAccumulatedSyncTimeMs() + partialSession);
+                runtime.setSyncEndTime(System.currentTimeMillis());
             }
-            info.setStatusMessage("Sync paused by user");
-            notifyOperatingStateChanged(info, previous, NodeOperatingState.PAUSED_USER);
+            runtime.setStatusMessage("Sync paused by user");
+            notifyOperatingStateChanged(profile, previous, NodeOperatingState.PAUSED_USER);
             LOGGER.info("Profile '{}' sync paused by user", profileName);
         }
     }
@@ -510,23 +816,24 @@ public class NodeLifecycleManager {
      * @param profileName the node profile to resume
      */
     public void resumeSyncByUser(String profileName) {
-        NodeInstanceInfo info = getProfileStatus(profileName);
-        if (info == null) {
+        NodeProfile profile = getProfile(profileName);
+        if (profile == null) {
             LOGGER.warn("Cannot resume sync: profile '{}' not found", profileName);
             return;
         }
 
-        NodeOperatingState current = info.getOperatingState();
+        NodeProfileRuntime runtime = profile.getRuntime();
+        NodeOperatingState current = runtime.getOperatingState();
         if (!current.isUserPaused()) {
             LOGGER.debug("Profile '{}' not paused by user, current state: {}", profileName, current);
             return;
         }
 
         // Resume to SYNCING; reportSyncProgress will correct if already caught up
-        if (info.setOperatingState(NodeOperatingState.SYNCING)) {
-            info.setSyncStartTime(System.currentTimeMillis());
-            info.setStatusMessage("Resuming sync...");
-            notifyOperatingStateChanged(info, current, NodeOperatingState.SYNCING);
+        if (runtime.setOperatingState(NodeOperatingState.SYNCING)) {
+            runtime.setSyncStartTime(System.currentTimeMillis());
+            runtime.setStatusMessage("Resuming sync...");
+            notifyOperatingStateChanged(profile, current, NodeOperatingState.SYNCING);
             LOGGER.info("Profile '{}' sync resumed by user", profileName);
         }
     }
@@ -539,28 +846,29 @@ public class NodeLifecycleManager {
      * @param reason      description of the system operation causing the pause (for logging)
      */
     public void pauseSyncBySystem(String profileName, String reason) {
-        NodeInstanceInfo info = getProfileStatus(profileName);
-        if (info == null) {
+        NodeProfile profile = getProfile(profileName);
+        if (profile == null) {
             LOGGER.warn("Cannot system-pause sync: profile '{}' not found", profileName);
             return;
         }
 
-        NodeOperatingState current = info.getOperatingState();
+        NodeProfileRuntime runtime = profile.getRuntime();
+        NodeOperatingState current = runtime.getOperatingState();
         if (current.isSystemPaused()) {
             LOGGER.debug("Profile '{}' already system-paused", profileName);
             return;
         }
 
         NodeOperatingState previous = current;
-        if (info.setOperatingState(NodeOperatingState.PAUSED_SYSTEM)) {
+        if (runtime.setOperatingState(NodeOperatingState.PAUSED_SYSTEM)) {
             // If we were syncing, accumulate partial session
             if (current == NodeOperatingState.SYNCING) {
-                long partialSession = System.currentTimeMillis() - info.getSyncStartTime();
-                info.setAccumulatedSyncTimeMs(info.getAccumulatedSyncTimeMs() + partialSession);
-                info.setSyncEndTime(System.currentTimeMillis());
+                long partialSession = System.currentTimeMillis() - runtime.getSyncStartTime();
+                runtime.setAccumulatedSyncTimeMs(runtime.getAccumulatedSyncTimeMs() + partialSession);
+                runtime.setSyncEndTime(System.currentTimeMillis());
             }
-            info.setStatusMessage("System pause: " + reason);
-            notifyOperatingStateChanged(info, previous, NodeOperatingState.PAUSED_SYSTEM);
+            runtime.setStatusMessage("System pause: " + reason);
+            notifyOperatingStateChanged(profile, previous, NodeOperatingState.PAUSED_SYSTEM);
             LOGGER.info("Profile '{}' sync paused by system: {}", profileName, reason);
         }
     }
@@ -568,37 +876,46 @@ public class NodeLifecycleManager {
     /**
      * Resumes synchronization after a system operation completes.
      * Restores to the appropriate substate based on current sync lag.
+     * <p>
+     * Note: We cannot use {@link #evaluateSyncSubstate(NodeProfileRuntime, long)} directly
+     * because it treats PAUSED_SYSTEM as a default case (no transition). Instead we evaluate
+     * the restored state using hysteresis thresholds against the current missing blocks.
+     * </p>
      *
      * @param profileName the node profile to resume
      */
     public void resumeSyncBySystem(String profileName) {
-        NodeInstanceInfo info = getProfileStatus(profileName);
-        if (info == null) {
+        NodeProfile profile = getProfile(profileName);
+        if (profile == null) {
             LOGGER.warn("Cannot system-resume sync: profile '{}' not found", profileName);
             return;
         }
 
-        NodeOperatingState current = info.getOperatingState();
+        NodeProfileRuntime runtime = profile.getRuntime();
+        NodeOperatingState current = runtime.getOperatingState();
         if (!current.isSystemPaused()) {
             LOGGER.debug("Profile '{}' not system-paused, current state: {}", profileName, current);
             return;
         }
 
-        // Restore based on current missing blocks (same logic as reportSyncProgress)
-        long missingBlocks = info.getMissingBlocks();
-        NodeOperatingState restoredState = evaluateSyncSubstate(info, missingBlocks);
-        // Temporarily set current to allow transition from PAUSED_SYSTEM
-        info.forceOperatingState(current); // no-op, just ensure consistency
+        // Restore based on current missing blocks using hysteresis thresholds
+        // (evaluateSyncSubstate cannot be used here because PAUSED_SYSTEM falls through
+        // its default case and returns the paused state unchanged)
+        long missingBlocks = runtime.getMissingBlocks();
+        int thresholdHi = runtime.getHysteresisThresholdHi();
+        NodeOperatingState restoredState = (missingBlocks > thresholdHi)
+                ? NodeOperatingState.SYNCING
+                : NodeOperatingState.SYNC_IDLE;
 
-        if (info.setOperatingState(restoredState)) {
+        if (runtime.setOperatingState(restoredState)) {
             if (restoredState == NodeOperatingState.SYNCING) {
-                info.setSyncStartTime(System.currentTimeMillis());
-                info.setStatusMessage("Sync resumed... " + missingBlocks + " blocks behind");
+                runtime.setSyncStartTime(System.currentTimeMillis());
+                runtime.setStatusMessage("Sync resumed... " + missingBlocks + " blocks behind");
             } else {
-                info.setStatusMessage("Fully synchronized");
+                runtime.setStatusMessage("Fully synchronized");
             }
-            notifyOperatingStateChanged(info, current, restoredState);
-            LOGGER.info("Profile '{}' sync resumed by system: PAUSED_SYSTEM → {}", profileName, restoredState);
+            notifyOperatingStateChanged(profile, current, restoredState);
+            LOGGER.info("Profile '{}' sync resumed by system: PAUSED_SYSTEM -> {}", profileName, restoredState);
         }
     }
 
@@ -629,15 +946,15 @@ public class NodeLifecycleManager {
      */
     public static synchronized void resetInstance() {
         if (instance != null) {
-            instance.getAllProfiles().forEach(info -> {
+            instance.getAllProfiles().forEach(profile -> {
                 try {
                     // Only stop profiles with an active context to avoid NPE
                     // when Signum was never initialized
-                    if (info.getCoreContext() != null) {
-                        instance.stopProfile(info.getProfileName());
+                    if (profile.getRuntime().getCoreContext() != null) {
+                        instance.stopProfile(profile.getName());
                     }
                 } catch (Exception e) {
-                    LOGGER.warn("Failed to stop profile {} during reset", info.getProfileName(), e);
+                    LOGGER.warn("Failed to stop profile {} during reset", profile.getName(), e);
                 }
             });
         }
@@ -645,42 +962,42 @@ public class NodeLifecycleManager {
         NodeCoreContextManager.resetInstance();
     }
 
-    private void notifyStateChanged(NodeInstanceInfo info, NodeLifecycleState oldState, NodeLifecycleState newState) {
+    private void notifyStateChanged(NodeProfile profile, NodeLifecycleState oldState, NodeLifecycleState newState) {
         for (LifecycleListener listener : listeners) {
             try {
-                listener.onStateChanged(info, oldState, newState);
+                listener.onStateChanged(profile, oldState, newState);
             } catch (Exception e) {
                 LOGGER.error("Error notifying listener {}", listener.getClass().getSimpleName(), e);
             }
         }
     }
 
-    private void notifyOperatingStateChanged(NodeInstanceInfo info,
+    private void notifyOperatingStateChanged(NodeProfile profile,
                                              NodeOperatingState oldSubstate,
                                              NodeOperatingState newSubstate) {
         for (LifecycleListener listener : listeners) {
             try {
-                listener.onOperatingStateChanged(info, oldSubstate, newSubstate);
+                listener.onOperatingStateChanged(profile, oldSubstate, newSubstate);
             } catch (Exception e) {
                 LOGGER.error("Error notifying operating state change to {}", listener.getClass().getSimpleName(), e);
             }
         }
     }
 
-    private void notifyStatusMessage(NodeInstanceInfo info, String message) {
+    private void notifyStatusMessage(NodeProfile profile, String message) {
         for (LifecycleListener listener : listeners) {
             try {
-                listener.onStatusMessage(info, message);
+                listener.onStatusMessage(profile, message);
             } catch (Exception e) {
                 LOGGER.error("Error notifying listener {}", listener.getClass().getSimpleName(), e);
             }
         }
     }
 
-    private void notifyError(NodeInstanceInfo info, String errorMessage) {
+    private void notifyError(NodeProfile profile, String errorMessage) {
         for (LifecycleListener listener : listeners) {
             try {
-                listener.onError(info, errorMessage);
+                listener.onError(profile, errorMessage);
             } catch (Exception e) {
                 LOGGER.error("Error notifying listener {}", listener.getClass().getSimpleName(), e);
             }
@@ -691,10 +1008,10 @@ public class NodeLifecycleManager {
      * Notifies all listeners that a profile is about to be stopped.
      * Listeners can use this to save GUI state, persist settings, etc.
      */
-    private void notifyShutdownRequested(NodeInstanceInfo info) {
+    private void notifyShutdownRequested(NodeProfile profile) {
         for (LifecycleListener listener : listeners) {
             try {
-                listener.onShutdownRequested(info);
+                listener.onShutdownRequested(profile);
             } catch (Exception e) {
                 LOGGER.error("Error notifying shutdown requested to {}", listener.getClass().getSimpleName(), e);
             }

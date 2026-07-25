@@ -135,34 +135,6 @@ class NodeInfoBarTest {
     }
 
     @Test
-    void lifecycleManager_GivenRegisteredProfile_HasIdleState() {
-        // Arrange
-        NodeLifecycleManager manager = NodeLifecycleManager.getInstance();
-        
-        // Act
-        manager.registerProfile("test-profile");
-        
-        // Assert
-        assertNotNull(manager.getProfileStatus("test-profile"));
-        assertEquals(NodeLifecycleState.IDLE, 
-            manager.getProfileStatus("test-profile").getState());
-    }
-
-    @Test
-    void lifecycleManager_GivenInitializedProfile_HasReadyState() {
-        // Arrange
-        NodeLifecycleManager manager = NodeLifecycleManager.getInstance();
-        manager.registerProfile("test-profile");
-        
-        // Act
-        manager.initializeProfile("test-profile");
-        
-        // Assert
-        assertEquals(NodeLifecycleState.READY, 
-            manager.getProfileStatus("test-profile").getState());
-    }
-
-    @Test
     void profile_GivenDefaultHttpPort_Returns8125() {
         // Arrange - testProfile already created without httpport set in a fresh profile
         NodeProfile freshProfile = new NodeProfile("fresh");

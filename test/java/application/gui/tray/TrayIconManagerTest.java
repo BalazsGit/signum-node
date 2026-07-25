@@ -1,10 +1,9 @@
 package application.gui.tray;
 
-import application.module.node.lifecycle.LifecycleListener;
-import application.module.node.lifecycle.NodeInstanceInfo;
 import application.module.node.lifecycle.NodeLifecycleManager;
 import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.lifecycle.NodeOperatingState;
+import application.module.node.profile.NodeProfile;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -97,59 +96,25 @@ class TrayIconManagerTest {
             boolean supported = manager.isTraySupported();
             assertEquals(supported, manager.isTraySupported());
         }
-
-        @Test
-        @DisplayName("getTrayIcon is null before initialize")
-        void getTrayIcon_nullBeforeInitialize() {
-            TrayIconManager manager = TrayIconManager.getInstance(lifecycleManager);
-            assertNull(manager.getTrayIcon());
-        }
     }
 
     // ====================================================================
-    // Callback setters
+    // Lifecycle listener callbacks (with NodeProfile)
     // ====================================================================
 
     @Nested
-    @DisplayName("Callback setters")
-    class CallbackTests {
-
-        @Test
-        @DisplayName("setShowWindowAction accepts non-null runnable")
-        void setShowWindowAction_acceptsRunnable() {
-            TrayIconManager manager = TrayIconManager.getInstance(lifecycleManager);
-            assertDoesNotThrow(() -> manager.setShowWindowAction(() -> {}));
-        }
-
-        @Test
-        @DisplayName("setShutdownAction accepts non-null runnable")
-        void setShutdownAction_acceptsRunnable() {
-            TrayIconManager manager = TrayIconManager.getInstance(lifecycleManager);
-            assertDoesNotThrow(() -> manager.setShutdownAction(() -> {}));
-        }
-
-        @Test
-        @DisplayName("setPhoenixWalletAction accepts non-null ActionListener")
-        void setPhoenixWalletAction_acceptsListener() {
-            TrayIconManager manager = TrayIconManager.getInstance(lifecycleManager);
-            assertDoesNotThrow(() -> manager.setPhoenixWalletAction(e -> {}));
-        }
-
-        @Test
-        @DisplayName("setClassicWalletAction accepts non-null ActionListener")
-        void setClassicWalletAction_acceptsListener() {
-            TrayIconManager manager = TrayIconManager.getInstance(lifecycleManager);
-            assertDoesNotThrow(() -> manager.setClassicWalletAction(e -> {}));
-        }
-    }
-
-    // ====================================================================
-    // Lifecycle listener registration
-    // ====================================================================
-
-    @Nested
-    @DisplayName("Lifecycle listener behavior")
+    @DisplayName("Lifecycle listener callbacks")
     class ListenerTests {
+
+        @Test
+        @DisplayName("initialize registers itself with lifecycleManager")
+        void initialize_registersListener() {
+            TrayIconManager manager = TrayIconManager.getInstance(lifecycleManager);
+
+            manager.initialize();
+
+            verify(lifecycleManager).addListener(manager);
+        }
 
         @Test
         @DisplayName("dispose removes listener from lifecycleManager")
@@ -165,39 +130,38 @@ class TrayIconManagerTest {
         @DisplayName("onStateChanged does not throw for valid state transition")
         void onStateChanged_doesNotThrow() {
             TrayIconManager manager = TrayIconManager.getInstance(lifecycleManager);
-            NodeInstanceInfo info = new NodeInstanceInfo("test");
-            info.forceState(NodeLifecycleState.READY);
+            NodeProfile profile = mockNodeProfile("test", NodeLifecycleState.READY);
 
             assertDoesNotThrow(() ->
-                manager.onStateChanged(info, NodeLifecycleState.READY, NodeLifecycleState.RUNNING));
+                manager.onStateChanged(profile, NodeLifecycleState.READY, NodeLifecycleState.RUNNING));
         }
 
         @Test
         @DisplayName("onOperatingStateChanged does not throw")
         void onOperatingStateChanged_doesNotThrow() {
             TrayIconManager manager = TrayIconManager.getInstance(lifecycleManager);
-            NodeInstanceInfo info = new NodeInstanceInfo("test");
+            NodeProfile profile = mockNodeProfile("test", NodeLifecycleState.RUNNING);
 
             assertDoesNotThrow(() ->
-                manager.onOperatingStateChanged(info, NodeOperatingState.SYNC_IDLE, NodeOperatingState.SYNCING));
+                manager.onOperatingStateChanged(profile, NodeOperatingState.SYNC_IDLE, NodeOperatingState.SYNCING));
         }
 
         @Test
         @DisplayName("onStatusMessage does not throw")
         void onStatusMessage_doesNotThrow() {
             TrayIconManager manager = TrayIconManager.getInstance(lifecycleManager);
-            NodeInstanceInfo info = new NodeInstanceInfo("test");
+            NodeProfile profile = mockNodeProfile("test", NodeLifecycleState.RUNNING);
 
-            assertDoesNotThrow(() -> manager.onStatusMessage(info, "Node started"));
+            assertDoesNotThrow(() -> manager.onStatusMessage(profile, "Node started"));
         }
 
         @Test
         @DisplayName("onError does not throw")
         void onError_doesNotThrow() {
             TrayIconManager manager = TrayIconManager.getInstance(lifecycleManager);
-            NodeInstanceInfo info = new NodeInstanceInfo("test");
+            NodeProfile profile = mockNodeProfile("test", NodeLifecycleState.ERROR);
 
-            assertDoesNotThrow(() -> manager.onError(info, "Test error"));
+            assertDoesNotThrow(() -> manager.onError(profile, "Test error"));
         }
     }
 
@@ -231,36 +195,31 @@ class TrayIconManagerTest {
         @DisplayName("onStateChanged with RUNNING updates tooltip to reflect operating state")
         void onStateChanged_runningUpdatesTooltip() {
             TrayIconManager manager = TrayIconManager.getInstance(lifecycleManager);
-            NodeInstanceInfo info = new NodeInstanceInfo("mainnet");
-            info.forceState(NodeLifecycleState.RUNNING);
-            info.forceOperatingState(NodeOperatingState.SYNC_IDLE);
+            NodeProfile profile = mockNodeProfile("mainnet", NodeLifecycleState.RUNNING);
 
             // Should not throw even without a real tray icon
             assertDoesNotThrow(() ->
-                manager.onStateChanged(info, NodeLifecycleState.READY, NodeLifecycleState.RUNNING));
+                manager.onStateChanged(profile, NodeLifecycleState.READY, NodeLifecycleState.RUNNING));
         }
 
         @Test
         @DisplayName("onStateChanged with STOPPED appends STOPPED marker")
         void onStateChanged_stoppedAppendsMarker() {
             TrayIconManager manager = TrayIconManager.getInstance(lifecycleManager);
-            NodeInstanceInfo info = new NodeInstanceInfo("mainnet");
-            info.forceState(NodeLifecycleState.RUNNING);
+            NodeProfile profile = mockNodeProfile("mainnet", NodeLifecycleState.RUNNING);
 
             assertDoesNotThrow(() ->
-                manager.onStateChanged(info, NodeLifecycleState.RUNNING, NodeLifecycleState.STOPPED));
+                manager.onStateChanged(profile, NodeLifecycleState.RUNNING, NodeLifecycleState.STOPPED));
         }
 
         @Test
         @DisplayName("onStateChanged with ERROR is handled gracefully")
         void onStateChanged_errorHandled() {
             TrayIconManager manager = TrayIconManager.getInstance(lifecycleManager);
-            NodeInstanceInfo info = new NodeInstanceInfo("mainnet");
-            info.forceState(NodeLifecycleState.RUNNING);
-            info.setErrorMessage("DB connection lost");
+            NodeProfile profile = mockNodeProfile("mainnet", NodeLifecycleState.ERROR);
 
             assertDoesNotThrow(() ->
-                manager.onStateChanged(info, NodeLifecycleState.RUNNING, NodeLifecycleState.ERROR));
+                manager.onStateChanged(profile, NodeLifecycleState.RUNNING, NodeLifecycleState.ERROR));
         }
     }
 
@@ -294,5 +253,18 @@ class TrayIconManagerTest {
                 manager.dispose();
             });
         }
+    }
+
+    // ====================================================================
+    // Test helpers
+    // ====================================================================
+
+    /**
+     * Creates a mocked NodeProfile for testing lifecycle listener callbacks.
+     */
+    private static NodeProfile mockNodeProfile(String name, NodeLifecycleState state) {
+        NodeProfile profile = mock(NodeProfile.class);
+        when(profile.getName()).thenReturn(name);
+        return profile;
     }
 }

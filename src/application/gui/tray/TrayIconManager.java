@@ -1,10 +1,10 @@
 package application.gui.tray;
 
 import application.module.node.lifecycle.LifecycleListener;
-import application.module.node.lifecycle.NodeInstanceInfo;
 import application.module.node.lifecycle.NodeLifecycleManager;
 import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.lifecycle.NodeOperatingState;
+import application.module.node.profile.NodeProfile;
 
 import java.awt.Image;
 import java.awt.MenuItem;
@@ -226,34 +226,34 @@ public class TrayIconManager implements LifecycleListener {
     // ====================================================================
 
     @Override
-    public void onStateChanged(NodeInstanceInfo info, NodeLifecycleState oldState, NodeLifecycleState newState) {
-        SwingUtilities.invokeLater(() -> updateTrayForState(info, newState));
+    public void onStateChanged(NodeProfile profile, NodeLifecycleState oldState, NodeLifecycleState newState) {
+        SwingUtilities.invokeLater(() -> updateTrayForState(profile, newState));
     }
 
     @Override
-    public void onOperatingStateChanged(NodeInstanceInfo info,
+    public void onOperatingStateChanged(NodeProfile profile,
                                         NodeOperatingState oldSubstate,
                                         NodeOperatingState newSubstate) {
-        SwingUtilities.invokeLater(() -> updateTrayTooltip(info, newSubstate));
+        SwingUtilities.invokeLater(() -> updateTrayTooltip(profile, newSubstate));
     }
 
     @Override
-    public void onStatusMessage(NodeInstanceInfo info, String message) {
+    public void onStatusMessage(NodeProfile profile, String message) {
         // Optionally show status messages via tray tooltip
         SwingUtilities.invokeLater(() -> {
             if (trayIcon != null) {
-                String tooltip = buildTooltip(info);
+                String tooltip = buildTooltip(profile);
                 trayIcon.setToolTip(tooltip);
             }
         });
     }
 
     @Override
-    public void onError(NodeInstanceInfo info, String errorMessage) {
+    public void onError(NodeProfile profile, String errorMessage) {
         SwingUtilities.invokeLater(() -> {
             if (trayIcon != null) {
                 trayIcon.displayMessage(
-                        "Signum Error: " + info.getProfileName(),
+                        "Signum Error: " + profile.getName(),
                         errorMessage,
                         MessageType.ERROR);
             }
@@ -264,10 +264,12 @@ public class TrayIconManager implements LifecycleListener {
     // Tray state update helpers
     // ====================================================================
 
-    private void updateTrayForState(NodeInstanceInfo info, NodeLifecycleState newState) {
+    private void updateTrayForState(NodeProfile profile, NodeLifecycleState newState) {
         if (trayIcon == null) {
             return;
         }
+
+        var runtime = profile.getRuntime();
 
         if (newState == NodeLifecycleState.STOPPED || newState == NodeLifecycleState.ERROR) {
             String tooltip = trayIcon.getToolTip();
@@ -275,33 +277,35 @@ public class TrayIconManager implements LifecycleListener {
                 trayIcon.setToolTip(tooltip + " (STOPPED)");
             }
         } else if (newState == NodeLifecycleState.RUNNING) {
-            updateTrayTooltip(info, info.getOperatingState());
+            updateTrayTooltip(profile, runtime.getOperatingState());
         }
     }
 
-    private void updateTrayTooltip(NodeInstanceInfo info, NodeOperatingState operatingState) {
+    private void updateTrayTooltip(NodeProfile profile, NodeOperatingState operatingState) {
         if (trayIcon == null) {
             return;
         }
-        trayIcon.setToolTip(buildTooltip(info));
+        trayIcon.setToolTip(buildTooltip(profile));
     }
 
-    private String buildTooltip(NodeInstanceInfo info) {
+    private String buildTooltip(NodeProfile profile) {
+        var runtime = profile.getRuntime();
+
         StringBuilder sb = new StringBuilder();
         sb.append(DEFAULT_TOOLTIP);
-        sb.append(" [").append(info.getProfileName()).append("]");
+        sb.append(" [").append(profile.getName()).append("]");
 
-        NodeLifecycleState state = info.getState();
+        NodeLifecycleState state = runtime.getLifecycleState();
         if (state.isActive()) {
-            NodeOperatingState substate = info.getOperatingState();
+            NodeOperatingState substate = runtime.getOperatingState();
             sb.append(" - ").append(substate.getDescription());
-            if (substate == NodeOperatingState.SYNCING && info.getMissingBlocks() > 0) {
-                sb.append(" (").append(info.getMissingBlocks()).append(" blocks behind)");
+            if (substate == NodeOperatingState.SYNCING && runtime.getMissingBlocks() > 0) {
+                sb.append(" (").append(runtime.getMissingBlocks()).append(" blocks behind)");
             }
         } else if (state == NodeLifecycleState.STOPPED) {
             sb.append(" - STOPPED");
         } else if (state == NodeLifecycleState.ERROR) {
-            sb.append(" - ERROR: ").append(info.getErrorMessage());
+            sb.append(" - ERROR: ").append(runtime.getErrorMessage());
         }
 
         return sb.toString();

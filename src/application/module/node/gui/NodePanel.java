@@ -4,10 +4,10 @@ import application.module.appearance.AppearanceModule;
 import application.module.node.instance.NodeCoreContext;
 import application.module.node.instance.NodeCoreContextManager;
 import application.module.node.lifecycle.LifecycleListener;
-import application.module.node.lifecycle.NodeInstanceInfo;
 import application.module.node.lifecycle.NodeLifecycleManager;
 import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.profile.NodeProfile;
+import application.module.node.profile.ProfileConfig;
 import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiIcons;
 import application.utils.gui.GuiUtils;
@@ -27,15 +27,19 @@ import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
  * Main Node panel that acts as a JTabbedPane container.
  * Dynamically loads profiles asynchronously with progress feedback.
  * Heavy NodeProfilePanel instances are lazy-loaded on first tab selection.
- *
+ * <p>
  * Integrates with NodeLifecycleManager for push-based lifecycle notifications.
+ * Supports user-defined tab order via ProfileConfig.tabOrder (saved to profiles.json).
  */
 @SuppressWarnings("serial")
 public class NodePanel extends JPanel implements LifecycleListener {
@@ -54,6 +58,8 @@ public class NodePanel extends JPanel implements LifecycleListener {
     private final Map<String, Integer> profileNameToTabIndex = new LinkedHashMap<>();
     /** Singleton lifecycle manager */
     private final NodeLifecycleManager lifecycleManager = NodeLifecycleManager.getInstance();
+    /** ProfileConfig for tab order management */
+    private final ProfileConfig profileConfig = new ProfileConfig();
 
     /**
      * Creates the main Node panel with dynamic profile loading and progress feedback.
@@ -199,6 +205,10 @@ public class NodePanel extends JPanel implements LifecycleListener {
 
                 lifecycleManager.startAutostartProfiles();
 
+                // Apply tab order from ProfileConfig (user-defined or default filesystem order)
+                final NodeProfile[] loadedProfiles = profiles;
+                SwingUtilities.invokeLater(() -> applyTabOrder(loadedProfiles));
+
                 // Final update - ready state
                 SwingUtilities.invokeLater(() -> {
                     updateProgress(100, "Ready - " + total + " profiles loaded");
@@ -294,50 +304,50 @@ public class NodePanel extends JPanel implements LifecycleListener {
     // ====================================================================
 
     @Override
-    public void onStateChanged(NodeInstanceInfo instanceInfo, NodeLifecycleState oldState, NodeLifecycleState newState) {
+    public void onStateChanged(NodeProfile profile, NodeLifecycleState oldState, NodeLifecycleState newState) {
         SwingUtilities.invokeLater(() -> {
-            NodeProfilePanel panel = loadedProfilePanels.get(instanceInfo.getProfileName());
+            NodeProfilePanel panel = loadedProfilePanels.get(profile.getName());
             if (panel != null) {
                 panel.onNodeStateChanged(oldState, newState);
             }
-            updateTabIcon(instanceInfo.getProfileName(), newState);
-            LOGGER.info("State change: {} -> {} for profile {}", oldState, newState, instanceInfo.getProfileName());
+            updateTabIcon(profile.getName(), newState);
+            LOGGER.info("State change: {} -> {} for profile {}", oldState, newState, profile.getName());
         });
     }
 
     @Override
-    public void onStatusMessage(NodeInstanceInfo instanceInfo, String message) {
+    public void onStatusMessage(NodeProfile profile, String message) {
         SwingUtilities.invokeLater(() -> {
-            NodeProfilePanel panel = loadedProfilePanels.get(instanceInfo.getProfileName());
+            NodeProfilePanel panel = loadedProfilePanels.get(profile.getName());
             if (panel != null) {
                 panel.onStatusMessage(message);
             }
-            LOGGER.debug("Status [{}]: {}", instanceInfo.getProfileName(), message);
+            LOGGER.debug("Status [{}]: {}", profile.getName(), message);
         });
     }
 
     @Override
-    public void onError(NodeInstanceInfo instanceInfo, String errorMessage) {
+    public void onError(NodeProfile profile, String errorMessage) {
         SwingUtilities.invokeLater(() -> {
-            NodeProfilePanel panel = loadedProfilePanels.get(instanceInfo.getProfileName());
+            NodeProfilePanel panel = loadedProfilePanels.get(profile.getName());
             if (panel != null) {
                 panel.onError(errorMessage);
             }
-            LOGGER.error("Error [{}]: {}", instanceInfo.getProfileName(), errorMessage);
+            LOGGER.error("Error [{}]: {}", profile.getName(), errorMessage);
         });
     }
 
     @Override
-    public void onShutdownRequested(NodeInstanceInfo instanceInfo) {
+    public void onShutdownRequested(NodeProfile profile) {
         // Forward shutdown request to the corresponding profile panel so it can
         // save GUI settings (metrics panel state, command input visibility, etc.)
-        NodeProfilePanel panel = loadedProfilePanels.get(instanceInfo.getProfileName());
+        NodeProfilePanel panel = loadedProfilePanels.get(profile.getName());
         if (panel != null && panel.getConsolePanel() != null) {
             panel.getConsolePanel().saveGuiSettings();
-            LOGGER.info("Shutdown requested for profile '{}' — GUI settings saved", instanceInfo.getProfileName());
+            LOGGER.info("Shutdown requested for profile '{}' - GUI settings saved", profile.getName());
         } else {
             LOGGER.debug("Shutdown requested for profile '{}', no console panel found to save settings",
-                    instanceInfo.getProfileName());
+                    profile.getName());
         }
     }
 
@@ -391,10 +401,139 @@ public class NodePanel extends JPanel implements LifecycleListener {
         // Keep the profile name as the tab title (no Unicode suffixes)
         profileTabbedPane.setTitleAt(tabIndex, profileName);
         profileTabbedPane.setIconAt(tabIndex, icon);
-        
+
         // Set tooltip with node state information for hover display
         String tooltip = "Profile: " + profileName + "\nNode State: " + state.getDescription();
         profileTabbedPane.setToolTipTextAt(tabIndex, tooltip);
+    }
+
+    // ====================================================================
+    // Tab Order Management (based on ProfileConfig.tabOrder / guiSettings)
+    // ====================================================================
+
+    /**
+     * Applies tab order to the profile tabbed pane.
+     * <p>
+     * Priority: User-defined order from ProfileConfig.tabOrder > filesystem discovery order.
+     * When user reorders tabs (drag-drop), the new order is persisted via ProfileConfig.setTabOrder().
+     * <p>
+     * This method rearranges existing tabs in the tabbed pane to match the desired order,
+     * updating internal tracking maps accordingly.
+     *
+     * @param profiles the array of discovered NodeProfiles (used as fallback order)
+     */
+    private void applyTabOrder(NodeProfile[] profiles) {
+        // Build a set of all loaded profile names for quick lookup
+        List<String> desiredOrder = new ArrayList<>();
+
+        // First try user-defined order from ProfileConfig
+        List<String> userOrder = profileConfig.getTabOrder();
+        if (userOrder != null && !userOrder.isEmpty()) {
+            // Filter to only include profiles that actually exist
+            for (String name : userOrder) {
+                if (placeholderReplaced.containsKey(name)) {
+                    desiredOrder.add(name);
+                }
+            }
+            // Add any remaining profiles not in user order (at end, in filesystem order)
+            for (NodeProfile p : profiles) {
+                if (!desiredOrder.contains(p.getName())) {
+                    desiredOrder.add(p.getName());
+                }
+            }
+        } else {
+            // No user-defined order: use filesystem discovery order
+            for (NodeProfile p : profiles) {
+                desiredOrder.add(p.getName());
+            }
+        }
+
+        if (desiredOrder.isEmpty()) {
+            return; // Nothing to reorder
+        }
+
+        LOGGER.info("Applying tab order: {}", desiredOrder);
+
+        // Save this order back to ProfileConfig so user's preferred order is persisted
+        profileConfig.setTabOrder(desiredOrder);
+
+        // Now rearrange tabs in the tabbed pane to match desiredOrder
+        rearrangeTabs(desiredOrder);
+    }
+
+    /**
+     * Rearranges the tabs in the tabbed pane to match the desired order.
+     * Tabs not in the desired list are appended at the end in their current position.
+     *
+     * @param desiredOrder ordered list of profile names
+     */
+    private void rearrangeTabs(List<String> desiredOrder) {
+        int tabCount = profileTabbedPane.getTabCount();
+        if (tabCount == 0) {
+            return;
+        }
+
+        // Build current order from tabbed pane
+        List<String> currentOrder = new ArrayList<>();
+        for (int i = 0; i < tabCount; i++) {
+            currentOrder.add(profileTabbedPane.getTitleAt(i));
+        }
+
+        // If already in desired order, skip
+        if (currentOrder.equals(desiredOrder)) {
+            LOGGER.debug("Tab order already matches desired order");
+            return;
+        }
+
+        LOGGER.info("Rearranging tabs from {} to {}", currentOrder, desiredOrder);
+
+        // Collect all tab components and titles
+        List<Component> components = new ArrayList<>();
+        List<String> titles = new ArrayList<>();
+        for (int i = 0; i < tabCount; i++) {
+            components.add(profileTabbedPane.getComponentAt(i));
+            titles.add(profileTabbedPane.getTitleAt(i));
+            // Also collect tooltips and icons for preservation
+        }
+
+        // Clear all tabs
+        while (profileTabbedPane.getTabCount() > 0) {
+            profileTabbedPane.removeTabAt(0);
+        }
+
+        // Rebuild in desired order
+        Map<String, Integer> newIndexMap = new LinkedHashMap<>();
+        int index = 0;
+
+        // First add tabs in desired order
+        for (String name : desiredOrder) {
+            int origIndex = currentOrder.indexOf(name);
+            if (origIndex >= 0) {
+                profileTabbedPane.addTab(name, components.get(origIndex));
+                newIndexMap.put(name, index++);
+                // Remove from current order so we don't add it again
+                currentOrder.remove(Integer.valueOf(origIndex));
+                components.remove(Integer.valueOf(origIndex));
+            }
+        }
+
+        // Add any remaining tabs (shouldn't happen if desiredOrder is complete)
+        for (int i = 0; i < titles.size(); i++) {
+            String name = titles.get(i);
+            if (!newIndexMap.containsKey(name)) {
+                profileTabbedPane.addTab(name, components.get(i));
+                newIndexMap.put(name, index++);
+            }
+        }
+
+        // Update internal tracking map
+        this.profileNameToTabIndex.clear();
+        for (int i = 0; i < profileTabbedPane.getTabCount(); i++) {
+            String name = profileTabbedPane.getTitleAt(i);
+            this.profileNameToTabIndex.put(name, i);
+        }
+
+        LOGGER.debug("Tab order rearranged. New mapping: {}", newIndexMap);
     }
 
     // ====================================================================

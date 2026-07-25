@@ -6,6 +6,7 @@ import application.api.Shutdownable;
 import application.gui.shell.MainFrame;
 import application.gui.shell.TabManager;
 import application.launcher.Launcher;
+import application.utils.gui.GuiManager;
 
 import javax.swing.JComponent;
 import javax.swing.SwingUtilities;
@@ -82,7 +83,19 @@ public class ApplicationKernel {
             }
         }
 
-        // 4. Add JVM shutdown hook as fallback safety net
+        // 4. Register completion hook to persist GUI settings before JVM exit
+        //    This ensures GuiManager settings (tabLayoutPolicy, colorOverrides) are saved
+        //    regardless of whether the user clicked Shutdown or the process is killed
+        shutdown.addOnCompleteHook(() -> {
+            try {
+                GuiManager.getInstance().saveToJson();
+                logger.info("GUI settings persisted on shutdown via completion hook");
+            } catch (Exception e) {
+                logger.warn("Failed to save GUI settings on shutdown", e);
+            }
+        });
+
+        // 5. Add JVM shutdown hook as fallback safety net
         //    If the application is killed without going through the Shutdown button,
         //    this hook ensures modules still get their stop() called
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -90,7 +103,7 @@ public class ApplicationKernel {
             shutdown.executeShutdownSequence();
         }, "ApplicationShutdown-Hook"));
 
-        // 5. Launch UI in EDT (Event Dispatch Thread) if not headless
+        // 6. Launch UI in EDT (Event Dispatch Thread) if not headless
         if (!isHeadless) {
             SwingUtilities.invokeLater(() -> {
                 logger.info("Starting GUI Shell...");

@@ -5,12 +5,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Verifies that NodeLifecycleManager.startProfile() wraps the startup thread
@@ -38,7 +33,8 @@ class NodeLifecycleManagerMdcTest {
     void startProfile_CleansUpMdcContext() throws Exception {
         // Arrange: register a profile so startProfile does not fail silently
         NodeLifecycleManager manager = NodeLifecycleManager.getInstance();
-        manager.registerProfile("test-profile");
+        NodeProfile profile = new NodeProfile("test-profile");
+        manager.addProfile(profile);
         manager.initializeProfile("test-profile");
 
         // Act: trigger startProfile (it will fail fast since no real DB, but that's fine)
@@ -48,18 +44,19 @@ class NodeLifecycleManagerMdcTest {
         Thread.sleep(2000);
 
         // Assert: MDC on this (main) thread must be clean
-        assertEquals(null, application.utils.logging.ProfileThreadContext.getModuleId());
-        assertEquals(null, application.utils.logging.ProfileThreadContext.getProfile());
+        assertNull(application.utils.logging.ProfileThreadContext.getModuleId());
+        assertNull(application.utils.logging.ProfileThreadContext.getProfile());
     }
 
     /**
-     * Integration-style test: use reflection to verify the thread was created.
+     * Integration-style test: verify the thread was created.
      */
     @Test
     void startProfile_CreatesNamedStarterThread() throws Exception {
         // Arrange
         NodeLifecycleManager manager = NodeLifecycleManager.getInstance();
-        manager.registerProfile("thread-test");
+        NodeProfile profile = new NodeProfile("thread-test");
+        manager.addProfile(profile);
         manager.initializeProfile("thread-test");
 
         String profileName = "thread-test";

@@ -1,7 +1,6 @@
 package application.module.node.gui;
 
 import application.module.appearance.AppearanceModule;
-import application.module.node.lifecycle.NodeInstanceInfo;
 import application.module.node.lifecycle.NodeLifecycleManager;
 import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.profile.NodeProfile;
@@ -498,8 +497,10 @@ public class NodeToolbar extends JPanel {
      */
     private void handleStartStopToggle() {
         NodeLifecycleManager manager = NodeLifecycleManager.getInstance();
-        NodeInstanceInfo info = manager.getProfileStatus(profile.getName());
-        NodeLifecycleState state = (info != null) ? info.getState() : NodeLifecycleState.STOPPED;
+        NodeProfile profileFromManager = manager.getProfile(profile.getName());
+        NodeLifecycleState state = (profileFromManager != null)
+                ? profileFromManager.getRuntime().getLifecycleState()
+                : NodeLifecycleState.STOPPED;
 
         if (state == NodeLifecycleState.RUNNING || state == NodeLifecycleState.PAUSED) {
             // Currently running/paused -> stop

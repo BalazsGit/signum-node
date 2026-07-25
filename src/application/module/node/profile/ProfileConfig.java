@@ -2,14 +2,12 @@ package application.module.node.profile;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.google.gson.reflect.TypeToken;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.lang.reflect.Type;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collections;
@@ -19,8 +17,21 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * Loads and manages profile configuration from profiles.json.
- * Handles autostart, enabled status, and description per profile.
+ * Loads and manages profile configuration from {@code profiles.json}.
+ * <p>
+ * <b>Single Source of Truth Migration:</b> Per-profile settings such as
+ * {@code autoStart}, {@code enabled}, {@code description} and {@code propertiesFile}
+ * have been migrated to the NodeProfile's {@code .properties} file. This class
+ * now only manages cross-profile configuration that does not belong in individual
+ * profile files:
+ * <ul>
+ *   <li>{@code loggingAssociations} — node profile name → logging preset mapping</li>
+ *   <li>{@code tabOrder} — user-defined GUI tab display order</li>
+ *   <li>{@code maxConcurrentNodes} — global limit on parallel running nodes</li>
+ * </ul>
+ * <p>
+ * The legacy {@link ProfileEntry} fields are marked deprecated but retained for
+ * backward-compatible JSON parsing (old profiles.json files may still contain them).
  */
 public class ProfileConfig {
 
@@ -66,20 +77,49 @@ public class ProfileConfig {
 
     /**
      * Entry for a single profile in profiles.json.
+     * <p>
+     * <b>Migration Note:</b> The {@code autoStart}, {@code enabled}, {@code description}
+     * and {@code propertiesFile} fields are deprecated — this data is now stored in the
+     * NodeProfile's {@code .properties} file (Single Source of Truth). These fields are
+     * retained only for backward-compatible JSON parsing when loading older profiles.json
+     * files that still contain them. Gson will silently ignore unknown keys, so removing
+     * these fields here would not break deserialization.
      */
     public static class ProfileEntry {
+        // ── Deprecated fields (retained for backward-compatible JSON parsing) ──
+
+        /** @deprecated Autostart is now in NodeProfile.properties (node.autostart) */
+        @Deprecated
         private String propertiesFile;
+
+        /** @deprecated Autostart is now in NodeProfile.properties (node.autostart) */
+        @Deprecated(forRemoval = true)
         private boolean autoStart = false;
+
+        /** @description Enabled state is managed by profile presence in .properties discovery */
+        @Deprecated(forRemoval = true)
         private boolean enabled = true;
+
+        /** @deprecated Description is now in NodeProfile.properties (node.description) */
+        @Deprecated(forRemoval = true)
         private String description = "";
+
+        // ── Active fields ──
+
         /** Reference to a named logging profile (e.g., "debug", "quiet", "verbose"). Optional. */
         private String loggingProfile;
+
         /** Per-module logging level presets (e.g., {"node": "debug", "database": "quiet"}). Optional. */
         private Map<String, String> loggingPresets;
 
         public ProfileEntry() {
         }
 
+        /**
+         * @deprecated Use the default constructor. AutoStart/Enabled/Description
+         * are now managed in NodeProfile.properties.
+         */
+        @Deprecated(forRemoval = true)
         public ProfileEntry(String propertiesFile, boolean autoStart, boolean enabled, String description) {
             this.propertiesFile = propertiesFile;
             this.autoStart = autoStart;
@@ -87,53 +127,51 @@ public class ProfileConfig {
             this.description = description;
         }
 
-        public String getPropertiesFile() {
-            return propertiesFile;
-        }
+        /** @deprecated Autostart is now in NodeProfile.properties */
+        @Deprecated(forRemoval = true)
+        public String getPropertiesFile() { return propertiesFile; }
 
-        public void setPropertiesFile(String propertiesFile) {
-            this.propertiesFile = propertiesFile;
-        }
+        /** @deprecated Autostart is now in NodeProfile.properties */
+        @Deprecated(forRemoval = true)
+        public void setPropertiesFile(String propertiesFile) { this.propertiesFile = propertiesFile; }
 
-        public boolean isAutoStart() {
-            return autoStart;
-        }
+        /** @deprecated Autostart is now in NodeProfile.properties (node.autostart) */
+        @Deprecated(forRemoval = true)
+        public boolean isAutoStart() { return autoStart; }
 
-        public void setAutoStart(boolean autoStart) {
-            this.autoStart = autoStart;
-        }
+        /** @deprecated Autostart is now in NodeProfile.properties (node.autostart) */
+        @Deprecated(forRemoval = true)
+        public void setAutoStart(boolean autoStart) { this.autoStart = autoStart; }
 
-        public boolean isEnabled() {
-            return enabled;
-        }
+        /** @deprecated Enabled state is managed by profile presence in .properties discovery */
+        @Deprecated(forRemoval = true)
+        public boolean isEnabled() { return enabled; }
 
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
-        }
+        /** @deprecated Enabled state is managed by profile presence in .properties discovery */
+        @Deprecated(forRemoval = true)
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
 
-        public String getDescription() {
-            return description;
-        }
+        /** @deprecated Description is now in NodeProfile.properties */
+        @Deprecated(forRemoval = true)
+        public String getDescription() { return description; }
 
-        public void setDescription(String description) {
-            this.description = description;
-        }
+        /** @deprecated Description is now in NodeProfile.properties */
+        @Deprecated(forRemoval = true)
+        public void setDescription(String description) { this.description = description; }
+
+        // ── Active API (logging association) ──
 
         /**
          * Gets the logging profile reference for this node profile.
          * @return the logging profile name (e.g., "debug", "quiet"), or null if not set
          */
-        public String getLoggingProfile() {
-            return loggingProfile;
-        }
+        public String getLoggingProfile() { return loggingProfile; }
 
         /**
          * Sets the logging profile reference for this node profile.
          * @param loggingProfile the logging profile name, or null to clear
          */
-        public void setLoggingProfile(String loggingProfile) {
-            this.loggingProfile = loggingProfile;
-        }
+        public void setLoggingProfile(String loggingProfile) { this.loggingProfile = loggingProfile; }
 
         /**
          * Gets per-module logging level presets.
@@ -206,9 +244,13 @@ public class ProfileConfig {
         }
     }
 
+    // ── Deprecated API (per-profile settings now in .properties) ──
+
     /**
-     * Gets the autoStart setting for a profile.
+     * @deprecated Autostart is now read from NodeProfile.properties (node.autostart).
+     * Use {@link NodeProfile#isAutostart()} directly.
      */
+    @Deprecated(forRemoval = true)
     public boolean getAutoStart(String profileName) {
         ProfileData data = load();
         ProfileEntry entry = data.getProfiles().get(profileName);
@@ -216,8 +258,9 @@ public class ProfileConfig {
     }
 
     /**
-     * Sets the autoStart setting for a profile and persists it.
+     * @deprecated Autostart is now set in NodeProfile.properties (node.autostart).
      */
+    @Deprecated(forRemoval = true)
     public void setAutoStart(String profileName, boolean autoStart) {
         ProfileData data = load();
         ProfileEntry entry = data.getProfiles().computeIfAbsent(profileName, k -> new ProfileEntry());
@@ -230,17 +273,19 @@ public class ProfileConfig {
     }
 
     /**
-     * Gets the enabled setting for a profile.
+     * @deprecated Enabled state is managed by profile presence in .properties discovery.
      */
+    @Deprecated(forRemoval = true)
     public boolean isEnabled(String profileName) {
         ProfileData data = load();
         ProfileEntry entry = data.getProfiles().get(profileName);
-        return entry == null || entry.isEnabled(); // default: enabled
+        return entry == null || entry.isEnabled();
     }
 
     /**
-     * Sets the enabled setting for a profile and persists it.
+     * @deprecated Enabled state is managed by profile presence in .properties discovery.
      */
+    @Deprecated(forRemoval = true)
     public void setEnabled(String profileName, boolean enabled) {
         ProfileData data = load();
         ProfileEntry entry = data.getProfiles().computeIfAbsent(profileName, k -> new ProfileEntry());
@@ -252,32 +297,32 @@ public class ProfileConfig {
         }
     }
 
-    /**
-     * Gets the ProfileEntry for a profile.
-     */
+    /** @deprecated Use {@link NodeLifecycleManager#getProfile(String)} instead. */
+    @Deprecated(forRemoval = true)
     public ProfileEntry getProfileEntry(String profileName) {
         ProfileData data = load();
         return data.getProfiles().get(profileName);
     }
 
     /**
-     * Gets all enabled profile names.
+     * @deprecated Enabled profiles list is no longer used. Use
+     * {@link NodeLifecycleManager#getAllProfiles()} for the registered profiles.
      */
+    @Deprecated(forRemoval = true)
     public List<String> getEnabledProfileNames() {
         ProfileData data = load();
-        return data.getProfiles().entrySet().stream()
-                .filter(e -> e.getValue().isEnabled())
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toList());
+        return data.getProfiles().keySet().stream().collect(Collectors.toList());
     }
 
     /**
-     * Gets all autostart-enabled profile names.
+     * @deprecated Autostart is now read from .properties. This method is a no-op
+     * and retained for backward compatibility only.
      */
+    @Deprecated(forRemoval = true)
     public List<String> getAutoStartProfileNames() {
         ProfileData data = load();
         return data.getProfiles().entrySet().stream()
-                .filter(e -> e.getValue().isAutoStart() && e.getValue().isEnabled())
+                .filter(e -> e.getValue().isAutoStart())
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
     }

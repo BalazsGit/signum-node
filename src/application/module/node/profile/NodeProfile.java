@@ -3,13 +3,18 @@ package application.module.node.profile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import application.module.node.logging.NodeLoggingProfile;
+import application.module.node.lifecycle.NodeProfileRuntime;
 import application.utils.config.ConfigPaths;
 import application.utils.config.PropertiesProfileEntity;
 import application.utils.config.PropertiesProfileLoader;
 import application.utils.logging.ProfileLogger;
 
 import java.io.InputStream;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
 
@@ -39,6 +44,8 @@ public class NodeProfile implements PropertiesProfileEntity {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(NodeProfile.class);
 
+    // ── Constants ──────────────────────────────────────────────────────
+
     /** Runtime configuration root directory (parent of JAR location). */
     static final String CONF_ROOT = ConfigPaths.RUNTIME_CONF_ROOT;
 
@@ -61,25 +68,94 @@ public class NodeProfile implements PropertiesProfileEntity {
     /** Default logging preset when not specified in profile. */
     public static final String DEFAULT_LOGGING_PRESET = "standard";
 
+    /** Property key for node autostart. When true, the node starts automatically on app launch. */
+    public static final String PROPERTY_AUTOSTART = "node.autostart";
+
+    /** Default autostart value when not specified in profile. */
+    public static final boolean DEFAULT_AUTOSTART = false;
+
     /**
      * Set of reserved profile names that are excluded from profile discovery
      * and cannot be used when saving new profiles.
      */
     static final Set<String> RESERVED_PROFILE_NAMES = Set.of("node-default", "logging-default");
 
+    // ── Immutable Identity Fields ──────────────────────────────────────
+
+    /** Unique profile identifier (immutable). */
     private final String profileName;
+
+    /** Path to the .properties file this profile was loaded from (immutable). */
+    private final Path propertiesPath;
+
+    /** True when running in headless mode -- GUI settings will never be loaded. */
+    private final boolean headlessMode;
+
+    // ── Config Data ────────────────────────────────────────────────────
+
+    /** Properties backing store (Single Source of Truth for config values). */
     private final Properties properties = new Properties();
+
+    // ── Runtime Composition (SRP: state separated from config) ─────────
+
+    /**
+     * Runtime state container -- lifecycle, sync tracking, port info.
+     * Always initialized at construction time (never null after build).
+     * @see NodeProfileRuntime
+     */
+    private final NodeProfileRuntime runtime;
+
+    // ── Logging Reference ──────────────────────────────────────────────
+
+    /** SLF4J-compatible logger for this profile (lazy init). */
     private volatile ProfileLogger logger;
+
+    /**
+     * Reference to the associated NodeLoggingProfile.
+     * Can be changed at runtime by the user swapping logging presets.
+     */
+    private NodeLoggingProfile loggingProfile;
+
+    // ── GUI Settings (Lazy-Loaded, Optional) ───────────────────────────
+
+    /** Dedicated lock object for thread-safe lazy loading of guiSettings. */
+    private final Object guiSettingsLock = new Object();
+
+    /** GUI-specific settings for this profile (loaded on first access). */
+    private volatile GuiProfileSettings guiSettings;
 
     // ── Construction ───────────────────────────────────────────────────
 
     /**
-     * Creates a new NodeProfile with the given name.
+     * Legacy constructor for backward compatibility with {@link PropertiesProfileEntity}
+     * contract. Creates a minimal profile with default runtime and no GUI support.
      *
      * @param profileName the profile name (identifier)
+     * @deprecated Use {@link Builder} for new code
      */
+    @Deprecated(forRemoval = false)
     public NodeProfile(String profileName) {
-        this.profileName = profileName;
+        this.profileName = Objects.requireNonNull(profileName, "profileName must not be null");
+        this.propertiesPath = null;
+        this.headlessMode = true;
+        this.runtime = new NodeProfileRuntime();
+    }
+
+    /**
+     * Package-private Builder constructor. All fields are set via the Builder
+     * to enforce proper initialization before the profile is used.
+     *
+     * @param builder the configured Builder instance
+     */
+    NodeProfile(Builder builder) {
+        this.profileName = Objects.requireNonNull(builder.name, "name must not be null");
+        this.propertiesPath = builder.propertiesPath;
+        this.headlessMode = builder.headlessMode;
+        this.runtime = new NodeProfileRuntime();
+
+        if (builder.properties != null) {
+            this.properties.putAll(builder.properties);
+        }
     }
 
     // ── PropertiesProfileEntity Contract ───────────────────────────────
@@ -211,6 +287,121 @@ public class NodeProfile implements PropertiesProfileEntity {
         return properties.containsKey(PROPERTY_LOGGING_PRESET);
     }
 
+    // ── Autostart Configuration ────────────────────────────────────────
+
+    /**
+     * Returns whether the node should start automatically when the application launches.
+     * Falls back to {@link #DEFAULT_AUTOSTART} if not explicitly set in the profile.
+     *
+     * @return true if autostart is enabled, false otherwise
+     */
+    public boolean isAutostart() {
+        String value = properties.getProperty(PROPERTY_AUTOSTART);
+        if (value == null || value.isEmpty()) {
+            return DEFAULT_AUTOSTART;
+        }
+        // Support Java Properties boolean-style values: on/off, true/false, yes/no, 1/0
+        return java.lang.Boolean.parseBoolean(value)
+                || "on".equalsIgnoreCase(value.trim())
+                || "yes".equalsIgnoreCase(value.trim());
+    }
+
+    /**
+     * Sets whether the node should start automatically when the application launches.
+     *
+     * @param value true to enable autostart, false to disable
+     */
+    public void setAutostart(boolean value) {
+        properties.setProperty(PROPERTY_AUTOSTART, String.valueOf(value));
+    }
+
+    /**
+     * Returns true if this profile has an explicit autostart setting configured.
+     */
+    public boolean hasAutostartSetting() {
+        return properties.containsKey(PROPERTY_AUTOSTART);
+    }
+
+    // ── Runtime Access ─────────────────────────────────────────────────
+
+    /**
+     * Returns the runtime state container for this profile.
+     * Contains lifecycle state machine, sync tracking, port info.
+     *
+     * @return the {@link NodeProfileRuntime} (never null)
+     */
+    public NodeProfileRuntime getRuntime() {
+        return runtime;
+    }
+
+    // ── PropertiesPath Access ──────────────────────────────────────────
+
+    /**
+     * Returns the file path this profile was loaded from, or null if created programmatically.
+     *
+     * @return the properties file path, or null
+     */
+    public Path getPropertiesPath() {
+        return propertiesPath;
+    }
+
+    // ── Headless Mode Access ───────────────────────────────────────────
+
+    /**
+     * Returns true if running in headless mode (no GUI support).
+     *
+     * @return true if headless
+     */
+    public boolean isHeadlessMode() {
+        return headlessMode;
+    }
+
+    // ── LoggingProfile Access ──────────────────────────────────────────
+
+    /**
+     * Returns the associated NodeLoggingProfile, or null if not yet set.
+     *
+     * @return the logging profile reference, or null
+     */
+    public NodeLoggingProfile getLoggingProfile() {
+        return loggingProfile;
+    }
+
+    /**
+     * Sets (or replaces) the associated NodeLoggingProfile.
+     *
+     * @param loggingProfile the logging profile to associate, or null to clear
+     */
+    public void setLoggingProfile(NodeLoggingProfile loggingProfile) {
+        this.loggingProfile = loggingProfile;
+    }
+
+    // ── GuiSettings Access (Lazy-Loaded) ───────────────────────────────
+
+    /**
+     * Returns the GUI-specific settings for this profile, lazily loading them
+     * on first access. Returns null in headless mode or if no GUI settings found.
+     * <p>
+     * Thread-safe using double-checked locking with a dedicated lock object.
+     *
+     * @return the {@link GuiProfileSettings}, or null if unavailable
+     */
+    public GuiProfileSettings getGuiSettings() {
+        // Fast path: volatile read
+        GuiProfileSettings local = guiSettings;
+        if (local == null) {
+            synchronized (guiSettingsLock) {
+                // Double-check after acquiring lock
+                local = guiSettings;
+                    if (local == null) {
+                        local = GuiSettingsLoader.loadForProfile(MODULE_ID, profileName);
+                        guiSettings = local; // volatile write
+                }
+            }
+        }
+        return headlessMode ? null : local;
+    }
+
     // ── Static Factory Methods (delegating to PropertiesProfileLoader) ─
 
     /**
@@ -226,7 +417,7 @@ public class NodeProfile implements PropertiesProfileEntity {
         try {
             return PropertiesProfileLoader.loadAll(
                     CONF_ROOT, MODULE_ID, CATEGORY, RESERVED_PROFILE_NAMES,
-                    NodeProfile::new, NodeProfile.class);
+                    name -> new NodeProfile(name), NodeProfile.class);
         } catch (Exception e) {
             LOGGER.error("Error loading node profiles", e);
             return new NodeProfile[0];
@@ -235,6 +426,8 @@ public class NodeProfile implements PropertiesProfileEntity {
 
     /**
      * Loads a specific profile by name from {@code conf/node/profiles/{name}.properties}.
+     * <p>
+     * Uses the Builder to create a fully-initialized profile with properties path set.
      *
      * @param profileName the profile name (without extension)
      * @return the loaded NodeProfile, or null if not found
@@ -249,9 +442,13 @@ public class NodeProfile implements PropertiesProfileEntity {
                 return null;
             }
 
-            NodeProfile profile = new NodeProfile(profileName);
-            profile.setProperties(props);
-            return profile;
+            Path propsPath = Paths.get(CONF_ROOT, MODULE_ID, CATEGORY, profileName + ".properties");
+
+            return new Builder(profileName)
+                    .properties(props)
+                    .propertiesPath(propsPath)
+                    .headless(false)
+                    .build();
         } catch (Exception e) {
             LOGGER.error("Error loading profile {}", profileName, e);
             return null;
@@ -334,6 +531,82 @@ public class NodeProfile implements PropertiesProfileEntity {
                 "node", "logging");
     }
 
+    // ── Builder Pattern ────────────────────────────────────────────────
+
+    /**
+     * Fluent API for constructing {@link NodeProfile} instances with full control.
+     * <p>
+     * <b>Required:</b> name, properties (can be empty).
+     * <b>Optional:</b> propertiesPath, headlessMode (defaults to false).
+     * <p>
+     * Usage:
+     * <pre>{@code
+     * NodeProfile profile = new NodeProfile.Builder("mainnet")
+     *         .properties(loadedProperties)
+     *         .propertiesPath(somePath)
+     *         .headless(false)
+     *         .build();
+     * }</pre>
+     */
+    public static class Builder {
+        private final String name;
+        private Properties properties;
+        private Path propertiesPath;
+        private boolean headlessMode = false;
+
+        /**
+         * Starts building a profile with the given name.
+         *
+         * @param name the profile identifier (required)
+         */
+        public Builder(String name) {
+            this.name = Objects.requireNonNull(name, "name must not be null");
+        }
+
+        /**
+         * Sets the properties backing store.
+         *
+         * @param properties the properties to use
+         * @return this builder for chaining
+         */
+        public Builder properties(Properties properties) {
+            this.properties = properties;
+            return this;
+        }
+
+        /**
+         * Sets the path to the source .properties file.
+         *
+         * @param path the file path, or null if created programmatically
+         * @return this builder for chaining
+         */
+        public Builder propertiesPath(Path path) {
+            this.propertiesPath = path;
+            return this;
+        }
+
+        /**
+         * Configures headless mode. When true, GUI settings are never loaded.
+         *
+         * @param headless true for headless, false for GUI support (default: false)
+         * @return this builder for chaining
+         */
+        public Builder headless(boolean headless) {
+            this.headlessMode = headless;
+            return this;
+        }
+
+        /**
+         * Builds the NodeProfile. Validates that required fields are set.
+         *
+         * @return a fully initialized {@link NodeProfile}
+         * @throws IllegalStateException if name is null (should not happen)
+         */
+        public NodeProfile build() {
+            return new NodeProfile(this);
+        }
+    }
+
     // ── Object Contract ────────────────────────────────────────────────
 
     @Override
@@ -351,6 +624,7 @@ public class NodeProfile implements PropertiesProfileEntity {
 
     @Override
     public String toString() {
-        return "NodeProfile{name='" + profileName + "', properties=" + properties.size() + " entries}";
+        return "NodeProfile{name='" + profileName + "', properties=" + properties.size() +
+                " entries, runtime=" + (runtime != null ? "present" : "null") + "}";
     }
 }
