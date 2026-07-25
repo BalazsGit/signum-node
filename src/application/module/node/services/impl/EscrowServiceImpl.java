@@ -5,6 +5,7 @@ import application.module.node.Escrow.Decision;
 import application.module.node.Escrow.DecisionType;
 import application.module.node.db.SignumKey;
 import application.module.node.db.SignumKey.LongKeyFactory;
+import application.module.node.db.TransactionDb;
 import application.module.node.db.VersionedEntityTable;
 import application.module.node.db.sql.DbKey.LinkKeyFactory;
 import application.module.node.db.store.EscrowStore;
@@ -29,10 +30,11 @@ public class EscrowServiceImpl implements EscrowService {
     private final Blockchain blockchain;
     private final AliasService aliasService;
     private final AccountService accountService;
+    private final TransactionDb transactionDb;
     private final List<Transaction> resultTransactions;
 
     public EscrowServiceImpl(EscrowStore escrowStore, Blockchain blockchain, AliasService aliasService,
-            AccountService accountService) {
+            AccountService accountService, TransactionDb transactionDb) {
         this.escrowStore = escrowStore;
         this.escrowTable = escrowStore.getEscrowTable();
         this.escrowDbKeyFactory = escrowStore.getEscrowDbKeyFactory();
@@ -42,6 +44,7 @@ public class EscrowServiceImpl implements EscrowService {
         this.blockchain = blockchain;
         this.aliasService = aliasService;
         this.accountService = accountService;
+        this.transactionDb = transactionDb;
     }
 
     @Override
@@ -136,7 +139,7 @@ public class EscrowServiceImpl implements EscrowService {
         int countRefund = 0;
         int countSplit = 0;
 
-        for (Decision decision : Signum.getStores().getEscrowStore().getDecisions(escrow.getId())) {
+        for (Decision decision : escrowStore.getDecisions(escrow.getId())) {
             if (decision.getAccountId().equals(escrow.getSenderId()) ||
                     decision.getAccountId().equals(escrow.getRecipientId())) {
                 continue;
@@ -196,7 +199,7 @@ public class EscrowServiceImpl implements EscrowService {
                 }
             }
             if (!resultTransactions.isEmpty()) {
-                Signum.getDbs().getTransactionDb().saveTransactions(resultTransactions);
+                transactionDb.saveTransactions(resultTransactions);
                 block.setEscrowTransactions(resultTransactions);
             }
             updatedEscrowIds.clear();
@@ -261,7 +264,7 @@ public class EscrowServiceImpl implements EscrowService {
             throw new RuntimeException(e.toString(), e);
         }
 
-        if (!Signum.getDbs().getTransactionDb().hasTransaction(transaction.getId())) {
+        if (!transactionDb.hasTransaction(transaction.getId())) {
             resultTransactions.add(transaction);
         }
     }

@@ -572,7 +572,8 @@ public final class Signum {
                     stores.getEscrowStore(),
                     blockchain,
                     aliasService,
-                    accountService);
+                    accountService,
+                    transactionDb);
 
             assetExchange = new AssetExchangeImpl(
                     accountService,
