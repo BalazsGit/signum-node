@@ -560,7 +560,9 @@ public final class Signum {
                     stores.getSubscriptionStore(),
                     transactionDb,
                     blockchain,
+                    fluxCapacitor,
                     aliasService,
+                    stores.getAliasStore(),
                     accountService);
             final DGSGoodsStoreService digitalGoodsStoreService = new DGSGoodsStoreServiceImpl(
                     blockchain,

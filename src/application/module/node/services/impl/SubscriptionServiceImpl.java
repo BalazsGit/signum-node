@@ -7,7 +7,9 @@ import application.module.node.db.SignumKey;
 import application.module.node.db.SignumKey.LongKeyFactory;
 import application.module.node.db.TransactionDb;
 import application.module.node.db.VersionedEntityTable;
+import application.module.node.db.store.AliasStore;
 import application.module.node.db.store.SubscriptionStore;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.AccountService;
 import application.module.node.services.AliasService;
@@ -27,7 +29,9 @@ public class SubscriptionServiceImpl implements SubscriptionService {
     private final LongKeyFactory<Subscription> subscriptionDbKeyFactory;
 
     private final Blockchain blockchain;
+    private final FluxCapacitor fluxCapacitor;
     private final AliasService aliasService;
+    private final AliasStore aliasStore;
     private final AccountService accountService;
 
     private final TransactionDb transactionDb;
@@ -37,13 +41,16 @@ public class SubscriptionServiceImpl implements SubscriptionService {
     private static final Set<Long> removeSubscriptions = new HashSet<>();
 
     public SubscriptionServiceImpl(SubscriptionStore subscriptionStore, TransactionDb transactionDb,
-            Blockchain blockchain, AliasService aliasService, AccountService accountService) {
+            Blockchain blockchain, FluxCapacitor fluxCapacitor, AliasService aliasService,
+            AliasStore aliasStore, AccountService accountService) {
         this.subscriptionStore = subscriptionStore;
         this.subscriptionTable = subscriptionStore.getSubscriptionTable();
         this.subscriptionDbKeyFactory = subscriptionStore.getSubscriptionDbKeyFactory();
         this.transactionDb = transactionDb;
         this.blockchain = blockchain;
+        this.fluxCapacitor = fluxCapacitor;
         this.aliasService = aliasService;
+        this.aliasStore = aliasStore;
         this.accountService = accountService;
     }
 
@@ -104,8 +111,8 @@ public class SubscriptionServiceImpl implements SubscriptionService {
     }
 
     private long getFee(int height) {
-        if (Signum.getFluxCapacitor().getValue(FluxValues.SODIUM, height))
-            return Signum.getFluxCapacitor().getValue(FluxValues.FEE_QUANT, height);
+        if (fluxCapacitor.getValue(FluxValues.SODIUM, height))
+            return fluxCapacitor.getValue(FluxValues.FEE_QUANT, height);
         return Constants.ONE_SIGNA;
     }
 
@@ -118,9 +125,9 @@ public class SubscriptionServiceImpl implements SubscriptionService {
                 if (alias != null && alias.getId() == subscription.getId()) {
                     Offer offer = aliasService.getOffer(alias);
                     if (offer != null) {
-                        Signum.getStores().getAliasStore().getOfferTable().delete(offer);
+                        aliasStore.getOfferTable().delete(offer);
                     }
-                    Signum.getStores().getAliasStore().getAliasTable().delete(alias);
+                    aliasStore.getAliasTable().delete(alias);
                 }
             }
             subscriptionTable.delete(subscription);
@@ -181,7 +188,7 @@ public class SubscriptionServiceImpl implements SubscriptionService {
     }
 
     private Account getRecipient(Subscription subscription) {
-        if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_ALIASES)) {
+        if (fluxCapacitor.getValue(FluxValues.SMART_ALIASES)) {
             Alias alias = aliasService.getAlias(subscription.getRecipientId());
             if (alias != null) {
                 Alias tld = aliasService.getTLD(alias.getTld());
