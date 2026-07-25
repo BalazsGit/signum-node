@@ -513,6 +513,8 @@ public final class Signum {
                     blockchainStore,
                     propertyService);
 
+            stores.getUnconfirmedTransactionStore().setBlockchain(blockchain);
+
             final AliasService aliasService = new AliasServiceImpl(stores.getAliasStore());
             fluxCapacitor = new FluxCapacitorImpl(blockchain, propertyService);
             aliasService.addDefaultTLDs();
