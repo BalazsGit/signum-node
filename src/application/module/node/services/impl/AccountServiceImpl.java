@@ -5,7 +5,7 @@ import application.module.node.Account.AccountAsset;
 import application.module.node.Account.Event;
 import application.module.node.Account.RewardRecipientAssignment;
 import application.module.node.AssetTransfer;
-import application.module.node.Signum;
+import application.module.node.Blockchain;
 import application.module.node.Constants;
 import application.module.node.crypto.Crypto;
 import application.module.node.db.SignumKey;
@@ -28,6 +28,7 @@ import static application.module.node.schema.Tables.ACCOUNT;
 
 public class AccountServiceImpl implements AccountService {
 
+    private final Blockchain blockchain;
     private final AccountStore accountStore;
     private final VersionedBatchEntityTable<Account> accountTable;
     private final VersionedBatchEntityTable<Account.Balance> accountBalanceTable;
@@ -43,7 +44,8 @@ public class AccountServiceImpl implements AccountService {
     private final Listeners<Account, Event> listeners = new Listeners<>();
     private final Listeners<AccountAsset, Event> assetListeners = new Listeners<>();
 
-    public AccountServiceImpl(AccountStore accountStore, AssetTransferStore assetTransferStore) {
+    public AccountServiceImpl(AccountStore accountStore, AssetTransferStore assetTransferStore, Blockchain blockchain) {
+        this.blockchain = blockchain;
         this.accountStore = accountStore;
         this.accountTable = accountStore.getAccountTable();
         this.accountBalanceTable = accountStore.getAccountBalanceTable();
@@ -303,7 +305,7 @@ public class AccountServiceImpl implements AccountService {
 
     @Override
     public void setRewardRecipientAssignment(Account account, Long recipient) {
-        int currentHeight = Signum.getBlockchain().getLastBlock().getHeight();
+        int currentHeight = this.blockchain.getLastBlock().getHeight();
         RewardRecipientAssignment assignment = getRewardRecipientAssignment(account.getId());
         if (assignment == null) {
             SignumKey signumKey = rewardRecipientAssignmentKeyFactory.newKey(account.getId());
@@ -318,7 +320,7 @@ public class AccountServiceImpl implements AccountService {
 
     @Override
     public long getUnconfirmedAssetBalanceQNT(Account account, long assetId) {
-        SignumKey newKey = Signum.getStores().getAccountStore().getAccountAssetKeyFactory().newKey(account.getId(),
+        SignumKey newKey = this.accountAssetKeyFactory.newKey(account.getId(),
                 assetId);
         AccountAsset accountAsset = accountAssetTable.get(newKey);
         return accountAsset == null ? 0 : accountAsset.getUnconfirmedQuantityQnt();

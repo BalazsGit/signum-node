@@ -15,6 +15,8 @@ public class SqlDbs implements Dbs {
         this.blockDb = new SqlBlockDb();
         this.transactionDb = new SqlTransactionDb();
         this.peerDb = new SqlPeerDb();
+        // Wire TransactionDb into SqlBlockDb to break circular dependency
+        ((SqlBlockDb) this.blockDb).setTransactionDb(this.transactionDb);
     }
 
     @Override

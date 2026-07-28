@@ -1,7 +1,6 @@
 package application.module.node.services.impl;
 
 import application.module.node.Alias;
-import application.module.node.Signum;
 import application.module.node.Alias.Offer;
 import application.module.node.Attachment.MessagingAliasAssignment;
 import application.module.node.Attachment.MessagingAliasSell;
@@ -12,15 +11,14 @@ import application.module.node.db.SignumKey;
 import application.module.node.db.SignumKey.LongKeyFactory;
 import application.module.node.db.VersionedEntityTable;
 import application.module.node.db.store.AliasStore;
+import application.module.node.db.store.Stores;
 import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
+import application.module.node.props.PropertyService;
 
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
 
 import java.util.Collection;
 
@@ -28,41 +26,41 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
-import static org.powermock.api.mockito.PowerMockito.mock;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(Signum.class)
 public class AliasServiceImplTest extends AbstractUnitTest {
 
-    private AliasServiceImpl t;
-
     private AliasStore aliasStoreMock;
+    private Stores storesMock;
+    private FluxCapacitor fluxCapacitorMock;
+    private PropertyService propertyServiceMock;
+
     private VersionedEntityTable<Alias> aliasTableMock;
     private SignumKey.LongKeyFactory<Alias> aliasDbKeyFactoryMock;
     private VersionedEntityTable<Offer> offerTableMock;
     private SignumKey.LongKeyFactory<Offer> offerDbKeyFactoryMock;
 
+    private AliasServiceImpl t;
+
     @Before
     public void setUp() {
-        mockStatic(Signum.class);
-
         aliasStoreMock = mock(AliasStore.class);
+        storesMock = mock(Stores.class);
+        propertyServiceMock = mock(PropertyService.class);
+
+        fluxCapacitorMock = QuickMocker.fluxCapacitorEnabledFunctionalities(FluxValues.PRE_POC2,
+                FluxValues.DIGITAL_GOODS_STORE);
+
         aliasTableMock = mock(VersionedEntityTable.class);
         aliasDbKeyFactoryMock = mock(LongKeyFactory.class);
         offerTableMock = mock(VersionedEntityTable.class);
         offerDbKeyFactoryMock = mock(LongKeyFactory.class);
-
-        FluxCapacitor mockFluxCapacitor = QuickMocker.fluxCapacitorEnabledFunctionalities(FluxValues.PRE_POC2,
-                FluxValues.DIGITAL_GOODS_STORE);
-        when(Signum.getFluxCapacitor()).thenReturn(mockFluxCapacitor);
 
         when(aliasStoreMock.getAliasTable()).thenReturn(aliasTableMock);
         when(aliasStoreMock.getAliasDbKeyFactory()).thenReturn(aliasDbKeyFactoryMock);
         when(aliasStoreMock.getOfferTable()).thenReturn(offerTableMock);
         when(aliasStoreMock.getOfferDbKeyFactory()).thenReturn(offerDbKeyFactoryMock);
 
-        t = new AliasServiceImpl(aliasStoreMock);
+        t = new AliasServiceImpl(aliasStoreMock, storesMock, fluxCapacitorMock, propertyServiceMock);
     }
 
     @Test

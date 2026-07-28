@@ -12,6 +12,7 @@ import java.util.Collection;
 
 class AssetServiceImpl {
 
+    private final Blockchain blockchain;
     private final AssetStore assetStore;
     private final AssetAccountServiceImpl assetAccountService;
     private final TradeServiceImpl tradeService;
@@ -21,8 +22,9 @@ class AssetServiceImpl {
 
     private final SignumKey.LongKeyFactory<Asset> assetDbKeyFactory;
 
-    public AssetServiceImpl(AssetAccountServiceImpl assetAccountService, TradeServiceImpl tradeService,
-            AssetStore assetStore, AssetTransferServiceImpl assetTransferService) {
+    public AssetServiceImpl(Blockchain blockchain, AssetAccountServiceImpl assetAccountService,
+            TradeServiceImpl tradeService, AssetStore assetStore, AssetTransferServiceImpl assetTransferService) {
+        this.blockchain = blockchain;
         this.assetAccountService = assetAccountService;
         this.tradeService = tradeService;
         this.assetStore = assetStore;
@@ -34,7 +36,7 @@ class AssetServiceImpl {
     public Asset getAsset(long id) {
         Asset asset = assetTable.get(assetDbKeyFactory.newKey(id));
         if (asset != null) {
-            asset.updateCurrentOwnerAccount();
+            asset.updateCurrentOwnerAccount(this.blockchain);
         }
         return asset;
     }
@@ -63,7 +65,7 @@ class AssetServiceImpl {
     public Collection<Asset> getAssetsIssuedBy(long accountId, int from, int to) {
         Collection<Asset> assets = assetStore.getAssetsIssuedBy(accountId, from, to);
         for (Asset asset : assets) {
-            asset.updateCurrentOwnerAccount();
+            asset.updateCurrentOwnerAccount(this.blockchain);
         }
         return assets;
     }
@@ -72,7 +74,7 @@ class AssetServiceImpl {
         Collection<Asset> assetsIssued = assetStore.getAssetsIssuedBy(accountId, from, to);
         ArrayList<Asset> assetsOwned = new ArrayList<>();
         for (Asset asset : assetsIssued) {
-            asset.updateCurrentOwnerAccount();
+            asset.updateCurrentOwnerAccount(this.blockchain);
             if (asset.getAccountId() == accountId) {
                 assetsOwned.add(asset);
             }
@@ -82,18 +84,17 @@ class AssetServiceImpl {
 
         if (nextIndex < 0) {
             // now check for ownership transfers
-            Blockchain blockchain = Signum.getBlockchain();
             int remainingSize = from - to - assetsIssued.size();
 
-            Collection<Long> txIds = blockchain.getTransactionIds(null, accountId, 0,
+            Collection<Long> txIds = this.blockchain.getTransactionIds(null, accountId, 0,
                     TransactionType.TYPE_COLORED_COINS.getType(),
                     TransactionType.SUBTYPE_COLORED_COINS_TRANSFER_OWNERSHIP, 0,
                     0, remainingSize, false);
             for (Long txId : txIds) {
-                Transaction tx = blockchain.getTransaction(txId);
-                Transaction assetIssuance = blockchain.getTransactionByFullHash(tx.getReferencedTransactionFullHash());
+                Transaction tx = this.blockchain.getTransaction(txId);
+                Transaction assetIssuance = this.blockchain.getTransactionByFullHash(
+                        tx.getReferencedTransactionFullHash());
                 Asset asset = getAsset(assetIssuance.getId());
-                asset.updateCurrentOwnerAccount();
                 if (asset.getAccountId() == accountId) {
                     assetsOwned.add(asset);
                 }

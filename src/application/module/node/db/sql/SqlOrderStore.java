@@ -1,6 +1,6 @@
 package application.module.node.db.sql;
 
-import application.module.node.Signum;
+import application.module.node.Blockchain;
 import application.module.node.Order;
 import application.module.node.db.SignumKey;
 import application.module.node.db.VersionedEntityTable;
@@ -22,6 +22,10 @@ import static application.module.node.schema.Tables.ASK_ORDER;
 import static application.module.node.schema.Tables.BID_ORDER;
 
 public class SqlOrderStore implements OrderStore {
+
+    // Injected after construction to break circular dependency (Stores created before Blockchain)
+    private Blockchain blockchain;
+
     private final DbKey.LongKeyFactory<Order.Ask> askOrderDbKeyFactory = new DbKey.LongKeyFactory<Order.Ask>(
             ASK_ORDER.ID) {
 
@@ -143,6 +147,14 @@ public class SqlOrderStore implements OrderStore {
         return askOrderTable.getManyBy(ASK_ORDER.ASSET_ID.eq(assetId), from, to);
     }
 
+    /**
+     * Sets the blockchain reference after construction to break circular dependency.
+     * Called by Stores.wireDependencies() after Blockchain is initialized.
+     */
+    public void setBlockchain(Blockchain blockchain) {
+        this.blockchain = blockchain;
+    }
+
     private void saveAsk(DSLContext ctx, Order.Ask ask) {
 
         ctx.insertInto(ASK_ORDER,
@@ -151,7 +163,7 @@ public class SqlOrderStore implements OrderStore {
                 ASK_ORDER.HEIGHT, ASK_ORDER.LATEST)
                 .values(ask.getId(), ask.getAccountId(), ask.getAssetId(),
                         ask.getPriceNQT(), ask.getQuantityQNT(), ask.getHeight(),
-                        Signum.getBlockchain().getHeight(), true)
+                        blockchain.getHeight(), true)
                 .onConflict(ASK_ORDER.ID, ASK_ORDER.HEIGHT)
                 .doUpdate()
                 .set(ASK_ORDER.ACCOUNT_ID, ask.getAccountId())
@@ -159,7 +171,7 @@ public class SqlOrderStore implements OrderStore {
                 .set(ASK_ORDER.PRICE, ask.getPriceNQT())
                 .set(ASK_ORDER.QUANTITY, ask.getQuantityQNT())
                 .set(ASK_ORDER.CREATION_HEIGHT, ask.getHeight())
-                .set(ASK_ORDER.HEIGHT, Signum.getBlockchain().getHeight())
+                .set(ASK_ORDER.HEIGHT, blockchain.getHeight())
                 .set(ASK_ORDER.LATEST, true)
                 .execute();
 
@@ -233,7 +245,7 @@ public class SqlOrderStore implements OrderStore {
                 BID_ORDER.HEIGHT, BID_ORDER.LATEST)
                 .values(bid.getId(), bid.getAccountId(), bid.getAssetId(),
                         bid.getPriceNQT(), bid.getQuantityQNT(), bid.getHeight(),
-                        Signum.getBlockchain().getHeight(), true)
+                        blockchain.getHeight(), true)
                 .onConflict(BID_ORDER.ID, BID_ORDER.HEIGHT)
                 .doUpdate()
                 .set(BID_ORDER.ACCOUNT_ID, bid.getAccountId())

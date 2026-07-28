@@ -1,11 +1,9 @@
 package application.module.node.db.sql;
 
-import application.module.node.Signum;
 import application.module.node.IndirectIncoming;
 import application.module.node.db.SignumKey;
 import application.module.node.db.store.DerivedTableManager;
 import application.module.node.db.store.IndirectIncomingStore;
-import application.module.node.props.Props;
 import org.jooq.*;
 import org.jooq.Record;
 
@@ -22,10 +20,10 @@ public class SqlIndirectIncomingStore implements IndirectIncomingStore {
     private final EntitySqlTable<IndirectIncoming> indirectIncomingTable;
     private final SignumKey.LinkKeyFactory<IndirectIncoming> indirectIncomingDbKeyFactory;
 
-    private static final Integer InsertMaxBatchSize = Signum.getPropertyService()
-            .getInt(Props.DB_INSERT_BATCH_MAX_SIZE);
+    private final int insertMaxBatchSize;
 
-    public SqlIndirectIncomingStore(DerivedTableManager derivedTableManager) {
+    public SqlIndirectIncomingStore(DerivedTableManager derivedTableManager, int insertMaxBatchSize) {
+        this.insertMaxBatchSize = insertMaxBatchSize;
         indirectIncomingDbKeyFactory = new DbKey.LinkKeyFactory<IndirectIncoming>("account_id", "transaction_id") {
             @Override
             public SignumKey newKey(IndirectIncoming indirectIncoming) {
@@ -65,7 +63,7 @@ public class SqlIndirectIncomingStore implements IndirectIncomingStore {
                 while (iterator.hasNext()) {
                     List<Record5<Long, Long, Long, Long, Integer>> rows = new ArrayList<>();
                     // break into batches
-                    for (int i = 0; i < InsertMaxBatchSize && iterator.hasNext(); i++) {
+                    for (int i = 0; i < SqlIndirectIncomingStore.this.insertMaxBatchSize && iterator.hasNext(); i++) {
                         IndirectIncoming indirectIncoming = iterator.next();
                         rows.add(ctx.newRecord(INDIRECT_INCOMING.ACCOUNT_ID,
                                 INDIRECT_INCOMING.TRANSACTION_ID,

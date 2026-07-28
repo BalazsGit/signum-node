@@ -1,6 +1,7 @@
 package application.module.node.db.sql;
 
 import application.module.node.*;
+import application.module.node.Blockchain;
 import application.module.node.Transaction;
 import application.module.node.at.*;
 import application.module.node.at.AT.AtMapEntry;
@@ -35,7 +36,7 @@ public class SqlATStore implements ATStore {
             return at.dbKey;
         }
     };
-    private final VersionedEntityTable<application.module.node.at.AT> atTable;
+    private VersionedEntityTable<application.module.node.at.AT> atTable;
 
     private final SignumKey.LongKeyFactory<application.module.node.at.AT.ATState> atStateDbKeyFactory = new DbKey.LongKeyFactory<application.module.node.at.AT.ATState>(
             AT_STATE.AT_ID) {
@@ -45,7 +46,7 @@ public class SqlATStore implements ATStore {
         }
     };
 
-    private final VersionedEntityTable<application.module.node.at.AT.ATState> atStateTable;
+    private VersionedEntityTable<application.module.node.at.AT.ATState> atStateTable;
 
     private final DbKey.LinkKey3Factory<application.module.node.at.AT.AtMapEntry> atMapKeyFactory = new DbKey.LinkKey3Factory<application.module.node.at.AT.AtMapEntry>(
             "at_id", "key1", "key2") {
@@ -55,9 +56,22 @@ public class SqlATStore implements ATStore {
         }
     };
 
-    private final VersionedEntityTable<application.module.node.at.AT.AtMapEntry> atMapTable;
+    private VersionedEntityTable<application.module.node.at.AT.AtMapEntry> atMapTable;
 
+    private final Blockchain blockchain;
+
+    public SqlATStore(DerivedTableManager derivedTableManager, StoreDependencies storeDependencies) {
+        this.blockchain = storeDependencies.blockchain();
+        initTables(derivedTableManager);
+    }
+
+    @Deprecated
     public SqlATStore(DerivedTableManager derivedTableManager) {
+        this.blockchain = null;
+        initTables(derivedTableManager);
+    }
+
+    private void initTables(DerivedTableManager derivedTableManager) {
         atTable = new VersionedEntitySqlTable<application.module.node.at.AT>("at",
                 application.module.node.schema.Tables.AT, atDbKeyFactory,
                 derivedTableManager) {
@@ -135,14 +149,14 @@ public class SqlATStore implements ATStore {
                         atState.getPrevHeight(),
                         atState.getNextHeight(), atState.getSleepBetween(), atState.getPrevBalance(),
                         atState.getFreezeWhenSameBalance(), atState.getMinActivationAmount(),
-                        Signum.getBlockchain().getHeight(), true)
+                        blockchain.getHeight(), true)
                 .execute();
     }
 
     private void saveATMapEntry(DSLContext ctx, application.module.node.at.AT.AtMapEntry atEntry) {
         ctx.insertInto(AT_MAP, AT_MAP.AT_ID, AT_MAP.KEY1, AT_MAP.KEY2, AT_MAP.VALUE, AT_STATE.HEIGHT, AT_STATE.LATEST)
                 .values(atEntry.getAtId(), atEntry.getKey1(), atEntry.getKey2(), atEntry.getValue(),
-                        Signum.getBlockchain().getHeight(), true)
+                        blockchain.getHeight(), true)
                 .execute();
     }
 
@@ -158,7 +172,7 @@ public class SqlATStore implements ATStore {
                         at.getVersion(), at.getcSize(), at.getdSize(), at.getcUserStackBytes(),
                         at.getcCallStackBytes(), at.getCreationBlockHeight(),
                         application.module.node.at.AT.compressState(at.getApCodeBytes()),
-                        Signum.getBlockchain().getHeight(),
+                        blockchain.getHeight(),
                         at.getApCodeHashId())
                 .execute();
     }
@@ -184,12 +198,12 @@ public class SqlATStore implements ATStore {
                     .and(
                             ACCOUNT_BALANCE.LATEST.isTrue())
                     .and(
-                            AT_STATE.NEXT_HEIGHT.lessOrEqual(Signum.getBlockchain().getHeight() + 1))
+                            AT_STATE.NEXT_HEIGHT.lessOrEqual(blockchain.getHeight() + 1))
                     .and(
                             ACCOUNT_BALANCE.BALANCE.greaterOrEqual(
-                                    atConstants.stepFee(atConstants.atVersion(Signum.getBlockchain().getHeight()))
+                                    atConstants.stepFee(atConstants.atVersion(blockchain.getHeight()))
                                             * atConstants.apiStepMultiplier(
-                                                    atConstants.atVersion(Signum.getBlockchain().getHeight()))))
+                                                    atConstants.atVersion(blockchain.getHeight()))))
                     .and(
                             AT_STATE.FREEZE_WHEN_SAME_BALANCE.isFalse().or(
                                     ACCOUNT_BALANCE.BALANCE.minus(AT_STATE.PREV_BALANCE)
@@ -283,8 +297,8 @@ public class SqlATStore implements ATStore {
         int codeSize = at.getCsize();
         if (code == null) {
             // Check the creation transaction for the reference code
-            Transaction atCreationTransaction = Signum.getBlockchain().getTransaction(at.getId());
-            Transaction transaction = Signum.getBlockchain()
+            Transaction atCreationTransaction = blockchain.getTransaction(at.getId());
+            Transaction transaction = blockchain
                     .getTransactionByFullHash(atCreationTransaction.getReferencedTransactionFullHash());
             if (transaction != null
                     && transaction.getAttachment() instanceof Attachment.AutomatedTransactionsCreation) {

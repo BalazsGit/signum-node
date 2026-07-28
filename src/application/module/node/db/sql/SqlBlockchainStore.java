@@ -8,6 +8,7 @@ import application.module.node.Attachment.CommitmentRemove;
 import application.module.node.db.BlockDb;
 import application.module.node.db.TransactionDb;
 import application.module.node.db.store.BlockchainStore;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.schema.tables.records.BlockRecord;
 import application.module.node.schema.tables.records.TransactionRecord;
@@ -36,19 +37,31 @@ public class SqlBlockchainStore implements BlockchainStore {
 
     private final TransactionDb transactionDb;
     private final BlockDb blockDb;
+    private final Blockchain blockchain;
+    private final FluxCapacitor fluxCapacitor;
 
     private static final int[] totalTransactions = new int[1];
     private static final int[] totalDeletedTransactions = new int[1];
 
+    public SqlBlockchainStore(TransactionDb transactionDb, BlockDb blockDb, StoreDependencies storeDependencies) {
+        this.transactionDb = transactionDb;
+        this.blockDb = blockDb;
+        this.blockchain = storeDependencies.blockchain();
+        this.fluxCapacitor = storeDependencies.fluxCapacitor();
+    }
+
+    @Deprecated
     public SqlBlockchainStore(TransactionDb transactionDb, BlockDb blockDb) {
         this.transactionDb = transactionDb;
         this.blockDb = blockDb;
+        this.blockchain = null;
+        this.fluxCapacitor = null;
     }
 
     @Override
     public Collection<Block> getBlocks(int from, int to) {
         return Db.fetchWithDSLContext(ctx -> {
-            int blockchainHeight = Signum.getBlockchain().getHeight();
+            int blockchainHeight = blockchain.getHeight();
             return getBlocks(ctx.selectFrom(BLOCK)
                     .where(BLOCK.HEIGHT.between(blockchainHeight - Math.max(to, 0))
                             .and(blockchainHeight - Math.max(from, 0)))
@@ -206,12 +219,12 @@ public class SqlBlockchainStore implements BlockchainStore {
         });
     }
 
-    private static int getHeightForNumberOfConfirmations(int numberOfConfirmations) {
-        int height = numberOfConfirmations > 0 ? Signum.getBlockchain().getHeight() - numberOfConfirmations
+    private int getHeightForNumberOfConfirmations(int numberOfConfirmations) {
+        int height = numberOfConfirmations > 0 ? blockchain.getHeight() - numberOfConfirmations
                 : Integer.MAX_VALUE;
         if (height < 0) {
             throw new IllegalArgumentException("Number of confirmations required " + numberOfConfirmations
-                    + " exceeds current blockchain height " + Signum.getBlockchain().getHeight());
+                    + " exceeds current blockchain height " + blockchain.getHeight());
         }
         return height;
     }
@@ -349,7 +362,7 @@ public class SqlBlockchainStore implements BlockchainStore {
             ArrayList<Condition> conditions = new ArrayList<>();
 
             // must be confirmed already
-            int height = Signum.getBlockchain().getHeight() - numberOfConfirmations;
+            int height = blockchain.getHeight() - numberOfConfirmations;
             conditions.add(TRANSACTION.HEIGHT.le(height));
             if (type >= 0) {
                 conditions.add(TRANSACTION.TYPE.eq(type));
@@ -408,7 +421,7 @@ public class SqlBlockchainStore implements BlockchainStore {
 
     @Override
     public long getCommittedAmount(long accountId, int height, int endHeight, Transaction skipTransaction) {
-        int commitmentWait = Signum.getFluxCapacitor().getValue(FluxValues.COMMITMENT_WAIT, height);
+        int commitmentWait = fluxCapacitor.getValue(FluxValues.COMMITMENT_WAIT, height);
         int commitmentHeight = Math.min(height - commitmentWait, endHeight);
 
         Collection<byte[]> commitmmentAddBytes = Db.fetchWithDSLContext(ctx -> {

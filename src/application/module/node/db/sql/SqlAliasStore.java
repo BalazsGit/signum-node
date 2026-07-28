@@ -1,7 +1,7 @@
 package application.module.node.db.sql;
 
 import application.module.node.Alias;
-import application.module.node.Signum;
+import application.module.node.Blockchain;
 import application.module.node.db.SignumKey;
 import application.module.node.db.VersionedEntityTable;
 import application.module.node.db.store.AliasStore;
@@ -31,6 +31,9 @@ public class SqlAliasStore implements AliasStore {
             return offer.dbKey;
         }
     };
+
+    // Injected after construction to break circular dependency (Stores created before Blockchain)
+    private Blockchain blockchain;
 
     public SqlAliasStore(DerivedTableManager derivedTableManager) {
         offerTable = new VersionedEntitySqlTable<Alias.Offer>("alias_offer", ALIAS_OFFER, offerDbKeyFactory,
@@ -99,11 +102,19 @@ public class SqlAliasStore implements AliasStore {
         }
     }
 
+    /**
+     * Sets the blockchain reference after construction to break circular dependency.
+     * Called by Stores.wireDependencies() after Blockchain is initialized.
+     */
+    public void setBlockchain(Blockchain blockchain) {
+        this.blockchain = blockchain;
+    }
+
     private void saveOffer(Alias.Offer offer) {
         Db.useDSLContext(ctx -> {
             ctx.insertInto(ALIAS_OFFER, ALIAS_OFFER.ID, ALIAS_OFFER.PRICE, ALIAS_OFFER.BUYER_ID, ALIAS_OFFER.HEIGHT)
                     .values(offer.getId(), offer.getPriceNqt(), (offer.getBuyerId() == 0 ? null : offer.getBuyerId()),
-                            Signum.getBlockchain().getHeight())
+                            blockchain.getHeight())
                     .execute();
         });
     }
@@ -133,7 +144,7 @@ public class SqlAliasStore implements AliasStore {
                 .set(ALIAS.ALIAS_NAME, alias.getAliasName()).set(ALIAS.TLD, alias.getTld())
                 .set(ALIAS.ALIAS_NAME_LOWER, alias.getAliasName().toLowerCase(Locale.ENGLISH))
                 .set(ALIAS.ALIAS_URI, alias.getAliasUri()).set(ALIAS.TIMESTAMP, alias.getTimestamp())
-                .set(ALIAS.HEIGHT, Signum.getBlockchain().getHeight()).execute();
+                .set(ALIAS.HEIGHT, blockchain.getHeight()).execute();
     }
 
     private final VersionedEntityTable<Alias> aliasTable;

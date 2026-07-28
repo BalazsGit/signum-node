@@ -3,6 +3,7 @@ package application.module.node.assetexchange;
 import application.module.node.Account.AccountAsset;
 import application.module.node.Asset;
 import application.module.node.AssetTransfer;
+import application.module.node.Blockchain;
 import application.module.node.Attachment.ColoredCoinsAskOrderPlacement;
 import application.module.node.Attachment.ColoredCoinsAssetIssuance;
 import application.module.node.Attachment.ColoredCoinsBidOrderPlacement;
@@ -25,12 +26,12 @@ public class AssetExchangeImpl implements AssetExchange {
     private final AssetServiceImpl assetService;
     private final OrderServiceImpl orderService;
 
-    public AssetExchangeImpl(AccountService accountService, TradeStore tradeStore, AccountStore accountStore,
-            AssetTransferStore assetTransferStore, AssetStore assetStore, OrderStore orderStore) {
+    public AssetExchangeImpl(Blockchain blockchain, AccountService accountService, TradeStore tradeStore,
+            AccountStore accountStore, AssetTransferStore assetTransferStore, AssetStore assetStore, OrderStore orderStore) {
         this.tradeService = new TradeServiceImpl(tradeStore);
         this.assetAccountService = new AssetAccountServiceImpl(accountStore);
         this.assetTransferService = new AssetTransferServiceImpl(assetTransferStore);
-        this.assetService = new AssetServiceImpl(this.assetAccountService, tradeService, assetStore,
+        this.assetService = new AssetServiceImpl(blockchain, this.assetAccountService, tradeService, assetStore,
                 assetTransferService);
         this.orderService = new OrderServiceImpl(orderStore, accountService, tradeService);
     }

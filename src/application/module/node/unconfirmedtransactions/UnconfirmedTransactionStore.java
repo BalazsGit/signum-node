@@ -1,5 +1,6 @@
 package application.module.node.unconfirmedtransactions;
 
+import application.module.node.Blockchain;
 import application.module.node.SignumException;
 import application.module.node.Transaction;
 import application.module.node.peer.Peer;
@@ -31,4 +32,6 @@ public interface UnconfirmedTransactionStore {
     void removeForgedTransactions(List<Transaction> transactions);
 
     int getAmount();
+
+    void setBlockchain(Blockchain blockchain);
 }

@@ -12,7 +12,6 @@ import application.module.node.Account;
 import application.module.node.Alias;
 import application.module.node.Alias.Offer;
 import application.module.node.Attachment;
-import application.module.node.Signum;
 import application.module.node.Subscription;
 import application.module.node.Transaction;
 import application.module.node.TransactionType;
@@ -20,8 +19,11 @@ import application.module.node.db.SignumKey;
 import application.module.node.db.VersionedEntityTable;
 import application.module.node.db.sql.Db;
 import application.module.node.db.store.AliasStore;
+import application.module.node.db.store.Stores;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.props.Props;
+import application.module.node.props.PropertyService;
 import application.module.node.services.AliasService;
 import application.module.node.services.SubscriptionService;
 import application.module.node.util.CollectionWithIndex;
@@ -34,6 +36,10 @@ public class AliasServiceImpl implements AliasService {
     private final SignumKey.LongKeyFactory<Alias> aliasDbKeyFactory;
     private final VersionedEntityTable<Offer> offerTable;
     private final SignumKey.LongKeyFactory<Offer> offerDbKeyFactory;
+    private final Stores stores;
+    private final FluxCapacitor fluxCapacitor;
+    private final PropertyService propertyService;
+    private SubscriptionService subscriptionService;
 
     private static final String MAIN_TLD = "signum";
     private static final String[] DEFAULT_TLDS = {
@@ -41,17 +47,28 @@ public class AliasServiceImpl implements AliasService {
             "w3", "wallet", "web3", "x", "y", "z"
     };
 
-    public AliasServiceImpl(AliasStore aliasStore) {
+    public AliasServiceImpl(AliasStore aliasStore, Stores stores, FluxCapacitor fluxCapacitor,
+            PropertyService propertyService) {
         this.aliasStore = aliasStore;
         this.aliasTable = aliasStore.getAliasTable();
         this.aliasDbKeyFactory = aliasStore.getAliasDbKeyFactory();
         this.offerTable = aliasStore.getOfferTable();
         this.offerDbKeyFactory = aliasStore.getOfferDbKeyFactory();
+        this.stores = stores;
+        this.fluxCapacitor = fluxCapacitor;
+        this.propertyService = propertyService;
+    }
+
+    /**
+     * Set the subscription service after it's created (avoids circular dependency).
+     */
+    public void setSubscriptionService(SubscriptionService subscriptionService) {
+        this.subscriptionService = subscriptionService;
     }
 
     public void addDefaultTLDs() {
         try {
-            Signum.getStores().beginTransaction();
+            this.stores.beginTransaction();
 
             // TODO: should be removed prior to the next release
             // try {
@@ -83,9 +100,9 @@ public class AliasServiceImpl implements AliasService {
                 Attachment.MessagingTldAssignment attachment = new Attachment.MessagingTldAssignment(tldName, 0);
                 addTLD(id, null, attachment);
             }
-            Signum.getStores().commitTransaction();
+            this.stores.commitTransaction();
         } finally {
-            Signum.getStores().endTransaction();
+            this.stores.endTransaction();
         }
     }
 
@@ -144,23 +161,22 @@ public class AliasServiceImpl implements AliasService {
     }
 
     private void createSubscription(Alias alias, int timestamp, boolean updateSubscription) {
-        if (!Signum.getFluxCapacitor().getValue(FluxValues.SMART_ALIASES)) {
+        if (!this.fluxCapacitor.getValue(FluxValues.SMART_ALIASES)) {
             return;
         }
 
-        SubscriptionService subscriptionService = Signum.getSubscriptionService();
-        int frequency = Signum.getPropertyService().getInt(Props.ALIAS_RENEWAL_FREQUENCY);
-        long fee = Signum.getFluxCapacitor().getValue(FluxValues.FEE_QUANT)
+        int frequency = this.propertyService.getInt(Props.ALIAS_RENEWAL_FREQUENCY);
+        long fee = this.fluxCapacitor.getValue(FluxValues.FEE_QUANT)
                 * TransactionType.BASELINE_ALIAS_RENEWAL_FACTOR;
-        Subscription subscription = subscriptionService.getSubscription(alias.getId());
+        Subscription subscription = this.subscriptionService.getSubscription(alias.getId());
         if (subscription != null && updateSubscription && subscription.getSenderId() != alias.getAccountId()) {
             subscription.setSenderId(alias.getAccountId());
             ArrayList<Subscription> subscriptions = new ArrayList<>();
             subscriptions.add(subscription);
-            Signum.getStores().getSubscriptionStore().saveSubscriptions(subscriptions);
+            this.stores.getSubscriptionStore().saveSubscriptions(subscriptions);
         }
         if (subscription == null) {
-            subscriptionService.addSubscription(Account.getAccount(alias.getAccountId()), alias.getId(), alias.getId(),
+            this.subscriptionService.addSubscription(Account.getAccount(alias.getAccountId()), alias.getId(), alias.getId(),
                     fee, timestamp, frequency);
         }
     }

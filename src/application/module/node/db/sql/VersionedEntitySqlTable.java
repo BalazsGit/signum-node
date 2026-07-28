@@ -1,6 +1,6 @@
 package application.module.node.db.sql;
 
-import application.module.node.Signum;
+import application.module.node.Blockchain;
 import application.module.node.db.SignumKey;
 import application.module.node.db.VersionedEntityTable;
 import application.module.node.db.store.DerivedTableManager;
@@ -19,9 +19,18 @@ public abstract class VersionedEntitySqlTable<T> extends EntitySqlTable<T> imple
 
     private static final Logger logger = LoggerFactory.getLogger(VersionedEntitySqlTable.class);
 
+    private final Blockchain blockchain;
+
     VersionedEntitySqlTable(String table, TableImpl<?> tableClass, SignumKey.Factory<T> dbKeyFactory,
             DerivedTableManager derivedTableManager) {
         super(table, tableClass, dbKeyFactory, true, derivedTableManager);
+        this.blockchain = null;
+    }
+
+    VersionedEntitySqlTable(String table, TableImpl<?> tableClass, SignumKey.Factory<T> dbKeyFactory,
+            DerivedTableManager derivedTableManager, Blockchain blockchain) {
+        super(table, tableClass, dbKeyFactory, true, derivedTableManager);
+        this.blockchain = blockchain;
     }
 
     @Override
@@ -188,7 +197,7 @@ public abstract class VersionedEntitySqlTable<T> extends EntitySqlTable<T> imple
                 SelectQuery<Record> countQuery = ctx.selectQuery();
                 countQuery.addFrom(tableClass);
                 countQuery.addConditions(dbKey.getPKConditions(tableClass));
-                countQuery.addConditions(heightField.lt(Signum.getBlockchain().getHeight()));
+                countQuery.addConditions(heightField.lt(blockchain.getHeight()));
                 if (ctx.fetchCount(countQuery) > 0) {
                     UpdateQuery updateQuery = ctx.updateQuery(tableClass);
                     updateQuery.addValue(

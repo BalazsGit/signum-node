@@ -515,14 +515,20 @@ public final class Signum {
 
             stores.getUnconfirmedTransactionStore().setBlockchain(blockchain);
 
-            final AliasService aliasService = new AliasServiceImpl(stores.getAliasStore());
             fluxCapacitor = new FluxCapacitorImpl(blockchain, propertyService);
+            final AliasService aliasService = new AliasServiceImpl(
+                    stores.getAliasStore(),
+                    stores,
+                    fluxCapacitor,
+                    propertyService);
             aliasService.addDefaultTLDs();
 
             EconomicClustering economicClustering = new EconomicClustering(blockchain);
 
-            final AccountService accountService = new AccountServiceImpl(stores.getAccountStore(),
-                    stores.getAssetTransferStore());
+            final AccountService accountService = new AccountServiceImpl(
+                    stores.getAccountStore(),
+                    stores.getAssetTransferStore(),
+                    blockchain);
 
             final DownloadCacheImpl downloadCache = new DownloadCacheImpl(
                     propertyService,
@@ -564,6 +570,7 @@ public final class Signum {
                     aliasService,
                     stores.getAliasStore(),
                     accountService);
+            ((AliasServiceImpl) aliasService).setSubscriptionService(subscriptionService);
             final DGSGoodsStoreService digitalGoodsStoreService = new DGSGoodsStoreServiceImpl(
                     blockchain,
                     stores.getDigitalGoodsStoreStore(),
@@ -576,6 +583,7 @@ public final class Signum {
                     transactionDb);
 
             assetExchange = new AssetExchangeImpl(
+                    blockchain,
                     accountService,
                     stores.getTradeStore(),
                     stores.getAccountStore(),
@@ -602,6 +610,8 @@ public final class Signum {
                     blockchain,
                     downloadCache,
                     generator,
+                    fluxCapacitor,
+                    propertyService,
                     params);
             blockchainProcessor = new BlockchainProcessorImpl(
                     threadPool,

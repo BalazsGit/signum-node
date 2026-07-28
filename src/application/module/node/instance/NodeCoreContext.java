@@ -1,21 +1,33 @@
 package application.module.node.instance;
 
-import application.module.node.Blockchain;
 import application.module.node.BlockchainImpl;
 import application.module.node.BlockchainProcessor;
+import application.module.node.EconomicClustering;
 import application.module.node.Generator;
+import application.module.node.NodeComponentFactory;
 import application.module.node.ShutdownManager;
 import application.module.node.TransactionProcessorImpl;
+import application.module.node.TransactionType;
 import application.module.node.assetexchange.AssetExchange;
+import application.module.node.assetexchange.AssetExchangeImpl;
+import application.module.node.at.AT;
+import application.module.node.db.BlockDb;
+import application.module.node.db.TransactionDb;
+import application.module.node.db.cache.DBCacheManagerImpl;
+import application.module.node.db.sql.Db;
 import application.module.node.db.sql.DbContext;
+import application.module.node.db.store.AliasStore;
+import application.module.node.db.store.BlockchainStore;
 import application.module.node.db.store.Dbs;
+import application.module.node.db.store.DerivedTableManager;
 import application.module.node.db.store.Stores;
+import application.module.node.deeplink.DeeplinkQRCodeGenerator;
+import application.module.node.feesuggestions.FeeSuggestionCalculator;
 import application.module.node.fluxcapacitor.FluxCapacitor;
-import application.module.node.props.CaselessProperties;
+import application.module.node.fluxcapacitor.FluxCapacitorImpl;
+import application.module.node.peer.Peers;
+import application.module.node.props.Props;
 import application.module.node.props.PropertyService;
-import application.utils.logging.ProfileThreadContext;
-import application.utils.logging.ProfileLogRouter;
-import application.utils.logging.ProfileLoggingApplier;
 import application.module.node.services.AccountService;
 import application.module.node.services.AliasService;
 import application.module.node.services.BlockService;
@@ -26,14 +38,38 @@ import application.module.node.services.ParameterService;
 import application.module.node.services.SubscriptionService;
 import application.module.node.services.TimeService;
 import application.module.node.services.TransactionService;
+import application.module.node.services.impl.AccountServiceImpl;
+import application.module.node.services.impl.AliasServiceImpl;
+import application.module.node.services.impl.ATServiceImpl;
+import application.module.node.services.impl.BlockServiceImpl;
+import application.module.node.services.impl.DGSGoodsStoreServiceImpl;
+import application.module.node.services.impl.EscrowServiceImpl;
+import application.module.node.services.impl.IndirectIncomingServiceImpl;
+import application.module.node.services.impl.ParameterServiceImpl;
+import application.module.node.services.impl.SubscriptionServiceImpl;
+import application.module.node.services.impl.TimeServiceImpl;
+import application.module.node.services.impl.TransactionServiceImpl;
+import application.module.node.statistics.StatisticsManagerImpl;
+import application.module.node.unconfirmedtransactions.UnconfirmedTransactionStore;
+import application.module.node.util.DownloadCacheImpl;
 import application.module.node.util.ThreadPool;
+import application.module.node.web.api.http.common.APITransactionManager;
+import application.module.node.web.api.http.common.APITransactionManagerImpl;
 import application.module.node.web.server.WebServer;
+import application.module.node.web.server.WebServerContext;
+import application.module.node.web.server.WebServerImpl;
+import application.utils.logging.ProfileLoggingApplier;
+import application.utils.logging.ProfileThreadContext;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import signum.net.NetworkParameters;
+import signumj.util.SignumUtils;
 
 /**
  * Encapsulates all instance-scoped state for a single running Signum node.
@@ -87,10 +123,19 @@ public final class NodeCoreContext {
     private DbContext dbContext;
 
     /** Per-instance database connection pool manager. */
+    private DBCacheManagerImpl dbCacheManager;
+
+    /** Per-instance Stores (data access layer). */
     private Stores stores;
 
     /** Per-instance database type wrapper. */
     private Dbs dbs;
+
+    /** Derived table manager for cached/computed tables. */
+    private DerivedTableManager derivedTableManager;
+
+    /** Statistics manager for DB metrics tracking. */
+    private StatisticsManagerImpl statisticsManager;
 
     /** Dedicated thread pool for background tasks. */
     private ThreadPool threadPool;
@@ -100,6 +145,19 @@ public final class NodeCoreContext {
 
     /** Tracks graceful shutdown progress. */
     private ShutdownManager shutdownManager;
+
+    // =========================================================================
+    // Network & Mining
+    // =========================================================================
+
+    /** Resolved NetworkParameters for this profile (null if not configured). */
+    private NetworkParameters networkParameters;
+
+    /** Block download cache. */
+    private DownloadCacheImpl downloadCache;
+
+    /** Economic clustering for transaction prioritization. */
+    private EconomicClustering economicClustering;
 
     // =========================================================================
     // Blockchain components
@@ -126,6 +184,7 @@ public final class NodeCoreContext {
 
     private AccountService accountService;
     private AliasService aliasService;
+    private ATServiceImpl atService;
     private BlockService blockService;
     private TransactionService transactionService;
     private SubscriptionService subscriptionService;
@@ -135,6 +194,14 @@ public final class NodeCoreContext {
     private IndirectIncomingService indirectIncomingService;
     private ParameterService parameterService;
     private TimeService timeService;
+
+    // =========================================================================
+    // Web/API components
+    // =========================================================================
+
+    private APITransactionManager apiTransactionManager;
+    private FeeSuggestionCalculator feeSuggestionCalculator;
+    private DeeplinkQRCodeGenerator deeplinkQRCodeGenerator;
 
     // =========================================================================
     // Lifecycle flags
@@ -176,9 +243,6 @@ public final class NodeCoreContext {
         }
         stopped.set(false);
         try {
-            // Delegation to Signum internal init logic (moved here eventually).
-            // For Phase 1 we keep the call-chain intact so Signum.init() still
-            // works, but we capture the created components below.
             doInitialize();
         } catch (NodeStartupException e) {
             started.set(false);
@@ -216,69 +280,541 @@ public final class NodeCoreContext {
 
     /**
      * Bootstrap logic extracted from {@code Signum.loadWallet()}.
-     * In Phase 1 this method calls into a protected helper on Signum; in later
-     * phases the code will be fully migrated here.
+     * Phase 9.1: Database Foundation - migrates DB-init components here.
+     * Phase 9.2: Blockchain Core - migrates blockchain + core services here.
+     * Phase 9.3: Services & Hooks - migrates remaining services here.
      */
     private void doInitialize() {
         // ── Step 1: Apply per-profile logging configuration ──
-        // Resolution priority: profiles.json loggingPresets → profiles.json loggingProfile
-        // → NodeProfile.properties logging.preset → hardcoded default ("standard")
         ProfileLoggingApplier.apply(confFolder.toString(), profileName);
 
         // ── Step 2: Tag current thread with module+profile for log routing ──
-        // ProfileThreadContext sets MDC context so that all SLF4J -> JUL ->
-        // ProfileLogRouter events emitted on this thread carry the correct
-        // module ID + profile name and are routed to the right UI console tabs.
         ProfileThreadContext.setContext("node", profileName);
 
         // ── Step 2.5: Create profile-scoped ShutdownManager ──
-        // The ShutdownManager persists graceful shutdown state to settings.json
-        // under the hierarchical path: module -> node -> {profileName}.
-        // Created here so each profile maintains independent shutdown tracking.
         this.shutdownManager = new ShutdownManager(this.propertyService, this.profileName);
-        application.module.node.Signum.setShutdownManager(this.shutdownManager);
 
-        // ── Step 3: Delegate to Signum.init() ──
+        // ── Step 3: Database Foundation (migrated from Signum.loadWallet) ──
         try {
-            application.module.node.Signum.init((CaselessProperties) propertyService);
-            captureComponentReferences();
+            initDatabaseFoundation();
         } catch (NodeStartupException e) {
             throw e;
         } catch (RuntimeException e) {
             throw new NodeStartupException(
-                    "Initialization failed for profile '" + profileName + "'", e);
+                    "Database initialization failed for profile '" + profileName + "'", e);
+        }
+
+        // ── Step 3.5: Blockchain Core (migrated from Signum.loadWallet lines 507-556) ──
+        try {
+            initBlockchainCore();
+        } catch (NodeStartupException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new NodeStartupException(
+                    "Blockchain core initialization failed for profile '" + profileName + "'", e);
+        }
+
+        // ── Step 3.75: Services & Hooks (migrated from Signum.loadWallet lines 558-644) ──
+        try {
+            initServicesAndHooks();
+        } catch (NodeStartupException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new NodeStartupException(
+                    "Services initialization failed for profile '" + profileName + "'", e);
+        }
+
+        // ── Step 4: Log initialization summary ──
+        long initTime = java.lang.System.currentTimeMillis();
+        logger.info("Node profile '{}' initialization completed.", profileName);
+        logger.info("Running network: {}", propertyService.getString(Props.NETWORK_NAME));
+    }
+
+    /**
+     * Initializes database foundation components locally.
+     * Migrated from Signum.loadWallet() lines 456-505.
+     */
+    private void initDatabaseFoundation() {
+        // ensureDatabaseDirectory for SQLite configs
+        ensureDatabaseDirectory(this.propertyService);
+
+        // Load NetworkParameters if configured
+        String networkParametersClass = this.propertyService.getString(Props.NETWORK_PARAMETERS);
+        if (networkParametersClass != null && !networkParametersClass.trim().isEmpty()
+                && !"null".equalsIgnoreCase(networkParametersClass)) {
+            try {
+                this.networkParameters = (NetworkParameters) Class
+                        .forName(networkParametersClass)
+                        .getConstructor()
+                        .newInstance();
+                this.propertyService.setNetworkParameters(this.networkParameters);
+            } catch (Exception e) {
+                throw new RuntimeException(
+                        "Failed to load network parameters class: " + networkParametersClass, e);
+            }
+        }
+
+        // Address prefix configuration (Signum.loadWallet line 486-489)
+        SignumUtils.setAddressPrefix(this.propertyService.getString(Props.ADDRESS_PREFIX));
+        SignumUtils.addAddressPrefix("BURST");
+        SignumUtils.setValueSuffix(this.propertyService.getString(Props.VALUE_SUFIX));
+
+        // TimeService (line 491)
+        this.timeService = new TimeServiceImpl();
+
+        // DerivedTableManager (line 493)
+        this.derivedTableManager = new DerivedTableManager();
+
+        // StatisticsManager + DBCacheManager (lines 495-496)
+        this.statisticsManager = new StatisticsManagerImpl(this.timeService);
+        this.dbCacheManager = new DBCacheManagerImpl(this.statisticsManager);
+
+        // ThreadPool (line 498)
+        this.threadPool = new ThreadPool(this.propertyService);
+
+        // Db.init + Dbs + Stores (lines 500-505)
+        // Multi-profile: per-instance DbContext - capture return value instead of static getActiveContext()
+        this.dbContext = Db.init(this.propertyService, this.dbCacheManager);
+        this.dbs = Db.getDbsByDatabaseType();
+
+        TransactionDb transactionDb = dbs.getTransactionDb();
+        BlockDb blockDb = dbs.getBlockDb();
+
+        this.stores = new Stores(this.derivedTableManager, this.dbCacheManager, this.timeService,
+                this.propertyService, transactionDb, blockDb, this.networkParameters);
+    }
+
+    /**
+     * Initializes blockchain core components locally.
+     * Migrated from Signum.loadWallet() lines 507-556.
+     */
+    private void initBlockchainCore() {
+        final TransactionDb transactionDb = this.dbs.getTransactionDb();
+        final BlockDb blockDb = this.dbs.getBlockDb();
+        final BlockchainStore blockchainStore = this.stores.getBlockchainStore();
+
+        // BlockchainImpl via factory (package-private constructor)
+        // Signum.loadWallet lines 510-514
+        this.blockchain = NodeComponentFactory.createBlockchain(
+                transactionDb,
+                blockDb,
+                blockchainStore,
+                this.propertyService);
+
+        // Set blockchain reference in unconfirmed transaction store (line 516)
+        UnconfirmedTransactionStore unconfirmedTransactionStore = this.stores.getUnconfirmedTransactionStore();
+        unconfirmedTransactionStore.setBlockchain(this.blockchain);
+
+        // AliasService + FluxCapacitor + addDefaultTLDs (lines 518-520)
+        this.fluxCapacitor = new FluxCapacitorImpl(this.blockchain, this.propertyService);
+        this.aliasService = new AliasServiceImpl(
+                this.stores.getAliasStore(),
+                this.stores,
+                this.fluxCapacitor,
+                this.propertyService);
+        this.aliasService.addDefaultTLDs();
+
+        // EconomicClustering (line 522)
+        this.economicClustering = new EconomicClustering(this.blockchain);
+
+        // AccountService (lines 524-525)
+        this.accountService = new AccountServiceImpl(
+                this.stores.getAccountStore(),
+                this.stores.getAssetTransferStore(),
+                this.blockchain);
+
+        // DownloadCache (lines 527-530)
+        this.downloadCache = new DownloadCacheImpl(
+                this.propertyService,
+                this.fluxCapacitor,
+                this.blockchain);
+
+        // Generator via factory - normal or mock (lines 532-544)
+        boolean mockMining = this.propertyService.getBoolean(Props.DEV_MOCK_MINING);
+        this.generator = NodeComponentFactory.createGenerator(
+                mockMining,
+                this.propertyService,
+                this.blockchain,
+                this.accountService,
+                this.timeService,
+                this.fluxCapacitor,
+                this.downloadCache);
+
+        // TransactionService (line 546)
+        this.transactionService = new TransactionServiceImpl(
+                this.accountService,
+                this.blockchain);
+
+        // TransactionProcessor (lines 548-556)
+        this.transactionProcessor = new TransactionProcessorImpl(
+                this.propertyService,
+                this.economicClustering,
+                this.blockchain,
+                this.stores,
+                this.timeService,
+                this.dbs,
+                this.accountService,
+                this.transactionService,
+                this.threadPool);
+    }
+
+    /**
+     * Initializes remaining services and blockchain hooks locally.
+     * Migrated from Signum.loadWallet() lines 558-644.
+     */
+    private void initServicesAndHooks() {
+        final TransactionDb transactionDb = this.dbs.getTransactionDb();
+        final BlockDb blockDb = this.dbs.getBlockDb();
+        final BlockchainStore blockchainStore = this.stores.getBlockchainStore();
+
+        // ATService (line 558)
+        this.atService = new ATServiceImpl(this.stores.getAtStore());
+
+        // SubscriptionService (lines 559-566)
+        AliasStore aliasStore = this.stores.getAliasStore();
+        this.subscriptionService = new SubscriptionServiceImpl(
+                this.stores.getSubscriptionStore(),
+                transactionDb,
+                this.blockchain,
+                this.fluxCapacitor,
+                this.aliasService,
+                aliasStore,
+                this.accountService);
+        // Wire subscription service back into AliasServiceImpl (avoids circular dependency)
+        ((AliasServiceImpl) this.aliasService).setSubscriptionService(this.subscriptionService);
+
+        // DGSGoodsStoreService (lines 567-570)
+        this.digitalGoodsStoreService = new DGSGoodsStoreServiceImpl(
+                this.blockchain,
+                this.stores.getDigitalGoodsStoreStore(),
+                this.accountService);
+
+        // EscrowService (lines 571-576)
+        this.escrowService = new EscrowServiceImpl(
+                this.stores.getEscrowStore(),
+                this.blockchain,
+                this.aliasService,
+                this.accountService,
+                transactionDb);
+
+        // AssetExchange (lines 578-584)
+        this.assetExchange = new AssetExchangeImpl(
+                this.blockchain,
+                this.accountService,
+                this.stores.getTradeStore(),
+                this.stores.getAccountStore(),
+                this.stores.getAssetTransferStore(),
+                this.stores.getAssetStore(),
+                this.stores.getOrderStore());
+
+        // IndirectIncomingService (lines 586-587)
+        this.indirectIncomingService = new IndirectIncomingServiceImpl(
+                this.stores.getIndirectIncomingStore(),
+                this.propertyService);
+
+        // TransactionType.init() - STATIC CALL, cannot fully migrate yet (lines 589-597)
+        TransactionType.init(
+                this.blockchain,
+                this.fluxCapacitor,
+                this.accountService,
+                this.digitalGoodsStoreService,
+                this.aliasService,
+                this.assetExchange,
+                this.subscriptionService,
+                this.escrowService);
+
+        // BlockService (lines 599-605)
+        NetworkParameters params = this.networkParameters;
+        this.blockService = new BlockServiceImpl(
+                this.accountService,
+                this.transactionService,
+                this.blockchain,
+                this.downloadCache,
+                this.generator,
+                this.fluxCapacitor,
+                this.propertyService,
+                params);
+
+        // BlockchainProcessor (lines 606-628) - 21 parameters!
+        // Using NodeComponentFactory since BlockchainProcessorImpl has package-private constructor
+        this.blockchainProcessor = NodeComponentFactory.createBlockchainProcessor(
+                this.threadPool,
+                this.blockService,
+                this.transactionProcessor,
+                this.blockchain,
+                this.propertyService,
+                this.subscriptionService,
+                this.timeService,
+                this.derivedTableManager,
+                blockDb,
+                transactionDb,
+                this.economicClustering,
+                blockchainStore,
+                this.stores,
+                this.escrowService,
+                this.transactionService,
+                this.downloadCache,
+                this.generator,
+                this.statisticsManager,
+                this.dbCacheManager,
+                this.accountService,
+                this.indirectIncomingService,
+                this.aliasService);
+
+        // downloadCache.setBlockchainProcessor(blockchainProcessor) (line 630)
+        this.downloadCache.setBlockchainProcessor(this.blockchainProcessor);
+
+        // generator.generateForBlockchainProcessor(threadPool, blockchainProcessor) (line 632)
+        this.generator.generateForBlockchainProcessor(
+                this.threadPool, this.blockchainProcessor);
+
+        // DeeplinkQRCodeGenerator (line 634)
+        this.deeplinkQRCodeGenerator = new DeeplinkQRCodeGenerator();
+
+        // ParameterService (lines 636-644)
+        this.parameterService = new ParameterServiceImpl(
+                this.accountService,
+                this.aliasService,
+                this.assetExchange,
+                this.digitalGoodsStoreService,
+                this.blockchain,
+                this.blockchainProcessor,
+                this.transactionProcessor,
+                this.atService);
+
+        // addBlockchainListeners (lines 646-651) - inline migration
+        AT.HandleATBlockTransactionsListener handleAtBlockTransactionListener =
+                new AT.HandleATBlockTransactionsListener(
+                        this.accountService,
+                        transactionDb);
+        this.blockchainProcessor.addListener(
+                handleAtBlockTransactionListener,
+                BlockchainProcessor.Event.AFTER_BLOCK_APPLY);
+
+        DGSGoodsStoreServiceImpl.ExpiredPurchaseListener expiredPurchaseListener =
+                new DGSGoodsStoreServiceImpl.ExpiredPurchaseListener(
+                        this.accountService,
+                        this.digitalGoodsStoreService);
+        this.blockchainProcessor.addListener(
+                expiredPurchaseListener,
+                BlockchainProcessor.Event.AFTER_BLOCK_APPLY);
+
+        // APITransactionManager (lines 653-658)
+        this.apiTransactionManager = new APITransactionManagerImpl(
+                this.parameterService,
+                this.transactionProcessor,
+                this.blockchain,
+                this.accountService,
+                this.transactionService);
+
+        // Peers.init() - STATIC CALL (lines 660-671)
+        Peers.init(
+                this.timeService,
+                this.accountService,
+                this.blockchain,
+                this.transactionProcessor,
+                this.blockchainProcessor,
+                this.propertyService,
+                this.threadPool);
+
+        // params.initialize() + TransactionType.setNetworkParameters() - STATIC CALLS (lines 668-671)
+        if (this.networkParameters != null) {
+            this.networkParameters.initialize(
+                    this.parameterService,
+                    this.accountService,
+                    this.apiTransactionManager);
+            TransactionType.setNetworkParameters(this.networkParameters);
+        }
+
+        // FeeSuggestionCalculator (lines 673-677)
+        this.feeSuggestionCalculator = new FeeSuggestionCalculator(
+                this.blockchainProcessor,
+                this.stores.getUnconfirmedTransactionStore(),
+                this.blockchain,
+                this.fluxCapacitor);
+
+        // WebServerImpl + start() (lines 679-703)
+        this.webServer = new WebServerImpl(new WebServerContext(
+                this.transactionProcessor,
+                this.blockchain,
+                this.blockchainProcessor,
+                this.parameterService,
+                this.accountService,
+                this.aliasService,
+                this.assetExchange,
+                this.escrowService,
+                this.digitalGoodsStoreService,
+                this.subscriptionService,
+                this.atService,
+                this.timeService,
+                this.economicClustering,
+                this.propertyService,
+                this.threadPool,
+                this.transactionService,
+                this.blockService,
+                this.generator,
+                this.apiTransactionManager,
+                this.feeSuggestionCalculator,
+                this.deeplinkQRCodeGenerator,
+                this.indirectIncomingService,
+                this.networkParameters));
+        try {
+            this.webServer.start();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to start WebServer", e);
+        }
+
+        // ThreadPool.start() with timewarp (lines 709-723)
+        boolean offline = this.propertyService.getBoolean(Props.DEV_OFFLINE);
+        int timeMultiplier = offline
+                ? Math.max(this.propertyService.getInt(Props.DEV_TIMEWARP), 1)
+                : 1;
+        this.threadPool.start(timeMultiplier);
+
+        if (timeMultiplier > 1) {
+            this.timeService.setTime(new application.module.node.util.Time.FasterTime(
+                    Math.max(
+                            this.timeService.getEpochTime(),
+                            this.blockchain.getLastBlock().getTimestamp()),
+                    timeMultiplier));
+            logger.info("TIME WILL FLOW {} TIMES FASTER!", timeMultiplier);
+        }
+
+        // DebugTrace.init() is package-private, so we delegate to Signum for now
+        // This will be migrated once DebugTrace is refactored
+    }
+
+    /**
+     * Ensures the database directory exists for SQLite-based configurations.
+     * Handles file URI resolution and parameter stripping.
+     * Migrated from Signum.ensureDatabaseDirectory().
+     */
+    private void ensureDatabaseDirectory(PropertyService props) {
+        String dbUrl = props.getString(Props.DB_URL);
+        if (dbUrl == null || !dbUrl.toLowerCase().startsWith("jdbc:sqlite:")) {
+            return;
+        }
+
+        String pathPart = dbUrl.substring("jdbc:sqlite:".length());
+
+        // Handle file URIs per RFC 2396
+        if (pathPart.toLowerCase().startsWith("file:")) {
+            pathPart = pathPart.substring(5);
+            if (pathPart.startsWith("///")) {
+                pathPart = pathPart.substring(2);
+            } else if (pathPart.startsWith("//") && !pathPart.startsWith("//", 2)) {
+                pathPart = pathPart.substring(2);
+            }
+        }
+
+        // Skip in-memory or special databases
+        if (pathPart.isEmpty() || pathPart.equalsIgnoreCase(":memory:") || pathPart.startsWith(":")) {
+            return;
+        }
+
+        // Strip parameters (e.g. ?cache=shared)
+        int queryIdx = pathPart.indexOf('?');
+        if (queryIdx != -1) {
+            pathPart = pathPart.substring(0, queryIdx);
+        }
+
+        try {
+            Path dbPath = application.utils.io.PathUtils.resolvePath(pathPart);
+            Path parent = dbPath.getParent();
+            if (parent != null && Files.notExists(parent)) {
+                Files.createDirectories(parent);
+                logger.info("Created missing database directory: {}", parent.toAbsolutePath());
+            }
+        } catch (Exception e) {
+            logger.warn("Failed to ensure database directory exists: {}", e.getMessage());
         }
     }
 
-    /**
-     * Reads component references from the Signum static bridge and stores them
-     * locally. Once all code is migrated to instance-access these go away.
-     */
-    private void captureComponentReferences() {
-        Blockchain bc = application.module.node.Signum.getBlockchain();
-        this.blockchain = (bc instanceof BlockchainImpl) ? (BlockchainImpl) bc : null;
-        this.blockchainProcessor = application.module.node.Signum.getBlockchainProcessor();
-        this.transactionProcessor = application.module.node.Signum.getTransactionProcessor();
-        this.transactionService = application.module.node.Signum.getTransactionService();
-        this.subscriptionService = application.module.node.Signum.getSubscriptionService();
-        this.assetExchange = application.module.node.Signum.getAssetExchange();
-        this.generator = application.module.node.Signum.getGenerator();
-        this.fluxCapacitor = application.module.node.Signum.getFluxCapacitor();
-        this.stores = application.module.node.Signum.getStores();
-        this.dbs = application.module.node.Signum.getDbs();
-        // Capture the per-instance DbContext created by Db.init()
-        this.dbContext = application.module.node.db.sql.Db.getActiveContext();
-    }
 
     /**
-     * Teardown logic extracted from {@code Signum.shutdown()}.
+     * Teardown logic - stops all local components in reverse-dependency order.
+     * Reverse of initialization order: WebServer → BlockchainProcessor → Peers → ThreadPool → DBCacheManager → Db.
      */
     private void doShutdown() {
         try {
-            application.module.node.Signum.shutdownNode();
+            // 1. Shutdown WebServer
+            if (this.webServer != null) {
+                try {
+                    this.webServer.shutdown();
+                } catch (Throwable t) {
+                    if (this.shutdownManager != null) {
+                        this.shutdownManager.markFailure("WebServer");
+                    }
+                    logger.error("Error shutting down WebServer for profile '{}'", profileName, t);
+                }
+            }
+
+            // 2. Shutdown BlockchainProcessor
+            if (this.blockchainProcessor != null) {
+                try {
+                    this.blockchainProcessor.shutdown();
+                } catch (Throwable t) {
+                    if (this.shutdownManager != null) {
+                        this.shutdownManager.markFailure("BlockchainProcessor");
+                    }
+                    logger.error("Error shutting down BlockchainProcessor for profile '{}'", profileName, t);
+                }
+            }
+
+            // 3. Shutdown Peers
+            if (this.threadPool != null) {
+                try {
+                    Peers.shutdown(this.threadPool);
+                } catch (Throwable t) {
+                    if (this.shutdownManager != null) {
+                        this.shutdownManager.markFailure("Peers");
+                    }
+                    logger.error("Error shutting down Peers for profile '{}'", profileName, t);
+                }
+            }
+
+            // 4. Shutdown ThreadPool
+            if (this.threadPool != null) {
+                try {
+                    this.threadPool.shutdown();
+                } catch (Throwable t) {
+                    if (this.shutdownManager != null) {
+                        this.shutdownManager.markFailure("ThreadPool");
+                    }
+                    logger.error("Error shutting down ThreadPool for profile '{}'", profileName, t);
+                }
+            }
+
+            // 5. Close DBCacheManager
+            if (this.dbCacheManager != null) {
+                try {
+                    this.dbCacheManager.close();
+                } catch (Throwable t) {
+                    if (this.shutdownManager != null) {
+                        this.shutdownManager.markFailure("DBCacheManager");
+                    }
+                    logger.error("Error closing DBCacheManager for profile '{}'", profileName, t);
+                }
+            }
+
+            // 6. Shutdown Database
+            try {
+                Db.shutdown();
+            } catch (Throwable t) {
+                if (this.shutdownManager != null) {
+                    this.shutdownManager.markFailure("Database");
+                }
+                logger.error("Error shutting down DB for profile '{}'", profileName, t);
+            }
+
+            // 7. Signal shutdown complete
+            if (this.shutdownManager != null) {
+                this.shutdownManager.finishShutdown();
+            }
+
+            logger.info("Node profile '{}' stopped.", profileName);
         } catch (Exception e) {
-            // Log but don't throw - shutdown must be resilient
-            logger.error("Error during shutdown of profile '{}'", profileName, e);
+            logger.error("Unexpected error during shutdown of profile '{}'", profileName, e);
         } finally {
             started.set(false);
             // Clear MDC routing context so orphaned events are not misrouted.
@@ -355,6 +891,10 @@ public final class NodeCoreContext {
         return aliasService;
     }
 
+    public ATServiceImpl getAtService() {
+        return atService;
+    }
+
     public BlockService getBlockService() {
         return blockService;
     }
@@ -371,8 +911,81 @@ public final class NodeCoreContext {
         return assetExchange;
     }
 
+    public DGSGoodsStoreService getDigitalGoodsStoreService() {
+        return digitalGoodsStoreService;
+    }
+
+    public EscrowService getEscrowService() {
+        return escrowService;
+    }
+
+    public IndirectIncomingService getIndirectIncomingService() {
+        return indirectIncomingService;
+    }
+
+    public ParameterService getParameterService() {
+        return parameterService;
+    }
+
+    public APITransactionManager getApiTransactionManager() {
+        return apiTransactionManager;
+    }
+
+    public FeeSuggestionCalculator getFeeSuggestionCalculator() {
+        return feeSuggestionCalculator;
+    }
+
     public ShutdownManager getShutdownManager() {
         return shutdownManager;
+    }
+
+    /**
+     * Returns the per-instance DBCacheManager.
+     */
+    public DBCacheManagerImpl getDbCacheManager() {
+        return dbCacheManager;
+    }
+
+    /**
+     * Returns the DerivedTableManager for this instance.
+     */
+    public DerivedTableManager getDerivedTableManager() {
+        return derivedTableManager;
+    }
+
+    /**
+     * Returns the StatisticsManager for this instance.
+     */
+    public StatisticsManagerImpl getStatisticsManager() {
+        return statisticsManager;
+    }
+
+    /**
+     * Returns the NetworkParameters for this profile (null if not configured).
+     */
+    public NetworkParameters getNetworkParameters() {
+        return networkParameters;
+    }
+
+    /**
+     * Returns the DownloadCache for block download management.
+     */
+    public DownloadCacheImpl getDownloadCache() {
+        return downloadCache;
+    }
+
+    /**
+     * Returns the EconomicClustering instance for transaction prioritization.
+     */
+    public EconomicClustering getEconomicClustering() {
+        return economicClustering;
+    }
+
+    /**
+     * Returns the TimeService instance for this profile.
+     */
+    public TimeService getTimeService() {
+        return timeService;
     }
 
     // =========================================================================

@@ -1,5 +1,6 @@
 package application.module.node.unconfirmedtransactions;
 
+import application.module.node.Blockchain;
 import application.module.node.Signum;
 import application.module.node.SignumException.ValidationException;
 import application.module.node.Constants;
@@ -47,6 +48,11 @@ public class UnconfirmedTransactionStoreImpl implements UnconfirmedTransactionSt
     private final int maxPercentageUnconfirmedTransactionsFullHash;
 
     private NetworkParameters params;
+
+    @Override
+    public void setBlockchain(Blockchain blockchain) {
+        this.reservedBalanceCache.setBlockchain(blockchain);
+    }
 
     public UnconfirmedTransactionStoreImpl(TimeService timeService, PropertyService propertyService,
             AccountStore accountStore, TransactionDb transactionDb,

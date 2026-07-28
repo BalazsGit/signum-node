@@ -7,11 +7,12 @@ import application.module.node.BlockchainProcessor;
 import application.module.node.BlockchainProcessor.BlockOutOfOrderException;
 import application.module.node.Constants;
 import application.module.node.Generator;
-import application.module.node.Signum;
 import application.module.node.Transaction;
 import application.module.node.crypto.Crypto;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.props.Props;
+import application.module.node.props.PropertyService;
 import application.module.node.services.AccountService;
 import application.module.node.services.BlockService;
 import application.module.node.services.TransactionService;
@@ -38,6 +39,8 @@ public class BlockServiceImpl implements BlockService {
     private final Blockchain blockchain;
     private final DownloadCacheImpl downloadCache;
     private final Generator generator;
+    private final FluxCapacitor fluxCapacitor;
+    private final PropertyService propertyService;
     private NetworkParameters networkParameters;
 
     private final List<Block> watchedBlocks = new ArrayList<>();
@@ -49,12 +52,17 @@ public class BlockServiceImpl implements BlockService {
             TransactionService transactionService,
             Blockchain blockchain,
             DownloadCacheImpl downloadCache,
-            Generator generator, NetworkParameters networkParameters) {
+            Generator generator,
+            FluxCapacitor fluxCapacitor,
+            PropertyService propertyService,
+            NetworkParameters networkParameters) {
         this.accountService = accountService;
         this.transactionService = transactionService;
         this.blockchain = blockchain;
         this.downloadCache = downloadCache;
         this.generator = generator;
+        this.fluxCapacitor = fluxCapacitor;
+        this.propertyService = propertyService;
         this.networkParameters = networkParameters;
     }
 
@@ -75,10 +83,10 @@ public class BlockServiceImpl implements BlockService {
             byte[] publicKey = block.getGeneratorPublicKey();
             Account account = accountService.getAccount(publicKey);
             if (account != null) {
-                if (Signum.getFluxCapacitor().getValue(FluxValues.PK_FREEZE2)
+                if (this.fluxCapacitor.getValue(FluxValues.PK_FREEZE2)
                         && account.getPublicKey() == null
-                        && Signum.getBlockchain().getHeight() - account.getCreationHeight() > Signum
-                                .getPropertyService().getInt(Props.PK_BLOCKS_PAST)) {
+                        && this.blockchain.getHeight() - account.getCreationHeight() > this.propertyService
+                                .getInt(Props.PK_BLOCKS_PAST)) {
                     logger.error("Setting a new key for an old inactivated account");
                     return false;
                 }
@@ -177,14 +185,14 @@ public class BlockServiceImpl implements BlockService {
             return;
         }
 
-        int checkPointHeight = Signum.getPropertyService().getInt(Props.NODE_CHECKPOINT_HEIGHT);
+        int checkPointHeight = this.propertyService.getInt(Props.NODE_CHECKPOINT_HEIGHT);
         try {
             if (block.getHeight() < checkPointHeight) {
                 // do not verify the nonce up to the checkpoint block
                 block.setPocTime(BigInteger.valueOf(0L));
             } else {
                 if (block.getHeight() == checkPointHeight) {
-                    String checkPointHash = Signum.getPropertyService()
+                    String checkPointHash = this.propertyService
                             .getString(Props.NODE_CHECKPOINT_HASH);
 
                     String receivedHash = Hex.toHexString(block.getPreviousBlockHash());
@@ -261,7 +269,7 @@ public class BlockServiceImpl implements BlockService {
                 }
             }
         }
-        if (!Signum.getFluxCapacitor().getValue(FluxValues.REWARD_RECIPIENT_ENABLE)) {
+        if (!this.fluxCapacitor.getValue(FluxValues.REWARD_RECIPIENT_ENABLE)) {
             accountService.addToBalanceAndUnconfirmedBalanceNQT(
                     generatorAccount,
                     Convert.safeAdd(block.getTotalFeeNqt(), blockReward));
@@ -272,7 +280,7 @@ public class BlockServiceImpl implements BlockService {
             Account rewardAccount = getRewardAccount(block);
 
             long rewardFeesNqt = block.getTotalFeeNqt();
-            if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, block.getHeight())) {
+            if (this.fluxCapacitor.getValue(FluxValues.SMART_FEES, block.getHeight())) {
                 if (block.getTotalFeeCashBackNqt() < 0) {
                     throw new ArithmeticException(
                             "Block fee cashback cannot be negative at height " + block.getHeight());
@@ -336,10 +344,10 @@ public class BlockServiceImpl implements BlockService {
     @Override
     public void calculateBaseTarget(Block block, Block previousBlock)
             throws BlockOutOfOrderException {
-        long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
+        long blockTime = this.fluxCapacitor.getValue(FluxValues.BLOCK_TIME);
 
         if (block.getPreviousBlockId() == 0 && block.getId() == Convert
-                .parseUnsignedLong(Signum.getPropertyService().getString(Props.GENESIS_BLOCK_ID))) {
+                .parseUnsignedLong(this.propertyService.getString(Props.GENESIS_BLOCK_ID))) {
             block.setBaseTarget(Constants.INITIAL_BASE_TARGET);
             block.setCumulativeDifficulty(BigInteger.ZERO);
         } else if (block.getHeight() < 4) {
@@ -347,7 +355,7 @@ public class BlockServiceImpl implements BlockService {
             block.setCumulativeDifficulty(previousBlock.getCumulativeDifficulty()
                     .add(Convert.two64.divide(BigInteger.valueOf(Constants.INITIAL_BASE_TARGET))));
         } else if (block.getHeight() < Constants.SIGNUM_DIFF_ADJUST_CHANGE_BLOCK
-                && !Signum.getFluxCapacitor().getValue(FluxValues.SODIUM)) {
+                && !this.fluxCapacitor.getValue(FluxValues.SODIUM)) {
             Block itBlock = previousBlock;
             BigInteger avgBaseTarget = BigInteger.valueOf(itBlock.getBaseTarget());
             do {
@@ -439,7 +447,7 @@ public class BlockServiceImpl implements BlockService {
             block.setBaseTarget(newBaseTarget);
             BigInteger difficulty = Convert.two64.divide(BigInteger.valueOf(newBaseTarget));
 
-            if (Signum.getFluxCapacitor().getValue(FluxValues.POC_PLUS, block.getHeight())) {
+            if (this.fluxCapacitor.getValue(FluxValues.POC_PLUS, block.getHeight())) {
                 block.setCommitment(
                         generator.estimateCommitment(
                                 block.getGeneratorId(),
@@ -448,7 +456,7 @@ public class BlockServiceImpl implements BlockService {
                 // update the average commitment based on a moving average filter
                 long curCommitment = previousBlock.getAverageCommitment();
 
-                long avgCommitmentWindow = Signum.getFluxCapacitor()
+                long avgCommitmentWindow = this.fluxCapacitor
                         .getValue(
                                 FluxValues.AVERAGE_COMMITMENT_WINDOW,
                                 block.getHeight());
@@ -467,7 +475,7 @@ public class BlockServiceImpl implements BlockService {
                 // assuming a minimum value of 1 coin
                 newAvgCommitment = Math.max(
                         newAvgCommitment,
-                        Signum.getPropertyService().getInt(Props.ONE_COIN_NQT));
+                        this.propertyService.getInt(Props.ONE_COIN_NQT));
                 block.setBaseTarget(newBaseTarget, newAvgCommitment);
 
                 if (block.getPeer() != null
@@ -497,7 +505,7 @@ public class BlockServiceImpl implements BlockService {
                             + " is missing. PoC+ consensus requires access to historical headers even in pruned mode.");
                 }
                 long pastAverageCommitment = pastBlock.getAverageCommitment();
-                if (Signum.getFluxCapacitor().getValue(FluxValues.SPEEDWAY, block.getHeight())) {
+                if (this.fluxCapacitor.getValue(FluxValues.SPEEDWAY, block.getHeight())) {
                     // use the average from past and now to get a smoother result
                     pastAverageCommitment = (pastAverageCommitment
                             + block.getAverageCommitment()) / 2;

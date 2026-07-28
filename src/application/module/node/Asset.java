@@ -52,9 +52,13 @@ public class Asset {
         this.mintable = attachment.getMintable();
     }
 
-    public void updateCurrentOwnerAccount() {
-        Blockchain blockchain = Signum.getBlockchain();
-
+    /**
+     * Updates the current owner account based on ownership transfer transactions.
+     * This method requires access to the blockchain for looking up transfer history.
+     *
+     * @param blockchain the blockchain instance to query for transaction history
+     */
+    public void updateCurrentOwnerAccount(Blockchain blockchain) {
         Transaction issuanceTransaction = blockchain.getTransaction(assetId);
         if (issuanceTransaction == null) {
             // no issuance tx for smart contract issued assets

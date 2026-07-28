@@ -118,8 +118,10 @@ public final class Db {
      *
      * @param propertyService  resolved properties for this profile
      * @param dbCacheManager   cache manager to associate with this context
+     * @return the newly created {@link DbContext} for this initialization call
+     * @since 4.0 return type changed from void to DbContext (Multi-profile: per-instance DbContext)
      */
-    public static void init(PropertyService propertyService, DBCacheManagerImpl dbCacheManager) {
+    public static DbContext init(PropertyService propertyService, DBCacheManagerImpl dbCacheManager) {
         try {
             Db.dbCacheManager = dbCacheManager;
             Db.databaseInstance = DatabaseInstanceFactory.createInstance(propertyService);
@@ -174,6 +176,7 @@ public final class Db {
             DbContext dbContext = new DbContext();
             dbContext.init(propertyService, dbCacheManager);
             setActiveContext(dbContext);
+            return dbContext; // Multi-profile: per-instance DbContext
 
         } catch (Exception e) {
             throw new RuntimeException(e.toString(), e);

@@ -1,12 +1,11 @@
 package application.module.node.db.sql;
 
-import application.module.node.Signum;
+import application.module.node.Blockchain;
 import application.module.node.Subscription;
 import application.module.node.db.SignumKey;
 import application.module.node.db.VersionedEntityTable;
 import application.module.node.db.store.DerivedTableManager;
 import application.module.node.db.store.SubscriptionStore;
-import application.module.node.props.Props;
 
 import org.jooq.*;
 import org.jooq.Record;
@@ -14,7 +13,6 @@ import org.jooq.Record;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static application.module.node.schema.Tables.SUBSCRIPTION;
@@ -31,9 +29,12 @@ public class SqlSubscriptionStore implements SubscriptionStore {
 
     private final VersionedEntityTable<Subscription> subscriptionTable;
 
-    private static final int InsertMaxBatchSize = Signum.getPropertyService().getInt(Props.DB_INSERT_BATCH_MAX_SIZE);
+    private final int insertMaxBatchSize;
+    // Injected after construction to break circular dependency (Stores created before Blockchain)
+    private Blockchain blockchain;
 
-    public SqlSubscriptionStore(DerivedTableManager derivedTableManager) {
+    public SqlSubscriptionStore(DerivedTableManager derivedTableManager, int insertMaxBatchSize) {
+        this.insertMaxBatchSize = insertMaxBatchSize;
         subscriptionTable = new VersionedEntitySqlTable<Subscription>("subscription",
                 application.module.node.schema.Tables.SUBSCRIPTION,
                 subscriptionDbKeyFactory, derivedTableManager) {
@@ -95,6 +96,14 @@ public class SqlSubscriptionStore implements SubscriptionStore {
         return subscriptionTable.getManyBy(getUpdateOnBlockClause(timestamp), 0, -1);
     }
 
+    /**
+     * Sets the blockchain reference after construction to break circular dependency.
+     * Called by Stores.wireDependencies() after Blockchain is initialized.
+     */
+    public void setBlockchain(Blockchain blockchain) {
+        this.blockchain = blockchain;
+    }
+
     private Query insertSubscription(DSLContext ctx, Subscription subscription) {
         return ctx
                 .insertInto(SUBSCRIPTION, SUBSCRIPTION.ID, SUBSCRIPTION.SENDER_ID, SUBSCRIPTION.RECIPIENT_ID,
@@ -102,7 +111,7 @@ public class SqlSubscriptionStore implements SubscriptionStore {
                         SUBSCRIPTION.LATEST)
                 .values(subscription.getId(), subscription.getSenderId(), subscription.getRecipientId(),
                         subscription.getAmountNQT(),
-                        subscription.getFrequency(), subscription.getTimeNext(), Signum.getBlockchain().getHeight(),
+                        subscription.getFrequency(), subscription.getTimeNext(), blockchain.getHeight(),
                         true);
     }
 
@@ -128,8 +137,8 @@ public class SqlSubscriptionStore implements SubscriptionStore {
                         : new ArrayList<>(subscriptions);
                 final int totalSize = subscriptionList.size();
 
-                for (int i = 0; i < totalSize; i += InsertMaxBatchSize) {
-                    int end = Math.min(i + InsertMaxBatchSize, totalSize);
+                for (int i = 0; i < totalSize; i += this.insertMaxBatchSize) {
+                    int end = Math.min(i + this.insertMaxBatchSize, totalSize);
                     List<Subscription> batch = subscriptionList.subList(i, end);
 
                     // remove the latest flag for past entries
@@ -149,7 +158,7 @@ public class SqlSubscriptionStore implements SubscriptionStore {
                         insertBatch.bind(
                                 subscription.getId(), subscription.getSenderId(), subscription.getRecipientId(),
                                 subscription.getAmountNQT(), subscription.getFrequency(),
-                                subscription.getTimeNext(), Signum.getBlockchain().getHeight(), true);
+                                subscription.getTimeNext(), blockchain.getHeight(), true);
                     }
                     insertBatch.execute();
                 }

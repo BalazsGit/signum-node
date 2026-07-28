@@ -1,7 +1,6 @@
 package application.module.node.unconfirmedtransactions;
 
 import application.module.node.Account;
-import application.module.node.Signum;
 import application.module.node.SignumException;
 import application.module.node.Constants;
 import application.module.node.SignumException.ValidationException;
@@ -22,14 +21,19 @@ class ReservedBalanceCache {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ReservedBalanceCache.class);
 
+    private Blockchain blockchain;
+
     private final AccountStore accountStore;
 
     private final HashMap<Long, Long> reservedBalanceCache;
 
     public ReservedBalanceCache(AccountStore accountStore) {
         this.accountStore = accountStore;
-
         this.reservedBalanceCache = new HashMap<>();
+    }
+
+    void setBlockchain(Blockchain blockchain) {
+        this.blockchain = blockchain;
     }
 
     void reserveBalanceAndPut(Transaction transaction) throws SignumException.ValidationException {
@@ -69,7 +73,6 @@ class ReservedBalanceCache {
             CommitmentRemove commitmentRemove = (CommitmentRemove) transaction.getAttachment();
             long totalAmountNQT = commitmentRemove.getAmountNqt();
 
-            Blockchain blockchain = Signum.getBlockchain();
             int nBlocksMined = blockchain.getBlocksCount(senderAccount.getId(),
                     blockchain.getHeight() - Constants.MAX_ROLLBACK, blockchain.getHeight());
             long amountCommitted = blockchain.getCommittedAmount(senderAccount.getId(), blockchain.getHeight(),

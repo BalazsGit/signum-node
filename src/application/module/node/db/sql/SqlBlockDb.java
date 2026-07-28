@@ -1,9 +1,9 @@
 package application.module.node.db.sql;
 
 import application.module.node.Block;
-import application.module.node.Signum;
 import application.module.node.SignumException;
 import application.module.node.db.BlockDb;
+import application.module.node.db.TransactionDb;
 import application.module.node.schema.tables.records.BlockRecord;
 import org.jooq.*;
 import org.jooq.Record;
@@ -19,6 +19,33 @@ import static application.module.node.schema.Tables.BLOCK;
 public class SqlBlockDb implements BlockDb {
 
     private static final Logger logger = LoggerFactory.getLogger(SqlBlockDb.class);
+
+    private TransactionDb transactionDb;
+
+    /** Default constructor for backward compatibility (transactionDb will be null). */
+    public SqlBlockDb() {
+        this.transactionDb = null;
+    }
+
+    /**
+     * Constructor with TransactionDb dependency injected.
+     * Used by SqlDbs to break the circular dependency.
+     *
+     * @param transactionDb the transaction database instance
+     */
+    public SqlBlockDb(TransactionDb transactionDb) {
+        this.transactionDb = transactionDb;
+    }
+
+    /**
+     * Sets the TransactionDb dependency after construction.
+     * This breaks the circular dependency where SqlDbs creates both SqlBlockDb and SqlTransactionDb.
+     *
+     * @param transactionDb the transaction database instance
+     */
+    public void setTransactionDb(TransactionDb transactionDb) {
+        this.transactionDb = transactionDb;
+    }
 
     public Block findBlock(long blockId) {
         return Db.fetchWithDSLContext(ctx -> {
@@ -152,7 +179,9 @@ public class SqlBlockDb implements BlockDb {
                         block.getGeneratorId(), block.getNonce(), block.getBlockAts())
                 .execute();
 
-        Signum.getDbs().getTransactionDb().saveTransactions(block.getTransactions());
+        if (this.transactionDb != null) {
+            this.transactionDb.saveTransactions(block.getTransactions());
+        }
 
         if (block.getPreviousBlockId() != 0) {
             ctx.update(BLOCK)

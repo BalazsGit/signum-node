@@ -1,7 +1,7 @@
 package application.module.node.db.sql;
 
+import application.module.node.Blockchain;
 import application.module.node.Asset;
-import application.module.node.Signum;
 import application.module.node.db.SignumKey;
 import application.module.node.db.store.AssetStore;
 import application.module.node.db.store.DerivedTableManager;
@@ -17,6 +17,19 @@ import java.util.Collection;
 import static application.module.node.schema.Tables.ASSET;
 
 public class SqlAssetStore implements AssetStore {
+    private final Blockchain blockchain;
+
+    public SqlAssetStore(DerivedTableManager derivedTableManager, StoreDependencies storeDependencies) {
+        this.blockchain = storeDependencies.blockchain();
+        initTable(derivedTableManager);
+    }
+
+    /** @deprecated Use {@link #SqlAssetStore(DerivedTableManager, StoreDependencies)} */
+    @Deprecated
+    public SqlAssetStore(DerivedTableManager derivedTableManager) {
+        this.blockchain = null;
+        initTable(derivedTableManager);
+    }
 
     private final SignumKey.LongKeyFactory<Asset> assetDbKeyFactory = new DbKey.LongKeyFactory<Asset>(ASSET.ID) {
 
@@ -26,9 +39,9 @@ public class SqlAssetStore implements AssetStore {
         }
 
     };
-    private final EntitySqlTable<Asset> assetTable;
+    private EntitySqlTable<Asset> assetTable;
 
-    public SqlAssetStore(DerivedTableManager derivedTableManager) {
+    private void initTable(DerivedTableManager derivedTableManager) {
         assetTable = new EntitySqlTable<Asset>("asset", application.module.node.schema.Tables.ASSET, assetDbKeyFactory,
                 derivedTableManager) {
 
@@ -48,7 +61,7 @@ public class SqlAssetStore implements AssetStore {
         ctx.insertInto(ASSET).set(ASSET.ID, asset.getId()).set(ASSET.ACCOUNT_ID, asset.getAccountId())
                 .set(ASSET.NAME, asset.getName()).set(ASSET.DESCRIPTION, asset.getDescription())
                 .set(ASSET.QUANTITY, asset.getQuantityQnt()).set(ASSET.DECIMALS, asset.getDecimals())
-                .set(ASSET.MINTABLE, asset.getMintable()).set(ASSET.HEIGHT, Signum.getBlockchain().getHeight())
+                .set(ASSET.MINTABLE, asset.getMintable()).set(ASSET.HEIGHT, blockchain.getHeight())
                 .execute();
     }
 

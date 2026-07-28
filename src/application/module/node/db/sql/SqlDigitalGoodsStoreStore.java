@@ -1,6 +1,6 @@
 package application.module.node.db.sql;
 
-import application.module.node.Signum;
+import application.module.node.Blockchain;
 import application.module.node.DigitalGoodsStore;
 import application.module.node.crypto.EncryptedData;
 import application.module.node.db.SignumKey;
@@ -37,10 +37,10 @@ public class SqlDigitalGoodsStoreStore implements DigitalGoodsStoreStore {
         }
     };
 
-    private final VersionedEntityTable<DigitalGoodsStore.Purchase> purchaseTable;
+    private VersionedEntityTable<DigitalGoodsStore.Purchase> purchaseTable;
 
     @Deprecated
-    private final VersionedValuesTable<DigitalGoodsStore.Purchase, EncryptedData> feedbackTable;
+    private VersionedValuesTable<DigitalGoodsStore.Purchase, EncryptedData> feedbackTable;
 
     private final DbKey.LongKeyFactory<DigitalGoodsStore.Purchase> publicFeedbackDbKeyFactory = new DbKey.LongKeyFactory<DigitalGoodsStore.Purchase>(
             PURCHASE.ID) {
@@ -50,7 +50,7 @@ public class SqlDigitalGoodsStoreStore implements DigitalGoodsStoreStore {
         }
     };
 
-    private final VersionedValuesTable<DigitalGoodsStore.Purchase, String> publicFeedbackTable;
+    private VersionedValuesTable<DigitalGoodsStore.Purchase, String> publicFeedbackTable;
 
     private final SignumKey.LongKeyFactory<DigitalGoodsStore.Goods> goodsDbKeyFactory = new DbKey.LongKeyFactory<DigitalGoodsStore.Goods>(
             GOODS.ID) {
@@ -60,9 +60,22 @@ public class SqlDigitalGoodsStoreStore implements DigitalGoodsStoreStore {
         }
     };
 
-    private final VersionedEntityTable<DigitalGoodsStore.Goods> goodsTable;
+    private VersionedEntityTable<DigitalGoodsStore.Goods> goodsTable;
 
+    private final Blockchain blockchain;
+
+    public SqlDigitalGoodsStoreStore(DerivedTableManager derivedTableManager, StoreDependencies storeDependencies) {
+        this.blockchain = storeDependencies.blockchain();
+        initTables(derivedTableManager);
+    }
+
+    @Deprecated
     public SqlDigitalGoodsStoreStore(DerivedTableManager derivedTableManager) {
+        this.blockchain = null;
+        initTables(derivedTableManager);
+    }
+
+    private void initTables(DerivedTableManager derivedTableManager) {
         purchaseTable = new VersionedEntitySqlTable<DigitalGoodsStore.Purchase>("purchase",
                 application.module.node.schema.Tables.PURCHASE,
                 purchaseDbKeyFactory, derivedTableManager) {
@@ -110,7 +123,7 @@ public class SqlDigitalGoodsStoreStore implements DigitalGoodsStoreStore {
                         PURCHASE_FEEDBACK.HEIGHT, PURCHASE_FEEDBACK.LATEST).values(
                                 purchase.getId(),
                                 data, nonce,
-                                application.module.node.Signum.getBlockchain().getHeight(), true)
+                                blockchain.getHeight(), true)
                         .execute();
             }
         };
@@ -131,11 +144,11 @@ public class SqlDigitalGoodsStoreStore implements DigitalGoodsStoreStore {
                 ctx.insertInto(PURCHASE_PUBLIC_FEEDBACK,
                         PURCHASE_PUBLIC_FEEDBACK.ID, PURCHASE_PUBLIC_FEEDBACK.PUBLIC_FEEDBACK,
                         PURCHASE_PUBLIC_FEEDBACK.HEIGHT, PURCHASE_PUBLIC_FEEDBACK.LATEST)
-                        .values(purchase.getId(), publicFeedback, Signum.getBlockchain().getHeight(), true)
+                        .values(purchase.getId(), publicFeedback, blockchain.getHeight(), true)
                         .onConflict(PURCHASE_PUBLIC_FEEDBACK.ID, PURCHASE_PUBLIC_FEEDBACK.HEIGHT)
                         .doUpdate()
                         .set(PURCHASE_PUBLIC_FEEDBACK.PUBLIC_FEEDBACK, publicFeedback)
-                        .set(PURCHASE_PUBLIC_FEEDBACK.HEIGHT, Signum.getBlockchain().getHeight())
+                        .set(PURCHASE_PUBLIC_FEEDBACK.HEIGHT, blockchain.getHeight())
                         .set(PURCHASE_PUBLIC_FEEDBACK.LATEST, true)
                         .execute();
             }
@@ -224,9 +237,9 @@ public class SqlDigitalGoodsStoreStore implements DigitalGoodsStoreStore {
                 GOODS.TAGS, GOODS.TIMESTAMP, GOODS.QUANTITY, GOODS.PRICE,
                 GOODS.DELISTED, GOODS.HEIGHT, GOODS.LATEST)
                 .values(goods.getId(), goods.getSellerId(), goods.getName(),
-                        goods.getDescription(), goods.getTags(), goods.getTimestamp(),
+                goods.getDescription(), goods.getTags(), goods.getTimestamp(),
                         goods.getQuantity(), goods.getPriceNQT(), goods.isDelisted(),
-                        Signum.getBlockchain().getHeight(), true)
+                        blockchain.getHeight(), true)
                 .onConflict(GOODS.ID, GOODS.HEIGHT)
                 .doUpdate()
                 .set(GOODS.SELLER_ID, goods.getSellerId())
@@ -272,12 +285,12 @@ public class SqlDigitalGoodsStoreStore implements DigitalGoodsStoreStore {
                 PURCHASE.HAS_PUBLIC_FEEDBACKS, PURCHASE.DISCOUNT,
                 PURCHASE.REFUND, PURCHASE.HEIGHT, PURCHASE.LATEST)
                 .values(purchase.getId(), purchase.getBuyerId(), purchase.getGoodsId(),
-                        purchase.getSellerId(), purchase.getQuantity(), purchase.getPriceNQT(),
+                purchase.getSellerId(), purchase.getQuantity(), purchase.getPriceNQT(),
                         purchase.getDeliveryDeadlineTimestamp(), note, nonce, purchase.getTimestamp(),
                         purchase.isPending(), goods, goodsNonce, refundNote, refundNonce,
                         purchase.getFeedbackNotes() != null && !purchase.getFeedbackNotes().isEmpty(),
                         !purchase.getPublicFeedback().isEmpty(), purchase.getDiscountNQT(),
-                        purchase.getRefundNQT(), Signum.getBlockchain().getHeight(), true)
+                        purchase.getRefundNQT(), blockchain.getHeight(), true)
                 .onConflict(PURCHASE.ID, PURCHASE.HEIGHT)
                 .doUpdate()
                 .set(PURCHASE.BUYER_ID, purchase.getBuyerId())

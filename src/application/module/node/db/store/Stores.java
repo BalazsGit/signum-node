@@ -1,9 +1,11 @@
 package application.module.node.db.store;
 
+import application.module.node.Blockchain;
 import application.module.node.db.BlockDb;
 import application.module.node.db.TransactionDb;
 import application.module.node.db.cache.DBCacheManagerImpl;
 import application.module.node.db.sql.*;
+import application.module.node.props.Props;
 import application.module.node.props.PropertyService;
 import application.module.node.services.TimeService;
 import application.module.node.unconfirmedtransactions.UnconfirmedTransactionStore;
@@ -21,27 +23,42 @@ public class Stores {
     private final EscrowStore escrowStore;
     private final OrderStore orderStore;
     private final TradeStore tradeStore;
-    private final SubscriptionStore subscriptionStore;
+    private final SqlSubscriptionStore subscriptionStore;
     private final UnconfirmedTransactionStore unconfirmedTransactionStore;
-    private final IndirectIncomingStore indirectIncomingStore;
+    private final SqlIndirectIncomingStore indirectIncomingStore;
+    private final SqlAliasStore aliasStoreImpl;
+    private final SqlOrderStore orderStoreImpl;
 
     public Stores(DerivedTableManager derivedTableManager, DBCacheManagerImpl dbCacheManager, TimeService timeService,
             PropertyService propertyService, TransactionDb transactionDb,
             BlockDb blockDb, NetworkParameters params) {
+        int insertMaxBatchSize = propertyService.getInt(Props.DB_INSERT_BATCH_MAX_SIZE);
         this.accountStore = new SqlAccountStore(derivedTableManager, dbCacheManager);
-        this.aliasStore = new SqlAliasStore(derivedTableManager);
+        this.aliasStoreImpl = new SqlAliasStore(derivedTableManager);
+        this.aliasStore = this.aliasStoreImpl;
         this.assetStore = new SqlAssetStore(derivedTableManager);
         this.assetTransferStore = new SqlAssetTransferStore(derivedTableManager);
         this.atStore = new SqlATStore(derivedTableManager);
         this.digitalGoodsStoreStore = new SqlDigitalGoodsStoreStore(derivedTableManager);
         this.escrowStore = new SqlEscrowStore(derivedTableManager);
-        this.orderStore = new SqlOrderStore(derivedTableManager);
+        this.orderStoreImpl = new SqlOrderStore(derivedTableManager);
+        this.orderStore = this.orderStoreImpl;
         this.tradeStore = new SqlTradeStore(derivedTableManager);
-        this.subscriptionStore = new SqlSubscriptionStore(derivedTableManager);
+        this.subscriptionStore = new SqlSubscriptionStore(derivedTableManager, insertMaxBatchSize);
         this.unconfirmedTransactionStore = new UnconfirmedTransactionStoreImpl(timeService, propertyService,
                 accountStore, transactionDb, params);
-        this.indirectIncomingStore = new SqlIndirectIncomingStore(derivedTableManager);
+        this.indirectIncomingStore = new SqlIndirectIncomingStore(derivedTableManager, insertMaxBatchSize);
         this.blockchainStore = new SqlBlockchainStore(transactionDb, blockDb);
+    }
+
+    /**
+     * Wires dependencies (like Blockchain) into stores after construction.
+     * This breaks the circular dependency where Stores are created before Blockchain.
+     */
+    public void wireDependencies(Blockchain blockchain) {
+        subscriptionStore.setBlockchain(blockchain);
+        aliasStoreImpl.setBlockchain(blockchain);
+        orderStoreImpl.setBlockchain(blockchain);
     }
 
     public AccountStore getAccountStore() {

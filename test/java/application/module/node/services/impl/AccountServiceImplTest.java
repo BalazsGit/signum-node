@@ -2,6 +2,7 @@ package application.module.node.services.impl;
 
 import application.module.node.Account;
 import application.module.node.Account.RewardRecipientAssignment;
+import application.module.node.Blockchain;
 import application.module.node.db.SignumKey;
 import application.module.node.db.SignumKey.LongKeyFactory;
 import application.module.node.db.VersionedBatchEntityTable;
@@ -23,6 +24,7 @@ public class AccountServiceImplTest {
     private VersionedBatchEntityTable<Account> accountTableMock;
     private LongKeyFactory<Account> accountSignumKeyFactoryMock;
     private AssetTransferStore assetTransferStoreMock;
+    private Blockchain blockchainMock;
 
     private AccountServiceImpl t;
 
@@ -32,11 +34,12 @@ public class AccountServiceImplTest {
         accountTableMock = mock(VersionedBatchEntityTable.class);
         accountSignumKeyFactoryMock = mock(LongKeyFactory.class);
         assetTransferStoreMock = mock(AssetTransferStore.class);
+        blockchainMock = mock(Blockchain.class);
 
         when(accountStoreMock.getAccountTable()).thenReturn(accountTableMock);
         when(accountStoreMock.getAccountKeyFactory()).thenReturn(accountSignumKeyFactoryMock);
 
-        t = new AccountServiceImpl(accountStoreMock, assetTransferStoreMock);
+        t = new AccountServiceImpl(accountStoreMock, assetTransferStoreMock, blockchainMock);
     }
 
     @Test

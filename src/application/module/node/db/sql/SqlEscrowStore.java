@@ -1,6 +1,6 @@
 package application.module.node.db.sql;
 
-import application.module.node.Signum;
+import application.module.node.Blockchain;
 import application.module.node.Escrow;
 import application.module.node.Transaction;
 import application.module.node.db.SignumKey;
@@ -18,6 +18,8 @@ import static application.module.node.schema.Tables.ESCROW;
 import static application.module.node.schema.Tables.ESCROW_DECISION;
 
 public class SqlEscrowStore implements EscrowStore {
+    private final Blockchain blockchain;
+
     private final SignumKey.LongKeyFactory<Escrow> escrowDbKeyFactory = new DbKey.LongKeyFactory<Escrow>(ESCROW.ID) {
         @Override
         public SignumKey newKey(Escrow escrow) {
@@ -36,10 +38,10 @@ public class SqlEscrowStore implements EscrowStore {
     private final VersionedEntityTable<Escrow.Decision> decisionTable;
     private final List<Transaction> resultTransactions = new ArrayList<>();
 
-    public SqlEscrowStore(DerivedTableManager derivedTableManager) {
-        escrowTable = new VersionedEntitySqlTable<Escrow>("escrow", application.module.node.schema.Tables.ESCROW,
-                escrowDbKeyFactory,
-                derivedTableManager) {
+    public SqlEscrowStore(DerivedTableManager derivedTableManager, StoreDependencies storeDependencies) {
+        this.blockchain = storeDependencies.blockchain();
+        this.escrowTable = new VersionedEntitySqlTable<Escrow>("escrow", application.module.node.schema.Tables.ESCROW,
+                escrowDbKeyFactory, derivedTableManager) {
             @Override
             protected Escrow load(DSLContext ctx, Record rs) {
                 return new SqlEscrow(rs);
@@ -50,8 +52,37 @@ public class SqlEscrowStore implements EscrowStore {
                 saveEscrow(ctx, escrow);
             }
         };
+        this.decisionTable = new VersionedEntitySqlTable<Escrow.Decision>("escrow_decision",
+                application.module.node.schema.Tables.ESCROW_DECISION, decisionDbKeyFactory, derivedTableManager) {
+            @Override
+            protected Escrow.Decision load(DSLContext ctx, Record record) {
+                return new SqlDecision(record);
+            }
 
-        decisionTable = new VersionedEntitySqlTable<Escrow.Decision>("escrow_decision",
+            @Override
+            protected void save(DSLContext ctx, Escrow.Decision decision) {
+                saveDecision(ctx, decision);
+            }
+        };
+    }
+
+    /** @deprecated Use {@link #SqlEscrowStore(DerivedTableManager, StoreDependencies)} */
+    @Deprecated
+    public SqlEscrowStore(DerivedTableManager derivedTableManager) {
+        this.blockchain = null;
+        this.escrowTable = new VersionedEntitySqlTable<Escrow>("escrow", application.module.node.schema.Tables.ESCROW,
+                escrowDbKeyFactory, derivedTableManager) {
+            @Override
+            protected Escrow load(DSLContext ctx, Record rs) {
+                return new SqlEscrow(rs);
+            }
+
+            @Override
+            protected void save(DSLContext ctx, Escrow escrow) {
+                saveEscrow(ctx, escrow);
+            }
+        };
+        this.decisionTable = new VersionedEntitySqlTable<Escrow.Decision>("escrow_decision",
                 application.module.node.schema.Tables.ESCROW_DECISION, decisionDbKeyFactory, derivedTableManager) {
             @Override
             protected Escrow.Decision load(DSLContext ctx, Record record) {
@@ -66,20 +97,18 @@ public class SqlEscrowStore implements EscrowStore {
     }
 
     private void saveDecision(DSLContext ctx, Escrow.Decision decision) {
-
         ctx.insertInto(ESCROW_DECISION,
                 ESCROW_DECISION.ESCROW_ID, ESCROW_DECISION.ACCOUNT_ID,
                 ESCROW_DECISION.DECISION, ESCROW_DECISION.HEIGHT,
                 ESCROW_DECISION.LATEST)
                 .values(decision.getEscrowId(), decision.getAccountId(),
                         (int) Escrow.decisionToByte(decision.getDecision()),
-                        Signum.getBlockchain().getHeight(), true)
+                         blockchain.getHeight(), true)
                 .onConflict(ESCROW_DECISION.ESCROW_ID, ESCROW_DECISION.ACCOUNT_ID, ESCROW_DECISION.HEIGHT)
                 .doUpdate()
                 .set(ESCROW_DECISION.DECISION, (int) Escrow.decisionToByte(decision.getDecision()))
                 .set(ESCROW_DECISION.LATEST, true)
                 .execute();
-
     }
 
     @Override
@@ -126,8 +155,8 @@ public class SqlEscrowStore implements EscrowStore {
                 ESCROW.DEADLINE_ACTION, ESCROW.HEIGHT, ESCROW.LATEST)
                 .values(escrow.getId(), escrow.getSenderId(), escrow.getRecipientId(),
                         escrow.getAmountNQT(), escrow.getRequiredSigners(),
-                        escrow.getDeadline(), (int) Escrow.decisionToByte(escrow.getDeadlineAction()),
-                        Signum.getBlockchain().getHeight(), true)
+                         escrow.getDeadline(), (int) Escrow.decisionToByte(escrow.getDeadlineAction()),
+                         blockchain.getHeight(), true)
                 .onConflict(ESCROW.ID, ESCROW.HEIGHT)
                 .doUpdate()
                 .set(ESCROW.SENDER_ID, escrow.getSenderId())
@@ -138,7 +167,6 @@ public class SqlEscrowStore implements EscrowStore {
                 .set(ESCROW.DEADLINE_ACTION, (int) Escrow.decisionToByte(escrow.getDeadlineAction()))
                 .set(ESCROW.LATEST, true)
                 .execute();
-
     }
 
     private class SqlDecision extends Escrow.Decision {

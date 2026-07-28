@@ -4,6 +4,7 @@ import application.module.node.Account.AccountAsset;
 import application.module.node.Asset;
 import application.module.node.AssetTransfer;
 import application.module.node.Attachment.ColoredCoinsAssetIssuance;
+import application.module.node.Blockchain;
 import application.module.node.Trade;
 import application.module.node.Transaction;
 import application.module.node.common.AbstractUnitTest;
@@ -27,6 +28,7 @@ public class AssetServiceImplTest extends AbstractUnitTest {
 
     private AssetServiceImpl t;
 
+    private Blockchain blockchainMock;
     private AssetAccountServiceImpl assetAccountServiceMock;
     private AssetTransferServiceImpl assetTransferServicMock;
     private TradeServiceImpl tradeServiceMock;
@@ -36,6 +38,7 @@ public class AssetServiceImplTest extends AbstractUnitTest {
 
     @Before
     public void setUp() {
+        blockchainMock = mock(Blockchain.class);
         assetAccountServiceMock = mock(AssetAccountServiceImpl.class);
         assetTransferServicMock = mock(AssetTransferServiceImpl.class);
         tradeServiceMock = mock(TradeServiceImpl.class);
@@ -47,7 +50,7 @@ public class AssetServiceImplTest extends AbstractUnitTest {
         when(assetStoreMock.getAssetTable()).thenReturn(assetTableMock);
         when(assetStoreMock.getAssetDbKeyFactory()).thenReturn(assetDbKeyFactoryMock);
 
-        t = new AssetServiceImpl(assetAccountServiceMock, tradeServiceMock, assetStoreMock, assetTransferServicMock);
+        t = new AssetServiceImpl(blockchainMock, assetAccountServiceMock, tradeServiceMock, assetStoreMock, assetTransferServicMock);
     }
 
     @Test

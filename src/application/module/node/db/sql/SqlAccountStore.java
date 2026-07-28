@@ -3,7 +3,7 @@ package application.module.node.db.sql;
 import application.module.node.Account;
 import application.module.node.Account.AccountAsset;
 import application.module.node.Asset;
-import application.module.node.Signum;
+import application.module.node.Blockchain;
 import application.module.node.Transaction;
 import application.module.node.TransactionType;
 import application.module.node.db.VersionedBatchEntityTable;
@@ -11,9 +11,10 @@ import application.module.node.db.VersionedEntityTable;
 import application.module.node.db.cache.DBCacheManagerImpl;
 import application.module.node.db.store.AccountStore;
 import application.module.node.db.store.DerivedTableManager;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
+import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
-import application.module.node.schema.tables.records.AccountBalanceRecord;
 import application.module.node.util.Convert;
 import signumj.crypto.SignumCrypto;
 
@@ -59,13 +60,38 @@ public class SqlAccountStore implements AccountStore {
         }
     };
 
-    private static final Integer InsertMaxBatchSize = Signum.getPropertyService()
-            .getInt(Props.DB_INSERT_BATCH_MAX_SIZE);
+    private final Blockchain blockchain;
+    private final FluxCapacitor fluxCapacitor;
+    private final PropertyService propertyService;
+    private final int insertMaxBatchSize;
+    private final Set<String> pkChecks;
 
-    private static final Set<String> PK_CHECKS = Collections
-            .unmodifiableSet(new HashSet<>(Signum.getPropertyService().getStringList(Props.NODE_PK_CHECKS)));
+    private VersionedEntityTable<Account.AccountAsset> accountAssetTable;
+    private VersionedEntityTable<Account.RewardRecipientAssignment> rewardRecipientAssignmentTable;
+    private VersionedBatchEntityTable<Account> accountTable;
+    private VersionedBatchEntityTable<Account.Balance> accountBalanceTable;
 
+    public SqlAccountStore(DerivedTableManager derivedTableManager, DBCacheManagerImpl dbCacheManager,
+            StoreDependencies storeDependencies) {
+        this.blockchain = storeDependencies.blockchain();
+        this.fluxCapacitor = storeDependencies.fluxCapacitor();
+        this.propertyService = storeDependencies.propertyService();
+        this.insertMaxBatchSize = propertyService.getInt(Props.DB_INSERT_BATCH_MAX_SIZE);
+        this.pkChecks = Collections.unmodifiableSet(new HashSet<>(propertyService.getStringList(Props.NODE_PK_CHECKS)));
+        initTables(derivedTableManager, dbCacheManager);
+    }
+
+    @Deprecated
     public SqlAccountStore(DerivedTableManager derivedTableManager, DBCacheManagerImpl dbCacheManager) {
+        this.blockchain = null;
+        this.fluxCapacitor = null;
+        this.propertyService = null;
+        this.insertMaxBatchSize = 1000;
+        this.pkChecks = Collections.emptySet();
+        initTables(derivedTableManager, dbCacheManager);
+    }
+
+    private void initTables(DerivedTableManager derivedTableManager, DBCacheManagerImpl dbCacheManager) {
         rewardRecipientAssignmentTable = new VersionedEntitySqlTable<Account.RewardRecipientAssignment>(
                 "reward_recip_assign", application.module.node.schema.Tables.REWARD_RECIP_ASSIGN,
                 rewardRecipientAssignmentDbKeyFactory,
@@ -85,7 +111,7 @@ public class SqlAccountStore implements AccountStore {
                         REWARD_RECIP_ASSIGN.HEIGHT, REWARD_RECIP_ASSIGN.LATEST)
                         .values(assignment.getAccountId(), assignment.getPrevRecipientId(),
                                 assignment.getRecipientId(), assignment.getFromHeight(),
-                                Signum.getBlockchain().getHeight(), true)
+                                blockchain.getHeight(), true)
                         .onConflict(REWARD_RECIP_ASSIGN.ACCOUNT_ID, REWARD_RECIP_ASSIGN.HEIGHT)
                         .doUpdate()
                         .set(REWARD_RECIP_ASSIGN.PREV_RECIP_ID, assignment.getPrevRecipientId())
@@ -122,7 +148,7 @@ public class SqlAccountStore implements AccountStore {
                         ACCOUNT_ASSET.HEIGHT, ACCOUNT_ASSET.LATEST)
                         .values(accountAsset.getAccountId(), accountAsset.getAssetId(),
                                 accountAsset.getQuantityQnt(), accountAsset.getUnconfirmedQuantityQnt(),
-                                Signum.getBlockchain().getHeight(), true)
+                                blockchain.getHeight(), true)
                         .onConflict(ACCOUNT_ASSET.ACCOUNT_ID, ACCOUNT_ASSET.ASSET_ID, ACCOUNT_ASSET.HEIGHT)
                         .doUpdate()
                         .set(ACCOUNT_ASSET.QUANTITY, accountAsset.getQuantityQnt())
@@ -149,7 +175,7 @@ public class SqlAccountStore implements AccountStore {
             @Override
             protected void bulkInsert(DSLContext ctx, Collection<Account> accounts) {
                 List<Query> accountQueries = new ArrayList<>();
-                int height = Signum.getBlockchain().getHeight();
+                int height = blockchain.getHeight();
 
                 for (Account account : accounts) {
                     if (account == null)
@@ -186,7 +212,7 @@ public class SqlAccountStore implements AccountStore {
 
             @Override
             protected void bulkInsert(DSLContext ctx, Collection<Account.Balance> accounts) {
-                int height = Signum.getBlockchain().getHeight();
+                int height = blockchain.getHeight();
                 Iterator<Account.Balance> iterator = accounts.iterator();
                 List<Record6<Long, Integer, Long, Long, Long, Boolean>> rows = new ArrayList<>();
                 while (iterator.hasNext()) {
@@ -202,7 +228,7 @@ public class SqlAccountStore implements AccountStore {
                                     balance.getBalanceNqt(), balance.getUnconfirmedBalanceNqt(),
                                     balance.getForgedBalanceNqt(), true));
 
-                    if (rows.size() >= InsertMaxBatchSize) {
+                    if (rows.size() >= insertMaxBatchSize) {
                         ctx.insertInto(ACCOUNT_BALANCE, ACCOUNT_BALANCE.ID, ACCOUNT_BALANCE.HEIGHT,
                                 ACCOUNT_BALANCE.BALANCE, ACCOUNT_BALANCE.UNCONFIRMED_BALANCE,
                                 ACCOUNT_BALANCE.FORGED_BALANCE, ACCOUNT.LATEST)
@@ -226,14 +252,6 @@ public class SqlAccountStore implements AccountStore {
     private static Condition getAccountsWithRewardRecipientClause(final long id, final int height) {
         return REWARD_RECIP_ASSIGN.RECIP_ID.eq(id).and(REWARD_RECIP_ASSIGN.FROM_HEIGHT.le(height));
     }
-
-    private final VersionedEntityTable<Account.AccountAsset> accountAssetTable;
-
-    private final VersionedEntityTable<Account.RewardRecipientAssignment> rewardRecipientAssignmentTable;
-
-    private final VersionedBatchEntityTable<Account> accountTable;
-
-    private final VersionedBatchEntityTable<Account.Balance> accountBalanceTable;
 
     @Override
     public VersionedBatchEntityTable<Account> getAccountTable() {
@@ -286,7 +304,7 @@ public class SqlAccountStore implements AccountStore {
                         .ge(minimumQuantity));
             }
             if (ignoreTreasury) {
-                Transaction transaction = Signum.getBlockchain().getTransaction(asset.getId());
+                Transaction transaction = blockchain.getTransaction(asset.getId());
                 if (transaction != null) {
                     List<Long> ignoredAccounts = ctx.select(TRANSACTION.RECIPIENT_ID).from(TRANSACTION)
                             .where(TRANSACTION.TYPE.eq(TransactionType.TYPE_COLORED_COINS.getType()))
@@ -312,7 +330,7 @@ public class SqlAccountStore implements AccountStore {
                     .and(ACCOUNT_ASSET.ACCOUNT_ID.ne(0L));
 
             if (ignoreTreasury) {
-                Transaction transaction = Signum.getBlockchain().getTransaction(asset.getId());
+                Transaction transaction = blockchain.getTransaction(asset.getId());
                 if (transaction != null) {
                     List<Long> ignoredAccounts = ctx.select(TRANSACTION.RECIPIENT_ID).from(TRANSACTION)
                             .where(TRANSACTION.TYPE.eq(TransactionType.TYPE_COLORED_COINS.getType()))
@@ -341,7 +359,7 @@ public class SqlAccountStore implements AccountStore {
     @Override
     public Collection<Account.RewardRecipientAssignment> getAccountsWithRewardRecipient(Long recipientId) {
         return getRewardRecipientAssignmentTable().getManyBy(
-                getAccountsWithRewardRecipientClause(recipientId, Signum.getBlockchain().getHeight() + 1), 0, -1);
+                getAccountsWithRewardRecipientClause(recipientId, blockchain.getHeight() + 1), 0, -1);
     }
 
     @Override
@@ -370,7 +388,7 @@ public class SqlAccountStore implements AccountStore {
         ArrayList<Long> treasuryAccounts = new ArrayList<>();
         // the 0 account should also be removed from the circulating
         treasuryAccounts.add(0L);
-        Transaction transaction = Signum.getBlockchain().getTransaction(asset.getId());
+        Transaction transaction = blockchain.getTransaction(asset.getId());
         if (transaction != null) {
             treasuryAccounts.addAll(Db.fetchWithDSLContext(ctx -> {
                 return ctx.select(TRANSACTION.RECIPIENT_ID).from(TRANSACTION)
@@ -399,8 +417,8 @@ public class SqlAccountStore implements AccountStore {
     @Override
     public boolean setOrVerify(Account acc, byte[] key, int height) {
         if (acc.getPublicKey() == null) {
-            if (Signum.getFluxCapacitor().getValue(FluxValues.PK_FREEZE)
-                    && Signum.getBlockchain().getHeight() - acc.getCreationHeight() > Signum.getPropertyService()
+            if (fluxCapacitor.getValue(FluxValues.PK_FREEZE)
+                    && blockchain.getHeight() - acc.getCreationHeight() > propertyService
                             .getInt(Props.PK_BLOCKS_PAST)) {
                 logger.info("Setting a new key for an old account {} is not allowed, created at height {}",
                         Convert.toUnsignedLong(acc.id), acc.getCreationHeight());
@@ -413,8 +431,8 @@ public class SqlAccountStore implements AccountStore {
                 getAccountTable().insert(acc);
             }
             return true;
-        } else if (Signum.getFluxCapacitor().getValue(FluxValues.PK_FREEZE)
-                && PK_CHECKS.contains(Convert.toHexString(SignumCrypto.getInstance().longToBytesLE(acc.getId())))) {
+        } else if (fluxCapacitor.getValue(FluxValues.PK_FREEZE)
+                && pkChecks.contains(Convert.toHexString(SignumCrypto.getInstance().longToBytesLE(acc.getId())))) {
             logger.info("Using the key for account {}", Convert.toUnsignedLong(acc.id));
             return false;
         } else if (Arrays.equals(acc.getPublicKey(), key)) {

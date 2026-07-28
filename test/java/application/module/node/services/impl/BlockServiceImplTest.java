@@ -4,17 +4,19 @@ import application.module.node.Account;
 import application.module.node.Block;
 import application.module.node.Blockchain;
 import application.module.node.Generator;
-import application.module.node.Signum;
 import application.module.node.common.AbstractUnitTest;
 import application.module.node.common.QuickMocker;
 import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxEnable;
 import application.module.node.fluxcapacitor.FluxValues;
+import application.module.node.props.PropertyService;
 import application.module.node.services.AccountService;
 import application.module.node.services.TransactionService;
 import application.module.node.util.DownloadCacheImpl;
+
+import signum.net.NetworkParameters;
+
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedStatic;
 
 import java.util.Collections;
 
@@ -24,7 +26,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
 class BlockServiceImplTest extends AbstractUnitTest {
@@ -42,7 +43,7 @@ class BlockServiceImplTest extends AbstractUnitTest {
         return block;
     }
 
-    private static BlockServiceImpl buildSubject() {
+    private static BlockServiceImpl buildSubject(FluxCapacitor fluxCapacitor, PropertyService propertyService) {
         Account generatorAccount = mock(Account.class);
         Account rewardAccount = mock(Account.class);
         Account nullAccount = mock(Account.class);
@@ -58,7 +59,8 @@ class BlockServiceImplTest extends AbstractUnitTest {
         when(blockchain.getBlockReward(anyInt())).thenReturn(10_000_000_000L);
 
         return new BlockServiceImpl(accountService, mock(TransactionService.class),
-                blockchain, mock(DownloadCacheImpl.class), mock(Generator.class), null);
+                blockchain, mock(DownloadCacheImpl.class), mock(Generator.class),
+                fluxCapacitor, propertyService, null);
     }
 
     private static FluxCapacitor smartFeesEnabled() {
@@ -73,55 +75,47 @@ class BlockServiceImplTest extends AbstractUnitTest {
      */
     @Test
     void apply_GivenNegativeFeeCashBack_ThrowsArithmeticException() {
-        BlockServiceImpl subject = buildSubject();
-        Block block = mockBlock(118_000_000L, -4_611_686_018_427_387_903L, 117_000_000L);
         FluxCapacitor flux = smartFeesEnabled();
+        PropertyService propertyService = mock(PropertyService.class);
+        BlockServiceImpl subject = buildSubject(flux, propertyService);
+        Block block = mockBlock(118_000_000L, -4_611_686_018_427_387_903L, 117_000_000L);
 
-        try (MockedStatic<Signum> signumMock = mockStatic(Signum.class)) {
-            signumMock.when(Signum::getFluxCapacitor).thenReturn(flux);
-            assertThrows(ArithmeticException.class, () -> subject.apply(block),
-                    "Negative fee cashback must be rejected to prevent inflated payout");
-        }
+        assertThrows(ArithmeticException.class, () -> subject.apply(block),
+                "Negative fee cashback must be rejected to prevent inflated payout");
     }
 
     @Test
     void apply_GivenNegativeFeeBurnt_ThrowsArithmeticException() {
-        BlockServiceImpl subject = buildSubject();
-        Block block = mockBlock(118_000_000L, 29_500_000L, -117_000_000L);
         FluxCapacitor flux = smartFeesEnabled();
+        PropertyService propertyService = mock(PropertyService.class);
+        BlockServiceImpl subject = buildSubject(flux, propertyService);
+        Block block = mockBlock(118_000_000L, 29_500_000L, -117_000_000L);
 
-        try (MockedStatic<Signum> signumMock = mockStatic(Signum.class)) {
-            signumMock.when(Signum::getFluxCapacitor).thenReturn(flux);
-            assertThrows(ArithmeticException.class, () -> subject.apply(block),
-                    "Negative fee burnt must be rejected");
-        }
+        assertThrows(ArithmeticException.class, () -> subject.apply(block),
+                "Negative fee burnt must be rejected");
     }
 
     @Test
     void apply_GivenFeesExceedTotal_ThrowsArithmeticException() {
-        BlockServiceImpl subject = buildSubject();
+        FluxCapacitor flux = smartFeesEnabled();
+        PropertyService propertyService = mock(PropertyService.class);
+        BlockServiceImpl subject = buildSubject(flux, propertyService);
         // cashback + burnt > totalFee → rewardFees would go negative
         Block block = mockBlock(100_000_000L, 60_000_000L, 60_000_000L);
-        FluxCapacitor flux = smartFeesEnabled();
 
-        try (MockedStatic<Signum> signumMock = mockStatic(Signum.class)) {
-            signumMock.when(Signum::getFluxCapacitor).thenReturn(flux);
-            assertThrows(ArithmeticException.class, () -> subject.apply(block),
-                    "cashback + burnt exceeding totalFee must be rejected");
-        }
+        assertThrows(ArithmeticException.class, () -> subject.apply(block),
+                "cashback + burnt exceeding totalFee must be rejected");
     }
 
     @Test
     void apply_GivenValidSmartFees_DoesNotThrow() {
-        BlockServiceImpl subject = buildSubject();
+        FluxCapacitor flux = smartFeesEnabled();
+        PropertyService propertyService = mock(PropertyService.class);
+        BlockServiceImpl subject = buildSubject(flux, propertyService);
         // totalFee=118, cashback=29.5, burnt=88.5 → rewardFees=0
         Block block = mockBlock(118_000_000L, 29_500_000L, 88_500_000L);
-        FluxCapacitor flux = smartFeesEnabled();
 
-        try (MockedStatic<Signum> signumMock = mockStatic(Signum.class)) {
-            signumMock.when(Signum::getFluxCapacitor).thenReturn(flux);
-            assertDoesNotThrow(() -> subject.apply(block),
-                    "Valid fee breakdown must be accepted");
-        }
+        assertDoesNotThrow(() -> subject.apply(block),
+                "Valid fee breakdown must be accepted");
     }
 }

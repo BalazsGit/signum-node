@@ -3,11 +3,15 @@ package application.module.node.services.impl;
 import application.module.node.Blockchain;
 import application.module.node.Subscription;
 import application.module.node.common.AbstractUnitTest;
+import application.module.node.common.QuickMocker;
 import application.module.node.db.SignumKey;
 import application.module.node.db.SignumKey.LongKeyFactory;
 import application.module.node.db.TransactionDb;
 import application.module.node.db.VersionedEntityTable;
+import application.module.node.db.store.AliasStore;
 import application.module.node.db.store.SubscriptionStore;
+import application.module.node.fluxcapacitor.FluxCapacitor;
+import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.AccountService;
 import application.module.node.services.AliasService;
 import org.junit.Before;
@@ -29,7 +33,9 @@ public class SubscriptionServiceImplTest extends AbstractUnitTest {
     private LongKeyFactory<Subscription> mockSubscriptionDbKeyFactory;
     private TransactionDb transactionDb;
     private Blockchain blockchain;
+    private FluxCapacitor fluxCapacitor;
     private AliasService aliasService;
+    private AliasStore aliasStore;
     private AccountService accountService;
 
     @Before
@@ -41,7 +47,14 @@ public class SubscriptionServiceImplTest extends AbstractUnitTest {
         when(mockSubscriptionStore.getSubscriptionTable()).thenReturn(mockSubscriptionTable);
         when(mockSubscriptionStore.getSubscriptionDbKeyFactory()).thenReturn(mockSubscriptionDbKeyFactory);
 
-        t = new SubscriptionServiceImpl(mockSubscriptionStore, transactionDb, blockchain, aliasService, accountService);
+        transactionDb = mock(TransactionDb.class);
+        blockchain = mock(Blockchain.class);
+        fluxCapacitor = QuickMocker.fluxCapacitorEnabledFunctionalities(FluxValues.PRE_POC2, FluxValues.DIGITAL_GOODS_STORE);
+        aliasService = mock(AliasService.class);
+        aliasStore = mock(AliasStore.class);
+        accountService = mock(AccountService.class);
+
+        t = new SubscriptionServiceImpl(mockSubscriptionStore, transactionDb, blockchain, fluxCapacitor, aliasService, aliasStore, accountService);
     }
 
     @Test
