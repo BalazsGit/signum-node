@@ -1,6 +1,7 @@
 package application.module.node.web.api.http.handler;
 
 import application.module.node.*;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.services.AccountService;
 import application.module.node.services.ParameterService;
 import application.module.node.util.Convert;
@@ -21,8 +22,8 @@ public final class DGSRefund extends CreateTransaction {
     private final Blockchain blockchain;
 
     public DGSRefund(ParameterService parameterService, Blockchain blockchain, AccountService accountService,
-            APITransactionManager apiTransactionManager) {
-        super(new LegacyDocTag[] { LegacyDocTag.DGS, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
+            APITransactionManager apiTransactionManager, FluxCapacitor fluxCapacitor) {
+        super(new LegacyDocTag[] { LegacyDocTag.DGS, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager, fluxCapacitor,
                 PURCHASE_PARAMETER, REFUND_NQT_PARAMETER);
         this.parameterService = parameterService;
         this.accountService = accountService;

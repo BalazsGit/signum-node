@@ -32,12 +32,14 @@ public class SqlSubscriptionStore implements SubscriptionStore {
     private final int insertMaxBatchSize;
     // Injected after construction to break circular dependency (Stores created before Blockchain)
     private Blockchain blockchain;
+    private final DbContext dbContext;
 
-    public SqlSubscriptionStore(DerivedTableManager derivedTableManager, int insertMaxBatchSize) {
+    public SqlSubscriptionStore(DerivedTableManager derivedTableManager, int insertMaxBatchSize, DbContext dbContext) {
         this.insertMaxBatchSize = insertMaxBatchSize;
+        this.dbContext = dbContext;
         subscriptionTable = new VersionedEntitySqlTable<Subscription>("subscription",
                 application.module.node.schema.Tables.SUBSCRIPTION,
-                subscriptionDbKeyFactory, derivedTableManager) {
+                subscriptionDbKeyFactory, derivedTableManager, blockchain, dbContext) {
             @Override
             protected Subscription load(DSLContext ctx, Record rs) {
                 return new SqlSubscription(rs);
@@ -131,7 +133,7 @@ public class SqlSubscriptionStore implements SubscriptionStore {
     @Override
     public void saveSubscriptions(Collection<Subscription> subscriptions) {
         if (!subscriptions.isEmpty()) {
-            Db.useDSLContext(ctx -> {
+            dbContext.useDSLContext(ctx -> {
                 final List<Subscription> subscriptionList = (subscriptions instanceof List)
                         ? (List<Subscription>) subscriptions
                         : new ArrayList<>(subscriptions);

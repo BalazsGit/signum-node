@@ -1,21 +1,18 @@
 package application.module.node.web.api.http.handler;
 
-import application.module.node.Attachment;
-import application.module.node.Blockchain;
-import application.module.node.Signum;
-import application.module.node.SignumException;
-import application.module.node.Constants;
+import application.module.node.*;
 import application.module.node.common.QuickMocker;
 import application.module.node.common.QuickMocker.MockParam;
 import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.ParameterService;
 import application.module.node.web.api.http.common.APITransactionManager;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.MockedStatic;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -23,35 +20,34 @@ import static application.module.node.Constants.*;
 import static application.module.node.TransactionType.ColoredCoins.ASSET_ISSUANCE;
 import static application.module.node.web.api.http.common.JSONResponses.*;
 import static application.module.node.web.api.http.common.Parameters.*;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
+import static org.mockito.Mockito.mockStatic;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(Signum.class)
-public class IssueAssetTest extends AbstractTransactionTest {
+@ExtendWith(MockitoExtension.class)
+class IssueAssetTest extends AbstractTransactionTest {
 
     private IssueAsset t;
 
+    @Mock
     private ParameterService mockParameterService;
+    @Mock
     private Blockchain mockBlockchain;
+    @Mock
     private APITransactionManager apiTransactionManagerMock;
 
-    @Before
-    public void setUp() {
-        mockParameterService = mock(ParameterService.class);
-        mockBlockchain = mock(Blockchain.class);
-        apiTransactionManagerMock = mock(APITransactionManager.class);
-
-        t = new IssueAsset(mockParameterService, mockBlockchain, apiTransactionManagerMock);
+    @BeforeEach
+    void setUp() {
+        FluxCapacitor fluxCapacitor = QuickMocker.latestValueFluxCapacitor();
+        t = new IssueAsset(mockParameterService, mockBlockchain, apiTransactionManagerMock, fluxCapacitor);
     }
 
     @Test
-    public void processRequest() throws SignumException {
+    void processRequest() throws SignumException {
         final String nameParameter = stringWithLength(MIN_ASSET_NAME_LENGTH + 1);
         final String descriptionParameter = stringWithLength(MAX_ASSET_DESCRIPTION_LENGTH - 1);
         final int decimalsParameter = 4;
@@ -63,32 +59,33 @@ public class IssueAssetTest extends AbstractTransactionTest {
                 new MockParam(DECIMALS_PARAMETER, decimalsParameter),
                 new MockParam(QUANTITY_QNT_PARAMETER, quantityQNTParameter));
 
-        mockStatic(Signum.class);
-        final FluxCapacitor fluxCapacitor = QuickMocker
-                .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
-        when(Signum.getFluxCapacitor()).thenReturn(fluxCapacitor);
-        doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            final FluxCapacitor fluxCapacitor = QuickMocker
+                    .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
+            mocked.when(Signum::getFluxCapacitor).thenReturn(fluxCapacitor);
+            doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
 
-        final Attachment.ColoredCoinsAssetIssuance attachment = (Attachment.ColoredCoinsAssetIssuance) attachmentCreatedTransaction(
-                () -> t.processRequest(req), apiTransactionManagerMock);
-        assertNotNull(attachment);
+            final Attachment.ColoredCoinsAssetIssuance attachment = (Attachment.ColoredCoinsAssetIssuance) attachmentCreatedTransaction(
+                    () -> t.processRequest(req), apiTransactionManagerMock);
+            assertNotNull(attachment);
 
-        assertEquals(ASSET_ISSUANCE, attachment.getTransactionType());
-        assertEquals(nameParameter, attachment.getName());
-        assertEquals(descriptionParameter, attachment.getDescription());
-        assertEquals(decimalsParameter, attachment.getDecimals());
-        assertEquals(descriptionParameter, attachment.getDescription());
+            assertEquals(ASSET_ISSUANCE, attachment.getTransactionType());
+            assertEquals(nameParameter, attachment.getName());
+            assertEquals(descriptionParameter, attachment.getDescription());
+            assertEquals(decimalsParameter, attachment.getDecimals());
+            assertEquals(descriptionParameter, attachment.getDescription());
+        }
     }
 
     @Test
-    public void processRequest_missingName() throws SignumException {
+    void processRequest_missingName() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest();
 
         assertEquals(MISSING_NAME, t.processRequest(req));
     }
 
     @Test
-    public void processRequest_incorrectAssetNameLength_smallerThanMin() throws SignumException {
+    void processRequest_incorrectAssetNameLength_smallerThanMin() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(NAME_PARAMETER, stringWithLength(MIN_ASSET_NAME_LENGTH - 1)));
 
@@ -96,7 +93,7 @@ public class IssueAssetTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_incorrectAssetNameLength_largerThanMax() throws SignumException {
+    void processRequest_incorrectAssetNameLength_largerThanMax() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(NAME_PARAMETER, stringWithLength(MAX_ASSET_NAME_LENGTH + 1)));
 
@@ -104,7 +101,7 @@ public class IssueAssetTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_incorrectAssetName() throws SignumException {
+    void processRequest_incorrectAssetName() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(NAME_PARAMETER, stringWithLength(MIN_ASSET_NAME_LENGTH + 1) + "["));
 
@@ -112,7 +109,7 @@ public class IssueAssetTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_incorrectAssetDescription() throws SignumException {
+    void processRequest_incorrectAssetDescription() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(NAME_PARAMETER, stringWithLength(MIN_ASSET_NAME_LENGTH + 1)),
                 new MockParam(DESCRIPTION_PARAMETER, stringWithLength(MAX_ASSET_DESCRIPTION_LENGTH + 1)));
@@ -121,7 +118,7 @@ public class IssueAssetTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_incorrectDecimals_unParsable() throws SignumException {
+    void processRequest_incorrectDecimals_unParsable() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(NAME_PARAMETER, stringWithLength(MIN_ASSET_NAME_LENGTH + 1)),
                 new MockParam(DESCRIPTION_PARAMETER, stringWithLength(MAX_ASSET_DESCRIPTION_LENGTH - 1)),
@@ -131,7 +128,7 @@ public class IssueAssetTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_incorrectDecimals_negativeNumber() throws SignumException {
+    void processRequest_incorrectDecimals_negativeNumber() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(NAME_PARAMETER, stringWithLength(MIN_ASSET_NAME_LENGTH + 1)),
                 new MockParam(DESCRIPTION_PARAMETER, stringWithLength(MAX_ASSET_DESCRIPTION_LENGTH - 1)),
@@ -141,7 +138,7 @@ public class IssueAssetTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_incorrectDecimals_moreThan8() throws SignumException {
+    void processRequest_incorrectDecimals_moreThan8() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(NAME_PARAMETER, stringWithLength(MIN_ASSET_NAME_LENGTH + 1)),
                 new MockParam(DESCRIPTION_PARAMETER, stringWithLength(MAX_ASSET_DESCRIPTION_LENGTH - 1)),
@@ -149,5 +146,4 @@ public class IssueAssetTest extends AbstractTransactionTest {
 
         assertEquals(INCORRECT_DECIMALS, t.processRequest(req));
     }
-
 }

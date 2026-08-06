@@ -9,6 +9,7 @@ import application.module.node.services.ParameterService;
 import application.module.node.web.api.http.common.APITransactionManager;
 import application.module.node.web.api.http.common.LegacyDocTag;
 import application.module.node.web.api.http.common.ParameterParser;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
@@ -23,14 +24,16 @@ public final class SetRewardRecipient extends CreateTransaction {
     private final ParameterService parameterService;
     private final Blockchain blockchain;
     private final AccountService accountService;
+    private final FluxCapacitor fluxCapacitor;
 
     public SetRewardRecipient(ParameterService parameterService, Blockchain blockchain, AccountService accountService,
-            APITransactionManager apiTransactionManager) {
+            APITransactionManager apiTransactionManager, FluxCapacitor fluxCapacitor) {
         super(new LegacyDocTag[] { LegacyDocTag.ACCOUNTS, LegacyDocTag.MINING, LegacyDocTag.CREATE_TRANSACTION },
-                apiTransactionManager, RECIPIENT_PARAMETER);
+                apiTransactionManager, fluxCapacitor, RECIPIENT_PARAMETER);
         this.parameterService = parameterService;
         this.blockchain = blockchain;
         this.accountService = accountService;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     @Override

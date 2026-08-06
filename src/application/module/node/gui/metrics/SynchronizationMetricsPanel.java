@@ -38,12 +38,12 @@ import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiFontManager;
 import application.utils.math.MovingAverage;
-import application.module.node.Signum;
 import application.module.node.Block;
 import application.module.node.Blockchain;
 import application.module.node.BlockchainProcessor;
 import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.props.Props;
+import application.module.node.props.PropertyService;
 import application.module.node.Constants;
 import application.module.node.fluxcapacitor.FluxValues;
 import org.slf4j.Logger;
@@ -233,6 +233,7 @@ public class SynchronizationMetricsPanel extends JPanel {
 
     private JProgressBar syncProgressBarUnverifiedBlocks;
     private final JFrame parentFrame;
+    private final MetricsPanelContext ctx;
     private boolean migLayoutDebug = false;
     private boolean showDebugBorders = false;
 
@@ -669,9 +670,18 @@ public class SynchronizationMetricsPanel extends JPanel {
     // We now use MetricsUpdateData for all update calculations to unify the data
     // structure.
 
+    /**
+     * @deprecated Use {@link #SynchronizationMetricsPanel(JFrame, ExecutorService, MetricsPanelContext)} instead.
+     */
+    @Deprecated
     public SynchronizationMetricsPanel(JFrame parentFrame, ExecutorService sharedExecutor) {
+        this(parentFrame, sharedExecutor, null);
+    }
+
+    public SynchronizationMetricsPanel(JFrame parentFrame, ExecutorService sharedExecutor, MetricsPanelContext ctx) {
         setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
         this.chartUpdateExecutor = sharedExecutor;
+        this.ctx = ctx;
         setLayout(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[grow]", "[grow, fill]"));
         try {
             this.parentFrame = parentFrame;
@@ -697,17 +707,22 @@ public class SynchronizationMetricsPanel extends JPanel {
      */
     public void init() {
         try {
-            oclUnverifiedQueueThreshold = Signum.getPropertyService().getInt(Props.GPU_UNVERIFIED_QUEUE);
-            oclEnabled = Signum.getPropertyService().getBoolean(Props.GPU_ACCELERATION);
+            PropertyService propertyService = ctx != null ? ctx.getPropertyService() : null;
+            if (propertyService != null) {
+                oclUnverifiedQueueThreshold = propertyService.getInt(Props.GPU_UNVERIFIED_QUEUE);
+                oclEnabled = propertyService.getBoolean(Props.GPU_ACCELERATION);
+            }
             if (oclEnabled) {
                 maxUnverifiedQueueSize = oclUnverifiedQueueThreshold * 2;
             } else {
                 maxUnverifiedQueueSize = oclUnverifiedQueueThreshold;
             }
-            maxUnconfirmedTxs = Signum.getPropertyService().getInt(Props.P2P_MAX_UNCONFIRMED_TRANSACTIONS);
+            if (propertyService != null) {
+                maxUnconfirmedTxs = propertyService.getInt(Props.P2P_MAX_UNCONFIRMED_TRANSACTIONS);
+            }
             // Defensive: blockchain and fluxCapacitor may be null if the node is not yet running
-            Blockchain blockchain = Signum.getBlockchain();
-            FluxCapacitor fluxCapacitor = Signum.getFluxCapacitor();
+            Blockchain blockchain = ctx != null ? ctx.getBlockchain() : null;
+            FluxCapacitor fluxCapacitor = ctx != null ? ctx.getFluxCapacitor() : null;
             if (blockchain != null && fluxCapacitor != null) {
                 maxPayloadSize = (fluxCapacitor.getValue(FluxValues.MAX_PAYLOAD_LENGTH,
                         blockchain.getHeight()) / 1024);
@@ -731,7 +746,9 @@ public class SynchronizationMetricsPanel extends JPanel {
                     .formatted(movingAverageWindow, maxPayloadSize, movingAverageWindow, movingAverageWindow);
             ContextMenuUtils.addInfoTooltip(parentFrame, payloadFullnessLabel, payloadTooltip, "sync.payload.fullness");
 
-            downloadCacheSize = Signum.getPropertyService().getInt(Props.NODE_BLOCK_CACHE_MB);
+            if (propertyService != null) {
+                downloadCacheSize = propertyService.getInt(Props.NODE_BLOCK_CACHE_MB);
+            }
             String cacheTooltip = """
                     The percentage of the allocated download cache memory that is currently in use.
 
@@ -1594,7 +1611,8 @@ public class SynchronizationMetricsPanel extends JPanel {
     }
 
     private void initListeners() {
-        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        if (ctx == null) return;
+        BlockchainProcessor blockchainProcessor = ctx.getBlockchainProcessor();
         if (blockchainProcessor != null) {
             blockchainProcessor.addQueueStatusListener(queueStatusListener);
             blockchainProcessor.addForkCacheStatsListener(forkCacheListener);
@@ -1603,7 +1621,7 @@ public class SynchronizationMetricsPanel extends JPanel {
             blockchainProcessor.addListener(blockPoppedListener, BlockchainProcessor.Event.BLOCK_MANUAL_POPPED);
             blockchainProcessor.addListener(blockPoppedListener, BlockchainProcessor.Event.BLOCK_AUTO_POPPED);
 
-            TransactionProcessor transactionProcessor = Signum.getTransactionProcessor();
+            TransactionProcessor transactionProcessor = ctx.getTransactionProcessor();
             if (transactionProcessor != null) {
                 transactionProcessor.addListener(unconfirmedTransactionListener,
                         TransactionProcessor.Event.ADDED_UNCONFIRMED_TRANSACTIONS);
@@ -1622,7 +1640,7 @@ public class SynchronizationMetricsPanel extends JPanel {
             LOGGER.warn("Error stopping netSpeedChartUpdater", t);
         }
         try {
-            BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+            BlockchainProcessor blockchainProcessor = ctx != null ? ctx.getBlockchainProcessor() : null;
             if (blockchainProcessor != null) {
                 blockchainProcessor.removeQueueStatusListener(queueStatusListener);
                 blockchainProcessor.removeForkCacheStatsListener(forkCacheListener);
@@ -1635,7 +1653,7 @@ public class SynchronizationMetricsPanel extends JPanel {
             LOGGER.warn("Error removing BlockchainProcessor listeners", t);
         }
         try {
-            TransactionProcessor transactionProcessor = Signum.getTransactionProcessor();
+            TransactionProcessor transactionProcessor = ctx != null ? ctx.getTransactionProcessor() : null;
             if (transactionProcessor != null) {
                 transactionProcessor.removeListener(unconfirmedTransactionListener,
                         TransactionProcessor.Event.ADDED_UNCONFIRMED_TRANSACTIONS);
@@ -1669,14 +1687,16 @@ public class SynchronizationMetricsPanel extends JPanel {
     public void onUnconfirmedTransactionCountChanged() {
         chartUpdateExecutor.submit(() -> {
             synchronized (updateLock) {
-                int count = Signum.getTransactionProcessor().getAmountUnconfirmedTransactions();
+                TransactionProcessor tp = ctx != null ? ctx.getTransactionProcessor() : null;
+                int count = tp != null ? tp.getAmountUnconfirmedTransactions() : 0;
                 SwingUtilities.invokeLater(() -> updateUnconfirmedTxCount(count));
             }
         });
     }
 
     public void onNetVolumeChanged() {
-        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        BlockchainProcessor blockchainProcessor = ctx != null ? ctx.getBlockchainProcessor() : null;
+        if (blockchainProcessor == null) return;
         this.uploadedVolume = blockchainProcessor.getUploadedVolume();
         this.downloadedVolume = blockchainProcessor.getDownloadedVolume();
     }
@@ -2120,7 +2140,8 @@ public class SynchronizationMetricsPanel extends JPanel {
             int downloadCacheTotalSize, int cacheFullness) {
 
         long cacheSizeBytes = (long) cacheFullness;
-        long cacheCapacityBytes = (long) Signum.getPropertyService().getInt(Props.NODE_BLOCK_CACHE_MB) * 1024L * 1024L;
+        PropertyService ps = ctx != null ? ctx.getPropertyService() : null;
+        long cacheCapacityBytes = (ps != null ? ps.getInt(Props.NODE_BLOCK_CACHE_MB) : downloadCacheSize) * 1024L * 1024L;
 
         double cacheSizeMB = cacheSizeBytes / (1024.0 * 1024.0);
         double cacheCapacityMB = cacheCapacityBytes / (1024.0 * 1024.0);
@@ -2308,7 +2329,8 @@ public class SynchronizationMetricsPanel extends JPanel {
 
             this.lastUpdateData = combinedData;
 
-            if (Signum.getBlockchain() != null && stats.height > Signum.getBlockchain().getHeight()) {
+            Blockchain bc = ctx != null ? ctx.getBlockchain() : null;
+            if (bc != null && stats.height > bc.getHeight()) {
                 return;
             }
 

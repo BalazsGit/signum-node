@@ -21,9 +21,11 @@ public class SqlIndirectIncomingStore implements IndirectIncomingStore {
     private final SignumKey.LinkKeyFactory<IndirectIncoming> indirectIncomingDbKeyFactory;
 
     private final int insertMaxBatchSize;
+    private final DbContext dbContext;
 
-    public SqlIndirectIncomingStore(DerivedTableManager derivedTableManager, int insertMaxBatchSize) {
+    public SqlIndirectIncomingStore(DerivedTableManager derivedTableManager, int insertMaxBatchSize, DbContext dbContext) {
         this.insertMaxBatchSize = insertMaxBatchSize;
+        this.dbContext = dbContext;
         indirectIncomingDbKeyFactory = new DbKey.LinkKeyFactory<IndirectIncoming>("account_id", "transaction_id") {
             @Override
             public SignumKey newKey(IndirectIncoming indirectIncoming) {
@@ -32,7 +34,7 @@ public class SqlIndirectIncomingStore implements IndirectIncomingStore {
         };
 
         this.indirectIncomingTable = new EntitySqlTable<IndirectIncoming>("indirect_incoming", INDIRECT_INCOMING,
-                indirectIncomingDbKeyFactory, derivedTableManager) {
+                indirectIncomingDbKeyFactory, derivedTableManager, dbContext) {
             @Override
             protected IndirectIncoming load(DSLContext ctx, org.jooq.Record rs) {
                 return new IndirectIncoming(
@@ -94,7 +96,7 @@ public class SqlIndirectIncomingStore implements IndirectIncomingStore {
 
     @Override
     public void addIndirectIncomings(Collection<IndirectIncoming> indirectIncomings) {
-        Db.useDSLContext(ctx -> {
+        dbContext.useDSLContext(ctx -> {
             indirectIncomingTable.save(ctx, indirectIncomings);
         });
     }

@@ -1,6 +1,7 @@
 package application.module.node.web.api.http.handler;
 
 import application.module.node.*;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.AccountService;
 import application.module.node.services.ParameterService;
@@ -24,8 +25,8 @@ public final class TransferAsset extends CreateTransaction {
     private final AccountService accountService;
 
     public TransferAsset(ParameterService parameterService, Blockchain blockchain,
-            APITransactionManager apiTransactionManager, AccountService accountService) {
-        super(new LegacyDocTag[] { LegacyDocTag.AE, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
+            APITransactionManager apiTransactionManager, AccountService accountService, FluxCapacitor fluxCapacitor) {
+        super(new LegacyDocTag[] { LegacyDocTag.AE, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager, fluxCapacitor,
                 RECIPIENT_PARAMETER, ASSET_PARAMETER, QUANTITY_QNT_PARAMETER, AMOUNT_NQT_PARAMETER);
         this.parameterService = parameterService;
         this.blockchain = blockchain;
@@ -56,7 +57,7 @@ public final class TransferAsset extends CreateTransaction {
             }
             if (amountNQT < 0 || amountNQT >= Constants.MAX_BALANCE_NQT) {
                 return JSONResponses.incorrect(AMOUNT_NQT_PARAMETER);
-            } else if (!Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
+            } else if (!this.fluxCapacitor.getValue(FluxValues.SMART_TOKEN)) {
                 return JSONResponses.incorrect(AMOUNT_NQT_PARAMETER);
             }
         }

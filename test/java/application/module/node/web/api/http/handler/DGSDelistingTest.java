@@ -7,45 +7,45 @@ import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.ParameterService;
 import application.module.node.web.api.http.common.APITransactionManager;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.MockedStatic;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import jakarta.servlet.http.HttpServletRequest;
 
 import static application.module.node.TransactionType.DigitalGoods.DELISTING;
 import static application.module.node.web.api.http.common.JSONResponses.UNKNOWN_GOODS;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
+import static org.mockito.Mockito.mockStatic;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(Signum.class)
-public class DGSDelistingTest extends AbstractTransactionTest {
+@ExtendWith(MockitoExtension.class)
+class DGSDelistingTest extends AbstractTransactionTest {
 
     private DGSDelisting t;
 
+    @Mock
     private ParameterService mockParameterService;
+    @Mock
     private Blockchain mockBlockchain;
+    @Mock
     private APITransactionManager apiTransactionManagerMock;
 
-    @Before
-    public void setUp() {
-        mockParameterService = mock(ParameterService.class);
-        mockBlockchain = mock(Blockchain.class);
-        apiTransactionManagerMock = mock(APITransactionManager.class);
-
-        t = new DGSDelisting(mockParameterService, mockBlockchain, apiTransactionManagerMock);
+    @BeforeEach
+    void setUp() {
+        FluxCapacitor fluxCapacitor = QuickMocker.latestValueFluxCapacitor();
+        t = new DGSDelisting(mockParameterService, mockBlockchain, apiTransactionManagerMock, fluxCapacitor);
     }
 
     @Test
-    public void processRequest() throws SignumException {
+    void processRequest() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest();
 
         final Account mockAccount = mock(Account.class);
@@ -58,22 +58,23 @@ public class DGSDelistingTest extends AbstractTransactionTest {
         when(mockParameterService.getSenderAccount(eq(req))).thenReturn(mockAccount);
         when(mockParameterService.getGoods(eq(req))).thenReturn(mockGoods);
 
-        mockStatic(Signum.class);
-        final FluxCapacitor fluxCapacitor = QuickMocker
-                .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
-        when(Signum.getFluxCapacitor()).thenReturn(fluxCapacitor);
-        doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            final FluxCapacitor fluxCapacitor = QuickMocker
+                    .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
+            mocked.when(Signum::getFluxCapacitor).thenReturn(fluxCapacitor);
+            doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
 
-        final Attachment.DigitalGoodsDelisting attachment = (Attachment.DigitalGoodsDelisting) attachmentCreatedTransaction(
-                () -> t.processRequest(req), apiTransactionManagerMock);
-        assertNotNull(attachment);
+            final Attachment.DigitalGoodsDelisting attachment = (Attachment.DigitalGoodsDelisting) attachmentCreatedTransaction(
+                    () -> t.processRequest(req), apiTransactionManagerMock);
+            assertNotNull(attachment);
 
-        assertEquals(DELISTING, attachment.getTransactionType());
-        assertEquals(mockGoods.getId(), attachment.getGoodsId());
+            assertEquals(DELISTING, attachment.getTransactionType());
+            assertEquals(mockGoods.getId(), attachment.getGoodsId());
+        }
     }
 
     @Test
-    public void processRequest_goodsDelistedUnknownGoods() throws SignumException {
+    void processRequest_goodsDelistedUnknownGoods() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest();
 
         final Account mockAccount = mock(Account.class);
@@ -88,7 +89,7 @@ public class DGSDelistingTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_otherSellerIdUnknownGoods() throws SignumException {
+    void processRequest_otherSellerIdUnknownGoods() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest();
 
         final Account mockAccount = mock(Account.class);
@@ -103,5 +104,4 @@ public class DGSDelistingTest extends AbstractTransactionTest {
 
         assertEquals(UNKNOWN_GOODS, t.processRequest(req));
     }
-
 }

@@ -138,7 +138,7 @@ public class NodeProfile implements PropertiesProfileEntity {
         this.profileName = Objects.requireNonNull(profileName, "profileName must not be null");
         this.propertiesPath = null;
         this.headlessMode = true;
-        this.runtime = new NodeProfileRuntime();
+        this.runtime = new NodeProfileRuntime(profileName);
     }
 
     /**
@@ -151,7 +151,7 @@ public class NodeProfile implements PropertiesProfileEntity {
         this.profileName = Objects.requireNonNull(builder.name, "name must not be null");
         this.propertiesPath = builder.propertiesPath;
         this.headlessMode = builder.headlessMode;
-        this.runtime = new NodeProfileRuntime();
+        this.runtime = new NodeProfileRuntime(builder.name);
 
         if (builder.properties != null) {
             this.properties.putAll(builder.properties);

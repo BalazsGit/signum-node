@@ -44,7 +44,7 @@ public final class GetAT extends ApiServlet.JsonRequestHandler {
                 Attachment.AutomatedTransactionsCreation atCreationAttachment = (Attachment.AutomatedTransactionsCreation) transaction
                         .getAttachment();
 
-                atCreation = new AtMachineState(at.getId(), at.getCreator(), atCreationAttachment.getCreationBytes(),
+                atCreation = AtMachineState.parse(at.getId(), at.getCreator(), atCreationAttachment.getCreationBytes(),
                         at.getCreationBlockHeight());
             }
         }

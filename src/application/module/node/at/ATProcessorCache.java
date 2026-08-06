@@ -1,9 +1,9 @@
 package application.module.node.at;
 
-import application.module.node.Signum;
 import application.module.node.SignumException;
 import application.module.node.Transaction;
 import application.module.node.db.TransactionDb;
+import application.module.node.db.store.ATStore;
 import application.module.node.db.sql.Db;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
@@ -23,6 +23,9 @@ import static application.module.node.schema.Tables.TRANSACTION;
  * This class is used to cache the transactions of past x
  * (Props.NODE_AT_PROCESSOR_CACHE_BLOCK_COUNT) blocks
  * to reduce database access as much as possible while AT processing.
+ * <p>
+ * Managed instance - constructed via {@link ATProcessingContext} with all dependencies injected.
+ * </p>
  */
 public final class ATProcessorCache {
 
@@ -31,7 +34,32 @@ public final class ATProcessorCache {
 
     private static final Logger logger = LoggerFactory.getLogger(ATProcessorCache.class);
 
-    private static ATProcessorCache instance;
+    /**
+     * Transitional bridge for legacy callers still using the singleton pattern.
+     * @deprecated Use constructor injection via {@link ATProcessingContext} instead.
+     * This field will be removed once all callers are migrated (Phase 10c completion).
+     */
+    @Deprecated
+    private static volatile ATProcessorCache instance;
+
+    /**
+     * Sets the active ATProcessorCache instance for legacy bridge compatibility.
+     * @deprecated Will be removed after Phase 10c migration.
+     */
+    @Deprecated
+    public static void setInstance(ATProcessorCache cache) {
+        instance = cache;
+    }
+
+    /**
+     * Returns the currently active ATProcessorCache instance.
+     * @deprecated Use constructor injection via {@link ATProcessingContext} instead.
+     */
+    @Deprecated
+    public static ATProcessorCache getInstance() {
+        return instance;
+    }
+
     private static final int CostOfOneAT = AtConstants.AT_ID_SIZE + 16;
     private final LinkedHashMap<Long, ATContext> atMap = new LinkedHashMap<>();
     private int currentBlockHeight = Integer.MIN_VALUE;
@@ -40,6 +68,7 @@ public final class ATProcessorCache {
     private long minimumActivationAmount = Long.MAX_VALUE;
     private final int numberOfBlocksToCache;
     private int lastLoadedBlockHeight = 0;
+    private final ATStore atStore;
 
     public static class ATContext {
         public byte[] md5;
@@ -47,8 +76,15 @@ public final class ATProcessorCache {
         public ArrayList<Transaction> transactions = new ArrayList<>();
     }
 
-    private ATProcessorCache(PropertyService propertyService) {
+    /**
+     * Creates a new AT processor cache with all required dependencies injected.
+     *
+     * @param propertyService the configuration properties service
+     * @param atStore         the AT data store
+     */
+    public ATProcessorCache(PropertyService propertyService, ATStore atStore) {
         this.numberOfBlocksToCache = propertyService.getInt(Props.NODE_AT_PROCESSOR_CACHE_BLOCK_COUNT);
+        this.atStore = atStore;
     }
 
     public boolean isEnabled() {
@@ -57,13 +93,6 @@ public final class ATProcessorCache {
 
     public HashMap<Long, ATContext> getAtMap() {
         return this.atMap;
-    }
-
-    public static ATProcessorCache getInstance() {
-        if (instance == null) {
-            instance = new ATProcessorCache(Signum.getPropertyService());
-        }
-        return instance;
     }
 
     public void reset() {
@@ -103,7 +132,7 @@ public final class ATProcessorCache {
 
     private void loadATsforBlock(int blockHeight) {
         logger.debug("Loading {} ATs for block height {}", getCurrentBlockAtIds().size(), blockHeight);
-        Signum.getStores().getAtStore().getATs(getCurrentBlockAtIds()).forEach(at -> {
+        atStore.getATs(getCurrentBlockAtIds()).forEach(at -> {
             Long atId = AtApiHelper.getLong(at.getId());
             this.minimumActivationAmount = Math.min(this.minimumActivationAmount, at.minActivationAmount());
             ATContext atContext = atMap.get(atId);

@@ -1,12 +1,13 @@
 package application.module.node.web.api.http.handler;
 
-import application.module.node.Signum;
 import application.module.node.SignumException;
 import application.module.node.Transaction;
 import application.module.node.TransactionProcessor;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.props.Props;
 import application.module.node.services.ParameterService;
+import application.module.node.props.PropertyService;
 import application.module.node.services.TransactionService;
 import application.module.node.util.Convert;
 import application.module.node.web.api.http.ApiServlet;
@@ -30,15 +31,20 @@ public final class BroadcastTransaction extends ApiServlet.JsonRequestHandler {
     private final TransactionProcessor transactionProcessor;
     private final ParameterService parameterService;
     private final TransactionService transactionService;
+    private final PropertyService propertyService;
+    private final FluxCapacitor fluxCapacitor;
 
     public BroadcastTransaction(TransactionProcessor transactionProcessor, ParameterService parameterService,
-            TransactionService transactionService) {
+            TransactionService transactionService, PropertyService propertyService,
+            FluxCapacitor fluxCapacitor) {
         super(new LegacyDocTag[] { LegacyDocTag.TRANSACTIONS }, TRANSACTION_BYTES_PARAMETER,
                 TRANSACTION_JSON_PARAMETER);
 
         this.transactionProcessor = transactionProcessor;
         this.parameterService = parameterService;
         this.transactionService = transactionService;
+        this.propertyService = propertyService;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     @Override
@@ -60,9 +66,9 @@ public final class BroadcastTransaction extends ApiServlet.JsonRequestHandler {
         Transaction transaction = parameterService.parseTransaction(transactionBytes, transactionJSON);
 
         long cashBackId = 0L;
-        if (Signum.getPropertyService() != null)
-            cashBackId = Convert.parseUnsignedLong(Signum.getPropertyService().getString(Props.CASH_BACK_ID));
-        if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES) && transaction.getCashBackId() != cashBackId) {
+        if (this.propertyService != null)
+            cashBackId = Convert.parseUnsignedLong(this.propertyService.getString(Props.CASH_BACK_ID));
+        if (this.fluxCapacitor.getValue(FluxValues.SMART_FEES) && transaction.getCashBackId() != cashBackId) {
             JsonObject response = new JsonObject();
             response.addProperty(ERROR_CODE_RESPONSE, 4);
             response.addProperty(ERROR_DESCRIPTION_RESPONSE, "Incorrect transactionBytes: cash back ID mismatch");

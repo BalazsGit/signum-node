@@ -1,6 +1,9 @@
 package application.module.node.peer;
 
 import application.module.node.*;
+import application.module.node.db.store.Dbs;
+import application.module.node.db.store.Stores;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
@@ -56,7 +59,7 @@ public final class Peers {
             return false;
         } else {
             try {
-                return isHigherOrEqualVersion(Signum.getFluxCapacitor().getValue(FluxValues.MIN_PEER_VERSION),
+                return isHigherOrEqualVersion(fluxCapacitor.getValue(FluxValues.MIN_PEER_VERSION),
                         Version.parse(header.trim().substring("BRS/".length())));
             } catch (IllegalArgumentException e) {
                 return false;
@@ -119,12 +122,55 @@ public final class Peers {
 
     private static TimeService timeService;
     private static PropertyService propertyService;
+    private static FluxCapacitor fluxCapacitor;
+    private static Dbs dbs;
+    private static Stores stores;
+    private static BlockchainProcessor blockchainProcessor;
 
+    /**
+     * Legacy 7-param bridge for backward compatibility (PeerManager.start() caller).
+     * The fluxCapacitor/dbs/stores are read from static fields populated by the primary 10-param caller.
+     *
+     * @deprecated Use the 10-param init() or call Peers.init() directly from Signum.loadWallet().
+     */
+    @Deprecated
     public static void init(TimeService timeService, AccountService accountService, Blockchain blockchain,
             TransactionProcessor transactionProcessor,
             BlockchainProcessor blockchainProcessor, PropertyService propertyService, ThreadPool threadPool) {
+        // Bridge: read already-populated static fields (set by Signum.loadWallet -> 10-param init)
+        Peers.init(timeService, accountService, blockchain, transactionProcessor, blockchainProcessor,
+                propertyService, threadPool, Peers.fluxCapacitor, Peers.dbs, Peers.stores);
+    }
+
+    /**
+     * Initialises the P2P peer networking subsystem.
+     *
+     * <p><b>Multi-profile warning:</b> This method uses static state internally
+     * (peer registry, connection pools, scheduler threads, UPnP gateway, etc.).
+     * In a multi-profile setup, calling init() for a second profile will
+     * overwrite the first profile's peer state. Until a full PeerManager
+     * extraction is implemented (Phase 10), only one profile should have an
+     * active P2P network at a time.
+     * </p>
+     *
+     * <p><b>Migration path:</b> Replace with instance-scoped PeerManager:
+     * {@code peerManager = new PeerManager(timeService, accountService, ...)} followed by
+     * {@code peerManager.start()} / {@code peerManager.shutdown()}.
+     * </p>
+     *
+     * @deprecated Will be replaced by instance-scoped {@code PeerManager} in Phase 10.
+     */
+    @Deprecated
+    public static void init(TimeService timeService, AccountService accountService, Blockchain blockchain,
+            TransactionProcessor transactionProcessor,
+            BlockchainProcessor blockchainProcessor, PropertyService propertyService, ThreadPool threadPool,
+            FluxCapacitor fluxCapacitor, Dbs dbs, Stores stores) {
         Peers.timeService = timeService;
         Peers.propertyService = propertyService;
+        Peers.fluxCapacitor = fluxCapacitor;
+        Peers.dbs = dbs;
+        Peers.stores = stores;
+        Peers.blockchainProcessor = blockchainProcessor;
 
         myPlatform = propertyService.getString(Props.P2P_MY_PLATFORM);
         if (propertyService.getString(Props.P2P_MY_ADDRESS) != null
@@ -144,7 +190,7 @@ public final class Peers {
         myPeerServerPort = propertyService.getInt(Props.P2P_PORT);
         useUpnp = propertyService.getBoolean(Props.P2P_UPNP);
         shareMyAddress = propertyService.getBoolean(Props.P2P_SHARE_MY_ADDRESS)
-                && !Signum.getPropertyService().getBoolean(Props.DEV_OFFLINE);
+                && !propertyService.getBoolean(Props.DEV_OFFLINE);
 
         JsonObject json = new JsonObject();
         if (myAddress != null && !myAddress.isEmpty()) {
@@ -189,7 +235,7 @@ public final class Peers {
                 wellKnownPeersList.add(rePeer);
             }
         }
-        if (wellKnownPeersList.isEmpty() || Signum.getPropertyService().getBoolean(Props.DEV_OFFLINE)) {
+        if (wellKnownPeersList.isEmpty() || propertyService.getBoolean(Props.DEV_OFFLINE)) {
             wellKnownPeers = Collections.emptySet();
         } else {
             wellKnownPeers = Collections.unmodifiableSet(new HashSet<>(wellKnownPeersList));
@@ -214,7 +260,7 @@ public final class Peers {
         communicationLoggingMask = propertyService.getInt(Props.NODE_COMMUNICATION_LOGGING_MASK);
         sendToPeersLimit = propertyService.getInt(P2P_SEND_TO_LIMIT);
         usePeersDb = propertyService.getBoolean(Props.P2P_USE_PEERS_DB)
-                && !Signum.getPropertyService().getBoolean(Props.DEV_OFFLINE);
+                && !propertyService.getBoolean(Props.DEV_OFFLINE);
         savePeers = usePeersDb && propertyService.getBoolean(Props.P2P_SAVE_PEERS);
         getMorePeers = propertyService.getBoolean(Props.P2P_GET_MORE_PEERS);
         getMorePeersThreshold = propertyService.getInt(Props.P2P_GET_MORE_PEERS_THRESHOLD);
@@ -241,7 +287,7 @@ public final class Peers {
                 }
                 if (usePeersDb) {
                     logger.debug("Loading known peers from the database...");
-                    loadPeers(Signum.getDbs().getPeerDb().loadPeers());
+                    loadPeers(dbs.getPeerDb().loadPeers());
                 }
                 lastSavedPeers = peers.size();
             }
@@ -269,7 +315,7 @@ public final class Peers {
         Init.init(timeService, accountService, blockchain, transactionProcessor, blockchainProcessor, propertyService,
                 threadPool);
 
-        if (!Signum.getPropertyService().getBoolean(Props.DEV_OFFLINE)) {
+        if (!propertyService.getBoolean(Props.DEV_OFFLINE)) {
             threadPool.scheduleThread("PeerConnecting", Peers.peerConnectingThread, 5);
             threadPool.scheduleThread("PeerUnBlacklisting", Peers.peerUnBlacklistingThread, 1);
             if (Peers.getMorePeers) {
@@ -477,7 +523,7 @@ public final class Peers {
                          */
 
                         if (!peer.isHigherOrEqualVersionThan(
-                                Signum.getFluxCapacitor().getValue(FluxValues.MIN_PEER_VERSION))
+                                fluxCapacitor.getValue(FluxValues.MIN_PEER_VERSION))
                                 || (peer.getNetworkName() != null
                                         && !peer.getNetworkName().equals(propertyService.getString(Props.NETWORK_NAME)))
                                 || (peer.getState() != Peer.State.CONNECTED && !peer.isBlacklisted()
@@ -501,9 +547,9 @@ public final class Peers {
                     if (peer.getState() == Peer.State.CONNECTED && now - peer.getLastUpdated() > 3600) {
                         peer.connect(timeService.getEpochTime());
                         if (!peer.isHigherOrEqualVersionThan(
-                                Signum.getFluxCapacitor().getValue(FluxValues.MIN_PEER_VERSION)) ||
+                                fluxCapacitor.getValue(FluxValues.MIN_PEER_VERSION)) ||
                                 (peer.getNetworkName() != null && !peer.getNetworkName()
-                                        .equals(Signum.getPropertyService().getString(Props.NETWORK_NAME)))
+                                        .equals(propertyService.getString(Props.NETWORK_NAME)))
                                 ||
                                 (peer.getState() != Peer.State.CONNECTED && !peer.isBlacklisted()
                                         && peers.size() > maxNumberOfConnectedPublicPeers)) {
@@ -523,32 +569,32 @@ public final class Peers {
         }
 
         private void updateSavedPeers() {
-            Set<String> oldPeers = new HashSet<>(Signum.getDbs().getPeerDb().loadPeers());
+            Set<String> oldPeers = new HashSet<>(dbs.getPeerDb().loadPeers());
             Set<String> currentPeers = new HashSet<>();
             for (Peer peer : Peers.peers.values()) {
                 if (peer.getAnnouncedAddress() != null
                         && !peer.isBlacklisted()
                         && !peer.isWellKnown()
                         && (peer.getNetworkName() == null || peer.getNetworkName()
-                                .equals(Signum.getPropertyService().getString(Props.NETWORK_NAME)))
+                                .equals(propertyService.getString(Props.NETWORK_NAME)))
                         && peer.isHigherOrEqualVersionThan(
-                                Signum.getFluxCapacitor().getValue(FluxValues.MIN_PEER_VERSION))) {
+                                fluxCapacitor.getValue(FluxValues.MIN_PEER_VERSION))) {
                     currentPeers.add(peer.getAnnouncedAddress());
                 }
             }
             Set<String> toDelete = new HashSet<>(oldPeers);
             toDelete.removeAll(currentPeers);
             try {
-                Signum.getStores().beginTransaction();
-                Signum.getDbs().getPeerDb().deletePeers(toDelete);
+                stores.beginTransaction();
+                dbs.getPeerDb().deletePeers(toDelete);
                 currentPeers.removeAll(oldPeers);
-                Signum.getDbs().getPeerDb().addPeers(currentPeers);
-                Signum.getStores().commitTransaction();
+                dbs.getPeerDb().addPeers(currentPeers);
+                stores.commitTransaction();
             } catch (Exception e) {
-                Signum.getStores().rollbackTransaction();
+                stores.rollbackTransaction();
                 throw e;
             } finally {
-                Signum.getStores().endTransaction();
+                stores.endTransaction();
             }
         }
 
@@ -590,8 +636,8 @@ public final class Peers {
                 long start = System.currentTimeMillis();
                 JsonObject response = peer.send(getPeersRequest);
                 long end = System.currentTimeMillis();
-                if (Signum.getBlockchainProcessor() != null) {
-                    Signum.getBlockchainProcessor().notifyPeerMetric(new PeerMetric(peer.getPeerAddress(),
+                if (blockchainProcessor != null) {
+                    blockchainProcessor.notifyPeerMetric(new PeerMetric(peer.getPeerAddress(),
                             end - start, 0, PeerMetric.Type.OTHER));
                 }
                 if (response == null) {
@@ -619,7 +665,7 @@ public final class Peers {
                             && (peer.getNetworkName() == null
                                     || peer.getNetworkName().equals(propertyService.getString(Props.NETWORK_NAME)))
                             && myPeer.isHigherOrEqualVersionThan(
-                                    Signum.getFluxCapacitor().getValue(FluxValues.MIN_PEER_VERSION))) {
+                                    fluxCapacitor.getValue(FluxValues.MIN_PEER_VERSION))) {
                         myPeers.add(myPeer.getAnnouncedAddress());
                     }
                 }
@@ -641,6 +687,19 @@ public final class Peers {
         }
     };
 
+    /**
+     * Shuts down the P2P peer networking subsystem.
+     *
+     * <p><b>Multi-profile warning:</b> This method stops shared static resources
+     * (peer server, executor services). In a multi-profile setup, shutting down
+     * Peers for one profile affects all profiles. Until a full PeerManager
+     * extraction is implemented (Phase 10), only one profile should have an
+     * active P2P network at a time.
+     * </p>
+     *
+     * @deprecated Will be replaced by instance-scoped {@code PeerManager#shutdown()} in Phase 10.
+     */
+    @Deprecated
     public static void shutdown(ThreadPool threadPool) {
         Throwable firstException = null;
         if (Init.peerServer != null) {
@@ -857,8 +916,8 @@ public final class Peers {
                         long start = System.currentTimeMillis();
                         JsonObject response = peer.send(jsonRequest);
                         long end = System.currentTimeMillis();
-                        if (Signum.getBlockchainProcessor() != null) {
-                            Signum.getBlockchainProcessor().notifyPeerMetric(
+                        if (blockchainProcessor != null) {
+                            blockchainProcessor.notifyPeerMetric(
                                     new PeerMetric(peer.getPeerAddress(), end - start, 0,
                                             PeerMetric.Type.BLOCK_TX));
                         }
@@ -903,8 +962,8 @@ public final class Peers {
             long start = System.currentTimeMillis();
             JsonObject response = peer.send(getUnconfirmedTransactionsRequest);
             long end = System.currentTimeMillis();
-            if (Signum.getBlockchainProcessor() != null) {
-                Signum.getBlockchainProcessor().notifyPeerMetric(new PeerMetric(peer.getPeerAddress(),
+            if (blockchainProcessor != null) {
+                blockchainProcessor.notifyPeerMetric(new PeerMetric(peer.getPeerAddress(),
                         end - start, 0, PeerMetric.Type.OTHER));
             }
             return response;
@@ -969,7 +1028,7 @@ public final class Peers {
     }
 
     private static boolean peerEligibleForSending(Peer peer, boolean sendSameBRSclass) {
-        return peer.isHigherOrEqualVersionThan(Signum.getFluxCapacitor().getValue(FluxValues.MIN_PEER_VERSION))
+        return peer.isHigherOrEqualVersionThan(fluxCapacitor.getValue(FluxValues.MIN_PEER_VERSION))
                 && (peer.getNetworkName() == null
                         || peer.getNetworkName().equals(propertyService.getString(Props.NETWORK_NAME)))
                 && (!sendSameBRSclass || peer.isAtLeastMyVersion())

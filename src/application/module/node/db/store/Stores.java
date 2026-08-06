@@ -28,27 +28,30 @@ public class Stores {
     private final SqlIndirectIncomingStore indirectIncomingStore;
     private final SqlAliasStore aliasStoreImpl;
     private final SqlOrderStore orderStoreImpl;
+    private final DbContext dbContext;
 
     public Stores(DerivedTableManager derivedTableManager, DBCacheManagerImpl dbCacheManager, TimeService timeService,
             PropertyService propertyService, TransactionDb transactionDb,
-            BlockDb blockDb, NetworkParameters params) {
+            BlockDb blockDb, NetworkParameters params, StoreDependencies storeDependencies) {
         int insertMaxBatchSize = propertyService.getInt(Props.DB_INSERT_BATCH_MAX_SIZE);
-        this.accountStore = new SqlAccountStore(derivedTableManager, dbCacheManager);
-        this.aliasStoreImpl = new SqlAliasStore(derivedTableManager);
+        DbContext dbContext = storeDependencies.dbContext();
+        this.dbContext = dbContext;
+        this.accountStore = new SqlAccountStore(derivedTableManager, dbCacheManager, storeDependencies);
+        this.aliasStoreImpl = new SqlAliasStore(derivedTableManager, dbContext);
         this.aliasStore = this.aliasStoreImpl;
-        this.assetStore = new SqlAssetStore(derivedTableManager);
-        this.assetTransferStore = new SqlAssetTransferStore(derivedTableManager);
-        this.atStore = new SqlATStore(derivedTableManager);
-        this.digitalGoodsStoreStore = new SqlDigitalGoodsStoreStore(derivedTableManager);
-        this.escrowStore = new SqlEscrowStore(derivedTableManager);
-        this.orderStoreImpl = new SqlOrderStore(derivedTableManager);
+        this.assetStore = new SqlAssetStore(derivedTableManager, storeDependencies);
+        this.assetTransferStore = new SqlAssetTransferStore(derivedTableManager, dbContext);
+        this.atStore = new SqlATStore(derivedTableManager, storeDependencies);
+        this.digitalGoodsStoreStore = new SqlDigitalGoodsStoreStore(derivedTableManager, storeDependencies);
+        this.escrowStore = new SqlEscrowStore(derivedTableManager, storeDependencies);
+        this.orderStoreImpl = new SqlOrderStore(derivedTableManager, dbContext);
         this.orderStore = this.orderStoreImpl;
-        this.tradeStore = new SqlTradeStore(derivedTableManager);
-        this.subscriptionStore = new SqlSubscriptionStore(derivedTableManager, insertMaxBatchSize);
+        this.tradeStore = new SqlTradeStore(derivedTableManager, dbContext);
+        this.subscriptionStore = new SqlSubscriptionStore(derivedTableManager, insertMaxBatchSize, dbContext);
         this.unconfirmedTransactionStore = new UnconfirmedTransactionStoreImpl(timeService, propertyService,
                 accountStore, transactionDb, params);
-        this.indirectIncomingStore = new SqlIndirectIncomingStore(derivedTableManager, insertMaxBatchSize);
-        this.blockchainStore = new SqlBlockchainStore(transactionDb, blockDb);
+        this.indirectIncomingStore = new SqlIndirectIncomingStore(derivedTableManager, insertMaxBatchSize, dbContext);
+        this.blockchainStore = new SqlBlockchainStore(transactionDb, blockDb, storeDependencies);
     }
 
     /**
@@ -90,19 +93,19 @@ public class Stores {
     }
 
     public void beginTransaction() {
-        Db.beginTransaction();
+        dbContext.beginTransaction();
     }
 
     public void commitTransaction() {
-        Db.commitTransaction();
+        dbContext.commitTransaction();
     }
 
     public void rollbackTransaction() {
-        Db.rollbackTransaction();
+        dbContext.rollbackTransaction();
     }
 
     public void endTransaction() {
-        Db.endTransaction();
+        dbContext.endTransaction();
     }
 
     public EscrowStore getEscrowStore() {

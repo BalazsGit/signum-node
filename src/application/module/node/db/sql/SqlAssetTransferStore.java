@@ -24,11 +24,13 @@ public class SqlAssetTransferStore implements AssetTransferStore {
         }
     };
     private final EntitySqlTable<AssetTransfer> assetTransferTable;
+    private final DbContext dbContext;
 
-    public SqlAssetTransferStore(DerivedTableManager derivedTableManager) {
+    public SqlAssetTransferStore(DerivedTableManager derivedTableManager, DbContext dbContext) {
+        this.dbContext = dbContext;
         assetTransferTable = new EntitySqlTable<AssetTransfer>("asset_transfer",
                 application.module.node.schema.Tables.ASSET_TRANSFER,
-                transferDbKeyFactory, derivedTableManager) {
+                transferDbKeyFactory, derivedTableManager, dbContext) {
 
             @Override
             protected AssetTransfer load(DSLContext ctx, Record record) {
@@ -43,7 +45,7 @@ public class SqlAssetTransferStore implements AssetTransferStore {
     }
 
     private void saveAssetTransfer(AssetTransfer assetTransfer) {
-        Db.useDSLContext(ctx -> {
+        dbContext.useDSLContext(ctx -> {
             ctx.insertInto(
                     ASSET_TRANSFER,
                     ASSET_TRANSFER.ID, ASSET_TRANSFER.ASSET_ID, ASSET_TRANSFER.SENDER_ID, ASSET_TRANSFER.RECIPIENT_ID,
@@ -72,7 +74,7 @@ public class SqlAssetTransferStore implements AssetTransferStore {
 
     @Override
     public Collection<AssetTransfer> getAccountAssetTransfers(long accountId, int from, int to) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             SelectQuery selectQuery = ctx
                     .selectFrom(ASSET_TRANSFER).where(
                             ASSET_TRANSFER.SENDER_ID.eq(accountId))
@@ -90,7 +92,7 @@ public class SqlAssetTransferStore implements AssetTransferStore {
 
     @Override
     public Collection<AssetTransfer> getAccountAssetTransfers(long accountId, long assetId, int from, int to) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             SelectQuery<AssetTransferRecord> selectQuery = ctx
                     .selectFrom(ASSET_TRANSFER).where(
                             ASSET_TRANSFER.SENDER_ID.eq(accountId).and(ASSET_TRANSFER.ASSET_ID.eq(assetId)))
@@ -109,7 +111,7 @@ public class SqlAssetTransferStore implements AssetTransferStore {
 
     @Override
     public int getTransferCount(long assetId) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             return ctx.fetchCount(ctx.selectFrom(ASSET_TRANSFER).where(ASSET_TRANSFER.ASSET_ID.eq(assetId)));
         });
     }

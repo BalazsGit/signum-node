@@ -7,10 +7,12 @@
 
 package application.module.node.at;
 
-import application.module.node.Signum;
-import application.module.node.Constants;
 import application.module.node.Account.AccountAsset;
+import application.module.node.Constants;
 import application.module.node.crypto.Crypto;
+import application.module.node.db.store.AccountStore;
+import application.module.node.db.store.ATStore;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.util.Convert;
 
@@ -24,6 +26,10 @@ import java.util.TreeSet;
 
 public class AtMachineState {
 
+    private final AtConstants atConstants;
+    private ATStore atStore;
+    private FluxCapacitor fluxCapacitor;
+    private AccountStore accountStore;
     private final int creationBlockHeight;
     private final int sleepBetween;
     private final ByteBuffer apCode;
@@ -51,11 +57,12 @@ public class AtMachineState {
     private short userStackPages;
     private int indirectsCount;
 
-    protected AtMachineState(byte[] atId, byte[] creator, short version,
+    protected AtMachineState(AtConstants atConstants, byte[] atId, byte[] creator, short version,
             int height,
             byte[] stateBytes, int cSize, int dSize, int cUserStackBytes, int cCallStackBytes,
             int creationBlockHeight, int sleepBetween,
             boolean freezeWhenSameBalance, long minActivationAmount, byte[] apCode, long apCodeHashId) {
+        this.atConstants = atConstants;
         this.atID = atId;
         this.creator = creator;
         this.version = version;
@@ -81,8 +88,13 @@ public class AtMachineState {
         mapUpdates = new ArrayList<>();
     }
 
-    public AtMachineState(byte[] atId, byte[] creator, byte[] creationBytes, int height) {
-        this.version = AtConstants.getInstance().atVersion(height);
+    /**
+     * Backward-compatible constructor for legacy callers.
+     * Receives AtConstants via constructor injection.
+     */
+    protected AtMachineState(AtConstants atConstants, byte[] atId, byte[] creator, byte[] creationBytes, int height) {
+        this.atConstants = atConstants;
+        this.version = atConstants.atVersion(height);
         this.atID = atId;
         this.creator = creator;
 
@@ -96,7 +108,7 @@ public class AtMachineState {
 
         b.getShort(); // future: reserved for future needs
 
-        int pageSize = (int) AtConstants.getInstance().pageSize(version);
+        int pageSize = (int) atConstants.pageSize(version);
         short codePages = b.getShort();
         this.dataPages = b.getShort();
         this.callStackPages = b.getShort();
@@ -165,6 +177,33 @@ public class AtMachineState {
         this.gBalance = 0;
         this.pBalance = 0;
         this.machineState = new MachineState();
+    }
+
+    /**
+     * Factory method for validation-only scenarios.
+     * Parses creation bytes without requiring AT ID or creator references.
+     * Internely resolves AtConstants via AtController to hide the dependency from callers.
+     *
+     * @param creationBytes raw AT creation byte array
+     * @param height        blockchain height for version resolution
+     * @return parsed AtMachineState instance
+     */
+    public static AtMachineState parseForValidation(byte[] creationBytes, int height) {
+        return new AtMachineState(AtController.getAtConstants(), null, null, creationBytes, height);
+    }
+
+    /**
+     * Factory method for AT instances with known identity.
+     * Internely resolves AtConstants via AtController to hide the dependency from callers.
+     *
+     * @param atId       raw bytes identifying the AT
+     * @param creator    raw bytes identifying the creator account
+     * @param creationBytes raw AT creation byte array
+     * @param height     blockchain height for version resolution
+     * @return parsed AtMachineState instance
+     */
+    public static AtMachineState parse(byte[] atId, byte[] creator, byte[] creationBytes, int height) {
+        return new AtMachineState(AtController.getAtConstants(), atId, creator, creationBytes, height);
     }
 
     byte[] getA1() {
@@ -288,6 +327,9 @@ public class AtMachineState {
     }
 
     long getMapValue(long atId, long key1, long key2) {
+        if (atStore == null) {
+            return 0L;
+        }
         long thisAtId = AtApiHelper.getLong(this.getId());
         if (atId == thisAtId) {
             // for the contract itself, we first check if there is a pending update
@@ -298,7 +340,7 @@ public class AtMachineState {
             }
         }
 
-        return Signum.getStores().getAtStore().getMapValue(atId, key1, key2);
+        return atStore.getMapValue(atId, key1, key2);
     }
 
     protected void clearLists() {
@@ -393,10 +435,11 @@ public class AtMachineState {
         Long balance = gBalanceAsset.get(assetId);
         if (balance == null) {
             balance = 0L;
-            AccountAsset asset = Signum.getStores().getAccountStore().getAccountAsset(AtApiHelper.getLong(getId()),
-                    assetId);
-            if (asset != null) {
-                balance = asset.getQuantityQnt();
+            if (accountStore != null) {
+                AccountAsset asset = accountStore.getAccountAsset(AtApiHelper.getLong(getId()), assetId);
+                if (asset != null) {
+                    balance = asset.getQuantityQnt();
+                }
             }
             gBalanceAsset.put(assetId, balance);
         }
@@ -480,7 +523,7 @@ public class AtMachineState {
 
     private byte[] getTransactionBytes() {
         int txLength = creator.length + 8;
-        if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_ATS, height)) {
+        if (fluxCapacitor != null && fluxCapacitor.getValue(FluxValues.SMART_ATS, height)) {
             txLength += 8;
         }
         ByteBuffer b = ByteBuffer.allocate(txLength * transactions.size());
@@ -491,7 +534,7 @@ public class AtMachineState {
             else
                 b.put(tx.getRecipientId());
             b.putLong(tx.getAmount());
-            if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_ATS, height)) {
+            if (fluxCapacitor != null && fluxCapacitor.getValue(FluxValues.SMART_ATS, height)) {
                 b.putLong(tx.getAssetId());
             }
         }
@@ -627,7 +670,7 @@ public class AtMachineState {
             ByteBuffer bytes = ByteBuffer.allocate(getSize());
             bytes.order(ByteOrder.LITTLE_ENDIAN);
 
-            if (Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_2)) {
+            if (fluxCapacitor != null && fluxCapacitor.getValue(FluxValues.AT_FIX_BLOCK_2)) {
                 flags[0] = (byte) ((running ? 1 : 0)
                         | (stopped ? 1 : 0) << 1
                         | (finished ? 1 : 0) << 2
@@ -689,5 +732,35 @@ public class AtMachineState {
         public long getSteps() {
             return steps;
         }
+    }
+
+    /**
+     * Sets the AT data store for map value lookups.
+     * Required for {@link #getMapValue(long, long, long)} to work without static access.
+     *
+     * @param atStore the AT store instance
+     */
+    public void setAtStore(ATStore atStore) {
+        this.atStore = atStore;
+    }
+
+    /**
+     * Sets the FluxCapacitor for feature flag evaluation.
+     * Required for transaction bytes serialization and machine state serialization.
+     *
+     * @param fluxCapacitor the flux capacitor instance
+     */
+    public void setFluxCapacitor(FluxCapacitor fluxCapacitor) {
+        this.fluxCapacitor = fluxCapacitor;
+    }
+
+    /**
+     * Sets the AccountStore for asset balance lookups.
+     * Required for {@link #getgBalance(long)} to resolve per-asset balances.
+     *
+     * @param accountStore the account store instance
+     */
+    public void setAccountStore(AccountStore accountStore) {
+        this.accountStore = accountStore;
     }
 }

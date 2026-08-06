@@ -2,7 +2,20 @@
 
 ## Overview
 
-This document describes the complete node profile loading mechanism, including configuration resolution, logging profiles, and how multiple node instances are bootstrapped from disk.
+This document describes the complete node profile loading mechanism, including `.properties`-based configuration resolution, NodeProfile + NodeProfileRuntime composition, logging profiles, and how multiple isolated node instances are bootrapped from disk.
+
+### Architecture Summary
+
+```
+NodeProfile (Config Entity) ──composition──► NodeProfileRuntime (State Container)
+    │                                           │
+    │  Properties (Single Source of Truth)       │  LifecycleStateMachine
+    │  NodeLoggingProfile reference              │  ProfileMetricCollector  
+    │  GuiProfileSettings (lazy, optional)       │  NodeCoreContext (isolated resources)
+    └─built via NodeProfile.Builder──────────────┘
+```
+
+> **Key Principle:** Each NodeProfile is a fully independent entity with its own DbContext, PropertyService, BlockchainProcessor, ThreadPool, etc. Profiles do NOT share mutable state.
 
 ---
 
@@ -199,29 +212,70 @@ if (profileCount == 0) {
 
 ---
 
+## NodeProfile + NodeProfileRuntime Composition
+
+### Construction Flow
+
+```mermaid
+sequenceDiagram
+    participant Launcher
+    participant PPL as PropertiesProfileLoader
+    participant Factory as PropertiesProfileFactory
+    participant Builder as NodeProfile.Builder
+    participant Profile as NodeProfile
+    participant Runtime as NodeProfileRuntime
+    participant Lifecycle as NodeLifecycleManager
+
+    Launcher->>PPL: loadAll("./conf", "node", "profiles", ...)
+    PPL->>Factory: create("mainnet")
+    Factory->>Builder: new Builder("mainnet")
+    PPL->>Builder: properties(loadProfile())
+    PPL->>Builder: loggingProfile(from profiles.json)
+    Builder->>Builder: build()
+    Note over Profile,Runtime: NodeProfile created with<br/>embedded NodeProfileRuntime
+    PPL-->>Launcher: NodeProfile[]
+    
+    Launcher->>Lifecycle: startProfile(profile)
+    Lifecycle->>Runtime: stateMachine.transitionTo(INITIALIZING)
+    Lifecycle->>Runtime: coreContext = new NodeCoreContext(...)
+    Runtime->>Runtime: coreContext.doInitialize()
+    Note over Runtime: DbContext, PropertyService,<br/>Blockchain, Stores, Services created LOCALLY
+```
+
+### profiles.json — Association Data Only
+
+The `profiles.json` file stores only cross-cutting association data:
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `loggingAssociations` | Object | `{"mainnet": "standard", "testnet": "debug"}` maps profile name → logging preset |
+| `tabOrder` | String[] \| null | Custom tab ordering for GUI (null = automatic) |
+| `maxConcurrentNodes` | Integer | Maximum nodes that can run simultaneously |
+
+**NodeProfile is the Single Source of Truth** for all node configuration. The `.properties` file provides everything: identity, database, P2P, API, mining settings.
+
 ## Profile-to-Instance Mapping
 
 ```mermaid
 graph TD
-    A[./conf/node/profiles/*.properties] -->|NodeProfile.loadAll()| B[NodeProfile[]]
-    B -->|For each profile| C[Create NodeConsolePanel]
-    C -->|ProfileLogger created| D[Subscribe to SystemLogger]
-    C -->|ProfileLogger created| E[Subscribe ProfileConsoleSubscriber]
+    A[./conf/node/profiles/*.properties] -->|PropertiesProfileLoader.loadAll()| B[NodeProfile.Builder[]]
+    B -->|build()| C[NodeProfile[]<br/>+ NodeProfileRuntime embedded]
+    C -->|For each profile| D[NodeLifecycleManager.startProfile()]
+    D -->|coreContext.doInitialize()| E[DbContext created LOCALLY]
+    D -->|constructor injection| F[Stores + Services created LOCALLY]
 
-    F[SystemLogRouterHandler] -->|JUL events| G[SystemLogger]
-    G -->|dispatch to all subscribers| H[SystemConsoleSubscriber]
-    G -->|forward from ProfileLogger| I[ProfileConsoleSubscriber]
+    G[SystemLogRouterHandler] -->|JUL events| H[SystemLogger]
+    H -->|dispatch to all subscribers| I[SystemConsoleSubscriber]
 
     subgraph "Per-Profile Isolation"
-        D
         E
-        I
+        F
     end
 
     subgraph "Global Aggregation"
-        F
         G
         H
+        I
     end
 ```
 

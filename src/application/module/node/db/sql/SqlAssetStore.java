@@ -18,9 +18,11 @@ import static application.module.node.schema.Tables.ASSET;
 
 public class SqlAssetStore implements AssetStore {
     private final Blockchain blockchain;
+    private final DbContext dbContext;
 
     public SqlAssetStore(DerivedTableManager derivedTableManager, StoreDependencies storeDependencies) {
         this.blockchain = storeDependencies.blockchain();
+        this.dbContext = storeDependencies.dbContext();
         initTable(derivedTableManager);
     }
 
@@ -28,6 +30,7 @@ public class SqlAssetStore implements AssetStore {
     @Deprecated
     public SqlAssetStore(DerivedTableManager derivedTableManager) {
         this.blockchain = null;
+        this.dbContext = null;
         initTable(derivedTableManager);
     }
 
@@ -43,7 +46,7 @@ public class SqlAssetStore implements AssetStore {
 
     private void initTable(DerivedTableManager derivedTableManager) {
         assetTable = new EntitySqlTable<Asset>("asset", application.module.node.schema.Tables.ASSET, assetDbKeyFactory,
-                derivedTableManager) {
+                derivedTableManager, dbContext) {
 
             @Override
             protected Asset load(DSLContext ctx, Record record) {
@@ -87,7 +90,7 @@ public class SqlAssetStore implements AssetStore {
 
     @Override
     public Collection<Asset> getAssetsByName(String name, int from, int to) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             SelectQuery<AssetRecord> query = ctx.selectFrom(ASSET)
                     .where(DSL.upper(ASSET.NAME).like("%" + name.toUpperCase() + "%")).getQuery();
             query.addOrderBy(ASSET.HEIGHT.asc(), ASSET.ID);

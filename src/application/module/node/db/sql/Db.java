@@ -120,7 +120,12 @@ public final class Db {
      * @param dbCacheManager   cache manager to associate with this context
      * @return the newly created {@link DbContext} for this initialization call
      * @since 4.0 return type changed from void to DbContext (Multi-profile: per-instance DbContext)
+     * @deprecated Use {@link DbContext#create(PropertyService, DBCacheManagerImpl)} instead.
+     *             That factory creates and returns an isolated context without touching
+     *             any static state in this class. The static {@code Db.init()} remains
+     *             only for backwards compatibility during the transitional period.
      */
+    @Deprecated
     public static DbContext init(PropertyService propertyService, DBCacheManagerImpl dbCacheManager) {
         try {
             Db.dbCacheManager = dbCacheManager;
@@ -218,6 +223,26 @@ public final class Db {
         // currently no-op
     }
 
+    /**
+     * Shuts down the database by delegating to the active {@link DbContext}.
+     *
+     * <p><b>Multi-profile warning:</b> In a multi-profile setup, this method only
+     * shuts down the <i>last-initialized</i> context (the current {@code activeContext}).
+     * Calling this while another profile is still running could leave that profile's
+     * database in an inconsistent state.
+     * </p>
+     *
+     * <p><b>Migration path:</b> Prefer calling {@link DbContext#shutdown()} directly
+     * on the per-instance context obtained from {@link application.module.node.instance.NodeCoreContext#getDbContext()}.
+     * This ensures each profile shuts down only its own database resources.
+     * </p>
+     *
+     * @deprecated Use {@code nodeCoreContext.getDbContext().shutdown()} instead.
+     * This static method is retained for backwards compatibility during the
+     * transitional period and will be removed once all callers migrate to
+     * instance-scoped shutdown.
+     */
+    @Deprecated
     public static void shutdown() {
         if (activeContext != null) {
             activeContext.shutdown();

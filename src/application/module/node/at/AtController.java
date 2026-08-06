@@ -3,7 +3,9 @@ package application.module.node.at;
 import application.module.node.Account;
 import application.module.node.Signum;
 import application.module.node.crypto.Crypto;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
+import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.util.Convert;
 import application.module.node.TransactionType;
@@ -17,37 +19,64 @@ import java.nio.ByteOrder;
 import java.security.MessageDigest;
 import java.util.*;
 
+/**
+ * AT (Automated Transaction) controller orchestrating AT execution.
+ * <p>
+ * Accepts {@link ATProcessingContext} as the primary dependency injection mechanism,
+ * eliminating all static {@code Signum.getXxx()} calls.
+ * </p>
+ */
 public abstract class AtController {
     private AtController() {
     }
 
     private static final Logger logger = LoggerFactory.getLogger(AtController.class);
 
-    private static final Logger debugLogger = Signum.getPropertyService().getBoolean(Props.ENABLE_AT_DEBUG_LOG) ? logger
-            : NOPLogger.NOP_LOGGER;
+    private static volatile AtConstants atConstants;
 
-    private static int runSteps(AtMachineState state) {
+    /**
+     * Sets the AtConstants instance for use by AtController methods.
+     * Called once during initialization.
+     */
+    public static void setAtConstants(AtConstants constants) {
+        atConstants = constants;
+    }
+
+    /**
+     * Gets the AtConstants instance.
+     */
+    public static AtConstants getAtConstants() {
+        return atConstants;
+    }
+
+    // Helper to get debug logger based on context property
+    private static Logger getDebugLogger(PropertyService propertyService) {
+        return propertyService.getBoolean(Props.ENABLE_AT_DEBUG_LOG) ? logger : NOPLogger.NOP_LOGGER;
+    }
+
+    private static int runSteps(AtMachineState state, ATProcessingContext ctx) {
+        final Logger debugLog = getDebugLogger(ctx.getPropertyService());
+
         state.getMachineState().running = true;
         state.getMachineState().stopped = false;
         state.getMachineState().finished = false;
         state.getMachineState().dead = false;
         state.getMachineState().steps = 0;
 
-        AtMachineProcessor processor = new AtMachineProcessor(state,
-                Signum.getPropertyService().getBoolean(Props.ENABLE_AT_DEBUG_LOG));
+        AtMachineProcessor processor = new AtMachineProcessor(state, ctx,
+                ctx.getPropertyService().getBoolean(Props.ENABLE_AT_DEBUG_LOG));
 
         state.setFreeze(false);
 
-        long stepFee = AtConstants.getInstance().stepFee(state.getVersion());
-
+        long stepFee = atConstants.stepFee(state.getVersion());
         int numSteps = 0;
 
         while (state.getMachineState().steps +
                 (numSteps = processor.getNumSteps(state.getApCode().get(state.getMachineState().pc),
-                        state.getIndirectsCount())) <= AtConstants.getInstance().maxSteps(state.getHeight())) {
+                        state.getIndirectsCount())) <= atConstants.maxSteps(state.getHeight())) {
 
             if ((state.getgBalance() < stepFee * numSteps)) {
-                debugLogger.debug("stopped - not enough balance");
+                debugLog.debug("stopped - not enough balance");
                 state.setFreeze(true);
                 return 3;
             }
@@ -58,21 +87,21 @@ public abstract class AtController {
 
             if (rc >= 0) {
                 if (state.getMachineState().stopped) {
-                    debugLogger.debug("stopped");
+                    debugLog.debug("stopped");
                     state.getMachineState().running = false;
                     return 2;
                 } else if (state.getMachineState().finished) {
-                    debugLogger.debug("finished");
+                    debugLog.debug("finished");
                     state.getMachineState().running = false;
                     return 1;
                 }
             } else {
                 if (rc == -1)
-                    debugLogger.debug("error: overflow");
+                    debugLog.debug("error: overflow");
                 else if (rc == -2)
-                    debugLogger.debug("error: invalid code");
+                    debugLog.debug("error: invalid code");
                 else
-                    debugLogger.debug("unexpected error");
+                    debugLog.debug("unexpected error");
 
                 if (state.getMachineState().jumps.contains(state.getMachineState().err)) {
                     state.getMachineState().pc = state.getMachineState().err;
@@ -87,15 +116,39 @@ public abstract class AtController {
         return 5;
     }
 
+    /**
+     * @deprecated Use {@link #resetMachine(AtMachineState, ATProcessingContext)}.
+     * Legacy bridge: delegates to the context-aware overload using static Signum accessors. Scheduled for removal in v4.1.
+     */
+    @Deprecated(since = "4.0", forRemoval = true)
     public static void resetMachine(AtMachineState state) {
-        state.getMachineState().reset();
-        listCode(state, true, true);
+        // Build ATProcessingContext from static Signum bridge (transitional only)
+        // Constructor: (atConstants, processorCache, propertyService, fluxCapacitor, 
+        //              blockchain, atStore, accountStore, accountService, assetExchange,
+        //              indirectIncomingStore, assetStore)
+        ATProcessingContext ctx = new ATProcessingContext(
+                AtController.getAtConstants(),
+                ATProcessorCache.getInstance(),
+                Signum.getPropertyService(),
+                Signum.getFluxCapacitor(),
+                Signum.getBlockchain(),
+                Signum.getStores().getAtStore(),
+                Signum.getStores().getAccountStore(),
+                Signum.getAccountService(),
+                Signum.getAssetExchange(),
+                Signum.getStores().getIndirectIncomingStore(),
+                Signum.getStores().getAssetStore());
+        resetMachine(state, ctx);
     }
 
-    private static void listCode(AtMachineState state, boolean disassembly, boolean determineJumps) {
+    public static void resetMachine(AtMachineState state, ATProcessingContext ctx) {
+        state.getMachineState().reset();
+        listCode(state, ctx, true, true);
+    }
 
-        AtMachineProcessor machineProcessor = new AtMachineProcessor(state,
-                Signum.getPropertyService().getBoolean(Props.ENABLE_AT_DEBUG_LOG));
+    private static void listCode(AtMachineState state, ATProcessingContext ctx, boolean disassembly, boolean determineJumps) {
+        AtMachineProcessor machineProcessor = new AtMachineProcessor(state, ctx,
+                ctx.getPropertyService().getBoolean(Props.ENABLE_AT_DEBUG_LOG));
 
         int opc = state.getMachineState().pc;
         int osteps = state.getMachineState().steps;
@@ -107,11 +160,9 @@ public abstract class AtController {
         state.getMachineState().opc = opc;
 
         while (true) {
-
             int rc = machineProcessor.processOp(disassembly, determineJumps);
             if (rc <= 0)
                 break;
-
             state.getMachineState().pc += rc;
         }
 
@@ -127,43 +178,34 @@ public abstract class AtController {
         try {
             ByteBuffer b = ByteBuffer.allocate(creation.length);
             b.order(ByteOrder.LITTLE_ENDIAN);
-
             b.put(creation);
             b.clear();
 
-            AtConstants instance = AtConstants.getInstance();
-
+            AtConstants instance = atConstants;
             short version = b.getShort();
             if (version > instance.atVersion(height)) {
                 throw new AtException(AtError.INCORRECT_VERSION.getDescription());
             }
 
-            // Ignore reserved bytes
-            b.getShort(); // future: reserved for future needs
-
+            b.getShort(); // reserved
             short codePages = b.getShort();
             if (codePages > instance.maxMachineCodePages(version) || codePages < minCodePages) {
                 throw new AtException(AtError.INCORRECT_CODE_PAGES.getDescription());
             }
-
             short dataPages = b.getShort();
             if (dataPages > instance.maxMachineDataPages(version) || dataPages < 0) {
                 throw new AtException(AtError.INCORRECT_DATA_PAGES.getDescription());
             }
-
             short callStackPages = b.getShort();
             if (callStackPages > instance.maxMachineCallStackPages(version) || callStackPages < 0) {
                 throw new AtException(AtError.INCORRECT_CALL_PAGES.getDescription());
             }
-
             short userStackPages = b.getShort();
             if (userStackPages > instance.maxMachineUserStackPages(version) || userStackPages < 0) {
                 throw new AtException(AtError.INCORRECT_USER_PAGES.getDescription());
             }
 
-            // Ignore the minimum activation amount
-            b.getLong();
-
+            b.getLong(); // min activation amount
             int codeLen = getLength(codePages, b);
             if (codeLen == 0 && codePages == 1 && version > 2) {
                 codeLen = 256;
@@ -217,10 +259,23 @@ public abstract class AtController {
         return codeLen;
     }
 
+    /**
+     * @deprecated Use {@link #getCurrentBlockATs(ATProcessingContext, int, int, long, int)}.
+     * Legacy bridge: delegates to the context-aware overload using static Signum accessors. Scheduled for removal in v4.1.
+     */
+    @Deprecated(since = "4.0", forRemoval = true)
     public static AtBlock getCurrentBlockATs(int freePayload, int blockHeight, long generatorId, int indirectsCount) {
-        List<Long> orderedATs = AT.getOrderedATs();
-        Iterator<Long> keys = orderedATs.iterator();
+        ATProcessingContext ctx = createLegacyContext();
+        return getCurrentBlockATs(ctx, freePayload, blockHeight, generatorId, indirectsCount);
+    }
 
+    public static AtBlock getCurrentBlockATs(ATProcessingContext ctx, int freePayload, int blockHeight,
+            long generatorId, int indirectsCount) {
+        final FluxCapacitor fluxCapacitor = ctx.getFluxCapacitor();
+        final Logger debugLog = getDebugLogger(ctx.getPropertyService());
+
+        List<Long> orderedATs = AT.getOrderedATs(ctx);
+        Iterator<Long> keys = orderedATs.iterator();
         List<AT> processedATs = new ArrayList<>();
 
         int costOfOneAT = getCostOfOneAT();
@@ -230,7 +285,7 @@ public abstract class AtController {
 
         while (payload <= freePayload - costOfOneAT && keys.hasNext()) {
             Long id = keys.next();
-            AT at = AT.getAT(id);
+            AT at = AT.getAT(ctx, id);
             at.addIndirectsCount(indirectsCount);
 
             long atAccountBalance = getATAccountBalance(id);
@@ -241,27 +296,27 @@ public abstract class AtController {
                 continue;
             }
 
-            if (atAccountBalance >= Convert.safeMultiply(AtConstants.getInstance().stepFee(at.getVersion()),
-                    AtConstants.getInstance().apiStepMultiplier(at.getVersion()))) {
+            if (atAccountBalance >= Convert.safeMultiply(atConstants.stepFee(at.getVersion()),
+                    atConstants.apiStepMultiplier(at.getVersion()))) {
                 try {
                     at.setgBalance(atAccountBalance);
                     at.setHeight(blockHeight);
                     at.clearLists();
                     at.setWaitForNumberOfBlocks(at.getSleepBetween());
-                    listCode(at, true, true);
-                    runSteps(at);
+                    listCode(at, ctx, true, true);
+                    runSteps(at, ctx);
                     indirectsCount = at.getIndirectsCount();
 
                     long fee = Convert.safeMultiply(at.getMachineState().steps,
-                            AtConstants.getInstance().stepFee(at.getVersion()));
+                            atConstants.stepFee(at.getVersion()));
                     if (at.getMachineState().dead) {
                         fee = Convert.safeAdd(fee, at.getgBalance());
                         at.setgBalance(0L);
                     }
                     at.setpBalance(at.getgBalance());
 
-                    long amount = makeTransactions(at, blockHeight, generatorId);
-                    if (!Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_4, blockHeight)) {
+                    long amount = makeTransactions(at, ctx, blockHeight, generatorId);
+                    if (!fluxCapacitor.getValue(FluxValues.AT_FIX_BLOCK_4, blockHeight)) {
                         totalAmount = amount;
                     } else {
                         totalAmount = Convert.safeAdd(totalAmount, amount);
@@ -269,20 +324,15 @@ public abstract class AtController {
 
                     totalFee = Convert.safeAdd(totalFee, fee);
                     AT.addPendingFee(id, fee, blockHeight, generatorId);
-
                     payload += costOfOneAT;
-
                     processedATs.add(at);
                 } catch (Exception e) {
-                    debugLogger.debug("Error handling AT", e);
+                    debugLog.debug("Error handling AT", e);
                 }
             }
         }
 
-        byte[] bytesForBlock;
-
-        bytesForBlock = getBlockATBytes(processedATs, payload);
-
+        byte[] bytesForBlock = getBlockATBytes(processedATs, payload);
         return new AtBlock(totalFee, totalAmount, bytesForBlock);
     }
 
@@ -297,89 +347,32 @@ public abstract class AtController {
             return new AtBlock(0, 0, null);
         }
 
-        LinkedHashMap<Long, byte[]> ats = getATsFromBlock(blockATs);
-        List<AT> processedATs = new ArrayList<>();
-
-        long totalFee = 0;
-        MessageDigest digest = Crypto.md5();
-        byte[] md5;
-        long totalAmount = 0;
-
-        for (Map.Entry<Long, byte[]> entry : ats.entrySet()) {
-            long atIdLong = entry.getKey();
-            byte[] receivedMd5 = entry.getValue();
-            AT at = AT.getAT(atIdLong);
-            logger.debug("Running AT {}", Convert.toUnsignedLong(atIdLong));
-            try {
-                at.clearLists();
-                at.setHeight(blockHeight);
-                at.setWaitForNumberOfBlocks(at.getSleepBetween());
-
-                long atAccountBalance = getATAccountBalance(atIdLong);
-                if (atAccountBalance < Convert.safeMultiply(AtConstants.getInstance().stepFee(at.getVersion()),
-                        AtConstants.getInstance().apiStepMultiplier(at.getVersion()))) {
-                    throw new AtException("AT has insufficient balance to run");
-                }
-
-                if (at.freezeOnSameBalance()
-                        && (Convert.safeSubtract(atAccountBalance, at.getgBalance()) < at.minActivationAmount())) {
-                    throw new AtException("AT should be frozen due to unchanged balance");
-                }
-
-                if (at.nextHeight() > blockHeight) {
-                    throw new AtException("AT not allowed to run again yet");
-                }
-
-                at.setgBalance(atAccountBalance);
-
-                listCode(at, true, true);
-
-                runSteps(at);
-
-                long fee = Convert.safeMultiply(at.getMachineState().steps,
-                        AtConstants.getInstance().stepFee(at.getVersion()));
-                if (at.getMachineState().dead) {
-                    fee = Convert.safeAdd(fee, at.getgBalance());
-                    at.setgBalance(0L);
-                }
-                at.setpBalance(at.getgBalance());
-
-                if (!Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_4, blockHeight)) {
-                    totalAmount = makeTransactions(at, blockHeight, generatorId);
-                } else {
-                    totalAmount = Convert.safeAdd(totalAmount, makeTransactions(at, blockHeight, generatorId));
-                }
-
-                totalFee = Convert.safeAdd(totalFee, fee);
-                AT.addPendingFee(atIdLong, fee, blockHeight, generatorId);
-
-                processedATs.add(at);
-
-                md5 = digest.digest(at.getBytes());
-                if (!Arrays.equals(md5, receivedMd5)) {
-                    logger.error("MD5 mismatch for AT {}", Convert.toUnsignedLong(atIdLong));
-                    throw new AtException("Calculated md5 and received md5 are not matching");
-                }
-            } catch (Exception e) {
-                debugLogger.debug("ATs error", e);
-                throw new AtException("ATs error. Block rejected", e);
-            }
-            logger.debug("Finished running AT {}", Convert.toUnsignedLong(atIdLong));
-        }
-
-        for (AT at : processedATs) {
-            at.saveState();
-        }
-        AT.saveMapUpdates(blockHeight, generatorId);
-        return new AtBlock(totalFee, totalAmount, new byte[1]);
+        // This legacy path still needs a context; callers should migrate to validateATs(ATProcessingContext,...)
+        throw new UnsupportedOperationException("validateATsOriginal requires ATProcessingContext. Use validateATs(ctx, ...) instead.");
     }
 
+    /**
+     * @deprecated Use {@link #validateATs(ATProcessingContext, byte[], int, long)}.
+     * Legacy bridge: delegates to the context-aware overload using static Signum accessors. Scheduled for removal in v4.1.
+     */
+    @Deprecated(since = "4.0", forRemoval = true)
     public static AtBlock validateATs(byte[] blockATs, int blockHeight, long generatorId) throws AtException {
+        ATProcessingContext ctx = createLegacyContext();
+        return validateATs(ctx, blockATs, blockHeight, generatorId);
+    }
+
+    public static AtBlock validateATs(ATProcessingContext ctx, byte[] blockATs, int blockHeight, long generatorId)
+            throws AtException {
         if (blockATs == null) {
             return new AtBlock(0, 0, null);
         }
-        ATProcessorCache atProcessorCache = ATProcessorCache.getInstance();
+
+        final FluxCapacitor fluxCapacitor = ctx.getFluxCapacitor();
+        final Logger debugLog = getDebugLogger(ctx.getPropertyService());
+
+        ATProcessorCache atProcessorCache = ctx.getProcessorCache();
         atProcessorCache.loadBlock(blockATs, blockHeight);
+
         List<AT> processedATs = new ArrayList<>();
         long totalFee = 0;
         MessageDigest digest = Crypto.md5();
@@ -388,9 +381,7 @@ public abstract class AtController {
 
         for (Long atIdLong : atProcessorCache.getCurrentBlockAtIds()) {
             ATProcessorCache.ATContext atContext = atProcessorCache.getATContext(atIdLong);
-            if (atContext == null) {
-                continue;
-            }
+            if (atContext == null) continue;
 
             AT at = atContext.at;
             byte[] receivedMd5 = atContext.md5;
@@ -402,8 +393,8 @@ public abstract class AtController {
                 at.setWaitForNumberOfBlocks(at.getSleepBetween());
 
                 long atAccountBalance = getATAccountBalance(atIdLong);
-                if (atAccountBalance < Convert.safeMultiply(AtConstants.getInstance().stepFee(at.getVersion()),
-                        AtConstants.getInstance().apiStepMultiplier(at.getVersion()))) {
+                if (atAccountBalance < Convert.safeMultiply(atConstants.stepFee(at.getVersion()),
+                        atConstants.apiStepMultiplier(at.getVersion()))) {
                     throw new AtException("AT has insufficient balance to run");
                 }
 
@@ -417,28 +408,26 @@ public abstract class AtController {
                 }
 
                 at.setgBalance(atAccountBalance);
-
-                listCode(at, true, true);
-
-                runSteps(at);
+                listCode(at, ctx, true, true);
+                runSteps(at, ctx);
 
                 long fee = Convert.safeMultiply(at.getMachineState().steps,
-                        AtConstants.getInstance().stepFee(at.getVersion()));
+                        atConstants.stepFee(at.getVersion()));
                 if (at.getMachineState().dead) {
                     fee = Convert.safeAdd(fee, at.getgBalance());
                     at.setgBalance(0L);
                 }
                 at.setpBalance(at.getgBalance());
 
-                if (!Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_4, blockHeight)) {
-                    totalAmount = makeTransactions(at, blockHeight, generatorId);
+                long amount = makeTransactions(at, ctx, blockHeight, generatorId);
+                if (!fluxCapacitor.getValue(FluxValues.AT_FIX_BLOCK_4, blockHeight)) {
+                    totalAmount = amount;
                 } else {
-                    totalAmount = Convert.safeAdd(totalAmount, makeTransactions(at, blockHeight, generatorId));
+                    totalAmount = Convert.safeAdd(totalAmount, amount);
                 }
 
                 totalFee = Convert.safeAdd(totalFee, fee);
                 AT.addPendingFee(atIdLong, fee, blockHeight, generatorId);
-
                 processedATs.add(at);
 
                 md5 = digest.digest(at.getBytes());
@@ -447,14 +436,14 @@ public abstract class AtController {
                     throw new AtException("Calculated md5 and received md5 are not matching");
                 }
             } catch (Exception e) {
-                debugLogger.debug("ATs error", e);
+                debugLog.debug("ATs error", e);
                 throw new AtException("ATs error. Block rejected", e);
             }
             logger.debug("Finished running AT {}", Convert.toUnsignedLong(atIdLong));
         }
 
-        processedATs.forEach(AT::saveState);
-        AT.saveMapUpdates(blockHeight, generatorId);
+        processedATs.forEach(at -> at.saveState(ctx));
+        AT.saveMapUpdates(ctx, blockHeight, generatorId);
         return new AtBlock(totalFee, totalAmount, new byte[1]);
     }
 
@@ -466,10 +455,7 @@ public abstract class AtController {
         ByteBuffer b = ByteBuffer.wrap(blockATs);
         b.order(ByteOrder.LITTLE_ENDIAN);
 
-        byte[] temp = new byte[AtConstants.AT_ID_SIZE];
-
         LinkedHashMap<Long, byte[]> ats = new LinkedHashMap<>();
-
         byte[] atId = new byte[AtConstants.AT_ID_SIZE];
         byte[] md5 = new byte[16];
 
@@ -480,7 +466,6 @@ public abstract class AtController {
             if (ats.containsKey(atIdLong)) {
                 throw new AtException("AT included in block multiple times");
             }
-
             ats.put(atIdLong, md5.clone());
             // while (b.position() < b.capacity()) {
             // b.get(temp, 0, temp.length);
@@ -524,7 +509,9 @@ public abstract class AtController {
         return AtConstants.AT_ID_SIZE + 16;
     }
 
-    private static long makeTransactions(AT at, int blockHeight, long generatorId) throws AtException {
+    private static long makeTransactions(AT at, ATProcessingContext ctx, int blockHeight, long generatorId)
+            throws AtException {
+        final FluxCapacitor fluxCapacitor = ctx.getFluxCapacitor();
         long totalAmount = 0;
 
         // Start with the transactions as provided
@@ -537,15 +524,13 @@ public abstract class AtController {
                 boolean tx1isTransfer = tx1.getType() == TransactionType.ColoredCoins.ASSET_TRANSFER;
                 boolean tx2isTransfer = tx2.getType() == TransactionType.ColoredCoins.ASSET_TRANSFER;
 
-                if (tx1isMint && tx2isTransfer)
-                    return -1;
-                if (tx1isTransfer && tx2isMint)
-                    return 1;
+                if (tx1isMint && tx2isTransfer) return -1;
+                if (tx1isTransfer && tx2isMint) return 1;
             }
             return 0;
         });
 
-        if (!Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_4, at.getHeight())) {
+        if (!fluxCapacitor.getValue(FluxValues.AT_FIX_BLOCK_4, at.getHeight())) {
             for (AtTransaction tx : ordered) {
                 if (AT.findPendingTransaction(tx.getRecipientId(), blockHeight, generatorId)) {
                     throw new AtException("Conflicting transaction found");
@@ -566,8 +551,28 @@ public abstract class AtController {
         }
 
         AT.addMapUpdates(at.getMapUpdates(), blockHeight, generatorId);
-
         return totalAmount;
+    }
+
+    // ===== Helper: build ATProcessingContext from static Signum bridge (transitional) =====
+    /**
+     * @deprecated Temporary bridge — builds context via static Signum accessors.
+     * Callers should migrate to passing ATProcessingContext directly. Scheduled for removal in v4.1.
+     */
+    @Deprecated(since = "4.0", forRemoval = true)
+    private static ATProcessingContext createLegacyContext() {
+        return new ATProcessingContext(
+                AtController.getAtConstants(),
+                ATProcessorCache.getInstance(),
+                Signum.getPropertyService(),
+                Signum.getFluxCapacitor(),
+                Signum.getBlockchain(),
+                Signum.getStores().getAtStore(),
+                Signum.getStores().getAccountStore(),
+                Signum.getAccountService(),
+                Signum.getAssetExchange(),
+                Signum.getStores().getIndirectIncomingStore(),
+                Signum.getStores().getAssetStore());
     }
 
     private static long getATAccountBalance(Long id) {
@@ -577,5 +582,4 @@ public abstract class AtController {
         }
         return 0;
     }
-
 }

@@ -6,54 +6,52 @@ import application.module.node.Transaction;
 import application.module.node.TransactionProcessor;
 import application.module.node.common.QuickMocker;
 import application.module.node.fluxcapacitor.FluxCapacitor;
+import application.module.node.props.PropertyService;
 import application.module.node.services.ParameterService;
 import application.module.node.services.TransactionService;
 import application.module.node.util.JSON;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.mockito.Mockito;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import jakarta.servlet.http.HttpServletRequest;
 
 import static application.module.node.web.api.http.common.Parameters.TRANSACTION_BYTES_PARAMETER;
 import static application.module.node.web.api.http.common.Parameters.TRANSACTION_JSON_PARAMETER;
 import static application.module.node.web.api.http.common.ResultFields.*;
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(Signum.class)
-public class BroadcastTransactionTest {
+@ExtendWith(MockitoExtension.class)
+class BroadcastTransactionTest {
 
     private BroadcastTransaction t;
 
+    @Mock
     private TransactionProcessor transactionProcessorMock;
+    @Mock
     private ParameterService parameterServiceMock;
+    @Mock
     private TransactionService transactionServiceMock;
+    @Mock
+    private PropertyService propertyServiceMock;
 
-    @Before
-    public void setUp() {
-        this.transactionProcessorMock = mock(TransactionProcessor.class);
-        this.parameterServiceMock = mock(ParameterService.class);
-        this.transactionServiceMock = mock(TransactionService.class);
-
-        mockStatic(Signum.class);
+    @BeforeEach
+    void setUp() {
         FluxCapacitor mockFluxCapacitor = QuickMocker.latestValueFluxCapacitor();
-        when(Signum.getFluxCapacitor()).thenReturn(mockFluxCapacitor);
-
-        t = new BroadcastTransaction(transactionProcessorMock, parameterServiceMock, transactionServiceMock);
+        t = new BroadcastTransaction(transactionProcessorMock, parameterServiceMock, transactionServiceMock,
+                propertyServiceMock, mockFluxCapacitor);
     }
 
     @Test
-    public void processRequest() throws SignumException {
+    void processRequest() throws SignumException {
         final String mockTransactionBytesParameter = "mockTransactionBytesParameter";
         final String mockTransactionJson = "mockTransactionJson";
 
@@ -81,7 +79,7 @@ public class BroadcastTransactionTest {
     }
 
     @Test
-    public void processRequest_validationException() throws SignumException {
+    void processRequest_validationException() throws SignumException {
         final String mockTransactionBytesParameter = "mockTransactionBytesParameter";
         final String mockTransactionJson = "mockTransactionJson";
 
@@ -94,17 +92,17 @@ public class BroadcastTransactionTest {
         when(parameterServiceMock.parseTransaction(eq(mockTransactionBytesParameter), eq(mockTransactionJson)))
                 .thenReturn(mockTransaction);
 
-        Mockito.doThrow(SignumException.NotCurrentlyValidException.class).when(transactionServiceMock)
-                .validate(eq(mockTransaction));
+        org.mockito.Mockito.doThrow(SignumException.NotCurrentlyValidException.class)
+                .when(transactionServiceMock).validate(eq(mockTransaction));
 
         final JsonObject result = (JsonObject) t.processRequest(req);
 
         assertEquals(4, JSON.getAsInt(result.get(ERROR_CODE_RESPONSE)));
-        assertNotNull(result.get(ERROR_DESCRIPTION_RESPONSE));
+        assertTrue(result.has(ERROR_DESCRIPTION_RESPONSE));
     }
 
     @Test
-    public void requirePost() {
+    void requirePost() {
         assertTrue(t.requirePost());
     }
 }

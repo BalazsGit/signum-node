@@ -1,7 +1,10 @@
 package application.module.node.gui.metrics;
 
 import application.module.node.BlockchainProcessor;
+import application.module.node.peer.Peer;
+import application.module.node.peer.PeerManager;
 import application.module.node.peer.PeerMetric;
+import application.module.node.peer.Peers;
 import application.module.node.util.Listener;
 import application.utils.gui.ColorPaletteManager;
 import application.utils.gui.ContextMenuUtils;
@@ -15,8 +18,6 @@ import application.module.node.Signum;
 import application.module.node.gui.dialog.PeerTableDialog;
 import application.module.node.gui.dialog.PeersDialog;
 import application.module.node.gui.dialog.PeersDialog.PeerCategory;
-import application.module.node.peer.Peer;
-import application.module.node.peer.Peers;
 import net.miginfocom.swing.MigLayout;
 import org.jfree.chart.ChartFactory;
 import org.jfree.chart.ChartPanel;
@@ -51,6 +52,7 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -231,10 +233,37 @@ public class PeerMetricsPanel extends JPanel {
     private final Listener<PeerMetric> peerMetricListener = this::onPeerMetric;
     private final Listener<application.module.node.Block> peersUpdatedListener = this::onPeersUpdated;
 
-    public PeerMetricsPanel(JFrame parentFrame, ExecutorService sharedExecutor) {
+    /**
+     * Profile-aware context providing access to node components.
+     * Replaces static {@code Signum.getXxx()} calls.
+     */
+    private final MetricsPanelContext ctx;
+
+    /**
+     * Creates a new PeerMetricsPanel with profile-aware context.
+     *
+     * @param parentFrame the parent frame
+     * @param sharedExecutor the shared executor service for background tasks
+     * @param ctx the profile-aware metrics context (may be null for backward compatibility)
+     */
+    public PeerMetricsPanel(JFrame parentFrame, ExecutorService sharedExecutor, MetricsPanelContext ctx) {
         this.chartUpdateExecutor = sharedExecutor;
         this.parentFrame = parentFrame;
+        this.ctx = ctx;
         initUI();
+    }
+
+    /**
+     * Creates a new PeerMetricsPanel without profile context.
+     * @deprecated Use {@link #PeerMetricsPanel(JFrame, ExecutorService, MetricsPanelContext)} instead.
+     * Retained for backward compatibility during migration.
+     *
+     * @param parentFrame the parent frame
+     * @param sharedExecutor the shared executor service for background tasks
+     */
+    @Deprecated(since = "4.0", forRemoval = true)
+    public PeerMetricsPanel(JFrame parentFrame, ExecutorService sharedExecutor) {
+        this(parentFrame, sharedExecutor, null);
     }
 
     /**
@@ -242,7 +271,7 @@ public class PeerMetricsPanel extends JPanel {
      * Should be called when the panel is added to the UI.
      */
     public void init() {
-        BlockchainProcessor processor = Signum.getBlockchainProcessor();
+        BlockchainProcessor processor = ctx != null ? ctx.getBlockchainProcessor() : null;
         if (processor != null) {
             processor.addPeerMetricListener(peerMetricListener);
             processor.addListener(peersUpdatedListener, BlockchainProcessor.Event.PEERS_UPDATED);
@@ -260,7 +289,7 @@ public class PeerMetricsPanel extends JPanel {
      */
     public void shutdown() {
         try {
-            BlockchainProcessor processor = Signum.getBlockchainProcessor();
+            BlockchainProcessor processor = ctx != null ? ctx.getBlockchainProcessor() : null;
             if (processor != null) {
                 processor.removePeerMetricListener(peerMetricListener);
                 processor.removeListener(peersUpdatedListener, BlockchainProcessor.Event.PEERS_UPDATED);
@@ -1548,8 +1577,9 @@ public class PeerMetricsPanel extends JPanel {
     private void onPeersUpdated(application.module.node.Block block) {
         chartUpdateExecutor.submit(() -> {
             synchronized (updateLock) {
+                PeerManager manager = ctx != null ? ctx.getPeerManager() : null;
+                Collection<Peer> allPeers = manager != null ? manager.getAllPeers() : Collections.emptyList();
                 String latestVersion = Signum.VERSION.toString();
-                Collection<Peer> allPeers = Peers.getAllPeers();
                 for (Peer p : allPeers) {
                     String v = p.getVersion() != null ? p.getVersion().toString() : "";
                     if (!v.isEmpty() && !"unknown".equals(v)) {

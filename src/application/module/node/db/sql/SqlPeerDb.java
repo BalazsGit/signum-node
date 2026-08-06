@@ -12,16 +12,33 @@ import static application.module.node.schema.Tables.PEER;
 
 public class SqlPeerDb implements PeerDb {
 
+    private final DbContext dbContext;
+
+    /** @deprecated Use {@link #SqlPeerDb(DbContext)} instead */
+    @Deprecated
+    public SqlPeerDb() {
+        this.dbContext = null;
+    }
+
+    /**
+     * Constructor with DbContext injected.
+     *
+     * @param dbContext the database context instance
+     */
+    public SqlPeerDb(DbContext dbContext) {
+        this.dbContext = dbContext;
+    }
+
     @Override
     public List<String> loadPeers() {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             return ctx.selectFrom(PEER).fetch(PEER.ADDRESS, String.class);
         });
     }
 
     @Override
     public void deletePeers(Collection<String> peers) {
-        Db.useDSLContext(ctx -> {
+        dbContext.useDSLContext(ctx -> {
             for (String peer : peers) {
                 ctx.deleteFrom(PEER).where(PEER.ADDRESS.eq(peer)).execute();
             }
@@ -30,7 +47,7 @@ public class SqlPeerDb implements PeerDb {
 
     @Override
     public void addPeers(Collection<String> peers) {
-        Db.useDSLContext(ctx -> {
+        dbContext.useDSLContext(ctx -> {
             List<Insert<PeerRecord>> inserts = peers.stream().map(peer -> ctx.insertInto(PEER).set(PEER.ADDRESS, peer))
                     .collect(Collectors.toList());
             ctx.batch(inserts).execute();
@@ -39,6 +56,6 @@ public class SqlPeerDb implements PeerDb {
 
     @Override
     public void optimize() {
-        Db.optimizeTable(PEER.getName());
+        dbContext.optimizeTable(PEER.getName());
     }
 }

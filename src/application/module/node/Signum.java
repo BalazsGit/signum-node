@@ -3,10 +3,13 @@ package application.module.node;
 import application.module.node.assetexchange.AssetExchange;
 import application.module.node.assetexchange.AssetExchangeImpl;
 import application.module.node.at.AT;
+import application.module.node.at.AtConstants;
 import application.module.node.db.BlockDb;
 import application.module.node.db.TransactionDb;
 import application.module.node.db.cache.DBCacheManagerImpl;
 import application.module.node.db.sql.Db;
+import application.module.node.db.sql.DbContext;
+import application.module.node.db.sql.StoreDependencies;
 import application.module.node.db.store.BlockchainStore;
 import application.module.node.db.store.Dbs;
 import application.module.node.db.store.DerivedTableManager;
@@ -31,7 +34,7 @@ import application.module.node.services.ParameterService;
 import application.module.node.services.SubscriptionService;
 import application.module.node.services.TimeService;
 import application.module.node.services.TransactionService;
-import application.module.node.services.impl.ATServiceImpl;
+import application.module.node.at.ATServiceImpl;
 import application.module.node.services.impl.AccountServiceImpl;
 import application.module.node.services.impl.AliasServiceImpl;
 import application.module.node.services.impl.BlockServiceImpl;
@@ -143,6 +146,10 @@ public final class Signum {
     private static TransactionService transactionService;
     private static SubscriptionService subscriptionService;
     private static AssetExchange assetExchange;
+    private static AccountService accountService;
+    private static AliasService aliasService;
+    private static DGSGoodsStoreService dgsGoodsStoreService;
+    private static EscrowService escrowService;
     private static Generator generator;
 
     private static PropertyService propertyService;
@@ -151,6 +158,8 @@ public final class Signum {
     private static DBCacheManagerImpl dbCacheManager;
 
     private static WebServer webServer;
+
+    private static AtConstants atConstants;
 
     private static ShutdownManager shutdownManager;
 
@@ -497,12 +506,19 @@ public final class Signum {
 
             threadPool = new ThreadPool(propertyService);
 
-            Db.init(propertyService, dbCacheManager);
+            DbContext dbContext = Db.init(propertyService, dbCacheManager);
             dbs = Db.getDbsByDatabaseType();
+
+            final StoreDependencies storeDependencies = new StoreDependencies(
+                    null, // blockchain - wired later via Stores.wireDependencies()
+                    propertyService,
+                    null, // fluxCapacitor - created after blockchain
+                    dbs,
+                    dbContext);
 
             stores = new Stores(derivedTableManager, dbCacheManager, timeService, propertyService,
                     dbs.getTransactionDb(),
-                    dbs.getBlockDb(), params);
+                    dbs.getBlockDb(), params, storeDependencies);
 
             final TransactionDb transactionDb = dbs.getTransactionDb();
             final BlockDb blockDb = dbs.getBlockDb();
@@ -516,19 +532,21 @@ public final class Signum {
             stores.getUnconfirmedTransactionStore().setBlockchain(blockchain);
 
             fluxCapacitor = new FluxCapacitorImpl(blockchain, propertyService);
-            final AliasService aliasService = new AliasServiceImpl(
+            Signum.aliasService = new AliasServiceImpl(
                     stores.getAliasStore(),
                     stores,
                     fluxCapacitor,
                     propertyService);
+            final AliasService aliasService = Signum.aliasService;
             aliasService.addDefaultTLDs();
 
             EconomicClustering economicClustering = new EconomicClustering(blockchain);
 
-            final AccountService accountService = new AccountServiceImpl(
+            Signum.accountService = new AccountServiceImpl(
                     stores.getAccountStore(),
                     stores.getAssetTransferStore(),
                     blockchain);
+            final AccountService accountService = Signum.accountService;
 
             final DownloadCacheImpl downloadCache = new DownloadCacheImpl(
                     propertyService,
@@ -571,16 +589,18 @@ public final class Signum {
                     stores.getAliasStore(),
                     accountService);
             ((AliasServiceImpl) aliasService).setSubscriptionService(subscriptionService);
-            final DGSGoodsStoreService digitalGoodsStoreService = new DGSGoodsStoreServiceImpl(
+            Signum.dgsGoodsStoreService = new DGSGoodsStoreServiceImpl(
                     blockchain,
                     stores.getDigitalGoodsStoreStore(),
                     accountService);
-            final EscrowService escrowService = new EscrowServiceImpl(
+            final DGSGoodsStoreService digitalGoodsStoreService = Signum.dgsGoodsStoreService;
+            Signum.escrowService = new EscrowServiceImpl(
                     stores.getEscrowStore(),
                     blockchain,
                     aliasService,
                     accountService,
                     transactionDb);
+            final EscrowService escrowService = Signum.escrowService;
 
             assetExchange = new AssetExchangeImpl(
                     blockchain,
@@ -635,7 +655,9 @@ public final class Signum {
                     dbCacheManager,
                     accountService,
                     indirectIncomingService,
-                    aliasService);
+                    aliasService,
+                    fluxCapacitor,
+                    atService);
 
             downloadCache.setBlockchainProcessor(blockchainProcessor);
 
@@ -674,7 +696,10 @@ public final class Signum {
                     transactionProcessor,
                     blockchainProcessor,
                     propertyService,
-                    threadPool);
+                    threadPool,
+                    fluxCapacitor,
+                    dbs,
+                    stores);
             if (params != null) {
                 params.initialize(parameterService, accountService, apiTransactionManager);
                 TransactionType.setNetworkParameters(params);
@@ -685,6 +710,9 @@ public final class Signum {
                     stores.getUnconfirmedTransactionStore(),
                     blockchain,
                     fluxCapacitor);
+
+            final AtConstants atConstantsLocal = new AtConstants(fluxCapacitor);
+            Signum.atConstants = atConstantsLocal;
 
             webServer = new WebServerImpl(new WebServerContext(transactionProcessor,
                     blockchain,
@@ -708,7 +736,9 @@ public final class Signum {
                     feeSuggestionCalculator,
                     deepLinkQrCodeGenerator,
                     indirectIncomingService,
-                    params));
+                    params,
+                    atConstantsLocal,
+                     fluxCapacitor));
             webServer.start();
 
             if (propertyService.getBoolean(Props.NODE_DEBUG_TRACE_ENABLED)) {
@@ -937,6 +967,51 @@ public final class Signum {
 
     public static FluxCapacitor getFluxCapacitor() {
         return fluxCapacitor;
+    }
+
+    /**
+     * @deprecated Use NodeCoreContext.getAccountService() for multi-profile support.
+     * Bridge accessor for transitional compatibility during TransactionType refactoring.
+     */
+    @Deprecated
+    public static AccountService getAccountService() {
+        return accountService;
+    }
+
+    /**
+     * @deprecated Use NodeCoreContext.getAliasService() for multi-profile support.
+     * Bridge accessor for transitional compatibility during TransactionType refactoring.
+     */
+    @Deprecated
+    public static AliasService getAliasService() {
+        return aliasService;
+    }
+
+    /**
+     * @deprecated Use NodeCoreContext.getEscrowService() for multi-profile support.
+     * Bridge accessor for transitional compatibility during TransactionType refactoring.
+     */
+    @Deprecated
+    public static EscrowService getEscrowService() {
+        return escrowService;
+    }
+
+    /**
+     * @deprecated Use NodeCoreContext.getDgsGoodsStoreService() for multi-profile support.
+     * Bridge accessor for transitional compatibility during TransactionType refactoring.
+     */
+    @Deprecated
+    public static DGSGoodsStoreService getDgsGoodsStoreService() {
+        return dgsGoodsStoreService;
+    }
+
+    /**
+     * @deprecated Use WebServerContext.getAtConstants() or TransactionApplyContext.getAtConstants().
+     * Bridge accessor for transitional compatibility during AT module singleton elimination.
+     */
+    @Deprecated
+    public static AtConstants getAtConstants() {
+        return atConstants;
     }
 
 }

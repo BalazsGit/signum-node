@@ -2,6 +2,7 @@ package application.module.node.web.api.http.handler;
 
 import application.module.node.*;
 import application.module.node.crypto.EncryptedData;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.web.api.http.common.APITransactionManager;
 import application.module.node.web.api.http.common.LegacyDocTag;
 import application.module.node.web.api.http.common.ParameterParser;
@@ -23,8 +24,8 @@ public final class DGSDelivery extends CreateTransaction {
     private final Blockchain blockchain;
 
     public DGSDelivery(ParameterService parameterService, Blockchain blockchain, AccountService accountService,
-            APITransactionManager apiTransactionManager) {
-        super(new LegacyDocTag[] { LegacyDocTag.DGS, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
+            APITransactionManager apiTransactionManager, FluxCapacitor fluxCapacitor) {
+        super(new LegacyDocTag[] { LegacyDocTag.DGS, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager, fluxCapacitor,
                 PURCHASE_PARAMETER, DISCOUNT_NQT_PARAMETER, GOODS_TO_ENCRYPT_PARAMETER, GOODS_IS_TEXT_PARAMETER,
                 GOODS_DATA_PARAMETER, GOODS_NONCE_PARAMETER);
         this.parameterService = parameterService;

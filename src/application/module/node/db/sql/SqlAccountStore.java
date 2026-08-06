@@ -65,6 +65,7 @@ public class SqlAccountStore implements AccountStore {
     private final PropertyService propertyService;
     private final int insertMaxBatchSize;
     private final Set<String> pkChecks;
+    private final DbContext dbContext;
 
     private VersionedEntityTable<Account.AccountAsset> accountAssetTable;
     private VersionedEntityTable<Account.RewardRecipientAssignment> rewardRecipientAssignmentTable;
@@ -76,6 +77,7 @@ public class SqlAccountStore implements AccountStore {
         this.blockchain = storeDependencies.blockchain();
         this.fluxCapacitor = storeDependencies.fluxCapacitor();
         this.propertyService = storeDependencies.propertyService();
+        this.dbContext = storeDependencies.dbContext();
         this.insertMaxBatchSize = propertyService.getInt(Props.DB_INSERT_BATCH_MAX_SIZE);
         this.pkChecks = Collections.unmodifiableSet(new HashSet<>(propertyService.getStringList(Props.NODE_PK_CHECKS)));
         initTables(derivedTableManager, dbCacheManager);
@@ -86,6 +88,7 @@ public class SqlAccountStore implements AccountStore {
         this.blockchain = null;
         this.fluxCapacitor = null;
         this.propertyService = null;
+        this.dbContext = null;
         this.insertMaxBatchSize = 1000;
         this.pkChecks = Collections.emptySet();
         initTables(derivedTableManager, dbCacheManager);
@@ -95,7 +98,7 @@ public class SqlAccountStore implements AccountStore {
         rewardRecipientAssignmentTable = new VersionedEntitySqlTable<Account.RewardRecipientAssignment>(
                 "reward_recip_assign", application.module.node.schema.Tables.REWARD_RECIP_ASSIGN,
                 rewardRecipientAssignmentDbKeyFactory,
-                derivedTableManager) {
+                derivedTableManager, blockchain, dbContext) {
 
             @Override
             protected Account.RewardRecipientAssignment load(DSLContext ctx, Record rs) {
@@ -124,7 +127,7 @@ public class SqlAccountStore implements AccountStore {
         };
 
         accountAssetTable = new VersionedEntitySqlTable<Account.AccountAsset>("account_asset",
-                application.module.node.schema.Tables.ACCOUNT_ASSET, accountAssetDbKeyFactory, derivedTableManager) {
+                application.module.node.schema.Tables.ACCOUNT_ASSET, accountAssetDbKeyFactory, derivedTableManager, blockchain, dbContext) {
             private final List<SortField<?>> sort = initializeSort();
 
             private List<SortField<?>> initializeSort() {
@@ -166,7 +169,7 @@ public class SqlAccountStore implements AccountStore {
 
         accountTable = new VersionedBatchEntitySqlTable<Account>("account",
                 application.module.node.schema.Tables.ACCOUNT,
-                accountDbKeyFactory, derivedTableManager, dbCacheManager, Account.class) {
+                accountDbKeyFactory, derivedTableManager, dbCacheManager, Account.class, dbContext) {
             @Override
             protected Account load(DSLContext ctx, Record rs) {
                 return new SqlAccount(rs);
@@ -204,7 +207,7 @@ public class SqlAccountStore implements AccountStore {
         accountBalanceTable = new VersionedBatchEntitySqlTable<Account.Balance>("account_balance",
                 application.module.node.schema.Tables.ACCOUNT_BALANCE, accountBalanceDbKeyFactory, derivedTableManager,
                 dbCacheManager,
-                Account.Balance.class) {
+                Account.Balance.class, dbContext) {
             @Override
             protected Account.Balance load(DSLContext ctx, Record rs) {
                 return new SqlAccountBalance(rs);
@@ -285,7 +288,7 @@ public class SqlAccountStore implements AccountStore {
 
     @Override
     public long getAllAccountsBalance() {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             return ctx.select(DSL.sum(ACCOUNT_BALANCE.BALANCE)).from(ACCOUNT_BALANCE)
                     .where(ACCOUNT_BALANCE.LATEST.isTrue())
                     .fetchOneInto(long.class);
@@ -294,7 +297,7 @@ public class SqlAccountStore implements AccountStore {
 
     @Override
     public int getAssetAccountsCount(Asset asset, long minimumQuantity, boolean ignoreTreasury, boolean unconfirmed) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
 
             SelectConditionStep<Record1<Integer>> select = ctx.selectCount().from(ACCOUNT_ASSET)
                     .where(ACCOUNT_ASSET.ASSET_ID.eq(asset.getId())).and(ACCOUNT_ASSET.LATEST.isTrue())
@@ -321,7 +324,7 @@ public class SqlAccountStore implements AccountStore {
 
     @Override
     public long getAssetCirculatingSupply(Asset asset, boolean ignoreTreasury, boolean unconfirmed) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
 
             SelectConditionStep<Record1<BigDecimal>> select = ctx.select(DSL.sum(
                     unconfirmed ? ACCOUNT_ASSET.UNCONFIRMED_QUANTITY : ACCOUNT_ASSET.QUANTITY))
@@ -390,7 +393,7 @@ public class SqlAccountStore implements AccountStore {
         treasuryAccounts.add(0L);
         Transaction transaction = blockchain.getTransaction(asset.getId());
         if (transaction != null) {
-            treasuryAccounts.addAll(Db.fetchWithDSLContext(ctx -> {
+            treasuryAccounts.addAll(dbContext.fetchWithDSLContext(ctx -> {
                 return ctx.select(TRANSACTION.RECIPIENT_ID).from(TRANSACTION)
                         .where(TRANSACTION.TYPE.eq(TransactionType.TYPE_COLORED_COINS.getType()))
                         .and(TRANSACTION.SUBTYPE.eq(TransactionType.SUBTYPE_COLORED_COINS_ADD_TREASURY_ACCOUNT))
@@ -425,7 +428,7 @@ public class SqlAccountStore implements AccountStore {
                 return false;
             }
 
-            if (Db.isInTransaction()) {
+            if (dbContext.isInTransaction()) {
                 acc.setPublicKey(key);
                 acc.setKeyHeight(-1);
                 getAccountTable().insert(acc);
@@ -447,7 +450,7 @@ public class SqlAccountStore implements AccountStore {
             return false;
         } else if (acc.getKeyHeight() >= height) {
             logger.info("DUPLICATE KEY!!!");
-            if (Db.isInTransaction()) {
+            if (dbContext.isInTransaction()) {
                 if (logger.isInfoEnabled()) {
                     logger.info(
                             "Changing key for account {} at height {}, was previously set to a different one at height {}",

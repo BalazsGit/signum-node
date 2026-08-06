@@ -14,21 +14,45 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.helpers.NOPLogger;
 
 import application.module.node.Asset;
-import application.module.node.Signum;
 import application.module.node.TransactionType;
+import application.module.node.assetexchange.AssetExchange;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.props.Props;
+import application.module.node.props.PropertyService;
 
 class AtMachineProcessor {
 
     private final Logger logger;
 
     private final AtMachineState machineData;
+    private final ATProcessingContext context;
     private final Fun fun = new Fun();
 
-    public AtMachineProcessor(AtMachineState machineData, boolean enableLogger) {
+    public AtMachineProcessor(AtMachineState machineData, ATProcessingContext context, boolean enableLogger) {
         this.machineData = machineData;
+        this.context = context;
         this.logger = enableLogger ? LoggerFactory.getLogger(AtMachineProcessor.class) : NOPLogger.NOP_LOGGER;
+    }
+
+    /** @return the FluxCapacitor from context */
+    private FluxCapacitor getFluxCapacitor() {
+        return context.getFluxCapacitor();
+    }
+
+    /** @return the AssetExchange from context */
+    private AssetExchange getAssetExchange() {
+        return context.getAssetExchange();
+    }
+
+    /** @return the PropertyService from context */
+    private PropertyService getPropertyService() {
+        return context.getPropertyService();
+    }
+
+    /** @return the AtConstants from context */
+    private AtConstants getAtConstants() {
+        return context.getAtConstants();
     }
 
     private int getFun() {
@@ -50,24 +74,24 @@ class AtMachineProcessor {
                 // special cases
                 if (op == OpCode.E_OP_CODE_EXT_FUN_RET) {
                     if (getFunAddr() == 0 && getFuncNum() == OpCode.ISSUE_ASSET) {
-                        return (int) (AtConstants.getInstance().apiStepMultiplier(version)
+                        return (int) (getAtConstants().apiStepMultiplier(version)
                                 * TransactionType.BASELINE_ASSET_ISSUANCE_FACTOR);
                     }
                 }
                 if (op == OpCode.E_OP_CODE_EXT_FUN) {
                     if (getFunAddr() == 0 && getFuncNum() == OpCode.DIST_TO_ASSET_HOLDERS) {
-                        int steps = (int) AtConstants.getInstance().apiStepMultiplier(version);
+                        int steps = (int) getAtConstants().apiStepMultiplier(version);
 
                         long minHolding = AtApiHelper.getLong(machineData.getB1());
                         long assetId = AtApiHelper.getLong(machineData.getB2());
-                        Asset asset = Signum.getAssetExchange().getAsset(assetId);
-                        int maxIndirects = Signum.getPropertyService().getInt(Props.MAX_INDIRECTS_PER_BLOCK);
+                        Asset asset = getAssetExchange().getAsset(assetId);
+                        int maxIndirects = getPropertyService().getInt(Props.MAX_INDIRECTS_PER_BLOCK);
                         int holdersCount = 0;
 
                         if (asset != null) {
-                            boolean unconfirmed = !Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX,
+                            boolean unconfirmed = !getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX,
                                     height);
-                            holdersCount = Signum.getAssetExchange().getAssetAccountsCount(asset, minHolding, true,
+                            holdersCount = getAssetExchange().getAssetAccountsCount(asset, minHolding, true,
                                     unconfirmed);
                             if (indirectsCount + holdersCount <= maxIndirects) {
                                 // distribution actually takes place only if we are not over the limit
@@ -79,7 +103,7 @@ class AtMachineProcessor {
                     }
                 }
             }
-            return (int) AtConstants.getInstance().apiStepMultiplier(version);
+            return (int) getAtConstants().apiStepMultiplier(version);
         }
 
         return 1;
@@ -449,7 +473,7 @@ class AtMachineProcessor {
                 }
             }
         } else if (op == OpCode.E_OP_CODE_SET_IDX) {
-            if (Signum.getFluxCapacitor().getValue(FluxValues.SIGNUM, machineData.getCreationBlockHeight())) {
+            if (getFluxCapacitor().getValue(FluxValues.SIGNUM, machineData.getCreationBlockHeight())) {
                 rc = get3Addrs();
                 if (rc == 0 || disassemble) {
                     rc = 13;
@@ -461,7 +485,7 @@ class AtMachineProcessor {
                     } else {
                         int addr = (int) (machineData.getApData().getLong(fun.addr2 * 8)
                                 + machineData.getApData().getLong(fun.addr3 * 8));
-                        if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_ATS,
+                        if (getFluxCapacitor().getValue(FluxValues.SMART_ATS,
                                 machineData.getCreationBlockHeight()) && !validAddr(addr, false)) {
                             rc = -1;
                         } else {
@@ -605,7 +629,7 @@ class AtMachineProcessor {
                 }
             }
         } else if (op == OpCode.E_OP_CODE_IDX_DAT) {
-            if (Signum.getFluxCapacitor().getValue(FluxValues.SIGNUM, machineData.getCreationBlockHeight())) {
+            if (getFluxCapacitor().getValue(FluxValues.SIGNUM, machineData.getCreationBlockHeight())) {
                 rc = get3Addrs();
                 if (rc == 0 || disassemble) {
                     rc = 13;
@@ -617,7 +641,7 @@ class AtMachineProcessor {
                     } else {
                         int addr = (int) (machineData.getApData().getLong(fun.addr1 * 8)
                                 + machineData.getApData().getLong(fun.addr2 * 8));
-                        if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_ATS,
+                        if (getFluxCapacitor().getValue(FluxValues.SMART_ATS,
                                 machineData.getCreationBlockHeight()) && !validAddr(addr, false)) {
                             rc = -1;
                         } else {
@@ -870,10 +894,10 @@ class AtMachineProcessor {
                     int numBlocks = (int) machineData.getApData().getLong(fun.addr1 * 8);
                     if (numBlocks < 0)
                         numBlocks = 0;
-                    int maxNumBlocks = (int) AtConstants.getInstance()
-                            .getMaxWaitForNumOfBlocks(machineData.getCreationBlockHeight());
-                    if (numBlocks > maxNumBlocks)
+                    int maxNumBlocks = (int) getAtConstants().getMaxWaitForNumOfBlocks(machineData.getCreationBlockHeight());
+                    if (numBlocks > maxNumBlocks){
                         numBlocks = maxNumBlocks;
+                    }
                     machineData.setWaitForNumberOfBlocks(numBlocks);
                     machineData.getMachineState().stopped = true;
                 }
@@ -940,7 +964,7 @@ class AtMachineProcessor {
             } else {
                 machineData.getMachineState().pc += rc;
                 machineData.getMachineState().stopped = true;
-                if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_ATS, machineData.getCreationBlockHeight())) {
+                if (getFluxCapacitor().getValue(FluxValues.SMART_ATS, machineData.getCreationBlockHeight())) {
                     machineData.setWaitForNumberOfBlocks(0);
                 } else {
                     machineData.setFreeze(true);

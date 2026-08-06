@@ -3,8 +3,8 @@ package application.module.node.web.api.http.handler;
 import application.module.node.Account;
 import application.module.node.Attachment;
 import application.module.node.Blockchain;
-import application.module.node.Signum;
 import application.module.node.SignumException;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.AccountService;
 import application.module.node.services.ParameterService;
@@ -25,13 +25,15 @@ public final class AddCommitment extends CreateTransaction {
 
     private final ParameterService parameterService;
     private final Blockchain blockchain;
+    private final FluxCapacitor fluxCapacitor;
 
     public AddCommitment(ParameterService parameterService, Blockchain blockchain, AccountService accountService,
-            APITransactionManager apiTransactionManager) {
+            APITransactionManager apiTransactionManager, FluxCapacitor fluxCapacitor) {
         super(new LegacyDocTag[] { LegacyDocTag.ACCOUNTS, LegacyDocTag.MINING, LegacyDocTag.CREATE_TRANSACTION },
-                apiTransactionManager, AMOUNT_NQT_PARAMETER);
+                apiTransactionManager, fluxCapacitor, AMOUNT_NQT_PARAMETER);
         this.parameterService = parameterService;
         this.blockchain = blockchain;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     @Override
@@ -39,7 +41,7 @@ public final class AddCommitment extends CreateTransaction {
         final Account account = parameterService.getSenderAccount(req);
         long amountNQT = ParameterParser.getAmountNQT(req);
 
-        long minimumFeeNQT = Signum.getFluxCapacitor().getValue(FluxValues.FEE_QUANT);
+        long minimumFeeNQT = this.fluxCapacitor.getValue(FluxValues.FEE_QUANT);
         long feeNQT = ParameterParser.getFeeNQT(req);
         if (feeNQT < minimumFeeNQT) {
             return INCORRECT_FEE;

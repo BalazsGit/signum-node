@@ -11,6 +11,7 @@ import application.module.node.util.JSON;
 import application.module.node.util.Subnet;
 import application.module.node.web.server.WebServerContext;
 import application.module.node.web.api.http.handler.*;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.web.api.http.common.*;
 
 import com.google.gson.JsonElement;
@@ -75,24 +76,25 @@ public final class ApiServlet extends HttpServlet {
         IndirectIncomingService indirectIncomingService = context.getIndirectIncomingService();
         FeeSuggestionCalculator feeSuggestionCalculator = context.getFeeSuggestionCalculator();
         DeeplinkQRCodeGenerator deeplinkQRCodeGenerator = context.getDeepLinkQRCodeGenerator();
+        FluxCapacitor fluxCapacitor = context.getFluxCapacitor();
 
         map.put("broadcastTransaction",
-                new BroadcastTransaction(transactionProcessor, parameterService, transactionService));
+                new BroadcastTransaction(transactionProcessor, parameterService, transactionService, propertyService, fluxCapacitor));
         map.put("calculateFullHash", new CalculateFullHash());
         map.put("cancelAskOrder",
-                new CancelAskOrder(parameterService, blockchain, assetExchange, apiTransactionManager));
+                new CancelAskOrder(parameterService, blockchain, assetExchange, apiTransactionManager, fluxCapacitor));
         map.put("cancelBidOrder",
-                new CancelBidOrder(parameterService, blockchain, assetExchange, apiTransactionManager));
+                new CancelBidOrder(parameterService, blockchain, assetExchange, apiTransactionManager, fluxCapacitor));
         map.put("decryptFrom", new DecryptFrom(parameterService));
-        map.put("dgsListing", new DGSListing(parameterService, blockchain, apiTransactionManager));
-        map.put("dgsDelisting", new DGSDelisting(parameterService, blockchain, apiTransactionManager));
-        map.put("dgsDelivery", new DGSDelivery(parameterService, blockchain, accountService, apiTransactionManager));
-        map.put("dgsFeedback", new DGSFeedback(parameterService, blockchain, accountService, apiTransactionManager));
-        map.put("dgsPriceChange", new DGSPriceChange(parameterService, blockchain, apiTransactionManager));
+        map.put("dgsListing", new DGSListing(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
+        map.put("dgsDelisting", new DGSDelisting(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
+        map.put("dgsDelivery", new DGSDelivery(parameterService, blockchain, accountService, apiTransactionManager, fluxCapacitor));
+        map.put("dgsFeedback", new DGSFeedback(parameterService, blockchain, accountService, apiTransactionManager, fluxCapacitor));
+        map.put("dgsPriceChange", new DGSPriceChange(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
         map.put("dgsPurchase",
-                new DGSPurchase(parameterService, blockchain, accountService, timeService, apiTransactionManager));
-        map.put("dgsQuantityChange", new DGSQuantityChange(parameterService, blockchain, apiTransactionManager));
-        map.put("dgsRefund", new DGSRefund(parameterService, blockchain, accountService, apiTransactionManager));
+                new DGSPurchase(parameterService, blockchain, accountService, timeService, apiTransactionManager, fluxCapacitor));
+        map.put("dgsQuantityChange", new DGSQuantityChange(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
+        map.put("dgsRefund", new DGSRefund(parameterService, blockchain, accountService, apiTransactionManager, fluxCapacitor));
         map.put("encryptTo", new EncryptTo(parameterService, accountService));
         map.put("generateToken", new GenerateToken(timeService));
         map.put("getAccount", new GetAccount(parameterService, accountService, blockchain, generator));
@@ -104,8 +106,8 @@ public final class ApiServlet extends HttpServlet {
         map.put("getAccountTransactionIds", new GetAccountTransactionIds(parameterService, blockchain));
         map.put("getAccountTransactions", new GetAccountTransactions(parameterService, blockchain));
         map.put("getAccountAssets", new GetAccountAssets(parameterService, accountService));
-        map.put("sellAlias", new SellAlias(parameterService, blockchain, apiTransactionManager));
-        map.put("buyAlias", new BuyAlias(parameterService, blockchain, aliasService, apiTransactionManager));
+        map.put("sellAlias", new SellAlias(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
+        map.put("buyAlias", new BuyAlias(parameterService, blockchain, aliasService, apiTransactionManager, fluxCapacitor));
         map.put("getAlias", new GetAlias(parameterService, aliasService));
         map.put("getAliases", new GetAliases(parameterService, aliasService));
         map.put("getAliasesByName", new GetAliasesByName(aliasService));
@@ -142,7 +144,7 @@ public final class ApiServlet extends HttpServlet {
         map.put("getAllTrades", new GetAllTrades(assetExchange));
         map.put("getAssetTransfers", new GetAssetTransfers(parameterService, accountService, assetExchange));
         map.put("getTransaction", new GetTransaction(transactionProcessor, blockchain));
-        map.put("getIndirectIncoming", new GetIndirectIncoming(blockchain, parameterService));
+        map.put("getIndirectIncoming", new GetIndirectIncoming(blockchain, parameterService, indirectIncomingService));
         map.put("getTransactionBytes", new GetTransactionBytes(blockchain, transactionProcessor));
         map.put("getTransactionIds", new GetTransactionIds(parameterService, blockchain));
         map.put("getUnconfirmedTransactionIds",
@@ -162,57 +164,57 @@ public final class ApiServlet extends HttpServlet {
         map.put("getBidOrderIds", new GetBidOrderIds(parameterService, assetExchange));
         map.put("getBidOrders", new GetBidOrders(parameterService, assetExchange));
         map.put("suggestFee", new SuggestFee(feeSuggestionCalculator));
-        map.put("issueAsset", new IssueAsset(parameterService, blockchain, apiTransactionManager));
-        map.put("mintAsset", new MintAsset(parameterService, blockchain, apiTransactionManager, assetExchange));
+        map.put("issueAsset", new IssueAsset(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
+        map.put("mintAsset", new MintAsset(parameterService, blockchain, apiTransactionManager, assetExchange, fluxCapacitor));
         map.put("distributeToAssetHolders", new DistributeToAssetHolders(parameterService, blockchain,
-                apiTransactionManager, assetExchange, accountService));
+                apiTransactionManager, assetExchange, accountService, fluxCapacitor));
         map.put("addAssetTreasuryAccount", new AddAssetTreasuryAccount(parameterService, assetExchange, blockchain,
-                apiTransactionManager, accountService));
+                apiTransactionManager, accountService, fluxCapacitor));
         map.put("longConvert", LongConvert.instance);
         map.put("parseTransaction", new ParseTransaction(parameterService, transactionService));
         map.put("placeAskOrder",
-                new PlaceAskOrder(parameterService, blockchain, apiTransactionManager, accountService));
-        map.put("placeBidOrder", new PlaceBidOrder(parameterService, blockchain, apiTransactionManager));
+                new PlaceAskOrder(parameterService, blockchain, apiTransactionManager, accountService, fluxCapacitor));
+        map.put("placeBidOrder", new PlaceBidOrder(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
         map.put("rsConvert", RSConvert.instance);
         map.put("readMessage", new ReadMessage(blockchain, accountService));
-        map.put("sendMessage", new SendMessage(parameterService, apiTransactionManager));
-        map.put("sendMoney", new SendMoney(parameterService, apiTransactionManager));
-        map.put("sendMoneyMulti", new SendMoneyMulti(parameterService, blockchain, apiTransactionManager));
-        map.put("sendMoneyMultiSame", new SendMoneyMultiSame(parameterService, blockchain, apiTransactionManager));
-        map.put("setAccountInfo", new SetAccountInfo(parameterService, blockchain, apiTransactionManager));
-        map.put("setAlias", new SetAlias(parameterService, blockchain, aliasService, apiTransactionManager));
-        map.put("setTLD", new SetTLD(parameterService, blockchain, aliasService, apiTransactionManager));
+        map.put("sendMessage", new SendMessage(parameterService, apiTransactionManager, fluxCapacitor));
+        map.put("sendMoney", new SendMoney(parameterService, apiTransactionManager, fluxCapacitor));
+        map.put("sendMoneyMulti", new SendMoneyMulti(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
+        map.put("sendMoneyMultiSame", new SendMoneyMultiSame(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
+        map.put("setAccountInfo", new SetAccountInfo(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
+        map.put("setAlias", new SetAlias(parameterService, blockchain, aliasService, apiTransactionManager, fluxCapacitor));
+        map.put("setTLD", new SetTLD(parameterService, blockchain, aliasService, apiTransactionManager, fluxCapacitor));
         map.put("signTransaction", new SignTransaction(parameterService, transactionService));
         map.put("transferAsset",
-                new TransferAsset(parameterService, blockchain, apiTransactionManager, accountService));
+                new TransferAsset(parameterService, blockchain, apiTransactionManager, accountService, fluxCapacitor));
         map.put("transferAssetMulti",
-                new TransferAssetMulti(parameterService, blockchain, apiTransactionManager, accountService));
+                new TransferAssetMulti(parameterService, blockchain, apiTransactionManager, accountService, assetExchange, fluxCapacitor));
         map.put("transferAssetOwnership",
-                new TransferAssetOwnership(parameterService, blockchain, apiTransactionManager, assetExchange));
+                new TransferAssetOwnership(parameterService, blockchain, apiTransactionManager, assetExchange, fluxCapacitor));
         map.put("getMiningInfo", new GetMiningInfo(blockchain, blockService, generator));
         map.put("submitNonce", new SubmitNonce(propertyService, accountService, blockchain, generator));
         map.put("getRewardRecipient", new GetRewardRecipient(parameterService, blockchain, accountService));
         map.put("setRewardRecipient",
-                new SetRewardRecipient(parameterService, blockchain, accountService, apiTransactionManager));
+                new SetRewardRecipient(parameterService, blockchain, accountService, apiTransactionManager, fluxCapacitor));
         map.put("addCommitment",
-                new AddCommitment(parameterService, blockchain, accountService, apiTransactionManager));
+                new AddCommitment(parameterService, blockchain, accountService, apiTransactionManager, fluxCapacitor));
         map.put("removeCommitment",
-                new RemoveCommitment(parameterService, blockchain, accountService, apiTransactionManager));
+                new RemoveCommitment(parameterService, blockchain, accountService, apiTransactionManager, fluxCapacitor));
         map.put("getAccountsWithRewardRecipient", new GetAccountsWithRewardRecipient(parameterService, accountService));
-        map.put("sendMoneyEscrow", new SendMoneyEscrow(parameterService, blockchain, apiTransactionManager));
-        map.put("escrowSign", new EscrowSign(parameterService, blockchain, escrowService, apiTransactionManager));
+        map.put("sendMoneyEscrow", new SendMoneyEscrow(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
+        map.put("escrowSign", new EscrowSign(parameterService, blockchain, escrowService, apiTransactionManager, fluxCapacitor));
         map.put("getEscrowTransaction", new GetEscrowTransaction(escrowService));
         map.put("getAccountEscrowTransactions", new GetAccountEscrowTransactions(parameterService, escrowService));
         map.put("sendMoneySubscription",
-                new SendMoneySubscription(parameterService, blockchain, apiTransactionManager));
+                new SendMoneySubscription(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
         map.put("subscriptionCancel",
-                new SubscriptionCancel(parameterService, subscriptionService, blockchain, apiTransactionManager));
+                new SubscriptionCancel(parameterService, subscriptionService, blockchain, apiTransactionManager, fluxCapacitor));
         map.put("getSubscription", new GetSubscription(subscriptionService, aliasService));
         map.put("getSubscriptionPayments", new GetSubscriptionPayments(blockchain));
         map.put("getAccountSubscriptions",
                 new GetAccountSubscriptions(parameterService, subscriptionService, aliasService));
         map.put("getSubscriptionsToAccount", new GetSubscriptionsToAccount(parameterService, subscriptionService));
-        map.put("createATProgram", new CreateATProgram(parameterService, blockchain, apiTransactionManager));
+        map.put("createATProgram", new CreateATProgram(parameterService, blockchain, apiTransactionManager, context.getAtConstants(), fluxCapacitor));
         map.put("getAT", new GetAT(parameterService, blockchain));
         map.put("getATDetails", new GetATDetails(parameterService));
         map.put("getATs", new GetATs(atService));

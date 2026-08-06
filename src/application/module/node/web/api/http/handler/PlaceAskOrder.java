@@ -1,6 +1,7 @@
 package application.module.node.web.api.http.handler;
 
 import application.module.node.*;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.services.AccountService;
 import application.module.node.services.ParameterService;
 import application.module.node.web.api.http.common.APITransactionManager;
@@ -20,8 +21,8 @@ public final class PlaceAskOrder extends CreateTransaction {
     private final AccountService accountService;
 
     public PlaceAskOrder(ParameterService parameterService, Blockchain blockchain,
-            APITransactionManager apiTransactionManager, AccountService accountService) {
-        super(new LegacyDocTag[] { LegacyDocTag.AE, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
+            APITransactionManager apiTransactionManager, AccountService accountService, FluxCapacitor fluxCapacitor) {
+        super(new LegacyDocTag[] { LegacyDocTag.AE, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager, fluxCapacitor,
                 ASSET_PARAMETER, QUANTITY_QNT_PARAMETER, PRICE_NQT_PARAMETER);
         this.parameterService = parameterService;
         this.blockchain = blockchain;

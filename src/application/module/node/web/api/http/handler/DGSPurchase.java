@@ -1,6 +1,7 @@
 package application.module.node.web.api.http.handler;
 
 import application.module.node.*;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.services.AccountService;
 import application.module.node.services.ParameterService;
 import application.module.node.services.TimeService;
@@ -23,8 +24,8 @@ public final class DGSPurchase extends CreateTransaction {
     private final TimeService timeService;
 
     public DGSPurchase(ParameterService parameterService, Blockchain blockchain, AccountService accountService,
-            TimeService timeService, APITransactionManager apiTransactionManager) {
-        super(new LegacyDocTag[] { LegacyDocTag.DGS, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
+            TimeService timeService, APITransactionManager apiTransactionManager, FluxCapacitor fluxCapacitor) {
+        super(new LegacyDocTag[] { LegacyDocTag.DGS, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager, fluxCapacitor,
                 GOODS_PARAMETER, PRICE_NQT_PARAMETER, QUANTITY_PARAMETER, DELIVERY_DEADLINE_TIMESTAMP_PARAMETER);
         this.parameterService = parameterService;
         this.blockchain = blockchain;

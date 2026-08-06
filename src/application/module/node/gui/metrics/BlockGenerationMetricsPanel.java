@@ -235,19 +235,40 @@ public class BlockGenerationMetricsPanel extends JPanel {
     private final Listener<Block> blockPoppedListener = this::onBlockPopped;
 
     /**
-     * Creates a new BlockGenerationMetricsPanel.
+     * Profile-aware context providing access to node components.
+     * Replaces static {@code Signum.getXxx()} calls.
+     */
+    private final MetricsPanelContext ctx;
+
+    /**
+     * Creates a new BlockGenerationMetricsPanel with profile-aware context.
      *
      * @param parentFrame    The parent JFrame.
      * @param sharedExecutor The shared ExecutorService for background tasks.
+     * @param ctx the profile-aware metrics context (may be null for backward compatibility)
      */
-    public BlockGenerationMetricsPanel(JFrame parentFrame, ExecutorService sharedExecutor) {
+    public BlockGenerationMetricsPanel(JFrame parentFrame, ExecutorService sharedExecutor, MetricsPanelContext ctx) {
         this.updateExecutor = sharedExecutor;
+        this.ctx = ctx;
         setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
         setLayout(new MigLayout((migLayoutDebug ? "debug, " : "") + "insets 0, fillx", "[]5![]5![]5![grow]",
                 "[grow, fill]"));
         this.parentFrame = parentFrame;
         initializeColorPalette();
         layoutComponents();
+    }
+
+    /**
+     * Creates a new BlockGenerationMetricsPanel without profile context.
+     * @deprecated Use {@link #BlockGenerationMetricsPanel(JFrame, ExecutorService, MetricsPanelContext)} instead.
+     * Retained for backward compatibility during migration.
+     *
+     * @param parentFrame    The parent JFrame.
+     * @param sharedExecutor The shared ExecutorService for background tasks.
+     */
+    @Deprecated(since = "4.0", forRemoval = true)
+    public BlockGenerationMetricsPanel(JFrame parentFrame, ExecutorService sharedExecutor) {
+        this(parentFrame, sharedExecutor, null);
     }
 
     private void initializeColorPalette() {
@@ -279,11 +300,12 @@ public class BlockGenerationMetricsPanel extends JPanel {
             updateBlockchainInfoUI(data);
         }
 
-        Blockchain blockchain = Signum.getBlockchain();
-        if (currentBlockDeadlines.isEmpty() && Signum.getGenerator() != null && blockchain != null) {
+        Blockchain blockchain = ctx != null ? ctx.getBlockchain() : null;
+        Generator generator = ctx != null ? ctx.getGenerator() : null;
+        if (currentBlockDeadlines.isEmpty() && generator != null && blockchain != null) {
             Block lastBlock = blockchain.getLastBlock();
             int nextHeight = (lastBlock != null ? lastBlock.getHeight() : 0) + 1;
-            for (Generator.GeneratorState state : Signum.getGenerator().getAllGenerators()) {
+            for (Generator.GeneratorState state : generator.getAllGenerators()) {
                 currentBlockDeadlines.add(new MinerEntry(state.getAccountId(), state.getDeadline(),
                         MinerEntry.Type.ACTIVE_LOCAL, nextHeight, System.currentTimeMillis(), 0));
             }
@@ -310,7 +332,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
      */
     public void shutdown() {
         try {
-            Generator generator = Signum.getGenerator();
+            Generator generator = ctx != null ? ctx.getGenerator() : null;
             if (generator != null) {
                 generator.removeListener(nonceSubmittedListener, Generator.Event.NONCE_SUBMITTED);
             }
@@ -318,7 +340,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
             logger.warn("Error removing Generator listeners", t);
         }
         try {
-            BlockchainProcessor processor = Signum.getBlockchainProcessor();
+            BlockchainProcessor processor = ctx != null ? ctx.getBlockchainProcessor() : null;
             if (processor != null) {
                 processor.removeListener(blockPushedListener, BlockchainProcessor.Event.BLOCK_PUSHED);
                 processor.removeListener(blockPoppedListener, BlockchainProcessor.Event.BLOCK_MANUAL_POPPED);
@@ -1330,12 +1352,12 @@ public class BlockGenerationMetricsPanel extends JPanel {
     }
 
     private void initListeners() {
-        Generator generator = Signum.getGenerator();
+        Generator generator = ctx != null ? ctx.getGenerator() : null;
         if (generator != null) {
             generator.addListener(nonceSubmittedListener, Generator.Event.NONCE_SUBMITTED);
         }
 
-        BlockchainProcessor processor = Signum.getBlockchainProcessor();
+        BlockchainProcessor processor = ctx != null ? ctx.getBlockchainProcessor() : null;
         if (processor != null) {
             processor.addListener(blockPushedListener, BlockchainProcessor.Event.BLOCK_PUSHED);
 
@@ -1358,7 +1380,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
     }
 
     private BlockchainUpdateData calculateBlockchainInfo(boolean updateMA) {
-        Blockchain blockchain = Signum.getBlockchain();
+        Blockchain blockchain = ctx != null ? ctx.getBlockchain() : null;
         if (blockchain == null) {
             logger.debug("Blockchain not available, returning null for blockchain info");
             return null;
@@ -1433,7 +1455,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
         updateExecutor.submit(() -> {
             synchronized (updateLock) {
                 // --- BACKGROUND WORK ---
-                Block lastBlock = Signum.getBlockchain().getLastBlock();
+                Blockchain blockchain = ctx != null ? ctx.getBlockchain() : null;
+                Block lastBlock = blockchain != null ? blockchain.getLastBlock() : null;
                 final int nextHeight = (lastBlock != null ? lastBlock.getHeight() : 0) + 1;
                 if (state.getBlock() == nextHeight) {
                     MinerEntry entry = new MinerEntry(state.getAccountId(), state.getDeadline(),
@@ -1596,7 +1619,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
         if (block.getHeight() <= 1)
             return data;
 
-        Block prevBlock = Signum.getBlockchain().getBlock(block.getPreviousBlockId());
+        Blockchain blockchain = ctx != null ? ctx.getBlockchain() : null;
+        Block prevBlock = blockchain != null ? blockchain.getBlock(block.getPreviousBlockId()) : null;
         if (prevBlock == null)
             return data;
 
@@ -1639,7 +1663,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
         }
 
         if (!minedByNode) {
-            Generator generator = Signum.getGenerator();
+            Generator generator = ctx != null ? ctx.getGenerator() : null;
             if (generator != null) {
                 for (Generator.GeneratorState state : generator.getAllGenerators()) {
                     if (state.getAccountId().equals(block.getGeneratorId())) {
@@ -1687,7 +1711,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
         networkMinersMA.add((double) uniqueGenerators);
 
         double signaPerTB = 0;
-        if (Signum.getFluxCapacitor().getValue(FluxValues.POC_PLUS, block.getHeight())) {
+        application.module.node.fluxcapacitor.FluxCapacitor fc = ctx != null ? ctx.getFluxCapacitor() : null;
+        if (fc != null && fc.getValue(FluxValues.POC_PLUS, block.getHeight())) {
             signaPerTB = (double) block.getAverageCommitment() / Constants.ONE_SIGNA;
         }
         data.signaPerTB = signaPerTB;
@@ -2000,7 +2025,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
     private PieChartUpdateData calculatePieChartData() {
         PieChartUpdateData data = new PieChartUpdateData();
         Set<Long> localGeneratorIds = new HashSet<>();
-        Generator generator = Signum.getGenerator();
+        Generator generator = ctx != null ? ctx.getGenerator() : null;
         if (generator != null) {
             for (Generator.GeneratorState state : generator.getAllGenerators()) {
                 localGeneratorIds.add(state.getAccountId());
@@ -2159,7 +2184,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
     private MinerUpdateData calculateMinerData(boolean updateHistory) {
         MinerUpdateData data = new MinerUpdateData();
-        Generator generator = Signum.getGenerator();
+        Generator generator = ctx != null ? ctx.getGenerator() : null;
         if (generator == null) {
             data.entries = Collections.emptyList();
             return data;
@@ -2171,8 +2196,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
             localGeneratorIds.add(state.getAccountId());
         }
 
-        Block lastBlock = Signum.getBlockchain().getLastBlock();
-        int nextHeight = (lastBlock != null ? lastBlock.getHeight() : 0) + 1;
+        Blockchain blockchain = ctx != null ? ctx.getBlockchain() : null;
+        Block lastBlock = blockchain != null ? blockchain.getLastBlock() : null;
 
         // Prepare Miner Entries
         data.entries = new ArrayList<>();
@@ -2196,7 +2221,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
             // nonces.
             // Let's assume if we have a GeneratorState for it, it's local.
 
-            Block prevBlock = Signum.getBlockchain().getBlock(lastBlock.getPreviousBlockId());
+            Block prevBlock = blockchain != null ? blockchain.getBlock(lastBlock.getPreviousBlockId()) : null;
             long deadline = 0;
             if (prevBlock != null) {
                 deadline = lastBlock.getTimestamp() - prevBlock.getTimestamp();

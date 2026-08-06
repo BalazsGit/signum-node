@@ -20,20 +20,21 @@ public abstract class VersionedBatchEntitySqlTable<T> extends VersionedEntitySql
     private final Class<T> tClass;
 
     VersionedBatchEntitySqlTable(String table, TableImpl<?> tableClass, DbKey.Factory<T> dbKeyFactory,
-            DerivedTableManager derivedTableManager, DBCacheManagerImpl dbCacheManager, Class<T> tClass) {
-        super(table, tableClass, dbKeyFactory, derivedTableManager);
+            DerivedTableManager derivedTableManager, DBCacheManagerImpl dbCacheManager, Class<T> tClass,
+            DbContext dbContext) {
+        super(table, tableClass, dbKeyFactory, derivedTableManager, dbContext);
         this.dbCacheManager = dbCacheManager;
         this.tClass = tClass;
     }
 
     private void assertInTransaction() {
-        if (Db.isInTransaction()) {
+        if (dbContext.isInTransaction()) {
             throw new IllegalStateException("Cannot use in batch table transaction");
         }
     }
 
     private void assertNotInTransaction() {
-        if (!Db.isInTransaction()) {
+        if (!dbContext.isInTransaction()) {
             throw new IllegalStateException("Not in transaction");
         }
     }
@@ -53,7 +54,7 @@ public abstract class VersionedBatchEntitySqlTable<T> extends VersionedEntitySql
     public T get(SignumKey dbKey) {
         if (getCache().containsKey(dbKey)) {
             return getCache().get(dbKey);
-        } else if (Db.isInTransaction() && getBatch().containsKey(dbKey)) {
+        } else if (dbContext.isInTransaction() && getBatch().containsKey(dbKey)) {
             return getBatch().get(dbKey);
         }
         T item = super.get(dbKey);
@@ -91,7 +92,7 @@ public abstract class VersionedBatchEntitySqlTable<T> extends VersionedEntitySql
          */
         int InsertMaxBatchSize = 1_000;
 
-        Db.useDSLContext(ctx -> {
+        dbContext.useDSLContext(ctx -> {
 
             Field<Long> idField = tableClass.field(dbKeyFactory.getPKColumns()[0], Long.class);
             List<Long> ids = keySet.stream()
@@ -231,7 +232,7 @@ public abstract class VersionedBatchEntitySqlTable<T> extends VersionedEntitySql
 
     @Override
     public Map<SignumKey, T> getBatch() {
-        return Db.getBatch(table);
+        return dbContext.getBatch(table);
     }
 
     @Override

@@ -88,6 +88,27 @@ public final class DbContext {
     public DbContext() {
     }
 
+    /**
+     * Pure instance factory that creates and initializes a new {@code DbContext}
+     * without touching any static state in {@link Db}.
+     * <p>
+     * This is the recommended entry point for multi-profile operation. Each call
+     * returns an isolated context with its own connection pool, Flyway instance,
+     * and thread-local transaction state.
+     * </p>
+     *
+     * @param propertyService  resolved properties for this profile
+     * @param dbCacheManager   cache manager to associate with this context
+     * @return a fully initialized DbContext ready for use
+     * @throws RuntimeException if database initialization fails
+     * @since 4.1
+     */
+    public static DbContext create(PropertyService propertyService, DBCacheManagerImpl dbCacheManager) {
+        DbContext ctx = new DbContext();
+        ctx.init(propertyService, dbCacheManager);
+        return ctx;
+    }
+
     // ========================================================================
     // Lifecycle
     // ========================================================================
@@ -206,7 +227,7 @@ public final class DbContext {
      * Returns the {@link Dbs} implementation for the current dialect.
      */
     public Dbs getDbsByDatabaseType() {
-        return new SqlDbs();
+        return new SqlDbs(this);
     }
 
     /** Currently a no-op placeholder for future query analysis support. */

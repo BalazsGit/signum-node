@@ -34,10 +34,12 @@ public class SqlAliasStore implements AliasStore {
 
     // Injected after construction to break circular dependency (Stores created before Blockchain)
     private Blockchain blockchain;
+    private final DbContext dbContext;
 
-    public SqlAliasStore(DerivedTableManager derivedTableManager) {
+    public SqlAliasStore(DerivedTableManager derivedTableManager, DbContext dbContext) {
+        this.dbContext = dbContext;
         offerTable = new VersionedEntitySqlTable<Alias.Offer>("alias_offer", ALIAS_OFFER, offerDbKeyFactory,
-                derivedTableManager) {
+                derivedTableManager, blockchain, dbContext) {
             @Override
             protected Alias.Offer load(DSLContext ctx, Record record) {
                 return new SqlOffer(record);
@@ -51,7 +53,7 @@ public class SqlAliasStore implements AliasStore {
 
         aliasTable = new VersionedEntitySqlTable<Alias>("alias", application.module.node.schema.Tables.ALIAS,
                 aliasDbKeyFactory,
-                derivedTableManager) {
+                derivedTableManager, blockchain, dbContext) {
             @Override
             protected Alias load(DSLContext ctx, Record record) {
                 return new SqlAlias(record);
@@ -111,7 +113,7 @@ public class SqlAliasStore implements AliasStore {
     }
 
     private void saveOffer(Alias.Offer offer) {
-        Db.useDSLContext(ctx -> {
+        dbContext.useDSLContext(ctx -> {
             ctx.insertInto(ALIAS_OFFER, ALIAS_OFFER.ID, ALIAS_OFFER.PRICE, ALIAS_OFFER.BUYER_ID, ALIAS_OFFER.HEIGHT)
                     .values(offer.getId(), offer.getPriceNqt(), (offer.getBuyerId() == 0 ? null : offer.getBuyerId()),
                             blockchain.getHeight())
@@ -173,7 +175,7 @@ public class SqlAliasStore implements AliasStore {
     public Collection<Alias.Offer> getAliasOffers(long account, long buyer, int from, int to) {
         Condition conditions = ALIAS_OFFER.LATEST.eq(true);
         if (account != 0L) {
-            Result<Record1<Long>> myAliases = Db.fetchWithDSLContext(ctx -> {
+            Result<Record1<Long>> myAliases = dbContext.fetchWithDSLContext(ctx -> {
                 return ctx.select(ALIAS.ID).from(ALIAS).where(ALIAS.ACCOUNT_ID.eq(account)).fetch();
             });
             conditions = conditions.and(ALIAS_OFFER.ID.in(myAliases));

@@ -21,10 +21,23 @@ public class SqlBlockDb implements BlockDb {
     private static final Logger logger = LoggerFactory.getLogger(SqlBlockDb.class);
 
     private TransactionDb transactionDb;
+    private final DbContext dbContext;
 
     /** Default constructor for backward compatibility (transactionDb will be null). */
+    @Deprecated
     public SqlBlockDb() {
         this.transactionDb = null;
+        this.dbContext = null;
+    }
+
+    /**
+     * Constructor with DbContext injected.
+     *
+     * @param dbContext the database context instance
+     */
+    public SqlBlockDb(DbContext dbContext) {
+        this.transactionDb = null;
+        this.dbContext = dbContext;
     }
 
     /**
@@ -33,8 +46,10 @@ public class SqlBlockDb implements BlockDb {
      *
      * @param transactionDb the transaction database instance
      */
+    @Deprecated
     public SqlBlockDb(TransactionDb transactionDb) {
         this.transactionDb = transactionDb;
+        this.dbContext = null;
     }
 
     /**
@@ -48,7 +63,7 @@ public class SqlBlockDb implements BlockDb {
     }
 
     public Block findBlock(long blockId) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             try {
                 BlockRecord r = ctx.selectFrom(BLOCK).where(BLOCK.ID.eq(blockId)).fetchAny();
                 return r == null ? null : loadBlock(r);
@@ -65,13 +80,13 @@ public class SqlBlockDb implements BlockDb {
     }
 
     public boolean hasBlock(long blockId) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             return ctx.fetchExists(ctx.selectOne().from(BLOCK).where(BLOCK.ID.eq(blockId)));
         });
     }
 
     public long findBlockIdAtHeight(int height) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             Long id = ctx.select(BLOCK.ID).from(BLOCK).where(BLOCK.HEIGHT.eq(height)).fetchOne(BLOCK.ID);
             if (id == null) {
                 throw new RuntimeException("Block at height " + height + " not found in database!");
@@ -81,7 +96,7 @@ public class SqlBlockDb implements BlockDb {
     }
 
     public Block findBlockAtHeight(int height) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             try {
                 BlockRecord r = ctx.selectFrom(BLOCK).where(BLOCK.HEIGHT.eq(height)).fetchAny();
                 Block block = r != null ? loadBlock(r) : null;
@@ -96,18 +111,15 @@ public class SqlBlockDb implements BlockDb {
     }
 
     public Block findLastBlock() {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
+
+            // avoid table scans through ordering - using indexed columns for direct lookups
+            SelectConditionStep<BlockRecord> query = ctx.selectFrom(BLOCK)
+                    .where(BLOCK.DB_ID.eq(
+                            ctx.select(DSL.max(BLOCK.DB_ID)).from(BLOCK)));
+
             try {
-
-                // avoid table scans through ordering - using indexed columns for direct lookups
-                SelectConditionStep<BlockRecord> query = ctx.selectFrom(BLOCK)
-                        .where(BLOCK.DB_ID.eq(
-                                ctx.select(DSL.max(BLOCK.DB_ID)).from(BLOCK)));
-
                 return loadBlock(query.fetchAny());
-                // old statement
-                // return
-                // loadBlock(ctx.selectFrom(BLOCK).orderBy(BLOCK.DB_ID.desc()).limit(1).fetchAny());
             } catch (SignumException.ValidationException e) {
                 throw new RuntimeException("Last block already in database does not pass validation!", e);
             }
@@ -115,7 +127,7 @@ public class SqlBlockDb implements BlockDb {
     }
 
     public Block findLastBlock(int timestamp) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             try {
                 return loadBlock(ctx.selectFrom(BLOCK).where(BLOCK.TIMESTAMP.lessOrEqual(timestamp))
                         .orderBy(BLOCK.DB_ID.desc()).limit(1).fetchAny());
@@ -195,20 +207,20 @@ public class SqlBlockDb implements BlockDb {
     // all deleted blocks
     @Override
     public void deleteBlocksFrom(long blockId) {
-        if (!Db.isInTransaction()) {
+        if (!dbContext.isInTransaction()) {
             try {
-                Db.beginTransaction();
+                dbContext.beginTransaction();
                 deleteBlocksFrom(blockId);
-                Db.commitTransaction();
+                dbContext.commitTransaction();
             } catch (Exception e) {
-                Db.rollbackTransaction();
+                dbContext.rollbackTransaction();
                 throw e;
             } finally {
-                Db.endTransaction();
+                dbContext.endTransaction();
             }
             return;
         }
-        Db.useDSLContext(ctx -> {
+        dbContext.useDSLContext(ctx -> {
             SelectQuery<Record> blockHeightQuery = ctx.selectQuery();
             blockHeightQuery.addFrom(BLOCK);
             blockHeightQuery.addSelect(BLOCK.HEIGHT);
@@ -224,24 +236,24 @@ public class SqlBlockDb implements BlockDb {
     }
 
     public void deleteAll(boolean force) {
-        if (!Db.isInTransaction()) {
+        if (!dbContext.isInTransaction()) {
             try {
-                Db.beginTransaction();
+                dbContext.beginTransaction();
                 deleteAll(force);
-                Db.commitTransaction();
+                dbContext.commitTransaction();
             } catch (Exception e) {
-                Db.rollbackTransaction();
+                dbContext.rollbackTransaction();
                 throw e;
             }
-            Db.endTransaction();
+            dbContext.endTransaction();
             return;
         }
         logger.info("Deleting blockchain...");
-        Db.clean();
+        dbContext.clean();
     }
 
     @Override
     public void optimize() {
-        Db.optimizeTable(BLOCK.getName());
+        dbContext.optimizeTable(BLOCK.getName());
     }
 }

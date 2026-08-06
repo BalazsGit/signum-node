@@ -39,6 +39,7 @@ public class SqlBlockchainStore implements BlockchainStore {
     private final BlockDb blockDb;
     private final Blockchain blockchain;
     private final FluxCapacitor fluxCapacitor;
+    private final DbContext dbContext;
 
     private static final int[] totalTransactions = new int[1];
     private static final int[] totalDeletedTransactions = new int[1];
@@ -48,6 +49,7 @@ public class SqlBlockchainStore implements BlockchainStore {
         this.blockDb = blockDb;
         this.blockchain = storeDependencies.blockchain();
         this.fluxCapacitor = storeDependencies.fluxCapacitor();
+        this.dbContext = storeDependencies.dbContext();
     }
 
     @Deprecated
@@ -56,11 +58,12 @@ public class SqlBlockchainStore implements BlockchainStore {
         this.blockDb = blockDb;
         this.blockchain = null;
         this.fluxCapacitor = null;
+        this.dbContext = null;
     }
 
     @Override
     public Collection<Block> getBlocks(int from, int to) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             int blockchainHeight = blockchain.getHeight();
             return getBlocks(ctx.selectFrom(BLOCK)
                     .where(BLOCK.HEIGHT.between(blockchainHeight - Math.max(to, 0))
@@ -72,7 +75,7 @@ public class SqlBlockchainStore implements BlockchainStore {
 
     @Override
     public Collection<Block> getBlocks(Account account, int timestamp, int from, int to) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
 
             SelectConditionStep<BlockRecord> query = ctx.selectFrom(BLOCK)
                     .where(BLOCK.GENERATOR_ID.eq(account.getId()));
@@ -90,7 +93,7 @@ public class SqlBlockchainStore implements BlockchainStore {
         if (from > to) {
             return 0;
         }
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             // No longer need to union with pruned_block since headers are kept in BLOCK
             return ctx.selectCount().from(BLOCK)
                     .where(BLOCK.GENERATOR_ID.eq(accountId))
@@ -116,7 +119,7 @@ public class SqlBlockchainStore implements BlockchainStore {
             throw new IllegalArgumentException("Can't get more than 1440 blocks at a time");
         }
 
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             return ctx.selectFrom(BLOCK).where(
                     BLOCK.HEIGHT.gt(ctx.select(BLOCK.HEIGHT).from(BLOCK).where(BLOCK.ID.eq(blockId))))
                     .orderBy(BLOCK.HEIGHT.asc()).limit(limit).fetch(BLOCK.ID, Long.class);
@@ -128,7 +131,7 @@ public class SqlBlockchainStore implements BlockchainStore {
         if (limit > 1440) {
             throw new IllegalArgumentException("Can't get more than 1440 blocks at a time");
         }
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             return ctx.selectFrom(BLOCK)
                     .where(BLOCK.HEIGHT.gt(ctx.select(BLOCK.HEIGHT)
                             .from(BLOCK)
@@ -147,21 +150,21 @@ public class SqlBlockchainStore implements BlockchainStore {
 
     @Override
     public int getTransactionCount() {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             return ctx.selectCount().from(TRANSACTION).fetchOne(0, int.class);
         });
     }
 
     @Override
     public Collection<Transaction> getAllTransactions() {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             return getTransactions(ctx, ctx.selectFrom(TRANSACTION).orderBy(TRANSACTION.DB_ID.asc()).fetch());
         });
     }
 
     @Override
     public long getAtBurnTotal() {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             return ctx.select(DSL.sum(TRANSACTION.AMOUNT)).from(TRANSACTION)
                     .where(TRANSACTION.RECIPIENT_ID.isNull())
                     .and(TRANSACTION.AMOUNT.gt(0L))
@@ -178,7 +181,7 @@ public class SqlBlockchainStore implements BlockchainStore {
         // failed. So, touch this method only
         // if you are really understand what you are doing.
         int height = getHeightForNumberOfConfirmations(numberOfConfirmations);
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             ArrayList<Condition> conditions = new ArrayList<>();
             if (blockTimestamp > 0) {
                 conditions.add(TRANSACTION.BLOCK_TIMESTAMP.ge(blockTimestamp));
@@ -236,7 +239,7 @@ public class SqlBlockchainStore implements BlockchainStore {
             byte type, byte subtype, int blockTimestamp, int from, int to, boolean includeIndirectIncoming,
             boolean bidirectional) {
         int height = getHeightForNumberOfConfirmations(numberOfConfirmations);
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             ArrayList<Condition> conditions = new ArrayList<>();
 
             boolean hasSender = senderId != null;
@@ -310,7 +313,7 @@ public class SqlBlockchainStore implements BlockchainStore {
     @Override
     public Collection<Transaction> getTransactions(long senderId, byte type, byte subtypeStart, byte subtypeEnd,
             int from, int to) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             ArrayList<Condition> conditions = new ArrayList<>();
             if (type >= 0) {
                 conditions.add(TRANSACTION.TYPE.eq(type));
@@ -337,7 +340,7 @@ public class SqlBlockchainStore implements BlockchainStore {
 
     @Override
     public int countTransactions(byte type, byte subtypeStart, byte subtypeEnd) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             ArrayList<Condition> conditions = new ArrayList<>();
             if (type >= 0) {
                 conditions.add(TRANSACTION.TYPE.eq(type));
@@ -358,7 +361,7 @@ public class SqlBlockchainStore implements BlockchainStore {
     @Override
     public Collection<Transaction> getTransactionsWithFullHashReference(String fullHash, int numberOfConfirmations,
             byte type, byte subtypeStart, byte subtypeEnd, int from, int to) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             ArrayList<Condition> conditions = new ArrayList<>();
 
             // must be confirmed already
@@ -400,7 +403,7 @@ public class SqlBlockchainStore implements BlockchainStore {
 
     @Override
     public void addBlock(Block block) {
-        Db.useDSLContext(ctx -> {
+        dbContext.useDSLContext(ctx -> {
             blockDb.saveBlock(ctx, block);
         });
     }
@@ -411,7 +414,7 @@ public class SqlBlockchainStore implements BlockchainStore {
 
         final int firstLatestBlockHeight = Math.max(0, latestBlockHeight - amountBlocks);
 
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             return getBlocks(ctx.selectFrom(BLOCK)
                     .where(BLOCK.HEIGHT.between(firstLatestBlockHeight).and(latestBlockHeight))
                     .orderBy(BLOCK.HEIGHT.asc())
@@ -424,7 +427,7 @@ public class SqlBlockchainStore implements BlockchainStore {
         int commitmentWait = fluxCapacitor.getValue(FluxValues.COMMITMENT_WAIT, height);
         int commitmentHeight = Math.min(height - commitmentWait, endHeight);
 
-        Collection<byte[]> commitmmentAddBytes = Db.fetchWithDSLContext(ctx -> {
+        Collection<byte[]> commitmmentAddBytes = dbContext.fetchWithDSLContext(ctx -> {
             SelectConditionStep<Record1<byte[]>> select = ctx.select(TRANSACTION.ATTACHMENT_BYTES).from(TRANSACTION)
                     .where(TRANSACTION.TYPE.eq(TransactionType.TYPE_SIGNA_MINING.getType()))
                     .and(TRANSACTION.SUBTYPE.eq(TransactionType.SUBTYPE_SIGNA_MINING_COMMITMENT_ADD))
@@ -433,7 +436,7 @@ public class SqlBlockchainStore implements BlockchainStore {
                 select = select.and(TRANSACTION.SENDER_ID.equal(accountId));
             return select.fetch().getValues(TRANSACTION.ATTACHMENT_BYTES);
         });
-        Collection<byte[]> commitmmentRemoveBytes = Db.fetchWithDSLContext(ctx -> {
+        Collection<byte[]> commitmmentRemoveBytes = dbContext.fetchWithDSLContext(ctx -> {
             SelectConditionStep<Record1<byte[]>> select = ctx.select(TRANSACTION.ATTACHMENT_BYTES).from(TRANSACTION)
                     .where(TRANSACTION.TYPE.eq(TransactionType.TYPE_SIGNA_MINING.getType()))
                     .and(TRANSACTION.SUBTYPE.eq(TransactionType.SUBTYPE_SIGNA_MINING_COMMITMENT_REMOVE))
@@ -480,7 +483,7 @@ public class SqlBlockchainStore implements BlockchainStore {
             byte subtype, int blockTimestamp, int from, int to, boolean includeIndirectIncoming) {
 
         int height = getHeightForNumberOfConfirmations(numberOfConfirmations);
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             ArrayList<Condition> conditions = new ArrayList<>();
             if (blockTimestamp > 0) {
                 conditions.add(TRANSACTION.BLOCK_TIMESTAMP.ge(blockTimestamp));
@@ -532,7 +535,7 @@ public class SqlBlockchainStore implements BlockchainStore {
             final int currentFrom = h;
             final int currentTo = Math.min(h + STEP, toHeight);
 
-            Db.useDSLContext(ctx -> {
+            dbContext.useDSLContext(ctx -> {
                 ctx.deleteFrom(INDIRECT_INCOMING)
                         .where(INDIRECT_INCOMING.HEIGHT.ge(currentFrom).and(INDIRECT_INCOMING.HEIGHT.lt(currentTo)))
                         .execute();
@@ -623,7 +626,7 @@ public class SqlBlockchainStore implements BlockchainStore {
 
     @Override
     public String getProperty(String key) {
-        return Db.fetchWithDSLContext((DSLContext ctx) -> ctx.select(PROPERTIES.DB_VALUE)
+        return dbContext.fetchWithDSLContext((DSLContext ctx) -> ctx.select(PROPERTIES.DB_VALUE)
                 .from(PROPERTIES)
                 .where(PROPERTIES.DB_KEY.eq(key))
                 .fetchOne(PROPERTIES.DB_VALUE));
@@ -635,7 +638,7 @@ public class SqlBlockchainStore implements BlockchainStore {
             if (key == null || value == null) {
                 throw new IllegalArgumentException("Key and value must not be null");
             }
-            Db.useDSLContext(
+            dbContext.useDSLContext(
                     ctx -> {
                         ctx.insertInto(PROPERTIES, PROPERTIES.DB_KEY, PROPERTIES.DB_VALUE)
                                 .values(key, value)
@@ -651,7 +654,7 @@ public class SqlBlockchainStore implements BlockchainStore {
 
     @Override
     public void deleteProperty(String key) {
-        Db.useDSLContext(ctx -> {
+        dbContext.useDSLContext(ctx -> {
             ctx.deleteFrom(PROPERTIES)
                     .where(PROPERTIES.DB_KEY.eq(key))
                     .execute();

@@ -6,6 +6,7 @@ import application.module.node.services.ParameterService;
 import application.module.node.web.api.http.common.APITransactionManager;
 import application.module.node.web.api.http.common.LegacyDocTag;
 import application.module.node.web.api.http.common.ParameterParser;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import com.google.gson.JsonElement;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -16,11 +17,14 @@ import static application.module.node.web.api.http.common.Parameters.RECIPIENT_P
 public final class SendMoney extends CreateTransaction {
 
     private final ParameterService parameterService;
+    private final FluxCapacitor fluxCapacitor;
 
-    public SendMoney(ParameterService parameterService, APITransactionManager apiTransactionManager) {
+    public SendMoney(ParameterService parameterService, APITransactionManager apiTransactionManager,
+            FluxCapacitor fluxCapacitor) {
         super(new LegacyDocTag[] { LegacyDocTag.ACCOUNTS, LegacyDocTag.TRANSACTIONS, LegacyDocTag.CREATE_TRANSACTION },
-                apiTransactionManager, RECIPIENT_PARAMETER, AMOUNT_NQT_PARAMETER);
+                apiTransactionManager, fluxCapacitor, RECIPIENT_PARAMETER, AMOUNT_NQT_PARAMETER);
         this.parameterService = parameterService;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     @Override

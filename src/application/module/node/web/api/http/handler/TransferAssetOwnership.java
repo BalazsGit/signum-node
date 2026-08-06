@@ -2,6 +2,7 @@ package application.module.node.web.api.http.handler;
 
 import application.module.node.*;
 import application.module.node.assetexchange.AssetExchange;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.ParameterService;
 import application.module.node.util.Convert;
@@ -21,14 +22,17 @@ public final class TransferAssetOwnership extends CreateTransaction {
     private final ParameterService parameterService;
     private final Blockchain blockchain;
     private final AssetExchange assetExchange;
+    private final FluxCapacitor fluxCapacitor;
 
     public TransferAssetOwnership(ParameterService parameterService, Blockchain blockchain,
-            APITransactionManager apiTransactionManager, AssetExchange assetExchange) {
-        super(new LegacyDocTag[] { LegacyDocTag.AE, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
+            APITransactionManager apiTransactionManager, AssetExchange assetExchange,
+            FluxCapacitor fluxCapacitor) {
+        super(new LegacyDocTag[] { LegacyDocTag.AE, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager, fluxCapacitor,
                 RECIPIENT_PARAMETER);
         this.parameterService = parameterService;
         this.blockchain = blockchain;
         this.assetExchange = assetExchange;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     @Override
@@ -54,7 +58,7 @@ public final class TransferAssetOwnership extends CreateTransaction {
             return JSONResponses.incorrect(REFERENCED_TRANSACTION_FULL_HASH_PARAMETER,
                     "sender is not the asset current owner");
         }
-        if (!Signum.getFluxCapacitor().getValue(FluxValues.PK_FREEZE2)) {
+        if (!this.fluxCapacitor.getValue(FluxValues.PK_FREEZE2)) {
             return JSONResponses.incorrect(REFERENCED_TRANSACTION_FULL_HASH_PARAMETER,
                     "ownership transfer is not enabled yet");
         }

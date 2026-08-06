@@ -25,6 +25,7 @@ public class SqlOrderStore implements OrderStore {
 
     // Injected after construction to break circular dependency (Stores created before Blockchain)
     private Blockchain blockchain;
+    private final DbContext dbContext;
 
     private final DbKey.LongKeyFactory<Order.Ask> askOrderDbKeyFactory = new DbKey.LongKeyFactory<Order.Ask>(
             ASK_ORDER.ID) {
@@ -46,9 +47,10 @@ public class SqlOrderStore implements OrderStore {
 
     };
 
-    public SqlOrderStore(DerivedTableManager derivedTableManager) {
+    public SqlOrderStore(DerivedTableManager derivedTableManager, DbContext dbContext) {
+        this.dbContext = dbContext;
         askOrderTable = new VersionedEntitySqlTable<Order.Ask>("ask_order", ASK_ORDER, askOrderDbKeyFactory,
-                derivedTableManager) {
+                derivedTableManager, blockchain, dbContext) {
             @Override
             protected Order.Ask load(DSLContext ctx, Record record) {
                 return new SqlAsk(record);
@@ -68,7 +70,7 @@ public class SqlOrderStore implements OrderStore {
         };
 
         bidOrderTable = new VersionedEntitySqlTable<Order.Bid>("bid_order", BID_ORDER, bidOrderDbKeyFactory,
-                derivedTableManager) {
+                derivedTableManager, blockchain, dbContext) {
 
             @Override
             protected Order.Bid load(DSLContext ctx, Record rs) {
@@ -119,7 +121,7 @@ public class SqlOrderStore implements OrderStore {
 
     @Override
     public Order.Ask getNextOrder(long assetId) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             SelectQuery<AskOrderRecord> query = ctx.selectFrom(ASK_ORDER)
                     .where(ASK_ORDER.ASSET_ID.eq(assetId).and(ASK_ORDER.LATEST.isTrue()))
                     .orderBy(ASK_ORDER.PRICE.asc(),
@@ -223,7 +225,7 @@ public class SqlOrderStore implements OrderStore {
 
     @Override
     public Order.Bid getNextBid(long assetId) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             SelectQuery<BidOrderRecord> query = ctx.selectFrom(BID_ORDER)
                     .where(BID_ORDER.ASSET_ID.eq(assetId)
                             .and(BID_ORDER.LATEST.isTrue()))

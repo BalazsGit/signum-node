@@ -12,9 +12,9 @@ import application.module.node.services.BlockService;
 import com.google.gson.JsonObject;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.MockedStatic;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -26,13 +26,12 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
+import static org.mockito.Mockito.mockStatic;
 
 import java.math.BigInteger;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(Signum.class)
-public class GetBlockTest {
+@ExtendWith(MockitoExtension.class)
+class GetBlockTest {
 
     private GetBlock t;
 
@@ -43,13 +42,6 @@ public class GetBlockTest {
     public void setUp() {
         blockchainMock = mock(Blockchain.class);
         blockServiceMock = mock(BlockService.class);
-
-        mockStatic(Signum.class);
-        PropertyService propertyService = mock(PropertyService.class);
-        when(Signum.getPropertyService()).thenReturn(propertyService);
-        doReturn((int) Constants.ONE_SIGNA).when(propertyService).getInt(eq(Props.ONE_COIN_NQT));
-
-        t = new GetBlock(blockchainMock, blockServiceMock);
     }
 
     @Test
@@ -64,9 +56,17 @@ public class GetBlockTest {
 
         when(blockchainMock.getBlock(eq(blockId))).thenReturn(mockBlock);
 
-        final JsonObject result = (JsonObject) t.processRequest(req);
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            PropertyService propertyService = mock(PropertyService.class);
+            mocked.when(Signum::getPropertyService).thenReturn(propertyService);
+            doReturn((int) Constants.ONE_SIGNA).when(propertyService).getInt(eq(Props.ONE_COIN_NQT));
 
-        assertNotNull(result);
+            t = new GetBlock(blockchainMock, blockServiceMock);
+
+            final JsonObject result = (JsonObject) t.processRequest(req);
+
+            assertNotNull(result);
+        }
     }
 
     @Test
@@ -74,7 +74,15 @@ public class GetBlockTest {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(BLOCK_PARAMETER, "notALong"));
 
-        assertEquals(INCORRECT_BLOCK, t.processRequest(req));
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            PropertyService propertyService = mock(PropertyService.class);
+            mocked.when(Signum::getPropertyService).thenReturn(propertyService);
+            doReturn((int) Constants.ONE_SIGNA).when(propertyService).getInt(eq(Props.ONE_COIN_NQT));
+
+            t = new GetBlock(blockchainMock, blockServiceMock);
+
+            assertEquals(INCORRECT_BLOCK, t.processRequest(req));
+        }
     }
 
     @Test
@@ -90,9 +98,17 @@ public class GetBlockTest {
         when(blockchainMock.getHeight()).thenReturn(100);
         when(blockchainMock.getBlockAtHeight(eq(blockHeight))).thenReturn(mockBlock);
 
-        final JsonObject result = (JsonObject) t.processRequest(req);
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            PropertyService propertyService = mock(PropertyService.class);
+            mocked.when(Signum::getPropertyService).thenReturn(propertyService);
+            doReturn((int) Constants.ONE_SIGNA).when(propertyService).getInt(eq(Props.ONE_COIN_NQT));
 
-        assertNotNull(result);
+            t = new GetBlock(blockchainMock, blockServiceMock);
+
+            final JsonObject result = (JsonObject) t.processRequest(req);
+
+            assertNotNull(result);
+        }
     }
 
     @Test
@@ -100,7 +116,15 @@ public class GetBlockTest {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(HEIGHT_PARAMETER, "unParsable"));
 
-        assertEquals(INCORRECT_HEIGHT, t.processRequest(req));
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            PropertyService propertyService = mock(PropertyService.class);
+            mocked.when(Signum::getPropertyService).thenReturn(propertyService);
+            doReturn((int) Constants.ONE_SIGNA).when(propertyService).getInt(eq(Props.ONE_COIN_NQT));
+
+            t = new GetBlock(blockchainMock, blockServiceMock);
+
+            assertEquals(INCORRECT_HEIGHT, t.processRequest(req));
+        }
     }
 
     @Test
@@ -110,7 +134,15 @@ public class GetBlockTest {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(HEIGHT_PARAMETER, heightValue));
 
-        assertEquals(INCORRECT_HEIGHT, t.processRequest(req));
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            PropertyService propertyService = mock(PropertyService.class);
+            mocked.when(Signum::getPropertyService).thenReturn(propertyService);
+            doReturn((int) Constants.ONE_SIGNA).when(propertyService).getInt(eq(Props.ONE_COIN_NQT));
+
+            t = new GetBlock(blockchainMock, blockServiceMock);
+
+            assertEquals(INCORRECT_HEIGHT, t.processRequest(req));
+        }
     }
 
     @Test
@@ -122,7 +154,15 @@ public class GetBlockTest {
 
         when(blockchainMock.getHeight()).thenReturn(5);
 
-        assertEquals(INCORRECT_HEIGHT, t.processRequest(req));
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            PropertyService propertyService = mock(PropertyService.class);
+            mocked.when(Signum::getPropertyService).thenReturn(propertyService);
+            doReturn((int) Constants.ONE_SIGNA).when(propertyService).getInt(eq(Props.ONE_COIN_NQT));
+
+            t = new GetBlock(blockchainMock, blockServiceMock);
+
+            assertEquals(INCORRECT_HEIGHT, t.processRequest(req));
+        }
     }
 
     @Test
@@ -137,9 +177,17 @@ public class GetBlockTest {
 
         when(blockchainMock.getLastBlock(eq(timestamp))).thenReturn(mockBlock);
 
-        final JsonObject result = (JsonObject) t.processRequest(req);
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            PropertyService propertyService = mock(PropertyService.class);
+            mocked.when(Signum::getPropertyService).thenReturn(propertyService);
+            doReturn((int) Constants.ONE_SIGNA).when(propertyService).getInt(eq(Props.ONE_COIN_NQT));
 
-        assertNotNull(result);
+            t = new GetBlock(blockchainMock, blockServiceMock);
+
+            final JsonObject result = (JsonObject) t.processRequest(req);
+
+            assertNotNull(result);
+        }
     }
 
     @Test
@@ -147,7 +195,15 @@ public class GetBlockTest {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(TIMESTAMP_PARAMETER, "unParsable"));
 
-        assertEquals(INCORRECT_TIMESTAMP, t.processRequest(req));
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            PropertyService propertyService = mock(PropertyService.class);
+            mocked.when(Signum::getPropertyService).thenReturn(propertyService);
+            doReturn((int) Constants.ONE_SIGNA).when(propertyService).getInt(eq(Props.ONE_COIN_NQT));
+
+            t = new GetBlock(blockchainMock, blockServiceMock);
+
+            assertEquals(INCORRECT_TIMESTAMP, t.processRequest(req));
+        }
     }
 
     @Test
@@ -157,14 +213,30 @@ public class GetBlockTest {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(TIMESTAMP_PARAMETER, timestamp));
 
-        assertEquals(INCORRECT_TIMESTAMP, t.processRequest(req));
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            PropertyService propertyService = mock(PropertyService.class);
+            mocked.when(Signum::getPropertyService).thenReturn(propertyService);
+            doReturn((int) Constants.ONE_SIGNA).when(propertyService).getInt(eq(Props.ONE_COIN_NQT));
+
+            t = new GetBlock(blockchainMock, blockServiceMock);
+
+            assertEquals(INCORRECT_TIMESTAMP, t.processRequest(req));
+        }
     }
 
     @Test
     public void processRequest_unknownBlock() {
         final HttpServletRequest req = QuickMocker.httpServletRequest();
 
-        assertEquals(UNKNOWN_BLOCK, t.processRequest(req));
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            PropertyService propertyService = mock(PropertyService.class);
+            mocked.when(Signum::getPropertyService).thenReturn(propertyService);
+            doReturn((int) Constants.ONE_SIGNA).when(propertyService).getInt(eq(Props.ONE_COIN_NQT));
+
+            t = new GetBlock(blockchainMock, blockServiceMock);
+
+            assertEquals(UNKNOWN_BLOCK, t.processRequest(req));
+        }
     }
 
 }

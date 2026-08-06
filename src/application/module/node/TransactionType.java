@@ -38,6 +38,43 @@ public abstract class TransactionType {
 
     private static final Logger logger = LoggerFactory.getLogger(TransactionType.class);
 
+    /**
+     * Current transaction processing context.
+     * Set by {@link #setContext(TransactionApplyContext)} during NodeCoreContext initialization.
+     * Provides isolated, profile-scoped access to all services needed by transaction type methods,
+     * eliminating static {@link Signum} dependencies.
+     * @since 4.0
+     */
+    private static TransactionApplyContext CONTEXT;
+
+    /**
+     * Sets the transaction processing context for this node instance.
+     * Called during NodeCoreContext initialization.
+     *
+     * @param context the transaction apply context containing all required services
+     * @throws IllegalStateException if context is null
+     * @since 4.0
+     */
+    public static void setContext(TransactionApplyContext context) {
+        CONTEXT = Objects.requireNonNull(context, "TransactionApplyContext must not be null");
+    }
+
+    /**
+     * Returns the current transaction processing context.
+     * Used internally by all transaction type methods to access services without
+     * relying on static {@link Signum} getters.
+     *
+     * @return the current transaction apply context
+     * @throws IllegalStateException if context has not been initialized
+     * @since 4.0
+     */
+    static TransactionApplyContext getContext() {
+        if (CONTEXT == null) {
+            throw new IllegalStateException("TransactionApplyContext not initialized - call setContext() first");
+        }
+        return CONTEXT;
+    }
+
     private static final Map<Type, Map<Byte, TransactionType>> TRANSACTION_TYPES = new HashMap<>();
 
     public static final Type TYPE_PAYMENT = new Type((byte) 0, "Payment");
@@ -105,14 +142,6 @@ public abstract class TransactionType {
     public static final long BASELINE_TLD_ASSIGNMENT_FACTOR = 10_000_000L;
     public static final long BASELINE_ALIAS_RENEWAL_FACTOR = 1250L;
 
-    private static Blockchain blockchain;
-    private static FluxCapacitor fluxCapacitor;
-    private static AccountService accountService;
-    private static DGSGoodsStoreService dgsGoodsStoreService;
-    private static AliasService aliasService;
-    private static AssetExchange assetExchange;
-    private static SubscriptionService subscriptionService;
-    private static EscrowService escrowService;
 
     public static class Type {
         private byte type;
@@ -132,19 +161,15 @@ public abstract class TransactionType {
         }
     }
 
-    // TODO Temporary...
+    /**
+     * @deprecated Use TransactionTypeRegistry + TransactionApplyContext instead.
+     * Legacy bridge method - no-op since static field assignments removed.
+     */
+    @Deprecated
     public static void init(Blockchain blockchain, FluxCapacitor fluxCapacitor,
             AccountService accountService, DGSGoodsStoreService dgsGoodsStoreService,
             AliasService aliasService, AssetExchange assetExchange,
             SubscriptionService subscriptionService, EscrowService escrowService) {
-        TransactionType.blockchain = blockchain;
-        TransactionType.fluxCapacitor = fluxCapacitor;
-        TransactionType.accountService = accountService;
-        TransactionType.dgsGoodsStoreService = dgsGoodsStoreService;
-        TransactionType.aliasService = aliasService;
-        TransactionType.assetExchange = assetExchange;
-        TransactionType.subscriptionService = subscriptionService;
-        TransactionType.escrowService = escrowService;
 
         Map<Byte, TransactionType> paymentTypes = new HashMap<>();
         paymentTypes.put(SUBTYPE_PAYMENT_ORDINARY_PAYMENT, Payment.ORDINARY);
@@ -260,12 +285,12 @@ public abstract class TransactionType {
         if (senderAccount.getUnconfirmedBalanceNqt() < totalAmountNQT) {
             return false;
         }
-        accountService.addToUnconfirmedBalanceNQT(senderAccount, -totalAmountNQT);
+        getContext().getAccountService().addToUnconfirmedBalanceNQT(senderAccount, -totalAmountNQT);
         if (!applyAttachmentUnconfirmed(transaction, senderAccount)) {
             if (logger.isDebugEnabled()) {
                 logger.debug("!applyAttachmentUnconfirmed({}, {})", transaction, senderAccount.getId());
             }
-            accountService.addToUnconfirmedBalanceNQT(senderAccount, totalAmountNQT);
+            getContext().getAccountService().addToUnconfirmedBalanceNQT(senderAccount, totalAmountNQT);
             return false;
         }
         return true;
@@ -279,7 +304,7 @@ public abstract class TransactionType {
     private Long calculateTransactionAmountNQT(Transaction transaction) {
         long totalAmountNQT = Convert.safeAdd(transaction.getAmountNqt(), transaction.getFeeNqt());
         if (transaction.getReferencedTransactionFullHash() != null &&
-                !Signum.getFluxCapacitor().getValue(FluxValues.SIGNUM, transaction.getHeight())) {
+                !getContext().getFluxCapacitor().getValue(FluxValues.SIGNUM, transaction.getHeight())) {
             totalAmountNQT = Convert.safeAdd(totalAmountNQT, Constants.UNCONFIRMED_POOL_DEPOSIT_NQT);
         }
         return totalAmountNQT;
@@ -292,20 +317,20 @@ public abstract class TransactionType {
     protected abstract boolean applyAttachmentUnconfirmed(Transaction transaction, Account senderAccount);
 
     final void apply(Transaction transaction, Account senderAccount, Account recipientAccount) {
-        accountService.addToBalanceNQT(senderAccount,
+        getContext().getAccountService().addToBalanceNQT(senderAccount,
                 -(Convert.safeAdd(transaction.getAmountNqt(), transaction.getFeeNqt())));
         if (transaction.getReferencedTransactionFullHash() != null &&
-                !Signum.getFluxCapacitor().getValue(FluxValues.SIGNUM, transaction.getHeight())) {
-            accountService.addToUnconfirmedBalanceNQT(senderAccount, Constants.UNCONFIRMED_POOL_DEPOSIT_NQT);
+                !getContext().getFluxCapacitor().getValue(FluxValues.SIGNUM, transaction.getHeight())) {
+            getContext().getAccountService().addToUnconfirmedBalanceNQT(senderAccount, Constants.UNCONFIRMED_POOL_DEPOSIT_NQT);
         }
         if (recipientAccount != null && transaction.getAmountNqt() > 0L && !transaction.getType().isIndirect()) {
-            accountService.addToBalanceAndUnconfirmedBalanceNQT(recipientAccount, transaction.getAmountNqt());
+            getContext().getAccountService().addToBalanceAndUnconfirmedBalanceNQT(recipientAccount, transaction.getAmountNqt());
         }
-        if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, transaction.getHeight())) {
-            Account cashBackAccount = accountService.getOrAddAccount(transaction.getCashBackId());
+        if (getContext().getFluxCapacitor().getValue(FluxValues.SMART_FEES, transaction.getHeight())) {
+            Account cashBackAccount = getContext().getAccountService().getOrAddAccount(transaction.getCashBackId());
             long cashBackAmountNQT = transaction.getFeeNqt()
-                    / Signum.getPropertyService().getInt(Props.CASH_BACK_FACTOR);
-            accountService.addToBalanceAndUnconfirmedBalanceNQT(cashBackAccount, cashBackAmountNQT);
+                    / getContext().getPropertyService().getInt(Props.CASH_BACK_FACTOR);
+            getContext().getAccountService().addToBalanceAndUnconfirmedBalanceNQT(cashBackAccount, cashBackAmountNQT);
         }
         if (logger.isTraceEnabled()) {
             logger.trace("applying transaction - id: {}, type: {}", transaction.getId(), transaction.getType());
@@ -344,7 +369,7 @@ public abstract class TransactionType {
 
     public final void undoUnconfirmed(Transaction transaction, Account senderAccount) {
         undoAttachmentUnconfirmed(transaction, senderAccount);
-        accountService.addToUnconfirmedBalanceNQT(senderAccount,
+        getContext().getAccountService().addToUnconfirmedBalanceNQT(senderAccount,
                 Convert.safeAdd(transaction.getAmountNqt(), transaction.getFeeNqt()));
     }
 
@@ -454,7 +479,7 @@ public abstract class TransactionType {
 
             @Override
             protected void validateAttachment(Transaction transaction) throws SignumException.ValidationException {
-                if (!fluxCapacitor.getValue(FluxValues.PRE_POC2, transaction.getHeight())) {
+                if (!getContext().getFluxCapacitor().getValue(FluxValues.PRE_POC2, transaction.getHeight())) {
                     throw new SignumException.NotCurrentlyValidException(
                             "Multi Out Payments are not allowed before the Pre POC2 block");
                 }
@@ -476,8 +501,8 @@ public abstract class TransactionType {
                 Attachment.PaymentMultiOutCreation attachment = (Attachment.PaymentMultiOutCreation) transaction
                         .getAttachment();
                 for (List<Long> recipient : attachment.getRecipients()) {
-                    accountService.addToBalanceAndUnconfirmedBalanceNQT(
-                            accountService.getOrAddAccount(recipient.get(0)), recipient.get(1));
+                    getContext().getAccountService().addToBalanceAndUnconfirmedBalanceNQT(
+                            getContext().getAccountService().getOrAddAccount(recipient.get(0)), recipient.get(1));
                 }
             }
 
@@ -542,7 +567,7 @@ public abstract class TransactionType {
 
             @Override
             protected void validateAttachment(Transaction transaction) throws SignumException.ValidationException {
-                if (!fluxCapacitor.getValue(FluxValues.PRE_POC2, transaction.getHeight())) {
+                if (!getContext().getFluxCapacitor().getValue(FluxValues.PRE_POC2, transaction.getHeight())) {
                     throw new SignumException.NotCurrentlyValidException(
                             "Multi Same Out Payments are not allowed before the Pre POC2 block");
                 }
@@ -562,8 +587,8 @@ public abstract class TransactionType {
                         .getAttachment();
                 final long amountNQT = Convert.safeDivide(transaction.getAmountNqt(),
                         attachment.getRecipients().size());
-                attachment.getRecipients().forEach(a -> accountService
-                        .addToBalanceAndUnconfirmedBalanceNQT(accountService.getOrAddAccount(a), amountNQT));
+                attachment.getRecipients().forEach(a -> getContext().getAccountService()
+                        .addToBalanceAndUnconfirmedBalanceNQT(getContext().getAccountService().getOrAddAccount(a), amountNQT));
             }
 
             @Override
@@ -656,7 +681,7 @@ public abstract class TransactionType {
                     throw new SignumException.NotValidException(
                             "Invalid arbitrary message: " + JSON.toJsonString(attachment.getJsonObject()));
                 }
-                if (!fluxCapacitor.getValue(FluxValues.DIGITAL_GOODS_STORE) && transaction.getMessage() == null) {
+                if (!getContext().getFluxCapacitor().getValue(FluxValues.DIGITAL_GOODS_STORE) && transaction.getMessage() == null) {
                     throw new SignumException.NotCurrentlyValidException(
                             "Missing message appendix not allowed before DGS block");
                 }
@@ -704,8 +729,8 @@ public abstract class TransactionType {
 
             @Override
             public Fee getBaselineFee(int height) {
-                return fluxCapacitor.getValue(FluxValues.SPEEDWAY, height) ? new Fee(
-                        fluxCapacitor.getValue(FluxValues.FEE_QUANT, height) * BASELINE_ALIAS_ASSIGNMENT_FACTOR, 0)
+                return getContext().getFluxCapacitor().getValue(FluxValues.SPEEDWAY, height) ? new Fee(
+                        getContext().getFluxCapacitor().getValue(FluxValues.FEE_QUANT, height) * BASELINE_ALIAS_ASSIGNMENT_FACTOR, 0)
                         : super.getBaselineFee(height);
             }
 
@@ -724,7 +749,7 @@ public abstract class TransactionType {
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 Attachment.MessagingAliasAssignment attachment = (Attachment.MessagingAliasAssignment) transaction
                         .getAttachment();
-                aliasService.addOrUpdateAlias(transaction, attachment);
+                getContext().getAliasService().addOrUpdateAlias(transaction, attachment);
             }
 
             @Override
@@ -746,7 +771,7 @@ public abstract class TransactionType {
                     throw new SignumException.NotValidException(
                             "Invalid alias assignment: " + JSON.toJsonString(attachment.getJsonObject()));
                 }
-                if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_ALIASES)) {
+                if (getContext().getFluxCapacitor().getValue(FluxValues.SMART_ALIASES)) {
                     if (!TextUtils.isInAlphabetOrUnderline(attachment.getAliasName())) {
                         throw new SignumException.NotValidException("Invalid alias name: " + attachment.getAliasName());
                     }
@@ -755,7 +780,7 @@ public abstract class TransactionType {
                         throw new SignumException.NotValidException("Invalid alias name: " + attachment.getAliasName());
                     }
                 }
-                Alias alias = aliasService.getAlias(attachment.getAliasName(), attachment.getTld());
+                Alias alias = getContext().getAliasService().getAlias(attachment.getAliasName(), attachment.getTld());
                 if (alias != null && alias.getAccountId() != transaction.getSenderId()) {
                     throw new SignumException.NotCurrentlyValidException(
                             "Alias already owned by another account: " + attachment.getAliasName());
@@ -801,7 +826,7 @@ public abstract class TransactionType {
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 Attachment.MessagingTldAssignment attachment = (Attachment.MessagingTldAssignment) transaction
                         .getAttachment();
-                aliasService.addTLD(transaction.getId(), transaction, attachment);
+                getContext().getAliasService().addTLD(transaction.getId(), transaction, attachment);
             }
 
             @Override
@@ -814,7 +839,7 @@ public abstract class TransactionType {
 
             @Override
             protected void validateAttachment(Transaction transaction) throws SignumException.ValidationException {
-                if (!fluxCapacitor.getValue(FluxValues.SMART_ALIASES, blockchain.getLastBlock().getHeight())) {
+                if (!getContext().getFluxCapacitor().getValue(FluxValues.SMART_ALIASES, getContext().getBlockchain().getLastBlock().getHeight())) {
                     throw new SignumException.NotCurrentlyValidException("Smart Alias not yet active");
                 }
                 Attachment.MessagingTldAssignment attachment = (Attachment.MessagingTldAssignment) transaction
@@ -827,7 +852,7 @@ public abstract class TransactionType {
                 if (!TextUtils.isInAlphabet(attachment.getTldName())) {
                     throw new SignumException.NotValidException("Invalid TLD name: " + attachment.getTldName());
                 }
-                Alias tld = aliasService.getTLD(attachment.getTldName());
+                Alias tld = getContext().getAliasService().getTLD(attachment.getTldName());
                 if (tld != null) {
                     throw new SignumException.NotCurrentlyValidException(
                             "TLD already registered by another account: " + attachment.getTldName());
@@ -835,7 +860,7 @@ public abstract class TransactionType {
 
                 if (transaction.getRecipientId() != 0L
                         || transaction.getAmountNqt() < BASELINE_TLD_ASSIGNMENT_FACTOR
-                                * fluxCapacitor.getValue(FluxValues.FEE_QUANT, blockchain.getLastBlock().getHeight())) {
+                                * getContext().getFluxCapacitor().getValue(FluxValues.FEE_QUANT, getContext().getBlockchain().getLastBlock().getHeight())) {
                     throw new SignumException.NotCurrentlyValidException(
                             "Invalid TLD assignment: " + attachment.getTldName());
                 }
@@ -875,7 +900,7 @@ public abstract class TransactionType {
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 final Attachment.MessagingAliasSell attachment = (Attachment.MessagingAliasSell) transaction
                         .getAttachment();
-                aliasService.sellAlias(transaction, attachment);
+                getContext().getAliasService().sellAlias(transaction, attachment);
             }
 
             @Override
@@ -889,9 +914,9 @@ public abstract class TransactionType {
 
             @Override
             protected void validateAttachment(Transaction transaction) throws SignumException.ValidationException {
-                if (!fluxCapacitor.getValue(FluxValues.DIGITAL_GOODS_STORE, blockchain.getLastBlock().getHeight())) {
+                if (!getContext().getFluxCapacitor().getValue(FluxValues.DIGITAL_GOODS_STORE, getContext().getBlockchain().getLastBlock().getHeight())) {
                     throw new SignumException.NotYetEnabledException(
-                            "Alias transfer not yet enabled at height " + blockchain.getLastBlock().getHeight());
+                            "Alias transfer not yet enabled at height " + getContext().getBlockchain().getLastBlock().getHeight());
                 }
                 if (transaction.getAmountNqt() != 0) {
                     throw new SignumException.NotValidException(
@@ -899,7 +924,7 @@ public abstract class TransactionType {
                 }
                 final Attachment.MessagingAliasSell attachment = (Attachment.MessagingAliasSell) transaction
                         .getAttachment();
-                if (attachment.getVersion() > 1 && !fluxCapacitor.getValue(FluxValues.SMART_ALIASES)) {
+                if (attachment.getVersion() > 1 && !getContext().getFluxCapacitor().getValue(FluxValues.SMART_ALIASES)) {
                     throw new SignumException.NotCurrentlyValidException("Attachment version mismatch");
                 }
                 if (attachment.getVersion() <= 1) {
@@ -922,8 +947,8 @@ public abstract class TransactionType {
                         throw new SignumException.NotValidException("Missing alias transfer recipient");
                     }
                 }
-                final Alias alias = attachment.getVersion() > 1 ? aliasService.getAlias(attachment.getAliasId())
-                        : aliasService.getAlias(attachment.getAliasName(), 0L);
+                final Alias alias = attachment.getVersion() > 1 ? getContext().getAliasService().getAlias(attachment.getAliasId())
+                        : getContext().getAliasService().getAlias(attachment.getAliasName(), 0L);
                 if (alias == null) {
                     throw new SignumException.NotCurrentlyValidException("Alias hasn't been registered yet");
                 } else if (alias.getAccountId() != transaction.getSenderId()) {
@@ -966,9 +991,9 @@ public abstract class TransactionType {
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 final Attachment.MessagingAliasBuy attachment = (Attachment.MessagingAliasBuy) transaction
                         .getAttachment();
-                final Alias alias = attachment.getVersion() > 1 ? aliasService.getAlias(attachment.getAliasId())
-                        : aliasService.getAlias(attachment.getAliasName(), 0L);
-                aliasService.changeOwner(transaction.getSenderId(), alias, transaction.getBlockTimestamp(), true);
+                final Alias alias = attachment.getVersion() > 1 ? getContext().getAliasService().getAlias(attachment.getAliasId())
+                        : getContext().getAliasService().getAlias(attachment.getAliasName(), 0L);
+                getContext().getAliasService().changeOwner(transaction.getSenderId(), alias, transaction.getBlockTimestamp(), true);
             }
 
             @Override
@@ -982,18 +1007,18 @@ public abstract class TransactionType {
 
             @Override
             protected void validateAttachment(Transaction transaction) throws SignumException.ValidationException {
-                if (!fluxCapacitor.getValue(FluxValues.DIGITAL_GOODS_STORE, blockchain.getLastBlock().getHeight())) {
+                if (!getContext().getFluxCapacitor().getValue(FluxValues.DIGITAL_GOODS_STORE, getContext().getBlockchain().getLastBlock().getHeight())) {
                     throw new SignumException.NotYetEnabledException(
-                            "Alias transfer not yet enabled at height " + blockchain.getLastBlock().getHeight());
+                            "Alias transfer not yet enabled at height " + getContext().getBlockchain().getLastBlock().getHeight());
                 }
                 final Attachment.MessagingAliasBuy attachment = (Attachment.MessagingAliasBuy) transaction
                         .getAttachment();
-                if (attachment.getVersion() > 1 && !fluxCapacitor.getValue(FluxValues.SMART_ALIASES)) {
+                if (attachment.getVersion() > 1 && !getContext().getFluxCapacitor().getValue(FluxValues.SMART_ALIASES)) {
                     throw new SignumException.NotCurrentlyValidException("Attachment version mismatch");
                 }
                 final String aliasName = attachment.getAliasName();
-                final Alias alias = attachment.getVersion() > 1 ? aliasService.getAlias(attachment.getAliasId())
-                        : aliasService.getAlias(attachment.getAliasName(), 0L);
+                final Alias alias = attachment.getVersion() > 1 ? getContext().getAliasService().getAlias(attachment.getAliasId())
+                        : getContext().getAliasService().getAlias(attachment.getAliasName(), 0L);
                 if (alias == null) {
                     throw new SignumException.NotCurrentlyValidException(
                             "Alias hasn't been registered yet: " + aliasName);
@@ -1002,7 +1027,7 @@ public abstract class TransactionType {
                             "Alias is owned by account other than recipient: "
                                     + Convert.toUnsignedLong(alias.getAccountId()));
                 }
-                Alias.Offer offer = aliasService.getOffer(alias);
+                Alias.Offer offer = getContext().getAliasService().getOffer(alias);
                 if (offer == null) {
                     throw new SignumException.NotCurrentlyValidException("Alias is not for sale: " + aliasName);
                 }
@@ -1064,7 +1089,7 @@ public abstract class TransactionType {
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 Attachment.MessagingAccountInfo attachment = (Attachment.MessagingAccountInfo) transaction
                         .getAttachment();
-                accountService.setAccountInfo(senderAccount, attachment.getName(), attachment.getDescription());
+                getContext().getAccountService().setAccountInfo(senderAccount, attachment.getName(), attachment.getDescription());
             }
 
             @Override
@@ -1100,8 +1125,8 @@ public abstract class TransactionType {
 
             @Override
             public Fee getBaselineFee(int height) {
-                return fluxCapacitor.getValue(FluxValues.SPEEDWAY, height)
-                        ? new Fee(fluxCapacitor.getValue(FluxValues.FEE_QUANT, height) * BASELINE_ASSET_ISSUANCE_FACTOR,
+                return getContext().getFluxCapacitor().getValue(FluxValues.SPEEDWAY, height)
+                        ? new Fee(getContext().getFluxCapacitor().getValue(FluxValues.FEE_QUANT, height) * BASELINE_ASSET_ISSUANCE_FACTOR,
                                 0)
                         : BASELINE_ASSET_ISSUANCE_FEE;
             }
@@ -1127,8 +1152,8 @@ public abstract class TransactionType {
                 Attachment.ColoredCoinsAssetIssuance attachment = (Attachment.ColoredCoinsAssetIssuance) transaction
                         .getAttachment();
                 long assetId = transaction.getId();
-                assetExchange.addAsset(transaction.getId(), transaction.getSenderId(), attachment);
-                accountService.addToAssetAndUnconfirmedAssetBalanceQNT(senderAccount, assetId,
+                getContext().getAssetExchange().addAsset(transaction.getId(), transaction.getSenderId(), attachment);
+                getContext().getAccountService().addToAssetAndUnconfirmedAssetBalanceQNT(senderAccount, assetId,
                         attachment.getQuantityQnt());
             }
 
@@ -1147,10 +1172,10 @@ public abstract class TransactionType {
                         || attachment.getDecimals() < 0 || attachment.getDecimals() > 8
                         || attachment.getQuantityQnt() < 0
                         || attachment.getQuantityQnt() > Constants.MAX_ASSET_QUANTITY_QNT
-                        || (attachment.getVersion() > 1 && !Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN))
-                        || (attachment.getMintable() && !Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN))
+                        || (attachment.getVersion() > 1 && !getContext().getFluxCapacitor().getValue(FluxValues.SMART_TOKEN))
+                        || (attachment.getMintable() && !getContext().getFluxCapacitor().getValue(FluxValues.SMART_TOKEN))
                         || (attachment.getQuantityQnt() == 0 && !attachment.getMintable()
-                                && !Signum.getFluxCapacitor().getValue(FluxValues.PK_FREEZE2))) {
+                                && !getContext().getFluxCapacitor().getValue(FluxValues.PK_FREEZE2))) {
                     throw new SignumException.NotValidException(
                             "Invalid asset issuance: " + JSON.toJsonString(attachment.getJsonObject()));
                 }
@@ -1194,10 +1219,10 @@ public abstract class TransactionType {
                 logger.trace("TransactionType ASSET_TRANSFER");
                 Attachment.ColoredCoinsAssetTransfer attachment = (Attachment.ColoredCoinsAssetTransfer) transaction
                         .getAttachment();
-                long unconfirmedAssetBalance = accountService.getUnconfirmedAssetBalanceQNT(senderAccount,
+                long unconfirmedAssetBalance = getContext().getAccountService().getUnconfirmedAssetBalanceQNT(senderAccount,
                         attachment.getAssetId());
                 if (unconfirmedAssetBalance >= 0 && unconfirmedAssetBalance >= attachment.getQuantityQnt()) {
-                    accountService.addToUnconfirmedAssetBalanceQNT(senderAccount, attachment.getAssetId(),
+                    getContext().getAccountService().addToUnconfirmedAssetBalanceQNT(senderAccount, attachment.getAssetId(),
                             -attachment.getQuantityQnt());
                     return true;
                 }
@@ -1208,18 +1233,18 @@ public abstract class TransactionType {
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 Attachment.ColoredCoinsAssetTransfer attachment = (Attachment.ColoredCoinsAssetTransfer) transaction
                         .getAttachment();
-                accountService.addToAssetBalanceQNT(senderAccount, attachment.getAssetId(),
+                getContext().getAccountService().addToAssetBalanceQNT(senderAccount, attachment.getAssetId(),
                         -attachment.getQuantityQnt());
-                accountService.addToAssetAndUnconfirmedAssetBalanceQNT(recipientAccount, attachment.getAssetId(),
+                getContext().getAccountService().addToAssetAndUnconfirmedAssetBalanceQNT(recipientAccount, attachment.getAssetId(),
                         attachment.getQuantityQnt());
-                assetExchange.addAssetTransfer(transaction, attachment.getAssetId(), attachment.getQuantityQnt());
+                getContext().getAssetExchange().addAssetTransfer(transaction, attachment.getAssetId(), attachment.getQuantityQnt());
             }
 
             @Override
             protected void undoAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
                 Attachment.ColoredCoinsAssetTransfer attachment = (Attachment.ColoredCoinsAssetTransfer) transaction
                         .getAttachment();
-                accountService.addToUnconfirmedAssetBalanceQNT(senderAccount, attachment.getAssetId(),
+                getContext().getAccountService().addToUnconfirmedAssetBalanceQNT(senderAccount, attachment.getAssetId(),
                         attachment.getQuantityQnt());
             }
 
@@ -1227,7 +1252,7 @@ public abstract class TransactionType {
             protected void validateAttachment(Transaction transaction) throws SignumException.ValidationException {
                 Attachment.ColoredCoinsAssetTransfer attachment = (Attachment.ColoredCoinsAssetTransfer) transaction
                         .getAttachment();
-                if ((!Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN) && transaction.getAmountNqt() != 0)
+                if ((!getContext().getFluxCapacitor().getValue(FluxValues.SMART_TOKEN) && transaction.getAmountNqt() != 0)
                         || attachment.getComment() != null
                                 && attachment.getComment().length() > Constants.MAX_ASSET_TRANSFER_COMMENT_LENGTH
                         || attachment.getAssetId() == 0) {
@@ -1239,7 +1264,7 @@ public abstract class TransactionType {
                             "Asset transfer comments no longer allowed, use message " +
                                     "or encrypted message appendix instead");
                 }
-                Asset asset = assetExchange.getAsset(attachment.getAssetId());
+                Asset asset = getContext().getAssetExchange().getAsset(attachment.getAssetId());
                 if (attachment.getQuantityQnt() <= 0) {
                     throw new SignumException.NotValidException("Invalid asset transfer asset or quantity: "
                             + JSON.toJsonString(attachment.getJsonObject()));
@@ -1272,7 +1297,7 @@ public abstract class TransactionType {
 
             @Override
             public Fee getBaselineFee(int height) {
-                return new Fee(fluxCapacitor.getValue(FluxValues.FEE_QUANT, height) * BASELINE_ASSET_ISSUANCE_FACTOR,
+                return new Fee(getContext().getFluxCapacitor().getValue(FluxValues.FEE_QUANT, height) * BASELINE_ASSET_ISSUANCE_FACTOR,
                         0);
             }
 
@@ -1291,7 +1316,7 @@ public abstract class TransactionType {
             protected boolean applyAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
                 logger.trace("TransactionType ASSET_TRANSFER_OWNERSHIP");
 
-                if (!Signum.getFluxCapacitor().getValue(FluxValues.PK_FREEZE2)) {
+                if (!getContext().getFluxCapacitor().getValue(FluxValues.PK_FREEZE2)) {
                     // not available yet
                     return false;
                 }
@@ -1302,12 +1327,12 @@ public abstract class TransactionType {
                 }
 
                 String fullHashRef = transaction.getReferencedTransactionFullHash();
-                Transaction assetIssuance = blockchain.getTransactionByFullHash(fullHashRef);
+                Transaction assetIssuance = getContext().getBlockchain().getTransactionByFullHash(fullHashRef);
                 if (assetIssuance == null) {
                     return false;
                 }
 
-                Asset asset = assetExchange.getAsset(assetIssuance.getId());
+                Asset asset = getContext().getAssetExchange().getAsset(assetIssuance.getId());
                 if (asset == null || transaction.getSenderId() != asset.getAccountId()) {
                     // only the current owner can transfer it
                     return false;
@@ -1329,12 +1354,12 @@ public abstract class TransactionType {
             protected void validateAttachment(Transaction transaction) throws SignumException.ValidationException {
                 Asset asset = null;
                 String fullHashRef = transaction.getReferencedTransactionFullHash();
-                Transaction assetIssuance = blockchain.getTransactionByFullHash(fullHashRef);
+                Transaction assetIssuance = getContext().getBlockchain().getTransactionByFullHash(fullHashRef);
                 if (assetIssuance != null) {
-                    asset = assetExchange.getAsset(assetIssuance.getId());
+                    asset = getContext().getAssetExchange().getAsset(assetIssuance.getId());
                 }
 
-                if (!Signum.getFluxCapacitor().getValue(FluxValues.PK_FREEZE2)
+                if (!getContext().getFluxCapacitor().getValue(FluxValues.PK_FREEZE2)
                         || transaction.getAmountNqt() != 0L
                         || asset == null
                         || transaction.getSenderId() != asset.getAccountId()) {
@@ -1364,7 +1389,7 @@ public abstract class TransactionType {
 
             @Override
             public Fee getBaselineFee(int height) {
-                long FEE_QUANT = fluxCapacitor.getValue(FluxValues.FEE_QUANT, height);
+                long FEE_QUANT = getContext().getFluxCapacitor().getValue(FluxValues.FEE_QUANT, height);
                 return new Fee(2 * FEE_QUANT, FEE_QUANT);
             }
 
@@ -1391,9 +1416,9 @@ public abstract class TransactionType {
                     long assetId = assetIds.get(i);
                     long quantityQNT = quantitiesQNT.get(i);
 
-                    long unconfirmedAssetBalance = accountService.getUnconfirmedAssetBalanceQNT(senderAccount, assetId);
+                    long unconfirmedAssetBalance = getContext().getAccountService().getUnconfirmedAssetBalanceQNT(senderAccount, assetId);
                     if (unconfirmedAssetBalance >= 0 && unconfirmedAssetBalance >= quantityQNT) {
-                        accountService.addToUnconfirmedAssetBalanceQNT(senderAccount, assetId, -quantityQNT);
+                        getContext().getAccountService().addToUnconfirmedAssetBalanceQNT(senderAccount, assetId, -quantityQNT);
                     } else {
                         return false;
                     }
@@ -1411,9 +1436,9 @@ public abstract class TransactionType {
                     long assetId = assetIds.get(i);
                     long quantityQNT = quantitiesQNT.get(i);
 
-                    accountService.addToAssetBalanceQNT(senderAccount, assetId, -quantityQNT);
-                    accountService.addToAssetAndUnconfirmedAssetBalanceQNT(recipientAccount, assetId, quantityQNT);
-                    assetExchange.addAssetTransfer(transaction, assetId, quantityQNT);
+                    getContext().getAccountService().addToAssetBalanceQNT(senderAccount, assetId, -quantityQNT);
+                    getContext().getAccountService().addToAssetAndUnconfirmedAssetBalanceQNT(recipientAccount, assetId, quantityQNT);
+                    getContext().getAssetExchange().addAssetTransfer(transaction, assetId, quantityQNT);
                 }
             }
 
@@ -1424,7 +1449,7 @@ public abstract class TransactionType {
                 for (int i = 0; i < attachment.getAssetIds().size(); i++) {
                     long assetId = attachment.getAssetIds().get(i);
                     long quantityQNT = attachment.getQuantitiesQnt().get(i);
-                    accountService.addToUnconfirmedAssetBalanceQNT(senderAccount, assetId, quantityQNT);
+                    getContext().getAccountService().addToUnconfirmedAssetBalanceQNT(senderAccount, assetId, quantityQNT);
                 }
             }
 
@@ -1432,7 +1457,7 @@ public abstract class TransactionType {
             protected void validateAttachment(Transaction transaction) throws SignumException.ValidationException {
                 Attachment.ColoredCoinsAssetMultiTransfer attachment = (Attachment.ColoredCoinsAssetMultiTransfer) transaction
                         .getAttachment();
-                if ((!Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN))
+                if ((!getContext().getFluxCapacitor().getValue(FluxValues.SMART_TOKEN))
                         || attachment.getAssetIds().size() < 2
                         || attachment.getAssetIds().size() > Constants.MAX_MULTI_ASSET_IDS) {
                     throw new SignumException.NotValidException(
@@ -1442,7 +1467,7 @@ public abstract class TransactionType {
                     long assetId = attachment.getAssetIds().get(i);
                     long quantityQNT = attachment.getQuantitiesQnt().get(i);
 
-                    Asset asset = assetExchange.getAsset(assetId);
+                    Asset asset = getContext().getAssetExchange().getAsset(assetId);
                     if (quantityQNT <= 0) {
                         throw new SignumException.NotValidException(
                                 "Invalid asset transfer quantity: " + JSON.toJsonString(attachment.getJsonObject()));
@@ -1491,15 +1516,15 @@ public abstract class TransactionType {
                 Attachment.ColoredCoinsAssetMint attachment = (Attachment.ColoredCoinsAssetMint) transaction
                         .getAttachment();
 
-                Asset asset = assetExchange.getAsset(attachment.getAssetId());
+                Asset asset = getContext().getAssetExchange().getAsset(attachment.getAssetId());
                 if (asset == null || asset.getAccountId() != transaction.getSenderId() || !asset.getMintable()
                         || attachment.getQuantityQnt() <= 0L
-                        || !Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
+                        || !getContext().getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
                     return false;
                 }
 
-                boolean unconfirmed = !Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX);
-                long circulatingSupply = assetExchange.getAssetCirculatingSupply(asset, false, unconfirmed);
+                boolean unconfirmed = !getContext().getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX);
+                long circulatingSupply = getContext().getAssetExchange().getAssetCirculatingSupply(asset, false, unconfirmed);
                 long newSupply = Convert.safeAdd(circulatingSupply, attachment.getQuantityQnt());
                 if (newSupply > Constants.MAX_ASSET_QUANTITY_QNT) {
                     return false;
@@ -1512,7 +1537,7 @@ public abstract class TransactionType {
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 Attachment.ColoredCoinsAssetMint attachment = (Attachment.ColoredCoinsAssetMint) transaction
                         .getAttachment();
-                accountService.addToAssetAndUnconfirmedAssetBalanceQNT(senderAccount, attachment.getAssetId(),
+                getContext().getAccountService().addToAssetAndUnconfirmedAssetBalanceQNT(senderAccount, attachment.getAssetId(),
                         attachment.getQuantityQnt());
             }
 
@@ -1532,12 +1557,12 @@ public abstract class TransactionType {
             protected void validateAttachment(Transaction transaction) throws SignumException.ValidationException {
                 Attachment.ColoredCoinsAssetMint attachment = (Attachment.ColoredCoinsAssetMint) transaction
                         .getAttachment();
-                if (!Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
+                if (!getContext().getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
                     throw new SignumException.NotValidException(
                             "Transaction type not yet enabled: " + JSON.toJsonString(attachment.getJsonObject()));
                 }
 
-                Asset asset = assetExchange.getAsset(attachment.getAssetId());
+                Asset asset = getContext().getAssetExchange().getAsset(attachment.getAssetId());
                 if (asset == null) {
                     throw new SignumException.NotCurrentlyValidException(
                             "Asset " + Convert.toUnsignedLong(attachment.getAssetId()) +
@@ -1549,8 +1574,8 @@ public abstract class TransactionType {
                             "Invalid asset mint: " + JSON.toJsonString(attachment.getJsonObject()));
                 }
 
-                boolean unconfirmed = !Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX);
-                long circulatingSupply = assetExchange.getAssetCirculatingSupply(asset, false, unconfirmed);
+                boolean unconfirmed = !getContext().getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX);
+                long circulatingSupply = getContext().getAssetExchange().getAssetCirculatingSupply(asset, false, unconfirmed);
                 long newSupply = Convert.safeAdd(circulatingSupply, attachment.getQuantityQnt());
                 if (newSupply > Constants.MAX_ASSET_QUANTITY_QNT) {
                     throw new SignumException.NotCurrentlyValidException(
@@ -1592,18 +1617,18 @@ public abstract class TransactionType {
             protected boolean applyAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
                 logger.trace("TransactionType ASSET_ADD_TREASURY_ACCOUNT");
 
-                if (!Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
+                if (!getContext().getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
                     return false;
                 }
 
-                Transaction assetCreationTransaction = Signum.getBlockchain()
+                Transaction assetCreationTransaction = getContext().getBlockchain()
                         .getTransactionByFullHash(transaction.getReferencedTransactionFullHash());
                 if (transaction.getAmountNqt() != 0 || assetCreationTransaction == null)
                     return false;
 
-                Asset asset = assetExchange.getAsset(assetCreationTransaction.getId());
+                Asset asset = getContext().getAssetExchange().getAsset(assetCreationTransaction.getId());
                 if (asset == null || asset.getAccountId() != transaction.getSenderId()
-                        || !Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
+                        || !getContext().getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
                     return false;
                 }
 
@@ -1622,17 +1647,17 @@ public abstract class TransactionType {
 
             @Override
             protected void validateAttachment(Transaction transaction) throws SignumException.ValidationException {
-                if (!Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
+                if (!getContext().getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
                     throw new SignumException.NotValidException("Transaction type not yet enabled");
                 }
 
-                Transaction assetCreationTransaction = Signum.getBlockchain()
+                Transaction assetCreationTransaction = getContext().getBlockchain()
                         .getTransactionByFullHash(transaction.getReferencedTransactionFullHash());
                 if (transaction.getAmountNqt() != 0 || assetCreationTransaction == null) {
                     throw new SignumException.NotCurrentlyValidException(
                             "Invalid transaction amount or reference transaction");
                 }
-                Asset asset = assetExchange.getAsset(assetCreationTransaction.getId());
+                Asset asset = getContext().getAssetExchange().getAsset(assetCreationTransaction.getId());
                 if (asset == null) {
                     throw new SignumException.NotCurrentlyValidException(
                             "Asset " + Convert.toUnsignedLong(assetCreationTransaction.getId()) +
@@ -1640,7 +1665,7 @@ public abstract class TransactionType {
                 }
 
                 if (asset.getAccountId() != transaction.getSenderId()
-                        || !Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
+                        || !getContext().getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
                     throw new SignumException.NotValidException("Invalid add treasury account transaction");
                 }
 
@@ -1683,9 +1708,9 @@ public abstract class TransactionType {
 
                 Attachment.ColoredCoinsAssetDistributeToHolders attachment = (Attachment.ColoredCoinsAssetDistributeToHolders) transaction
                         .getAttachment();
-                Asset asset = assetExchange.getAsset(attachment.getAssetId());
-                boolean unconfirmed = !Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX, height);
-                long numberOfHolders = assetExchange.getAssetAccountsCount(asset,
+                Asset asset = getContext().getAssetExchange().getAsset(attachment.getAssetId());
+                boolean unconfirmed = !getContext().getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX, height);
+                long numberOfHolders = getContext().getAssetExchange().getAssetAccountsCount(asset,
                         attachment.getMinimumAssetQuantityQnt(), true, unconfirmed);
                 long minFeeHolders = (numberOfHolders * minFee) / 10L;
                 minFee = Math.max(minFee, minFeeHolders);
@@ -1699,28 +1724,28 @@ public abstract class TransactionType {
                 Attachment.ColoredCoinsAssetDistributeToHolders attachment = (Attachment.ColoredCoinsAssetDistributeToHolders) transaction
                         .getAttachment();
 
-                if (!Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
+                if (!getContext().getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
                     return false;
                 }
 
                 long assetToDistribute = attachment.getAssetIdToDistribute();
                 if (assetToDistribute != 0L && attachment.getQuantityQnt() > 0L) {
-                    long unconfirmedAssetBalance = accountService.getUnconfirmedAssetBalanceQNT(senderAccount,
+                    long unconfirmedAssetBalance = getContext().getAccountService().getUnconfirmedAssetBalanceQNT(senderAccount,
                             attachment.getAssetIdToDistribute());
                     if (attachment.getQuantityQnt() > unconfirmedAssetBalance)
                         return false;
                 }
 
-                accountService.addToUnconfirmedAssetBalanceQNT(senderAccount, assetToDistribute,
+                getContext().getAccountService().addToUnconfirmedAssetBalanceQNT(senderAccount, assetToDistribute,
                         -attachment.getQuantityQnt());
 
-                Asset asset = assetExchange.getAsset(attachment.getAssetId());
-                boolean unconfirmed = !Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX);
-                CollectionWithIndex<AccountAsset> assetHolders = assetExchange.getAssetAccounts(asset, true,
+                Asset asset = getContext().getAssetExchange().getAsset(attachment.getAssetId());
+                boolean unconfirmed = !getContext().getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX);
+                CollectionWithIndex<AccountAsset> assetHolders = getContext().getAssetExchange().getAssetAccounts(asset, true,
                         attachment.getMinimumAssetQuantityQnt(), unconfirmed, -1, -1);
                 long circulatingQuantityQNT = 0L;
                 for (AccountAsset holder : assetHolders) {
-                    if (Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX, transaction.getHeight())
+                    if (getContext().getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX, transaction.getHeight())
                             && holder.getAccountId() == senderAccount.getId()) {
                         continue;
                     }
@@ -1728,7 +1753,7 @@ public abstract class TransactionType {
                             holder.getUnconfirmedQuantityQnt());
                 }
                 if (circulatingQuantityQNT <= 0L) {
-                    accountService.addToUnconfirmedAssetBalanceQNT(senderAccount, assetToDistribute,
+                    getContext().getAccountService().addToUnconfirmedAssetBalanceQNT(senderAccount, assetToDistribute,
                             attachment.getQuantityQnt());
                     return false;
                 }
@@ -1742,24 +1767,24 @@ public abstract class TransactionType {
 
                 // subtract the asset balance from the sender, the amount was already subtracted
                 // by the transaction
-                accountService.addToAssetBalanceQNT(senderAccount, attachment.getAssetIdToDistribute(),
+                getContext().getAccountService().addToAssetBalanceQNT(senderAccount, attachment.getAssetIdToDistribute(),
                         -attachment.getQuantityQnt());
 
                 Collection<IndirectIncoming> incomings = getIndirectIncomings(transaction);
                 for (IndirectIncoming incoming : incomings) {
 
                     // add to the holders
-                    Account account = accountService.getOrAddAccount(incoming.getAccountId());
+                    Account account = getContext().getAccountService().getOrAddAccount(incoming.getAccountId());
 
                     long quantity = incoming.getQuantity();
                     if (quantity > 0L) {
-                        accountService.addToAssetAndUnconfirmedAssetBalanceQNT(account,
+                        getContext().getAccountService().addToAssetAndUnconfirmedAssetBalanceQNT(account,
                                 attachment.getAssetIdToDistribute(), quantity);
                     }
 
                     long amount = incoming.getAmount();
                     if (amount > 0L) {
-                        accountService.addToBalanceAndUnconfirmedBalanceNQT(account, amount);
+                        getContext().getAccountService().addToBalanceAndUnconfirmedBalanceNQT(account, amount);
                     }
                 }
             }
@@ -1768,7 +1793,7 @@ public abstract class TransactionType {
             protected void undoAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
                 Attachment.ColoredCoinsAssetDistributeToHolders attachment = (Attachment.ColoredCoinsAssetDistributeToHolders) transaction
                         .getAttachment();
-                accountService.addToUnconfirmedAssetBalanceQNT(senderAccount, attachment.getAssetIdToDistribute(),
+                getContext().getAccountService().addToUnconfirmedAssetBalanceQNT(senderAccount, attachment.getAssetIdToDistribute(),
                         attachment.getQuantityQnt());
             }
 
@@ -1777,7 +1802,7 @@ public abstract class TransactionType {
                 Attachment.ColoredCoinsAssetDistributeToHolders attachment = (Attachment.ColoredCoinsAssetDistributeToHolders) transaction
                         .getAttachment();
 
-                if (!Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
+                if (!getContext().getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
                     throw new SignumException.NotValidException(
                             "Transaction type not yet enabled: " + JSON.toJsonString(attachment.getJsonObject()));
                 }
@@ -1786,15 +1811,15 @@ public abstract class TransactionType {
                     throw new SignumException.NotValidException(
                             "Invalid asset transfer id: " + JSON.toJsonString(attachment.getJsonObject()));
                 }
-                Asset asset = assetExchange.getAsset(attachment.getAssetId());
+                Asset asset = getContext().getAssetExchange().getAsset(attachment.getAssetId());
                 if (asset == null) {
                     throw new SignumException.NotCurrentlyValidException(
                             "Asset " + Convert.toUnsignedLong(attachment.getAssetId()) +
                                     " does not exist yet");
                 }
 
-                boolean unconfirmed = !Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX);
-                long circulatingQuantity = assetExchange.getAssetCirculatingSupply(asset, true, unconfirmed);
+                boolean unconfirmed = !getContext().getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX);
+                long circulatingQuantity = getContext().getAssetExchange().getAssetCirculatingSupply(asset, true, unconfirmed);
                 if (circulatingQuantity <= 0L) {
                     throw new SignumException.NotValidException(
                             "Asset has no circulating supply: " + JSON.toJsonString(attachment.getJsonObject()));
@@ -1803,7 +1828,7 @@ public abstract class TransactionType {
                     throw new SignumException.NotValidException("Nothing to distribute");
                 }
                 if (attachment.getQuantityQnt() > 0L) {
-                    Asset assetToDistribute = assetExchange.getAsset(attachment.getAssetIdToDistribute());
+                    Asset assetToDistribute = getContext().getAssetExchange().getAsset(attachment.getAssetIdToDistribute());
                     if (assetToDistribute == null) {
                         throw new SignumException.NotCurrentlyValidException(
                                 "Asset " + Convert.toUnsignedLong(attachment.getAssetId()) +
@@ -1828,18 +1853,18 @@ public abstract class TransactionType {
                 Attachment.ColoredCoinsAssetDistributeToHolders attachment = (Attachment.ColoredCoinsAssetDistributeToHolders) transaction
                         .getAttachment();
 
-                boolean unconfirmed = !Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX,
+                boolean unconfirmed = !getContext().getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX,
                         transaction.getHeight());
-                CollectionWithIndex<AccountAsset> assetHolders = assetExchange.getAssetAccounts(
-                        assetExchange.getAsset(attachment.getAssetId()),
+                CollectionWithIndex<AccountAsset> assetHolders = getContext().getAssetExchange().getAssetAccounts(
+                        getContext().getAssetExchange().getAsset(attachment.getAssetId()),
                         true, attachment.getMinimumAssetQuantityQnt(), unconfirmed, -1, -1);
                 long circulatingQuantityQNT = 0L;
                 for (AccountAsset holder : assetHolders) {
-                    if (Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX, transaction.getHeight())
+                    if (getContext().getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX, transaction.getHeight())
                             && holder.getAccountId() == transaction.getSenderId()) {
                         continue;
                     }
-                    long holderQuantity = Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX,
+                    long holderQuantity = getContext().getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX,
                             transaction.getHeight()) ? holder.getQuantityQnt() : holder.getUnconfirmedQuantityQnt();
                     circulatingQuantityQNT = Convert.safeAdd(circulatingQuantityQNT, holderQuantity);
                 }
@@ -1857,7 +1882,7 @@ public abstract class TransactionType {
                 long largestHolderQuantity = 0L;
                 IndirectIncoming largestIndirect = null;
                 for (AccountAsset holder : assetHolders) {
-                    if (Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX, transaction.getHeight())
+                    if (getContext().getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX, transaction.getHeight())
                             && holder.getAccountId() == transaction.getSenderId()) {
                         continue;
                     }
@@ -1917,7 +1942,7 @@ public abstract class TransactionType {
                     throw new SignumException.NotValidException(
                             "Invalid asset order placement: " + JSON.toJsonString(attachment.getJsonObject()));
                 }
-                Asset asset = assetExchange.getAsset(attachment.getAssetId());
+                Asset asset = getContext().getAssetExchange().getAsset(attachment.getAssetId());
                 if (attachment.getQuantityQnt() <= 0 || (asset != null && !asset.getMintable()
                         && attachment.getQuantityQnt() > asset.getQuantityQnt())) {
                     throw new SignumException.NotValidException("Invalid asset order placement asset or quantity: "
@@ -1965,10 +1990,10 @@ public abstract class TransactionType {
                 logger.trace("TransactionType ASK_ORDER_PLACEMENT");
                 Attachment.ColoredCoinsAskOrderPlacement attachment = (Attachment.ColoredCoinsAskOrderPlacement) transaction
                         .getAttachment();
-                long unconfirmedAssetBalance = accountService.getUnconfirmedAssetBalanceQNT(senderAccount,
+                long unconfirmedAssetBalance = getContext().getAccountService().getUnconfirmedAssetBalanceQNT(senderAccount,
                         attachment.getAssetId());
                 if (unconfirmedAssetBalance >= 0 && unconfirmedAssetBalance >= attachment.getQuantityQnt()) {
-                    accountService.addToUnconfirmedAssetBalanceQNT(senderAccount, attachment.getAssetId(),
+                    getContext().getAccountService().addToUnconfirmedAssetBalanceQNT(senderAccount, attachment.getAssetId(),
                             -attachment.getQuantityQnt());
                     return true;
                 }
@@ -1979,8 +2004,8 @@ public abstract class TransactionType {
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 Attachment.ColoredCoinsAskOrderPlacement attachment = (Attachment.ColoredCoinsAskOrderPlacement) transaction
                         .getAttachment();
-                if (assetExchange.getAsset(attachment.getAssetId()) != null) {
-                    assetExchange.addAskOrder(transaction, attachment);
+                if (getContext().getAssetExchange().getAsset(attachment.getAssetId()) != null) {
+                    getContext().getAssetExchange().addAskOrder(transaction, attachment);
                 }
             }
 
@@ -1988,7 +2013,7 @@ public abstract class TransactionType {
             protected void undoAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
                 Attachment.ColoredCoinsAskOrderPlacement attachment = (Attachment.ColoredCoinsAskOrderPlacement) transaction
                         .getAttachment();
-                accountService.addToUnconfirmedAssetBalanceQNT(senderAccount, attachment.getAssetId(),
+                getContext().getAccountService().addToUnconfirmedAssetBalanceQNT(senderAccount, attachment.getAssetId(),
                         attachment.getQuantityQnt());
             }
 
@@ -2022,7 +2047,7 @@ public abstract class TransactionType {
                 logger.trace("TransactionType BID_ORDER_PLACEMENT");
                 Long totalAmountNQT = calculateAttachmentTotalAmountNQT(transaction);
                 if (senderAccount.getUnconfirmedBalanceNqt() >= totalAmountNQT) {
-                    accountService.addToUnconfirmedBalanceNQT(senderAccount, -totalAmountNQT);
+                    getContext().getAccountService().addToUnconfirmedBalanceNQT(senderAccount, -totalAmountNQT);
                     return true;
                 }
                 return false;
@@ -2039,15 +2064,15 @@ public abstract class TransactionType {
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 Attachment.ColoredCoinsBidOrderPlacement attachment = (Attachment.ColoredCoinsBidOrderPlacement) transaction
                         .getAttachment();
-                if (assetExchange.getAsset(attachment.getAssetId()) != null) {
-                    assetExchange.addBidOrder(transaction, attachment);
+                if (getContext().getAssetExchange().getAsset(attachment.getAssetId()) != null) {
+                    getContext().getAssetExchange().addBidOrder(transaction, attachment);
                 }
             }
 
             @Override
             protected void undoAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
                 Long totalAmountNQT = calculateAttachmentTotalAmountNQT(transaction);
-                accountService.addToUnconfirmedBalanceNQT(senderAccount, totalAmountNQT);
+                getContext().getAccountService().addToUnconfirmedBalanceNQT(senderAccount, totalAmountNQT);
             }
 
         };
@@ -2097,10 +2122,10 @@ public abstract class TransactionType {
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 Attachment.ColoredCoinsAskOrderCancellation attachment = (Attachment.ColoredCoinsAskOrderCancellation) transaction
                         .getAttachment();
-                Order order = assetExchange.getAskOrder(attachment.getOrderId());
-                assetExchange.removeAskOrder(attachment.getOrderId());
+                Order order = getContext().getAssetExchange().getAskOrder(attachment.getOrderId());
+                getContext().getAssetExchange().removeAskOrder(attachment.getOrderId());
                 if (order != null) {
-                    accountService.addToUnconfirmedAssetBalanceQNT(senderAccount, order.getAssetId(),
+                    getContext().getAccountService().addToUnconfirmedAssetBalanceQNT(senderAccount, order.getAssetId(),
                             order.getQuantityQNT());
                 }
             }
@@ -2109,7 +2134,7 @@ public abstract class TransactionType {
             protected void validateAttachment(Transaction transaction) throws SignumException.ValidationException {
                 Attachment.ColoredCoinsAskOrderCancellation attachment = (Attachment.ColoredCoinsAskOrderCancellation) transaction
                         .getAttachment();
-                Order ask = assetExchange.getAskOrder(attachment.getOrderId());
+                Order ask = getContext().getAssetExchange().getAskOrder(attachment.getOrderId());
                 if (ask == null) {
                     throw new SignumException.NotCurrentlyValidException(
                             "Invalid ask order: " + Convert.toUnsignedLong(attachment.getOrderId()));
@@ -2150,10 +2175,10 @@ public abstract class TransactionType {
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 Attachment.ColoredCoinsBidOrderCancellation attachment = (Attachment.ColoredCoinsBidOrderCancellation) transaction
                         .getAttachment();
-                Order order = assetExchange.getBidOrder(attachment.getOrderId());
-                assetExchange.removeBidOrder(attachment.getOrderId());
+                Order order = getContext().getAssetExchange().getBidOrder(attachment.getOrderId());
+                getContext().getAssetExchange().removeBidOrder(attachment.getOrderId());
                 if (order != null) {
-                    accountService.addToUnconfirmedBalanceNQT(senderAccount,
+                    getContext().getAccountService().addToUnconfirmedBalanceNQT(senderAccount,
                             Convert.safeMultiply(order.getQuantityQNT(), order.getPriceNQT()));
                 }
             }
@@ -2162,7 +2187,7 @@ public abstract class TransactionType {
             protected void validateAttachment(Transaction transaction) throws SignumException.ValidationException {
                 Attachment.ColoredCoinsBidOrderCancellation attachment = (Attachment.ColoredCoinsBidOrderCancellation) transaction
                         .getAttachment();
-                Order bid = assetExchange.getBidOrder(attachment.getOrderId());
+                Order bid = getContext().getAssetExchange().getBidOrder(attachment.getOrderId());
                 if (bid == null) {
                     throw new SignumException.NotCurrentlyValidException(
                             "Invalid bid order: " + Convert.toUnsignedLong(attachment.getOrderId()));
@@ -2198,9 +2223,9 @@ public abstract class TransactionType {
 
         @Override
         protected final void validateAttachment(Transaction transaction) throws SignumException.ValidationException {
-            if (!fluxCapacitor.getValue(FluxValues.DIGITAL_GOODS_STORE, blockchain.getLastBlock().getHeight())) {
+            if (!getContext().getFluxCapacitor().getValue(FluxValues.DIGITAL_GOODS_STORE, getContext().getBlockchain().getLastBlock().getHeight())) {
                 throw new SignumException.NotYetEnabledException(
-                        "Digital goods listing not yet enabled at height " + blockchain.getLastBlock().getHeight());
+                        "Digital goods listing not yet enabled at height " + getContext().getBlockchain().getLastBlock().getHeight());
             }
             if (transaction.getAmountNqt() != 0) {
                 throw new SignumException.NotValidException("Invalid digital goods transaction");
@@ -2237,7 +2262,7 @@ public abstract class TransactionType {
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 Attachment.DigitalGoodsListing attachment = (Attachment.DigitalGoodsListing) transaction
                         .getAttachment();
-                dgsGoodsStoreService.listGoods(transaction, attachment);
+                getContext().getDgsGoodsStoreService().listGoods(transaction, attachment);
             }
 
             @Override
@@ -2288,14 +2313,14 @@ public abstract class TransactionType {
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 Attachment.DigitalGoodsDelisting attachment = (Attachment.DigitalGoodsDelisting) transaction
                         .getAttachment();
-                dgsGoodsStoreService.delistGoods(attachment.getGoodsId());
+                getContext().getDgsGoodsStoreService().delistGoods(attachment.getGoodsId());
             }
 
             @Override
             void doValidateAttachment(Transaction transaction) throws SignumException.ValidationException {
                 Attachment.DigitalGoodsDelisting attachment = (Attachment.DigitalGoodsDelisting) transaction
                         .getAttachment();
-                DigitalGoodsStore.Goods goods = dgsGoodsStoreService.getGoods(attachment.getGoodsId());
+                DigitalGoodsStore.Goods goods = getContext().getDgsGoodsStoreService().getGoods(attachment.getGoodsId());
                 if (goods != null && transaction.getSenderId() != goods.getSellerId()) {
                     throw new SignumException.NotValidException(
                             "Invalid digital goods delisting - seller is different: "
@@ -2349,14 +2374,14 @@ public abstract class TransactionType {
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 Attachment.DigitalGoodsPriceChange attachment = (Attachment.DigitalGoodsPriceChange) transaction
                         .getAttachment();
-                dgsGoodsStoreService.changePrice(attachment.getGoodsId(), attachment.getPriceNqt());
+                getContext().getDgsGoodsStoreService().changePrice(attachment.getGoodsId(), attachment.getPriceNqt());
             }
 
             @Override
             void doValidateAttachment(Transaction transaction) throws SignumException.ValidationException {
                 Attachment.DigitalGoodsPriceChange attachment = (Attachment.DigitalGoodsPriceChange) transaction
                         .getAttachment();
-                DigitalGoodsStore.Goods goods = dgsGoodsStoreService.getGoods(attachment.getGoodsId());
+                DigitalGoodsStore.Goods goods = getContext().getDgsGoodsStoreService().getGoods(attachment.getGoodsId());
                 if (attachment.getPriceNqt() <= 0 || attachment.getPriceNqt() > Constants.MAX_BALANCE_NQT
                         || (goods != null && transaction.getSenderId() != goods.getSellerId())) {
                     throw new SignumException.NotValidException(
@@ -2411,14 +2436,14 @@ public abstract class TransactionType {
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 Attachment.DigitalGoodsQuantityChange attachment = (Attachment.DigitalGoodsQuantityChange) transaction
                         .getAttachment();
-                dgsGoodsStoreService.changeQuantity(attachment.getGoodsId(), attachment.getDeltaQuantity(), false);
+                getContext().getDgsGoodsStoreService().changeQuantity(attachment.getGoodsId(), attachment.getDeltaQuantity(), false);
             }
 
             @Override
             void doValidateAttachment(Transaction transaction) throws SignumException.ValidationException {
                 Attachment.DigitalGoodsQuantityChange attachment = (Attachment.DigitalGoodsQuantityChange) transaction
                         .getAttachment();
-                DigitalGoodsStore.Goods goods = dgsGoodsStoreService.getGoods(attachment.getGoodsId());
+                DigitalGoodsStore.Goods goods = getContext().getDgsGoodsStoreService().getGoods(attachment.getGoodsId());
                 if (attachment.getDeltaQuantity() < -Constants.MAX_DGS_LISTING_QUANTITY
                         || attachment.getDeltaQuantity() > Constants.MAX_DGS_LISTING_QUANTITY
                         || (goods != null && transaction.getSenderId() != goods.getSellerId())) {
@@ -2475,7 +2500,7 @@ public abstract class TransactionType {
                 logger.trace("TransactionType PURCHASE");
                 Long totalAmountNQT = calculateAttachmentTotalAmountNQT(transaction);
                 if (senderAccount.getUnconfirmedBalanceNqt() >= totalAmountNQT) {
-                    accountService.addToUnconfirmedBalanceNQT(senderAccount, -totalAmountNQT);
+                    getContext().getAccountService().addToUnconfirmedBalanceNQT(senderAccount, -totalAmountNQT);
                     return true;
                 }
                 return false;
@@ -2490,7 +2515,7 @@ public abstract class TransactionType {
 
             @Override
             protected void undoAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
-                accountService.addToUnconfirmedBalanceNQT(senderAccount,
+                getContext().getAccountService().addToUnconfirmedBalanceNQT(senderAccount,
                         calculateAttachmentTotalAmountNQT(transaction));
             }
 
@@ -2498,14 +2523,14 @@ public abstract class TransactionType {
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 Attachment.DigitalGoodsPurchase attachment = (Attachment.DigitalGoodsPurchase) transaction
                         .getAttachment();
-                dgsGoodsStoreService.purchase(transaction, attachment);
+                getContext().getDgsGoodsStoreService().purchase(transaction, attachment);
             }
 
             @Override
             void doValidateAttachment(Transaction transaction) throws SignumException.ValidationException {
                 Attachment.DigitalGoodsPurchase attachment = (Attachment.DigitalGoodsPurchase) transaction
                         .getAttachment();
-                DigitalGoodsStore.Goods goods = dgsGoodsStoreService.getGoods(attachment.getGoodsId());
+                DigitalGoodsStore.Goods goods = getContext().getDgsGoodsStoreService().getGoods(attachment.getGoodsId());
                 if (attachment.getQuantity() <= 0 || attachment.getQuantity() > Constants.MAX_DGS_LISTING_QUANTITY
                         || attachment.getPriceNqt() <= 0 || attachment.getPriceNqt() > Constants.MAX_BALANCE_NQT
                         || (goods != null && goods.getSellerId() != transaction.getRecipientId())) {
@@ -2524,7 +2549,7 @@ public abstract class TransactionType {
                     throw new SignumException.NotCurrentlyValidException(
                             "Goods price or quantity changed: " + JSON.toJsonString(attachment.getJsonObject()));
                 }
-                if (attachment.getDeliveryDeadlineTimestamp() <= blockchain.getLastBlock().getTimestamp()) {
+                if (attachment.getDeliveryDeadlineTimestamp() <= getContext().getBlockchain().getLastBlock().getTimestamp()) {
                     throw new SignumException.NotCurrentlyValidException(
                             "Delivery deadline has already expired: " + attachment.getDeliveryDeadlineTimestamp());
                 }
@@ -2564,14 +2589,14 @@ public abstract class TransactionType {
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 Attachment.DigitalGoodsDelivery attachment = (Attachment.DigitalGoodsDelivery) transaction
                         .getAttachment();
-                dgsGoodsStoreService.deliver(transaction, attachment);
+                getContext().getDgsGoodsStoreService().deliver(transaction, attachment);
             }
 
             @Override
             void doValidateAttachment(Transaction transaction) throws SignumException.ValidationException {
                 Attachment.DigitalGoodsDelivery attachment = (Attachment.DigitalGoodsDelivery) transaction
                         .getAttachment();
-                DigitalGoodsStore.Purchase purchase = dgsGoodsStoreService
+                DigitalGoodsStore.Purchase purchase = getContext().getDgsGoodsStoreService()
                         .getPendingPurchase(attachment.getPurchaseId());
                 if (attachment.getGoods().getData().length > Constants.MAX_DGS_GOODS_LENGTH
                         || attachment.getGoods().getData().length == 0
@@ -2633,7 +2658,7 @@ public abstract class TransactionType {
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 Attachment.DigitalGoodsFeedback attachment = (Attachment.DigitalGoodsFeedback) transaction
                         .getAttachment();
-                dgsGoodsStoreService.feedback(attachment.getPurchaseId(), transaction.getEncryptedMessage(),
+                getContext().getDgsGoodsStoreService().feedback(attachment.getPurchaseId(), transaction.getEncryptedMessage(),
                         transaction.getMessage());
             }
 
@@ -2641,7 +2666,7 @@ public abstract class TransactionType {
             void doValidateAttachment(Transaction transaction) throws SignumException.ValidationException {
                 Attachment.DigitalGoodsFeedback attachment = (Attachment.DigitalGoodsFeedback) transaction
                         .getAttachment();
-                DigitalGoodsStore.Purchase purchase = dgsGoodsStoreService.getPurchase(attachment.getPurchaseId());
+                DigitalGoodsStore.Purchase purchase = getContext().getDgsGoodsStoreService().getPurchase(attachment.getPurchaseId());
                 if (purchase != null &&
                         (purchase.getSellerId() != transaction.getRecipientId()
                                 || transaction.getSenderId() != purchase.getBuyerId())) {
@@ -2705,7 +2730,7 @@ public abstract class TransactionType {
                 logger.trace("TransactionType REFUND");
                 Long totalAmountNQT = calculateAttachmentTotalAmountNQT(transaction);
                 if (senderAccount.getUnconfirmedBalanceNqt() >= totalAmountNQT) {
-                    accountService.addToUnconfirmedBalanceNQT(senderAccount, -totalAmountNQT);
+                    getContext().getAccountService().addToUnconfirmedBalanceNQT(senderAccount, -totalAmountNQT);
                     return true;
                 }
                 return false;
@@ -2719,21 +2744,21 @@ public abstract class TransactionType {
 
             @Override
             protected void undoAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
-                accountService.addToUnconfirmedBalanceNQT(senderAccount,
+                getContext().getAccountService().addToUnconfirmedBalanceNQT(senderAccount,
                         calculateAttachmentTotalAmountNQT(transaction));
             }
 
             @Override
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
                 Attachment.DigitalGoodsRefund attachment = (Attachment.DigitalGoodsRefund) transaction.getAttachment();
-                dgsGoodsStoreService.refund(transaction.getSenderId(), attachment.getPurchaseId(),
+                getContext().getDgsGoodsStoreService().refund(transaction.getSenderId(), attachment.getPurchaseId(),
                         attachment.getRefundNqt(), transaction.getEncryptedMessage());
             }
 
             @Override
             void doValidateAttachment(Transaction transaction) throws SignumException.ValidationException {
                 Attachment.DigitalGoodsRefund attachment = (Attachment.DigitalGoodsRefund) transaction.getAttachment();
-                DigitalGoodsStore.Purchase purchase = dgsGoodsStoreService.getPurchase(attachment.getPurchaseId());
+                DigitalGoodsStore.Purchase purchase = getContext().getDgsGoodsStoreService().getPurchase(attachment.getPurchaseId());
                 if (attachment.getRefundNqt() < 0 || attachment.getRefundNqt() > Constants.MAX_BALANCE_NQT
                         || (purchase != null &&
                                 (purchase.getBuyerId() != transaction.getRecipientId()
@@ -2816,13 +2841,13 @@ public abstract class TransactionType {
 
             @Override
             protected void validateAttachment(Transaction transaction) throws SignumException.ValidationException {
-                if (Signum.getFluxCapacitor().getValue(FluxValues.SODIUM))
+                if (getContext().getFluxCapacitor().getValue(FluxValues.SODIUM))
                     throw new SignumException.NotCurrentlyValidException(
                             "Effective Balance Leasing disabled after Sodium HF");
 
                 Attachment.AccountControlEffectiveBalanceLeasing attachment = (Attachment.AccountControlEffectiveBalanceLeasing) transaction
                         .getAttachment();
-                Account recipientAccount = accountService.getAccount(transaction.getRecipientId());
+                Account recipientAccount = getContext().getAccountService().getAccount(transaction.getRecipientId());
                 if (transaction.getSenderId() == transaction.getRecipientId()
                         || transaction.getAmountNqt() != 0
                         || attachment.getPeriod() < 1440) {
@@ -2892,12 +2917,12 @@ public abstract class TransactionType {
 
             @Override
             protected void applyAttachment(Transaction transaction, Account senderAccount, Account recipientAccount) {
-                accountService.setRewardRecipientAssignment(senderAccount, recipientAccount.getId());
+                getContext().getAccountService().setRewardRecipientAssignment(senderAccount, recipientAccount.getId());
             }
 
             @Override
             public TransactionDuplicationKey getDuplicationKey(Transaction transaction) {
-                if (!fluxCapacitor.getValue(FluxValues.DIGITAL_GOODS_STORE)) {
+                if (!getContext().getFluxCapacitor().getValue(FluxValues.DIGITAL_GOODS_STORE)) {
                     return TransactionDuplicationKey.IS_NEVER_DUPLICATE; // sync fails after 7007 without this
                 }
 
@@ -2907,21 +2932,21 @@ public abstract class TransactionType {
 
             @Override
             protected void validateAttachment(Transaction transaction) throws SignumException.ValidationException {
-                int height = blockchain.getLastBlock().getHeight() + 1;
-                Account sender = accountService.getAccount(transaction.getSenderId());
+                int height = getContext().getBlockchain().getLastBlock().getHeight() + 1;
+                Account sender = getContext().getAccountService().getAccount(transaction.getSenderId());
 
                 if (sender == null) {
                     throw new SignumException.NotCurrentlyValidException("Sender not yet known ?!");
                 }
 
-                Account.RewardRecipientAssignment rewardAssignment = accountService
+                Account.RewardRecipientAssignment rewardAssignment = getContext().getAccountService()
                         .getRewardRecipientAssignment(sender);
                 if (rewardAssignment != null && rewardAssignment.getFromHeight() >= height) {
                     throw new SignumException.NotCurrentlyValidException(
                             "Cannot reassign reward recipient before previous goes into effect: "
                                     + JSON.toJsonString(transaction.getJsonObject()));
                 }
-                Account recip = accountService.getAccount(transaction.getRecipientId());
+                Account recip = getContext().getAccountService().getAccount(transaction.getRecipientId());
                 if (recip == null || recip.getPublicKey() == null) {
                     throw new SignumException.NotValidException(
                             "Reward recipient must have public key saved in blockchain: "
@@ -2929,16 +2954,16 @@ public abstract class TransactionType {
                 }
 
                 if (transaction.getAmountNqt() != 0
-                        || transaction.getFeeNqt() < fluxCapacitor.getValue(FluxValues.FEE_QUANT, height)) {
+                        || transaction.getFeeNqt() < getContext().getFluxCapacitor().getValue(FluxValues.FEE_QUANT, height)) {
                     throw new SignumException.NotValidException(
                             "Reward recipient assignment transaction must have 0 send amount and at least minimum fee: "
                                     + JSON.toJsonString(transaction.getJsonObject()));
                 }
 
-                if (!Signum.getFluxCapacitor().getValue(FluxValues.REWARD_RECIPIENT_ENABLE, height)) {
+                if (!getContext().getFluxCapacitor().getValue(FluxValues.REWARD_RECIPIENT_ENABLE, height)) {
                     throw new SignumException.NotCurrentlyValidException(
                             "Reward recipient assignment not allowed before block "
-                                    + Signum.getFluxCapacitor().getStartingHeight(FluxValues.REWARD_RECIPIENT_ENABLE));
+                                    + getContext().getFluxCapacitor().getStartingHeight(FluxValues.REWARD_RECIPIENT_ENABLE));
                 }
             }
 
@@ -2985,7 +3010,7 @@ public abstract class TransactionType {
                     return false;
 
                 if (senderAccount.getUnconfirmedBalanceNqt() >= totalAmountNQT) {
-                    accountService.addToUnconfirmedBalanceNQT(senderAccount, -totalAmountNQT);
+                    getContext().getAccountService().addToUnconfirmedBalanceNQT(senderAccount, -totalAmountNQT);
                     return true;
                 }
                 return false;
@@ -3000,7 +3025,7 @@ public abstract class TransactionType {
             protected void undoAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
                 CommitmentAdd commitmentAdd = (CommitmentAdd) transaction.getAttachment();
                 Long totalAmountNQT = commitmentAdd.getAmountNqt();
-                accountService.addToUnconfirmedBalanceNQT(senderAccount, totalAmountNQT);
+                getContext().getAccountService().addToUnconfirmedBalanceNQT(senderAccount, totalAmountNQT);
             }
 
             @Override
@@ -3012,16 +3037,16 @@ public abstract class TransactionType {
 
             @Override
             protected void validateAttachment(Transaction transaction) throws SignumException.ValidationException {
-                int height = blockchain.getLastBlock().getHeight() + 1;
-                Account sender = accountService.getAccount(transaction.getSenderId());
+                int height = getContext().getBlockchain().getLastBlock().getHeight() + 1;
+                Account sender = getContext().getAccountService().getAccount(transaction.getSenderId());
 
                 if (sender == null) {
                     throw new SignumException.NotCurrentlyValidException("Sender not yet known ?!");
                 }
 
-                if (!Signum.getFluxCapacitor().getValue(FluxValues.SIGNUM, height)) {
+                if (!getContext().getFluxCapacitor().getValue(FluxValues.SIGNUM, height)) {
                     throw new SignumException.NotCurrentlyValidException("Add commitment not allowed before block "
-                            + Signum.getFluxCapacitor().getStartingHeight(FluxValues.SIGNUM));
+                            + getContext().getFluxCapacitor().getStartingHeight(FluxValues.SIGNUM));
                 }
             }
 
@@ -3061,17 +3086,16 @@ public abstract class TransactionType {
                 if (totalAmountNQT < 0L)
                     return false;
 
-                blockchain = Signum.getBlockchain();
-                int nBlocksMined = blockchain.getBlocksCount(senderAccount.getId(),
-                        blockchain.getHeight() - Constants.MAX_ROLLBACK, blockchain.getHeight());
+                int nBlocksMined = getContext().getBlockchain().getBlocksCount(senderAccount.getId(),
+                        getContext().getBlockchain().getHeight() - Constants.MAX_ROLLBACK, getContext().getBlockchain().getHeight());
                 if (nBlocksMined > 0) {
                     // need to wait since the last block mined to remove any commitment
                     return false;
                 }
-                long amountCommitted = blockchain.getCommittedAmount(senderAccount.getId(), blockchain.getHeight(),
-                        blockchain.getHeight(), transaction);
+                long amountCommitted = getContext().getBlockchain().getCommittedAmount(senderAccount.getId(), getContext().getBlockchain().getHeight(),
+                        getContext().getBlockchain().getHeight(), transaction);
                 if (amountCommitted >= totalAmountNQT) {
-                    accountService.addToUnconfirmedBalanceNQT(senderAccount, totalAmountNQT);
+                    getContext().getAccountService().addToUnconfirmedBalanceNQT(senderAccount, totalAmountNQT);
                     return true;
                 }
                 return false;
@@ -3087,7 +3111,7 @@ public abstract class TransactionType {
                 CommitmentRemove commitmentRemove = (CommitmentRemove) transaction.getAttachment();
                 long totalAmountNQT = commitmentRemove.getAmountNqt();
 
-                accountService.addToUnconfirmedBalanceNQT(senderAccount, -totalAmountNQT);
+                getContext().getAccountService().addToUnconfirmedBalanceNQT(senderAccount, -totalAmountNQT);
             }
 
             @Override
@@ -3100,16 +3124,16 @@ public abstract class TransactionType {
 
             @Override
             protected void validateAttachment(Transaction transaction) throws SignumException.ValidationException {
-                int height = blockchain.getLastBlock().getHeight() + 1;
-                Account sender = accountService.getAccount(transaction.getSenderId());
+                int height = getContext().getBlockchain().getLastBlock().getHeight() + 1;
+                Account sender = getContext().getAccountService().getAccount(transaction.getSenderId());
 
                 if (sender == null) {
                     throw new SignumException.NotCurrentlyValidException("Sender not yet known ?!");
                 }
 
-                if (!Signum.getFluxCapacitor().getValue(FluxValues.SIGNUM, height)) {
+                if (!getContext().getFluxCapacitor().getValue(FluxValues.SIGNUM, height)) {
                     throw new SignumException.NotCurrentlyValidException("Add commitment not allowed before block "
-                            + Signum.getFluxCapacitor().getStartingHeight(FluxValues.SIGNUM));
+                            + getContext().getFluxCapacitor().getStartingHeight(FluxValues.SIGNUM));
                 }
             }
 
@@ -3162,7 +3186,7 @@ public abstract class TransactionType {
                 if (senderAccount.getUnconfirmedBalanceNqt() < totalAmountNQT) {
                     return false;
                 }
-                accountService.addToUnconfirmedBalanceNQT(senderAccount, -totalAmountNQT);
+                getContext().getAccountService().addToUnconfirmedBalanceNQT(senderAccount, -totalAmountNQT);
                 return true;
             }
 
@@ -3180,11 +3204,11 @@ public abstract class TransactionType {
                 Attachment.AdvancedPaymentEscrowCreation attachment = (Attachment.AdvancedPaymentEscrowCreation) transaction
                         .getAttachment();
                 Long totalAmountNQT = calculateAttachmentTotalAmountNQT(transaction);
-                accountService.addToBalanceNQT(senderAccount, -totalAmountNQT);
+                getContext().getAccountService().addToBalanceNQT(senderAccount, -totalAmountNQT);
                 Collection<Long> signers = attachment.getSigners();
-                signers.forEach(signer -> accountService.addToBalanceAndUnconfirmedBalanceNQT(
-                        accountService.getOrAddAccount(signer), Constants.ONE_SIGNA));
-                escrowService.addEscrowTransaction(senderAccount,
+                signers.forEach(signer -> getContext().getAccountService().addToBalanceAndUnconfirmedBalanceNQT(
+                        getContext().getAccountService().getOrAddAccount(signer), Constants.ONE_SIGNA));
+                getContext().getEscrowService().addEscrowTransaction(senderAccount,
                         recipientAccount,
                         transaction.getId(),
                         attachment.getAmountNqt(),
@@ -3196,7 +3220,7 @@ public abstract class TransactionType {
 
             @Override
             protected final void undoAttachmentUnconfirmed(Transaction transaction, Account senderAccount) {
-                accountService.addToUnconfirmedBalanceNQT(senderAccount,
+                getContext().getAccountService().addToUnconfirmedBalanceNQT(senderAccount,
                         calculateAttachmentTotalAmountNQT(transaction));
             }
 
@@ -3244,7 +3268,7 @@ public abstract class TransactionType {
                         attachment.getSigners().contains(transaction.getRecipientId())) {
                     throw new SignumException.NotValidException("Escrow sender and recipient cannot be signers");
                 }
-                if (!escrowService.isEnabled()) {
+                if (!getContext().getEscrowService().isEnabled()) {
                     throw new SignumException.NotYetEnabledException("Escrow not yet enabled");
                 }
             }
@@ -3287,8 +3311,8 @@ public abstract class TransactionType {
                     Account recipientAccount) {
                 Attachment.AdvancedPaymentEscrowSign attachment = (Attachment.AdvancedPaymentEscrowSign) transaction
                         .getAttachment();
-                Escrow escrow = escrowService.getEscrowTransaction(attachment.getEscrowId());
-                escrowService.sign(senderAccount.getId(), attachment.getDecision(), escrow);
+                Escrow escrow = getContext().getEscrowService().getEscrowTransaction(attachment.getEscrowId());
+                getContext().getEscrowService().sign(senderAccount.getId(), attachment.getDecision(), escrow);
             }
 
             @Override
@@ -3315,11 +3339,11 @@ public abstract class TransactionType {
                 if (attachment.getEscrowId() == null || attachment.getDecision() == null) {
                     throw new SignumException.NotValidException("Escrow signing requires escrow id and decision set");
                 }
-                Escrow escrow = escrowService.getEscrowTransaction(attachment.getEscrowId());
+                Escrow escrow = getContext().getEscrowService().getEscrowTransaction(attachment.getEscrowId());
                 if (escrow == null) {
                     throw new SignumException.NotValidException("Escrow transaction not found");
                 }
-                if (!escrowService.isIdSigner(transaction.getSenderId(), escrow) &&
+                if (!getContext().getEscrowService().isIdSigner(transaction.getSenderId(), escrow) &&
                         !escrow.getSenderId().equals(transaction.getSenderId()) &&
                         !escrow.getRecipientId().equals(transaction.getSenderId())) {
                     throw new SignumException.NotValidException("Sender is not a participant in specified escrow");
@@ -3332,7 +3356,7 @@ public abstract class TransactionType {
                         && attachment.getDecision() != Escrow.DecisionType.REFUND) {
                     throw new SignumException.NotValidException("Escrow recipient can only refund");
                 }
-                if (!escrowService.isEnabled()) {
+                if (!getContext().getEscrowService().isEnabled()) {
                     throw new SignumException.NotYetEnabledException("Escrow not yet enabled");
                 }
             }
@@ -3435,7 +3459,7 @@ public abstract class TransactionType {
                     Account recipientAccount) {
                 Attachment.AdvancedPaymentSubscriptionSubscribe attachment = (Attachment.AdvancedPaymentSubscriptionSubscribe) transaction
                         .getAttachment();
-                subscriptionService.addSubscription(senderAccount, recipientAccount.getId(), transaction.getId(),
+                getContext().getSubscriptionService().addSubscription(senderAccount, recipientAccount.getId(), transaction.getId(),
                         transaction.getAmountNqt(), transaction.getTimestamp(), attachment.getFrequency());
             }
 
@@ -3461,12 +3485,12 @@ public abstract class TransactionType {
                 if (transaction.getAmountNqt() < Constants.ONE_SIGNA
                         || transaction.getAmountNqt() > Constants.MAX_BALANCE_NQT) {
                     throw new SignumException.NotValidException("Subscriptions must be at least one "
-                            + Signum.getPropertyService().getString(Props.VALUE_SUFIX));
+                            + getContext().getPropertyService().getString(Props.VALUE_SUFIX));
                 }
                 if (transaction.getSenderId() == transaction.getRecipientId()) {
                     throw new SignumException.NotValidException("Cannot create subscription to same address");
                 }
-                if (!subscriptionService.isEnabled()) {
+                if (!getContext().getSubscriptionService().isEnabled()) {
                     throw new SignumException.NotYetEnabledException("Subscriptions not yet enabled");
                 }
             }
@@ -3505,7 +3529,7 @@ public abstract class TransactionType {
                 logger.trace("TransactionType SUBSCRIPTION_CANCEL");
                 Attachment.AdvancedPaymentSubscriptionCancel attachment = (Attachment.AdvancedPaymentSubscriptionCancel) transaction
                         .getAttachment();
-                subscriptionService.addRemoval(attachment.getSubscriptionId());
+                getContext().getSubscriptionService().addRemoval(attachment.getSubscriptionId());
                 return true;
             }
 
@@ -3514,7 +3538,7 @@ public abstract class TransactionType {
                     Account recipientAccount) {
                 Attachment.AdvancedPaymentSubscriptionCancel attachment = (Attachment.AdvancedPaymentSubscriptionCancel) transaction
                         .getAttachment();
-                subscriptionService.removeSubscription(attachment.getSubscriptionId());
+                getContext().getSubscriptionService().removeSubscription(attachment.getSubscriptionId());
             }
 
             @Override
@@ -3538,7 +3562,7 @@ public abstract class TransactionType {
                     throw new SignumException.NotValidException("Subscription cancel must include subscription id");
                 }
 
-                Subscription subscription = subscriptionService.getSubscription(attachment.getSubscriptionId());
+                Subscription subscription = getContext().getSubscriptionService().getSubscription(attachment.getSubscriptionId());
                 if (subscription == null) {
                     throw new SignumException.NotValidException(
                             "Subscription cancel must contain current subscription id");
@@ -3549,7 +3573,7 @@ public abstract class TransactionType {
                     throw new SignumException.NotValidException("Subscription cancel can only be done by participants");
                 }
 
-                if (!subscriptionService.isEnabled()) {
+                if (!getContext().getSubscriptionService().isEnabled()) {
                     throw new SignumException.NotYetEnabledException("Subscription cancel not yet enabled");
                 }
             }
@@ -3677,13 +3701,13 @@ public abstract class TransactionType {
             @Override
             void doValidateAttachment(Transaction transaction)
                     throws ValidationException {
-                if (!fluxCapacitor.getValue(FluxValues.AUTOMATED_TRANSACTION_BLOCK,
-                        blockchain.getLastBlock().getHeight())) {
+                if (!getContext().getFluxCapacitor().getValue(FluxValues.AUTOMATED_TRANSACTION_BLOCK,
+                        getContext().getBlockchain().getLastBlock().getHeight())) {
                     throw new SignumException.NotYetEnabledException("Automated Transactions not yet enabled at height "
-                            + blockchain.getLastBlock().getHeight());
+                            + getContext().getBlockchain().getLastBlock().getHeight());
                 }
-                if (transaction.getSignature() != null && accountService.getAccount(transaction.getId()) != null) {
-                    Account existingAccount = accountService.getAccount(transaction.getId());
+                if (transaction.getSignature() != null && getContext().getAccountService().getAccount(transaction.getId()) != null) {
+                    Account existingAccount = getContext().getAccountService().getAccount(transaction.getId());
                     if (existingAccount.getPublicKey() != null
                             && !Arrays.equals(existingAccount.getPublicKey(), new byte[32]))
                         throw new SignumException.NotValidException("Account with id already exists");
@@ -3696,10 +3720,10 @@ public abstract class TransactionType {
                 long totalPages;
                 int minCodePages = 1;
                 try {
-                    AtMachineState thisNewAtCreation = new AtMachineState(null, null, attachment.getCreationBytes(), 0);
+                    AtMachineState thisNewAtCreation = AtMachineState.parseForValidation(attachment.getCreationBytes(), 0);
                     if (thisNewAtCreation.getApCodeBytes().length == 0) {
                         // check if we have a reference for the code
-                        Transaction referenceTransaction = Signum.getBlockchain()
+                        Transaction referenceTransaction = getContext().getBlockchain()
                                 .getTransactionByFullHash(transaction.getReferencedTransactionFullHash());
                         minCodePages = 0;
 
@@ -3707,7 +3731,7 @@ public abstract class TransactionType {
                                 .getAttachment() instanceof Attachment.AutomatedTransactionsCreation) {
                             Attachment.AutomatedTransactionsCreation atCreationAttachmentRef = (Attachment.AutomatedTransactionsCreation) referenceTransaction
                                     .getAttachment();
-                            AtMachineState atCreationRef = new AtMachineState(null, null,
+                            AtMachineState atCreationRef = AtMachineState.parseForValidation(
                                     atCreationAttachmentRef.getCreationBytes(), referenceTransaction.getHeight());
                             // we need a code and also compatible page sizes
                             if (atCreationRef.getApCodeBytes().length == 0
@@ -3722,18 +3746,18 @@ public abstract class TransactionType {
                                     "Invalid reference transaction for the AT code");
                         }
                     }
-                    totalPages = AtController.checkCreationBytes(attachment.getCreationBytes(), blockchain.getHeight(),
+                    totalPages = AtController.checkCreationBytes(attachment.getCreationBytes(), getContext().getBlockchain().getHeight(),
                             minCodePages);
                 } catch (AtException e) {
                     throw new SignumException.NotCurrentlyValidException("Invalid AT creation bytes", e);
                 }
-                long requiredFee = totalPages * AtConstants.getInstance().costPerPage(blockchain.getHeight());
+                long requiredFee = totalPages * getContext().getAtConstants().costPerPage(getContext().getBlockchain().getHeight());
                 if (transaction.getFeeNqt() < requiredFee) {
                     throw new SignumException.NotValidException(
                             "Insufficient fee for AT creation, using " + transaction.getFeeNqt()
                                     + ", minimum: " + requiredFee);
                 }
-                if (fluxCapacitor.getValue(FluxValues.AT_FIX_BLOCK_3)) {
+                if (getContext().getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_3)) {
                     if (attachment.getName().length() > Constants.MAX_AUTOMATED_TRANSACTION_NAME_LENGTH) {
                         throw new SignumException.NotValidException("Name of automated transaction over size limit");
                     }
@@ -3750,13 +3774,13 @@ public abstract class TransactionType {
                         .getAttachment();
 
                 long codeHashId = 0L;
-                AtMachineState thisNewAtCreation = new AtMachineState(null, null, attachment.getCreationBytes(), 0);
+                AtMachineState thisNewAtCreation = AtMachineState.parseForValidation(attachment.getCreationBytes(), 0);
                 if (thisNewAtCreation.getApCodeBytes().length == 0) {
-                    Transaction referenceTransaction = Signum.getBlockchain()
+                    Transaction referenceTransaction = getContext().getBlockchain()
                             .getTransactionByFullHash(transaction.getReferencedTransactionFullHash());
                     Attachment.AutomatedTransactionsCreation atCreationAttachmentRef = (Attachment.AutomatedTransactionsCreation) referenceTransaction
                             .getAttachment();
-                    AtMachineState atCreationRef = new AtMachineState(null, null,
+                    AtMachineState atCreationRef = AtMachineState.parseForValidation(
                             atCreationAttachmentRef.getCreationBytes(), referenceTransaction.getHeight());
                     codeHashId = atCreationRef.getApCodeHashId();
                 }
@@ -3827,11 +3851,11 @@ public abstract class TransactionType {
     }
 
     public Fee getBaselineFee(int height) {
-        long FEE_QUANT = fluxCapacitor.getValue(FluxValues.FEE_QUANT, height);
-        if (fluxCapacitor.getValue(FluxValues.SPEEDWAY, height)) {
+        long FEE_QUANT = getContext().getFluxCapacitor().getValue(FluxValues.FEE_QUANT, height);
+        if (getContext().getFluxCapacitor().getValue(FluxValues.SPEEDWAY, height)) {
             return new Fee(FEE_QUANT, FEE_QUANT);
         }
-        return new Fee((fluxCapacitor.getValue(FluxValues.PRE_POC2, height) ? FEE_QUANT : ONE_SIGNA), 0);
+        return new Fee((getContext().getFluxCapacitor().getValue(FluxValues.PRE_POC2, height) ? FEE_QUANT : ONE_SIGNA), 0);
     }
 
     public static final class Fee {

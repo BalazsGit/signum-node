@@ -1,10 +1,14 @@
 package application.module.node.lifecycle;
 
+import application.module.node.metrics.ProfileMetric;
+import application.module.node.metrics.ProfileMetricCollector;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collection;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -26,7 +30,7 @@ class NodeProfileRuntimeTest {
 
     @BeforeEach
     void setUp() {
-        runtime = new NodeProfileRuntime();
+        runtime = new NodeProfileRuntime("test-profile");
     }
 
     // ── Construction Tests ──────────────────────────────────────────────
@@ -385,10 +389,67 @@ class NodeProfileRuntimeTest {
         @DisplayName("set/get core context (null check)")
         void testCoreContext() {
             assertNull(runtime.getCoreContext());
-            // We can't create a real NodeCoreContext in unit tests,
-            // but we verify the setter doesn't throw
             runtime.setCoreContext(null);
             assertNull(runtime.getCoreContext());
+        }
+    }
+
+    // ── Metrics Integration Tests ────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Metrics Integration")
+    class MetricsTests {
+
+        @Test
+        @DisplayName("getMetrics returns non-null collector")
+        void testMetricsNeverNull() {
+            assertNotNull(runtime.getMetrics());
+        }
+
+        @Test
+        @DisplayName("Collector is bound to correct profile ID")
+        void testCollectorBoundToProfileId() {
+            assertEquals("test-profile", runtime.getMetrics().getProfileId());
+        }
+
+        @Test
+        @DisplayName("Can record and retrieve metrics via runtime")
+        void testRecordAndRetrieveMetric() {
+            runtime.getMetrics().record("blockchain", "height", 12345);
+            ProfileMetric metric = runtime.getMetrics().get("blockchain", "height");
+            assertNotNull(metric);
+            assertEquals(12345.0, metric.getValue());
+        }
+
+        @Test
+        @DisplayName("Cannot record with null moduleId")
+        void testRecordNullModuleIdThrows() {
+            assertThrows(NullPointerException.class,
+                () -> runtime.getMetrics().record(null, "height", 1));
+        }
+
+        @Test
+        @DisplayName("Cannot record with null metricName")
+        void testRecordNullMetricNameThrows() {
+            assertThrows(NullPointerException.class,
+                () -> runtime.getMetrics().record("blockchain", null, 1));
+        }
+
+        @Test
+        @DisplayName("getByModule returns only that module's metrics")
+        void testGetByModule() {
+            runtime.getMetrics().record("blockchain", "height", 100);
+            runtime.getMetrics().record("peer", "count", 5);
+            Collection<ProfileMetric> blockchain = runtime.getMetrics().getByModule("blockchain");
+            assertEquals(1, blockchain.size());
+        }
+
+        @Test
+        @DisplayName("Clear removes all metrics")
+        void testClear() {
+            runtime.getMetrics().record("blockchain", "height", 100);
+            runtime.getMetrics().clear();
+            assertEquals(0, runtime.getMetrics().size());
         }
     }
 

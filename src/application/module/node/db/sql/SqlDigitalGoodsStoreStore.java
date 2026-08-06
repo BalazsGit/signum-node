@@ -63,22 +63,25 @@ public class SqlDigitalGoodsStoreStore implements DigitalGoodsStoreStore {
     private VersionedEntityTable<DigitalGoodsStore.Goods> goodsTable;
 
     private final Blockchain blockchain;
+    private final DbContext dbContext;
 
     public SqlDigitalGoodsStoreStore(DerivedTableManager derivedTableManager, StoreDependencies storeDependencies) {
         this.blockchain = storeDependencies.blockchain();
+        this.dbContext = storeDependencies.dbContext();
         initTables(derivedTableManager);
     }
 
     @Deprecated
     public SqlDigitalGoodsStoreStore(DerivedTableManager derivedTableManager) {
         this.blockchain = null;
+        this.dbContext = null;
         initTables(derivedTableManager);
     }
 
     private void initTables(DerivedTableManager derivedTableManager) {
         purchaseTable = new VersionedEntitySqlTable<DigitalGoodsStore.Purchase>("purchase",
                 application.module.node.schema.Tables.PURCHASE,
-                purchaseDbKeyFactory, derivedTableManager) {
+                purchaseDbKeyFactory, derivedTableManager, blockchain, dbContext) {
             @Override
             protected DigitalGoodsStore.Purchase load(DSLContext ctx, Record rs) {
                 return new SQLPurchase(rs);
@@ -99,7 +102,7 @@ public class SqlDigitalGoodsStoreStore implements DigitalGoodsStoreStore {
         };
 
         feedbackTable = new VersionedValuesSqlTable<DigitalGoodsStore.Purchase, EncryptedData>("purchase_feedback",
-                application.module.node.schema.Tables.PURCHASE_FEEDBACK, feedbackDbKeyFactory, derivedTableManager) {
+                application.module.node.schema.Tables.PURCHASE_FEEDBACK, feedbackDbKeyFactory, derivedTableManager, dbContext) {
 
             @Override
             protected EncryptedData load(DSLContext ctx, Record record) {
@@ -131,7 +134,7 @@ public class SqlDigitalGoodsStoreStore implements DigitalGoodsStoreStore {
         publicFeedbackTable = new VersionedValuesSqlTable<DigitalGoodsStore.Purchase, String>(
                 "purchase_public_feedback", application.module.node.schema.Tables.PURCHASE_PUBLIC_FEEDBACK,
                 publicFeedbackDbKeyFactory,
-                derivedTableManager) {
+                derivedTableManager, dbContext) {
 
             @Override
             protected String load(DSLContext ctx, Record record) {
@@ -156,7 +159,7 @@ public class SqlDigitalGoodsStoreStore implements DigitalGoodsStoreStore {
 
         goodsTable = new VersionedEntitySqlTable<DigitalGoodsStore.Goods>("goods",
                 application.module.node.schema.Tables.GOODS,
-                goodsDbKeyFactory, derivedTableManager) {
+                goodsDbKeyFactory, derivedTableManager, blockchain, dbContext) {
 
             @Override
             protected DigitalGoodsStore.Goods load(DSLContext ctx, Record rs) {

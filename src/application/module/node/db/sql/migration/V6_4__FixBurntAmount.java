@@ -6,20 +6,36 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.List;
 
-import application.module.node.db.sql.Db;
 import org.flywaydb.core.api.migration.BaseJavaMigration;
 import org.flywaydb.core.api.migration.Context;
 
 import application.module.node.Attachment.PaymentMultiOutCreation;
 import application.module.node.Attachment.PaymentMultiSameOutCreation;
 import application.module.node.TransactionType;
-import org.jooq.SQLDialect;
 
+/**
+ * Migration to fix burnt amount calculations.
+ * Skipped for SQLite and PostgreSQL as they handle this differently.
+ * <p>
+ * Phase 10e: Replaced static {@code Db.getDialect()} with instance-based
+ * dialect detection via JDBC connection metadata from Flyway context.
+ */
 public class V6_4__FixBurntAmount extends BaseJavaMigration {
 
+    /**
+     * Determines if the current database is SQLite or PostgreSQL using JDBC URL.
+     * <p>
+     * This replaces the static {@code Db.getDialect()} call to support multi-profile
+     * operation where each profile has its own isolated DbContext.
+     */
+    private static boolean isSqliteOrPostgres(Context context) throws java.sql.SQLException {
+        String url = context.getConnection().getMetaData().getURL();
+        return url != null && (url.startsWith("jdbc:sqlite:") || url.startsWith("jdbc:postgresql:"));
+    }
+
+    @Override
     public void migrate(Context context) throws Exception {
-        if (Db.getDialect() == SQLDialect.SQLITE ||
-                Db.getDialect() == SQLDialect.POSTGRES) {
+        if (isSqliteOrPostgres(context)) {
             return;
         }
 

@@ -6,6 +6,7 @@ import application.module.node.services.SubscriptionService;
 import application.module.node.util.Convert;
 import application.module.node.web.api.http.common.APITransactionManager;
 import application.module.node.web.api.http.common.LegacyDocTag;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
@@ -20,14 +21,16 @@ public final class SubscriptionCancel extends CreateTransaction {
     private final ParameterService parameterService;
     private final SubscriptionService subscriptionService;
     private final Blockchain blockchain;
+    private final FluxCapacitor fluxCapacitor;
 
     public SubscriptionCancel(ParameterService parameterService, SubscriptionService subscriptionService,
-            Blockchain blockchain, APITransactionManager apiTransactionManager) {
+            Blockchain blockchain, APITransactionManager apiTransactionManager, FluxCapacitor fluxCapacitor) {
         super(new LegacyDocTag[] { LegacyDocTag.TRANSACTIONS, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
-                SUBSCRIPTION_PARAMETER);
+                fluxCapacitor, SUBSCRIPTION_PARAMETER);
         this.parameterService = parameterService;
         this.blockchain = blockchain;
         this.subscriptionService = subscriptionService;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     @Override

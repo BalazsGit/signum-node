@@ -9,6 +9,7 @@ import application.module.node.util.TextUtils;
 import application.module.node.web.api.http.common.APITransactionManager;
 import application.module.node.web.api.http.common.LegacyDocTag;
 import application.module.node.web.api.http.common.ParameterParser;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import org.slf4j.Logger;
@@ -29,14 +30,18 @@ public final class CreateATProgram extends CreateTransaction {
 
     private final ParameterService parameterService;
     private final Blockchain blockchain;
+    private final AtConstants atConstants;
+    private final FluxCapacitor fluxCapacitor;
 
     public CreateATProgram(ParameterService parameterService, Blockchain blockchain,
-            APITransactionManager apiTransactionManager) {
+            APITransactionManager apiTransactionManager, AtConstants atConstants, FluxCapacitor fluxCapacitor) {
         super(new LegacyDocTag[] { LegacyDocTag.AT, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
-                NAME_PARAMETER, DESCRIPTION_PARAMETER, CREATION_BYTES_PARAMETER, CODE_PARAMETER, DATA_PARAMETER,
+                fluxCapacitor, NAME_PARAMETER, DESCRIPTION_PARAMETER, CREATION_BYTES_PARAMETER, CODE_PARAMETER, DATA_PARAMETER,
                 DPAGES_PARAMETER, CSPAGES_PARAMETER, USPAGES_PARAMETER, MIN_ACTIVATION_AMOUNT_NQT_PARAMETER);
         this.parameterService = parameterService;
         this.blockchain = blockchain;
+        this.atConstants = atConstants;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     @Override
@@ -70,7 +75,7 @@ public final class CreateATProgram extends CreateTransaction {
                     throw new IllegalArgumentException();
                 }
 
-                short version = AtConstants.getInstance().atVersion(blockchain.getHeight());
+                short version = atConstants.atVersion(blockchain.getHeight());
                 int cpages = 0;
                 int dpages = 0;
                 int cspages = 0;
@@ -87,7 +92,7 @@ public final class CreateATProgram extends CreateTransaction {
                     }
                     Attachment.AutomatedTransactionsCreation atCreationAttachment = (Attachment.AutomatedTransactionsCreation) transaction
                             .getAttachment();
-                    AtMachineState atCreation = new AtMachineState(null, null, atCreationAttachment.getCreationBytes(),
+                    AtMachineState atCreation = AtMachineState.parseForValidation(atCreationAttachment.getCreationBytes(),
                             transaction.getHeight());
                     if (atCreation.getApCodeBytes().length == 0) {
                         throw new IllegalArgumentException();

@@ -1,7 +1,9 @@
 package application.module.node.lifecycle;
 
 import application.module.node.instance.NodeCoreContext;
+import application.module.node.metrics.ProfileMetricCollector;
 
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -111,14 +113,25 @@ public final class NodeProfileRuntime {
      */
     private volatile NodeCoreContext coreContext;
 
+    // ── Metrics (Measurement Hierarchy) ────────────────────────────────
+
+    /**
+     * Profile-scoped metric collector for structured measurement data collection.
+     * Thread-safe, stores latest value per module+metric combination.
+     */
+    private final ProfileMetricCollector metrics;
+
     // ── Construction ────────────────────────────────────────────────────
 
     /**
      * Creates a new runtime state container with default-initialized values.
      * Lifecycle starts in IDLE, operating state starts in SYNC_IDLE.
+     *
+     * @param profileId the node profile identifier for metric collection (never null)
      */
-    public NodeProfileRuntime() {
+    public NodeProfileRuntime(String profileId) {
         this.stateMachine = new LifecycleStateMachine();
+        this.metrics = new ProfileMetricCollector(Objects.requireNonNull(profileId, "profileId must not be null"));
         this.startTime = 0;
         this.stopTime = null;
         this.errorMessage = null;
@@ -388,6 +401,19 @@ public final class NodeProfileRuntime {
         this.coreContext = coreContext;
     }
 
+    // ── Metrics Access (Measurement Hierarchy) ─────────────────────────
+
+    /**
+     * Returns the profile-scoped metric collector.
+     * Use this to record or query structured measurement data
+     * (blockchain height, peer count, trim metrics, etc.).
+     *
+     * @return the {@link ProfileMetricCollector} (never null)
+     */
+    public ProfileMetricCollector getMetrics() {
+        return metrics;
+    }
+
     // ── Computed Sync Duration Helpers ──────────────────────────────────
 
     /**
@@ -446,6 +472,7 @@ public final class NodeProfileRuntime {
                 ", missingBlocks=" + missingBlocks +
                 ", active=" + isActive() +
                 ", coreContext=" + (coreContext != null ? "present" : "null") +
+                ", metrics=" + metrics +
                 '}';
     }
 }

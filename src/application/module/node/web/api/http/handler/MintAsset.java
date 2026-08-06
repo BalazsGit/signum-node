@@ -2,6 +2,7 @@ package application.module.node.web.api.http.handler;
 
 import application.module.node.*;
 import application.module.node.assetexchange.AssetExchange;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.ParameterService;
 import application.module.node.util.Convert;
@@ -24,8 +25,8 @@ public final class MintAsset extends CreateTransaction {
     private final AssetExchange assetExchange;
 
     public MintAsset(ParameterService parameterService, Blockchain blockchain,
-            APITransactionManager apiTransactionManager, AssetExchange assetExchange) {
-        super(new LegacyDocTag[] { LegacyDocTag.AE, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
+            APITransactionManager apiTransactionManager, AssetExchange assetExchange, FluxCapacitor fluxCapacitor) {
+        super(new LegacyDocTag[] { LegacyDocTag.AE, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager, fluxCapacitor,
                 ASSET_PARAMETER, QUANTITY_QNT_PARAMETER);
         this.parameterService = parameterService;
         this.blockchain = blockchain;
@@ -42,14 +43,14 @@ public final class MintAsset extends CreateTransaction {
         if (asset.getMintable() == false) {
             return JSONResponses.incorrect("this asset is not mintable");
         }
-        if (!Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
+        if (!this.fluxCapacitor.getValue(FluxValues.SMART_TOKEN)) {
             return JSONResponses.incorrect("minting assets is not enabled yet");
         }
         if (asset.getAccountId() != account.getId()) {
             return JSONResponses.incorrect("only the current asset owner can mint new coins");
         }
 
-        boolean unconfirmed = !Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX);
+        boolean unconfirmed = !this.fluxCapacitor.getValue(FluxValues.DISTRIBUTION_FIX);
         long circulatingSupply = assetExchange.getAssetCirculatingSupply(asset, false, unconfirmed);
         long newSupply;
         try {

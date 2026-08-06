@@ -1,9 +1,11 @@
 package application.module.node.web.server;
 
 import application.module.node.*;
+import application.module.node.at.AtConstants;
 import application.module.node.assetexchange.AssetExchange;
 import application.module.node.deeplink.DeeplinkQRCodeGenerator;
 import application.module.node.feesuggestions.FeeSuggestionCalculator;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.props.PropertyService;
 import application.module.node.services.*;
 import application.module.node.util.ThreadPool;
@@ -34,6 +36,8 @@ public class WebServerContext {
     private final DeeplinkQRCodeGenerator deepLinkQRCodeGenerator;
     private final IndirectIncomingService indirectIncomingService;
     private final NetworkParameters params;
+    private final AtConstants atConstants;
+    private final FluxCapacitor fluxCapacitor;
 
     public WebServerContext(TransactionProcessor transactionProcessor, Blockchain blockchain,
             BlockchainProcessor blockchainProcessor, ParameterService parameterService, AccountService accountService,
@@ -43,7 +47,8 @@ public class WebServerContext {
             ThreadPool threadPool, TransactionService transactionService, BlockService blockService,
             Generator generator, APITransactionManager apiTransactionManager,
             FeeSuggestionCalculator feeSuggestionCalculator, DeeplinkQRCodeGenerator deepLinkQRCodeGenerator,
-            IndirectIncomingService indirectIncomingService, NetworkParameters params) {
+            IndirectIncomingService indirectIncomingService, NetworkParameters params, AtConstants atConstants,
+            FluxCapacitor fluxCapacitor) {
         this.transactionProcessor = transactionProcessor;
         this.blockchain = blockchain;
         this.blockchainProcessor = blockchainProcessor;
@@ -67,6 +72,8 @@ public class WebServerContext {
         this.deepLinkQRCodeGenerator = deepLinkQRCodeGenerator;
         this.indirectIncomingService = indirectIncomingService;
         this.params = params;
+        this.atConstants = atConstants;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     public TransactionProcessor getTransactionProcessor() {
@@ -159,5 +166,13 @@ public class WebServerContext {
 
     public NetworkParameters getNetworkParameters() {
         return params;
+    }
+
+    public AtConstants getAtConstants() {
+        return atConstants;
+    }
+
+    public FluxCapacitor getFluxCapacitor() {
+        return fluxCapacitor;
     }
 }

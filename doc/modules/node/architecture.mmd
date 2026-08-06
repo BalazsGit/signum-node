@@ -1,30 +1,54 @@
 ---
-description: Node module component, config resolution, and logging architecture diagram
+description: Node module component, config resolution, logging, and multi-profile runtime architecture diagram
 ---
 flowchart BT
     subgraph Node_Module["Node Module"]
-        Signum[Signum]
         ProfileConfig[ProfileConfig]
         LifecycleMgr[NodeLifecycleManager]
-        BlockchainProc[BlockchainProcessorImpl]
         LoggingProv[NodeLoggingProvider]
-        NodeCoreCtx[NodeCoreContext]
+
+        subgraph Profile_Runtime["Profile Runtime (per profile)"]
+            direction TB
+            NodeProfile[NodeProfile<br/>(Config Entity)]
+            NodeProfileRuntime[NodeProfileRuntime<br/>(State Container)]
+            StateMachine[LifecycleStateMachine<br/>(State Pattern)]
+            MetricCollector[ProfileMetricCollector<br/>(Per-Profile Metrics)]
+
+            subgraph CoreContext["NodeCoreContext<br/>(Isolated Resources)"]
+                direction TB
+                DbContext[DbContext]
+                StoreDeps[StoreDependencies]
+                PropertyService[PropertyService]
+                Blockchain[Blockchain]
+                Stores[*Store Instances]
+                Services[*Service Instances]
+                ThreadPool[ThreadPool]
+                WebServer[WebServer]
+            end
+        end
+
+        NodeProfile -->|composition 1:1| NodeProfileRuntime
+        NodeProfileRuntime -->|owns| StateMachine
+        NodeProfileRuntime -->|owns| MetricCollector
+        NodeProfileRuntime -->|owns| CoreContext
     end
 
     subgraph Config_System["Config System"]
         ConfigPath[ModuleConfigPath]
-        PropsSvc[PropertiesService]
+        PPL[PropertiesProfileLoader]
         LogMgr[LoggingProfileManager]
+        ProfileBuilder[NodeProfile.Builder<br/>(Builder Pattern)]
     end
 
     subgraph Resources["Resources JAR"]
-        NodeDef[/conf/node/profiles/ profile-default.properties]
+        NodeDef[/conf/node/profiles/ node-default.properties]
         LogDef[/conf/node/logging/ logging-default.properties]
     end
 
-    subgraph Runtime["Runtime User"]
-        UserNode[conf/node/ {profile}.properties]
-        UserLog[conf/node/logging.properties]
+    subgraph Runtime_Config["Runtime User Config"]
+        UserNode[conf/node/profiles/ {profile}.properties]
+        UserLog[conf/node/logging/logging.properties]
+        ProfilesJson[settings/profiles.json<br/>(loggingAssociations + tabOrder)]
     end
 
     subgraph Logging_Framework["Logging Framework"]
@@ -33,13 +57,13 @@ flowchart BT
         LoggerImpl[LoggerImpl Abstract]
         SystemLogger[SystemLogger Singleton]
         ProfileLogger[ProfileLogger Per-Profile]
-        
+
         ModuleLogger -.-> LoggerImpl
         LoggerImpl --> SystemLogger
         LoggerImpl --> ProfileLogger
     end
 
-    subgraph New_Bridge["New JUL→SystemLogger Bridge"]
+    subgraph New_Bridge["JUL→SystemLogger Bridge"]
         direction TB
         SysRouterHandler[SystemLogRouterHandler]
         JulBridge[SLF4J → slf4j-jdk14 → JUL LogManager]
@@ -58,26 +82,32 @@ flowchart BT
         NodeConsolePanel[NodeConsolePanel TextAreaOutputStream]
     end
 
+    %% Profile Loading Flow
+    PPL -->|discovers| UserNode
+    PPL -->|syncs defaults| NodeDef
+    PPL -->|creates via factory| ProfileBuilder
+    ProfileBuilder -->|builds| NodeProfile
+    ProfilesJson -->|loggingAssociation| NodeProfile
+
     %% Config Resolution
-    Signum --> ConfigPath
+    LifecycleMgr -->|manages| NodeProfile
+    LifecycleMgr -->|uses| PPL
+    LoggingProv --> LogMgr
     ConfigPath --> NodeDef
     ConfigPath --> LogDef
     ConfigPath --> UserNode
     ConfigPath --> UserLog
-    LoggingProv --> LogMgr
-    LifecycleMgr --> PropsSvc
-    ProfileConfig --> ConfigPath
 
     %% New JUL→SystemLogger Bridge (Active)
     JulBridge -->|publish(LogRecord)| SysRouterHandler
     SysRouterHandler -->|"LogEvent.from()"| SystemLogger
 
     %% Logging Architecture
-    NodeCoreCtx --> ProfileLogger
+    CoreContext --> ProfileLogger
     SystemLogger --> SysConsole
     ProfileLogger --> ProfConsole
     ProfileLogger -.->|forwardToSystem| SystemLogger
-    
+
     %% Bootstrap Logs
     NodeConsolePanel -->|"bootstrap logs"| ProfConsole
 
@@ -86,3 +116,14 @@ flowchart BT
     ProfileLogRouter -.->|globalSubscribers| SysConsole
     ProfileThreadCtx -.->|MDC Routing| ProfileLogRouter
     ProfileLogCtx -.->|Subscriber Registry| ProfileLogRouter
+
+    %% CoreContext Internal Dependencies (Phase 10e: StoreDependencies added)
+    DbContext --> PropertyService
+    DbContext --> StoreDeps
+    PropertyService --> StoreDeps
+    StoreDeps --> Blockchain
+    StoreDeps --> Stores
+    Blockchain --> Stores
+    Stores --> Services
+    Services --> ThreadPool
+    Services --> WebServer

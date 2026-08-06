@@ -22,29 +22,29 @@ public abstract class VersionedEntitySqlTable<T> extends EntitySqlTable<T> imple
     private final Blockchain blockchain;
 
     VersionedEntitySqlTable(String table, TableImpl<?> tableClass, SignumKey.Factory<T> dbKeyFactory,
-            DerivedTableManager derivedTableManager) {
-        super(table, tableClass, dbKeyFactory, true, derivedTableManager);
+            DerivedTableManager derivedTableManager, DbContext dbContext) {
+        super(table, tableClass, dbKeyFactory, true, derivedTableManager, dbContext);
         this.blockchain = null;
     }
 
     VersionedEntitySqlTable(String table, TableImpl<?> tableClass, SignumKey.Factory<T> dbKeyFactory,
-            DerivedTableManager derivedTableManager, Blockchain blockchain) {
-        super(table, tableClass, dbKeyFactory, true, derivedTableManager);
+            DerivedTableManager derivedTableManager, Blockchain blockchain, DbContext dbContext) {
+        super(table, tableClass, dbKeyFactory, true, derivedTableManager, dbContext);
         this.blockchain = blockchain;
     }
 
     @Override
     public void rollback(int height) {
-        rollback(table, tableClass, heightField, latestField, height, dbKeyFactory);
+        rollback(dbContext, table, tableClass, heightField, latestField, height, dbKeyFactory);
     }
 
-    static void rollback(final String table, final TableImpl<?> tableClass, Field<Integer> heightField,
+    static void rollback(DbContext dbContext, final String table, final TableImpl<?> tableClass, Field<Integer> heightField,
             Field<Boolean> latestField, final int height, final DbKey.Factory<?> dbKeyFactory) {
-        if (!Db.isInTransaction()) {
+        if (!dbContext.isInTransaction()) {
             throw new IllegalStateException("Not in transaction");
         }
 
-        Db.useDSLContext(ctx -> {
+        dbContext.useDSLContext(ctx -> {
             // get dbKey's for entries whose stuff newer than height would be deleted, to
             // allow fixing
             // their latest flag of the "potential" remaining newest entry
@@ -80,28 +80,28 @@ public abstract class VersionedEntitySqlTable<T> extends EntitySqlTable<T> imple
                 }
             }
         });
-        Db.getCache(table).clear();
+        dbContext.getCache(table).clear();
     }
 
     @Override
     public void trim(int height) {
-        trim(tableClass, heightField, height, dbKeyFactory);
+        trim(dbContext, tableClass, heightField, height, dbKeyFactory);
     }
 
-    static void trim(
+    static void trim(DbContext dbContext,
             final TableImpl<?> tableClass,
             final Field<Integer> heightField,
             final int trimHeight,
             final DbKey.Factory<?> dbKeyFactory) {
 
-        if (!Db.isInTransaction()) {
+        if (!dbContext.isInTransaction()) {
             throw new IllegalStateException("Not in transaction");
         }
 
         final int selectBatchSize = 10_000;
         final int deleteBatchSize = 1_000;
 
-        Db.useDSLContext(ctx -> {
+        dbContext.useDSLContext(ctx -> {
             List<Field<Long>> pkFields = new ArrayList<>();
             for (String column : dbKeyFactory.getPKColumns()) {
                 pkFields.add(tableClass.field(column, Long.class));
@@ -188,11 +188,11 @@ public abstract class VersionedEntitySqlTable<T> extends EntitySqlTable<T> imple
         if (t == null) {
             return false;
         }
-        if (!Db.isInTransaction()) {
+        if (!dbContext.isInTransaction()) {
             throw new IllegalStateException("Not in transaction");
         }
         DbKey dbKey = (DbKey) dbKeyFactory.newKey(t);
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             try {
                 SelectQuery<Record> countQuery = ctx.selectQuery();
                 countQuery.addFrom(tableClass);
@@ -218,7 +218,7 @@ public abstract class VersionedEntitySqlTable<T> extends EntitySqlTable<T> imple
                     return deleteQuery.execute() > 0;
                 }
             } finally {
-                Db.getCache(table).remove(dbKey);
+                dbContext.getCache(table).remove(dbKey);
             }
         });
     }

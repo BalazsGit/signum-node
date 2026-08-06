@@ -10,48 +10,48 @@ import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.AccountService;
 import application.module.node.services.ParameterService;
 import application.module.node.web.api.http.common.APITransactionManager;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.MockedStatic;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import jakarta.servlet.http.HttpServletRequest;
 
 import static application.module.node.TransactionType.DigitalGoods.REFUND;
 import static application.module.node.web.api.http.common.JSONResponses.*;
 import static application.module.node.web.api.http.common.Parameters.REFUND_NQT_PARAMETER;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doReturn;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
+import static org.mockito.Mockito.mockStatic;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(Signum.class)
-public class DGSRefundTest extends AbstractTransactionTest {
+@ExtendWith(MockitoExtension.class)
+class DGSRefundTest extends AbstractTransactionTest {
 
     private DGSRefund t;
 
+    @Mock
     private ParameterService mockParameterService;
+    @Mock
     private Blockchain mockBlockchain;
+    @Mock
     private AccountService mockAccountService;
+    @Mock
     private APITransactionManager apiTransactionManagerMock;
 
-    @Before
-    public void setUp() {
-        mockParameterService = mock(ParameterService.class);
-        mockBlockchain = mock(Blockchain.class);
-        mockAccountService = mock(AccountService.class);
-        apiTransactionManagerMock = mock(APITransactionManager.class);
-
-        t = new DGSRefund(mockParameterService, mockBlockchain, mockAccountService, apiTransactionManagerMock);
+    @BeforeEach
+    void setUp() {
+        FluxCapacitor fluxCapacitor = QuickMocker.latestValueFluxCapacitor();
+        t = new DGSRefund(mockParameterService, mockBlockchain, mockAccountService, apiTransactionManagerMock, fluxCapacitor);
     }
 
     @Test
-    public void processRequest() throws SignumException {
+    void processRequest() throws SignumException {
         final long refundNQTParameter = 5;
 
         final HttpServletRequest req = QuickMocker.httpServletRequest(
@@ -72,26 +72,26 @@ public class DGSRefundTest extends AbstractTransactionTest {
         when(mockParameterService.getPurchase(eq(req))).thenReturn(mockPurchase);
 
         final Account mockBuyerAccount = mock(Account.class);
-
         when(mockAccountService.getAccount(eq(mockPurchase.getBuyerId()))).thenReturn(mockBuyerAccount);
 
-        mockStatic(Signum.class);
-        final FluxCapacitor fluxCapacitor = QuickMocker
-                .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
-        when(Signum.getFluxCapacitor()).thenReturn(fluxCapacitor);
-        doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            final FluxCapacitor fluxCapacitor = QuickMocker
+                    .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
+            mocked.when(Signum::getFluxCapacitor).thenReturn(fluxCapacitor);
+            doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
 
-        final Attachment.DigitalGoodsRefund attachment = (Attachment.DigitalGoodsRefund) attachmentCreatedTransaction(
-                () -> t.processRequest(req), apiTransactionManagerMock);
-        assertNotNull(attachment);
+            final Attachment.DigitalGoodsRefund attachment = (Attachment.DigitalGoodsRefund) attachmentCreatedTransaction(
+                    () -> t.processRequest(req), apiTransactionManagerMock);
+            assertNotNull(attachment);
 
-        assertEquals(REFUND, attachment.getTransactionType());
-        assertEquals(refundNQTParameter, attachment.getRefundNqt());
-        assertEquals(mockPurchaseId, attachment.getPurchaseId());
+            assertEquals(REFUND, attachment.getTransactionType());
+            assertEquals(refundNQTParameter, attachment.getRefundNqt());
+            assertEquals(mockPurchaseId, attachment.getPurchaseId());
+        }
     }
 
     @Test
-    public void processRequest_incorrectPurchase() throws SignumException {
+    void processRequest_incorrectPurchase() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest();
 
         final Account mockSellerAccount = mock(Account.class);
@@ -107,7 +107,7 @@ public class DGSRefundTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_duplicateRefund() throws SignumException {
+    void processRequest_duplicateRefund() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest();
 
         final Account mockSellerAccount = mock(Account.class);
@@ -124,7 +124,7 @@ public class DGSRefundTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_goodsNotDelivered() throws SignumException {
+    void processRequest_goodsNotDelivered() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest();
 
         final Account mockSellerAccount = mock(Account.class);
@@ -142,7 +142,7 @@ public class DGSRefundTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_incorrectDgsRefundWrongFormat() throws SignumException {
+    void processRequest_incorrectDgsRefundWrongFormat() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(REFUND_NQT_PARAMETER, "Bob"));
 
@@ -161,7 +161,7 @@ public class DGSRefundTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_negativeIncorrectDGSRefund() throws SignumException {
+    void processRequest_negativeIncorrectDGSRefund() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(REFUND_NQT_PARAMETER, -5));
 
@@ -180,7 +180,7 @@ public class DGSRefundTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_overMaxBalanceNQTIncorrectDGSRefund() throws SignumException {
+    void processRequest_overMaxBalanceNQTIncorrectDGSRefund() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(REFUND_NQT_PARAMETER, Constants.MAX_BALANCE_NQT + 1));
 
@@ -197,5 +197,4 @@ public class DGSRefundTest extends AbstractTransactionTest {
 
         assertEquals(INCORRECT_DGS_REFUND, t.processRequest(req));
     }
-
 }

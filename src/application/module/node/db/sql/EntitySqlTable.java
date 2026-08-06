@@ -1,6 +1,5 @@
 package application.module.node.db.sql;
 
-import application.module.node.Signum;
 import application.module.node.db.SignumKey;
 import application.module.node.db.EntityTable;
 import application.module.node.db.store.DerivedTableManager;
@@ -23,13 +22,13 @@ public abstract class EntitySqlTable<T> extends DerivedSqlTable implements Entit
     final Field<Boolean> latestField;
 
     EntitySqlTable(String table, TableImpl<?> tableClass, SignumKey.Factory<T> dbKeyFactory,
-            DerivedTableManager derivedTableManager) {
-        this(table, tableClass, dbKeyFactory, false, derivedTableManager);
+            DerivedTableManager derivedTableManager, DbContext dbContext) {
+        this(table, tableClass, dbKeyFactory, false, derivedTableManager, dbContext);
     }
 
     EntitySqlTable(String table, TableImpl<?> tableClass, SignumKey.Factory<T> dbKeyFactory, boolean multiversion,
-            DerivedTableManager derivedTableManager) {
-        super(table, tableClass, derivedTableManager);
+            DerivedTableManager derivedTableManager, DbContext dbContext) {
+        super(table, tableClass, derivedTableManager, dbContext);
         this.dbKeyFactory = (DbKey.Factory<T>) dbKeyFactory;
         this.multiversion = multiversion;
         this.defaultSort = new ArrayList<>();
@@ -44,7 +43,7 @@ public abstract class EntitySqlTable<T> extends DerivedSqlTable implements Entit
     }
 
     private Map<SignumKey, T> getCache() {
-        return Db.getCache(table);
+        return dbContext.getCache(table);
     }
 
     protected abstract T load(DSLContext ctx, Record rs);
@@ -64,7 +63,7 @@ public abstract class EntitySqlTable<T> extends DerivedSqlTable implements Entit
 
     @Override
     public final void checkAvailable(int height) {
-        if (multiversion && height < Signum.getBlockchainProcessor().getMinRollbackHeight()) {
+        if (multiversion && height < derivedTableManager.getMinRollbackHeight()) {
             throw new IllegalArgumentException("Historical data as of height " + height
                     + " not available, set DB.trimDerivedTables=false and re-scan");
         }
@@ -73,13 +72,13 @@ public abstract class EntitySqlTable<T> extends DerivedSqlTable implements Entit
     @Override
     public T get(SignumKey nxtKey) {
         DbKey dbKey = (DbKey) nxtKey;
-        if (Db.isInTransaction()) {
+        if (dbContext.isInTransaction()) {
             T t = getCache().get(dbKey);
             if (t != null) {
                 return t;
             }
         }
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             SelectQuery<Record> query = ctx.selectQuery();
             query.addFrom(tableClass);
             query.addConditions(dbKey.getPKConditions(tableClass));
@@ -96,7 +95,7 @@ public abstract class EntitySqlTable<T> extends DerivedSqlTable implements Entit
     public T get(SignumKey nxtKey, int height) {
         DbKey dbKey = (DbKey) nxtKey;
 
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             SelectQuery<Record> query = ctx.selectQuery();
             query.addFrom(tableClass);
             query.addConditions(dbKey.getPKConditions(tableClass));
@@ -110,7 +109,7 @@ public abstract class EntitySqlTable<T> extends DerivedSqlTable implements Entit
 
     @Override
     public T getBy(Condition condition) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             SelectQuery<Record> query = ctx.selectQuery();
             query.addFrom(tableClass);
             query.addConditions(condition);
@@ -127,7 +126,7 @@ public abstract class EntitySqlTable<T> extends DerivedSqlTable implements Entit
     public T getBy(Condition condition, int height) {
         checkAvailable(height);
 
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             SelectQuery<Record> query = ctx.selectQuery();
             query.addFrom(tableClass);
             query.addConditions(condition);
@@ -149,7 +148,7 @@ public abstract class EntitySqlTable<T> extends DerivedSqlTable implements Entit
     }
 
     private T get(DSLContext ctx, SelectQuery<Record> query, boolean cache) {
-        final boolean doCache = cache && Db.isInTransaction();
+        final boolean doCache = cache && dbContext.isInTransaction();
         Record record = query.fetchOne();
         if (record == null)
             return null;
@@ -162,7 +161,7 @@ public abstract class EntitySqlTable<T> extends DerivedSqlTable implements Entit
         if (t == null) {
             t = load(ctx, record);
             if (doCache) {
-                Db.getCache(table).put(dbKey, t);
+                dbContext.getCache(table).put(dbKey, t);
             }
         }
         return t;
@@ -175,7 +174,7 @@ public abstract class EntitySqlTable<T> extends DerivedSqlTable implements Entit
 
     @Override
     public Collection<T> getManyBy(Condition condition, int from, int to, List<SortField<?>> sort) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             SelectQuery<Record> query = ctx.selectQuery();
             query.addFrom(tableClass);
             query.addConditions(condition);
@@ -196,7 +195,7 @@ public abstract class EntitySqlTable<T> extends DerivedSqlTable implements Entit
     @Override
     public Collection<T> getManyBy(Condition condition, int height, int from, int to, List<SortField<?>> sort) {
         checkAvailable(height);
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             SelectQuery<Record> query = ctx.selectQuery();
             query.addFrom(tableClass);
             query.addConditions(condition);
@@ -228,7 +227,7 @@ public abstract class EntitySqlTable<T> extends DerivedSqlTable implements Entit
 
     @Override
     public Collection<T> getManyBy(DSLContext ctx, SelectQuery<? extends Record> query, boolean cache) {
-        final boolean doCache = cache && Db.isInTransaction();
+        final boolean doCache = cache && dbContext.isInTransaction();
         return query.fetch(record -> {
             T t = null;
             DbKey dbKey = null;
@@ -239,7 +238,7 @@ public abstract class EntitySqlTable<T> extends DerivedSqlTable implements Entit
             if (t == null) {
                 t = load(ctx, record);
                 if (doCache) {
-                    Db.getCache(table).put(dbKey, t);
+                    dbContext.getCache(table).put(dbKey, t);
                 }
             }
             return t;
@@ -253,7 +252,7 @@ public abstract class EntitySqlTable<T> extends DerivedSqlTable implements Entit
 
     @Override
     public Collection<T> getAll(int from, int to, List<SortField<?>> sort) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             SelectQuery<Record> query = ctx.selectQuery();
             query.addFrom(tableClass);
             if (multiversion) {
@@ -273,7 +272,7 @@ public abstract class EntitySqlTable<T> extends DerivedSqlTable implements Entit
     @Override
     public Collection<T> getAll(int height, int from, int to, List<SortField<?>> sort) {
         checkAvailable(height);
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             SelectQuery<Record> query = ctx.selectQuery();
             query.addFrom(tableClass);
             query.addConditions(heightField.le(height));
@@ -303,7 +302,7 @@ public abstract class EntitySqlTable<T> extends DerivedSqlTable implements Entit
 
     @Override
     public int getCount() {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             SelectJoinStep<?> r = ctx.selectCount().from(tableClass);
             return (multiversion ? r.where(latestField.isTrue()) : r).fetchOne(0, int.class);
         });
@@ -311,25 +310,25 @@ public abstract class EntitySqlTable<T> extends DerivedSqlTable implements Entit
 
     @Override
     public int getRowCount() {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             return ctx.selectCount().from(tableClass).fetchOne(0, int.class);
         });
     }
 
     @Override
     public void insert(T t) {
-        if (!Db.isInTransaction()) {
+        if (!dbContext.isInTransaction()) {
             throw new IllegalStateException("Not in transaction");
         }
         DbKey dbKey = (DbKey) dbKeyFactory.newKey(t);
         T cachedT = getCache().get(dbKey);
         if (cachedT == null) {
-            Db.getCache(table).put(dbKey, t);
+            dbContext.getCache(table).put(dbKey, t);
         } else if (t != cachedT) { // not a bug
             throw new IllegalStateException("Different instance found in Db cache, perhaps trying to save an object "
                     + "that was read outside the current transaction");
         }
-        Db.useDSLContext(ctx -> {
+        dbContext.useDSLContext(ctx -> {
             if (multiversion) {
                 UpdateQuery<?> query = ctx.updateQuery(tableClass);
                 query.addValue(
@@ -346,12 +345,12 @@ public abstract class EntitySqlTable<T> extends DerivedSqlTable implements Entit
     @Override
     public void rollback(int height) {
         super.rollback(height);
-        Db.getCache(table).clear();
+        dbContext.getCache(table).clear();
     }
 
     @Override
     public void truncate() {
         super.truncate();
-        Db.getCache(table).clear();
+        dbContext.getCache(table).clear();
     }
 }

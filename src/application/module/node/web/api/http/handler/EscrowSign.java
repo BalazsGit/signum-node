@@ -15,20 +15,23 @@ import static application.module.node.web.api.http.common.Parameters.DECISION_PA
 import static application.module.node.web.api.http.common.Parameters.ESCROW_PARAMETER;
 import static application.module.node.web.api.http.common.ResultFields.ERROR_CODE_RESPONSE;
 import static application.module.node.web.api.http.common.ResultFields.ERROR_DESCRIPTION_RESPONSE;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 
 public final class EscrowSign extends CreateTransaction {
 
     private final ParameterService parameterService;
     private final EscrowService escrowService;
     private final Blockchain blockchain;
+    private final FluxCapacitor fluxCapacitor;
 
     public EscrowSign(ParameterService parameterService, Blockchain blockchain, EscrowService escrowService,
-            APITransactionManager apiTransactionManager) {
-        super(new LegacyDocTag[] { LegacyDocTag.TRANSACTIONS, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
+            APITransactionManager apiTransactionManager, FluxCapacitor fluxCapacitor) {
+        super(new LegacyDocTag[] { LegacyDocTag.TRANSACTIONS, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager, fluxCapacitor,
                 ESCROW_PARAMETER, DECISION_PARAMETER);
         this.parameterService = parameterService;
         this.blockchain = blockchain;
         this.escrowService = escrowService;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     @Override

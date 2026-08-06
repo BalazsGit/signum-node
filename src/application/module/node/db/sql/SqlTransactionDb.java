@@ -20,9 +20,26 @@ import static application.module.node.schema.Tables.TRANSACTION;
 
 public class SqlTransactionDb implements TransactionDb {
 
+    private final DbContext dbContext;
+
+    /** @deprecated Use {@link #SqlTransactionDb(DbContext)} instead */
+    @Deprecated
+    public SqlTransactionDb() {
+        this.dbContext = null;
+    }
+
+    /**
+     * Constructor with DbContext injected.
+     *
+     * @param dbContext the database context instance
+     */
+    public SqlTransactionDb(DbContext dbContext) {
+        this.dbContext = dbContext;
+    }
+
     @Override
     public Transaction findTransaction(long transactionId) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             try {
                 TransactionRecord transactionRecord = ctx.selectFrom(TRANSACTION)
                         .where(TRANSACTION.ID.eq(transactionId)).fetchOne();
@@ -36,7 +53,7 @@ public class SqlTransactionDb implements TransactionDb {
 
     @Override
     public Transaction findTransactionByFullHash(String fullHash) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             try {
                 TransactionRecord transactionRecord = ctx.selectFrom(TRANSACTION)
                         .where(TRANSACTION.FULL_HASH.eq(Convert.parseHexString(fullHash))).fetchOne();
@@ -50,14 +67,14 @@ public class SqlTransactionDb implements TransactionDb {
 
     @Override
     public boolean hasTransaction(long transactionId) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             return ctx.fetchExists(ctx.selectFrom(TRANSACTION).where(TRANSACTION.ID.eq(transactionId)));
         });
     }
 
     @Override
     public boolean hasTransactionByFullHash(String fullHash) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             return ctx.fetchExists(
                     ctx.selectFrom(TRANSACTION).where(TRANSACTION.FULL_HASH.eq(Convert.parseHexString(fullHash))));
         });
@@ -115,7 +132,7 @@ public class SqlTransactionDb implements TransactionDb {
 
     @Override
     public List<Transaction> findBlockTransactions(long blockId, boolean onlySigned) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             SelectConditionStep<TransactionRecord> select = ctx.selectFrom(TRANSACTION)
                     .where(TRANSACTION.BLOCK_ID.eq(blockId));
             if (onlySigned) {
@@ -151,7 +168,7 @@ public class SqlTransactionDb implements TransactionDb {
 
     public void saveTransactions(List<Transaction> transactions) {
         if (!transactions.isEmpty()) {
-            Db.useDSLContext(ctx -> {
+            dbContext.useDSLContext(ctx -> {
                 List<TransactionRecord> records = new ArrayList<>(transactions.size());
                 for (Transaction transaction : transactions) {
                     TransactionRecord record = ctx.newRecord(TRANSACTION);
@@ -190,6 +207,6 @@ public class SqlTransactionDb implements TransactionDb {
 
     @Override
     public void optimize() {
-        Db.optimizeTable(TRANSACTION.getName());
+        dbContext.optimizeTable(TRANSACTION.getName());
     }
 }

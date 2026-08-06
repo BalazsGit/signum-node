@@ -6,17 +6,14 @@ import application.module.node.DigitalGoodsStore.Goods;
 import application.module.node.common.AbstractUnitTest;
 import application.module.node.common.QuickMocker;
 import application.module.node.common.QuickMocker.MockParam;
-import application.module.node.db.sql.DbUtils;
 import application.module.node.services.DGSGoodsStoreService;
 import application.module.node.util.JSON;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.core.classloader.annotations.SuppressStaticInitializationFor;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Collection;
@@ -29,10 +26,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-@SuppressStaticInitializationFor("node.db.sql.DbUtils")
-@PrepareForTest(DbUtils.class)
-@RunWith(PowerMockRunner.class)
-public class GetDGSGoodsTest extends AbstractUnitTest {
+@ExtendWith(MockitoExtension.class)
+class GetDGSGoodsTest extends AbstractUnitTest {
 
     private GetDGSGoods t;
 

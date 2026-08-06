@@ -18,13 +18,13 @@ public abstract class ValuesSqlTable<T, V> extends DerivedSqlTable implements Va
     final DbKey.Factory<T> dbKeyFactory;
 
     protected ValuesSqlTable(String table, TableImpl<?> tableClass, DbKey.Factory<T> dbKeyFactory,
-            DerivedTableManager derivedTableManager) {
-        this(table, tableClass, dbKeyFactory, false, derivedTableManager);
+            DerivedTableManager derivedTableManager, DbContext dbContext) {
+        this(table, tableClass, dbKeyFactory, false, derivedTableManager, dbContext);
     }
 
     ValuesSqlTable(String table, TableImpl<?> tableClass, DbKey.Factory<T> dbKeyFactory, boolean multiversion,
-            DerivedTableManager derivedTableManager) {
-        super(table, tableClass, derivedTableManager);
+            DerivedTableManager derivedTableManager, DbContext dbContext) {
+        super(table, tableClass, derivedTableManager, dbContext);
         this.dbKeyFactory = dbKeyFactory;
         this.multiversion = multiversion;
     }
@@ -36,11 +36,11 @@ public abstract class ValuesSqlTable<T, V> extends DerivedSqlTable implements Va
     @SuppressWarnings("unchecked")
     @Override
     public final List<V> get(SignumKey nxtKey) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             DbKey dbKey = (DbKey) nxtKey;
             List<V> values;
-            if (Db.isInTransaction()) {
-                values = (List<V>) Db.getCache(table).get(dbKey);
+            if (dbContext.isInTransaction()) {
+                values = (List<V>) dbContext.getCache(table).get(dbKey);
                 if (values != null) {
                     return values;
                 }
@@ -57,8 +57,8 @@ public abstract class ValuesSqlTable<T, V> extends DerivedSqlTable implements Va
                     return load(ctx, record);
                 }
             });
-            if (Db.isInTransaction()) {
-                Db.getCache(table).put(dbKey, values);
+            if (dbContext.isInTransaction()) {
+                dbContext.getCache(table).put(dbKey, values);
             }
             return values;
         });
@@ -66,12 +66,12 @@ public abstract class ValuesSqlTable<T, V> extends DerivedSqlTable implements Va
 
     @Override
     public final void insert(T t, List<V> values) {
-        if (!Db.isInTransaction()) {
+        if (!dbContext.isInTransaction()) {
             throw new IllegalStateException("Not in transaction");
         }
-        Db.useDSLContext(ctx -> {
+        dbContext.useDSLContext(ctx -> {
             DbKey dbKey = (DbKey) dbKeyFactory.newKey(t);
-            Db.getCache(table).put(dbKey, values);
+            dbContext.getCache(table).put(dbKey, values);
             if (multiversion) {
                 ctx.update(tableClass)
                         .set(latestField, false)
@@ -88,12 +88,12 @@ public abstract class ValuesSqlTable<T, V> extends DerivedSqlTable implements Va
     @Override
     public void rollback(int height) {
         super.rollback(height);
-        Db.getCache(table).clear();
+        dbContext.getCache(table).clear();
     }
 
     @Override
     public final void truncate() {
         super.truncate();
-        Db.getCache(table).clear();
+        dbContext.getCache(table).clear();
     }
 }

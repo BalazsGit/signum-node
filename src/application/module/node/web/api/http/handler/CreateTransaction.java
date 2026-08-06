@@ -2,8 +2,8 @@ package application.module.node.web.api.http.handler;
 
 import application.module.node.Account;
 import application.module.node.Attachment;
-import application.module.node.Signum;
 import application.module.node.SignumException;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.web.api.http.ApiServlet;
 import application.module.node.web.api.http.common.APITransactionManager;
@@ -28,6 +28,7 @@ public abstract class CreateTransaction extends ApiServlet.JsonRequestHandler {
             RECIPIENT_PUBLIC_KEY_PARAMETER };
 
     private final APITransactionManager apiTransactionManager;
+    protected final FluxCapacitor fluxCapacitor;
 
     private static String[] addCommonParameters(String[] parameters) {
         String[] result = Arrays.copyOf(parameters, parameters.length + commonParameters.length);
@@ -36,15 +37,17 @@ public abstract class CreateTransaction extends ApiServlet.JsonRequestHandler {
     }
 
     protected CreateTransaction(LegacyDocTag[] legacyDocTags, APITransactionManager apiTransactionManager,
-            boolean replaceParameters, String... parameters) {
+            FluxCapacitor fluxCapacitor, boolean replaceParameters, String... parameters) {
         super(legacyDocTags, replaceParameters ? parameters : addCommonParameters(parameters));
         this.apiTransactionManager = apiTransactionManager;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     protected CreateTransaction(LegacyDocTag[] legacyDocTags, APITransactionManager apiTransactionManager,
-            String... parameters) {
+            FluxCapacitor fluxCapacitor, String... parameters) {
         super(legacyDocTags, addCommonParameters(parameters));
         this.apiTransactionManager = apiTransactionManager;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     public final JsonElement createTransaction(HttpServletRequest req, Account senderAccount, Attachment attachment)
@@ -69,7 +72,7 @@ public abstract class CreateTransaction extends ApiServlet.JsonRequestHandler {
     }
 
     private long minimumFeeNQT() {
-        return Signum.getFluxCapacitor().getValue(FluxValues.FEE_QUANT);
+        return fluxCapacitor.getValue(FluxValues.FEE_QUANT);
     }
 
 }

@@ -14,7 +14,8 @@ public class SqlOrderStoreTrimRegistrationTest {
     @Test
     public void askAndBidTablesAreRegisteredForTrim() {
         DerivedTableManager derivedTableManager = new DerivedTableManager();
-        OrderStore orderStore = new SqlOrderStore(derivedTableManager);
+        DbContext dbContext = new DbContext();
+        OrderStore orderStore = new SqlOrderStore(derivedTableManager, dbContext);
 
         Set<String> registeredTables = derivedTableManager.getDerivedTables().stream()
                 .map(table -> table.getTable())

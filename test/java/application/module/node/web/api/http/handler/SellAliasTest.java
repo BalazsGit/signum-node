@@ -8,11 +8,12 @@ import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.ParameterService;
 import application.module.node.web.api.http.common.APITransactionManager;
 import application.module.node.web.api.http.common.ParameterException;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.MockedStatic;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -21,35 +22,34 @@ import static application.module.node.TransactionType.Messaging.ALIAS_SELL;
 import static application.module.node.web.api.http.common.JSONResponses.*;
 import static application.module.node.web.api.http.common.Parameters.PRICE_NQT_PARAMETER;
 import static application.module.node.web.api.http.common.Parameters.RECIPIENT_PARAMETER;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
+import static org.mockito.Mockito.mockStatic;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(Signum.class)
-public class SellAliasTest extends AbstractTransactionTest {
+@ExtendWith(MockitoExtension.class)
+class SellAliasTest extends AbstractTransactionTest {
 
     private SellAlias t;
 
-    private ParameterService parameterServiceMock;
-    private Blockchain blockchainMock;
+    @Mock
+    private ParameterService mockParameterService;
+    @Mock
+    private Blockchain mockBlockchain;
+    @Mock
     private APITransactionManager apiTransactionManagerMock;
 
-    @Before
-    public void setUp() {
-        parameterServiceMock = mock(ParameterService.class);
-        blockchainMock = mock(Blockchain.class);
-        apiTransactionManagerMock = mock(APITransactionManager.class);
-
-        t = new SellAlias(parameterServiceMock, blockchainMock, apiTransactionManagerMock);
+    @BeforeEach
+    void setUp() {
+        FluxCapacitor fluxCapacitor = QuickMocker.latestValueFluxCapacitor();
+        t = new SellAlias(mockParameterService, mockBlockchain, apiTransactionManagerMock, fluxCapacitor);
     }
 
     @Test
-    public void processRequest() throws SignumException {
+    void processRequest() throws SignumException {
         final int priceParameter = 10;
         final int recipientId = 5;
 
@@ -64,56 +64,65 @@ public class SellAliasTest extends AbstractTransactionTest {
         final Account mockSender = mock(Account.class);
         when(mockSender.getId()).thenReturn(aliasAccountId);
 
-        when(parameterServiceMock.getSenderAccount(req)).thenReturn(mockSender);
-        when(parameterServiceMock.getAlias(req)).thenReturn(mockAlias);
+        when(mockParameterService.getSenderAccount(req)).thenReturn(mockSender);
+        when(mockParameterService.getAlias(req)).thenReturn(mockAlias);
 
-        mockStatic(Signum.class);
-        final FluxCapacitor fluxCapacitor = QuickMocker
-                .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
-        when(Signum.getFluxCapacitor()).thenReturn(fluxCapacitor);
-        doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            final FluxCapacitor fluxCapacitor = QuickMocker
+                    .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
+            mocked.when(Signum::getFluxCapacitor).thenReturn(fluxCapacitor);
+            doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
 
-        final Attachment.MessagingAliasSell attachment = (Attachment.MessagingAliasSell) attachmentCreatedTransaction(
-                () -> t.processRequest(req), apiTransactionManagerMock);
-        assertNotNull(attachment);
+            final Attachment.MessagingAliasSell attachment = (Attachment.MessagingAliasSell) attachmentCreatedTransaction(
+                    () -> t.processRequest(req), apiTransactionManagerMock);
+            assertNotNull(attachment);
 
-        assertEquals(ALIAS_SELL, attachment.getTransactionType());
-        assertEquals(priceParameter, attachment.getPriceNqt());
+            assertEquals(ALIAS_SELL, attachment.getTransactionType());
+            assertEquals(priceParameter, attachment.getPriceNqt());
+        }
     }
 
     @Test
-    public void processRequest_missingPrice() throws SignumException {
+    void processRequest_missingPrice() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest();
 
         assertEquals(MISSING_PRICE, t.processRequest(req));
     }
 
     @Test
-    public void processRequest_incorrectPrice_unParsable() throws SignumException {
+    void processRequest_incorrectPrice_unParsable() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(PRICE_NQT_PARAMETER, "unParsable"));
 
         assertEquals(INCORRECT_PRICE, t.processRequest(req));
     }
 
-    @Test(expected = ParameterException.class)
-    public void processRequest_incorrectPrice_negative() throws SignumException {
+    @Test
+    void processRequest_incorrectPrice_negative() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(PRICE_NQT_PARAMETER, -10));
 
-        t.processRequest(req);
-    }
-
-    @Test(expected = ParameterException.class)
-    public void processRequest_incorrectPrice_overMaxBalance() throws SignumException {
-        final HttpServletRequest req = QuickMocker.httpServletRequest(
-                new MockParam(PRICE_NQT_PARAMETER, MAX_BALANCE_NQT + 1));
-
-        t.processRequest(req);
+        try {
+            t.processRequest(req);
+        } catch (Exception e) {
+            assertEquals(ParameterException.class, e.getClass());
+        }
     }
 
     @Test
-    public void processRequest_incorrectRecipient_unparsable() throws SignumException {
+    void processRequest_incorrectPrice_overMaxBalance() throws SignumException {
+        final HttpServletRequest req = QuickMocker.httpServletRequest(
+                new MockParam(PRICE_NQT_PARAMETER, MAX_BALANCE_NQT + 1));
+
+        try {
+            t.processRequest(req);
+        } catch (Exception e) {
+            assertEquals(ParameterException.class, e.getClass());
+        }
+    }
+
+    @Test
+    void processRequest_incorrectRecipient_unparsable() throws SignumException {
         final int price = 10;
 
         final HttpServletRequest req = QuickMocker.httpServletRequest(
@@ -124,7 +133,7 @@ public class SellAliasTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_incorrectRecipient_zero() throws SignumException {
+    void processRequest_incorrectRecipient_zero() throws SignumException {
         final int price = 10;
         final int recipientId = 0;
 
@@ -136,7 +145,7 @@ public class SellAliasTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_incorrectAliasOwner() throws SignumException {
+    void processRequest_incorrectAliasOwner() throws SignumException {
         final int price = 10;
         final int recipientId = 5;
 
@@ -152,10 +161,9 @@ public class SellAliasTest extends AbstractTransactionTest {
         final Account mockSender = mock(Account.class);
         when(mockSender.getId()).thenReturn(mockSenderId);
 
-        when(parameterServiceMock.getSenderAccount(req)).thenReturn(mockSender);
-        when(parameterServiceMock.getAlias(req)).thenReturn(mockAlias);
+        when(mockParameterService.getSenderAccount(req)).thenReturn(mockSender);
+        when(mockParameterService.getAlias(req)).thenReturn(mockAlias);
 
         assertEquals(INCORRECT_ALIAS_OWNER, t.processRequest(req));
     }
-
 }

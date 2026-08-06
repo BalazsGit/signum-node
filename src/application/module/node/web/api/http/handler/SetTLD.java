@@ -1,6 +1,7 @@
 package application.module.node.web.api.http.handler;
 
 import application.module.node.*;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.AliasService;
 import application.module.node.services.ParameterService;
@@ -27,8 +28,8 @@ public final class SetTLD extends CreateTransaction {
     private final AliasService aliasService;
 
     public SetTLD(ParameterService parameterService, Blockchain blockchain, AliasService aliasService,
-            APITransactionManager apiTransactionManager) {
-        super(new LegacyDocTag[] { LegacyDocTag.ALIASES, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
+            APITransactionManager apiTransactionManager, FluxCapacitor fluxCapacitor) {
+        super(new LegacyDocTag[] { LegacyDocTag.ALIASES, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager, fluxCapacitor,
                 TLD_PARAMETER, AMOUNT_NQT_PARAMETER);
         this.parameterService = parameterService;
         this.blockchain = blockchain;
@@ -63,7 +64,7 @@ public final class SetTLD extends CreateTransaction {
         long recipient = 0L;
         long amountNQT = ParameterParser.getAmountNQT(req);
         if (amountNQT < TransactionType.BASELINE_TLD_ASSIGNMENT_FACTOR
-                * Signum.getFluxCapacitor().getValue(FluxValues.FEE_QUANT, blockchain.getLastBlock().getHeight())) {
+                * this.fluxCapacitor.getValue(FluxValues.FEE_QUANT, blockchain.getLastBlock().getHeight())) {
             return incorrect(AMOUNT_NQT_PARAMETER);
         }
 

@@ -1,6 +1,7 @@
 package application.module.node.web.api.http.handler;
 
 import application.module.node.*;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.services.ParameterService;
 import application.module.node.util.Convert;
 import application.module.node.web.api.http.common.APITransactionManager;
@@ -19,8 +20,8 @@ public final class SellAlias extends CreateTransaction {
     private final Blockchain blockchain;
 
     public SellAlias(ParameterService parameterService, Blockchain blockchain,
-            APITransactionManager apiTransactionManager) {
-        super(new LegacyDocTag[] { LegacyDocTag.ALIASES, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
+            APITransactionManager apiTransactionManager, FluxCapacitor fluxCapacitor) {
+        super(new LegacyDocTag[] { LegacyDocTag.ALIASES, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager, fluxCapacitor,
                 ALIAS_PARAMETER, ALIAS_NAME_PARAMETER, TLD_PARAMETER, RECIPIENT_PARAMETER, PRICE_NQT_PARAMETER);
         this.parameterService = parameterService;
         this.blockchain = blockchain;

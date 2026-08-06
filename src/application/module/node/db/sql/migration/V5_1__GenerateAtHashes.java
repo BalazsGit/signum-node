@@ -1,21 +1,37 @@
 package application.module.node.db.sql.migration;
 
-import application.module.node.db.sql.Db;
 import org.flywaydb.core.api.migration.BaseJavaMigration;
 import org.flywaydb.core.api.migration.Context;
 
 import application.module.node.crypto.Crypto;
 import application.module.node.util.Convert;
-import org.jooq.SQLDialect;
 
 import java.sql.ResultSet;
 import java.sql.Statement;
 
+/**
+ * Migration to generate AT code hashes.
+ * Skipped for SQLite and PostgreSQL as they handle this differently.
+ * <p>
+ * Phase 10e: Replaced static {@code Db.getDialect()} with instance-based
+ * dialect detection via JDBC connection metadata from Flyway context.
+ */
 public class V5_1__GenerateAtHashes extends BaseJavaMigration {
 
+    /**
+     * Determines if the current database is SQLite or PostgreSQL using JDBC URL.
+     * <p>
+     * This replaces the static {@code Db.getDialect()} call to support multi-profile
+     * operation where each profile has its own isolated DbContext.
+     */
+    private static boolean isSqliteOrPostgres(Context context) throws java.sql.SQLException {
+        String url = context.getConnection().getMetaData().getURL();
+        return url != null && (url.startsWith("jdbc:sqlite:") || url.startsWith("jdbc:postgresql:"));
+    }
+
+    @Override
     public void migrate(Context context) throws Exception {
-        if (Db.getDialect() == SQLDialect.SQLITE ||
-                Db.getDialect() == SQLDialect.POSTGRES) {
+        if (isSqliteOrPostgres(context)) {
             return;
         }
 

@@ -1,6 +1,7 @@
 package application.module.node.web.api.http.handler;
 
 import application.module.node.*;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.services.AliasService;
 import application.module.node.services.ParameterService;
 import application.module.node.web.api.http.common.APITransactionManager;
@@ -20,8 +21,8 @@ public final class BuyAlias extends CreateTransaction {
     private final Blockchain blockchain;
 
     public BuyAlias(ParameterService parameterService, Blockchain blockchain, AliasService aliasService,
-            APITransactionManager apiTransactionManager) {
-        super(new LegacyDocTag[] { LegacyDocTag.ALIASES, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
+            APITransactionManager apiTransactionManager, FluxCapacitor fluxCapacitor) {
+        super(new LegacyDocTag[] { LegacyDocTag.ALIASES, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager, fluxCapacitor,
                 ALIAS_PARAMETER, ALIAS_NAME_PARAMETER, TLD_PARAMETER, AMOUNT_NQT_PARAMETER);
         this.parameterService = parameterService;
         this.blockchain = blockchain;

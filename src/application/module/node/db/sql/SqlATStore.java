@@ -3,6 +3,7 @@ package application.module.node.db.sql;
 import application.module.node.*;
 import application.module.node.Blockchain;
 import application.module.node.Transaction;
+import application.module.node.at.AtConstants;
 import application.module.node.at.*;
 import application.module.node.at.AT.AtMapEntry;
 import application.module.node.db.SignumKey;
@@ -59,22 +60,34 @@ public class SqlATStore implements ATStore {
     private VersionedEntityTable<application.module.node.at.AT.AtMapEntry> atMapTable;
 
     private final Blockchain blockchain;
+    private AtConstants atConstants;
+    private final DbContext dbContext;
 
     public SqlATStore(DerivedTableManager derivedTableManager, StoreDependencies storeDependencies) {
         this.blockchain = storeDependencies.blockchain();
+        this.dbContext = storeDependencies.dbContext();
         initTables(derivedTableManager);
     }
 
     @Deprecated
     public SqlATStore(DerivedTableManager derivedTableManager) {
         this.blockchain = null;
+        this.dbContext = null;
         initTables(derivedTableManager);
+    }
+
+    /**
+     * Sets the AtConstants instance for AT fee/scheduling calculations.
+     * Called during dependency wiring after construction to avoid circular dependencies.
+     */
+    public void setAtConstants(AtConstants atConstants) {
+        this.atConstants = atConstants;
     }
 
     private void initTables(DerivedTableManager derivedTableManager) {
         atTable = new VersionedEntitySqlTable<application.module.node.at.AT>("at",
                 application.module.node.schema.Tables.AT, atDbKeyFactory,
-                derivedTableManager) {
+                derivedTableManager, blockchain, dbContext) {
             @Override
             protected application.module.node.at.AT load(DSLContext ctx, Record rs) {
                 throw new RuntimeException("AT attempted to be created with atTable.load");
@@ -95,7 +108,7 @@ public class SqlATStore implements ATStore {
 
         atStateTable = new VersionedEntitySqlTable<application.module.node.at.AT.ATState>("at_state",
                 application.module.node.schema.Tables.AT_STATE,
-                atStateDbKeyFactory, derivedTableManager) {
+                atStateDbKeyFactory, derivedTableManager, blockchain, dbContext) {
             @Override
             protected application.module.node.at.AT.ATState load(DSLContext ctx, Record rs) {
                 return new SqlATState(rs);
@@ -118,7 +131,7 @@ public class SqlATStore implements ATStore {
 
         atMapTable = new VersionedEntitySqlTable<application.module.node.at.AT.AtMapEntry>("at_map",
                 application.module.node.schema.Tables.AT_MAP,
-                atMapKeyFactory, derivedTableManager) {
+                atMapKeyFactory, derivedTableManager, blockchain, dbContext) {
             @Override
             protected application.module.node.at.AT.AtMapEntry load(DSLContext ctx, Record rs) {
                 return new SqlAtMapEntry(rs);
@@ -179,15 +192,14 @@ public class SqlATStore implements ATStore {
 
     @Override
     public boolean isATAccountId(Long id) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             return ctx.fetchExists(ctx.selectOne().from(AT).where(AT.ID.eq(id)).and(AT.LATEST.isTrue()));
         });
     }
 
     @Override
     public List<Long> getOrderedATs() {
-        return Db.fetchWithDSLContext(ctx -> {
-            AtConstants atConstants = AtConstants.getInstance();
+        return dbContext.fetchWithDSLContext(ctx -> {
             return ctx.selectFrom(
                     AT.join(AT_STATE).on(AT.ID.eq(AT_STATE.AT_ID)).join(ACCOUNT_BALANCE)
                             .on(AT.ID.eq(ACCOUNT_BALANCE.ID)))
@@ -201,9 +213,9 @@ public class SqlATStore implements ATStore {
                             AT_STATE.NEXT_HEIGHT.lessOrEqual(blockchain.getHeight() + 1))
                     .and(
                             ACCOUNT_BALANCE.BALANCE.greaterOrEqual(
-                                    atConstants.stepFee(atConstants.atVersion(blockchain.getHeight()))
-                                            * atConstants.apiStepMultiplier(
-                                                    atConstants.atVersion(blockchain.getHeight()))))
+                                    this.atConstants.stepFee(this.atConstants.atVersion(blockchain.getHeight()))
+                                            * this.atConstants.apiStepMultiplier(
+                                                    this.atConstants.atVersion(blockchain.getHeight()))))
                     .and(
                             AT_STATE.FREEZE_WHEN_SAME_BALANCE.isFalse().or(
                                     ACCOUNT_BALANCE.BALANCE.minus(AT_STATE.PREV_BALANCE)
@@ -221,7 +233,7 @@ public class SqlATStore implements ATStore {
 
     @Override
     public application.module.node.at.AT getAT(Long id, int height) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             SelectJoinStep<Record> select = ctx.select(AT.fields()).select(AT_STATE.fields()).from(AT.join(AT_STATE)
                     .on(AT.ID.eq(AT_STATE.AT_ID)));
             ResultQuery<Record> where = null;
@@ -245,7 +257,7 @@ public class SqlATStore implements ATStore {
 
     @Override
     public Collection<application.module.node.at.AT> getATs(Collection<Long> ids) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             Result<Record> result = ctx.select(AT.fields()).select(AT_STATE.fields())
                     .from(AT.join(AT_STATE).on(AT.ID.eq(AT_STATE.AT_ID)))
                     .where(AT.LATEST.isTrue()).and(AT_STATE.LATEST.isTrue()).and(AT.ID.in(ids))
@@ -271,7 +283,7 @@ public class SqlATStore implements ATStore {
 
     @Override
     public CollectionWithIndex<AtMapEntry> getMapValues(long atId, long key1, Long value, int from, int to) {
-        Result<Record> result = Db.fetchWithDSLContext(ctx -> {
+        Result<Record> result = dbContext.fetchWithDSLContext(ctx -> {
             SelectConditionStep<Record> request = ctx.select(AT_MAP.fields()).from(AT_MAP).where(AT_MAP.LATEST.isTrue())
                     .and(AT_MAP.AT_ID.eq(atId))
                     .and(AT_MAP.KEY1.eq(key1));
@@ -304,7 +316,7 @@ public class SqlATStore implements ATStore {
                     && transaction.getAttachment() instanceof Attachment.AutomatedTransactionsCreation) {
                 Attachment.AutomatedTransactionsCreation atCreationAttachment = (Attachment.AutomatedTransactionsCreation) transaction
                         .getAttachment();
-                AtMachineState atCreation = new AtMachineState(null, null, atCreationAttachment.getCreationBytes(), 0);
+                AtMachineState atCreation = AtMachineState.parseForValidation(atCreationAttachment.getCreationBytes(), 0);
                 code = atCreation.getApCodeBytes();
                 codeSize = atCreation.getcSize();
                 codeHashId = atCreation.getApCodeHashId();
@@ -321,7 +333,7 @@ public class SqlATStore implements ATStore {
 
     @Override
     public List<Long> getATsIssuedBy(Long accountId, Long codeHashId, int from, int to) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             SelectConditionStep<Record1<Long>> request = ctx.select(AT.ID).from(AT).where(AT.LATEST.isTrue());
             if (accountId != null) {
                 request = request.and(AT.CREATOR_ID.eq(accountId));
@@ -338,7 +350,7 @@ public class SqlATStore implements ATStore {
 
     @Override
     public Collection<Long> getAllATIds(Long codeHashId) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             SelectConditionStep<AtRecord> request = ctx.selectFrom(AT).where(AT.LATEST.isTrue());
             if (codeHashId != null)
                 request = request.and(AT.AP_CODE_HASH_ID.eq(codeHashId));
@@ -373,7 +385,7 @@ public class SqlATStore implements ATStore {
 
     @Override
     public Long findTransaction(int startHeight, int endHeight, Long atID, int numOfTx, long minActivationAmount) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             long startTime = System.nanoTime();
 
             SelectQuery<Record1<Long>> query = ctx.select(TRANSACTION.ID)
@@ -394,7 +406,7 @@ public class SqlATStore implements ATStore {
 
     @Override
     public int findTransactionHeight(Long transactionId, int height, Long atID, long minActivationAmount) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return dbContext.fetchWithDSLContext(ctx -> {
             long startTime = System.nanoTime();
             try {
                 List<Long> transactionIds = ctx.select(TRANSACTION.ID)

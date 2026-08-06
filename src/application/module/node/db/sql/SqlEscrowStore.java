@@ -40,8 +40,9 @@ public class SqlEscrowStore implements EscrowStore {
 
     public SqlEscrowStore(DerivedTableManager derivedTableManager, StoreDependencies storeDependencies) {
         this.blockchain = storeDependencies.blockchain();
+        DbContext dbContext = storeDependencies.dbContext();
         this.escrowTable = new VersionedEntitySqlTable<Escrow>("escrow", application.module.node.schema.Tables.ESCROW,
-                escrowDbKeyFactory, derivedTableManager) {
+                escrowDbKeyFactory, derivedTableManager, blockchain, dbContext) {
             @Override
             protected Escrow load(DSLContext ctx, Record rs) {
                 return new SqlEscrow(rs);
@@ -53,7 +54,8 @@ public class SqlEscrowStore implements EscrowStore {
             }
         };
         this.decisionTable = new VersionedEntitySqlTable<Escrow.Decision>("escrow_decision",
-                application.module.node.schema.Tables.ESCROW_DECISION, decisionDbKeyFactory, derivedTableManager) {
+                application.module.node.schema.Tables.ESCROW_DECISION, decisionDbKeyFactory, derivedTableManager,
+                blockchain, dbContext) {
             @Override
             protected Escrow.Decision load(DSLContext ctx, Record record) {
                 return new SqlDecision(record);
@@ -71,7 +73,7 @@ public class SqlEscrowStore implements EscrowStore {
     public SqlEscrowStore(DerivedTableManager derivedTableManager) {
         this.blockchain = null;
         this.escrowTable = new VersionedEntitySqlTable<Escrow>("escrow", application.module.node.schema.Tables.ESCROW,
-                escrowDbKeyFactory, derivedTableManager) {
+                escrowDbKeyFactory, derivedTableManager, blockchain, null) {
             @Override
             protected Escrow load(DSLContext ctx, Record rs) {
                 return new SqlEscrow(rs);
@@ -83,7 +85,8 @@ public class SqlEscrowStore implements EscrowStore {
             }
         };
         this.decisionTable = new VersionedEntitySqlTable<Escrow.Decision>("escrow_decision",
-                application.module.node.schema.Tables.ESCROW_DECISION, decisionDbKeyFactory, derivedTableManager) {
+                application.module.node.schema.Tables.ESCROW_DECISION, decisionDbKeyFactory, derivedTableManager,
+                blockchain, null) {
             @Override
             protected Escrow.Decision load(DSLContext ctx, Record record) {
                 return new SqlDecision(record);

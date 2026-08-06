@@ -8,49 +8,49 @@ import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.AccountService;
 import application.module.node.services.ParameterService;
 import application.module.node.web.api.http.common.APITransactionManager;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.MockedStatic;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import jakarta.servlet.http.HttpServletRequest;
 
 import static application.module.node.TransactionType.ColoredCoins.ASSET_TRANSFER;
 import static application.module.node.web.api.http.common.JSONResponses.NOT_ENOUGH_ASSETS;
 import static application.module.node.web.api.http.common.Parameters.*;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
+import static org.mockito.Mockito.mockStatic;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(Signum.class)
-public class TransferAssetTest extends AbstractTransactionTest {
+@ExtendWith(MockitoExtension.class)
+class TransferAssetTest extends AbstractTransactionTest {
 
     private TransferAsset t;
 
-    private ParameterService parameterServiceMock;
-    private Blockchain blockchainMock;
+    @Mock
+    private ParameterService mockParameterService;
+    @Mock
+    private Blockchain mockBlockchain;
+    @Mock
     private APITransactionManager apiTransactionManagerMock;
-    private AccountService accountServiceMock;
+    @Mock
+    private AccountService mockAccountService;
 
-    @Before
-    public void setUp() {
-        parameterServiceMock = mock(ParameterService.class);
-        blockchainMock = mock(Blockchain.class);
-        apiTransactionManagerMock = mock(APITransactionManager.class);
-        accountServiceMock = mock(AccountService.class);
-
-        t = new TransferAsset(parameterServiceMock, blockchainMock, apiTransactionManagerMock, accountServiceMock);
+    @BeforeEach
+    void setUp() {
+        FluxCapacitor fluxCapacitor = QuickMocker.latestValueFluxCapacitor();
+        t = new TransferAsset(mockParameterService, mockBlockchain, apiTransactionManagerMock, mockAccountService, fluxCapacitor);
     }
 
     @Test
-    public void processRequest() throws SignumException {
+    void processRequest() throws SignumException {
         final long recipientParameter = 34L;
         final long assetIdParameter = 456L;
         final long quantityQNTParameter = 56L;
@@ -62,32 +62,33 @@ public class TransferAssetTest extends AbstractTransactionTest {
 
         Asset mockAsset = mock(Asset.class);
 
-        when(parameterServiceMock.getAsset(eq(req))).thenReturn(mockAsset);
+        when(mockParameterService.getAsset(eq(req))).thenReturn(mockAsset);
         when(mockAsset.getId()).thenReturn(assetIdParameter);
 
         final Account mockSenderAccount = mock(Account.class);
-        when(accountServiceMock.getUnconfirmedAssetBalanceQNT(eq(mockSenderAccount), eq(assetIdParameter)))
+        when(mockAccountService.getUnconfirmedAssetBalanceQNT(eq(mockSenderAccount), eq(assetIdParameter)))
                 .thenReturn(500L);
 
-        when(parameterServiceMock.getSenderAccount(eq(req))).thenReturn(mockSenderAccount);
+        when(mockParameterService.getSenderAccount(eq(req))).thenReturn(mockSenderAccount);
 
-        mockStatic(Signum.class);
-        final FluxCapacitor fluxCapacitor = QuickMocker
-                .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
-        when(Signum.getFluxCapacitor()).thenReturn(fluxCapacitor);
-        doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            final FluxCapacitor fluxCapacitor = QuickMocker
+                    .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
+            mocked.when(Signum::getFluxCapacitor).thenReturn(fluxCapacitor);
+            doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
 
-        final Attachment.ColoredCoinsAssetTransfer attachment = (Attachment.ColoredCoinsAssetTransfer) attachmentCreatedTransaction(
-                () -> t.processRequest(req), apiTransactionManagerMock);
-        assertNotNull(attachment);
+            final Attachment.ColoredCoinsAssetTransfer attachment = (Attachment.ColoredCoinsAssetTransfer) attachmentCreatedTransaction(
+                    () -> t.processRequest(req), apiTransactionManagerMock);
+            assertNotNull(attachment);
 
-        assertEquals(ASSET_TRANSFER, attachment.getTransactionType());
-        assertEquals(assetIdParameter, attachment.getAssetId());
-        assertEquals(quantityQNTParameter, attachment.getQuantityQnt());
+            assertEquals(ASSET_TRANSFER, attachment.getTransactionType());
+            assertEquals(assetIdParameter, attachment.getAssetId());
+            assertEquals(quantityQNTParameter, attachment.getQuantityQnt());
+        }
     }
 
     @Test
-    public void processRequest_assetBalanceLowerThanQuantityNQTParameter() throws SignumException {
+    void processRequest_assetBalanceLowerThanQuantityNQTParameter() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(RECIPIENT_PARAMETER, "123"),
                 new MockParam(ASSET_PARAMETER, "456"),
@@ -95,20 +96,21 @@ public class TransferAssetTest extends AbstractTransactionTest {
 
         Asset mockAsset = mock(Asset.class);
 
-        when(parameterServiceMock.getAsset(eq(req))).thenReturn(mockAsset);
+        when(mockParameterService.getAsset(eq(req))).thenReturn(mockAsset);
         when(mockAsset.getId()).thenReturn(456l);
 
         final Account mockSenderAccount = mock(Account.class);
-        when(parameterServiceMock.getSenderAccount(eq(req))).thenReturn(mockSenderAccount);
+        when(mockParameterService.getSenderAccount(eq(req))).thenReturn(mockSenderAccount);
 
-        when(accountServiceMock.getUnconfirmedAssetBalanceQNT(eq(mockSenderAccount), anyLong())).thenReturn(2L);
+        when(mockAccountService.getUnconfirmedAssetBalanceQNT(eq(mockSenderAccount), anyLong())).thenReturn(2L);
 
-        mockStatic(Signum.class);
-        final FluxCapacitor fluxCapacitor = QuickMocker
-                .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
-        when(Signum.getFluxCapacitor()).thenReturn(fluxCapacitor);
-        doReturn(false).when(fluxCapacitor).getValue(eq(FluxValues.SMART_TOKEN));
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            final FluxCapacitor fluxCapacitor = QuickMocker
+                    .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
+            mocked.when(Signum::getFluxCapacitor).thenReturn(fluxCapacitor);
+            doReturn(false).when(fluxCapacitor).getValue(eq(FluxValues.SMART_TOKEN));
 
-        assertEquals(NOT_ENOUGH_ASSETS, t.processRequest(req));
+            assertEquals(NOT_ENOUGH_ASSETS, t.processRequest(req));
+        }
     }
 }

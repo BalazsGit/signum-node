@@ -11,10 +11,20 @@ public class SqlDbs implements Dbs {
     private final TransactionDb transactionDb;
     private final PeerDb peerDb;
 
+    /** @deprecated Use {@link #SqlDbs(DbContext)} instead */
+    @Deprecated
     public SqlDbs() {
         this.blockDb = new SqlBlockDb();
         this.transactionDb = new SqlTransactionDb();
         this.peerDb = new SqlPeerDb();
+        // Wire TransactionDb into SqlBlockDb to break circular dependency
+        ((SqlBlockDb) this.blockDb).setTransactionDb(this.transactionDb);
+    }
+
+    public SqlDbs(DbContext dbContext) {
+        this.blockDb = new SqlBlockDb(dbContext);
+        this.transactionDb = new SqlTransactionDb(dbContext);
+        this.peerDb = new SqlPeerDb(dbContext);
         // Wire TransactionDb into SqlBlockDb to break circular dependency
         ((SqlBlockDb) this.blockDb).setTransactionDb(this.transactionDb);
     }

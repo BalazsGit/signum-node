@@ -5,12 +5,17 @@ import application.module.node.Appendix;
 import application.module.node.Asset;
 import application.module.node.Attachment;
 import application.module.node.Attachment.ColoredCoinsAssetTransfer;
-import application.module.node.Signum;
+import application.module.node.assetexchange.AssetExchange;
+import application.module.node.Blockchain;
 import application.module.node.Constants;
+import application.module.node.db.store.AssetStore;
+import application.module.node.db.store.ATStore;
+import application.module.node.props.PropertyService;
 import application.module.node.Transaction;
 import application.module.node.TransactionType;
 import application.module.node.Account.AccountAsset;
 import application.module.node.crypto.Crypto;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.props.Props;
 import application.module.node.util.Convert;
@@ -22,45 +27,124 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.Objects;
 
+/**
+ * Platform-specific AT (Automated Transaction) API implementation.
+ * Uses injected {@link ATProcessingContext} for all external dependencies,
+ * eliminating static {@code Signum.getXxx()} calls.
+ *
+ * <p><b>Migration:</b> The singleton {@link #getInstance()} is deprecated.
+ * Use constructor injection via {@link #AtApiPlatformImpl(ATProcessingContext)} instead.</p>
+ */
 public class AtApiPlatformImpl extends AtApiImpl {
 
     private static final Logger logger = LoggerFactory.getLogger(AtApiPlatformImpl.class);
 
+    /** @deprecated Use constructor injection with {@link ATProcessingContext} */
+    @Deprecated
     private static final AtApiPlatformImpl instance = new AtApiPlatformImpl();
 
-    private AtApiPlatformImpl() {
+    private final ATProcessingContext context;
+
+    /**
+     * Creates a new platform API implementation with the given processing context.
+     *
+     * @param context the AT processing context containing all dependencies
+     */
+    public AtApiPlatformImpl(ATProcessingContext context) {
+        this.context = context;
     }
 
+    /**
+     * @deprecated Use constructor injection with {@link ATProcessingContext}
+     */
+    @Deprecated
+    private AtApiPlatformImpl() {
+        this.context = null;
+    }
+
+    /**
+     * @deprecated Use constructor injection with {@link ATProcessingContext}
+     * @return the legacy singleton instance
+     */
+    @Deprecated
     public static AtApiPlatformImpl getInstance() {
         return instance;
     }
 
-    private static Long findTransaction(int startHeight, int endHeight, Long atID, int numOfTx, long minAmount) {
-        ATProcessorCache cache = ATProcessorCache.getInstance();
-        if (cache.isEnabled()) {
-            try {
-                return ATProcessorCache.getInstance().findTransactionId(startHeight, endHeight, atID, numOfTx,
-                        minAmount);
-            } catch (ATProcessorCache.CacheMissException e) {
-                // no op
-            }
-        }
-        return Signum.getStores().getAtStore().findTransaction(startHeight, endHeight, atID, numOfTx, minAmount);
+    // ==================== Helper methods — direct context access (fail-fast) ====================
+
+    /**
+     * Returns the AT data store from the processing context.
+     * Throws {@link IllegalStateException} if invoked on a legacy singleton instance.
+     */
+    private ATStore getAtStoreBridge() {
+        Objects.requireNonNull(context, "ATProcessingContext must not be null — use constructor injection");
+        return context.getAtStore();
     }
 
-    private static int findTransactionHeight(Long transactionId, int height, Long atID, long minAmount) {
-        ATProcessorCache cache = ATProcessorCache.getInstance();
+    /**
+     * Looks up a transaction ID via cache first, then falls back to the store.
+     */
+    private Long findTransaction(int startHeight, int endHeight, Long atID, int numOfTx, long minAmount) {
+        ATProcessorCache cache = context.getProcessorCache();
         if (cache.isEnabled()) {
             try {
-                return ATProcessorCache.getInstance().findTransactionHeight(transactionId, height, atID, minAmount);
+                return cache.findTransactionId(startHeight, endHeight, atID, numOfTx, minAmount);
             } catch (ATProcessorCache.CacheMissException e) {
-                // no op
+                // no op — fall through to store lookup
             }
         }
-        return Signum.getStores().getAtStore().findTransactionHeight(transactionId, height, atID, minAmount);
-
+        return getAtStoreBridge().findTransaction(startHeight, endHeight, atID, numOfTx, minAmount);
     }
+
+    /**
+     * Looks up a transaction height via cache first, then falls back to the store.
+     */
+    private int findTransactionHeight(Long transactionId, int height, Long atID, long minAmount) {
+        ATProcessorCache cache = context.getProcessorCache();
+        if (cache.isEnabled()) {
+            try {
+                return cache.findTransactionHeight(transactionId, height, atID, minAmount);
+            } catch (ATProcessorCache.CacheMissException e) {
+                // no op — fall through to store lookup
+            }
+        }
+        return getAtStoreBridge().findTransactionHeight(transactionId, height, atID, minAmount);
+    }
+
+    /** @return the blockchain instance from context */
+    private Blockchain getBlockchain() {
+        Objects.requireNonNull(context, "ATProcessingContext must not be null — use constructor injection");
+        return context.getBlockchain();
+    }
+
+    /** @return FluxCapacitor instance from context */
+    private FluxCapacitor getFluxCapacitor() {
+        Objects.requireNonNull(context, "ATProcessingContext must not be null — use constructor injection");
+        return context.getFluxCapacitor();
+    }
+
+    /** @return AssetStore instance from context */
+    private AssetStore getAssetStoreBridge() {
+        Objects.requireNonNull(context, "ATProcessingContext must not be null — use constructor injection");
+        return context.getAssetStore();
+    }
+
+    /** @return AssetExchange instance from context */
+    private AssetExchange getAssetExchange() {
+        Objects.requireNonNull(context, "ATProcessingContext must not be null — use constructor injection");
+        return context.getAssetExchange();
+    }
+
+    /** @return PropertyService instance from context */
+    private PropertyService getPropertyService() {
+        Objects.requireNonNull(context, "ATProcessingContext must not be null — use constructor injection");
+        return context.getPropertyService();
+    }
+
+    // ==================== AtApiImpl overrides ====================
 
     @Override
     public long getBlockTimestamp(AtMachineState state) {
@@ -84,7 +168,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
         ByteBuffer b = ByteBuffer.allocate(state.getA1().length * 4);
         b.order(ByteOrder.LITTLE_ENDIAN);
 
-        b.put(Signum.getBlockchain().getBlockAtHeight(state.getHeight() - 1).getBlockHash());
+        b.put(getBlockchain().getBlockAtHeight(state.getHeight() - 1).getBlockHash());
 
         b.clear();
 
@@ -124,7 +208,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
     public long getTypeForTxInA(AtMachineState state) {
         long txid = AtApiHelper.getLong(state.getA1());
 
-        Transaction tx = Signum.getBlockchain().getTransaction(txid);
+        Transaction tx = getBlockchain().getTransaction(txid);
 
         if (tx == null || (tx.getHeight() >= state.getHeight())) {
             return -1;
@@ -145,7 +229,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
     public long getAmountForTxInA(AtMachineState state) {
         long txId = AtApiHelper.getLong(state.getA1());
 
-        Transaction tx = Signum.getBlockchain().getTransaction(txId);
+        Transaction tx = getBlockchain().getTransaction(txId);
 
         if (tx == null || (tx.getHeight() >= state.getHeight())) {
             return -1;
@@ -172,7 +256,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
             }
         }
         if ((tx.getMessage() == null
-                || Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_2, state.getHeight()))
+                || getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_2, state.getHeight()))
                 && state.minActivationAmount() <= tx.getAmountNqt()) {
             return tx.getAmountNqt() - state.minActivationAmount();
         }
@@ -215,7 +299,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
         long txId = AtApiHelper.getLong(state.getA1());
         logger.debug("get timestamp for tx with id {} found", txId);
         // TODO: we might avoid this db access, when using cache here
-        Transaction tx = Signum.getBlockchain().getTransaction(txId);
+        Transaction tx = getBlockchain().getTransaction(txId);
 
         if (tx == null || (tx.getHeight() >= state.getHeight())) {
             return -1;
@@ -232,7 +316,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
     public long getRandomIdForTxInA(AtMachineState state) {
         long txId = AtApiHelper.getLong(state.getA1());
 
-        Transaction tx = Signum.getBlockchain().getTransaction(txId);
+        Transaction tx = getBlockchain().getTransaction(txId);
 
         if (tx == null || (tx.getHeight() >= state.getHeight())) {
             return -1;
@@ -241,10 +325,10 @@ public class AtApiPlatformImpl extends AtApiImpl {
         int txBlockHeight = tx.getHeight();
         int blockHeight = state.getHeight();
 
-        if (blockHeight - txBlockHeight < AtConstants.getInstance().blocksForRandom(blockHeight)) { // for tests - for
-                                                                                                    // real case 1440
+        AtConstants atConstants = AtApiController.getAtConstants();
+        if (blockHeight - txBlockHeight < atConstants.blocksForRandom(blockHeight)) { // for tests - for real case 1440
             state.setWaitForNumberOfBlocks(
-                    (int) AtConstants.getInstance().blocksForRandom(blockHeight) - (blockHeight - txBlockHeight));
+                    (int) atConstants.blocksForRandom(blockHeight) - (blockHeight - txBlockHeight));
             state.getMachineState().pc -= 7;
             state.getMachineState().stopped = true;
             return 0;
@@ -255,10 +339,10 @@ public class AtApiPlatformImpl extends AtApiImpl {
         byte[] senderPublicKey = tx.getSenderPublicKey();
 
         ByteBuffer bf = ByteBuffer
-                .allocate((Signum.getFluxCapacitor().getValue(FluxValues.SODIUM)) ? 32 + 8 + senderPublicKey.length
+                .allocate((getFluxCapacitor().getValue(FluxValues.SODIUM)) ? 32 + 8 + senderPublicKey.length
                         : 32 + Long.SIZE + senderPublicKey.length);
         bf.order(ByteOrder.LITTLE_ENDIAN);
-        bf.put(Signum.getBlockchain().getBlockAtHeight(blockHeight - 1).getGenerationSignature());
+        bf.put(getBlockchain().getBlockAtHeight(blockHeight - 1).getGenerationSignature());
         bf.putLong(tx.getId());
         bf.put(senderPublicKey);
 
@@ -272,7 +356,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
     public long checkSignBWithA(AtMachineState state) {
         if (state.getVersion() > 2) {
             long txid = AtApiHelper.getLong(state.getA1());
-            Transaction tx = Signum.getBlockchain().getTransaction(txid);
+            Transaction tx = getBlockchain().getTransaction(txid);
             if (tx == null || tx.getHeight() >= state.getHeight() || tx.getMessage() == null) {
                 return 0L;
             }
@@ -316,7 +400,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
     public void messageFromTxInAToB(AtMachineState state) {
         long txid = AtApiHelper.getLong(state.getA1());
 
-        Transaction tx = Signum.getBlockchain().getTransaction(txid);
+        Transaction tx = getBlockchain().getTransaction(txid);
         if (tx != null && tx.getHeight() >= state.getHeight()) {
             tx = null;
         }
@@ -364,7 +448,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
 
         clearB(state);
 
-        Transaction tx = Signum.getBlockchain().getTransaction(txId);
+        Transaction tx = getBlockchain().getTransaction(txId);
         if (tx != null && tx.getHeight() >= state.getHeight()) {
             tx = null;
         }
@@ -380,7 +464,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
 
         clearB(state);
 
-        Transaction tx = Signum.getBlockchain().getTransaction(txId);
+        Transaction tx = getBlockchain().getTransaction(txId);
         if (tx != null && tx.getHeight() >= state.getHeight()) {
             tx = null;
         }
@@ -418,7 +502,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
             if (atId != 0L) {
                 creator = 0L;
                 // asking for the creator of the given at_id
-                AT at = Signum.getStores().getAtStore().getAT(atId);
+                AT at = getAtStoreBridge().getAT(atId);
                 if (at != null) {
                     creator = AtApiHelper.getLong(at.getCreator());
                 }
@@ -439,7 +523,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
         if (atId == 0L) {
             atId = AtApiHelper.getLong(state.getId());
         }
-        AT at = Signum.getStores().getAtStore().getAT(atId);
+        AT at = getAtStoreBridge().getAT(atId);
         if (at != null) {
             return at.getApCodeHashId();
         }
@@ -458,7 +542,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
             atId = AtApiHelper.getLong(state.getId());
         }
         // asking for the creator of the given at_id
-        AT at = Signum.getStores().getAtStore().getAT(atId);
+        AT at = getAtStoreBridge().getAT(atId);
         if (at != null) {
             return at.minActivationAmount();
         }
@@ -470,7 +554,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
         ByteBuffer b = ByteBuffer.allocate(state.getA1().length * 4);
         b.order(ByteOrder.LITTLE_ENDIAN);
 
-        b.put(Signum.getBlockchain().getBlockAtHeight(state.getHeight() - 1).getGenerationSignature());
+        b.put(getBlockchain().getBlockAtHeight(state.getHeight() - 1).getGenerationSignature());
 
         b.clear();
 
@@ -491,7 +575,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
 
     @Override
     public long getCurrentBalance(AtMachineState state) {
-        if (!Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_2, state.getHeight())) {
+        if (!getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_2, state.getHeight())) {
             return 0;
         }
 
@@ -505,7 +589,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
 
     @Override
     public long getAccountBalance(AtMachineState state) {
-        if (!Signum.getFluxCapacitor().getValue(FluxValues.PK_FREEZE2, state.getHeight())) {
+        if (!getFluxCapacitor().getValue(FluxValues.PK_FREEZE2, state.getHeight())) {
             return 0;
         }
 
@@ -523,7 +607,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
 
     @Override
     public long getPreviousBalance(AtMachineState state) {
-        if (!Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_2, state.getHeight())) {
+        if (!getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_2, state.getHeight())) {
             return 0;
         }
 
@@ -623,7 +707,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
                 quantity,
                 state.getgBalance(assetId));
 
-        Asset asset = Signum.getStores().getAssetStore().getAsset(assetId);
+        Asset asset = getAssetStoreBridge().getAsset(assetId);
         if (asset == null || asset.getAccountId() != accountId || quantity <= 0L) {
             // only assets that we have created internally and no burning by mint
             logger.debug(
@@ -634,8 +718,8 @@ public class AtApiPlatformImpl extends AtApiImpl {
             return;
         }
 
-        boolean unconfirmed = !Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX, state.getHeight());
-        long circulatingSupply = Signum.getAssetExchange().getAssetCirculatingSupply(asset, false, unconfirmed);
+        boolean unconfirmed = !getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX, state.getHeight());
+        long circulatingSupply = getAssetExchange().getAssetCirculatingSupply(asset, false, unconfirmed);
         long newSupply = Convert.safeAdd(circulatingSupply, quantity);
         if (newSupply > Constants.MAX_ASSET_QUANTITY_QNT) {
             // do not mint extra to keep the limit
@@ -676,15 +760,15 @@ public class AtApiPlatformImpl extends AtApiImpl {
         long assetToDistribute = AtApiHelper.getLong(state.getA3());
         long quantityToDistribute = 0L;
 
-        Asset asset = Signum.getStores().getAssetStore().getAsset(assetId);
+        Asset asset = getAssetStoreBridge().getAsset(assetId);
         if (asset == null) {
             // asset not found, do nothing
             return;
         }
 
-        int maxIndirects = Signum.getPropertyService().getInt(Props.MAX_INDIRECTS_PER_BLOCK);
-        boolean unconfirmed = !Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX, state.getHeight());
-        int holdersCount = Signum.getAssetExchange().getAssetAccountsCount(asset, minHolding, true, unconfirmed);
+        int maxIndirects = getPropertyService().getInt(Props.MAX_INDIRECTS_PER_BLOCK);
+        boolean unconfirmed = !getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX, state.getHeight());
+        int holdersCount = getAssetExchange().getAssetAccountsCount(asset, minHolding, true, unconfirmed);
         if (holdersCount == 0 || state.getIndirectsCount() + holdersCount > maxIndirects) {
             // no holders to distribute or over the maximum, so do not distribute
             return;
@@ -722,14 +806,14 @@ public class AtApiPlatformImpl extends AtApiImpl {
         long minHolding = AtApiHelper.getLong(state.getB1());
         long assetId = AtApiHelper.getLong(state.getB2());
 
-        Asset asset = Signum.getStores().getAssetStore().getAsset(assetId);
+        Asset asset = getAssetStoreBridge().getAsset(assetId);
         if (asset == null) {
             // asset not found, no holders
             return 0L;
         }
 
-        boolean unconfirmed = !Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX, state.getHeight());
-        return Signum.getAssetExchange().getAssetAccountsCount(asset, minHolding, true, unconfirmed);
+        boolean unconfirmed = !getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX, state.getHeight());
+        return getAssetExchange().getAssetAccountsCount(asset, minHolding, true, unconfirmed);
     }
 
     @Override
@@ -740,14 +824,14 @@ public class AtApiPlatformImpl extends AtApiImpl {
 
         long assetId = AtApiHelper.getLong(state.getB2());
 
-        Asset asset = Signum.getStores().getAssetStore().getAsset(assetId);
+        Asset asset = getAssetStoreBridge().getAsset(assetId);
         if (asset == null) {
             // asset not found, no supply
             return 0L;
         }
 
-        boolean unconfirmed = !Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX, state.getHeight());
-        return Signum.getAssetExchange().getAssetCirculatingSupply(asset, true, unconfirmed);
+        boolean unconfirmed = !getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX, state.getHeight());
+        return getAssetExchange().getAssetCirculatingSupply(asset, true, unconfirmed);
     }
 
     @Override
@@ -819,7 +903,8 @@ public class AtApiPlatformImpl extends AtApiImpl {
     public long addMinutesToTimestamp(long val1, long val2, AtMachineState state) {
         int height = AtApiHelper.longToHeight(val1);
         int numOfTx = AtApiHelper.longToNumOfTx(val1);
-        int addHeight = height + (int) (val2 / AtConstants.getInstance().averageBlockMinutes(state.getHeight()));
+        AtConstants atConstants = AtApiController.getAtConstants();
+        int addHeight = height + (int) (val2 / atConstants.averageBlockMinutes(state.getHeight()));
 
         return AtApiHelper.getLongTimestamp(addHeight, numOfTx);
     }

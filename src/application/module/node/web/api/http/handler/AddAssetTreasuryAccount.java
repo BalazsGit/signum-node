@@ -2,6 +2,7 @@ package application.module.node.web.api.http.handler;
 
 import application.module.node.*;
 import application.module.node.assetexchange.AssetExchange;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.services.AccountService;
 import application.module.node.services.ParameterService;
 import application.module.node.web.api.http.common.APITransactionManager;
@@ -19,14 +20,17 @@ public final class AddAssetTreasuryAccount extends CreateTransaction {
     private final ParameterService parameterService;
     private final Blockchain blockchain;
     private final AssetExchange assetExchange;
+    private final FluxCapacitor fluxCapacitor;
 
     public AddAssetTreasuryAccount(ParameterService parameterService, AssetExchange assetExchange,
-            Blockchain blockchain, APITransactionManager apiTransactionManager, AccountService accountService) {
+            Blockchain blockchain, APITransactionManager apiTransactionManager, AccountService accountService,
+            FluxCapacitor fluxCapacitor) {
         super(new LegacyDocTag[] { LegacyDocTag.AE, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
-                RECIPIENT_PARAMETER);
+                fluxCapacitor, RECIPIENT_PARAMETER);
         this.parameterService = parameterService;
         this.blockchain = blockchain;
         this.assetExchange = assetExchange;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     @Override

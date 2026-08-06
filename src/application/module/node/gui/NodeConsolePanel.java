@@ -1631,9 +1631,12 @@ public class NodeConsolePanel extends JPanel {
         // Skip DB Check on Manual Pop-off — console-specific setting for pop-off decisions
         skipDbCheckItem = new JCheckBox("Skip DB Check on Manual Pop-off");
         skipDbCheckItem.addActionListener(e -> {
-            BlockchainProcessor bp = Signum.getBlockchainProcessor();
-            if (bp != null) {
-                bp.setSkipDbCheckOnManualPopOff(skipDbCheckItem.isSelected());
+            NodeCoreContext ctx = getNodeContext();
+            if (ctx != null) {
+                BlockchainProcessor bp = ctx.getBlockchainProcessor();
+                if (bp != null) {
+                    bp.setSkipDbCheckOnManualPopOff(skipDbCheckItem.isSelected());
+                }
             }
         });
 
@@ -2188,7 +2191,7 @@ public class NodeConsolePanel extends JPanel {
     private void syncButtonAction() {
         // The UI will update via the onSyncStateChanged listener when the core
         // processes the change.
-        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        BlockchainProcessor blockchainProcessor = getNodeContext().getBlockchainProcessor();
         if (blockchainProcessor != null) {
             blockchainProcessor.setSyncPaused(!isSyncStopped);
         }
@@ -2238,7 +2241,7 @@ public class NodeConsolePanel extends JPanel {
      * </ul>
      */
     private void dbCheckAction() {
-        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        BlockchainProcessor blockchainProcessor = getNodeContext().getBlockchainProcessor();
         if (blockchainProcessor == null) {
             showMessage("Blockchain processor not initialized.");
             return;
@@ -2351,7 +2354,7 @@ public class NodeConsolePanel extends JPanel {
 
     private void showDbCheckResult(int result, int height, long totalMined, long totalEffectiveBalance,
             boolean wasResolutionActive, int limitHeight, int lastTrimHeight) {
-        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        BlockchainProcessor blockchainProcessor = getNodeContext().getBlockchainProcessor();
         final double totalMinedSigna = (double) totalMined / Constants.ONE_SIGNA;
         final double totalEffectiveBalanceSigna = (double) totalEffectiveBalance / Constants.ONE_SIGNA;
         final long difference = totalMined - totalEffectiveBalance;
@@ -2464,11 +2467,11 @@ public class NodeConsolePanel extends JPanel {
 
     private void popOff(int count) {
         // LOGGER.info("Pop off requested, this can take a while...");
-        if (Signum.getBlockchainProcessor() == null) {
+        if (getNodeContext().getBlockchainProcessor() == null) {
             showMessage("Blockchain processor not initialized.");
             return;
         }
-        new Thread(() -> Signum.getBlockchainProcessor().popOff(count)).start();
+        new Thread(() -> getNodeContext().getBlockchainProcessor().popOff(count)).start();
     }
 
     /**
@@ -2573,7 +2576,7 @@ public class NodeConsolePanel extends JPanel {
     }
 
     private void initListeners() {
-        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        BlockchainProcessor blockchainProcessor = getNodeContext().getBlockchainProcessor();
         blockchainProcessor.addListener(block -> onPeersUpdated(), BlockchainProcessor.Event.PEERS_UPDATED);
         blockchainProcessor.addListener(block -> onNetVolumeChanged(), BlockchainProcessor.Event.NET_VOLUME_CHANGED);
         blockchainProcessor.addListener(this::onBlockPushed, BlockchainProcessor.Event.BLOCK_PUSHED);
@@ -2603,7 +2606,7 @@ public class NodeConsolePanel extends JPanel {
     }
 
     public void onPeersUpdated() {
-        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        BlockchainProcessor blockchainProcessor = getNodeContext().getBlockchainProcessor();
         Collection<Peer> allPeers = blockchainProcessor.getAllPeers();
         long connectedCount = allPeers.stream().filter(p -> p.getState() == Peer.State.CONNECTED).count();
         long allKnownCount = allPeers.size();
@@ -2612,7 +2615,7 @@ public class NodeConsolePanel extends JPanel {
     }
 
     public void onNetVolumeChanged() {
-        BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+        BlockchainProcessor blockchainProcessor = getNodeContext().getBlockchainProcessor();
         long uploaded = blockchainProcessor.getUploadedVolume();
         long downloaded = blockchainProcessor.getDownloadedVolume();
         SwingUtilities.invokeLater(() -> {
@@ -2693,7 +2696,7 @@ public class NodeConsolePanel extends JPanel {
     }
 
     private void onConsistencyUpdate() {
-        BlockchainProcessor.ConsistencyState state = Signum.getBlockchainProcessor().getConsistencyState();
+        BlockchainProcessor.ConsistencyState state = getNodeContext().getBlockchainProcessor().getConsistencyState();
         SwingUtilities.invokeLater(() -> {
             switch (state) {
                 case CONSISTENT:
@@ -2735,9 +2738,9 @@ public class NodeConsolePanel extends JPanel {
     }
 
     private void onManualPopOffProgress() {
-        int remaining = Signum.getBlockchainProcessor().getManualPopOffBlocksCount();
-        int blockHeight = Signum.getBlockchainProcessor().getBeforeRollbackHeight();
-        int targetHeight = Signum.getBlockchainProcessor().getManualLastPopOffHeight();
+        int remaining = getNodeContext().getBlockchainProcessor().getManualPopOffBlocksCount();
+        int blockHeight = getNodeContext().getBlockchainProcessor().getBeforeRollbackHeight();
+        int targetHeight = getNodeContext().getBlockchainProcessor().getManualLastPopOffHeight();
         SwingUtilities.invokeLater(() -> {
             Color textColor = remaining > 0 ? GuiColors.getSaved() : GuiColors.getApplied();
             popOffBlockCountLabel.setText("Pop off blocks: " + remaining);
@@ -2755,12 +2758,12 @@ public class NodeConsolePanel extends JPanel {
     }
 
     private void onAutoPopOffProgress() {
-        int remaining = Signum.getBlockchainProcessor().getAutoPopOffBlocksCount();
-        int blockHeight = Signum.getBlockchainProcessor().getBeforeRollbackHeight();
-        int targetHeight = Signum.getBlockchainProcessor().getAutoLastPopOffHeight();
+        int remaining = getNodeContext().getBlockchainProcessor().getAutoPopOffBlocksCount();
+        int blockHeight = getNodeContext().getBlockchainProcessor().getBeforeRollbackHeight();
+        int targetHeight = getNodeContext().getBlockchainProcessor().getAutoLastPopOffHeight();
         SwingUtilities.invokeLater(() -> {
             Color textColor;
-            if (Signum.getBlockchainProcessor().getResolutionState() == BlockchainProcessor.ResolutionState.ACTIVE) {
+            if (getNodeContext().getBlockchainProcessor().getResolutionState() == BlockchainProcessor.ResolutionState.ACTIVE) {
                 textColor = GuiColors.getContrastRed();
             } else {
                 textColor = GuiColors.getSaved();
@@ -3246,7 +3249,7 @@ public class NodeConsolePanel extends JPanel {
 
     private int calculateMaxPeerHeight() {
         try {
-            return Signum.getBlockchainProcessor().getAllPeers().stream()
+            return getNodeContext().getBlockchainProcessor().getAllPeers().stream()
                     .filter(p -> p.getState() == Peer.State.CONNECTED)
                     .mapToInt(p -> (int) p.getHeight())
                     .max()

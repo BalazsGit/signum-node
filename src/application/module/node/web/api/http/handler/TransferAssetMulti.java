@@ -19,9 +19,10 @@ import application.module.node.Account;
 import application.module.node.Asset;
 import application.module.node.Attachment;
 import application.module.node.Blockchain;
-import application.module.node.Signum;
 import application.module.node.SignumException;
 import application.module.node.Constants;
+import application.module.node.assetexchange.AssetExchange;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.AccountService;
 import application.module.node.services.ParameterService;
@@ -32,14 +33,19 @@ public final class TransferAssetMulti extends CreateTransaction {
     private final ParameterService parameterService;
     private final Blockchain blockchain;
     private final AccountService accountService;
+    private final AssetExchange assetExchange;
+    private final FluxCapacitor fluxCapacitor;
 
     public TransferAssetMulti(ParameterService parameterService, Blockchain blockchain,
-            APITransactionManager apiTransactionManager, AccountService accountService) {
-        super(new LegacyDocTag[] { LegacyDocTag.AE, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
+            APITransactionManager apiTransactionManager, AccountService accountService,
+            AssetExchange assetExchange, FluxCapacitor fluxCapacitor) {
+        super(new LegacyDocTag[] { LegacyDocTag.AE, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager, fluxCapacitor,
                 RECIPIENT_PARAMETER, ASSET_IDS_AND_QUANTITIES_PARAMETER, AMOUNT_NQT_PARAMETER);
         this.parameterService = parameterService;
         this.blockchain = blockchain;
         this.accountService = accountService;
+        this.assetExchange = assetExchange;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     @Override
@@ -65,7 +71,7 @@ public final class TransferAssetMulti extends CreateTransaction {
         for (String assetIdString : assetIdsArray) {
             String[] assetIdAndQuantity = assetIdString.split(":", 2);
             long assetId = Convert.parseUnsignedLong(assetIdAndQuantity[0]);
-            Asset asset = Signum.getStores().getAssetStore().getAsset(assetId);
+            Asset asset = this.assetExchange.getAsset(assetId);
             if (asset == null || assetIds.contains(assetId)) {
                 return JSONResponses.incorrect(ASSET_IDS_AND_QUANTITIES_PARAMETER);
             }
@@ -92,7 +98,7 @@ public final class TransferAssetMulti extends CreateTransaction {
             }
             if (amountNQT < 0 || amountNQT >= Constants.MAX_BALANCE_NQT) {
                 return JSONResponses.incorrect(AMOUNT_NQT_PARAMETER);
-            } else if (!Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
+            } else if (!this.fluxCapacitor.getValue(FluxValues.SMART_TOKEN)) {
                 return JSONResponses.incorrect(AMOUNT_NQT_PARAMETER);
             }
         }

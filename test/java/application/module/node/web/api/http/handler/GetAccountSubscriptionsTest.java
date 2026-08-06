@@ -16,9 +16,9 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.MockedStatic;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Collection;
@@ -31,11 +31,10 @@ import static org.junit.Assert.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
+import static org.mockito.Mockito.mockStatic;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(Signum.class)
-public class GetAccountSubscriptionsTest extends AbstractUnitTest {
+@ExtendWith(MockitoExtension.class)
+class GetAccountSubscriptionsTest extends AbstractUnitTest {
 
     private ParameterService parameterServiceMock;
     private SubscriptionService subscriptionServiceMock;
@@ -45,16 +44,9 @@ public class GetAccountSubscriptionsTest extends AbstractUnitTest {
 
     @Before
     public void setUp() {
-        mockStatic(Signum.class);
-
         parameterServiceMock = mock(ParameterService.class);
         subscriptionServiceMock = mock(SubscriptionService.class);
         aliasServiceMock = mock(AliasService.class);
-
-        Blockchain mockBlockchain = mock(Blockchain.class);
-        when(Signum.getBlockchain()).thenReturn(mockBlockchain);
-
-        t = new GetAccountSubscriptions(parameterServiceMock, subscriptionServiceMock, aliasServiceMock);
     }
 
     @Test
@@ -77,20 +69,27 @@ public class GetAccountSubscriptionsTest extends AbstractUnitTest {
         final Collection<Subscription> subscriptionIterator = this.mockCollection(subscription);
         when(subscriptionServiceMock.getSubscriptionsByParticipant(eq(userId))).thenReturn(subscriptionIterator);
 
-        final JsonObject result = (JsonObject) t.processRequest(req);
-        assertNotNull(result);
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            Blockchain mockBlockchain = mock(Blockchain.class);
+            mocked.when(Signum::getBlockchain).thenReturn(mockBlockchain);
 
-        final JsonArray resultSubscriptions = (JsonArray) result.get(SUBSCRIPTIONS_RESPONSE);
-        assertNotNull(resultSubscriptions);
-        assertEquals(1, resultSubscriptions.size());
+            t = new GetAccountSubscriptions(parameterServiceMock, subscriptionServiceMock, aliasServiceMock);
 
-        final JsonObject resultSubscription = (JsonObject) resultSubscriptions.get(0);
-        assertNotNull(resultSubscription);
+            final JsonObject result = (JsonObject) t.processRequest(req);
+            assertNotNull(result);
 
-        assertEquals("" + subscription.getId(), JSON.getAsString(resultSubscription.get(ID_RESPONSE)));
-        assertEquals("" + subscription.getAmountNQT(), JSON.getAsString(resultSubscription.get(AMOUNT_NQT_RESPONSE)));
-        assertEquals(subscription.getFrequency(), JSON.getAsInt(resultSubscription.get(FREQUENCY_RESPONSE)));
-        assertEquals(subscription.getTimeNext(), JSON.getAsInt(resultSubscription.get(TIME_NEXT_RESPONSE)));
+            final JsonArray resultSubscriptions = (JsonArray) result.get(SUBSCRIPTIONS_RESPONSE);
+            assertNotNull(resultSubscriptions);
+            assertEquals(1, resultSubscriptions.size());
+
+            final JsonObject resultSubscription = (JsonObject) resultSubscriptions.get(0);
+            assertNotNull(resultSubscription);
+
+            assertEquals("" + subscription.getId(), JSON.getAsString(resultSubscription.get(ID_RESPONSE)));
+            assertEquals("" + subscription.getAmountNQT(), JSON.getAsString(resultSubscription.get(AMOUNT_NQT_RESPONSE)));
+            assertEquals(subscription.getFrequency(), JSON.getAsInt(resultSubscription.get(FREQUENCY_RESPONSE)));
+            assertEquals(subscription.getTimeNext(), JSON.getAsInt(resultSubscription.get(TIME_NEXT_RESPONSE)));
+        }
     }
 
 }

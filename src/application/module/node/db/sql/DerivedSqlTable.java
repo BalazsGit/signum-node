@@ -15,9 +15,17 @@ public abstract class DerivedSqlTable implements DerivedTable {
     final Field<Integer> heightField;
     final Field<Boolean> latestField;
 
-    DerivedSqlTable(String table, TableImpl<?> tableClass, DerivedTableManager derivedTableManager) {
+    /** Reference to the DerivedTableManager for accessing runtime-configurable values. */
+    protected final DerivedTableManager derivedTableManager;
+
+    /** Reference to the instance-scoped DbContext for database operations. */
+    protected final DbContext dbContext;
+
+    DerivedSqlTable(String table, TableImpl<?> tableClass, DerivedTableManager derivedTableManager, DbContext dbContext) {
         this.table = table;
         this.tableClass = tableClass;
+        this.derivedTableManager = derivedTableManager;
+        this.dbContext = dbContext;
         logger.trace("Creating derived table for {}", table);
         derivedTableManager.registerDerivedTable(this);
         this.heightField = tableClass.field("height", Integer.class);
@@ -31,20 +39,20 @@ public abstract class DerivedSqlTable implements DerivedTable {
 
     @Override
     public void rollback(int height) {
-        if (!Db.isInTransaction()) {
+        if (!dbContext.isInTransaction()) {
             throw new IllegalStateException("Not in transaction");
         }
-        Db.useDSLContext(ctx -> {
+        dbContext.useDSLContext(ctx -> {
             ctx.delete(tableClass).where(heightField.gt(height)).execute();
         });
     }
 
     @Override
     public void truncate() {
-        if (!Db.isInTransaction()) {
+        if (!dbContext.isInTransaction()) {
             throw new IllegalStateException("Not in transaction");
         }
-        Db.useDSLContext(ctx -> {
+        dbContext.useDSLContext(ctx -> {
             ctx.delete(tableClass).execute();
         });
     }
@@ -61,6 +69,6 @@ public abstract class DerivedSqlTable implements DerivedTable {
 
     @Override
     public void optimize() {
-        Db.optimizeTable(table);
+        dbContext.optimizeTable(table);
     }
 }

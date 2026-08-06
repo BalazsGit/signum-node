@@ -19,10 +19,10 @@ import application.module.node.Account.AccountAsset;
 import application.module.node.Asset;
 import application.module.node.Attachment;
 import application.module.node.Blockchain;
-import application.module.node.Signum;
 import application.module.node.SignumException;
 import application.module.node.Constants;
 import application.module.node.assetexchange.AssetExchange;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.AccountService;
 import application.module.node.services.ParameterService;
@@ -35,10 +35,12 @@ public final class DistributeToAssetHolders extends CreateTransaction {
     private final Blockchain blockchain;
     private final AssetExchange assetExchange;
     private final AccountService accountService;
+    private final FluxCapacitor fluxCapacitor;
 
     public DistributeToAssetHolders(ParameterService parameterService, Blockchain blockchain,
-            APITransactionManager apiTransactionManager, AssetExchange assetExchange, AccountService accountService) {
-        super(new LegacyDocTag[] { LegacyDocTag.AE, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
+            APITransactionManager apiTransactionManager, AssetExchange assetExchange, AccountService accountService,
+            FluxCapacitor fluxCapacitor) {
+        super(new LegacyDocTag[] { LegacyDocTag.AE, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager, fluxCapacitor,
                 ASSET_PARAMETER,
                 QUANTITY_MININUM_QNT_PARAMETER, AMOUNT_NQT_PARAMETER, ASSET_TO_DISTRIBUTE_PARAMETER,
                 QUANTITY_QNT_PARAMETER);
@@ -46,6 +48,7 @@ public final class DistributeToAssetHolders extends CreateTransaction {
         this.blockchain = blockchain;
         this.assetExchange = assetExchange;
         this.accountService = accountService;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     @Override
@@ -67,7 +70,7 @@ public final class DistributeToAssetHolders extends CreateTransaction {
             }
         }
 
-        if (!Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
+        if (!this.fluxCapacitor.getValue(FluxValues.SMART_TOKEN)) {
             return JSONResponses.incorrect("asset distribution is not enabled yet");
         }
 
@@ -99,7 +102,7 @@ public final class DistributeToAssetHolders extends CreateTransaction {
             return JSONResponses.incorrect(AMOUNT_NQT_PARAMETER);
         }
 
-        boolean unconfirmed = !Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX);
+        boolean unconfirmed = !this.fluxCapacitor.getValue(FluxValues.DISTRIBUTION_FIX);
         CollectionWithIndex<AccountAsset> holders = assetExchange.getAssetAccounts(asset, false, minimumQuantity,
                 unconfirmed, -1, -1);
         long circulatingSupply = 0;

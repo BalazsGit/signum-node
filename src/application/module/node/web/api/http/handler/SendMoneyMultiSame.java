@@ -6,6 +6,7 @@ import application.module.node.util.Convert;
 import application.module.node.web.api.http.common.APITransactionManager;
 import application.module.node.web.api.http.common.LegacyDocTag;
 import application.module.node.web.api.http.common.ParameterParser;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
@@ -26,14 +27,16 @@ public final class SendMoneyMultiSame extends CreateTransaction {
 
     private final ParameterService parameterService;
     private final Blockchain blockchain;
+    private final FluxCapacitor fluxCapacitor;
 
     public SendMoneyMultiSame(ParameterService parameterService, Blockchain blockchain,
-            APITransactionManager apiTransactionManager) {
+            APITransactionManager apiTransactionManager, FluxCapacitor fluxCapacitor) {
         super(new LegacyDocTag[] { LegacyDocTag.TRANSACTIONS, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
-                true, commonParameters);
+                fluxCapacitor, true, commonParameters);
 
         this.parameterService = parameterService;
         this.blockchain = blockchain;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     @Override

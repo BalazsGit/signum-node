@@ -12,9 +12,9 @@ import application.module.node.services.TimeService;
 import application.module.node.web.api.http.common.APITransactionManager;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.MockedStatic;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -27,11 +27,10 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
+import static org.mockito.Mockito.mockStatic;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(Signum.class)
-public class DGSPurchaseTest extends AbstractTransactionTest {
+@ExtendWith(MockitoExtension.class)
+class DGSPurchaseTest extends AbstractTransactionTest {
 
     private DGSPurchase t;
 
@@ -50,7 +49,7 @@ public class DGSPurchaseTest extends AbstractTransactionTest {
         apiTransactionManagerMock = mock(APITransactionManager.class);
 
         t = new DGSPurchase(mockParameterService, mockBlockchain, mockAccountService, mockTimeService,
-                apiTransactionManagerMock);
+                apiTransactionManagerMock, QuickMocker.latestValueFluxCapacitor());
     }
 
     @Test
@@ -80,21 +79,22 @@ public class DGSPurchaseTest extends AbstractTransactionTest {
 
         when(mockAccountService.getAccount(eq(mockSellerId))).thenReturn(mockSellerAccount);
 
-        mockStatic(Signum.class);
-        final FluxCapacitor fluxCapacitor = QuickMocker
-                .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
-        when(Signum.getFluxCapacitor()).thenReturn(fluxCapacitor);
-        doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            final FluxCapacitor fluxCapacitor = QuickMocker
+                    .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
+            mocked.when(Signum::getFluxCapacitor).thenReturn(fluxCapacitor);
+            doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
 
-        final Attachment.DigitalGoodsPurchase attachment = (Attachment.DigitalGoodsPurchase) attachmentCreatedTransaction(
-                () -> t.processRequest(req), apiTransactionManagerMock);
-        assertNotNull(attachment);
+            final Attachment.DigitalGoodsPurchase attachment = (Attachment.DigitalGoodsPurchase) attachmentCreatedTransaction(
+                    () -> t.processRequest(req), apiTransactionManagerMock);
+            assertNotNull(attachment);
 
-        assertEquals(PURCHASE, attachment.getTransactionType());
-        assertEquals(goodsQuantity, attachment.getQuantity());
-        assertEquals(goodsPrice, attachment.getPriceNqt());
-        assertEquals(deliveryDeadlineTimestamp, attachment.getDeliveryDeadlineTimestamp());
-        assertEquals(mockGoodsId, attachment.getGoodsId());
+            assertEquals(PURCHASE, attachment.getTransactionType());
+            assertEquals(goodsQuantity, attachment.getQuantity());
+            assertEquals(goodsPrice, attachment.getPriceNqt());
+            assertEquals(deliveryDeadlineTimestamp, attachment.getDeliveryDeadlineTimestamp());
+            assertEquals(mockGoodsId, attachment.getGoodsId());
+        }
     }
 
     @Test

@@ -82,6 +82,18 @@ public class AtTransaction {
     }
 
     public Transaction build(Block block) throws NotValidException {
+        return build(block, block.getHeight());
+    }
+
+    /**
+     * Builds a Transaction from this AT transaction data.
+     * Accepts blockchain height to eliminate static Signum.getBlockchain() calls.
+     *
+     * @param block the block containing this transaction
+     * @param blockchainHeight current blockchain height for message appendix
+     * @return built Transaction instance
+     */
+    public Transaction build(Block block, int blockchainHeight) throws NotValidException {
         attachment = Attachment.AT_PAYMENT;
 
         long recipient = getRecipientId() == null ? 0L : AtApiHelper.getLong(getRecipientId());
@@ -128,13 +140,45 @@ public class AtTransaction {
 
         byte[] message = getMessage();
         if (message != null) {
-            builder.message(new Appendix.Message(message, Signum.getBlockchain().getHeight()));
+            builder.message(new Appendix.Message(message, blockchainHeight));
         }
 
         return builder.build();
     }
 
+    /**
+     * Applies this AT transaction to the blockchain state.
+     * Deprecated bridge: uses static Signum accessors for backward compatibility.
+     *
+     * @param accountService the account service for balance operations
+     * @param transaction the transaction being applied
+     * @deprecated Use {@link #apply(ATProcessingContext, Transaction)} instead. Scheduled for removal in v4.1.
+     */
+    @Deprecated(since = "4.0", forRemoval = true)
     public void apply(AccountService accountService, Transaction transaction) {
+        apply(new ATProcessingContext(
+                AtController.getAtConstants(),
+                null,
+                Signum.getPropertyService(),
+                Signum.getFluxCapacitor(),
+                Signum.getBlockchain(),
+                Signum.getStores().getAtStore(),
+                Signum.getStores().getAccountStore(),
+                accountService,
+                Signum.getAssetExchange(),
+                Signum.getStores().getIndirectIncomingStore(),
+                Signum.getStores().getAssetStore()), transaction);
+    }
+
+    /**
+     * Applies this AT transaction using the provided processing context for all dependencies.
+     * Replaces static Signum.getXxx() calls with injected dependencies.
+     *
+     * @param context the AT processing context containing all required dependencies
+     * @param transaction the transaction being applied
+     */
+    public void apply(ATProcessingContext context, Transaction transaction) {
+        AccountService accountService = context.getAccountService();
         Account senderAccount = accountService.getAccount(AtApiHelper.getLong(getSenderId()));
         long recipient = getRecipientId() == null ? 0L : AtApiHelper.getLong(getRecipientId());
         Account recipientAccount = accountService.getOrAddAccount(recipient);
@@ -144,19 +188,19 @@ public class AtTransaction {
             accountService.addToAssetAndUnconfirmedAssetBalanceQNT(recipientAccount, getAssetId(), quantity);
 
             ColoredCoinsAssetTransfer assetTransferAttachment = (ColoredCoinsAssetTransfer) attachment;
-            Signum.getAssetExchange().addAssetTransfer(transaction, assetTransferAttachment.getAssetId(),
+            context.getAssetExchange().addAssetTransfer(transaction, assetTransferAttachment.getAssetId(),
                     assetTransferAttachment.getQuantityQnt());
 
             // we also have coins to send besides the asset
             if (getAmount() > 0L
-                    && Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_5, transaction.getHeight())) {
+                    && context.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_5, transaction.getHeight())) {
                 accountService.addToBalanceAndUnconfirmedBalanceNQT(senderAccount, -getAmount());
                 accountService.addToBalanceAndUnconfirmedBalanceNQT(recipientAccount, getAmount());
             }
         } else if (getType() == TransactionType.ColoredCoins.ASSET_ISSUANCE) {
-            Asset asset = Signum.getAssetExchange().getAsset(assetId);
+            Asset asset = context.getAssetExchange().getAsset(assetId);
             if (asset == null && assetId != 0L) {
-                Signum.getAssetExchange().addAsset(assetId, senderAccount.getId(),
+                context.getAssetExchange().addAsset(assetId, senderAccount.getId(),
                         (ColoredCoinsAssetIssuance) attachment);
             }
         } else if (getType() == TransactionType.ColoredCoins.ASSET_MINT) {
@@ -187,13 +231,12 @@ public class AtTransaction {
                                 incoming.getQuantity());
                     }
                 }
-                Signum.getStores().getIndirectIncomingStore().addIndirectIncomings(indirects);
+                context.getIndirectIncomingStore().addIndirectIncomings(indirects);
             }
         } else {
             accountService.addToBalanceAndUnconfirmedBalanceNQT(senderAccount, -getAmount());
             accountService.addToBalanceAndUnconfirmedBalanceNQT(recipientAccount, getAmount());
         }
-
     }
 
     public static AtTransaction getATTransaction(Long atId, Long height) {

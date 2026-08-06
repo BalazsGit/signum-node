@@ -10,48 +10,50 @@ import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.ParameterService;
 import application.module.node.web.api.http.common.APITransactionManager;
 import application.module.node.web.api.http.common.ParameterException;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.MockedStatic;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import jakarta.servlet.http.HttpServletRequest;
 
 import static application.module.node.TransactionType.ColoredCoins.BID_ORDER_CANCELLATION;
 import static application.module.node.web.api.http.common.JSONResponses.UNKNOWN_ORDER;
 import static application.module.node.web.api.http.common.Parameters.ORDER_PARAMETER;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.powermock.api.mockito.PowerMockito.mock;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
+import static org.mockito.Mockito.mockStatic;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(Signum.class)
-public class CancelBidOrderTest extends AbstractTransactionTest {
+@ExtendWith(MockitoExtension.class)
+class CancelBidOrderTest extends AbstractTransactionTest {
 
     private CancelBidOrder t;
 
+    @Mock
     private ParameterService parameterServiceMock;
+    @Mock
     private Blockchain blockchainMock;
+    @Mock
     private AssetExchange assetExchangeMock;
+    @Mock
     private APITransactionManager apiTransactionManagerMock;
 
-    @Before
-    public void setUp() {
-        parameterServiceMock = mock(ParameterService.class);
-        blockchainMock = mock(Blockchain.class);
-        assetExchangeMock = mock(AssetExchange.class);
-        apiTransactionManagerMock = mock(APITransactionManager.class);
-
-        t = new CancelBidOrder(parameterServiceMock, blockchainMock, assetExchangeMock, apiTransactionManagerMock);
+    @BeforeEach
+    void setUp() {
+        FluxCapacitor fluxCapacitor = QuickMocker.latestValueFluxCapacitor();
+        t = new CancelBidOrder(parameterServiceMock, blockchainMock, assetExchangeMock, apiTransactionManagerMock,
+                fluxCapacitor);
     }
 
     @Test
-    public void processRequest() throws SignumException {
+    void processRequest() throws SignumException {
         final int orderId = 123;
         final long orderAccountId = 1;
         final long senderAccountId = orderAccountId;
@@ -67,27 +69,28 @@ public class CancelBidOrderTest extends AbstractTransactionTest {
         when(mockAccount.getId()).thenReturn(senderAccountId);
         when(parameterServiceMock.getSenderAccount(eq(req))).thenReturn(mockAccount);
 
-        mockStatic(Signum.class);
-        final FluxCapacitor fluxCapacitor = QuickMocker
-                .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
-        when(Signum.getFluxCapacitor()).thenReturn(fluxCapacitor);
-        doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            final FluxCapacitor fluxCapacitor = QuickMocker
+                    .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
+            mocked.when(Signum::getFluxCapacitor).thenReturn(fluxCapacitor);
+            doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
 
-        final Attachment.ColoredCoinsBidOrderCancellation attachment = (application.module.node.Attachment.ColoredCoinsBidOrderCancellation) attachmentCreatedTransaction(
-                () -> t.processRequest(req), apiTransactionManagerMock);
-        assertNotNull(attachment);
+            final Attachment.ColoredCoinsBidOrderCancellation attachment = (Attachment.ColoredCoinsBidOrderCancellation) attachmentCreatedTransaction(
+                    () -> t.processRequest(req), apiTransactionManagerMock);
+            assertNotNull(attachment);
 
-        assertEquals(BID_ORDER_CANCELLATION, attachment.getTransactionType());
-        assertEquals(orderId, attachment.getOrderId());
-    }
-
-    @Test(expected = ParameterException.class)
-    public void processRequest_orderParameterMissing() throws SignumException {
-        t.processRequest(QuickMocker.httpServletRequest());
+            assertEquals(BID_ORDER_CANCELLATION, attachment.getTransactionType());
+            assertEquals(orderId, attachment.getOrderId());
+        }
     }
 
     @Test
-    public void processRequest_orderDataMissingUnkownOrder() throws SignumException {
+    void processRequest_orderParameterMissing() throws SignumException {
+        assertThrows(ParameterException.class, () -> t.processRequest(QuickMocker.httpServletRequest()));
+    }
+
+    @Test
+    void processRequest_orderDataMissingUnkownOrder() throws SignumException {
         final int orderId = 123;
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(ORDER_PARAMETER, orderId));
@@ -98,7 +101,7 @@ public class CancelBidOrderTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_accountIdNotSameAsOrder() throws SignumException {
+    void processRequest_accountIdNotSameAsOrder() throws SignumException {
         final int orderId = 123;
         final long orderAccountId = 1;
         final long senderAccountId = 2;
@@ -117,5 +120,4 @@ public class CancelBidOrderTest extends AbstractTransactionTest {
 
         assertEquals(UNKNOWN_ORDER, t.processRequest(req));
     }
-
 }

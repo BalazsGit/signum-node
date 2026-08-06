@@ -11,11 +11,12 @@ import application.module.node.services.ParameterService;
 import application.module.node.util.JSON;
 import application.module.node.web.api.http.common.APITransactionManager;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.MockedStatic;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -23,37 +24,36 @@ import static application.module.node.TransactionType.AdvancedPayment.ESCROW_SIG
 import static application.module.node.web.api.http.common.Parameters.DECISION_PARAMETER;
 import static application.module.node.web.api.http.common.Parameters.ESCROW_PARAMETER;
 import static application.module.node.web.api.http.common.ResultFields.ERROR_CODE_RESPONSE;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.powermock.api.mockito.PowerMockito.mock;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
+import static org.mockito.Mockito.mockStatic;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(Signum.class)
-public class EscrowSignTest extends AbstractTransactionTest {
+@ExtendWith(MockitoExtension.class)
+class EscrowSignTest extends AbstractTransactionTest {
 
+    @Mock
     private ParameterService parameterServiceMock;
+    @Mock
     private Blockchain blockchainMock;
+    @Mock
     private EscrowService escrowServiceMock;
+    @Mock
     private APITransactionManager apiTransactionManagerMock;
 
     private EscrowSign t;
 
-    @Before
-    public void setUp() {
-        parameterServiceMock = mock(ParameterService.class);
-        blockchainMock = mock(Blockchain.class);
-        escrowServiceMock = mock(EscrowService.class);
-        apiTransactionManagerMock = mock(APITransactionManager.class);
-
-        t = new EscrowSign(parameterServiceMock, blockchainMock, escrowServiceMock, apiTransactionManagerMock);
+    @BeforeEach
+    void setUp() {
+        FluxCapacitor fluxCapacitor = QuickMocker.latestValueFluxCapacitor();
+        t = new EscrowSign(parameterServiceMock, blockchainMock, escrowServiceMock, apiTransactionManagerMock, fluxCapacitor);
     }
 
     @Test
-    public void processRequest_positiveAsEscrowSender() throws SignumException {
+    void processRequest_positiveAsEscrowSender() throws SignumException {
         final long escrowId = 5;
         final long senderId = 6;
 
@@ -68,26 +68,27 @@ public class EscrowSignTest extends AbstractTransactionTest {
         final Account sender = mock(Account.class);
         when(sender.getId()).thenReturn(senderId);
 
-        mockStatic(Signum.class);
-        final FluxCapacitor fluxCapacitor = QuickMocker
-                .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
-        when(Signum.getFluxCapacitor()).thenReturn(fluxCapacitor);
-        doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
-
         when(escrowServiceMock.getEscrowTransaction(eq(escrowId))).thenReturn(escrow);
         when(parameterServiceMock.getSenderAccount(eq(req))).thenReturn(sender);
 
-        final Attachment.AdvancedPaymentEscrowSign attachment = (application.module.node.Attachment.AdvancedPaymentEscrowSign) attachmentCreatedTransaction(
-                () -> t.processRequest(req),
-                apiTransactionManagerMock);
-        assertNotNull(attachment);
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            final FluxCapacitor fluxCapacitor = QuickMocker
+                    .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
+            mocked.when(Signum::getFluxCapacitor).thenReturn(fluxCapacitor);
+            doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
 
-        assertEquals(ESCROW_SIGN, attachment.getTransactionType());
-        assertEquals(DecisionType.RELEASE, attachment.getDecision());
+            final Attachment.AdvancedPaymentEscrowSign attachment = (Attachment.AdvancedPaymentEscrowSign) attachmentCreatedTransaction(
+                    () -> t.processRequest(req),
+                    apiTransactionManagerMock);
+            assertNotNull(attachment);
+
+            assertEquals(ESCROW_SIGN, attachment.getTransactionType());
+            assertEquals(DecisionType.RELEASE, attachment.getDecision());
+        }
     }
 
     @Test
-    public void processRequest_positiveAsEscrowRecipient() throws SignumException {
+    void processRequest_positiveAsEscrowRecipient() throws SignumException {
         final long escrowId = 5;
         final long senderId = 6;
 
@@ -105,23 +106,24 @@ public class EscrowSignTest extends AbstractTransactionTest {
         when(escrowServiceMock.getEscrowTransaction(eq(escrowId))).thenReturn(escrow);
         when(parameterServiceMock.getSenderAccount(eq(req))).thenReturn(sender);
 
-        mockStatic(Signum.class);
-        final FluxCapacitor fluxCapacitor = QuickMocker
-                .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
-        when(Signum.getFluxCapacitor()).thenReturn(fluxCapacitor);
-        doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            final FluxCapacitor fluxCapacitor = QuickMocker
+                    .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
+            mocked.when(Signum::getFluxCapacitor).thenReturn(fluxCapacitor);
+            doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
 
-        final Attachment.AdvancedPaymentEscrowSign attachment = (application.module.node.Attachment.AdvancedPaymentEscrowSign) attachmentCreatedTransaction(
-                () -> t.processRequest(req),
-                apiTransactionManagerMock);
-        assertNotNull(attachment);
+            final Attachment.AdvancedPaymentEscrowSign attachment = (Attachment.AdvancedPaymentEscrowSign) attachmentCreatedTransaction(
+                    () -> t.processRequest(req),
+                    apiTransactionManagerMock);
+            assertNotNull(attachment);
 
-        assertEquals(ESCROW_SIGN, attachment.getTransactionType());
-        assertEquals(DecisionType.REFUND, attachment.getDecision());
+            assertEquals(ESCROW_SIGN, attachment.getTransactionType());
+            assertEquals(DecisionType.REFUND, attachment.getDecision());
+        }
     }
 
     @Test
-    public void processRequest_positiveAsEscrowSigner() throws SignumException {
+    void processRequest_positiveAsEscrowSigner() throws SignumException {
         final long escrowId = 5;
         final long senderId = 6;
 
@@ -136,28 +138,28 @@ public class EscrowSignTest extends AbstractTransactionTest {
         final Account sender = mock(Account.class);
         when(sender.getId()).thenReturn(senderId);
 
-        mockStatic(Signum.class);
-        final FluxCapacitor fluxCapacitor = QuickMocker
-                .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
-        when(Signum.getFluxCapacitor()).thenReturn(fluxCapacitor);
-        doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
-
         when(escrowServiceMock.isIdSigner(eq(senderId), eq(escrow))).thenReturn(true);
-
         when(escrowServiceMock.getEscrowTransaction(eq(escrowId))).thenReturn(escrow);
         when(parameterServiceMock.getSenderAccount(eq(req))).thenReturn(sender);
 
-        final Attachment.AdvancedPaymentEscrowSign attachment = (application.module.node.Attachment.AdvancedPaymentEscrowSign) attachmentCreatedTransaction(
-                () -> t.processRequest(req),
-                apiTransactionManagerMock);
-        assertNotNull(attachment);
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            final FluxCapacitor fluxCapacitor = QuickMocker
+                    .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
+            mocked.when(Signum::getFluxCapacitor).thenReturn(fluxCapacitor);
+            doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
 
-        assertEquals(ESCROW_SIGN, attachment.getTransactionType());
-        assertEquals(DecisionType.REFUND, attachment.getDecision());
+            final Attachment.AdvancedPaymentEscrowSign attachment = (Attachment.AdvancedPaymentEscrowSign) attachmentCreatedTransaction(
+                    () -> t.processRequest(req),
+                    apiTransactionManagerMock);
+            assertNotNull(attachment);
+
+            assertEquals(ESCROW_SIGN, attachment.getTransactionType());
+            assertEquals(DecisionType.REFUND, attachment.getDecision());
+        }
     }
 
     @Test
-    public void processRequest_invalidEscrowId() throws SignumException {
+    void processRequest_invalidEscrowId() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(ESCROW_PARAMETER, "NotANumber"));
 
@@ -167,7 +169,7 @@ public class EscrowSignTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_escrowNotFound() throws SignumException {
+    void processRequest_escrowNotFound() throws SignumException {
         final long escrowId = 5;
 
         final HttpServletRequest req = QuickMocker.httpServletRequest(
@@ -181,7 +183,7 @@ public class EscrowSignTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_invalidDecisionType() throws SignumException {
+    void processRequest_invalidDecisionType() throws SignumException {
         final long escrowId = 5;
 
         final HttpServletRequest req = QuickMocker.httpServletRequest(
@@ -198,7 +200,7 @@ public class EscrowSignTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_invalidSender() throws SignumException {
+    void processRequest_invalidSender() throws SignumException {
         final long escrowId = 5;
         final long senderId = 6;
 
@@ -224,7 +226,7 @@ public class EscrowSignTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_senderCanOnlyRelease() throws SignumException {
+    void processRequest_senderCanOnlyRelease() throws SignumException {
         final long escrowId = 5;
         final long senderId = 6;
 
@@ -247,7 +249,7 @@ public class EscrowSignTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_recipientCanOnlyRefund() throws SignumException {
+    void processRequest_recipientCanOnlyRefund() throws SignumException {
         final long escrowId = 5;
         final long senderId = 6;
 

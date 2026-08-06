@@ -49,4 +49,9 @@ public class IndirectIncomingServiceImpl implements IndirectIncomingService {
             return;
         indirectIncomingStore.rollback(height);
     }
+
+    @Override
+    public IndirectIncoming getIndirectIncoming(long accountId, long transactionId) {
+        return indirectIncomingStore.getIndirectIncoming(accountId, transactionId);
+    }
 }

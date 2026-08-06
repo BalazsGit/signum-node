@@ -15,21 +15,29 @@ import com.google.gson.JsonElement;
 
 import application.module.node.Account;
 import application.module.node.Blockchain;
-import application.module.node.Signum;
 import application.module.node.SignumException;
 import application.module.node.IndirectIncoming;
+import application.module.node.services.IndirectIncomingService;
 import application.module.node.services.ParameterService;
 import application.module.node.util.Convert;
 
+/**
+ * Handles the getIndirectIncoming API request.
+ * Uses IndirectIncomingService (service layer) rather than accessing the store directly,
+ * following the layered architecture: Web API → Services → Stores → Database.
+ */
 public final class GetIndirectIncoming extends ApiServlet.JsonRequestHandler {
 
     private final Blockchain blockchain;
     private final ParameterService parameterService;
+    private final IndirectIncomingService indirectIncomingService;
 
-    public GetIndirectIncoming(Blockchain blockchain, ParameterService parameterService) {
+    public GetIndirectIncoming(Blockchain blockchain, ParameterService parameterService,
+            IndirectIncomingService indirectIncomingService) {
         super(new LegacyDocTag[] { LegacyDocTag.TRANSACTIONS }, TRANSACTION_PARAMETER, ACCOUNT_PARAMETER);
         this.blockchain = blockchain;
         this.parameterService = parameterService;
+        this.indirectIncomingService = indirectIncomingService;
     }
 
     @Override
@@ -48,8 +56,7 @@ public final class GetIndirectIncoming extends ApiServlet.JsonRequestHandler {
             return INCORRECT_TRANSACTION;
         }
 
-        IndirectIncoming indirect = Signum.getStores().getIndirectIncomingStore().getIndirectIncoming(account.getId(),
-                transactionId);
+        IndirectIncoming indirect = indirectIncomingService.getIndirectIncoming(account.getId(), transactionId);
 
         if (indirect == null) {
             return UNKNOWN_TRANSACTION;

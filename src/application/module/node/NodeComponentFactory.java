@@ -10,6 +10,7 @@ import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.props.PropertyService;
 import application.module.node.services.AccountService;
 import application.module.node.services.AliasService;
+import application.module.node.services.ATService;
 import application.module.node.services.BlockService;
 import application.module.node.services.EscrowService;
 import application.module.node.services.IndirectIncomingService;
@@ -138,11 +139,12 @@ public final class NodeComponentFactory {
      * @param generator             the block generator
      * @param statisticsManager     the statistics manager
      * @param dbCacheManager        the DB cache manager
-     * @param accountService        the account service
-     * @param indirectIncomingService the indirect incoming service
-     * @param aliasService          the alias service
-     * @return a new {@link BlockchainProcessorImpl} instance
-     */
+      * @param accountService        the account service
+      * @param indirectIncomingService the indirect incoming service
+      * @param aliasService          the alias service
+      * @param atService             the AT service
+      * @return a new {@link BlockchainProcessorImpl} instance
+      */
     public static BlockchainProcessorImpl createBlockchainProcessor(
             application.module.node.util.ThreadPool threadPool,
             BlockService blockService,
@@ -165,7 +167,9 @@ public final class NodeComponentFactory {
             DBCacheManagerImpl dbCacheManager,
             AccountService accountService,
             IndirectIncomingService indirectIncomingService,
-            AliasService aliasService) {
+            AliasService aliasService,
+            FluxCapacitor fluxCapacitor,
+            ATService atService) {
         return new BlockchainProcessorImpl(
                 threadPool,
                 blockService,
@@ -188,7 +192,9 @@ public final class NodeComponentFactory {
                 dbCacheManager,
                 accountService,
                 indirectIncomingService,
-                aliasService);
+                aliasService,
+                fluxCapacitor,
+                atService);
     }
 
 }

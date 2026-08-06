@@ -16,17 +16,17 @@ import application.utils.gui.TabbedPaneHoverHelper;
 @SuppressWarnings("serial")
 public class MetricsPanel extends JTabbedPane {
 
-    private final SynchronizationMetricsPanel syncPanel;
-    private final BlockGenerationMetricsPanel blockGenPanel;
-    private final PeerMetricsPanel peerMetricsPanel;
-    private final NetworkMetricsPanel networkMetricsPanel;
-    private final JPanel syncWrapper;
-    private final JPanel blockGenWrapper;
-    private final JPanel peerWrapper;
-    private final JPanel networkWrapper;
+    private SynchronizationMetricsPanel syncPanel;
+    private BlockGenerationMetricsPanel blockGenPanel;
+    private PeerMetricsPanel peerMetricsPanel;
+    private NetworkMetricsPanel networkMetricsPanel;
+    private JPanel syncWrapper;
+    private JPanel blockGenWrapper;
+    private JPanel peerWrapper;
+    private JPanel networkWrapper;
     private boolean isExpanded = true;
     private int lastSelectedIndex = 1;
-    private final CustomDrawingComponent toggleTab;
+    private CustomDrawingComponent toggleTab;
     private Timer animationTimer;
     private final TabbedPaneHoverHelper hoverHelper = new TabbedPaneHoverHelper();
 
@@ -51,14 +51,40 @@ public class MetricsPanel extends JTabbedPane {
     }
 
     // Dedicated executors for each panel to ensure isolation and prevent starvation
-    private final ExecutorService syncExecutor;
-    private final ExecutorService blockGenExecutor;
-    private final ExecutorService peerExecutor;
-    private final ExecutorService networkExecutor;
+    private ExecutorService syncExecutor;
+    private ExecutorService blockGenExecutor;
+    private ExecutorService peerExecutor;
+    private ExecutorService networkExecutor;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(MetricsPanel.class);
 
+    /** Profile-aware context for child panels (may be null for backward compatibility) */
+    private final MetricsPanelContext metricsContext;
+
+    /**
+     * Creates a new MetricsPanel with profile-aware context.
+     * @param parentFrame the parent JFrame
+     * @param context the profile-aware metrics context (may be null)
+     */
+    public MetricsPanel(JFrame parentFrame, MetricsPanelContext context) {
+        this.metricsContext = context;
+        initPanels(parentFrame);
+    }
+
+    /**
+     * Creates a new MetricsPanel without profile context.
+     * @deprecated Use {@link #MetricsPanel(JFrame, MetricsPanelContext)} instead.
+     * Retained for backward compatibility during migration.
+     *
+     * @param parentFrame the parent JFrame
+     */
+    @Deprecated(since = "4.0", forRemoval = true)
     public MetricsPanel(JFrame parentFrame) {
+        this.metricsContext = null;
+        initPanels(parentFrame);
+    }
+
+    private void initPanels(JFrame parentFrame) {
         // Create dedicated single thread executors for each panel.
         // This ensures that heavy load on one panel (e.g. PeerMetrics) does not block
         // updates on other panels (e.g. Sync), providing better UI responsiveness.
@@ -87,9 +113,9 @@ public class MetricsPanel extends JTabbedPane {
             return t;
         });
 
-        syncPanel = new SynchronizationMetricsPanel(parentFrame, syncExecutor);
-        blockGenPanel = new BlockGenerationMetricsPanel(parentFrame, blockGenExecutor);
-        peerMetricsPanel = new PeerMetricsPanel(parentFrame, peerExecutor);
+        syncPanel = new SynchronizationMetricsPanel(parentFrame, syncExecutor, metricsContext);
+        blockGenPanel = new BlockGenerationMetricsPanel(parentFrame, blockGenExecutor, metricsContext);
+        peerMetricsPanel = new PeerMetricsPanel(parentFrame, peerExecutor, metricsContext);
         networkMetricsPanel = new NetworkMetricsPanel(parentFrame, networkExecutor);
 
         // Create wrappers for collapsing animation

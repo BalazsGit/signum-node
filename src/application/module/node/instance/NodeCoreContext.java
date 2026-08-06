@@ -6,16 +6,23 @@ import application.module.node.EconomicClustering;
 import application.module.node.Generator;
 import application.module.node.NodeComponentFactory;
 import application.module.node.ShutdownManager;
+import application.module.node.TransactionApplyContext;
 import application.module.node.TransactionProcessorImpl;
 import application.module.node.TransactionType;
 import application.module.node.assetexchange.AssetExchange;
 import application.module.node.assetexchange.AssetExchangeImpl;
+import application.module.node.at.AtConstants;
+import application.module.node.at.AtController;
 import application.module.node.at.AT;
+import application.module.node.at.ATProcessorCache;
+import application.module.node.at.ATProcessingContext;
 import application.module.node.db.BlockDb;
 import application.module.node.db.TransactionDb;
 import application.module.node.db.cache.DBCacheManagerImpl;
 import application.module.node.db.sql.Db;
 import application.module.node.db.sql.DbContext;
+import application.module.node.db.sql.SqlATStore;
+import application.module.node.db.sql.StoreDependencies;
 import application.module.node.db.store.AliasStore;
 import application.module.node.db.store.BlockchainStore;
 import application.module.node.db.store.Dbs;
@@ -25,7 +32,7 @@ import application.module.node.deeplink.DeeplinkQRCodeGenerator;
 import application.module.node.feesuggestions.FeeSuggestionCalculator;
 import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxCapacitorImpl;
-import application.module.node.peer.Peers;
+import application.module.node.peer.PeerManager;
 import application.module.node.props.Props;
 import application.module.node.props.PropertyService;
 import application.module.node.services.AccountService;
@@ -40,7 +47,7 @@ import application.module.node.services.TimeService;
 import application.module.node.services.TransactionService;
 import application.module.node.services.impl.AccountServiceImpl;
 import application.module.node.services.impl.AliasServiceImpl;
-import application.module.node.services.impl.ATServiceImpl;
+import application.module.node.at.ATServiceImpl;
 import application.module.node.services.impl.BlockServiceImpl;
 import application.module.node.services.impl.DGSGoodsStoreServiceImpl;
 import application.module.node.services.impl.EscrowServiceImpl;
@@ -202,6 +209,18 @@ public final class NodeCoreContext {
     private APITransactionManager apiTransactionManager;
     private FeeSuggestionCalculator feeSuggestionCalculator;
     private DeeplinkQRCodeGenerator deeplinkQRCodeGenerator;
+
+    /**
+     * Immutable snapshot of all services required for transaction type processing.
+     * Provides context-aware access to eliminate static Signum.getXxx() calls.
+     */
+    private TransactionApplyContext transactionApplyContext;
+
+    /** AT constants instance, shared across Web/API and store layers. */
+    private AtConstants atConstants;
+
+    /** Per-profile peer manager for isolated peer networking. */
+    private PeerManager peerManager;
 
     // =========================================================================
     // Lifecycle flags
@@ -373,15 +392,16 @@ public final class NodeCoreContext {
         this.threadPool = new ThreadPool(this.propertyService);
 
         // Db.init + Dbs + Stores (lines 500-505)
-        // Multi-profile: per-instance DbContext - capture return value instead of static getActiveContext()
-        this.dbContext = Db.init(this.propertyService, this.dbCacheManager);
-        this.dbs = Db.getDbsByDatabaseType();
+        // Phase 9.5: Pure instance factory — no static Db.activeContext pollution
+        this.dbContext = DbContext.create(this.propertyService, this.dbCacheManager);
+        this.dbs = this.dbContext.getDbsByDatabaseType();
 
         TransactionDb transactionDb = dbs.getTransactionDb();
         BlockDb blockDb = dbs.getBlockDb();
 
+        StoreDependencies storeDeps = new StoreDependencies(null, this.propertyService, null, this.dbs, this.dbContext);
         this.stores = new Stores(this.derivedTableManager, this.dbCacheManager, this.timeService,
-                this.propertyService, transactionDb, blockDb, this.networkParameters);
+                this.propertyService, transactionDb, blockDb, this.networkParameters, storeDeps);
     }
 
     /**
@@ -559,7 +579,12 @@ public final class NodeCoreContext {
                 this.dbCacheManager,
                 this.accountService,
                 this.indirectIncomingService,
-                this.aliasService);
+                this.aliasService,
+                this.fluxCapacitor,
+                this.atService);
+
+        // Wire minRollbackHeight supplier to DerivedTableManager (eliminates last Signum static ref)
+        this.derivedTableManager.setMinRollbackHeightSupplier(this.blockchainProcessor::getMinRollbackHeight);
 
         // downloadCache.setBlockchainProcessor(blockchainProcessor) (line 630)
         this.downloadCache.setBlockchainProcessor(this.blockchainProcessor);
@@ -607,8 +632,13 @@ public final class NodeCoreContext {
                 this.accountService,
                 this.transactionService);
 
-        // Peers.init() - STATIC CALL (lines 660-671)
-        Peers.init(
+        // PeerManager - instance-scoped peer management (Phase 10.5)
+        this.peerManager = new PeerManager(
+                this.propertyService,
+                this.blockchain,
+                this.threadPool,
+                this.timeService);
+        this.peerManager.start(
                 this.timeService,
                 this.accountService,
                 this.blockchain,
@@ -632,6 +662,15 @@ public final class NodeCoreContext {
                 this.stores.getUnconfirmedTransactionStore(),
                 this.blockchain,
                 this.fluxCapacitor);
+
+        // Create AtConstants EARLY so it's available for WebServerContext and SqlATStore wiring
+        this.atConstants = new AtConstants(this.fluxCapacitor);
+
+        // Wire AtConstants into SqlATStore (for getOrderedATs fee calculations)
+        ((SqlATStore) this.stores.getAtStore()).setAtConstants(this.atConstants);
+
+        // Initialize static AT module references with injected AtConstants
+        AtController.setAtConstants(this.atConstants);
 
         // WebServerImpl + start() (lines 679-703)
         this.webServer = new WebServerImpl(new WebServerContext(
@@ -657,7 +696,9 @@ public final class NodeCoreContext {
                 this.feeSuggestionCalculator,
                 this.deeplinkQRCodeGenerator,
                 this.indirectIncomingService,
-                this.networkParameters));
+                this.networkParameters,
+                this.atConstants,
+                this.fluxCapacitor));
         try {
             this.webServer.start();
         } catch (Exception e) {
@@ -679,6 +720,23 @@ public final class NodeCoreContext {
                     timeMultiplier));
             logger.info("TIME WILL FLOW {} TIMES FASTER!", timeMultiplier);
         }
+
+        // Create TransactionApplyContext with all services wired up
+        this.transactionApplyContext = new TransactionApplyContext(
+                this.blockchain,
+                this.fluxCapacitor,
+                this.accountService,
+                this.digitalGoodsStoreService,
+                this.aliasService,
+                this.assetExchange,
+                this.subscriptionService,
+                this.escrowService,
+                this.propertyService,
+                this.stores.getAtStore(),
+                this.atConstants);
+
+        // Wire TransactionApplyContext into TransactionType static holder (Phase 10f)
+        TransactionType.setContext(this.transactionApplyContext);
 
         // DebugTrace.init() is package-private, so we delegate to Signum for now
         // This will be migrated once DebugTrace is refactored
@@ -761,15 +819,15 @@ public final class NodeCoreContext {
                 }
             }
 
-            // 3. Shutdown Peers
-            if (this.threadPool != null) {
+            // 3. Shutdown PeerManager (instance-scoped, Phase 10.5)
+            if (this.peerManager != null) {
                 try {
-                    Peers.shutdown(this.threadPool);
+                    this.peerManager.shutdown(this.threadPool);
                 } catch (Throwable t) {
                     if (this.shutdownManager != null) {
-                        this.shutdownManager.markFailure("Peers");
+                        this.shutdownManager.markFailure("PeerManager");
                     }
-                    logger.error("Error shutting down Peers for profile '{}'", profileName, t);
+                    logger.error("Error shutting down PeerManager for profile '{}'", profileName, t);
                 }
             }
 
@@ -797,9 +855,11 @@ public final class NodeCoreContext {
                 }
             }
 
-            // 6. Shutdown Database
+            // 6. Shutdown Database — instance-scoped (not static Db.shutdown())
             try {
-                Db.shutdown();
+                if (this.dbContext != null) {
+                    this.dbContext.shutdown();
+                }
             } catch (Throwable t) {
                 if (this.shutdownManager != null) {
                     this.shutdownManager.markFailure("Database");
@@ -975,6 +1035,15 @@ public final class NodeCoreContext {
     }
 
     /**
+     * Returns the TransactionApplyContext for transaction type processing.
+     * Provides isolated, profile-scoped access to all services needed by
+     * TransactionType subclasses without requiring static Signum.getXxx() calls.
+     */
+    public TransactionApplyContext getTransactionApplyContext() {
+        return transactionApplyContext;
+    }
+
+    /**
      * Returns the EconomicClustering instance for transaction prioritization.
      */
     public EconomicClustering getEconomicClustering() {
@@ -987,6 +1056,15 @@ public final class NodeCoreContext {
     public TimeService getTimeService() {
         return timeService;
     }
+
+    /**
+     * Returns the PeerManager for this profile.
+     * Provides isolated, per-profile peer management.
+     */
+    public PeerManager getPeerManager() {
+        return peerManager;
+    }
+
 
     // =========================================================================
     // Lifecycle state queries

@@ -1,10 +1,6 @@
 package application.module.node.web.api.http.handler;
 
-import application.module.node.Attachment;
-import application.module.node.Blockchain;
-import application.module.node.Signum;
-import application.module.node.SignumException;
-import application.module.node.Constants;
+import application.module.node.*;
 import application.module.node.common.QuickMocker;
 import application.module.node.common.QuickMocker.MockParam;
 import application.module.node.fluxcapacitor.FluxCapacitor;
@@ -12,11 +8,12 @@ import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.AliasService;
 import application.module.node.services.ParameterService;
 import application.module.node.web.api.http.common.APITransactionManager;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.MockedStatic;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -24,43 +21,36 @@ import static application.module.node.TransactionType.Messaging.ALIAS_ASSIGNMENT
 import static application.module.node.web.api.http.common.JSONResponses.*;
 import static application.module.node.web.api.http.common.Parameters.ALIAS_NAME_PARAMETER;
 import static application.module.node.web.api.http.common.Parameters.ALIAS_URI_PARAMETER;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
+import static org.mockito.Mockito.mockStatic;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(Signum.class)
-public class SetAliasTest extends AbstractTransactionTest {
+@ExtendWith(MockitoExtension.class)
+class SetAliasTest extends AbstractTransactionTest {
 
     private SetAlias t;
 
-    private ParameterService parameterServiceMock;
-    private Blockchain blockchainMock;
-    private AliasService aliasServiceMock;
+    @Mock
+    private ParameterService mockParameterService;
+    @Mock
+    private Blockchain mockBlockchain;
+    @Mock
+    private AliasService mockAliasService;
+    @Mock
     private APITransactionManager apiTransactionManagerMock;
 
-    @Before
-    public void setUp() {
-        mockStatic(Signum.class);
-
-        parameterServiceMock = mock(ParameterService.class);
-        blockchainMock = mock(Blockchain.class);
-        aliasServiceMock = mock(AliasService.class);
-        apiTransactionManagerMock = mock(APITransactionManager.class);
-
-        FluxCapacitor mockFluxCapacitor = QuickMocker.fluxCapacitorEnabledFunctionalities(FluxValues.PRE_POC2,
-                FluxValues.DIGITAL_GOODS_STORE);
-        when(Signum.getFluxCapacitor()).thenReturn(mockFluxCapacitor);
-
-        t = new SetAlias(parameterServiceMock, blockchainMock, aliasServiceMock, apiTransactionManagerMock);
+    @BeforeEach
+    void setUp() {
+        FluxCapacitor fluxCapacitor = QuickMocker.latestValueFluxCapacitor();
+        t = new SetAlias(mockParameterService, mockBlockchain, mockAliasService, apiTransactionManagerMock, fluxCapacitor);
     }
 
     @Test
-    public void processRequest() throws SignumException {
+    void processRequest() throws SignumException {
         final String aliasNameParameter = "aliasNameParameter";
         final String aliasUrl = "aliasUrl";
 
@@ -68,23 +58,24 @@ public class SetAliasTest extends AbstractTransactionTest {
                 new MockParam(ALIAS_NAME_PARAMETER, aliasNameParameter),
                 new MockParam(ALIAS_URI_PARAMETER, aliasUrl));
 
-        mockStatic(Signum.class);
-        final FluxCapacitor fluxCapacitor = QuickMocker
-                .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
-        when(Signum.getFluxCapacitor()).thenReturn(fluxCapacitor);
-        doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            final FluxCapacitor fluxCapacitor = QuickMocker
+                    .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
+            mocked.when(Signum::getFluxCapacitor).thenReturn(fluxCapacitor);
+            doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
 
-        final Attachment.MessagingAliasAssignment attachment = (Attachment.MessagingAliasAssignment) attachmentCreatedTransaction(
-                () -> t.processRequest(req), apiTransactionManagerMock);
-        assertNotNull(attachment);
+            final Attachment.MessagingAliasAssignment attachment = (Attachment.MessagingAliasAssignment) attachmentCreatedTransaction(
+                    () -> t.processRequest(req), apiTransactionManagerMock);
+            assertNotNull(attachment);
 
-        assertEquals(ALIAS_ASSIGNMENT, attachment.getTransactionType());
-        assertEquals(aliasNameParameter, attachment.getAliasName());
-        assertEquals(aliasUrl, attachment.getAliasUri());
+            assertEquals(ALIAS_ASSIGNMENT, attachment.getTransactionType());
+            assertEquals(aliasNameParameter, attachment.getAliasName());
+            assertEquals(aliasUrl, attachment.getAliasUri());
+        }
     }
 
     @Test
-    public void processRequest_missingAliasName() throws SignumException {
+    void processRequest_missingAliasName() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(ALIAS_NAME_PARAMETER, null),
                 new MockParam(ALIAS_URI_PARAMETER, "aliasUrl"));
@@ -93,7 +84,7 @@ public class SetAliasTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_incorrectAliasLength_nameOnlySpaces() throws SignumException {
+    void processRequest_incorrectAliasLength_nameOnlySpaces() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(ALIAS_NAME_PARAMETER, "  "),
                 new MockParam(ALIAS_URI_PARAMETER, null));
@@ -102,7 +93,7 @@ public class SetAliasTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_incorrectAliasLength_incorrectAliasName() throws SignumException {
+    void processRequest_incorrectAliasLength_incorrectAliasName() throws SignumException {
         final HttpServletRequest req = QuickMocker.httpServletRequest(
                 new MockParam(ALIAS_NAME_PARAMETER, "[]"),
                 new MockParam(ALIAS_URI_PARAMETER, null));
@@ -111,7 +102,7 @@ public class SetAliasTest extends AbstractTransactionTest {
     }
 
     @Test
-    public void processRequest_incorrectUriLengthWhenOver1000Characters() throws SignumException {
+    void processRequest_incorrectUriLengthWhenOver1000Characters() throws SignumException {
         final StringBuilder uriOver1000Characters = new StringBuilder();
 
         for (int i = 0; i < 1001; i++) {
@@ -124,5 +115,4 @@ public class SetAliasTest extends AbstractTransactionTest {
 
         assertEquals(INCORRECT_URI_LENGTH, t.processRequest(req));
     }
-
 }

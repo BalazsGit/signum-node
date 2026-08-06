@@ -1,6 +1,10 @@
 package application.module.node.web.api.http.handler;
 
-import application.module.node.*;
+import application.module.node.Account;
+import application.module.node.Attachment;
+import application.module.node.Blockchain;
+import application.module.node.Constants;
+import application.module.node.SignumException;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.ParameterService;
 import application.module.node.util.Convert;
@@ -22,8 +26,8 @@ public final class IssueAsset extends CreateTransaction {
     private final Blockchain blockchain;
 
     public IssueAsset(ParameterService parameterService, Blockchain blockchain,
-            APITransactionManager apiTransactionManager) {
-        super(new LegacyDocTag[] { LegacyDocTag.AE, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
+            APITransactionManager apiTransactionManager, application.module.node.fluxcapacitor.FluxCapacitor fluxCapacitor) {
+        super(new LegacyDocTag[] { LegacyDocTag.AE, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager, fluxCapacitor,
                 NAME_PARAMETER, DESCRIPTION_PARAMETER, QUANTITY_QNT_PARAMETER, DECIMALS_PARAMETER, MINTABLE_PARAMETER);
         this.parameterService = parameterService;
         this.blockchain = blockchain;
@@ -36,7 +40,7 @@ public final class IssueAsset extends CreateTransaction {
         String description = req.getParameter(DESCRIPTION_PARAMETER);
         String decimalsValue = Convert.emptyToNull(req.getParameter(DECIMALS_PARAMETER));
         boolean mintable = "true".equals(req.getParameter(MINTABLE_PARAMETER));
-        if (mintable && !Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
+        if (mintable && !this.fluxCapacitor.getValue(FluxValues.SMART_TOKEN)) {
             // only after the fork we are allowed to have a mintable assset
             return JSONResponses.incorrect(MINTABLE_PARAMETER);
         }

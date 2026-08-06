@@ -7,8 +7,8 @@
 
 package application.module.node.at;
 
-import application.module.node.Signum;
 import application.module.node.crypto.Crypto;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 
 import java.math.BigInteger;
@@ -17,8 +17,31 @@ import java.nio.ByteOrder;
 import java.security.MessageDigest;
 import java.util.Arrays;
 
+/**
+ * Implementation of the AT (Automated Transaction) API.
+ * Delegates platform-specific operations to {@link AtApiPlatformImpl}
+ * and uses injected {@link FluxCapacitor} for feature flag evaluation.
+ */
 public class AtApiImpl implements AtApi {
     private final AtApiPlatformImpl platform = AtApiPlatformImpl.getInstance();
+    private FluxCapacitor fluxCapacitor;
+
+    /**
+     * Default constructor. Creates internal reference to AtApiPlatformImpl singleton.
+     * TODO: Replace with constructor injection when AtApiPlatformImpl singleton is eliminated.
+     */
+    public AtApiImpl() {
+    }
+
+    /**
+     * Sets the FluxCapacitor for feature flag evaluation.
+     * Called during AT module initialization to provide dependency without static access.
+     *
+     * @param fluxCapacitor the flux capacitor instance for feature flag checks
+     */
+    public void setFluxCapacitor(FluxCapacitor fluxCapacitor) {
+        this.fluxCapacitor = fluxCapacitor;
+    }
 
     @Override
     public long getA1(AtMachineState state) {
@@ -535,7 +558,7 @@ public class AtApiImpl implements AtApi {
         mdb.order(ByteOrder.LITTLE_ENDIAN);
 
         state.setB1(AtApiHelper.getByteArray(mdb.getLong(0)));
-        if (Signum.getFluxCapacitor().getValue(FluxValues.SODIUM)) {
+        if (fluxCapacitor.getValue(FluxValues.SODIUM)) {
             state.setB2(AtApiHelper.getByteArray(mdb.getLong(8)));
         } else {
             state.setB1(AtApiHelper.getByteArray(mdb.getLong(8)));
@@ -544,7 +567,7 @@ public class AtApiImpl implements AtApi {
 
     @Override
     public long checkMd5AWithB(AtMachineState state) {
-        if (Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_3)) {
+        if (fluxCapacitor.getValue(FluxValues.AT_FIX_BLOCK_3)) {
             ByteBuffer b = ByteBuffer.allocate(16);
             b.order(ByteOrder.LITTLE_ENDIAN);
 
@@ -583,7 +606,7 @@ public class AtApiImpl implements AtApi {
 
     @Override
     public long checkHash160AWithB(AtMachineState state) {
-        if (Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_3)) {
+        if (fluxCapacitor.getValue(FluxValues.AT_FIX_BLOCK_3)) {
             ByteBuffer b = ByteBuffer.allocate(32);
             b.order(ByteOrder.LITTLE_ENDIAN);
 
@@ -628,7 +651,7 @@ public class AtApiImpl implements AtApi {
 
     @Override
     public long checkSha256AWithB(AtMachineState state) {
-        if (Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_3)) {
+        if (fluxCapacitor.getValue(FluxValues.AT_FIX_BLOCK_3)) {
             ByteBuffer b = ByteBuffer.allocate(32);
             b.order(ByteOrder.LITTLE_ENDIAN);
 

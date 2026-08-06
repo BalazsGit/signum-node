@@ -19,10 +19,9 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.core.classloader.annotations.SuppressStaticInitializationFor;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.MockedStatic;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -37,14 +36,10 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
+import static org.mockito.Mockito.mockStatic;
 
-;
-
-@SuppressStaticInitializationFor("node.Block")
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(Signum.class)
-public class GetAccountBlocksTest extends AbstractUnitTest {
+@ExtendWith(MockitoExtension.class)
+class GetAccountBlocksTest extends AbstractUnitTest {
 
     private GetAccountBlocks t;
 
@@ -57,13 +52,6 @@ public class GetAccountBlocksTest extends AbstractUnitTest {
         blockchainMock = mock(Blockchain.class);
         parameterServiceMock = mock(ParameterService.class);
         blockServiceMock = mock(BlockService.class);
-
-        mockStatic(Signum.class);
-        PropertyService propertyService = mock(PropertyService.class);
-        when(Signum.getPropertyService()).thenReturn(propertyService);
-        doReturn((int) Constants.ONE_SIGNA).when(propertyService).getInt(eq(Props.ONE_COIN_NQT));
-
-        t = new GetAccountBlocks(blockchainMock, parameterServiceMock, blockServiceMock);
     }
 
     @Test
@@ -88,15 +76,23 @@ public class GetAccountBlocksTest extends AbstractUnitTest {
                 .thenReturn(new CollectionWithIndex<Block>(
                         mockBlockIterator, -1));
 
-        final JsonObject result = (JsonObject) t.processRequest(req);
+        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
+            PropertyService propertyService = mock(PropertyService.class);
+            mocked.when(Signum::getPropertyService).thenReturn(propertyService);
+            doReturn((int) Constants.ONE_SIGNA).when(propertyService).getInt(eq(Props.ONE_COIN_NQT));
 
-        final JsonArray blocks = (JsonArray) result.get(BLOCKS_RESPONSE);
-        assertNotNull(blocks);
-        assertEquals(1, blocks.size());
+            t = new GetAccountBlocks(blockchainMock, parameterServiceMock, blockServiceMock);
 
-        final JsonObject resultBlock = (JsonObject) blocks.get(0);
-        assertNotNull(resultBlock);
+            final JsonObject result = (JsonObject) t.processRequest(req);
 
-        // TODO validate all fields
+            final JsonArray blocks = (JsonArray) result.get(BLOCKS_RESPONSE);
+            assertNotNull(blocks);
+            assertEquals(1, blocks.size());
+
+            final JsonObject resultBlock = (JsonObject) blocks.get(0);
+            assertNotNull(resultBlock);
+
+            // TODO validate all fields
+        }
     }
 }

@@ -1,6 +1,7 @@
 package application.module.node.web.api.http.handler;
 
 import application.module.node.*;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.AliasService;
 import application.module.node.services.ParameterService;
@@ -27,8 +28,8 @@ public final class SetAlias extends CreateTransaction {
     private final AliasService aliasService;
 
     public SetAlias(ParameterService parameterService, Blockchain blockchain, AliasService aliasService,
-            APITransactionManager apiTransactionManager) {
-        super(new LegacyDocTag[] { LegacyDocTag.ALIASES, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
+            APITransactionManager apiTransactionManager, FluxCapacitor fluxCapacitor) {
+        super(new LegacyDocTag[] { LegacyDocTag.ALIASES, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager, fluxCapacitor,
                 ALIAS_NAME_PARAMETER, ALIAS_URI_PARAMETER, TLD_PARAMETER);
         this.parameterService = parameterService;
         this.blockchain = blockchain;
@@ -51,7 +52,7 @@ public final class SetAlias extends CreateTransaction {
             return INCORRECT_ALIAS_LENGTH;
         }
 
-        if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_ALIASES)) {
+        if (this.fluxCapacitor.getValue(FluxValues.SMART_ALIASES)) {
             if (!TextUtils.isInAlphabetOrUnderline(aliasName)) {
                 return INCORRECT_ALIAS_NAME;
             }
