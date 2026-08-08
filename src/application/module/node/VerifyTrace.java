@@ -36,7 +36,7 @@ public final class VerifyTrace {
         String fileName = args.length == 1 ? args[0] : "nxt-trace.csv";
         try (BufferedReader reader = new BufferedReader(new FileReader(fileName))) {
             String line = reader.readLine();
-            String[] headers = unquote(line.split(DebugTrace.SEPARATOR));
+            String[] headers = unquote(line.split(DebugTrace.DEFAULT_SEPARATOR));
 
             Map<String, Map<String, Long>> totals = new HashMap<>();
             Map<String, Map<String, Map<String, Long>>> accountAssetTotals = new HashMap<>();
@@ -44,7 +44,7 @@ public final class VerifyTrace {
             Map<String, Long> accountAssetQuantities = new HashMap<>();
 
             while ((line = reader.readLine()) != null) {
-                String[] values = unquote(line.split(DebugTrace.SEPARATOR));
+                String[] values = unquote(line.split(DebugTrace.DEFAULT_SEPARATOR));
                 Map<String, String> valueMap = new HashMap<>();
                 for (int i = 0; i < headers.length; i++) {
                     valueMap.put(headers[i], values[i]);
@@ -151,8 +151,8 @@ public final class VerifyTrace {
         }
     }
 
-    private static final String BEGIN_QUOTE = "^" + DebugTrace.QUOTE;
-    private static final String END_QUOTE = DebugTrace.QUOTE + "$";
+    private static final String BEGIN_QUOTE = "^" + DebugTrace.DEFAULT_QUOTE;
+    private static final String END_QUOTE = DebugTrace.DEFAULT_QUOTE + "$";
 
     private static String[] unquote(String[] values) {
         String[] result = new String[values.length];

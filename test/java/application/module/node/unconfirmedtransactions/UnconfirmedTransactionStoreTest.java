@@ -89,8 +89,6 @@ public class UnconfirmedTransactionStoreTest {
         doReturn(Constants.FEE_QUANT_SIP3).when(mockFluxCapacitor).getValue(eq(FluxValues.FEE_QUANT), anyInt());
         doReturn(Constants.FEE_QUANT_SIP3).when(mockFluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
 
-        TransactionType.init(mockBlockChain, mockFluxCapacitor, null, null, null, null, null, null);
-
         t = new UnconfirmedTransactionStoreImpl(timeService, mockPropertyService, accountStoreMock, transactionDbMock,
                 null);
     }

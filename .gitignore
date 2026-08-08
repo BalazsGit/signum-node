@@ -40,3 +40,6 @@ result
 
 # Implementation plans (local development artifacts)
 /implementation_plan/
+
+# Scripts (local development artifacts)
+/scripts/

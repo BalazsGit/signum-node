@@ -2,6 +2,7 @@ package application.module.node.instance;
 
 import application.module.node.BlockchainImpl;
 import application.module.node.BlockchainProcessor;
+import application.module.node.DebugTrace;
 import application.module.node.EconomicClustering;
 import application.module.node.Generator;
 import application.module.node.NodeComponentFactory;
@@ -221,6 +222,8 @@ public final class NodeCoreContext {
 
     /** Per-profile peer manager for isolated peer networking. */
     private PeerManager peerManager;
+
+    private DebugTrace debugTrace;
 
     // =========================================================================
     // Lifecycle flags
@@ -532,17 +535,6 @@ public final class NodeCoreContext {
                 this.stores.getIndirectIncomingStore(),
                 this.propertyService);
 
-        // TransactionType.init() - STATIC CALL, cannot fully migrate yet (lines 589-597)
-        TransactionType.init(
-                this.blockchain,
-                this.fluxCapacitor,
-                this.accountService,
-                this.digitalGoodsStoreService,
-                this.aliasService,
-                this.assetExchange,
-                this.subscriptionService,
-                this.escrowService);
-
         // BlockService (lines 599-605)
         NetworkParameters params = this.networkParameters;
         this.blockService = new BlockServiceImpl(
@@ -632,7 +624,7 @@ public final class NodeCoreContext {
                 this.accountService,
                 this.transactionService);
 
-        // PeerManager - instance-scoped peer management (Phase 10.5)
+        // PeerManager
         this.peerManager = new PeerManager(
                 this.propertyService,
                 this.blockchain,
@@ -735,11 +727,16 @@ public final class NodeCoreContext {
                 this.stores.getAtStore(),
                 this.atConstants);
 
-        // Wire TransactionApplyContext into TransactionType static holder (Phase 10f)
+        // Wire TransactionApplyContext into TransactionType
         TransactionType.setContext(this.transactionApplyContext);
 
-        // DebugTrace.init() is package-private, so we delegate to Signum for now
-        // This will be migrated once DebugTrace is refactored
+        // DebugTrace (Phase C) - instance-scoped account tracing
+        this.debugTrace = DebugTrace.create(
+                this.propertyService,
+                this.blockchainProcessor,
+                this.accountService,
+                this.assetExchange,
+                this.digitalGoodsStoreService);
     }
 
     /**
@@ -1059,16 +1056,17 @@ public final class NodeCoreContext {
 
     /**
      * Returns the PeerManager for this profile.
-     * Provides isolated, per-profile peer management.
      */
     public PeerManager getPeerManager() {
         return peerManager;
     }
 
-
-    // =========================================================================
-    // Lifecycle state queries
-    // =========================================================================
+    /**
+     * Returns the DebugTrace instance (null when debug tracing disabled).
+     */
+    public DebugTrace getDebugTrace() {
+        return debugTrace;
+    }
 
     /**
      * Returns {@code true} if this context has been started and has not been stopped.

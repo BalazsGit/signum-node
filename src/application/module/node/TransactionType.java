@@ -162,15 +162,12 @@ public abstract class TransactionType {
     }
 
     /**
-     * @deprecated Use TransactionTypeRegistry + TransactionApplyContext instead.
-     * Legacy bridge method - no-op since static field assignments removed.
+     * Static initializer for transaction type registry.
+     * Populates the TRANSACTION_TYPES map with all registered type/subtype mappings.
+     * This is constant data that does not depend on runtime services - moved from
+     * deprecated init() method during Phase A refactoring to eliminate static dependencies.
      */
-    @Deprecated
-    public static void init(Blockchain blockchain, FluxCapacitor fluxCapacitor,
-            AccountService accountService, DGSGoodsStoreService dgsGoodsStoreService,
-            AliasService aliasService, AssetExchange assetExchange,
-            SubscriptionService subscriptionService, EscrowService escrowService) {
-
+    static {
         Map<Byte, TransactionType> paymentTypes = new HashMap<>();
         paymentTypes.put(SUBTYPE_PAYMENT_ORDINARY_PAYMENT, Payment.ORDINARY);
         paymentTypes.put(SUBTYPE_PAYMENT_ORDINARY_PAYMENT_MULTI_OUT, Payment.MULTI_OUT);

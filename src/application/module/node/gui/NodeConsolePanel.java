@@ -2032,7 +2032,10 @@ public class NodeConsolePanel extends JPanel {
                     }
 
                     try {
-                        Signum.shutdown(false);
+                        NodeCoreContext context = getNodeContext();
+                        if (context != null) {
+                            context.stop();
+                        }
                     } catch (Throwable t) {
                         LOGGER.error("Unexpected error during Signum core shutdown", t);
                     }
@@ -2816,8 +2819,8 @@ public class NodeConsolePanel extends JPanel {
 
     public void startSignumWithGUI() {
         try {
-            // signum.init();
-            Signum.main(args);
+            // Delegates to NodeLifecycleManager via bridge. Falls back to legacy init only when no active profile is set.
+            Signum.startNode();
             loadGuiSettings();
             
             // Now that properties are loaded, set the correct values for the GUI

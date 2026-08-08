@@ -1,7 +1,6 @@
 package application.module.node;
 
 import application.module.node.assetexchange.AssetExchange;
-import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.services.AccountService;
 import application.module.node.services.DGSGoodsStoreService;
@@ -9,79 +8,68 @@ import application.module.node.util.Convert;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.*;
+import java.io.BufferedWriter;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
 import java.math.BigInteger;
-import java.util.*;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
+/**
+ * Instance-scoped debug trace utility for account-level CSV logging.
+ * <p>
+ * Phase C migration: converted from static state to instance scope.
+ * Each NodeCoreContext creates its own DebugTrace when debug tracing is enabled.
+ * </p>
+ *
+ * @since 4.0
+ */
 public final class DebugTrace {
 
     private static final Logger logger = LoggerFactory.getLogger(DebugTrace.class);
 
-    static String QUOTE;
-    static String SEPARATOR;
-    private static boolean LOG_UNCONFIRMED;
+    /** CSV quote character – public constant for VerifyTrace compatibility. */
+    public static final String DEFAULT_QUOTE = "\"";
 
-    private static DGSGoodsStoreService dgsGoodsStoreService;
-    private static AssetExchange assetExchange;
+    /** CSV separator character – public constant for VerifyTrace compatibility. */
+    public static final String DEFAULT_SEPARATOR = ",";
 
-    static void init(PropertyService propertyService, BlockchainProcessor blockchainProcessor,
-            AccountService accountService, AssetExchange assetExchange,
-            DGSGoodsStoreService dgsGoodsStoreService) {
-
-        QUOTE = propertyService.getString(Props.NODE_DEBUG_TRACE_QUOTE);
-        SEPARATOR = propertyService.getString(Props.NODE_DEBUG_TRACE_SEPARATOR);
-        LOG_UNCONFIRMED = propertyService.getBoolean(Props.NODE_DEBUG_LOG_CONFIRMED);
-
-        DebugTrace.assetExchange = assetExchange;
-        DebugTrace.dgsGoodsStoreService = dgsGoodsStoreService;
-
-        List<String> accountIdStrings = propertyService.getStringList(Props.NODE_DEBUG_TRACE_ACCOUNTS);
-        String logName = propertyService.getString(Props.NODE_DEBUG_TRACE_LOG);
-        if (accountIdStrings.isEmpty() || logName == null) {
-            return;
-        }
-        Set<Long> accountIds = new HashSet<>();
-        for (String accountId : accountIdStrings) {
-            if ("*".equals(accountId)) {
-                accountIds.clear();
-                break;
-            }
-            accountIds.add(Convert.parseUnsignedLong(accountId));
-        }
-        final DebugTrace debugTrace = addDebugTrace(accountIds, logName, blockchainProcessor, accountService,
-                assetExchange);
-        blockchainProcessor.addListener(block -> debugTrace.resetLog(), BlockchainProcessor.Event.RESCAN_BEGIN);
-        logger.debug("Debug tracing of " + (accountIdStrings.contains("*") ? "ALL"
-                : String.valueOf(accountIds.size())) + " accounts enabled");
+    /**
+     * Backwards-compatible accessor for legacy callers (VerifyTrace).
+     * @deprecated Use {@link #DEFAULT_QUOTE} directly.
+     */
+    @Deprecated
+    public static String getQuote() {
+        return DEFAULT_QUOTE;
     }
 
-    private static DebugTrace addDebugTrace(Set<Long> accountIds, String logName,
-            BlockchainProcessor blockchainProcessor, AccountService accountService, AssetExchange assetExchange) {
-        final DebugTrace debugTrace = new DebugTrace(accountIds, logName);
-        assetExchange.addTradeListener(debugTrace::trace, Trade.Event.TRADE);
-        accountService.addListener(account -> debugTrace.trace(account, false), Account.Event.BALANCE);
-        if (LOG_UNCONFIRMED) {
-            accountService.addListener(account -> debugTrace.trace(account, true), Account.Event.UNCONFIRMED_BALANCE);
-        }
-        accountService.addAssetListener(accountAsset -> debugTrace.trace(accountAsset, false),
-                Account.Event.ASSET_BALANCE);
-        if (LOG_UNCONFIRMED) {
-            accountService.addAssetListener(accountAsset -> debugTrace.trace(accountAsset, true),
-                    Account.Event.UNCONFIRMED_ASSET_BALANCE);
-        }
-        blockchainProcessor.addListener(debugTrace::traceBeforeAccept, BlockchainProcessor.Event.BEFORE_BLOCK_ACCEPT);
-        blockchainProcessor.addListener(debugTrace::trace, BlockchainProcessor.Event.BEFORE_BLOCK_APPLY);
-        return debugTrace;
+    /**
+     * Backwards-compatible accessor for legacy callers (VerifyTrace).
+     * @deprecated Use {@link #DEFAULT_SEPARATOR} directly.
+     */
+    @Deprecated
+    public static String getSeparator() {
+        return DEFAULT_SEPARATOR;
     }
 
-    private static final String[] columns = { "height", "event", "account", "asset", "balance", "unconfirmed balance",
-            "asset balance", "unconfirmed asset balance",
-            "transaction amount", "transaction fee", "generation fee", "effective balance",
-            "order", "order price", "order quantity", "order cost",
-            "trade price", "trade quantity", "trade cost",
-            "asset quantity", "transaction", "lessee", "lessor guaranteed balance",
-            "purchase", "purchase price", "purchase quantity", "purchase cost", "discount", "refund",
-            "sender", "recipient", "block", "timestamp" };
+    // ── Column definitions ──
+
+    private static final String[] columns = {
+        "height", "event", "account", "asset", "balance", "unconfirmed balance",
+        "asset balance", "unconfirmed asset balance",
+        "transaction amount", "transaction fee", "generation fee", "effective balance",
+        "order", "order price", "order quantity", "order cost",
+        "trade price", "trade quantity", "trade cost",
+        "asset quantity", "transaction", "lessee", "lessor guaranteed balance",
+        "purchase", "purchase price", "purchase quantity", "purchase cost", "discount", "refund",
+        "sender", "recipient", "block", "timestamp"
+    };
 
     private static final Map<String, String> headers = new HashMap<>();
     static {
@@ -90,28 +78,116 @@ public final class DebugTrace {
         }
     }
 
+    // ── Instance fields ──
+
+    private final String quote;
+    private final String separator;
+    private final boolean logUnconfirmed;
+
     private final Set<Long> accountIds;
     private final String logName;
+    private final DGSGoodsStoreService dgsGoodsStoreService;
+    private final AssetExchange assetExchange;
+
     private PrintWriter log;
 
-    private DebugTrace(Set<Long> accountIds, String logName) {
+    /**
+     * Creates an instance-scoped DebugTrace.
+     *
+     * @param accountIds         set of tracked account IDs (empty = track all)
+     * @param logName            path to the CSV trace file
+     * @param quote              CSV quote character
+     * @param separator          CSV separator character
+     * @param logUnconfirmed     whether to log unconfirmed balances
+     * @param dgsGoodsStoreService DGS goods store service reference
+     * @param assetExchange      asset exchange reference
+     */
+    DebugTrace(Set<Long> accountIds, String logName, String quote, String separator,
+            boolean logUnconfirmed, DGSGoodsStoreService dgsGoodsStoreService, AssetExchange assetExchange) {
         this.accountIds = accountIds;
         this.logName = logName;
+        this.quote = quote != null ? quote : DEFAULT_QUOTE;
+        this.separator = separator != null ? separator : DEFAULT_SEPARATOR;
+        this.logUnconfirmed = logUnconfirmed;
+        this.dgsGoodsStoreService = dgsGoodsStoreService;
+        this.assetExchange = assetExchange;
         resetLog();
     }
 
-    private void resetLog() {
+    /**
+     * Registers blockchain listeners for this debug trace instance.
+     * Called by NodeCoreContext after construction.
+     */
+    void registerListeners(BlockchainProcessor blockchainProcessor, AccountService accountService) {
+        assetExchange.addTradeListener(this::trace, Trade.Event.TRADE);
+        accountService.addListener(account -> this.trace(account, false), Account.Event.BALANCE);
+        if (this.logUnconfirmed) {
+            accountService.addListener(account -> this.trace(account, true), Account.Event.UNCONFIRMED_BALANCE);
+        }
+        accountService.addAssetListener(accountAsset -> this.trace(accountAsset, false),
+                Account.Event.ASSET_BALANCE);
+        if (this.logUnconfirmed) {
+            accountService.addAssetListener(accountAsset -> this.trace(accountAsset, true),
+                    Account.Event.UNCONFIRMED_ASSET_BALANCE);
+        }
+        blockchainProcessor.addListener(this::traceBeforeAccept, BlockchainProcessor.Event.BEFORE_BLOCK_ACCEPT);
+        blockchainProcessor.addListener(this::trace, BlockchainProcessor.Event.BEFORE_BLOCK_APPLY);
+        blockchainProcessor.addListener(block -> this.resetLog(), BlockchainProcessor.Event.RESCAN_BEGIN);
+    }
+
+    /**
+     * Factory method for NodeCoreContext to create a configured DebugTrace.
+     */
+    public static DebugTrace create(application.module.node.props.PropertyService propertyService,
+            BlockchainProcessor blockchainProcessor,
+            AccountService accountService,
+            AssetExchange assetExchange,
+            DGSGoodsStoreService dgsGoodsStoreService) {
+
+        String quote = propertyService.getString(Props.NODE_DEBUG_TRACE_QUOTE);
+        String separator = propertyService.getString(Props.NODE_DEBUG_TRACE_SEPARATOR);
+        boolean logUnconfirmed = propertyService.getBoolean(Props.NODE_DEBUG_LOG_CONFIRMED);
+
+        List<String> accountIdStrings = propertyService.getStringList(Props.NODE_DEBUG_TRACE_ACCOUNTS);
+        String logName = propertyService.getString(Props.NODE_DEBUG_TRACE_LOG);
+        if (accountIdStrings.isEmpty() || logName == null) {
+            return null;
+        }
+
+        Set<Long> accountIds = new HashSet<>();
+        for (String accountId : accountIdStrings) {
+            if ("*".equals(accountId)) {
+                accountIds.clear();
+                break;
+            }
+            accountIds.add(Convert.parseUnsignedLong(accountId));
+        }
+
+        DebugTrace debugTrace = new DebugTrace(
+                accountIds, logName, quote, separator, logUnconfirmed, dgsGoodsStoreService, assetExchange);
+        debugTrace.registerListeners(blockchainProcessor, accountService);
+
+        logger.debug("Debug tracing of " + (accountIdStrings.contains("*") ? "ALL"
+                : String.valueOf(accountIds.size())) + " accounts enabled");
+        return debugTrace;
+    }
+
+    // ── Log management ──
+
+    void resetLog() {
         if (log != null) {
             log.close();
         }
         try {
-            log = new PrintWriter((new BufferedWriter(new OutputStreamWriter(new FileOutputStream(logName)))), true);
+            log = new PrintWriter(new BufferedWriter(new OutputStreamWriter(new FileOutputStream(this.logName))), true);
         } catch (IOException e) {
-            logger.debug("Debug tracing to " + logName + " not possible", e);
+            logger.debug("Debug tracing to " + this.logName + " not possible", e);
             throw new RuntimeException(e);
         }
         this.log(headers);
     }
+
+    // ── Account filters ──
 
     private boolean include(long accountId) {
         return accountId != 0 && (accountIds.isEmpty() || accountIds.contains(accountId));
@@ -134,7 +210,8 @@ public final class DebugTrace {
         return false;
     }
 
-    // Note: Trade events occur before the change in account balances
+    // ── Trace methods ──
+
     private void trace(Trade trade) {
         long askAccountId = assetExchange.getAskOrder(trade.getAskOrderId()).getAccountId();
         long bidAccountId = assetExchange.getBidOrder(trade.getBidOrderId()).getAccountId();
@@ -186,6 +263,8 @@ public final class DebugTrace {
         }
     }
 
+    // ── Value maps ──
+
     private Map<String, String> getValues(long accountId, boolean unconfirmed) {
         Map<String, String> map = new HashMap<>();
         map.put("account", Convert.toUnsignedLong(accountId));
@@ -213,9 +292,8 @@ public final class DebugTrace {
         long amount = transaction.getAmountNqt();
         long fee = transaction.getFeeNqt();
         if (isRecipient) {
-            fee = 0; // fee doesn't affect recipient account
+            fee = 0;
         } else {
-            // for sender the amounts are subtracted
             amount = -amount;
             fee = -fee;
         }
@@ -268,31 +346,22 @@ public final class DebugTrace {
             boolean isRecipient) {
         Map<String, String> map = getValues(accountId, false);
         if (attachment instanceof Attachment.ColoredCoinsOrderPlacement) {
-            if (isRecipient) {
-                return Collections.emptyMap();
-            }
+            if (isRecipient) return Collections.emptyMap();
             Attachment.ColoredCoinsOrderPlacement orderPlacement = (Attachment.ColoredCoinsOrderPlacement) attachment;
             boolean isAsk = orderPlacement instanceof Attachment.ColoredCoinsAskOrderPlacement;
             map.put("asset", Convert.toUnsignedLong(orderPlacement.getAssetId()));
             map.put("order", transaction.getStringId());
             map.put("order price", String.valueOf(orderPlacement.getPriceNqt()));
             long quantity = orderPlacement.getQuantityQnt();
-            if (isAsk) {
-                quantity = -quantity;
-            }
+            if (isAsk) quantity = -quantity;
             map.put("order quantity", String.valueOf(quantity));
             BigInteger orderCost = BigInteger.valueOf(orderPlacement.getPriceNqt())
                     .multiply(BigInteger.valueOf(orderPlacement.getQuantityQnt()));
-            if (!isAsk) {
-                orderCost = orderCost.negate();
-            }
+            if (!isAsk) orderCost = orderCost.negate();
             map.put("order cost", orderCost.toString());
-            String event = (isAsk ? "ask" : "bid") + " order";
-            map.put("event", event);
+            map.put("event", (isAsk ? "ask" : "bid") + " order");
         } else if (attachment instanceof Attachment.ColoredCoinsAssetIssuance) {
-            if (isRecipient) {
-                return Collections.emptyMap();
-            }
+            if (isRecipient) return Collections.emptyMap();
             Attachment.ColoredCoinsAssetIssuance assetIssuance = (Attachment.ColoredCoinsAssetIssuance) attachment;
             map.put("asset", transaction.getStringId());
             map.put("asset quantity", String.valueOf(assetIssuance.getQuantityQnt()));
@@ -301,13 +370,12 @@ public final class DebugTrace {
             Attachment.ColoredCoinsAssetTransfer assetTransfer = (Attachment.ColoredCoinsAssetTransfer) attachment;
             map.put("asset", Convert.toUnsignedLong(assetTransfer.getAssetId()));
             long quantity = assetTransfer.getQuantityQnt();
-            if (!isRecipient) {
-                quantity = -quantity;
-            }
+            if (!isRecipient) quantity = -quantity;
             map.put("asset quantity", String.valueOf(quantity));
             map.put("event", "asset transfer");
         } else if (attachment instanceof Attachment.ColoredCoinsOrderCancellation) {
-            Attachment.ColoredCoinsOrderCancellation orderCancellation = (Attachment.ColoredCoinsOrderCancellation) attachment;
+            Attachment.ColoredCoinsOrderCancellation orderCancellation =
+                    (Attachment.ColoredCoinsOrderCancellation) attachment;
             map.put("order", Convert.toUnsignedLong(orderCancellation.getOrderId()));
             map.put("event", "order cancel");
         } else if (attachment instanceof Attachment.DigitalGoodsPurchase) {
@@ -320,22 +388,16 @@ public final class DebugTrace {
         } else if (attachment instanceof Attachment.DigitalGoodsDelivery) {
             Attachment.DigitalGoodsDelivery delivery = (Attachment.DigitalGoodsDelivery) transaction.getAttachment();
             DigitalGoodsStore.Purchase purchase = dgsGoodsStoreService.getPurchase(delivery.getPurchaseId());
-            if (isRecipient) {
-                map = getValues(purchase.getBuyerId(), false);
-            }
+            if (isRecipient) map = getValues(purchase.getBuyerId(), false);
             map.put("event", "delivery");
             map.put("purchase", Convert.toUnsignedLong(delivery.getPurchaseId()));
             long discount = delivery.getDiscountNqt();
             map.put("purchase price", String.valueOf(purchase.getPriceNQT()));
             map.put("purchase quantity", String.valueOf(purchase.getQuantity()));
             long cost = Convert.safeMultiply(purchase.getPriceNQT(), purchase.getQuantity());
-            if (isRecipient) {
-                cost = -cost;
-            }
+            if (isRecipient) cost = -cost;
             map.put("purchase cost", String.valueOf(cost));
-            if (!isRecipient) {
-                discount = -discount;
-            }
+            if (!isRecipient) discount = -discount;
             map.put("discount", String.valueOf(discount));
         } else if (attachment instanceof Attachment.DigitalGoodsRefund) {
             Attachment.DigitalGoodsRefund refund = (Attachment.DigitalGoodsRefund) transaction.getAttachment();
@@ -345,9 +407,7 @@ public final class DebugTrace {
             map.put("event", "refund");
             map.put("purchase", Convert.toUnsignedLong(refund.getPurchaseId()));
             long refundNQT = refund.getRefundNqt();
-            if (!isRecipient) {
-                refundNQT = -refundNQT;
-            }
+            if (!isRecipient) refundNQT = -refundNQT;
             map.put("refund", String.valueOf(refundNQT));
         } else if (attachment == Attachment.ARBITRARY_MESSAGE) {
             map = new HashMap<>();
@@ -366,22 +426,19 @@ public final class DebugTrace {
         return map;
     }
 
+    // ── CSV writer ──
+
     private void log(Map<String, String> map) {
-        if (map.isEmpty()) {
-            return;
-        }
+        if (map.isEmpty()) return;
         StringBuilder buf = new StringBuilder();
         for (String column : columns) {
-            if (!LOG_UNCONFIRMED && column.startsWith("unconfirmed")) {
-                continue;
-            }
+            if (!this.logUnconfirmed && column.startsWith("unconfirmed")) continue;
             String value = map.get(column);
             if (value != null) {
-                buf.append(QUOTE).append(value).append(QUOTE);
+                buf.append(this.quote).append(value).append(this.quote);
             }
-            buf.append(SEPARATOR);
+            buf.append(this.separator);
         }
         log.println(buf.toString());
     }
-
 }

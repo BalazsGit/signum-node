@@ -22,8 +22,10 @@ import java.util.*;
 /**
  * AT (Automated Transaction) controller orchestrating AT execution.
  * <p>
- * Accepts {@link ATProcessingContext} as the primary dependency injection mechanism,
- * eliminating all static {@code Signum.getXxx()} calls.
+ * Manages AT machine lifecycle: creation, activation, state transitions,
+ * fee calculation, and transaction generation within blocks.
+ * Uses {@link ATProcessingContext} for dependency injection of runtime
+ * services and configuration.
  * </p>
  */
 public abstract class AtController {
@@ -36,7 +38,7 @@ public abstract class AtController {
 
     /**
      * Sets the AtConstants instance for use by AtController methods.
-     * Called once during initialization.
+     * Called once during node initialization.
      */
     public static void setAtConstants(AtConstants constants) {
         atConstants = constants;
@@ -118,14 +120,9 @@ public abstract class AtController {
 
     /**
      * @deprecated Use {@link #resetMachine(AtMachineState, ATProcessingContext)}.
-     * Legacy bridge: delegates to the context-aware overload using static Signum accessors. Scheduled for removal in v4.1.
      */
     @Deprecated(since = "4.0", forRemoval = true)
     public static void resetMachine(AtMachineState state) {
-        // Build ATProcessingContext from static Signum bridge (transitional only)
-        // Constructor: (atConstants, processorCache, propertyService, fluxCapacitor, 
-        //              blockchain, atStore, accountStore, accountService, assetExchange,
-        //              indirectIncomingStore, assetStore)
         ATProcessingContext ctx = new ATProcessingContext(
                 AtController.getAtConstants(),
                 ATProcessorCache.getInstance(),
@@ -232,8 +229,6 @@ public abstract class AtController {
                 throw new AtException(AtError.INCORRECT_CREATION_TX.getDescription());
             }
 
-            // TODO note: run code in demo mode for checking if is valid
-
         } catch (BufferUnderflowException e) {
             throw new AtException(AtError.INCORRECT_CREATION_TX.getDescription());
         }
@@ -261,7 +256,6 @@ public abstract class AtController {
 
     /**
      * @deprecated Use {@link #getCurrentBlockATs(ATProcessingContext, int, int, long, int)}.
-     * Legacy bridge: delegates to the context-aware overload using static Signum accessors. Scheduled for removal in v4.1.
      */
     @Deprecated(since = "4.0", forRemoval = true)
     public static AtBlock getCurrentBlockATs(int freePayload, int blockHeight, long generatorId, int indirectsCount) {
@@ -336,24 +330,16 @@ public abstract class AtController {
         return new AtBlock(totalFee, totalAmount, bytesForBlock);
     }
 
-    // ##### TODO:
-    // 1. Gather all ats first
-    // 2. check which transactions (startHeight and endHeight) are needed
-    // 3. Store these in a memory (check before how much this could be), ordered...
-    // 4. Instead of SqlATStore in findTransaction, use a CachedATStore
-
     public static AtBlock validateATsOriginal(byte[] blockATs, int blockHeight, long generatorId) throws AtException {
         if (blockATs == null) {
             return new AtBlock(0, 0, null);
         }
 
-        // This legacy path still needs a context; callers should migrate to validateATs(ATProcessingContext,...)
         throw new UnsupportedOperationException("validateATsOriginal requires ATProcessingContext. Use validateATs(ctx, ...) instead.");
     }
 
     /**
      * @deprecated Use {@link #validateATs(ATProcessingContext, byte[], int, long)}.
-     * Legacy bridge: delegates to the context-aware overload using static Signum accessors. Scheduled for removal in v4.1.
      */
     @Deprecated(since = "4.0", forRemoval = true)
     public static AtBlock validateATs(byte[] blockATs, int blockHeight, long generatorId) throws AtException {
@@ -467,17 +453,6 @@ public abstract class AtController {
                 throw new AtException("AT included in block multiple times");
             }
             ats.put(atIdLong, md5.clone());
-            // while (b.position() < b.capacity()) {
-            // b.get(temp, 0, temp.length);
-            // byte[] md5 = new byte[16];
-            // b.get(md5, 0, md5.length);
-            // ByteBuffer atId = ByteBuffer.allocate(AtConstants.AT_ID_SIZE);
-            // atId.put(temp);
-            // atId.clear();
-            // if (ats.containsKey(atId)) {
-            // throw new AtException("AT included in block multiple times");
-            // }
-            // ats.put(atId, md5);
         }
 
         if (b.remaining() != 0) {
@@ -514,7 +489,6 @@ public abstract class AtController {
         final FluxCapacitor fluxCapacitor = ctx.getFluxCapacitor();
         long totalAmount = 0;
 
-        // Start with the transactions as provided
         List<AtTransaction> ordered = new ArrayList<>(at.getTransactions());
 
         ordered.sort((tx1, tx2) -> {
@@ -554,10 +528,8 @@ public abstract class AtController {
         return totalAmount;
     }
 
-    // ===== Helper: build ATProcessingContext from static Signum bridge (transitional) =====
     /**
      * @deprecated Temporary bridge — builds context via static Signum accessors.
-     * Callers should migrate to passing ATProcessingContext directly. Scheduled for removal in v4.1.
      */
     @Deprecated(since = "4.0", forRemoval = true)
     private static ATProcessingContext createLegacyContext() {

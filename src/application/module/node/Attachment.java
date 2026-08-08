@@ -2756,7 +2756,7 @@ public interface Attachment extends Appendix {
 
             buffer.getShort(); // future: reserved for future needs
 
-            int pageSize = (int) Signum.getAtConstants().pageSize(version);
+            int pageSize = AtConstants.PAGE_SIZE;
             short codePages = buffer.getShort();
             short dataPages = buffer.getShort();
             buffer.getShort();

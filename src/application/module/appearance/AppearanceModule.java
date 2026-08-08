@@ -4,7 +4,6 @@ import application.api.Module;
 import application.api.ModuleContext;
 import application.module.appearance.gui.AppearancePanel;
 import application.module.appearance.gui.laf.FlatLafPrefs;
-import application.module.node.Signum;
 import application.module.node.gui.GuiResources;
 import application.module.node.props.Props;
 import application.utils.gui.ColorPaletteManager;
@@ -87,13 +86,21 @@ public class AppearanceModule implements Module {
         this.settingsPanel = new AppearancePanel(null, null);
     }
 
+    // Local constants to eliminate Signum bridge dependency (v4.1 migration 2026-08-07)
+    private static final String CONF_FOLDER = "conf";
+    private static final org.apache.commons.cli.Option CONF_FOLDER_OPTION =
+            new org.apache.commons.cli.Option("c", "config-dir", true,
+                    "Path to configuration directory (default: ./conf)");
+
     private static Path getGuiSettingsPath(String[] args) {
-        String confFolder = Signum.CONF_FOLDER;
+        String confFolder = CONF_FOLDER;
         try {
             if (args != null) {
-                CommandLine cmd = new DefaultParser().parse(Signum.CLI_OPTIONS, args);
-                if (cmd.hasOption(Signum.CONF_FOLDER_OPTION.getOpt())) {
-                    confFolder = cmd.getOptionValue(Signum.CONF_FOLDER_OPTION.getOpt());
+                org.apache.commons.cli.Options options = new org.apache.commons.cli.Options();
+                options.addOption(CONF_FOLDER_OPTION);
+                CommandLine cmd = new DefaultParser().parse(options, args);
+                if (cmd.hasOption(CONF_FOLDER_OPTION.getOpt())) {
+                    confFolder = cmd.getOptionValue(CONF_FOLDER_OPTION.getOpt());
                 }
             }
         } catch (Exception e) {
@@ -103,8 +110,17 @@ public class AppearanceModule implements Module {
         String settingsDir = Props.SETTINGS_DIR.getDefaultValue();
         Path confPath = PathUtils.resolvePath(confFolder);
         Path nodePath = confPath.resolve("node");
-        Path nodePropsFile = Signum.resolvePropertiesPath(nodePath, Signum.PROPERTIES_NAME,
-                Signum.DEFAULT_PROPERTIES_NAME, confPath);
+        // Inline Signum.resolvePropertiesPath() to remove bridge dependency (v4.1 migration 2026-08-07)
+        Path nodePropsFile = null;
+        Path candidate = nodePath.resolve("node.properties");
+        if (Files.exists(candidate)) {
+            nodePropsFile = candidate;
+        } else {
+            candidate = confPath.resolve("node-default.properties");
+            if (Files.exists(candidate)) {
+                nodePropsFile = candidate;
+            }
+        }
 
         if (nodePropsFile != null && Files.exists(nodePropsFile)) {
             try (java.io.FileInputStream in = new java.io.FileInputStream(nodePropsFile.toFile())) {

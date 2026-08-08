@@ -95,8 +95,8 @@ public final class PeerManager {
      * <p>
      * This delegates to {@link Peers#init(TimeService, AccountService, Blockchain,
      * TransactionProcessor, BlockchainProcessor, PropertyService, ThreadPool)} which
-     * currently uses static state. In Phase 10d, this delegation will be replaced
-     * with fully instance-scoped peer management.
+     * currently uses static state. Future work will replace this with fully
+     * instance-scoped peer management.
      * </p>
      *
      * @param timeService          the time service
@@ -118,15 +118,15 @@ public final class PeerManager {
         // Delegate to existing static init — bridges legacy Peers during migration
         Peers.init(timeService, accountService, blockchain,
                    transactionProcessor, blockchainProcessor, propertyService, threadPool);
-        logger.info("PeerManager started (delegating to Peers.init() during Phase 10.5 migration)");
+        logger.info("PeerManager started (delegating to Peers.init())");
     }
 
     /**
      * Shuts down the peer networking subsystem for this profile.
      * <p>
      * This delegates to {@link Peers#shutdown(ThreadPool)} which currently
-     * stops shared static resources. In Phase 10d, shutdown will clean up
-     * only this instance's resources.
+     * stops shared static resources. Future work will replace this with cleanup
+     * of only this instance's resources.
      * </p>
      *
      * @param threadPool the thread pool to use for executor cleanup
@@ -139,7 +139,7 @@ public final class PeerManager {
         this.running = false;
         // Delegate to existing static shutdown — bridges legacy Peers during migration
         Peers.shutdown(threadPool);
-        logger.info("PeerManager shutdown complete (delegating to Peers.shutdown() during Phase 10.5 migration)");
+        logger.info("PeerManager shutdown complete (delegating to Peers.shutdown())");
     }
 
     /**

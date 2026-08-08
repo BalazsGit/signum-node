@@ -7,18 +7,42 @@ import application.module.node.fluxcapacitor.FluxValues;
 import java.util.HashMap;
 
 /**
- * AT (Automated Transaction) constants with FluxCapacitor-dependent values.
+ * Configuration constants for Automated Transaction (AT) processing.
  * <p>
- * Replaced singleton pattern with constructor injection to eliminate static
- * {@code Signum.getFluxCapacitor()} calls. Instances are created by
- * dependency injection containers or parent contexts.
+ * Provides version-specific fee schedules, step limits, memory page sizes,
+ * and timing parameters used by the AT virtual machine. Values are derived
+ * from {@link FluxCapacitor} feature flags to support epoch-based evolution
+ * of AT behavior without code changes.
+ * </p>
+ *
+ * @since 4.0
+ */
+/**
+ * Configuration constants for Automated Transaction (AT) processing.
+ * <p>
+ * Provides version-specific fee schedules, step limits, memory page sizes,
+ * and timing parameters used by the AT virtual machine. Values are derived
+ * from {@link FluxCapacitor} feature flags to support epoch-based evolution
+ * of AT behavior without code changes.
  * </p>
  *
  * @since 4.0
  */
 public final class AtConstants {
-    // platform based
+
+    /**
+     * Size of AT identifier in bytes.
+     */
     public static final int AT_ID_SIZE = 8;
+
+    /**
+     * Memory page size in bytes for AT virtual machine.
+     * <p>
+     * This value is constant across all AT versions (1, 2, 3) and is used
+     * for code, data, user stack, and call stack memory allocation.
+     * </p>
+     */
+    public static final int PAGE_SIZE = 256;
 
     private final HashMap<Short, Long> minFee = new HashMap<>();
     private final HashMap<Short, Long> stepFee = new HashMap<>();

@@ -48,8 +48,6 @@ public class TransactionDuplicatesCheckerImplTest {
 
         doReturn(Constants.FEE_QUANT_SIP3).when(mockFluxCapacitor).getValue(eq(FluxValues.FEE_QUANT), anyInt());
 
-        TransactionType.init(mockBlockchain, mockFluxCapacitor, null, null, null, null, null, null);
-
         t = new TransactionDuplicatesCheckerImpl();
     }
 

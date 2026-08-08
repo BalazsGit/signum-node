@@ -8,6 +8,7 @@ import application.module.database.gui.DatabaseConfigurationPanel.PropertyRow;
 import application.module.database.profile.SQLiteProfile;
 import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.node.Signum;
+import application.module.node.lifecycle.NodeLifecycleManager;
 import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
@@ -380,8 +381,8 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
             @Override
             protected Void doInBackground() throws Exception {
                 if (isRunning) {
-                    publish(new ProgressInfo("Stopping Signum Node core...", 20));
-                    Signum.shutdownNode();
+                    publish(new ProgressInfo("Stopping node lifecycle...", 20));
+                    NodeLifecycleManager.getInstance().stopAllProfiles();
                     Thread.sleep(2000);
                 }
 
@@ -402,8 +403,10 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
                 }
 
                 if (isRunning) {
-                    publish(new ProgressInfo("Restarting Signum Node core...", 90));
-                    Signum.startNode();
+                    publish(new ProgressInfo("Restarting node lifecycle...", 90));
+                    NodeLifecycleManager manager = NodeLifecycleManager.getInstance();
+                    manager.discoverProfiles();
+                    manager.startProfile(runningProfileName);
                 }
                 return null;
             }
