@@ -3,8 +3,8 @@ package application.module.node.web.api.http.handler;
 import application.module.node.Block;
 import application.module.node.Blockchain;
 import application.module.node.BlockchainProcessor;
-import application.module.node.Signum;
 import application.module.node.peer.Peer;
+import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.services.TimeService;
 import application.module.node.web.api.http.ApiServlet;
@@ -21,20 +21,22 @@ public final class GetBlockchainStatus extends ApiServlet.JsonRequestHandler {
     private final BlockchainProcessor blockchainProcessor;
     private final Blockchain blockchain;
     private final TimeService timeService;
+    private final PropertyService propertyService;
 
     public GetBlockchainStatus(BlockchainProcessor blockchainProcessor, Blockchain blockchain,
-            TimeService timeService) {
+            TimeService timeService, PropertyService propertyService) {
         super(new LegacyDocTag[] { LegacyDocTag.BLOCKS, LegacyDocTag.INFO });
         this.blockchainProcessor = blockchainProcessor;
         this.blockchain = blockchain;
         this.timeService = timeService;
+        this.propertyService = propertyService;
     }
 
     @Override
     protected JsonElement processRequest(HttpServletRequest req) {
         JsonObject response = new JsonObject();
-        response.addProperty("application", Signum.getPropertyService().getString(Props.APPLICATION));
-        response.addProperty("version", Signum.getPropertyService().getString(Props.VERSION));
+        response.addProperty("application", propertyService.getString(Props.APPLICATION));
+        response.addProperty("version", propertyService.getString(Props.VERSION));
         response.addProperty(TIME_RESPONSE, timeService.getEpochTime());
         Block lastBlock = blockchain.getLastBlock();
         response.addProperty("lastBlock", lastBlock.getStringId());

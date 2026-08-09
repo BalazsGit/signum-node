@@ -2,6 +2,7 @@ package application.module.node.web.api.http.handler;
 
 import application.module.node.*;
 import application.module.node.assetexchange.AssetExchange;
+import application.module.node.db.store.AccountStore;
 import application.module.node.peer.Peer;
 import application.module.node.peer.Peers;
 import application.module.node.props.PropertyService;
@@ -9,7 +10,6 @@ import application.module.node.props.Props;
 import application.module.node.services.ATService;
 import application.module.node.services.AccountService;
 import application.module.node.services.AliasService;
-import application.module.node.services.EscrowService;
 import application.module.node.services.TimeService;
 
 import application.module.node.web.api.http.ApiServlet;
@@ -36,12 +36,13 @@ public final class GetState extends ApiServlet.JsonRequestHandler {
     private final ATService atService;
     private final Generator generator;
     private final PropertyService propertyService;
+    private final BlockchainProcessor blockchainProcessor;
+    private final AccountStore accountStore;
     private final List<String> apiAdminKeyList;
 
     public GetState(Blockchain blockchain, AssetExchange assetExchange, AccountService accountService,
-            EscrowService escrowService,
             AliasService aliasService, TimeService timeService, ATService atService, Generator generator,
-            PropertyService propertyService) {
+            PropertyService propertyService, BlockchainProcessor blockchainProcessor, AccountStore accountStore) {
         super(new LegacyDocTag[] { LegacyDocTag.INFO }, INCLUDE_COUNTS_PARAMETER, API_KEY_PARAMETER);
         this.blockchain = blockchain;
         this.assetExchange = assetExchange;
@@ -51,6 +52,8 @@ public final class GetState extends ApiServlet.JsonRequestHandler {
         this.atService = atService;
         this.generator = generator;
         this.propertyService = propertyService;
+        this.blockchainProcessor = blockchainProcessor;
+        this.accountStore = accountStore;
 
         apiAdminKeyList = propertyService.getStringList(Props.API_ADMIN_KEY_LIST);
     }
@@ -60,15 +63,15 @@ public final class GetState extends ApiServlet.JsonRequestHandler {
 
         JsonObject response = new JsonObject();
 
-        response.addProperty("application", Signum.getPropertyService().getString(Props.APPLICATION));
-        response.addProperty("version", Signum.getPropertyService().getString(Props.VERSION));
+        response.addProperty("application", propertyService.getString(Props.APPLICATION));
+        response.addProperty("version", propertyService.getString(Props.VERSION));
         response.addProperty(TIME_RESPONSE, timeService.getEpochTime());
         response.addProperty("lastBlock", blockchain.getLastBlock().getStringId());
         response.addProperty(CUMULATIVE_DIFFICULTY_RESPONSE,
                 blockchain.getLastBlock().getCumulativeDifficulty().toString());
         long totalMined = blockchain.getTotalMined();
-        long totalBurnt = Signum.getStores().getAccountStore().getAccountBalanceTable().get(
-                Signum.getStores().getAccountStore().getAccountKeyFactory().newKey(0L)).getBalanceNqt();
+        long totalBurnt = accountStore.getAccountBalanceTable().get(
+                accountStore.getAccountKeyFactory().newKey(0L)).getBalanceNqt();
         response.addProperty("totalMinedNQT", totalMined);
         response.addProperty("totalBurntNQT", totalBurnt);
         response.addProperty("circulatingSupplyNQT", totalMined - totalBurnt);
@@ -117,12 +120,12 @@ public final class GetState extends ApiServlet.JsonRequestHandler {
 
         response.addProperty("numberOfPeers", Peers.getAllPeers().size());
         response.addProperty("numberOfUnlockedAccounts", generator.getAllGenerators().size());
-        Peer lastBlockchainFeeder = Signum.getBlockchainProcessor().getLastBlockchainFeeder();
+        Peer lastBlockchainFeeder = blockchainProcessor.getLastBlockchainFeeder();
         response.addProperty("lastBlockchainFeeder",
                 lastBlockchainFeeder == null ? null : lastBlockchainFeeder.getAnnouncedAddress());
         response.addProperty("lastBlockchainFeederHeight",
-                Signum.getBlockchainProcessor().getLastBlockchainFeederHeight());
-        response.addProperty("isScanning", Signum.getBlockchainProcessor().isScanning());
+                blockchainProcessor.getLastBlockchainFeederHeight());
+        response.addProperty("isScanning", blockchainProcessor.isScanning());
         response.addProperty("availableProcessors", Runtime.getRuntime().availableProcessors());
         response.addProperty("maxMemory", Runtime.getRuntime().maxMemory());
         response.addProperty("totalMemory", Runtime.getRuntime().totalMemory());

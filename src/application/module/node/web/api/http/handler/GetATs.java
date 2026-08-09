@@ -2,7 +2,6 @@ package application.module.node.web.api.http.handler;
 
 import application.module.node.Attachment;
 import application.module.node.Blockchain;
-import application.module.node.Signum;
 import application.module.node.SignumException;
 import application.module.node.Transaction;
 import application.module.node.at.AT;
@@ -30,11 +29,13 @@ import static application.module.node.web.api.http.common.ResultFields.NEXT_INDE
 public final class GetATs extends ApiServlet.JsonRequestHandler {
 
     private final ATService atService;
+    private final Blockchain blockchain;
 
-    public GetATs(ATService atService) {
+    public GetATs(ATService atService, Blockchain blockchain) {
         super(new LegacyDocTag[] { LegacyDocTag.AT, LegacyDocTag.ACCOUNTS }, MACHINE_CODE_HASH_ID_PARAMETER,
                 INCLUDE_DETAILS_PARAMETER, FIRST_INDEX_PARAMETER, LAST_INDEX_PARAMETER);
         this.atService = atService;
+        this.blockchain = blockchain;
     }
 
     @Override
@@ -59,7 +60,6 @@ public final class GetATs extends ApiServlet.JsonRequestHandler {
             }
         }
 
-        Blockchain blockchain = Signum.getBlockchain();
         CollectionWithIndex<Long> atIds = atService.getATsIssuedBy(null, codeHashId, firstIndex, lastIndex);
         JsonArray ats = new JsonArray();
         for (long atId : atIds) {

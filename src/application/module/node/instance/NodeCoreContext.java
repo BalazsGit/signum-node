@@ -616,13 +616,15 @@ public final class NodeCoreContext {
                 expiredPurchaseListener,
                 BlockchainProcessor.Event.AFTER_BLOCK_APPLY);
 
-        // APITransactionManager (lines 653-658)
+        // APITransactionManager – injected dependencies eliminate static Signum calls
         this.apiTransactionManager = new APITransactionManagerImpl(
                 this.parameterService,
                 this.transactionProcessor,
                 this.blockchain,
                 this.accountService,
-                this.transactionService);
+                this.transactionService,
+                this.propertyService,
+                this.fluxCapacitor);
 
         // PeerManager
         this.peerManager = new PeerManager(
@@ -690,7 +692,8 @@ public final class NodeCoreContext {
                 this.indirectIncomingService,
                 this.networkParameters,
                 this.atConstants,
-                this.fluxCapacitor));
+                this.fluxCapacitor,
+                this.stores));
         try {
             this.webServer.start();
         } catch (Exception e) {

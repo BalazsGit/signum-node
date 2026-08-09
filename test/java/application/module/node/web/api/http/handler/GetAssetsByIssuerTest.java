@@ -3,7 +3,6 @@ package application.module.node.web.api.http.handler;
 import application.module.node.Account;
 import application.module.node.Asset;
 import application.module.node.Blockchain;
-import application.module.node.Signum;
 import application.module.node.SignumException;
 import application.module.node.assetexchange.AssetExchange;
 import application.module.node.common.AbstractUnitTest;
@@ -17,9 +16,6 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.MockedStatic;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Collection;
@@ -32,9 +28,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.mockStatic;
 
-@ExtendWith(MockitoExtension.class)
 class GetAssetsByIssuerTest extends AbstractUnitTest {
 
     private GetAssetsByIssuer t;
@@ -60,7 +54,7 @@ class GetAssetsByIssuerTest extends AbstractUnitTest {
                 new MockParam(LAST_INDEX_PARAMETER, lastIndex));
 
         final Account mockAccount = mock(Account.class);
-        when(mockAccount.getId()).thenReturn(1l);
+        when(mockAccount.getId()).thenReturn(1L);
         when(mockParameterService.getAccount(eq(req))).thenReturn(mockAccount);
 
         final long mockAssetId = 1;
@@ -81,29 +75,26 @@ class GetAssetsByIssuerTest extends AbstractUnitTest {
         when(mockAssetExchange.getTransferCount(eq(mockAssetId))).thenReturn(2);
         when(mockAssetExchange.getTradeCount(eq(mockAssetId))).thenReturn(3);
 
-        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
-            Blockchain mockBlockchain = mock(Blockchain.class);
-            mocked.when(Signum::getBlockchain).thenReturn(mockBlockchain);
-            when(mockBlockchain.getHeight()).thenReturn(Integer.MAX_VALUE);
+        Blockchain mockBlockchain = mock(Blockchain.class);
+        when(mockBlockchain.getHeight()).thenReturn(Integer.MAX_VALUE);
 
-            t = new GetAssetsByIssuer(mockParameterService, mockAssetExchange, mockAccountService);
+        t = new GetAssetsByIssuer(mockParameterService, mockAssetExchange, mockAccountService, mockBlockchain);
 
-            final JsonObject result = (JsonObject) t.processRequest(req);
-            assertNotNull(result);
+        final JsonObject result = (JsonObject) t.processRequest(req);
+        assertNotNull(result);
 
-            final JsonArray assetsForAccountsResult = (JsonArray) result.get(ASSETS_RESPONSE);
-            assertNotNull(assetsForAccountsResult);
-            assertEquals(1, assetsForAccountsResult.size());
+        final JsonArray assetsForAccountsResult = (JsonArray) result.get(ASSETS_RESPONSE);
+        assertNotNull(assetsForAccountsResult);
+        assertEquals(1, assetsForAccountsResult.size());
 
-            final JsonObject assetResult = (JsonObject) assetsForAccountsResult.get(0);
-            assertNotNull(assetResult);
+        final JsonObject assetResult = (JsonObject) assetsForAccountsResult.get(0);
+        assertNotNull(assetResult);
 
-            assertEquals(mockAsset.getName(), JSON.getAsString(assetResult.get(NAME_RESPONSE)));
-            assertEquals(mockAsset.getDescription(), JSON.getAsString(assetResult.get(DESCRIPTION_RESPONSE)));
-            assertEquals(mockAsset.getDecimals(), JSON.getAsByte(assetResult.get(DECIMALS_RESPONSE)));
-            assertEquals("" + mockAsset.getQuantityQnt(), JSON.getAsString(assetResult.get(QUANTITY_QNT_RESPONSE)));
-            assertEquals("" + mockAsset.getId(), JSON.getAsString(assetResult.get(ASSET_RESPONSE)));
-        }
+        assertEquals(mockAsset.getName(), JSON.getAsString(assetResult.get(NAME_RESPONSE)));
+        assertEquals(mockAsset.getDescription(), JSON.getAsString(assetResult.get(DESCRIPTION_RESPONSE)));
+        assertEquals(mockAsset.getDecimals(), JSON.getAsByte(assetResult.get(DECIMALS_RESPONSE)));
+        assertEquals("" + mockAsset.getQuantityQnt(), JSON.getAsString(assetResult.get(QUANTITY_QNT_RESPONSE)));
+        assertEquals("" + mockAsset.getId(), JSON.getAsString(assetResult.get(ASSET_RESPONSE)));
     }
 
 }

@@ -113,19 +113,19 @@ public final class ApiServlet extends HttpServlet {
         map.put("getAliasesByName", new GetAliasesByName(aliasService));
         map.put("getAliasesOnSale", new GetAliasesOnSale(aliasService));
         map.put("getTLDs", new GetTLDs(aliasService));
-        map.put("getAllAssets", new GetAllAssets(assetExchange, accountService));
-        map.put("getAsset", new GetAsset(parameterService, assetExchange, accountService));
+        map.put("getAllAssets", new GetAllAssets(assetExchange, accountService, blockchain));
+        map.put("getAsset", new GetAsset(parameterService, assetExchange, accountService, fluxCapacitor, blockchain));
         map.put("getAssetIds", new GetAssetIds(assetExchange));
-        map.put("getAssetsByIssuer", new GetAssetsByIssuer(parameterService, assetExchange, accountService));
-        map.put("getAssetsByOwner", new GetAssetsByOwner(parameterService, assetExchange, accountService));
-        map.put("getAssetsByName", new GetAssetsByName(assetExchange, accountService));
+        map.put("getAssetsByIssuer", new GetAssetsByIssuer(parameterService, assetExchange, accountService, blockchain));
+        map.put("getAssetsByOwner", new GetAssetsByOwner(parameterService, assetExchange, accountService, blockchain));
+        map.put("getAssetsByName", new GetAssetsByName(assetExchange, accountService, blockchain));
         map.put("getAssetAccounts", new GetAssetAccounts(parameterService, assetExchange));
         map.put("getBalance", new GetBalance(parameterService));
         map.put("getBlock", new GetBlock(blockchain, blockService));
         map.put("getBlockId", new GetBlockId(blockchain));
         map.put("getBlocks", new GetBlocks(blockchain, blockService));
-        map.put("getBlockchainStatus", new GetBlockchainStatus(blockchainProcessor, blockchain, timeService));
-        map.put("getConstants", GetConstants.instance);
+        map.put("getBlockchainStatus", new GetBlockchainStatus(blockchainProcessor, blockchain, timeService, propertyService));
+        map.put("getConstants", new GetConstants(blockchain, propertyService, fluxCapacitor));
         map.put("getDGSGoods", new GetDGSGoods(digitalGoodsStoreService));
         map.put("getDGSGood", new GetDGSGood(parameterService));
         map.put("getDGSPurchases", new GetDGSPurchases(digitalGoodsStoreService));
@@ -136,8 +136,9 @@ public final class ApiServlet extends HttpServlet {
         map.put("getPeer", GetPeer.instance);
         map.put("getMyPeerInfo", new GetMyPeerInfo(transactionProcessor));
         map.put("getPeers", GetPeers.instance);
-        map.put("getState", new GetState(blockchain, assetExchange, accountService, escrowService, aliasService,
-                timeService, atService, generator, propertyService));
+        map.put("getState", new GetState(blockchain, assetExchange, accountService, aliasService,
+                timeService, atService, generator, propertyService, blockchainProcessor,
+                context.getStores().getAccountStore()));
         map.put("getTime", new GetTime(timeService));
         map.put("getTrades", new GetTrades(parameterService, assetExchange));
         map.put("getTradeJournal", new GetTradeJournal(parameterService, assetExchange));
@@ -191,7 +192,7 @@ public final class ApiServlet extends HttpServlet {
                 new TransferAssetMulti(parameterService, blockchain, apiTransactionManager, accountService, assetExchange, fluxCapacitor));
         map.put("transferAssetOwnership",
                 new TransferAssetOwnership(parameterService, blockchain, apiTransactionManager, assetExchange, fluxCapacitor));
-        map.put("getMiningInfo", new GetMiningInfo(blockchain, blockService, generator));
+        map.put("getMiningInfo", new GetMiningInfo(blockchain, blockService, generator, propertyService));
         map.put("submitNonce", new SubmitNonce(propertyService, accountService, blockchain, generator));
         map.put("getRewardRecipient", new GetRewardRecipient(parameterService, blockchain, accountService));
         map.put("setRewardRecipient",
@@ -209,15 +210,15 @@ public final class ApiServlet extends HttpServlet {
                 new SendMoneySubscription(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
         map.put("subscriptionCancel",
                 new SubscriptionCancel(parameterService, subscriptionService, blockchain, apiTransactionManager, fluxCapacitor));
-        map.put("getSubscription", new GetSubscription(subscriptionService, aliasService));
+        map.put("getSubscription", new GetSubscription(subscriptionService, aliasService, blockchain));
         map.put("getSubscriptionPayments", new GetSubscriptionPayments(blockchain));
         map.put("getAccountSubscriptions",
-                new GetAccountSubscriptions(parameterService, subscriptionService, aliasService));
-        map.put("getSubscriptionsToAccount", new GetSubscriptionsToAccount(parameterService, subscriptionService));
+                new GetAccountSubscriptions(parameterService, subscriptionService, aliasService, blockchain));
+        map.put("getSubscriptionsToAccount", new GetSubscriptionsToAccount(parameterService, subscriptionService, blockchain));
         map.put("createATProgram", new CreateATProgram(parameterService, blockchain, apiTransactionManager, context.getAtConstants(), fluxCapacitor));
         map.put("getAT", new GetAT(parameterService, blockchain));
         map.put("getATDetails", new GetATDetails(parameterService));
-        map.put("getATs", new GetATs(atService));
+        map.put("getATs", new GetATs(atService, blockchain));
         map.put("getATIds", new GetATIds(atService));
         map.put("getATLong", GetATLong.instance);
         map.put("getATMapValue", new GetATMapValue());

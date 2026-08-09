@@ -14,7 +14,6 @@ import com.google.gson.JsonObject;
 import application.module.node.Account;
 import application.module.node.Block;
 import application.module.node.Blockchain;
-import application.module.node.Signum;
 import application.module.node.SignumException;
 import application.module.node.Constants;
 import application.module.node.Generator;
@@ -53,7 +52,7 @@ public final class GetAccount extends ApiServlet.JsonRequestHandler {
         }
 
         if (parameterService.getAmountCommitted(req)) {
-            long committedAmount = Signum.getBlockchain().getCommittedAmount(account.getId(),
+            long committedAmount = blockchain.getCommittedAmount(account.getId(),
                     height + Constants.COMMITMENT_WAIT, height, null);
             response.addProperty(COMMITTED_NQT_RESPONSE, Convert.toUnsignedLong(committedAmount));
         }

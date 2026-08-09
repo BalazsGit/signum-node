@@ -1,7 +1,8 @@
 package application.module.node.web.api.http.handler;
 
+import application.module.node.Blockchain;
+
 import application.module.node.Account;
-import application.module.node.Signum;
 import application.module.node.SignumException;
 import application.module.node.Subscription;
 import application.module.node.Transaction;
@@ -22,11 +23,14 @@ public final class GetSubscriptionsToAccount extends ApiServlet.JsonRequestHandl
 
     private final ParameterService parameterService;
     private final SubscriptionService subscriptionService;
+    private final Blockchain blockchain;
 
-    public GetSubscriptionsToAccount(ParameterService parameterService, SubscriptionService subscriptionService) {
+    public GetSubscriptionsToAccount(ParameterService parameterService, SubscriptionService subscriptionService,
+            Blockchain blockchain) {
         super(new LegacyDocTag[] { LegacyDocTag.ACCOUNTS }, ACCOUNT_PARAMETER);
         this.parameterService = parameterService;
         this.subscriptionService = subscriptionService;
+        this.blockchain = blockchain;
     }
 
     @Override
@@ -39,7 +43,7 @@ public final class GetSubscriptionsToAccount extends ApiServlet.JsonRequestHandl
 
         for (Subscription subscription : subscriptionService.getSubscriptionsToId(account.getId())) {
 
-            Transaction transaction = Signum.getBlockchain().getTransaction(subscription.getId());
+            Transaction transaction = blockchain.getTransaction(subscription.getId());
             subscriptions.add(JSONData.subscription(subscription, null, null, transaction));
         }
 

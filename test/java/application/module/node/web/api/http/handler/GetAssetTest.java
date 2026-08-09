@@ -2,7 +2,6 @@ package application.module.node.web.api.http.handler;
 
 import application.module.node.Asset;
 import application.module.node.Blockchain;
-import application.module.node.Signum;
 import application.module.node.SignumException;
 import application.module.node.assetexchange.AssetExchange;
 import application.module.node.common.AbstractUnitTest;
@@ -15,9 +14,6 @@ import application.module.node.util.JSON;
 import com.google.gson.JsonObject;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.MockedStatic;
-import org.mockito.junit.jupiter.MockitoExtension;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -28,22 +24,24 @@ import static org.junit.Assert.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.mockStatic;
 
-@ExtendWith(MockitoExtension.class)
 class GetAssetTest extends AbstractUnitTest {
+
+    private GetAsset t;
 
     private ParameterService parameterServiceMock;
     private AssetExchange mockAssetExchange;
     private AccountService mockAccountService;
-
-    private GetAsset t;
+    private FluxCapacitor fluxCapacitor;
+    private Blockchain blockchain;
 
     @Before
     public void setUp() {
         parameterServiceMock = mock(ParameterService.class);
         mockAssetExchange = mock(AssetExchange.class);
         mockAccountService = mock(AccountService.class);
+        fluxCapacitor = QuickMocker.latestValueFluxCapacitor();
+        blockchain = mock(Blockchain.class);
     }
 
     @Test
@@ -58,6 +56,7 @@ class GetAssetTest extends AbstractUnitTest {
         when(asset.getName()).thenReturn("assetName");
         when(asset.getDescription()).thenReturn("assetDescription");
         when(asset.getDecimals()).thenReturn(Byte.parseByte("3"));
+        when(asset.getQuantityQnt()).thenReturn(100L);
 
         when(parameterServiceMock.getAsset(eq(req))).thenReturn(asset);
 
@@ -70,25 +69,18 @@ class GetAssetTest extends AbstractUnitTest {
         when(mockAssetExchange.getAssetAccountsCount(eq(asset), eq(0L), eq(true), eq(false)))
                 .thenReturn(assetAccountsCount);
 
-        try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
-            Blockchain mockBlockchain = mock(Blockchain.class);
-            mocked.when(Signum::getBlockchain).thenReturn(mockBlockchain);
-            when(mockBlockchain.getHeight()).thenReturn(Integer.MAX_VALUE);
-            mocked.when(Signum::getFluxCapacitor).thenReturn(QuickMocker.latestValueFluxCapacitor());
+        t = new GetAsset(parameterServiceMock, mockAssetExchange, mockAccountService, fluxCapacitor, blockchain);
 
-            t = new GetAsset(parameterServiceMock, mockAssetExchange, mockAccountService);
+        final JsonObject result = (JsonObject) t.processRequest(req);
 
-            final JsonObject result = (JsonObject) t.processRequest(req);
-
-            assertNotNull(result);
-            assertEquals(asset.getName(), JSON.getAsString(result.get(NAME_RESPONSE)));
-            assertEquals(asset.getDescription(), JSON.getAsString(result.get(DESCRIPTION_RESPONSE)));
-            assertEquals(asset.getDecimals(), JSON.getAsInt(result.get(DECIMALS_RESPONSE)));
-            assertEquals("" + asset.getQuantityQnt(), JSON.getAsString(result.get(QUANTITY_QNT_RESPONSE)));
-            assertEquals("" + asset.getId(), JSON.getAsString(result.get(ASSET_RESPONSE)));
-            assertEquals(tradeCount, JSON.getAsInt(result.get(NUMBER_OF_TRADES_RESPONSE)));
-            assertEquals(transferCount, JSON.getAsInt(result.get(NUMBER_OF_TRANSFERS_RESPONSE)));
-            assertEquals(assetAccountsCount, JSON.getAsInt(result.get(NUMBER_OF_ACCOUNTS_RESPONSE)));
-        }
+        assertNotNull(result);
+        assertEquals(asset.getName(), JSON.getAsString(result.get(NAME_RESPONSE)));
+        assertEquals(asset.getDescription(), JSON.getAsString(result.get(DESCRIPTION_RESPONSE)));
+        assertEquals(asset.getDecimals(), JSON.getAsInt(result.get(DECIMALS_RESPONSE)));
+        assertEquals("" + asset.getQuantityQnt(), JSON.getAsString(result.get(QUANTITY_QNT_RESPONSE)));
+        assertEquals("" + asset.getId(), JSON.getAsString(result.get(ASSET_RESPONSE)));
+        assertEquals(tradeCount, JSON.getAsInt(result.get(NUMBER_OF_TRADES_RESPONSE)));
+        assertEquals(transferCount, JSON.getAsInt(result.get(NUMBER_OF_TRANSFERS_RESPONSE)));
+        assertEquals(assetAccountsCount, JSON.getAsInt(result.get(NUMBER_OF_ACCOUNTS_RESPONSE)));
     }
 }

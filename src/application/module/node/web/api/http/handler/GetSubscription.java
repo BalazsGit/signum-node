@@ -1,7 +1,8 @@
 package application.module.node.web.api.http.handler;
 
+import application.module.node.Blockchain;
+
 import application.module.node.Alias;
-import application.module.node.Signum;
 import application.module.node.Subscription;
 import application.module.node.Transaction;
 import application.module.node.services.AliasService;
@@ -23,11 +24,13 @@ public final class GetSubscription extends ApiServlet.JsonRequestHandler {
 
     private final SubscriptionService subscriptionService;
     private final AliasService aliasService;
+    private final Blockchain blockchain;
 
-    public GetSubscription(SubscriptionService subscriptionService, AliasService aliasService) {
+    public GetSubscription(SubscriptionService subscriptionService, AliasService aliasService, Blockchain blockchain) {
         super(new LegacyDocTag[] { LegacyDocTag.ACCOUNTS }, SUBSCRIPTION_PARAMETER);
         this.subscriptionService = subscriptionService;
         this.aliasService = aliasService;
+        this.blockchain = blockchain;
     }
 
     @Override
@@ -53,7 +56,7 @@ public final class GetSubscription extends ApiServlet.JsonRequestHandler {
         Alias alias = aliasService.getAlias(subscription.getRecipientId());
         Alias tld = alias == null ? null : aliasService.getTLD(alias.getTld());
 
-        Transaction transaction = Signum.getBlockchain().getTransaction(subscriptionId);
+        Transaction transaction = blockchain.getTransaction(subscriptionId);
 
         return JSONData.subscription(subscription, alias, tld, transaction);
     }

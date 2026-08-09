@@ -8,7 +8,9 @@ import application.module.node.Appendix.PublicKeyAnnouncement;
 import application.module.node.Transaction.Builder;
 import application.module.node.crypto.Crypto;
 import application.module.node.crypto.EncryptedData;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
+import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.services.AccountService;
 import application.module.node.services.ParameterService;
@@ -33,15 +35,19 @@ public class APITransactionManagerImpl implements APITransactionManager {
     private final Blockchain blockchain;
     private final AccountService accountService;
     private final TransactionService transactionService;
+    private final PropertyService propertyService;
+    private final FluxCapacitor fluxCapacitor;
 
     public APITransactionManagerImpl(ParameterService parameterService, TransactionProcessor transactionProcessor,
             Blockchain blockchain, AccountService accountService,
-            TransactionService transactionService) {
+            TransactionService transactionService, PropertyService propertyService, FluxCapacitor fluxCapacitor) {
         this.parameterService = parameterService;
         this.transactionProcessor = transactionProcessor;
         this.blockchain = blockchain;
         this.accountService = accountService;
         this.transactionService = transactionService;
+        this.propertyService = propertyService;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     @Override
@@ -57,7 +63,7 @@ public class APITransactionManagerImpl implements APITransactionManager {
         String recipientPublicKeyValue = Convert.emptyToNull(ParameterParser.getRecipientPublicKey(req));
         boolean broadcast = !Parameters.isFalse(req.getParameter(BROADCAST_PARAMETER));
 
-        long cashBackId = Convert.parseUnsignedLong(Signum.getPropertyService().getString(Props.CASH_BACK_ID));
+        long cashBackId = Convert.parseUnsignedLong(propertyService.getString(Props.CASH_BACK_ID));
 
         EncryptedMessage encryptedMessage = null;
 
@@ -80,7 +86,7 @@ public class APITransactionManagerImpl implements APITransactionManager {
         Message message = null;
         String messageValue = Convert.emptyToNull(req.getParameter(MESSAGE_PARAMETER));
         if (messageValue != null) {
-            boolean messageIsText = Signum.getFluxCapacitor().getValue(FluxValues.DIGITAL_GOODS_STORE, blockchainHeight)
+            boolean messageIsText = fluxCapacitor.getValue(FluxValues.DIGITAL_GOODS_STORE, blockchainHeight)
                     && !Parameters.isFalse(req.getParameter(MESSAGE_IS_TEXT_PARAMETER));
             try {
                 message = messageIsText ? new Message(messageValue, blockchainHeight)
@@ -89,19 +95,19 @@ public class APITransactionManagerImpl implements APITransactionManager {
                 throw new ParameterException(INCORRECT_ARBITRARY_MESSAGE);
             }
         } else if (attachment instanceof Attachment.ColoredCoinsAssetTransfer
-                && Signum.getFluxCapacitor().getValue(FluxValues.DIGITAL_GOODS_STORE, blockchainHeight)) {
+                && fluxCapacitor.getValue(FluxValues.DIGITAL_GOODS_STORE, blockchainHeight)) {
             String commentValue = Convert.emptyToNull(req.getParameter(COMMENT_PARAMETER));
             if (commentValue != null) {
                 message = new Message(commentValue, blockchainHeight);
             }
         } else if (attachment == Attachment.ARBITRARY_MESSAGE
-                && !Signum.getFluxCapacitor().getValue(FluxValues.DIGITAL_GOODS_STORE, blockchainHeight)) {
+                && !fluxCapacitor.getValue(FluxValues.DIGITAL_GOODS_STORE, blockchainHeight)) {
             message = new Message(new byte[0], blockchainHeight);
         }
         PublicKeyAnnouncement publicKeyAnnouncement = null;
         byte[] recipientPublicKey = Convert.parseHexString(recipientPublicKeyValue);
         if (recipientPublicKeyValue != null
-                && Signum.getFluxCapacitor().getValue(FluxValues.DIGITAL_GOODS_STORE, blockchainHeight)) {
+                && fluxCapacitor.getValue(FluxValues.DIGITAL_GOODS_STORE, blockchainHeight)) {
             publicKeyAnnouncement = new PublicKeyAnnouncement(recipientPublicKey, blockchainHeight);
         }
 
@@ -152,7 +158,7 @@ public class APITransactionManagerImpl implements APITransactionManager {
                     .referencedTransactionFullHash(referencedTransactionFullHash);
             if (attachment.getTransactionType().hasRecipient()) {
                 Account recipientAccount = accountService.getAccount(recipientId);
-                if (recipientId != 0L && Signum.getPropertyService().getBoolean(Props.PK_API_BLOCK)) {
+                if (recipientId != 0L && propertyService.getBoolean(Props.PK_API_BLOCK)) {
                     long referenceId = Convert.fullHashToId(referencedTransactionFullHash);
                     if ((referenceId != recipientId) // allow to send to a fresh new account if we use the reference to
                                                      // a transaction that has that ID (contract creation pending)

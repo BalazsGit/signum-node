@@ -2,7 +2,7 @@ package application.module.node.web.api.http.handler;
 
 import application.module.node.Account;
 import application.module.node.Asset;
-import application.module.node.Signum;
+import application.module.node.Blockchain;
 import application.module.node.SignumException;
 import application.module.node.assetexchange.AssetExchange;
 import application.module.node.services.AccountService;
@@ -25,14 +25,16 @@ public final class GetAssetsByOwner extends AbstractAssetsRetrieval {
 
     private final ParameterService parameterService;
     private final AssetExchange assetExchange;
+    private final Blockchain blockchain;
 
     public GetAssetsByOwner(ParameterService parameterService, AssetExchange assetExchange,
-            AccountService accountService) {
+            AccountService accountService, Blockchain blockchain) {
         super(new LegacyDocTag[] { LegacyDocTag.AE, LegacyDocTag.ACCOUNTS }, assetExchange, accountService,
                 ACCOUNT_PARAMETER, FIRST_INDEX_PARAMETER, LAST_INDEX_PARAMETER,
                 HEIGHT_START_PARAMETER, HEIGHT_END_PARAMETER, SKIP_ZERO_VOLUME_PARAMETER);
         this.parameterService = parameterService;
         this.assetExchange = assetExchange;
+        this.blockchain = blockchain;
     }
 
     @Override
@@ -41,7 +43,7 @@ public final class GetAssetsByOwner extends AbstractAssetsRetrieval {
         int firstIndex = ParameterParser.getFirstIndex(req);
         int lastIndex = ParameterParser.getLastIndex(req);
 
-        int heightEnd = Signum.getBlockchain().getHeight();
+        int heightEnd = blockchain.getHeight();
         // default is one day window
         int heightStart = heightEnd - 360;
 

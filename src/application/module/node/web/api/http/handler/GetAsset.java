@@ -1,9 +1,10 @@
 package application.module.node.web.api.http.handler;
 
 import application.module.node.Asset;
-import application.module.node.Signum;
+import application.module.node.Blockchain;
 import application.module.node.SignumException;
 import application.module.node.assetexchange.AssetExchange;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.AccountService;
 import application.module.node.services.ParameterService;
@@ -23,13 +24,18 @@ public final class GetAsset extends ApiServlet.JsonRequestHandler {
     private final ParameterService parameterService;
     private final AssetExchange assetExchange;
     private final AccountService accountService;
+    private final FluxCapacitor fluxCapacitor;
+    private final Blockchain blockchain;
 
-    public GetAsset(ParameterService parameterService, AssetExchange assetExchange, AccountService accountService) {
+    public GetAsset(ParameterService parameterService, AssetExchange assetExchange, AccountService accountService,
+            FluxCapacitor fluxCapacitor, Blockchain blockchain) {
         super(new LegacyDocTag[] { LegacyDocTag.AE }, ASSET_PARAMETER, QUANTITY_MININUM_QNT_PARAMETER,
                 HEIGHT_START_PARAMETER, HEIGHT_END_PARAMETER);
         this.parameterService = parameterService;
         this.assetExchange = assetExchange;
         this.accountService = accountService;
+        this.fluxCapacitor = fluxCapacitor;
+        this.blockchain = blockchain;
     }
 
     @Override
@@ -39,14 +45,14 @@ public final class GetAsset extends ApiServlet.JsonRequestHandler {
 
         int tradeCount = assetExchange.getTradeCount(asset.getId());
         int transferCount = assetExchange.getTransferCount(asset.getId());
-        boolean unconfirmed = !Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX);
+        boolean unconfirmed = !fluxCapacitor.getValue(FluxValues.DISTRIBUTION_FIX);
         int accountsCount = assetExchange.getAssetAccountsCount(asset, minimumQuantity, true, unconfirmed);
         long circulatingSupply = assetExchange.getAssetCirculatingSupply(asset, true, unconfirmed);
 
         long quantityBurnt = accountService.getUnconfirmedAssetBalanceQNT(accountService.getNullAccount(),
                 asset.getId());
 
-        int heightEnd = Signum.getBlockchain().getHeight();
+        int heightEnd = blockchain.getHeight();
         // default is one day window
         int heightStart = heightEnd - 360;
 

@@ -3,7 +3,6 @@ package application.module.node.web.api.http.handler;
 import application.module.node.Attachment;
 import application.module.node.Attachment.AdvancedPaymentSubscriptionPayment;
 import application.module.node.Blockchain;
-import application.module.node.Signum;
 import application.module.node.Transaction;
 import application.module.node.TransactionType;
 import application.module.node.util.CollectionWithIndex;
@@ -65,7 +64,6 @@ public final class GetSubscriptionPayments extends ApiServlet.JsonRequestHandler
         }
 
         JsonArray transactions = new JsonArray();
-        Blockchain blockchain = Signum.getBlockchain();
         CollectionWithIndex<Transaction> accountTransactions = new CollectionWithIndex<Transaction>(
                 blockchain.getTransactions(tx.getSenderId(), TransactionType.TYPE_ADVANCED_PAYMENT.getType(),
                         TransactionType.SUBTYPE_ADVANCED_PAYMENT_SUBSCRIPTION_PAYMENT,
