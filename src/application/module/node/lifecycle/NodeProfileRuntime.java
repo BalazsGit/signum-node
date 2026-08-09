@@ -1,5 +1,6 @@
 package application.module.node.lifecycle;
 
+import application.module.node.Signum;
 import application.module.node.instance.NodeCoreContext;
 import application.module.node.metrics.ProfileMetricCollector;
 
@@ -108,9 +109,25 @@ public final class NodeProfileRuntime {
     // ── Runtime Context ────────────────────────────────────────────────
 
     /**
-     * Reference to the running NodeCoreContext for this profile.
+     * Signum facade instance that owns the NodeCoreContext for this profile.
      * Null if the profile has not been started yet.
+     * <p>
+     * This is the greenfield way to access node services:
+     * {@code runtime.getSignum().getBlockchain()} instead of
+     * {@code Signum.getBlockchain()} (static).
+     * </p>
      */
+    private volatile Signum signum;
+
+    /**
+     * Direct reference to the running NodeCoreContext for this profile.
+     * Kept for backwards compatibility during Phase E3 migration.
+     * Mirrors {@code signum.getContext()} when signum is set.
+     * Null if the profile has not been started yet.
+     *
+     * @deprecated Use {@link #getSignum()} instead. Will be removed in Phase E4.
+     */
+    @Deprecated
     private volatile NodeCoreContext coreContext;
 
     // ── Metrics (Measurement Hierarchy) ────────────────────────────────
@@ -380,15 +397,47 @@ public final class NodeProfileRuntime {
         this.hysteresisThresholdLo = hysteresisThresholdLo;
     }
 
-    // ── NodeCoreContext Access ──────────────────────────────────────────
+    // ── Signum Facade Access (Greenfield) ──────────────────────────────
+
+    /**
+     * Gets the Signum facade for this profile instance.
+     * Returns null if the profile has not been started yet.
+     *
+     * @return the Signum facade, or null
+     * @since 4.0 Phase E3
+     */
+    public Signum getSignum() {
+        return signum;
+    }
+
+    /**
+     * Sets the Signum facade reference when the profile is started.
+     * Also updates the legacy coreContext reference for backwards compatibility.
+     *
+     * @param signum the facade to associate with this profile
+     * @since 4.0 Phase E3
+     */
+    public void setSignum(Signum signum) {
+        this.signum = signum;
+        // Keep legacy coreContext in sync for backwards compat
+        this.coreContext = signum != null ? signum.getContext() : null;
+    }
+
+    // ── NodeCoreContext Access (Legacy Bridge) ─────────────────────────
 
     /**
      * Gets the NodeCoreContext for this profile instance.
      * Returns null if the profile has not been started yet.
      *
      * @return the core context, or null
+     * @deprecated Use {@link #getSignum()} instead. Will be removed in Phase E4.
      */
+    @Deprecated
     public NodeCoreContext getCoreContext() {
+        // Prefer signum.getContext() if available, fallback to direct ref
+        if (this.signum != null) {
+            return this.signum.getContext();
+        }
         return coreContext;
     }
 
@@ -396,7 +445,9 @@ public final class NodeProfileRuntime {
      * Sets the NodeCoreContext reference when the profile is started.
      *
      * @param coreContext the runtime context to associate with this profile
+     * @deprecated Use {@link #setSignum(Signum)} instead. Will be removed in Phase E4.
      */
+    @Deprecated
     public void setCoreContext(NodeCoreContext coreContext) {
         this.coreContext = coreContext;
     }

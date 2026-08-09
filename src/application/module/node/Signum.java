@@ -1,62 +1,27 @@
 package application.module.node;
 
 import application.module.node.assetexchange.AssetExchange;
-import application.module.node.assetexchange.AssetExchangeImpl;
-import application.module.node.at.AT;
 import application.module.node.at.AtConstants;
-import application.module.node.db.BlockDb;
-import application.module.node.db.TransactionDb;
 import application.module.node.db.cache.DBCacheManagerImpl;
 import application.module.node.db.sql.Db;
-import application.module.node.db.sql.DbContext;
-import application.module.node.db.sql.StoreDependencies;
-import application.module.node.db.store.BlockchainStore;
 import application.module.node.db.store.Dbs;
-import application.module.node.db.store.DerivedTableManager;
 import application.module.node.db.store.Stores;
-import application.module.node.deeplink.DeeplinkQRCodeGenerator;
-import application.module.node.feesuggestions.FeeSuggestionCalculator;
 import application.module.node.fluxcapacitor.FluxCapacitor;
-import application.module.node.fluxcapacitor.FluxCapacitorImpl;
-import application.module.node.peer.Peers;
 import application.module.node.props.CaselessProperties;
 import application.module.node.props.PropertyService;
 import application.module.node.props.PropertyServiceImpl;
 import application.module.node.props.Props;
-import application.module.node.services.ATService;
 import application.module.node.services.AccountService;
 import application.module.node.services.AliasService;
-import application.module.node.services.BlockService;
 import application.module.node.services.DGSGoodsStoreService;
 import application.module.node.services.EscrowService;
-import application.module.node.services.IndirectIncomingService;
-import application.module.node.services.ParameterService;
 import application.module.node.services.SubscriptionService;
-import application.module.node.services.TimeService;
 import application.module.node.services.TransactionService;
-import application.module.node.at.ATServiceImpl;
-import application.module.node.services.impl.AccountServiceImpl;
-import application.module.node.services.impl.AliasServiceImpl;
-import application.module.node.services.impl.BlockServiceImpl;
-import application.module.node.services.impl.DGSGoodsStoreServiceImpl;
-import application.module.node.services.impl.EscrowServiceImpl;
-import application.module.node.services.impl.IndirectIncomingServiceImpl;
-import application.module.node.services.impl.ParameterServiceImpl;
-import application.module.node.services.impl.SubscriptionServiceImpl;
-import application.module.node.services.impl.TimeServiceImpl;
-import application.module.node.services.impl.TransactionServiceImpl;
-import application.module.node.statistics.StatisticsManagerImpl;
-import application.module.node.util.DownloadCacheImpl;
 import application.module.node.util.LoggerConfigurator;
-import application.module.node.util.ThreadPool;
-import application.module.node.util.Time;
-import application.module.node.web.api.http.common.APITransactionManager;
-import application.module.node.web.api.http.common.APITransactionManagerImpl;
 import application.module.node.web.server.WebServer;
-import application.module.node.web.server.WebServerContext;
-import application.module.node.web.server.WebServerImpl;
 import application.module.node.instance.NodeCoreContext;
 import application.module.node.instance.NodeCoreContextBuilder;
+import application.module.node.lifecycle.NodeLifecycleManager;
 import application.module.node.profile.NodeProfile;
 import application.utils.config.ConfigPaths;
 import application.utils.config.PropertiesProfileLoader;
@@ -64,10 +29,7 @@ import application.utils.io.PathUtils;
 
 import java.util.Objects;
 
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -85,13 +47,23 @@ import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import signum.net.NetworkParameters;
 import signumj.util.SignumUtils;
 
 /**
  * The main class of the Signum node.
+ * <p>
+ * This is the public facade for a single Signum node instance.
+ * It owns a {@link NodeCoreContext} that holds all runtime components,
+ * and delegates lifecycle + service access to it.
+ * </p>
+ *
+ * @since 4.0 Greenfield facade architecture (Phase E1-E4)
  */
 public final class Signum {
+
+    // =========================================================================
+    // Public constants (safe – no instance state)
+    // =========================================================================
 
     public static final Version VERSION = Version.parse("v3.9.8");
     public static final String APPLICATION = "BRS";
@@ -110,6 +82,7 @@ public final class Signum {
     public static final String DEFAULT_LOGGING_PROPERTIES_NAME = "logging-default";
     public static final String LOGGING_PROPERTIES_NAME = "logging";
 
+    // Profile tracking (lightweight, safe to keep static for legacy bootstrap)
     private static String activeNodeProfile = PROPERTIES_NAME;
     private static String activeLoggingProfile = LOGGING_PROPERTIES_NAME;
 
@@ -137,55 +110,419 @@ public final class Signum {
                     .longOpt("help")
                     .build());
 
-    private static Logger logger;
-
-    private static Stores stores;
-    private static Dbs dbs;
-
-    private static ThreadPool threadPool;
-
-    private static BlockchainImpl blockchain;
-    private static BlockchainProcessorImpl blockchainProcessor;
-    private static TransactionProcessorImpl transactionProcessor;
-    private static TransactionService transactionService;
-    private static SubscriptionService subscriptionService;
-    private static AssetExchange assetExchange;
-    private static AccountService accountService;
-    private static AliasService aliasService;
-    private static DGSGoodsStoreService dgsGoodsStoreService;
-    private static EscrowService escrowService;
-    private static Generator generator;
-
-    private static PropertyService propertyService;
-    private static FluxCapacitor fluxCapacitor;
-
-    private static DBCacheManagerImpl dbCacheManager;
-
-    private static WebServer webServer;
-
-    private static AtConstants atConstants;
-
-    private static ShutdownManager shutdownManager;
+    // =========================================================================
+    // Instance state (Facade)
+    // =========================================================================
 
     /**
-     * Sets the ShutdownManager instance from the owning NodeCoreContext.
-     * The context creates a profile-scoped ShutdownManager and registers it
-     * here so that the legacy static shutdown path in {@link #shutdown(boolean)}
-     * can still access it.
-     *
-     * @param manager the ShutdownManager for this profile
+     * The NodeCoreContext owned by this Signum facade instance.
+     * Null when using legacy static bootstrap path (Signum.init()).
      */
-    public static void setShutdownManager(ShutdownManager manager) {
-        shutdownManager = manager;
+    private final NodeCoreContext context;
+
+    /**
+     * Profile identity for this Signum instance.
+     * Null when using legacy static bootstrap path.
+     */
+    private final NodeProfile profile;
+
+    // =========================================================================
+    // Legacy bootstrap helpers (static, transitional)
+    // =========================================================================
+
+    /** Logger used only by the legacy bootstrap / init path. */
+    private static Logger logger;
+
+    /** Tracks whether the legacy init() has already run. */
+    private static AtomicBoolean isInitialized = new AtomicBoolean(false);
+
+    /** Tracks whether a shutdown is in progress (legacy). */
+    private static AtomicBoolean isShutdown = new AtomicBoolean(false);
+
+    /** Tracks whether the node was stopped (legacy). */
+    private static AtomicBoolean nodeStopped = new AtomicBoolean(false);
+
+    // =========================================================================
+    // Constructors
+    // =========================================================================
+
+    /**
+     * Private constructor for legacy static bootstrap (Signum.init/loadWallet).
+     * Creates no context -- legacy path populates NodeCoreContext via builder.
+     */
+    private Signum() {
+        this.context = null;
+        this.profile = null;
     }
 
-    private static AtomicBoolean isShutdown = new AtomicBoolean(false);
-    private static AtomicBoolean nodeStopped = new AtomicBoolean(false);
-    private static AtomicBoolean isInitialized = new AtomicBoolean(false); // New flag for initialization
+    /**
+     * Creates a new Signum facade instance that owns the given NodeCoreContext.
+     * This is the preferred greenfield constructor for multi-node operation.
+     *
+     * @param profile    the node profile identity (must not be null)
+     * @param confFolder the base configuration folder path (must not be null)
+     */
+    public Signum(NodeProfile profile, Path confFolder) {
+        this.profile = Objects.requireNonNull(profile, "profile must not be null");
+        this.context = new NodeCoreContextBuilder(profile.getName(), confFolder).build();
+    }
+
+    /**
+     * Creates a new Signum facade instance that wraps an existing NodeCoreContext.
+     * Used when the context was built externally (e.g., tests, legacy migration).
+     *
+     * @param profile the node profile identity (must not be null)
+     * @param context the pre-built core context (must not be null)
+     */
+    public Signum(NodeProfile profile, NodeCoreContext context) {
+        this.profile = Objects.requireNonNull(profile, "profile must not be null");
+        this.context = Objects.requireNonNull(context, "context must not be null");
+    }
+
+    // =========================================================================
+    // Lifecycle delegation
+    // =========================================================================
+
+    /**
+     * Starts the node by delegating to the owned NodeCoreContext.
+     *
+     * @throws application.module.node.instance.NodeStartupException if initialization fails
+     */
+    public void start() {
+        Objects.requireNonNull(this.context, "context not available -- use legacy Signum.init() or provide context");
+        this.context.start();
+    }
+
+    /**
+     * Gracefully stops the node by delegating to the owned NodeCoreContext.
+     */
+    public void stop() {
+        if (this.context != null) {
+            this.context.stop();
+        }
+    }
+
+    /**
+     * Re-starts the node by stopping and starting the owned NodeCoreContext.
+     */
+    public void restart() {
+        Objects.requireNonNull(this.context, "context not available");
+        this.context.restart();
+    }
+
+    // =========================================================================
+    // Identity
+    // =========================================================================
+
+    /**
+     * Returns the profile identity for this Signum instance.
+     *
+     * @return the NodeProfile, or null if created via legacy static bootstrap
+     */
+    public NodeProfile getProfile() {
+        return profile;
+    }
+
+    /**
+     * Returns the profile name for this Signum instance.
+     *
+     * @return the profile name, or null if created via legacy static bootstrap
+     */
+    public String getProfileName() {
+        return profile != null ? profile.getName() : null;
+    }
+
+    /**
+     * Returns whether this node is currently running.
+     */
+    public boolean isRunning() {
+        return this.context != null && this.context.isRunning();
+    }
+
+    /**
+     * Returns the owned NodeCoreContext.
+     * Returns null when using legacy static bootstrap path.
+     * <p>
+     * This method is intentionally public so that infrastructure components
+     * like {@link application.module.node.lifecycle.NodeProfileRuntime} can
+     * access the context for lifecycle management and backwards compatibility.
+     * </p>
+     *
+     * @return the NodeCoreContext, or null
+     */
+    public NodeCoreContext getContext() {
+        return context;
+    }
+
+    // =========================================================================
+    // Active instance registry (bridge support – transitional)
+    // =========================================================================
+
+    /**
+     * Active Signum instance for backwards-compatible static delegation.
+     * Set during Phase E2 bridge migration so that existing callers using
+     * {@code Signum.getBlockchain()} continue to work via the active facade.
+     * Will be removed after all callers migrate to constructor injection.
+     */
+    private static volatile Signum activeInstance;
+
+    /**
+     * Registers a Signum instance as the active one for static bridge support.
+     * <p>
+     * Must be called from outside packages (e.g., {@code application.module.node.lifecycle})
+     * so visibility is {@code public}.
+     * </p>
+     *
+     * @param signum the Signum instance to mark as active
+     */
+    public static void setActive(Signum signum) {
+        activeInstance = signum;
+    }
+
+    /**
+     * Returns the currently active Signum instance (for bridge support).
+     *
+     * @return the active Signum, or null if none registered
+     */
+    public static Signum getActiveInstance() {
+        return activeInstance;
+    }
+
+    // =========================================================================
+    // Deprecated static bridge getters – delegate via active instance context
+    // =========================================================================
+
+    /**
+     * Bridge getter: delegates to active Signum instance context.
+     * @deprecated Use Signum instance method or constructor injection instead.
+     */
+    @Deprecated
+    public static Blockchain getBlockchain() {
+        NodeCoreContext ctx = resolveContext();
+        if (ctx == null) throw new IllegalStateException("No active Signum instance – call via instance API");
+        return ctx.getBlockchain();
+    }
+
+    /**
+     * Bridge getter: delegates to active Signum instance context.
+     * @deprecated Use Signum instance method or constructor injection instead.
+     */
+    @Deprecated
+    public static BlockchainProcessor getBlockchainProcessor() {
+        NodeCoreContext ctx = resolveContext();
+        if (ctx == null) throw new IllegalStateException("No active Signum instance");
+        return ctx.getBlockchainProcessor();
+    }
+
+    /**
+     * Bridge getter: delegates to active Signum instance context.
+     * @deprecated Use Signum instance method or constructor injection instead.
+     */
+    @Deprecated
+    public static Generator getGenerator() {
+        NodeCoreContext ctx = resolveContext();
+        if (ctx == null) throw new IllegalStateException("No active Signum instance");
+        return ctx.getGenerator();
+    }
+
+    /**
+     * Bridge getter: delegates to active Signum instance context.
+     * @deprecated Use Signum instance method or constructor injection instead.
+     */
+    @Deprecated
+    public static TransactionProcessorImpl getTransactionProcessor() {
+        NodeCoreContext ctx = resolveContext();
+        if (ctx == null) throw new IllegalStateException("No active Signum instance");
+        return ctx.getTransactionProcessor();
+    }
+
+    /**
+     * Bridge getter: delegates to active Signum instance context.
+     * @deprecated Use Signum instance method or constructor injection instead.
+     */
+    @Deprecated
+    public static TransactionService getTransactionService() {
+        NodeCoreContext ctx = resolveContext();
+        if (ctx == null) throw new IllegalStateException("No active Signum instance");
+        return ctx.getTransactionService();
+    }
+
+    /**
+     * Bridge getter: delegates to active Signum instance context.
+     * @deprecated Use Signum instance method or constructor injection instead.
+     */
+    @Deprecated
+    public static SubscriptionService getSubscriptionService() {
+        NodeCoreContext ctx = resolveContext();
+        if (ctx == null) throw new IllegalStateException("No active Signum instance");
+        return ctx.getSubscriptionService();
+    }
+
+    /**
+     * Bridge getter: delegates to active Signum instance context.
+     * @deprecated Use Signum instance method or constructor injection instead.
+     */
+    @Deprecated
+    public static AssetExchange getAssetExchange() {
+        NodeCoreContext ctx = resolveContext();
+        if (ctx == null) throw new IllegalStateException("No active Signum instance");
+        return ctx.getAssetExchange();
+    }
+
+    /**
+     * Bridge getter: delegates to active Signum instance context.
+     * @deprecated Use Signum instance method or constructor injection instead.
+     */
+    @Deprecated
+    public static Stores getStores() {
+        NodeCoreContext ctx = resolveContext();
+        if (ctx == null) throw new IllegalStateException("No active Signum instance");
+        return ctx.getStores();
+    }
+
+    /**
+     * Bridge getter: delegates to active Signum instance context.
+     * @deprecated Use Signum instance method or constructor injection instead.
+     */
+    @Deprecated
+    public static Dbs getDbs() {
+        NodeCoreContext ctx = resolveContext();
+        if (ctx == null) throw new IllegalStateException("No active Signum instance");
+        return ctx.getDbs();
+    }
+
+    /**
+     * Bridge getter: delegates to active Signum instance context.
+     * @deprecated Use NodeCoreContext.getPropertyService() instead.
+     */
+    @Deprecated
+    public static PropertyService getPropertyService() {
+        NodeCoreContext ctx = resolveContext();
+        if (ctx == null) throw new IllegalStateException("No active Signum instance");
+        return ctx.getPropertyService();
+    }
+
+    /**
+     * Bridge getter: delegates to active Signum instance context.
+     * @deprecated Use NodeCoreContext.getFluxCapacitor() instead.
+     */
+    @Deprecated
+    public static FluxCapacitor getFluxCapacitor() {
+        NodeCoreContext ctx = resolveContext();
+        if (ctx == null) throw new IllegalStateException("No active Signum instance");
+        return ctx.getFluxCapacitor();
+    }
+
+    /**
+     * Bridge getter: delegates to active Signum instance context.
+     * @deprecated Use NodeCoreContext.getAccountService() instead.
+     */
+    @Deprecated
+    public static AccountService getAccountService() {
+        NodeCoreContext ctx = resolveContext();
+        if (ctx == null) throw new IllegalStateException("No active Signum instance");
+        return ctx.getAccountService();
+    }
+
+    /**
+     * Bridge getter: delegates to active Signum instance context.
+     * @deprecated Use NodeCoreContext.getAliasService() instead.
+     */
+    @Deprecated
+    public static AliasService getAliasService() {
+        NodeCoreContext ctx = resolveContext();
+        if (ctx == null) throw new IllegalStateException("No active Signum instance");
+        return ctx.getAliasService();
+    }
+
+    /**
+     * Bridge getter: delegates to active Signum instance context.
+     * @deprecated Use NodeCoreContext.getEscrowService() instead.
+     */
+    @Deprecated
+    public static EscrowService getEscrowService() {
+        NodeCoreContext ctx = resolveContext();
+        if (ctx == null) throw new IllegalStateException("No active Signum instance");
+        return ctx.getEscrowService();
+    }
+
+    /**
+     * Bridge getter: delegates to active Signum instance context.
+     * @deprecated Use NodeCoreContext.getDigitalGoodsStoreService() instead.
+     */
+    @Deprecated
+    public static DGSGoodsStoreService getDgsGoodsStoreService() {
+        NodeCoreContext ctx = resolveContext();
+        if (ctx == null) throw new IllegalStateException("No active Signum instance");
+        return ctx.getDigitalGoodsStoreService();
+    }
+
+    /**
+     * Bridge getter: delegates to active Signum instance context.
+     * @deprecated Use WebServerContext.getAtConstants() or TransactionApplyContext.getAtConstants().
+     */
+    @Deprecated
+    public static AtConstants getAtConstants() {
+        // AtConstants is not directly exposed by NodeCoreContext – use the bridge path
+        throw new UnsupportedOperationException(
+                "getAtConstants() via static bridge is not supported. " +
+                "Use TransactionApplyContext.getAtConstants() or WebServerContext.getAtConstants().");
+    }
+
+    // =========================================================================
+    // Profile management
+    // =========================================================================
+
+    public static String getActiveNodeProfile() {
+        return activeNodeProfile;
+    }
+
+    public static void setActiveNodeProfile(String profile) {
+        activeNodeProfile = profile;
+    }
+
+    public static String getActiveLoggingProfile() {
+        return activeLoggingProfile;
+    }
+
+    public static void setActiveLoggingProfile(String profile) {
+        activeLoggingProfile = profile;
+    }
+
+    // =========================================================================
+    // Helper: resolve NodeCoreContext from active instance
+    // =========================================================================
+
+    /**
+     * Resolves the NodeCoreContext from the active Signum instance, if registered.
+     * Returns null when no active instance is set (legacy mode).
+     */
+    private static NodeCoreContext resolveContext() {
+        Signum active = activeInstance;
+        return active != null ? active.getContext() : null;
+    }
+
+    // =========================================================================
+    // Bootstrap helpers (logger)
+    // =========================================================================
+
+    public static void setLogger(Logger l) {
+        logger = l;
+    }
+
+    private static void ensureLogger() {
+        if (logger == null) {
+            logger = LoggerFactory.getLogger(Signum.class);
+        }
+    }
+
+    // =========================================================================
+    // Properties loading
+    // =========================================================================
 
     /**
      * Loads properties for a specific named profile using the unified PropertiesProfileLoader.
-     * Architecture: Hardcoded defaults (Props.java) → Profile .properties file only.
+     * Architecture: Hardcoded defaults (Props.java) -> Profile .properties file only.
      * Path schema: ../conf/node/profiles/{profileName}.properties
      *
      * @param confFolder  The base configuration folder (e.g., "../conf")
@@ -193,7 +530,7 @@ public final class Signum {
      * @return PropertyService with loaded properties, or empty one if file not found
      */
     public static PropertyService loadPropertiesForProfile(String confFolder, String profileName) {
-        CaselessProperties properties = new CaselessProperties();
+        application.module.node.props.CaselessProperties properties = new application.module.node.props.CaselessProperties();
 
         // Use unified profile loader for path resolution: ../conf/node/profiles/{profileName}.properties
         Path profileFile = PropertiesProfileLoader.resolveProfileFile(
@@ -234,25 +571,8 @@ public final class Signum {
      * Loads a profile by name using the simplified architecture.
      */
     private static PropertyService loadProperties(String confFolder) {
-        // Default to first available profile or empty
         String defaultProfile = PROPERTIES_NAME;
         return loadPropertiesForProfile(confFolder, defaultProfile);
-    }
-
-    public static String getActiveNodeProfile() {
-        return activeNodeProfile;
-    }
-
-    public static void setActiveNodeProfile(String profile) {
-        activeNodeProfile = profile;
-    }
-
-    public static String getActiveLoggingProfile() {
-        return activeLoggingProfile;
-    }
-
-    public static void setActiveLoggingProfile(String profile) {
-        activeLoggingProfile = profile;
     }
 
     /**
@@ -274,250 +594,9 @@ public final class Signum {
         return null;
     }
 
-    /**
-     * The NodeCoreContext owned by this Signum facade instance.
-     * Null when using legacy static bootstrap path (Signum.init()).
-     */
-    private final NodeCoreContext context;
-
-    /**
-     * Profile identity for this Signum instance.
-     * Null when using legacy static bootstrap path.
-     */
-    private final NodeProfile profile;
-
-    /**
-     * Private constructor for legacy static bootstrap (Signum.init/loadWallet).
-     * Creates no context -- static fields are populated directly by loadWallet().
-     */
-    private Signum() {
-        this.context = null;
-        this.profile = null;
-    }
-
-    /**
-     * Creates a new Signum facade instance that owns the given NodeCoreContext.
-     * This is the preferred greenfield constructor for multi-node operation.
-     *
-     * @param profile    the node profile identity (must not be null)
-     * @param confFolder the base configuration folder path (must not be null)
-     */
-    public Signum(NodeProfile profile, Path confFolder) {
-        this.profile = Objects.requireNonNull(profile, "profile must not be null");
-        this.context = new NodeCoreContextBuilder(profile.getName(), confFolder).build();
-    }
-
-    /**
-     * Creates a new Signum facade instance that wraps an existing NodeCoreContext.
-     * Used when the context was built externally (e.g., tests, legacy migration).
-     *
-     * @param profile the node profile identity (must not be null)
-     * @param context the pre-built core context (must not be null)
-     */
-    public Signum(NodeProfile profile, NodeCoreContext context) {
-        this.profile = Objects.requireNonNull(profile, "profile must not be null");
-        this.context = Objects.requireNonNull(context, "context must not be null");
-    }
-
-    // ── Lifecycle delegation ──
-
-    /**
-     * Starts the node by delegating to the owned NodeCoreContext.
-     *
-     * @throws application.module.node.instance.NodeStartupException if initialization fails
-     */
-    public void start() {
-        Objects.requireNonNull(this.context, "context not available -- use legacy Signum.init() or provide context");
-        this.context.start();
-    }
-
-    /**
-     * Gracefully stops the node by delegating to the owned NodeCoreContext.
-     */
-    public void stop() {
-        if (this.context != null) {
-            this.context.stop();
-        }
-    }
-
-    /**
-     * Re-starts the node by stopping and starting the owned NodeCoreContext.
-     */
-    public void restart() {
-        Objects.requireNonNull(this.context, "context not available");
-        this.context.restart();
-    }
-
-    // ── Identity ──
-
-    /**
-     * Returns the profile identity for this Signum instance.
-     *
-     * @return the NodeProfile, or null if created via legacy static bootstrap
-     */
-    public NodeProfile getProfile() {
-        return profile;
-    }
-
-    /**
-     * Returns the profile name for this Signum instance.
-     *
-     * @return the profile name, or null if created via legacy static bootstrap
-     */
-    public String getProfileName() {
-        return profile != null ? profile.getName() : null;
-    }
-
-    /**
-     * Returns whether this node is currently running.
-     */
-    public boolean isRunning() {
-        return this.context != null && this.context.isRunning();
-    }
-
-    // ── Context access (internal) ──
-
-    /**
-     * Returns the owned NodeCoreContext.
-     * Returns null when using legacy static bootstrap path.
-     *
-     * @return the NodeCoreContext, or null
-     */
-    NodeCoreContext getContext() {
-        return context;
-    }
-
-    // ── Legacy static singleton (for bridge support in Phase E2) ──
-
-    /**
-     * Active Signum instance for backwards-compatible static delegation.
-     * Set during Phase E2 bridge migration so that existing callers using
-     * {@code Signum.getBlockchain()} continue to work via the active facade.
-     */
-    private static volatile Signum activeInstance;
-
-    /**
-     * Registers a Signum instance as the active one for static bridge support.
-     * This is a transitional mechanism and will be removed in Phase E4.
-     *
-     * @param signum the Signum instance to mark as active
-     */
-    static void setActive(Signum signum) {
-        activeInstance = signum;
-    }
-
-    /**
-     * Returns the currently active Signum instance (for bridge support).
-     *
-     * @return the active Signum, or null if none registered
-     */
-    static Signum getActiveInstance() {
-        return activeInstance;
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context when available,
-     * falls back to legacy static field for backwards compatibility.
-     * @deprecated Use Signum instance method or constructor injection instead.
-     */
-    @Deprecated
-    public static Blockchain getBlockchain() {
-        NodeCoreContext ctx = resolveContext();
-        return ctx != null ? ctx.getBlockchain() : blockchain;
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context when available,
-     * falls back to legacy static field for backwards compatibility.
-     * @deprecated Use Signum instance method or constructor injection instead.
-     */
-    @Deprecated
-    public static BlockchainProcessor getBlockchainProcessor() {
-        NodeCoreContext ctx = resolveContext();
-        return ctx != null ? ctx.getBlockchainProcessor() : blockchainProcessor;
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context when available,
-     * falls back to legacy static field for backwards compatibility.
-     * @deprecated Use Signum instance method or constructor injection instead.
-     */
-    @Deprecated
-    public static Generator getGenerator() {
-        NodeCoreContext ctx = resolveContext();
-        return ctx != null ? ctx.getGenerator() : generator;
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context when available,
-     * falls back to legacy static field for backwards compatibility.
-     * @deprecated Use Signum instance method or constructor injection instead.
-     */
-    @Deprecated
-    public static TransactionProcessorImpl getTransactionProcessor() {
-        return transactionProcessor; // Not exposed in NodeCoreContext yet
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context when available,
-     * falls back to legacy static field for backwards compatibility.
-     * @deprecated Use Signum instance method or constructor injection instead.
-     */
-    @Deprecated
-    public static TransactionService getTransactionService() {
-        NodeCoreContext ctx = resolveContext();
-        return ctx != null ? ctx.getTransactionService() : transactionService;
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context when available,
-     * falls back to legacy static field for backwards compatibility.
-     * @deprecated Use Signum instance method or constructor injection instead.
-     */
-    @Deprecated
-    public static SubscriptionService getSubscriptionService() {
-        return subscriptionService; // Not exposed in NodeCoreContext yet
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context when available,
-     * falls back to legacy static field for backwards compatibility.
-     * @deprecated Use Signum instance method or constructor injection instead.
-     */
-    @Deprecated
-    public static AssetExchange getAssetExchange() {
-        NodeCoreContext ctx = resolveContext();
-        return ctx != null ? ctx.getAssetExchange() : assetExchange;
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context when available,
-     * falls back to legacy static field for backwards compatibility.
-     * @deprecated Use Signum instance method or constructor injection instead.
-     */
-    @Deprecated
-    public static Stores getStores() {
-        return stores; // Not exposed in NodeCoreContext yet
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context when available,
-     * falls back to legacy static field for backwards compatibility.
-     * @deprecated Use Signum instance method or constructor injection instead.
-     */
-    @Deprecated
-    public static Dbs getDbs() {
-        return dbs; // Not exposed in NodeCoreContext yet
-    }
-
-    /**
-     * Resolves the NodeCoreContext from the active Signum instance, if registered.
-     * Returns null when no active instance is set (legacy mode).
-     */
-    private static NodeCoreContext resolveContext() {
-        Signum active = activeInstance;
-        return active != null ? active.getContext() : null;
-    }
+    // =========================================================================
+    // Main / init / shutdown (legacy entry points – delegate to lifecycle mgr)
+    // =========================================================================
 
     /**
      * The main entry point for the node.
@@ -538,19 +617,9 @@ public final class Signum {
         init(confFolder);
     }
 
-    public static void setLogger(Logger l) {
-        logger = l;
-    }
-
-    private static void ensureLogger() {
-        if (logger == null)
-            logger = LoggerFactory.getLogger(Signum.class);
-    }
-
     private static boolean validateVersionNotDev(PropertyService propertyService) {
         if (VERSION.isPrelease()
-                && propertyService
-                        .getString(Props.NETWORK_NAME)
+                && propertyService.getString(Props.NETWORK_NAME)
                         .equals(Constants.SIGNUM_NETWORK_NAME)) {
             logger.error("THIS IS A DEVELOPMENT VERSION, PLEASE DO NOT USE THIS ON Signum MAINNET");
             return false;
@@ -566,24 +635,51 @@ public final class Signum {
     }
 
     /**
-     * Shuts down the node core services.
+     * Shuts down all running node profiles via NodeLifecycleManager.
+     * Delegates to modern lifecycle management and performs legacy cleanup as fallback.
      */
     public static void shutdownNode() {
-        shutdown(false);
+        ensureLogger();
+        NodeLifecycleManager.getInstance().stopAllProfiles();
+        if (!isShutdown.get()) {
+            shutdown(false);
+        }
     }
 
     /**
-     * Re-initializes and starts the node core services.
+     * Starts the default node profile via NodeLifecycleManager.
+     * Delegates to modern lifecycle management. Falls back to legacy init only when no active profile is set.
      */
     public static void startNode() {
         initShutdown();
-        init(CONF_FOLDER);
+        String profile = getActiveNodeProfile();
+        NodeLifecycleManager manager = NodeLifecycleManager.getInstance();
+        manager.discoverProfiles();
+        if (profile != null && !profile.isEmpty()) {
+            manager.startProfile(profile);
+        } else {
+            // Fallback: legacy init when no profile discovered
+            logger.warn("No active node profile configured. Falling back to legacy Signum.init()");
+            init(CONF_FOLDER);
+        }
     }
 
     public static void init(CaselessProperties customProperties) {
         if (isInitialized.compareAndSet(false, true)) {
             ensureLogger();
-            loadWallet(new PropertyServiceImpl(customProperties));
+            // Delegate to NodeCoreContext builder + lifecycle manager for greenfield path
+            String profileName = getActiveNodeProfile();
+            try {
+                NodeProfile profile = new NodeProfile(profileName != null ? profileName : PROPERTIES_NAME);
+                Path confFolder = PathUtils.resolvePath(CONF_FOLDER);
+                NodeCoreContext ctx = new NodeCoreContextBuilder(profile.getName(), confFolder).build();
+                Signum signum = new Signum(profile, ctx);
+                setActive(signum);
+                signum.start();
+            } catch (Exception e) {
+                logger.error("Failed to initialize node via greenfield path", e);
+                throw new RuntimeException("Failed to initialize Signum node", e);
+            }
         } else {
             if (logger != null)
                 logger.warn("Signum node already initialized. Skipping re-initialization.");
@@ -624,375 +720,23 @@ public final class Signum {
             }
         }
 
-        PropertyService propertyService = loadProperties(confFolder);
-        loadWallet(propertyService);
-    }
-
-    private static void ensureDatabaseDirectory(PropertyService propertyService) {
-        String dbUrl = propertyService.getString(Props.DB_URL);
-        if (dbUrl != null && dbUrl.toLowerCase().startsWith("jdbc:sqlite:")) {
-            String pathPart = dbUrl.substring("jdbc:sqlite:".length());
-
-            // Handle file URIs according to RFC 2396 (e.g. file:./db/ or file:///path/)
-            if (pathPart.toLowerCase().startsWith("file:")) {
-                pathPart = pathPart.substring(5);
-                // Clean unnecessary leading slashes for local filesystem
-                if (pathPart.startsWith("///")) {
-                    pathPart = pathPart.substring(2);
-                } else if (pathPart.startsWith("//") && !pathPart.startsWith("//", 2)) {
-                    pathPart = pathPart.substring(2);
-                }
-            }
-
-            // Skip in-memory or special databases
-            if (pathPart.isEmpty() || pathPart.equalsIgnoreCase(":memory:") || pathPart.startsWith(":")) {
-                return;
-            }
-
-            // Strip parameters (e.g. ?cache=shared)
-            int queryIdx = pathPart.indexOf('?');
-            if (queryIdx != -1) {
-                pathPart = pathPart.substring(0, queryIdx);
-            }
-
-            try {
-                // Resolve the path using PathUtils. This ensures that relative
-                // paths are anchored to the application root, regardless of
-                // the CWD (Current Working Directory).
-                Path dbPath = PathUtils.resolvePath(pathPart);
-                Path parent = dbPath.getParent();
-                if (parent != null && Files.notExists(parent)) {
-                    Files.createDirectories(parent);
-                    logger.info("Created missing database directory: {}", parent.toAbsolutePath());
-                }
-            } catch (Exception e) {
-                logger.warn("Failed to ensure database directory exists: {}", e.getMessage());
-            }
-        }
-    }
-
-    private static void loadWallet(PropertyService propertyService) {
-        Signum.propertyService = propertyService;
-
-        ensureDatabaseDirectory(propertyService);
-
-        // ShutdownManager is now created by NodeCoreContext.doInitialize()
-        // with the correct profile name. It is registered via setShutdownManager().
-
-        String networkParametersClass = propertyService.getString(Props.NETWORK_PARAMETERS);
-        NetworkParameters params = null;
-        if (networkParametersClass != null && !networkParametersClass.trim().isEmpty()
-                && !"null".equalsIgnoreCase(networkParametersClass)) {
-            try {
-                params = (NetworkParameters) Class
-                        .forName(networkParametersClass)
-                        .getConstructor()
-                        .newInstance();
-                propertyService.setNetworkParameters(params);
-            } catch (Exception e) {
-                throw new RuntimeException("Failed to load network parameters class: " + networkParametersClass, e);
-            }
-        }
-
-        if (!validateVersionNotDev(propertyService)) {
-            return;
-        }
-
+        // Use greenfield builder path
+        String profileName = getActiveNodeProfile();
+        NodeProfile profile = new NodeProfile(profileName != null ? profileName : PROPERTIES_NAME);
         try {
-            final long startTime = System.currentTimeMillis();
-
-            // Address prefix and coin name
-            SignumUtils.setAddressPrefix(propertyService.getString(Props.ADDRESS_PREFIX));
-            // TODO: change to coin name
-            SignumUtils.addAddressPrefix("BURST");
-            SignumUtils.setValueSuffix(propertyService.getString(Props.VALUE_SUFIX));
-
-            final TimeService timeService = new TimeServiceImpl();
-
-            final DerivedTableManager derivedTableManager = new DerivedTableManager();
-
-            final StatisticsManagerImpl statisticsManager = new StatisticsManagerImpl(timeService);
-            dbCacheManager = new DBCacheManagerImpl(statisticsManager);
-
-            threadPool = new ThreadPool(propertyService);
-
-            DbContext dbContext = Db.init(propertyService, dbCacheManager);
-            dbs = Db.getDbsByDatabaseType();
-
-            final StoreDependencies storeDependencies = new StoreDependencies(
-                    null, // blockchain - wired later via Stores.wireDependencies()
-                    propertyService,
-                    null, // fluxCapacitor - created after blockchain
-                    dbs,
-                    dbContext);
-
-            stores = new Stores(derivedTableManager, dbCacheManager, timeService, propertyService,
-                    dbs.getTransactionDb(),
-                    dbs.getBlockDb(), params, storeDependencies);
-
-            final TransactionDb transactionDb = dbs.getTransactionDb();
-            final BlockDb blockDb = dbs.getBlockDb();
-            final BlockchainStore blockchainStore = stores.getBlockchainStore();
-            blockchain = new BlockchainImpl(
-                    transactionDb,
-                    blockDb,
-                    blockchainStore,
-                    propertyService);
-
-            stores.getUnconfirmedTransactionStore().setBlockchain(blockchain);
-
-            fluxCapacitor = new FluxCapacitorImpl(blockchain, propertyService);
-            Signum.aliasService = new AliasServiceImpl(
-                    stores.getAliasStore(),
-                    stores,
-                    fluxCapacitor,
-                    propertyService);
-            final AliasService aliasService = Signum.aliasService;
-            aliasService.addDefaultTLDs();
-
-            EconomicClustering economicClustering = new EconomicClustering(blockchain);
-
-            Signum.accountService = new AccountServiceImpl(
-                    stores.getAccountStore(),
-                    stores.getAssetTransferStore(),
-                    blockchain);
-            final AccountService accountService = Signum.accountService;
-
-            final DownloadCacheImpl downloadCache = new DownloadCacheImpl(
-                    propertyService,
-                    fluxCapacitor,
-                    blockchain);
-
-            generator = propertyService.getBoolean(Props.DEV_MOCK_MINING)
-                    ? new GeneratorImpl.MockGenerator(
-                            propertyService,
-                            blockchain,
-                            accountService,
-                            timeService,
-                            fluxCapacitor)
-                    : new GeneratorImpl(
-                            blockchain,
-                            downloadCache,
-                            accountService,
-                            timeService,
-                            fluxCapacitor);
-
-            transactionService = new TransactionServiceImpl(accountService, blockchain);
-
-            transactionProcessor = new TransactionProcessorImpl(
-                    propertyService,
-                    economicClustering,
-                    blockchain,
-                    stores,
-                    timeService, dbs,
-                    accountService,
-                    transactionService,
-                    threadPool);
-
-            final ATService atService = new ATServiceImpl(stores.getAtStore());
-            subscriptionService = new SubscriptionServiceImpl(
-                    stores.getSubscriptionStore(),
-                    transactionDb,
-                    blockchain,
-                    fluxCapacitor,
-                    aliasService,
-                    stores.getAliasStore(),
-                    accountService);
-            ((AliasServiceImpl) aliasService).setSubscriptionService(subscriptionService);
-            Signum.dgsGoodsStoreService = new DGSGoodsStoreServiceImpl(
-                    blockchain,
-                    stores.getDigitalGoodsStoreStore(),
-                    accountService);
-            final DGSGoodsStoreService digitalGoodsStoreService = Signum.dgsGoodsStoreService;
-            Signum.escrowService = new EscrowServiceImpl(
-                    stores.getEscrowStore(),
-                    blockchain,
-                    aliasService,
-                    accountService,
-                    transactionDb);
-            final EscrowService escrowService = Signum.escrowService;
-
-            assetExchange = new AssetExchangeImpl(
-                    blockchain,
-                    accountService,
-                    stores.getTradeStore(),
-                    stores.getAccountStore(),
-                    stores.getAssetTransferStore(),
-                    stores.getAssetStore(),
-                    stores.getOrderStore());
-
-            final IndirectIncomingService indirectIncomingService = new IndirectIncomingServiceImpl(
-                    stores.getIndirectIncomingStore(), propertyService);
-
-
-            final BlockService blockService = new BlockServiceImpl(
-                    accountService,
-                    transactionService,
-                    blockchain,
-                    downloadCache,
-                    generator,
-                    fluxCapacitor,
-                    propertyService,
-                    params);
-            blockchainProcessor = new BlockchainProcessorImpl(
-                    threadPool,
-                    blockService,
-                    transactionProcessor,
-                    blockchain,
-                    propertyService,
-                    subscriptionService,
-                    timeService,
-                    derivedTableManager,
-                    blockDb,
-                    transactionDb,
-                    economicClustering,
-                    blockchainStore,
-                    stores,
-                    escrowService,
-                    transactionService,
-                    downloadCache,
-                    generator,
-                    statisticsManager,
-                    dbCacheManager,
-                    accountService,
-                    indirectIncomingService,
-                    aliasService,
-                    fluxCapacitor,
-                    atService);
-
-            downloadCache.setBlockchainProcessor(blockchainProcessor);
-
-            generator.generateForBlockchainProcessor(threadPool, blockchainProcessor);
-
-            final DeeplinkQRCodeGenerator deepLinkQrCodeGenerator = new DeeplinkQRCodeGenerator();
-
-            final ParameterService parameterService = new ParameterServiceImpl(
-                    accountService,
-                    aliasService,
-                    assetExchange,
-                    digitalGoodsStoreService,
-                    blockchain,
-                    blockchainProcessor,
-                    transactionProcessor,
-                    atService);
-
-            addBlockchainListeners(blockchainProcessor,
-                    accountService,
-                    assetExchange,
-                    digitalGoodsStoreService,
-                    blockchain,
-                    dbs.getTransactionDb());
-
-            final APITransactionManager apiTransactionManager = new APITransactionManagerImpl(
-                    parameterService,
-                    transactionProcessor,
-                    blockchain,
-                    accountService,
-                    transactionService);
-
-            // Peers.init() removed - handled by NodeCoreContext.start() via PeerManager (Phase B)
-            // See: NodeCoreContext.initServicesAndHooks() → peerManager.start()
-            if (params != null) {
-                params.initialize(parameterService, accountService, apiTransactionManager);
-                TransactionType.setNetworkParameters(params);
-            }
-
-            final FeeSuggestionCalculator feeSuggestionCalculator = new FeeSuggestionCalculator(
-                    blockchainProcessor,
-                    stores.getUnconfirmedTransactionStore(),
-                    blockchain,
-                    fluxCapacitor);
-
-            final AtConstants atConstantsLocal = new AtConstants(fluxCapacitor);
-            Signum.atConstants = atConstantsLocal;
-
-            webServer = new WebServerImpl(new WebServerContext(transactionProcessor,
-                    blockchain,
-                    blockchainProcessor,
-                    parameterService,
-                    accountService,
-                    aliasService,
-                    assetExchange,
-                    escrowService,
-                    digitalGoodsStoreService,
-                    subscriptionService,
-                    atService,
-                    timeService,
-                    economicClustering,
-                    propertyService,
-                    threadPool,
-                    transactionService,
-                    blockService,
-                    generator,
-                    apiTransactionManager,
-                    feeSuggestionCalculator,
-                    deepLinkQrCodeGenerator,
-                    indirectIncomingService,
-                    params,
-                    atConstantsLocal,
-                     fluxCapacitor));
-            webServer.start();
-
-            // DebugTrace.init() removed - Phase C: Static DebugTrace will be migrated to instance scope
-            // DebugTrace uses static service refs (assetExchange, dgsGoodsStoreService) which breaks multi-node isolation
-            // To re-enable: refactor DebugTrace to accept instance-scoped dependencies via constructor or init(TransactionApplyContext)
-            // See: greenfield_multi_node_refactoring_roadmap.md Phase C
-
-            int timeMultiplier = (propertyService.getBoolean(Props.DEV_OFFLINE))
-                    ? Math.max(propertyService.getInt(Props.DEV_TIMEWARP), 1)
-                    : 1;
-
-            threadPool.start(timeMultiplier);
-            if (timeMultiplier > 1) {
-                timeService.setTime(new Time.FasterTime(
-                        Math.max(
-                                timeService.getEpochTime(),
-                                getBlockchain()
-                                        .getLastBlock()
-                                        .getTimestamp()),
-                        timeMultiplier));
-                logger.info("TIME WILL FLOW {} TIMES FASTER!", timeMultiplier);
-            }
-
-            long currentTime = System.currentTimeMillis();
-            logger.info("Initialization took {} ms", currentTime - startTime);
-            logger.info("Signum Multiverse {} started successfully.", VERSION);
-            logger.info("Running network: {}", propertyService.getString(Props.NETWORK_NAME));
+            NodeCoreContext ctx = new NodeCoreContextBuilder(profile.getName(), confPath).build();
+            Signum signum = new Signum(profile, ctx);
+            setActive(signum);
+            signum.start();
         } catch (Exception e) {
-            logger.error("Failed to initialize Signum node", e);
+            logger.error("Failed to initialize node via greenfield builder", e);
             throw new RuntimeException("Failed to initialize Signum node", e);
         }
-        Thread consoleThread = new Thread(Signum::commandHandler);
-        consoleThread.setName("Console Command Handler");
-        consoleThread.setDaemon(true);
-        consoleThread.start();
     }
 
-    private static void addBlockchainListeners(
-            BlockchainProcessor blockchainProcessor,
-            AccountService accountService,
-            AssetExchange assetExchange,
-            DGSGoodsStoreService goodsService,
-            Blockchain blockchain,
-            TransactionDb transactionDb) {
-
-        @SuppressWarnings("checkstyle:linelengthcheck")
-        final AT.HandleATBlockTransactionsListener handleAtBlockTransactionListener = new AT.HandleATBlockTransactionsListener(
-                accountService,
-                transactionDb);
-
-        @SuppressWarnings("checkstyle:linelengthcheck")
-        final DGSGoodsStoreServiceImpl.ExpiredPurchaseListener devNullListener = new DGSGoodsStoreServiceImpl.ExpiredPurchaseListener(
-                accountService,
-                goodsService);
-
-        blockchainProcessor.addListener(
-                handleAtBlockTransactionListener,
-                BlockchainProcessor.Event.AFTER_BLOCK_APPLY);
-        blockchainProcessor.addListener(
-                devNullListener,
-                BlockchainProcessor.Event.AFTER_BLOCK_APPLY);
-    }
+    // =========================================================================
+    // Console command handler (legacy)
+    // =========================================================================
 
     private static void commandHandler() {
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
@@ -1006,14 +750,18 @@ public final class Signum {
         }
     }
 
+    /**
+     * Processes a console command.
+     * Resolves the active context for greenfield mode.
+     */
     public static void processCommand(String command) {
         ensureLogger();
         logger.debug("received command: >{}<", command);
 
-        // Resolve active context for greenfield mode, fall back to static fields for legacy mode
+        // Resolve active context for greenfield mode
         NodeCoreContext ctx = getActiveInstance() != null ? getActiveInstance().getContext() : null;
-        BlockchainProcessor proc = ctx != null ? ctx.getBlockchainProcessor() : blockchainProcessor;
-        Blockchain chain = ctx != null ? ctx.getBlockchain() : blockchain;
+        BlockchainProcessor proc = ctx != null ? ctx.getBlockchainProcessor() : null;
+        Blockchain chain = ctx != null ? (Blockchain) ctx.getBlockchain() : null;
 
         if (command.equals(".shutdown")) {
             shutdown(false);
@@ -1063,7 +811,7 @@ public final class Signum {
      * Cleans up the node prior to shutting down.
      * Supports both legacy static mode and greenfield context-based mode.
      * When an active Signum instance owns a NodeCoreContext, that context.stop()
-     * handles the full teardown. Otherwise falls back to legacy static cleanup.
+     * handles the full teardown. Otherwise falls back to logging only.
      *
      * @param ignoreDbShutdown if true, shuts down everything but the database.
      */
@@ -1082,151 +830,23 @@ public final class Signum {
             return;
         }
 
-        // Legacy static mode
+        // Legacy static mode (should no longer be reached in normal operation)
         if (isShutdown.get() && !nodeStopped.get()) {
             logger.info("Already shutting down...");
         }
 
         synchronized (isShutdown) {
-
             if (isShutdown.getAndSet(true)) {
                 return;
-            }
-
-            if (shutdownManager != null) {
-                shutdownManager.startShutdown();
             }
 
             logger.info("Shutting down...");
             logger.info("Do not force exit or kill the node process.");
 
-            if (webServer != null) {
-                try {
-                    webServer.shutdown();
-                } catch (Throwable t) {
-                    if (shutdownManager != null) {
-                        shutdownManager.markFailure("WebServer");
-                    }
-                    logger.error("Error shutting down webServer", t);
-                }
-            }
-
-            if (blockchainProcessor != null) {
-                try {
-                    blockchainProcessor.shutdown();
-                } catch (Throwable t) {
-                    if (shutdownManager != null) {
-                        shutdownManager.markFailure("BlockchainProcessor");
-                    }
-                    logger.error("Error shutting down blockchainProcessor", t);
-                }
-            }
-
-            if (threadPool != null) {
-                try {
-                    Peers.shutdown(threadPool);
-                } catch (Throwable t) {
-                    if (shutdownManager != null) {
-                        shutdownManager.markFailure("Peers");
-                    }
-                    logger.error("Error shutting down Peers", t);
-                }
-            }
-
-            if (threadPool != null) {
-                try {
-                    threadPool.shutdown();
-                } catch (Throwable t) {
-                    if (shutdownManager != null) {
-                        shutdownManager.markFailure("ThreadPool");
-                    }
-                    logger.error("Error shutting down threadPool", t);
-                }
-            }
-
-            if (dbCacheManager != null) {
-                try {
-                    dbCacheManager.close();
-                } catch (Throwable t) {
-                    if (shutdownManager != null) {
-                        shutdownManager.markFailure("DBCacheManager");
-                    }
-                    logger.error("Error closing dbCacheManager", t);
-                }
-            }
-
-            if (!ignoreDbShutdown) {
-                try {
-                    Db.shutdown();
-                } catch (Throwable t) {
-                    if (shutdownManager != null) {
-                        shutdownManager.markFailure("Database");
-                    }
-                    logger.error("Error shutting down DB", t);
-                }
-            }
-
-            if (shutdownManager != null) {
-                shutdownManager.finishShutdown();
-            }
+            // No static components to shut down – everything is in NodeCoreContext
             logger.info("BRS {} stopped.", VERSION);
             LoggerConfigurator.shutdown();
             nodeStopped.set(true);
-
         }
     }
-
-    public static PropertyService getPropertyService() {
-        return propertyService;
-    }
-
-    public static FluxCapacitor getFluxCapacitor() {
-        return fluxCapacitor;
-    }
-
-    /**
-     * @deprecated Use NodeCoreContext.getAccountService() for multi-profile support.
-     * Bridge accessor for transitional compatibility during TransactionType refactoring.
-     */
-    @Deprecated
-    public static AccountService getAccountService() {
-        return accountService;
-    }
-
-    /**
-     * @deprecated Use NodeCoreContext.getAliasService() for multi-profile support.
-     * Bridge accessor for transitional compatibility during TransactionType refactoring.
-     */
-    @Deprecated
-    public static AliasService getAliasService() {
-        return aliasService;
-    }
-
-    /**
-     * @deprecated Use NodeCoreContext.getEscrowService() for multi-profile support.
-     * Bridge accessor for transitional compatibility during TransactionType refactoring.
-     */
-    @Deprecated
-    public static EscrowService getEscrowService() {
-        return escrowService;
-    }
-
-    /**
-     * @deprecated Use NodeCoreContext.getDgsGoodsStoreService() for multi-profile support.
-     * Bridge accessor for transitional compatibility during TransactionType refactoring.
-     */
-    @Deprecated
-    public static DGSGoodsStoreService getDgsGoodsStoreService() {
-        return dgsGoodsStoreService;
-    }
-
-    /**
-     * @deprecated Use WebServerContext.getAtConstants() or TransactionApplyContext.getAtConstants().
-     * Bridge accessor for transitional compatibility during AT module singleton elimination.
-     */
-    @Deprecated
-    public static AtConstants getAtConstants() {
-        return atConstants;
-    }
-
 }
