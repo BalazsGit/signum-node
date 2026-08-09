@@ -1,6 +1,7 @@
 package application.module.node.gui;
 
 import application.module.appearance.AppearanceModule;
+import application.module.node.Signum;
 import application.module.node.lifecycle.NodeLifecycleManager;
 import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.profile.NodeProfile;
@@ -56,6 +57,14 @@ public class NodeToolbar extends JPanel {
 
     private final NodeProfile profile;
 
+    /**
+     * Signum facade for per-instance access to node services.
+     * Set via {@link #setSignum(Signum)} by the parent NodeProfilePanel.
+     * May be null in legacy mode or before the node starts.
+     * @since 4.0 Phase G - Greenfield wiring
+     */
+    private Signum signum;
+
     // Lifecycle buttons - Start/Stop merged into single toggle + Restart
     private JButton startStopButton;
     private JButton restartButton;
@@ -103,9 +112,34 @@ public class NodeToolbar extends JPanel {
      *
      * @param profile The NodeProfile this toolbar belongs to
      */
+    /**
+     * Creates a new NodeToolbar for the given profile.
+     *
+     * @param profile The NodeProfile this toolbar belongs to
+     */
     public NodeToolbar(NodeProfile profile) {
         this.profile = profile;
         initialize();
+    }
+
+    /**
+     * Sets the Signum facade for per-instance access to node services.
+     * Called by NodeProfilePanel after construction so that all node component
+     * access goes through the instance facade rather than static Signum calls.
+     *
+     * @param signum the Signum facade for this profile (may be null)
+     * @since 4.0 Phase G - Greenfield wiring
+     */
+    public void setSignum(Signum signum) {
+        this.signum = signum;
+    }
+
+    /**
+     * Returns the injected Signum facade, or null if not set.
+     * @return the Signum facade for this profile
+     */
+    Signum getSignum() {
+        return signum;
     }
 
     private void initialize() {

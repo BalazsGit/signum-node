@@ -56,7 +56,14 @@ class MetricsPanelContextTest {
 
     @Test
     void constructor_WithNullCoreContext_ThrowsIllegalArgumentException() {
-        assertThrows(IllegalArgumentException.class, () -> new MetricsPanelContext(null));
+        assertThrows(IllegalArgumentException.class, 
+            () -> new MetricsPanelContext((application.module.node.instance.NodeCoreContext)null));
+    }
+    
+    @Test
+    void constructor_WithNullSignum_ThrowsIllegalArgumentException() {
+        assertThrows(IllegalArgumentException.class, 
+            () -> new MetricsPanelContext((application.module.node.Signum)null));
     }
 
     @Test

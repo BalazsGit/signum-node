@@ -175,6 +175,18 @@ public class NodeConsolePanel extends JPanel {
     }
 
     /**
+     * Sets the Signum facade for per-instance access to node services.
+     * This is the preferred wiring method (Facade Pattern). The facade owns the NodeCoreContext,
+     * so we extract the context from it for backward compatibility with existing API.
+     *
+     * @param signum Per-instance Signum facade (may be null if not yet started)
+     * @since 4.0 Phase G - Greenfield wiring
+     */
+    public void setSignum(Signum signum) {
+        this.nodeContext = (signum != null) ? signum.getContext() : null;
+    }
+
+    /**
      * Returns the injected NodeCoreContext, or falls back to the legacy
      * static bridge via NodeCoreContextManager.getActive() if not set.
      */

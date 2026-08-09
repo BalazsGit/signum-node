@@ -1,8 +1,9 @@
 package application.module.node.gui;
 
 import application.module.appearance.AppearanceModule;
+import application.module.node.Signum;
 import application.module.node.instance.NodeCoreContext;
-import application.module.node.instance.NodeCoreContextManager;
+import application.module.node.instance.NodeFactory;
 import application.module.node.lifecycle.LifecycleListener;
 import application.module.node.lifecycle.NodeLifecycleManager;
 import application.module.node.lifecycle.NodeLifecycleState;
@@ -279,12 +280,12 @@ public class NodePanel extends JPanel implements LifecycleListener {
             profile = new NodeProfile(profileName);
         }
 
-        // Wire the per-instance NodeCoreContext from the manager.
-        // If the node hasn't been started yet, context will be null - that's fine,
-        // the panel handles null context gracefully.
-        NodeCoreContext context = NodeCoreContextManager.getInstance().get(profileName);
+        // Wire the per-instance Signum facade from the NodeFactory registry.
+        // If the node hasn't been started yet, signum will be null - that's fine,
+        // the panel handles null signum gracefully (profile not yet started).
+        Signum signum = NodeFactory.getInstance().get(profileName);
 
-        NodeProfilePanel actualPanel = new NodeProfilePanel(null, profile, context);
+        NodeProfilePanel actualPanel = new NodeProfilePanel(null, profile, signum);
         loadedProfilePanels.put(profileName, actualPanel);
 
         // Replace placeholder with actual panel

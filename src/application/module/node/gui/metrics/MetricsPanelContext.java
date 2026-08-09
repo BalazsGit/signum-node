@@ -3,6 +3,7 @@ package application.module.node.gui.metrics;
 import application.module.node.BlockchainImpl;
 import application.module.node.BlockchainProcessor;
 import application.module.node.Generator;
+import application.module.node.Signum;
 import application.module.node.TransactionProcessorImpl;
 import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.peer.PeerManager;
@@ -50,6 +51,17 @@ public final class MetricsPanelContext {
             throw new IllegalArgumentException("NodeCoreContext must not be null");
         }
         this.coreContext = coreContext;
+    }
+
+    /**
+     * Convenience constructor that extracts the NodeCoreContext from a Signum facade.
+     * This is the greenfield way to wire metrics panels directly from a Signum instance.
+     *
+     * @param signum the Signum facade (owns the NodeCoreContext), must not be null
+     * @since 4.0 Phase G - Greenfield wiring
+     */
+    public MetricsPanelContext(Signum signum) {
+        this(signum != null ? signum.getContext() : null);
     }
 
     /**
