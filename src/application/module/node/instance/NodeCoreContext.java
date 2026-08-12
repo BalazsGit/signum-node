@@ -739,12 +739,14 @@ public final class NodeCoreContext {
         TransactionType.setContext(this.transactionApplyContext);
 
         // DebugTrace (Phase C) - instance-scoped account tracing
+        // V4.1: blockchain passed to eliminate Signum.getBlockchain() static call
         this.debugTrace = DebugTrace.create(
                 this.propertyService,
                 this.blockchainProcessor,
                 this.accountService,
                 this.assetExchange,
-                this.digitalGoodsStoreService);
+                this.digitalGoodsStoreService,
+                this.blockchain);
     }
 
     /**

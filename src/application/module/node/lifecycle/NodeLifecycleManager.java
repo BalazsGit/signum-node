@@ -358,10 +358,14 @@ public class NodeLifecycleManager {
         Runnable startupTask = () -> {
             try {
                 Signum signum = new Signum(profile, Paths.get(confFolderPath));
-                signum.start();
-
+                // Set active instance BEFORE start() so that static bridge getters
+                // (e.g., Signum.getFluxCapacitor()) work during doInitialize().
+                // These bridge calls are used by Block constructor, SqlBlockDb.loadBlock(),
+                // and other legacy code paths still inside initServicesAndHooks().
                 Signum.setActive(signum);
                 NodeFactory.getInstance().register(signum);
+
+                signum.start();
 
                 // Set Signum on runtime (also updates legacy coreContext for backwards compat)
                 runtime.setSignum(signum);

@@ -27,6 +27,10 @@ import java.util.Set;
  * Phase C migration: converted from static state to instance scope.
  * Each NodeCoreContext creates its own DebugTrace when debug tracing is enabled.
  * </p>
+ * <p>
+ * V4.1 migration: replaced all Signum.getBlockchain() static calls with
+ * instance-scoped {@link Blockchain} reference passed via constructor.
+ * </p>
  *
  * @since 4.0
  */
@@ -88,6 +92,7 @@ public final class DebugTrace {
     private final String logName;
     private final DGSGoodsStoreService dgsGoodsStoreService;
     private final AssetExchange assetExchange;
+    private final Blockchain blockchain;
 
     private PrintWriter log;
 
@@ -101,9 +106,11 @@ public final class DebugTrace {
      * @param logUnconfirmed     whether to log unconfirmed balances
      * @param dgsGoodsStoreService DGS goods store service reference
      * @param assetExchange      asset exchange reference
+     * @param blockchain         instance-scoped blockchain reference (eliminates static Signum.getBlockchain())
      */
     DebugTrace(Set<Long> accountIds, String logName, String quote, String separator,
-            boolean logUnconfirmed, DGSGoodsStoreService dgsGoodsStoreService, AssetExchange assetExchange) {
+            boolean logUnconfirmed, DGSGoodsStoreService dgsGoodsStoreService, AssetExchange assetExchange,
+            Blockchain blockchain) {
         this.accountIds = accountIds;
         this.logName = logName;
         this.quote = quote != null ? quote : DEFAULT_QUOTE;
@@ -111,6 +118,7 @@ public final class DebugTrace {
         this.logUnconfirmed = logUnconfirmed;
         this.dgsGoodsStoreService = dgsGoodsStoreService;
         this.assetExchange = assetExchange;
+        this.blockchain = blockchain;
         resetLog();
     }
 
@@ -142,7 +150,8 @@ public final class DebugTrace {
             BlockchainProcessor blockchainProcessor,
             AccountService accountService,
             AssetExchange assetExchange,
-            DGSGoodsStoreService dgsGoodsStoreService) {
+            DGSGoodsStoreService dgsGoodsStoreService,
+            Blockchain blockchain) {
 
         String quote = propertyService.getString(Props.NODE_DEBUG_TRACE_QUOTE);
         String separator = propertyService.getString(Props.NODE_DEBUG_TRACE_SEPARATOR);
@@ -164,7 +173,7 @@ public final class DebugTrace {
         }
 
         DebugTrace debugTrace = new DebugTrace(
-                accountIds, logName, quote, separator, logUnconfirmed, dgsGoodsStoreService, assetExchange);
+                accountIds, logName, quote, separator, logUnconfirmed, dgsGoodsStoreService, assetExchange, blockchain);
         debugTrace.registerListeners(blockchainProcessor, accountService);
 
         logger.debug("Debug tracing of " + (accountIdStrings.contains("*") ? "ALL"
@@ -271,8 +280,9 @@ public final class DebugTrace {
         Account.Balance account = Account.getAccountBalance(accountId);
         map.put("balance", String.valueOf(account != null ? account.getBalanceNqt() : 0));
         map.put("unconfirmed balance", String.valueOf(account != null ? account.getUnconfirmedBalanceNqt() : 0));
-        map.put("timestamp", String.valueOf(Signum.getBlockchain().getLastBlock().getTimestamp()));
-        map.put("height", String.valueOf(Signum.getBlockchain().getHeight()));
+        Block lastBlock = blockchain.getLastBlock();
+        map.put("timestamp", String.valueOf(lastBlock != null ? lastBlock.getTimestamp() : 0L));
+        map.put("height", String.valueOf(blockchain.getHeight()));
         map.put("event", unconfirmed ? "unconfirmed balance" : "balance");
         return map;
     }
@@ -336,8 +346,9 @@ public final class DebugTrace {
         } else {
             map.put("asset balance", String.valueOf(accountAsset.getQuantityQnt()));
         }
-        map.put("timestamp", String.valueOf(Signum.getBlockchain().getLastBlock().getTimestamp()));
-        map.put("height", String.valueOf(Signum.getBlockchain().getHeight()));
+        Block lastBlock = blockchain.getLastBlock();
+        map.put("timestamp", String.valueOf(lastBlock != null ? lastBlock.getTimestamp() : 0L));
+        map.put("height", String.valueOf(blockchain.getHeight()));
         map.put("event", "asset balance");
         return map;
     }
@@ -412,8 +423,9 @@ public final class DebugTrace {
         } else if (attachment == Attachment.ARBITRARY_MESSAGE) {
             map = new HashMap<>();
             map.put("account", Convert.toUnsignedLong(accountId));
-            map.put("timestamp", String.valueOf(Signum.getBlockchain().getLastBlock().getTimestamp()));
-            map.put("height", String.valueOf(Signum.getBlockchain().getHeight()));
+            Block lastBlock = blockchain.getLastBlock();
+            map.put("timestamp", String.valueOf(lastBlock != null ? lastBlock.getTimestamp() : 0L));
+            map.put("height", String.valueOf(blockchain.getHeight()));
             map.put("event", "message");
             if (isRecipient) {
                 map.put("sender", Convert.toUnsignedLong(transaction.getSenderId()));
