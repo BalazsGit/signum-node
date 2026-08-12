@@ -1,4 +1,3 @@
-
 plugins {
   id 'com.github.johnrengelman.shadow' version '8.1.1'
   id 'java'
@@ -344,6 +343,11 @@ tasks.register('javadocJar', Jar) {
 artifacts {
     archives sourcesJar
     archives javadocJar
+}
+
+// Configure javadoc to ignore pre-existing formatting warnings/errors
+tasks.withType(Javadoc) {
+    options.addStringOption('Xdoclint:none', '-quiet')
 }
 
 // === JOOQ Codegen
