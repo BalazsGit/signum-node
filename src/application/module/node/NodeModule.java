@@ -104,6 +104,7 @@ public class NodeModule implements Module {
     @Override
     public JComponent getUI() {
         if (gui == null) {
+            LOGGER.info("[DIAG] NodeModule.getUI() - creating NEW NodePanel instance");
             JFrame parentFrame = null;
             for (java.awt.Frame f : java.awt.Frame.getFrames()) {
                 if (f instanceof JFrame) {
@@ -113,7 +114,15 @@ public class NodeModule implements Module {
                     }
                 }
             }
-            gui = new NodePanel(parentFrame);
+            try {
+                gui = new NodePanel(parentFrame);
+                LOGGER.info("[DIAG] NodeModule.getUI() - NodePanel created successfully");
+            } catch (Exception e) {
+                LOGGER.error("[DIAG] NodeModule.getUI() - FAILED to create NodePanel", e);
+                throw e;
+            }
+        } else {
+            LOGGER.debug("[DIAG] NodeModule.getUI() - returning cached NodePanel instance");
         }
         return gui;
     }

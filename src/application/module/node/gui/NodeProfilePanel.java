@@ -80,82 +80,99 @@ public class NodeProfilePanel extends JPanel {
      * @since 4.0 Phase G - Greenfield wiring
      */
     public NodeProfilePanel(JFrame parentFrame, NodeProfile profile, Signum signum) {
-        this.parentFrame = parentFrame;
-        this.profile = profile;
-        this.signum = signum;
-        this.confFolder = determineConfFolder();
+        LOGGER.info("[DIAG] NodeProfilePanel constructor START for profile: {}", profile.getName());
+        
+        try {
+            this.parentFrame = parentFrame;
+            this.profile = profile;
+            this.signum = signum;
+            this.confFolder = determineConfFolder();
 
-        setLayout(new BorderLayout());
-        setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+            setLayout(new BorderLayout());
+            setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
-        infoBar = new NodeInfoBar(profile);
-        toolbar = new NodeToolbar(profile);
+            LOGGER.info("[DIAG] Creating NodeInfoBar for profile: {}", profile.getName());
+            infoBar = new NodeInfoBar(profile);
+            
+            LOGGER.info("[DIAG] Creating NodeToolbar for profile: {}", profile.getName());
+            toolbar = new NodeToolbar(profile);
 
-        // Wrap infoBar in a responsive scroll pane so info chips are accessible when window is narrow
-        // The separator border is applied to the scroll pane (not NodeInfoBar) so it appears below the scrollbar
-        ResponsiveToolbarScrollPane infoBarScrollPane = new ResponsiveToolbarScrollPane(infoBar,
-                new java.awt.Insets(2, 4, 0, 4));
-        infoBarScrollPane.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(0, 0, 1, 0, GuiColors.getSeparator()),
-                BorderFactory.createEmptyBorder(0, 0, 2, 0)
-        ));
+            // Wrap infoBar in a responsive scroll pane so info chips are accessible when window is narrow
+            ResponsiveToolbarScrollPane infoBarScrollPane = new ResponsiveToolbarScrollPane(infoBar,
+                    new java.awt.Insets(2, 4, 0, 4));
+            infoBarScrollPane.setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createMatteBorder(0, 0, 1, 0, GuiColors.getSeparator()),
+                    BorderFactory.createEmptyBorder(0, 0, 2, 0)
+            ));
 
-        // Toolbar now includes its own internal ResponsiveToolbarScrollPane (matching ConsolePanel pattern).
-        // Only add a thin border spacer panel to separate toolbar from infoBar visually.
-        JPanel toolbarWrapper = new JPanel(new BorderLayout());
-        toolbarWrapper.setOpaque(false);
-        toolbarWrapper.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
-        toolbarWrapper.add(toolbar, BorderLayout.CENTER);
+            JPanel toolbarWrapper = new JPanel(new BorderLayout());
+            toolbarWrapper.setOpaque(false);
+            toolbarWrapper.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
+            toolbarWrapper.add(toolbar, BorderLayout.CENTER);
 
-        JPanel northPanel = new JPanel(new BorderLayout());
-        northPanel.setOpaque(false);
-        northPanel.add(infoBarScrollPane, BorderLayout.NORTH);
-        northPanel.add(toolbarWrapper, BorderLayout.SOUTH);
-        add(northPanel, BorderLayout.NORTH);
+            JPanel northPanel = new JPanel(new BorderLayout());
+            northPanel.setOpaque(false);
+            northPanel.add(infoBarScrollPane, BorderLayout.NORTH);
+            northPanel.add(toolbarWrapper, BorderLayout.SOUTH);
+            add(northPanel, BorderLayout.NORTH);
 
-        innerTabbedPane = new JTabbedPane(SwingConstants.TOP);
-        GuiFontManager.applyDefaultFont(innerTabbedPane);
-        GuiUtils.applyDefaultTabLayoutPolicy(innerTabbedPane);
-
-        consolePanel = new NodeConsolePanel(parentFrame, profile);
-        // Inject Signum facade into console panel for per-instance access
-        if (signum != null) {
-            consolePanel.setSignum(signum);
-        }
-        // Wire callback so console panel can switch to Console tab when showing command input
-        consolePanel.setSwitchToConsoleAction(() -> switchToConsoleTab());
-        innerTabbedPane.addTab("Console", consolePanel);
-
-        configurationPanel = new NodeConfigurationPanel(
-                this::restartNode,
-                this.confFolder,
-                () -> {
-                },
-                null
-        );
-        innerTabbedPane.addTab("Configuration", configurationPanel);
-
-        loggingPanel = new LoggerConfigurationPanel(
-                this::restartNode,
-                this.confFolder,
-                () -> {
-                },
-                null,
-                null,
-                () -> profile.getName(),
-                () -> "logging"
-        );
-        innerTabbedPane.addTab("Logging", loggingPanel);
-
-        add(innerTabbedPane, BorderLayout.CENTER);
-        wireToolbarCallbacks();
-        wireConsoleVisibilityTracking();
-
-        AppearanceModule.registerAppearanceListener(() -> {
+            innerTabbedPane = new JTabbedPane(SwingConstants.TOP);
             GuiFontManager.applyDefaultFont(innerTabbedPane);
-        });
+            GuiUtils.applyDefaultTabLayoutPolicy(innerTabbedPane);
 
-        LOGGER.info("Created NodeProfilePanel for profile: {}", profile.getName());
+            LOGGER.info("[DIAG] Creating NodeConsolePanel for profile: {}", profile.getName());
+            consolePanel = new NodeConsolePanel(parentFrame, profile);
+            if (signum != null) {
+                consolePanel.setSignum(signum);
+            }
+            consolePanel.setSwitchToConsoleAction(() -> switchToConsoleTab());
+            innerTabbedPane.addTab("Console", consolePanel);
+            LOGGER.info("[DIAG] Console tab added successfully");
+
+            LOGGER.info("[DIAG] Creating NodeConfigurationPanel for profile: {}", profile.getName());
+            configurationPanel = new NodeConfigurationPanel(
+                    this::restartNode,
+                    this.confFolder,
+                    () -> {
+                    },
+                    null
+            );
+            innerTabbedPane.addTab("Configuration", configurationPanel);
+            LOGGER.info("[DIAG] Configuration tab added successfully");
+
+            LOGGER.info("[DIAG] Creating LoggerConfigurationPanel for profile: {}", profile.getName());
+            loggingPanel = new LoggerConfigurationPanel(
+                    this::restartNode,
+                    this.confFolder,
+                    () -> {
+                    },
+                    null,
+                    null,
+                    () -> profile.getName(),
+                    () -> "logging"
+            );
+            innerTabbedPane.addTab("Logging", loggingPanel);
+            LOGGER.info("[DIAG] Logging tab added successfully");
+
+            LOGGER.info("[DIAG] Adding innerTabbedPane to CENTER (total tabs: {})", innerTabbedPane.getTabCount());
+            add(innerTabbedPane, BorderLayout.CENTER);
+            
+            LOGGER.info("[DIAG] Wiring toolbar callbacks for profile: {}", profile.getName());
+            wireToolbarCallbacks();
+            
+            LOGGER.info("[DIAG] Wiring console visibility tracking for profile: {}", profile.getName());
+            wireConsoleVisibilityTracking();
+
+            AppearanceModule.registerAppearanceListener(() -> {
+                GuiFontManager.applyDefaultFont(innerTabbedPane);
+            });
+
+            LOGGER.info("[DIAG] NodeProfilePanel constructor COMPLETED SUCCESSFULLY for profile: {} (tabs: {})", 
+                    profile.getName(), innerTabbedPane.getTabCount());
+        } catch (Exception e) {
+            LOGGER.error("[DIAG] NodeProfilePanel constructor FAILED for profile: {}", profile.getName(), e);
+            throw e;
+        }
     }
 
     /**

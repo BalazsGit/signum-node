@@ -103,6 +103,7 @@ public class NodeConfigurationPanel extends JPanel {
     public NodeConfigurationPanel(Runnable restartAction, String confFolder, Runnable backAction,
             Runnable switchAction) {
         super(new BorderLayout());
+        LOGGER.info("[DIAG] NodeConfigurationPanel constructor START");
         this.restartAction = restartAction;
         this.confFolder = confFolder;
         this.backAction = backAction;
@@ -136,10 +137,34 @@ public class NodeConfigurationPanel extends JPanel {
         // construction
         this.saveProfileBtn = new JButton("Save Profile As");
         this.applyProfileBtn = new JButton("Apply Profile");
+        
+        LOGGER.info("[DIAG] NodeConfigurationPanel - calling loadAppliedProperties()");
         loadAppliedProperties();
-        initHelpTexts();
-        initUI();
-        loadProfileLinks(this.loadedProfileName);
+        
+        LOGGER.info("[DIAG] NodeConfigurationPanel - deferring initHelpTexts/initUI/loadProfileLinks to EDT (async)");
+        
+        // Defer heavy UI construction + profile link loading to EDT to avoid blocking the constructor.
+        // initHelpTexts is ~1500 lines of HashMap.put calls, initUI builds 3000+ components,
+        // and loadProfileLinks needs UI fields (linkedLogCombo) initialized by initUI.
+        SwingUtilities.invokeLater(() -> {
+            try {
+                LOGGER.info("[DIAG] NodeConfigurationPanel - async initHelpTexts START");
+                initHelpTexts();
+                LOGGER.info("[DIAG] NodeConfigurationPanel - async initHelpTexts DONE");
+                
+                LOGGER.info("[DIAG] NodeConfigurationPanel - async initUI START");
+                initUI();
+                LOGGER.info("[DIAG] NodeConfigurationPanel - async initUI DONE");
+                
+                LOGGER.info("[DIAG] NodeConfigurationPanel - async loadProfileLinks START for: {}", loadedProfileName);
+                loadProfileLinks(loadedProfileName);
+                LOGGER.info("[DIAG] NodeConfigurationPanel - async loadProfileLinks DONE");
+            } catch (Exception e) {
+                LOGGER.error("[DIAG] NodeConfigurationPanel - async init FAILED", e);
+            }
+        });
+        
+        LOGGER.info("[DIAG] NodeConfigurationPanel constructor returned (UI will be built asynchronously)");
     }
 
     private void initUI() {
@@ -264,7 +289,10 @@ public class NodeConfigurationPanel extends JPanel {
         // Clear list before rebuilding UI (in case of re-init)
         allPropertyRows.clear();
 
+        LOGGER.info("[DIAG] initUI - START");
+        
         // --- API Server Settings ---
+        LOGGER.info("[DIAG] initUI - Building API tab");
         currentAddingTabIndex = 0;
         JPanel apiPanel = createCategoryPanel();
         addProperty(apiPanel, Props.API_SERVER, "Enable API Server");
@@ -287,8 +315,10 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(apiPanel, Props.API_SSL_LETSENCRYPT_PATH, "SSL LetsEncrypt Path");
         finalizeCategoryPanel(apiPanel);
         categoryTabbedPane.addTab("API Settings", createScrollPane(apiPanel));
+        LOGGER.info("[DIAG] initUI - API tab done");
 
         // --- Database Settings ---
+        LOGGER.info("[DIAG] initUI - Building Database tab");
         currentAddingTabIndex = 1;
         JPanel dbPanel = createCategoryPanel();
         addJdbcUrlProperty(dbPanel, (Prop<String>) Props.DB_URL, "JDBC Connection URL");
@@ -306,8 +336,10 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(dbPanel, Props.NODE_BLOCK_CACHE_MB, "Block Cache (MB)");
         finalizeCategoryPanel(dbPanel);
         categoryTabbedPane.addTab("Database", createScrollPane(dbPanel));
+        LOGGER.info("[DIAG] initUI - Database tab done");
 
         // --- P2P Networking ---
+        LOGGER.info("[DIAG] initUI - Building P2P tab");
         currentAddingTabIndex = 2;
         JPanel p2pPanel = createCategoryPanel();
         addProperty(p2pPanel, Props.P2P_PORT, "P2P Port");
@@ -339,8 +371,10 @@ public class NodeConfigurationPanel extends JPanel {
                 "Max Unconfirmed Txs Raw Size Bytes");
         finalizeCategoryPanel(p2pPanel);
         categoryTabbedPane.addTab("P2P Networking", createScrollPane(p2pPanel));
+        LOGGER.info("[DIAG] initUI - P2P tab done");
 
         // --- Mining & GPU ---
+        LOGGER.info("[DIAG] initUI - Building Mining tab");
         currentAddingTabIndex = 3;
         JPanel miningPanel = createCategoryPanel();
         addProperty(miningPanel, Props.GPU_ACCELERATION, "Enable GPU Acceleration");
@@ -356,8 +390,10 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(miningPanel, Props.ALLOW_OTHER_SOLO_MINERS, "Allow Other Solo Miners");
         finalizeCategoryPanel(miningPanel);
         categoryTabbedPane.addTab("Mining & GPU", createScrollPane(miningPanel));
+        LOGGER.info("[DIAG] initUI - Mining tab done");
 
         // --- System & Advanced ---
+        LOGGER.info("[DIAG] initUI - Building System tab");
         currentAddingTabIndex = 4;
         JPanel systemPanel = createCategoryPanel();
         addProperty(systemPanel, Props.APPLICATION, "Application Name");
@@ -386,8 +422,10 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(systemPanel, Props.ALIAS_RENEWAL_FREQUENCY, "Alias Renewal Frequency");
         finalizeCategoryPanel(systemPanel);
         categoryTabbedPane.addTab("System & Advanced", createScrollPane(systemPanel));
+        LOGGER.info("[DIAG] initUI - System tab done");
 
         // --- Dev & Debug ---
+        LOGGER.info("[DIAG] initUI - Building Dev tab");
         currentAddingTabIndex = 5;
         JPanel devPanel = createCategoryPanel();
         addProperty(devPanel, Props.DEV_OFFLINE, "Offline Mode");
@@ -405,8 +443,10 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(devPanel, Props.NODE_COMMUNICATION_LOGGING_MASK, "Communication Logging Mask");
         finalizeCategoryPanel(devPanel);
         categoryTabbedPane.addTab("Dev & Debug", createScrollPane(devPanel));
+        LOGGER.info("[DIAG] initUI - Dev tab done");
 
         // --- Jetty Server ---
+        LOGGER.info("[DIAG] initUI - Building Jetty tab");
         currentAddingTabIndex = 6;
         JPanel jettyPanel = createCategoryPanel();
         addProperty(jettyPanel, Props.JETTY_API_GZIP_FILTER, "API Gzip Filter");
@@ -442,8 +482,10 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(jettyPanel, Props.JETTY_P2P_DOS_FILTER_MANAGED_ATTR, "P2P DoS Managed Attr");
         finalizeCategoryPanel(jettyPanel);
         categoryTabbedPane.addTab("Jetty Server", createScrollPane(jettyPanel));
+        LOGGER.info("[DIAG] initUI - Jetty tab done");
 
         // --- Network Constants ---
+        LOGGER.info("[DIAG] initUI - Building Network tab");
         currentAddingTabIndex = 7;
         JPanel netPanel = createCategoryPanel();
         addProperty(netPanel, Props.BLOCK_TIME, "Block Time");
@@ -485,8 +527,10 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(netPanel, Props.DEV_NEXT_FORK_BLOCK_HEIGHT, "Dev Next Fork Start");
         finalizeCategoryPanel(netPanel);
         categoryTabbedPane.addTab("Network Constants", createScrollPane(netPanel));
+        LOGGER.info("[DIAG] initUI - Network tab done");
 
         // --- Linked Profiles ---
+        LOGGER.info("[DIAG] initUI - Building Linked Profiles tab");
         linkedProfilesTabIndex = categoryTabbedPane.getTabCount();
         currentAddingTabIndex = linkedProfilesTabIndex;
 
@@ -541,8 +585,10 @@ public class NodeConfigurationPanel extends JPanel {
 
         finalizeCategoryPanel(linkedPanel);
         categoryTabbedPane.addTab("Linked Profiles", createScrollPane(linkedPanel));
+        LOGGER.info("[DIAG] initUI - Linked Profiles tab done");
 
         // --- Content Container (CardLayout for Tabs vs Search Results) ---
+        LOGGER.info("[DIAG] initUI - Building content container");
         contentCardLayout = new CardLayout();
         contentContainer = new JPanel(contentCardLayout);
 
@@ -571,6 +617,8 @@ public class NodeConfigurationPanel extends JPanel {
         bottomContainer.add(new JSeparator(SwingConstants.HORIZONTAL), BorderLayout.NORTH);
         bottomContainer.add(bottomPanel, BorderLayout.CENTER);
         add(bottomContainer, BorderLayout.SOUTH);
+        
+        LOGGER.info("[DIAG] initUI - COMPLETED ({} tabs)", categoryTabbedPane.getTabCount());
     }
 
     @Override
@@ -1609,9 +1657,14 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     public void loadAppliedProperties() {
-        application.module.node.props.PropertyService service = application.module.node.Signum.getPropertyService();
-        if (service == null)
-            return;
+        // Node may not be started yet when this panel is constructed.
+        // Defer loading until the node is running (will be called from onNodeStateChanged).
+        try {
+            application.module.node.props.PropertyService service = application.module.node.Signum.getPropertyService();
+            if (service == null) {
+                LOGGER.debug("[DIAG] loadAppliedProperties - PropertyService is null, deferring until node starts");
+                return;
+            }
 
         for (PropertyRow row : allPropertyRows) {
             String val = getServiceValueAsString(service, row.prop);
@@ -1630,7 +1683,12 @@ public class NodeConfigurationPanel extends JPanel {
         if (appliedPass != null && !appliedPass.isEmpty())
             appliedProfile.setProperty(Props.DB_PASSWORD.getName(), appliedPass);
 
-        refreshUIColors();
+            refreshUIColors();
+        } catch (IllegalStateException e) {
+            // Node not started yet - "No active Signum instance"
+            // Properties will be loaded when the node starts via onNodeStateChanged callback.
+            LOGGER.debug("[DIAG] loadAppliedProperties - Node not started yet, properties will load on node start: {}", e.getMessage());
+        }
     }
 
     private String getServiceValueAsString(application.module.node.props.PropertyService service, Prop prop) {

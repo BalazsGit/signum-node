@@ -267,6 +267,47 @@ public final class SmartScrollController {
         return panelActive;
     }
 
+    // ── External Event Suppression ───────────────────────────────────────
+
+    /**
+     * Temporarily suppresses scrollbar adjustment events.
+     * <p>
+     * When {@code suppressing} is {@code true}, the {@link AdjustmentListener}
+     * installed on the vertical scrollbar will ignore all incoming events.
+     * This prevents external layout changes (e.g., metrics panel animation
+     * resizing the console viewport) from being misinterpreted as user scroll intent.
+     * </p>
+     * <p>
+     * Callers MUST restore the previous value after the layout operation completes.
+     * Typical usage pattern:
+     * <pre>{@code
+     * boolean wasSuppressing = controller.setSuppressingEvents(true);
+     * try {
+     *     // perform layout changes that resize the scroll pane
+     *     panel.setPreferredSize(new Dimension(...));
+     *     panel.revalidate();
+     * } finally {
+     *     controller.setSuppressingEvents(wasSuppressing);
+     * }
+     * }</pre>
+     * </p>
+     *
+     * @param suppressing true to ignore scrollbar events, false to resume processing
+     * @return the previous suppression value so callers can restore it
+     */
+    public boolean setSuppressingEvents(boolean suppressing) {
+        boolean previous = this.isSuppressingEvents;
+        this.isSuppressingEvents = suppressing;
+        return previous;
+    }
+
+    /**
+     * @return true if scrollbar adjustment events are currently suppressed
+     */
+    public boolean isSuppressingEvents() {
+        return isSuppressingEvents;
+    }
+
     // ── User scroll detection ────────────────────────────────────────────
 
     /** Internal handler for scrollbar adjustment events. */
@@ -276,7 +317,7 @@ public final class SmartScrollController {
             return;
         }
 
-        // Ignore events triggered by programmatic scrolls
+        // Ignore events triggered by programmatic scrolls or external suppression
         if (isSuppressingEvents) {
             return;
         }

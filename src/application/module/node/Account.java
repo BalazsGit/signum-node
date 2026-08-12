@@ -291,13 +291,29 @@ public class Account {
         return account;
     }
 
-    public Account(long id) {
+    /**
+     * Constructs an Account with the given ID and creation height.
+     * Accepts blockchain height to eliminate static Signum.getBlockchain() calls.
+     *
+     * @param id              the account ID
+     * @param creationHeight  the blockchain height at which this account was created
+     */
+    public Account(long id, int creationHeight) {
         if (id != Crypto.rsDecode(Crypto.rsEncode(id))) {
             logger.log(Level.INFO, "CRITICAL ERROR: Reed-Solomon encoding fails for {0}", id);
         }
         this.id = id;
         this.nxtKey = accountSignumKeyFactory().newKey(this.id);
-        this.creationHeight = Signum.getBlockchain().getHeight();
+        this.creationHeight = creationHeight;
+    }
+
+    /**
+     * @deprecated Use {@link #Account(long, int)} with explicit creation height.
+     * This constructor uses a static Signum.getBlockchain() call which breaks multi-node isolation.
+     */
+    @Deprecated
+    public Account(long id) {
+        this(id, Signum.getBlockchain().getHeight());
     }
 
     protected Account(long id, SignumKey signumKey, int creationHeight) {

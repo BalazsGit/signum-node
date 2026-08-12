@@ -399,6 +399,11 @@ public final class NodeCoreContext {
         this.dbContext = DbContext.create(this.propertyService, this.dbCacheManager);
         this.dbs = this.dbContext.getDbsByDatabaseType();
 
+        // Bridge pattern: set static activeContext for legacy code paths that still use
+        // Db.getConnection() statically (e.g., BlockchainProcessorImpl constructor).
+        // This is a temporary measure until all static Db refs are migrated to instance access.
+        Db.setActiveContext(this.dbContext);
+
         TransactionDb transactionDb = dbs.getTransactionDb();
         BlockDb blockDb = dbs.getBlockDb();
 

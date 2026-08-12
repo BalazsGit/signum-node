@@ -113,6 +113,7 @@ import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
+import application.utils.gui.SmartScrollController;
 import application.module.node.util.Convert;
 import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.profile.NodeProfile;
@@ -1446,12 +1447,9 @@ public class NodeConsolePanel extends JPanel {
                 + "This information is essential for confirming that your node is connected to the network and processing new blocks as they are created.";
         addInfoTooltip(latestBlockHeightLabel, blockInfoTooltip);
         addInfoTooltip(latestBlockTimestampLabel, blockInfoTooltip);
-        metricsPanel = new MetricsPanel(parentFrame);
-        // Wire ExpansionListener so that chevron toggle updates our tracked state
-        metricsPanel.setExpansionListener(expanded -> this.metricsExpanded = expanded);
-        metricsPanel.setVisible(false);
+        // Lazy-init: MetricsPanel is created on first 'show' request in updateMetricsPanelState().
+        // This avoids eager resource allocation (executor threads, timers) when the user never opens it.
         metricsPanelWrapper = new JPanel(new BorderLayout());
-        metricsPanelWrapper.add(metricsPanel, BorderLayout.CENTER);
 
         trimSeparator = new JSeparator(SwingConstants.VERTICAL);
         trimSeparator.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
@@ -2173,8 +2171,8 @@ public class NodeConsolePanel extends JPanel {
 
         try {
             String newIconLocation = iconLocation;
-            if (Signum.getPropertyService() != null) {
-                newIconLocation = Signum.getPropertyService().getString(Props.ICON_LOCATION);
+            if (this.nodeContext.getPropertyService() != null) {
+                newIconLocation = this.nodeContext.getPropertyService().getString(Props.ICON_LOCATION);
             }
             if (!newIconLocation.equals(iconLocation)) {
                 // update the icon
@@ -2428,7 +2426,7 @@ public class NodeConsolePanel extends JPanel {
                 int messageType;
 
                 if (!wasResolutionActive
-                        && Signum.getPropertyService().getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED)) {
+                        && this.nodeContext.getPropertyService().getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED)) {
                     activeMessage = "The database is INCONSISTENT.\n\n" +
                             "An automatic consistency resolution has been started.\n" +
                             "Please check the logs for progress.";
@@ -2574,7 +2572,7 @@ public class NodeConsolePanel extends JPanel {
 
     private void openWebUi(String path) {
         try {
-            PropertyService propertyService = Signum.getPropertyService();
+            PropertyService propertyService = this.nodeContext.getPropertyService();
             int port = propertyService.getInt(Props.API_PORT);
             String httpPrefix = propertyService.getBoolean(Props.API_SSL) ? "https://" : "http://";
             String address = httpPrefix + "localhost:" + port + path;
@@ -2639,7 +2637,7 @@ public class NodeConsolePanel extends JPanel {
 
             // Start the GUI timer only once, when the first download volume is received,
             // and if experimental features are enabled in the config.
-            if (Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL)
+            if (this.nodeContext.getPropertyService().getBoolean(Props.EXPERIMENTAL)
                     && downloaded > 0
                     && !guiTimerStarted.getAndSet(true)) {
                 startGuiTimer();
@@ -2649,7 +2647,7 @@ public class NodeConsolePanel extends JPanel {
 
     private void startGuiTimer() {
         guiTimer = new Timer(1000, e -> {
-            if (Signum.getBlockchain() != null && Signum.getBlockchainProcessor() != null) {
+            if (this.nodeContext.getBlockchain() != null && this.nodeContext.getBlockchainProcessor() != null) {
                 guiAccumulatedSyncTimeMs += 1000;
                 totalTimeLabel.setText(DurationFormatter.format(guiAccumulatedSyncTimeMs,
                         DurationFormatter.Unit.YEAR, DurationFormatter.Unit.SECOND));
@@ -2731,22 +2729,22 @@ public class NodeConsolePanel extends JPanel {
         if (block == null)
             return;
         int maxPeerHeight = calculateMaxPeerHeight();
-        long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
+        long blockTime = this.nodeContext.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
         SwingUtilities.invokeLater(() -> {
             updateLatestBlock(block, maxPeerHeight, blockTime);
 
             // Start the GUI timer only once, when the first block is pushed,
             // and if experimental features are enabled in the config.
-            if (Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL) && !guiTimerStarted.getAndSet(true)) {
+            if (this.nodeContext.getPropertyService().getBoolean(Props.EXPERIMENTAL) && !guiTimerStarted.getAndSet(true)) {
                 startGuiTimer();
             }
         });
     }
 
     private void onBlockPopped() {
-        Block lastBlock = Signum.getBlockchain().getLastBlock();
+        Block lastBlock = this.nodeContext.getBlockchain().getLastBlock();
         int maxPeerHeight = calculateMaxPeerHeight();
-        long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
+        long blockTime = this.nodeContext.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
         SwingUtilities.invokeLater(() -> {
             updateLatestBlock(lastBlock, maxPeerHeight, blockTime);
         });
@@ -2836,10 +2834,10 @@ public class NodeConsolePanel extends JPanel {
             loadGuiSettings();
             
             // Now that properties are loaded, set the correct values for the GUI
-            showPopOff = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
-            measurementActive = Signum.getPropertyService().getBoolean(Props.MEASUREMENT_ACTIVE);
-            experimentalActive = Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
-            String archivalMode = Signum.getPropertyService().getString(Props.DB_ARCHIVAL_MODE).toUpperCase();
+            showPopOff = this.nodeContext.getPropertyService().getBoolean(Props.EXPERIMENTAL);
+            measurementActive = this.nodeContext.getPropertyService().getBoolean(Props.MEASUREMENT_ACTIVE);
+            experimentalActive = this.nodeContext.getPropertyService().getBoolean(Props.EXPERIMENTAL);
+            String archivalMode = this.nodeContext.getPropertyService().getString(Props.DB_ARCHIVAL_MODE).toUpperCase();
             boolean isPruneMode = "PRUNE".equals(archivalMode);
             boolean isTrimMode = "TRIM".equals(archivalMode);
             trimEnabled = isTrimMode || isPruneMode;
@@ -2869,16 +2867,16 @@ public class NodeConsolePanel extends JPanel {
             trimLabel.setToolTipText(shortTooltip);
             addInfoTooltip(trimLabel, detailedTooltip, archivalMode);
 
-            autoResolveEnabled = Signum.getPropertyService().getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED);
+            autoResolveEnabled = this.nodeContext.getPropertyService().getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED);
 
-            Block lastBlock = Signum.getBlockchain().getLastBlock();
+            Block lastBlock = this.nodeContext.getBlockchain().getLastBlock();
             int maxPeerHeight = calculateMaxPeerHeight();
-            BlockchainProcessor blockchainProcessor = Signum.getBlockchainProcessor();
+            BlockchainProcessor blockchainProcessor = this.nodeContext.getBlockchainProcessor();
             Collection<Peer> allPeers = blockchainProcessor.getAllPeers();
             long connectedCount = allPeers.stream().filter(p -> p.getState() == Peer.State.CONNECTED).count();
             long allKnownCount = allPeers.size();
             long blacklistedCount = allPeers.stream().filter(Peer::isBlacklisted).count();
-            long blockTime = Signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
+            long blockTime = this.nodeContext.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
 
             try {
                 SwingUtilities.invokeLater(() -> {
@@ -2899,14 +2897,13 @@ public class NodeConsolePanel extends JPanel {
                         skipDbCheckItem.setSelected(blockchainProcessor.isSkipDbCheckOnManualPopOff());
                     }
 
+                    // Use the new toggle-based updateMetricsPanelState() to handle MetricsPanel visibility.
+                    // This ensures lazy-init + proper lifecycle (no NPE when panel was never created).
                     if (showMetricsPanel) {
-                        metricsPanel.init();
-                        metricsPanel.setVisible(true);
+                        updateMetricsPanelState(true);
                     } else {
-                        metricsPanel.shutdown();
-                        metricsPanelWrapper.removeAll();
-                        metricsPanel = null;
                         metricsPanelWrapper.setPreferredSize(new Dimension(0, 0));
+                        metricsPanelWrapper.setMinimumSize(new Dimension(0, 0));
                         metricsPanelWrapper.revalidate();
                     }
 
@@ -2976,7 +2973,7 @@ public class NodeConsolePanel extends JPanel {
                 // updateTitle() removed - title management moved to NodeInfoBar
 
                 initListeners();
-                if (Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL)) {
+                if (this.nodeContext.getPropertyService().getBoolean(Props.EXPERIMENTAL)) {
                     // Initialize timers from the log file.
                     if (blockchainProcessor != null) {
                         this.guiAccumulatedSyncTimeMs = blockchainProcessor.getAccumulatedSyncTimeMs();
@@ -2993,7 +2990,7 @@ public class NodeConsolePanel extends JPanel {
                         updateTimeLabelVisibility(); // Initial visibility check
                     });
                 }
-                if (Signum.getBlockchain() == null) {
+                if (this.nodeContext.getBlockchain() == null) {
                     onBrsStopped();
                 }
             } catch (Exception t) {
@@ -3044,8 +3041,9 @@ public class NodeConsolePanel extends JPanel {
 
         // Do NOT init/shutdown MetricsPanel here — it needs PropertyService which is not
         // available during init. The actual panel visibility is handled by startSignumWithGUI().
-        // Instead, just ensure the wrapper has a stable size so toolbar layout is correct.
-        if (!showMetricsPanel) {
+        // Only set wrapper to 0,0 if the panel hasn't been initialized yet (metricsPanel == null).
+        // If the panel already exists and is visible, respect that state — don't force-hide it.
+        if (!showMetricsPanel && metricsPanel == null) {
             metricsPanelWrapper.setPreferredSize(new Dimension(0, 0));
             metricsPanelWrapper.setMinimumSize(new Dimension(0, 0));
         }
@@ -3083,20 +3081,58 @@ public class NodeConsolePanel extends JPanel {
 
         showMetricsPanel = show;
         LOGGER.info("[DEBUG-MetricsPanel] updateMetricsPanelState: showMetricsPanel={}", showMetricsPanel);
+
+        // Get SmartScrollController from unifiedConsole's subscriber to suppress events during animation.
+        final SmartScrollController scrollController;
+        if (unifiedConsole != null && unifiedConsole.getSubscriber() != null) {
+            scrollController = unifiedConsole.getSubscriber().getScrollController();
+        } else {
+            scrollController = null;
+        }
+
+        // Suppress scrollbar adjustment events so viewport resize doesn't corrupt SmartScrollController state
+        boolean wasSuppressing = scrollController != null && scrollController.setSuppressingEvents(true);
+        LOGGER.info("[DEBUG-MetricsPanel] SmartScrollController suppression activated: wasSuppressing={}, controller={}",
+                wasSuppressing, scrollController != null ? "exists" : "null");
+
         if (show) {
+            // LAZY-INIT: Create and initialise the panel only on the first show request.
+            // This ensures child timers/executors start at the right time and avoids wasting
+            // resources when the user never toggles the MetricsPanel visible.
             if (metricsPanel == null) {
                 metricsPanel = new MetricsPanel(parentFrame);
+                // Wire ExpansionListener so that chevron toggle updates our tracked state
+                metricsPanel.setExpansionListener(expanded -> this.metricsExpanded = expanded);
                 metricsPanel.init();
                 metricsPanel.setVisible(true);
                 metricsPanelWrapper.add(metricsPanel, BorderLayout.CENTER);
+            } else {
+                // Subsequent show: just make visible again (panel and timers already alive)
+                metricsPanel.setVisible(true);
+            }
+
+            // Ensure layout is stabilised before measuring target height.
+            // Without this, the first-time preferredSize may be 0 because Swing has not
+            // performed a full layout pass on the newly added component tree.
+            if (metricsPanel != null) {
+                metricsPanel.ensureLayoutStability();
             }
 
             // Prepare for animation: Start from 0 height
             metricsPanelWrapper.setPreferredSize(new Dimension(metricsPanelWrapper.getWidth(), 0));
             metricsPanelWrapper.revalidate();
 
-            // Calculate target height
-            int targetHeight = metricsPanel.getPreferredSize().height;
+            // Calculate target height after layout stabilisation
+            int rawTargetHeight = metricsPanel != null ? metricsPanel.getPreferredSize().height : 0;
+            final int animationTargetHeight;
+            if (rawTargetHeight <= 0) {
+                // Fallback: if preferred size is still unreliable, use a reasonable default
+                animationTargetHeight = 200;
+                LOGGER.warn("[DEBUG-MetricsPanel] targetHeight resolved to fallback {}: preferredSize was {}",
+                        animationTargetHeight, metricsPanel != null ? metricsPanel.getPreferredSize() : "null");
+            } else {
+                animationTargetHeight = rawTargetHeight;
+            }
 
             metricsPanelAnimator = new Timer(10, new ActionListener() {
                 final long startTime = System.currentTimeMillis();
@@ -3109,19 +3145,28 @@ public class NodeConsolePanel extends JPanel {
                     // Ease out: 1 - (1 - t)^3
                     progress = 1.0f - (float) Math.pow(1.0f - progress, 3);
 
-                    int h = (int) (targetHeight * progress);
+                    int h = (int) (animationTargetHeight * progress);
                     metricsPanelWrapper.setPreferredSize(new Dimension(metricsPanelWrapper.getWidth(), h));
                     metricsPanelWrapper.revalidate();
 
                     if (progress >= 1.0f) {
                         ((Timer) e.getSource()).stop();
+                        metricsPanelAnimator = null;
                         metricsPanelWrapper.setPreferredSize(null); // Reset to allow dynamic resizing
                         metricsPanelWrapper.revalidate();
+                        // Restore SmartScrollController state after animation completes
+                        if (scrollController != null) {
+                            scrollController.setSuppressingEvents(wasSuppressing);
+                            LOGGER.info("[DEBUG-MetricsPanel] SmartScrollController suppression restored after expand: wasSuppressing={}", wasSuppressing);
+                        }
                     }
                 }
             });
             metricsPanelAnimator.start();
         } else {
+            // TOGGLE HIDE: animate collapse, then setVisible(false).
+            // The panel instance is kept alive so child timers continue running and we avoid
+            // the costly recreate-on-show cycle (no new executors, no layout instability).
             if (metricsPanel != null) {
                 final int startHeight = metricsPanelWrapper.getHeight();
 
@@ -3142,22 +3187,33 @@ public class NodeConsolePanel extends JPanel {
 
                         if (progress >= 1.0f) {
                             ((Timer) e.getSource()).stop();
-                            metricsPanel.shutdown();
-                            metricsPanelWrapper.removeAll();
-                            metricsPanel = null;
+                            metricsPanelAnimator = null;
+                            // Hide but KEEP alive — do NOT shutdown/remove/null here.
+                            // Full cleanup only happens in onNodeStateChanged(STOPPED|IDLE).
+                            metricsPanel.setVisible(false);
                             metricsPanelWrapper.setPreferredSize(new Dimension(0, 0));
                             metricsPanelWrapper.setMinimumSize(new Dimension(0, 0));
                             metricsPanelWrapper.revalidate();
+                            // Restore SmartScrollController state after animation completes
+                            if (scrollController != null) {
+                                scrollController.setSuppressingEvents(wasSuppressing);
+                                LOGGER.info("[DEBUG-MetricsPanel] SmartScrollController suppression restored after collapse: wasSuppressing={}", wasSuppressing);
+                            }
                         }
                     }
                 });
                 metricsPanelAnimator.start();
+            } else {
+                // No panel to hide - restore suppression immediately
+                if (scrollController != null) {
+                    scrollController.setSuppressingEvents(wasSuppressing);
+                }
             }
         }
     }
 
     private void updateTimeLabelVisibility() {
-        if (!Signum.getPropertyService().getBoolean(Props.EXPERIMENTAL)) {
+        if (!this.nodeContext.getPropertyService().getBoolean(Props.EXPERIMENTAL)) {
             totalTimeLabel.setVisible(false);
             innerTimeSeparator.setVisible(false);
             syncInProgressTimeLabel.setVisible(false);
@@ -3317,7 +3373,7 @@ public class NodeConsolePanel extends JPanel {
      */
     private boolean loadAutostartSetting() {
         try {
-            String settingsDir = Signum.getPropertyService().getString(Props.SETTINGS_DIR);
+            String settingsDir = this.nodeContext.getPropertyService().getString(Props.SETTINGS_DIR);
             Path settingsPath = application.utils.io.PathUtils
                     .resolvePath(Paths.get(settingsDir, "gui-settings.json").toString());
             if (Files.exists(settingsPath)) {
@@ -3348,7 +3404,7 @@ public class NodeConsolePanel extends JPanel {
      */
     private void saveAutostartSetting(boolean value) {
         try {
-            String settingsDir = Signum.getPropertyService().getString(Props.SETTINGS_DIR);
+            String settingsDir = this.nodeContext.getPropertyService().getString(Props.SETTINGS_DIR);
             Path settingsPath = application.utils.io.PathUtils
                     .resolvePath(Paths.get(settingsDir, "gui-settings.json").toString());
             if (settingsPath.getParent() != null) {
@@ -3392,7 +3448,7 @@ public class NodeConsolePanel extends JPanel {
      */
     private String resolveSettingsDir() {
         try {
-            PropertyService ps = Signum.getPropertyService();
+            PropertyService ps = this.nodeContext.getPropertyService();
             if (ps != null) {
                 return ps.getString(Props.SETTINGS_DIR);
             }

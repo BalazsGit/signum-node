@@ -144,7 +144,7 @@ public class AccountServiceImpl implements AccountService {
     public Account getOrAddAccount(long id) {
         Account account = accountTable.get(accountSignumKeyFactory.newKey(id));
         if (account == null) {
-            account = new Account(id);
+            account = new Account(id, this.blockchain.getHeight());
             accountTable.insert(account);
         }
         return account;
