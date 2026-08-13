@@ -4,7 +4,8 @@ import application.module.node.SignumException;
 import application.module.node.Transaction;
 import application.module.node.db.TransactionDb;
 import application.module.node.db.store.ATStore;
-import application.module.node.db.sql.Db;
+import application.module.node.db.sql.DbContext;
+import application.module.node.db.store.Dbs;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import org.jooq.Cursor;
@@ -69,6 +70,10 @@ public final class ATProcessorCache {
     private final int numberOfBlocksToCache;
     private int lastLoadedBlockHeight = 0;
     private final ATStore atStore;
+    /** Instance-scoped DbContext for DSL queries (multi-node isolation). */
+    private final DbContext dbContext;
+    /** Instance-scoped Dbs wrapper for TransactionDb access. */
+    private final Dbs dbs;
 
     public static class ATContext {
         public byte[] md5;
@@ -81,10 +86,14 @@ public final class ATProcessorCache {
      *
      * @param propertyService the configuration properties service
      * @param atStore         the AT data store
+     * @param dbContext       the per-instance database context (multi-node isolation)
+     * @param dbs             the per-instance database wrapper
      */
-    public ATProcessorCache(PropertyService propertyService, ATStore atStore) {
+    public ATProcessorCache(PropertyService propertyService, ATStore atStore, DbContext dbContext, Dbs dbs) {
         this.numberOfBlocksToCache = propertyService.getInt(Props.NODE_AT_PROCESSOR_CACHE_BLOCK_COUNT);
         this.atStore = atStore;
+        this.dbContext = dbContext;
+        this.dbs = dbs;
     }
 
     public boolean isEnabled() {
@@ -180,7 +189,7 @@ public final class ATProcessorCache {
     private void loadTransactionsFromHeightUntilCurrentBlock(int startHeight, boolean shallRemoveOldest) {
         logger.debug("Loading AT transactions for heights from {} to {}", startHeight, currentBlockHeight - 1);
 
-        Db.useDSLContext(ctx -> {
+        this.dbContext.useDSLContext(ctx -> {
             try (Cursor<TransactionRecord> cursor = ctx.selectFrom(TRANSACTION)
                     .where(TRANSACTION.HEIGHT.between(startHeight, currentBlockHeight - 1))
                     .and(TRANSACTION.RECIPIENT_ID.isNotNull())
@@ -196,7 +205,7 @@ public final class ATProcessorCache {
                 }
 
                 // Phase 2: Now that the cursor is closed, we can safely load full transactions
-                TransactionDb db = Db.getDbsByDatabaseType().getTransactionDb();
+                TransactionDb db = this.dbs.getTransactionDb();
                 for (TransactionRecord r : recordsToProcess) {
                     Long recipientId = r.getRecipientId();
 

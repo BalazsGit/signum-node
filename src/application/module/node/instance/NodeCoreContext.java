@@ -220,6 +220,9 @@ public final class NodeCoreContext {
     /** AT constants instance, shared across Web/API and store layers. */
     private AtConstants atConstants;
 
+    /** AT processor cache (instance-scoped to eliminate static Db polling). */
+    private ATProcessorCache atProcessorCache;
+
     /** Per-profile peer manager for isolated peer networking. */
     private PeerManager peerManager;
 
@@ -497,6 +500,14 @@ public final class NodeCoreContext {
 
         // ATService (line 558)
         this.atService = new ATServiceImpl(this.stores.getAtStore());
+
+        // ATProcessorCache - instance-scoped with injected DbContext + Dbs (eliminates static Db polling)
+        this.atProcessorCache = new ATProcessorCache(
+                this.propertyService,
+                this.stores.getAtStore(),
+                this.dbContext,
+                this.dbs);
+        ATProcessorCache.setInstance(this.atProcessorCache);
 
         // SubscriptionService (lines 559-566)
         AliasStore aliasStore = this.stores.getAliasStore();
