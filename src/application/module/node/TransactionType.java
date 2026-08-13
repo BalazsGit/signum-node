@@ -39,40 +39,84 @@ public abstract class TransactionType {
     private static final Logger logger = LoggerFactory.getLogger(TransactionType.class);
 
     /**
-     * Current transaction processing context.
-     * Set by {@link #setContext(TransactionApplyContext)} during NodeCoreContext initialization.
-     * Provides isolated, profile-scoped access to all services needed by transaction type methods,
-     * eliminating static {@link Signum} dependencies.
-     * @since 4.0
+     * ThreadLocal-based transaction processing context for multi-node isolation.
+     * Each thread stores its own TransactionApplyContext, preventing cross-node state mutation
+     * when multiple nodes process transactions concurrently on different threads.
+     * @since 4.1
      */
-    private static TransactionApplyContext CONTEXT;
+    private static final ThreadLocal<TransactionApplyContext> CONTEXT_LOCAL = new ThreadLocal<>();
+
+    /**
+     * Legacy single-instance fallback. Used only when no ThreadLocal context is bound.
+     * Populated once during NodeCoreContext initialization for single-node backward compatibility.
+     * @deprecated Use {@link #bindContext(TransactionApplyContext)} / {@link #getContext()} instead.
+     */
+    @Deprecated
+    private static volatile TransactionApplyContext LEGACY_CONTEXT;
+
+    /**
+     * Binds a TransactionApplyContext to the current thread.
+     * Use try-finally to ensure cleanup:
+     * <pre>{@code
+     * try {
+     *     TransactionType.bindContext(ctx);
+     *     // ... process transactions ...
+     * } finally {
+     *     TransactionType.clearContext();
+     * }
+     * }</pre>
+     *
+     * @param context the transaction apply context to bind
+     * @throws NullPointerException if context is null
+     * @since 4.1
+     */
+    public static void bindContext(TransactionApplyContext context) {
+        CONTEXT_LOCAL.set(Objects.requireNonNull(context, "TransactionApplyContext must not be null"));
+    }
+
+    /**
+     * Clears the ThreadLocal context bound to the current thread.
+     * Prevents memory leaks and stale state across requests.
+     * Always call in a finally block after {@link #bindContext(TransactionApplyContext)}.
+     * @since 4.1
+     */
+    public static void clearContext() {
+        CONTEXT_LOCAL.remove();
+    }
 
     /**
      * Sets the transaction processing context for this node instance.
      * Called during NodeCoreContext initialization.
+     * Populates the legacy fallback so single-node callers without explicit thread binding still work.
      *
      * @param context the transaction apply context containing all required services
      * @throws IllegalStateException if context is null
      * @since 4.0
      */
     public static void setContext(TransactionApplyContext context) {
-        CONTEXT = Objects.requireNonNull(context, "TransactionApplyContext must not be null");
+        LEGACY_CONTEXT = Objects.requireNonNull(context, "TransactionApplyContext must not be null");
     }
 
     /**
      * Returns the current transaction processing context.
+     * Checks ThreadLocal first (thread-bound), then falls back to legacy singleton for backward compatibility.
      * Used internally by all transaction type methods to access services without
      * relying on static {@link Signum} getters.
      *
      * @return the current transaction apply context
-     * @throws IllegalStateException if context has not been initialized
+     * @throws IllegalStateException if no context has been initialized
      * @since 4.0
      */
     static TransactionApplyContext getContext() {
-        if (CONTEXT == null) {
-            throw new IllegalStateException("TransactionApplyContext not initialized - call setContext() first");
+        TransactionApplyContext ctx = CONTEXT_LOCAL.get();
+        if (ctx != null) {
+            return ctx;
         }
-        return CONTEXT;
+        ctx = LEGACY_CONTEXT;
+        if (ctx == null) {
+            throw new IllegalStateException("TransactionApplyContext not initialized - call setContext() or bindContext() first");
+        }
+        return ctx;
     }
 
     private static final Map<Type, Map<Byte, TransactionType>> TRANSACTION_TYPES = new HashMap<>();
