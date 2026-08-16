@@ -3,9 +3,9 @@ package application.module.node.web.api.http.handler;
 import application.module.node.Account;
 import application.module.node.Account.AccountAsset;
 import application.module.node.Asset;
-import application.module.node.Signum;
 import application.module.node.SignumException;
 import application.module.node.assetexchange.AssetExchange;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.ParameterService;
 import application.module.node.util.CollectionWithIndex;
@@ -28,12 +28,14 @@ public final class GetAssetAccounts extends ApiServlet.JsonRequestHandler {
 
     private final ParameterService parameterService;
     private final AssetExchange assetExchange;
+    private final FluxCapacitor fluxCapacitor;
 
-    public GetAssetAccounts(ParameterService parameterService, AssetExchange assetExchange) {
+    public GetAssetAccounts(ParameterService parameterService, AssetExchange assetExchange, FluxCapacitor fluxCapacitor) {
         super(new LegacyDocTag[] { LegacyDocTag.AE }, ASSET_PARAMETER, ASSET_IGNORE_TREASURY_PARAMETER,
                 QUANTITY_MININUM_QNT_PARAMETER, FIRST_INDEX_PARAMETER, LAST_INDEX_PARAMETER);
         this.parameterService = parameterService;
         this.assetExchange = assetExchange;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     @Override
@@ -47,7 +49,7 @@ public final class GetAssetAccounts extends ApiServlet.JsonRequestHandler {
         boolean filterTreasury = "false".equals(req.getParameter(ASSET_IGNORE_TREASURY_PARAMETER)) ? false : true;
 
         JsonArray accountAssetsArray = new JsonArray();
-        boolean unconfirmed = !Signum.getFluxCapacitor().getValue(FluxValues.DISTRIBUTION_FIX);
+        boolean unconfirmed = !fluxCapacitor.getValue(FluxValues.DISTRIBUTION_FIX);
         CollectionWithIndex<AccountAsset> accountAssets = assetExchange.getAssetAccounts(asset,
                 filterTreasury, minimumQuantity, unconfirmed, firstIndex, lastIndex);
         for (Account.AccountAsset accountAsset : accountAssets) {

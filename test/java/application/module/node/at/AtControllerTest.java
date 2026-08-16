@@ -35,7 +35,8 @@ public class AtControllerTest {
         AtTestHelper.addEchoAT();
         AtTestHelper.addTipThanksAT();
         assertEquals(3, AT.getOrderedATs().size());
-        AtBlock atBlock = AtController.getCurrentBlockATs(Integer.MAX_VALUE, Integer.MAX_VALUE, 0L, 0);
+        ATProcessingContext ctx = AtTestHelper.getTestContext();
+        AtBlock atBlock = AtController.getCurrentBlockATs(ctx, Integer.MAX_VALUE, Integer.MAX_VALUE, 0L, 0);
         assertNotNull(atBlock);
         assertNotNull(atBlock.getBytesForBlock());
         assertEquals(
@@ -50,7 +51,8 @@ public class AtControllerTest {
         AtTestHelper.addEchoAT();
         AtTestHelper.addTipThanksAT();
         assertEquals(3, AT.getOrderedATs().size());
-        AtBlock atBlock = AtController.validateATs(Convert.parseHexString(
+        ATProcessingContext ctx = AtTestHelper.getTestContext();
+        AtBlock atBlock = AtController.validateATs(ctx, Convert.parseHexString(
                 "010000000000000097c1d1e5b25c1d109f2ba522d1dda248020000000000000014ea12712c274caebc49ccd7fff0b0b703000000000000009f1af5443c8d1e7b492f848e91fccb1f"),
                 Integer.MAX_VALUE, 0L);
         assertNotNull(atBlock);
@@ -65,7 +67,8 @@ public class AtControllerTest {
         AtTestHelper.addEchoATV3();
         AtTestHelper.addTipThanksATV3();
         assertEquals(3, AT.getOrderedATs().size());
-        AtBlock atBlock = AtController.validateATs(Convert.parseHexString(
+        ATProcessingContext ctx = AtTestHelper.getTestContext();
+        AtBlock atBlock = AtController.validateATs(ctx, Convert.parseHexString(
                 "010000000000000097c1d1e5b25c1d109f2ba522d1dda248020000000000000014ea12712c274caebc49ccd7fff0b0b703000000000000009f1af5443c8d1e7b492f848e91fccb1f"),
                 Integer.MAX_VALUE, 0L);
         assertNotNull(atBlock);

@@ -1,7 +1,9 @@
 package application.module.node;
 
 import application.module.node.crypto.EncryptedData;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
+import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.util.Convert;
 import application.module.node.util.JSON;
@@ -9,7 +11,6 @@ import com.google.gson.JsonObject;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
-//TODO: Create JavaDocs and remove this
 @SuppressWarnings({ "checkstyle:MissingJavadocTypeCheck", "checkstyle:MissingJavadocMethodCheck" })
 
 public interface Appendix {
@@ -38,11 +39,19 @@ public interface Appendix {
             this.version = version;
         }
 
-        AbstractAppendix(int blockchainHeight) {
-            this.version = (byte) (Signum.getFluxCapacitor().getValue(
+        AbstractAppendix(FluxCapacitor fluxCapacitor, int blockchainHeight) {
+            this.version = (byte) (fluxCapacitor.getValue(
                     FluxValues.DIGITAL_GOODS_STORE, blockchainHeight)
                             ? 1
                             : 0);
+        }
+
+        /**
+         * @deprecated Use {@link #AbstractAppendix(FluxCapacitor, int)} with instance-scoped FluxCapacitor.
+         */
+        @Deprecated(since = "4.1", forRemoval = true)
+        AbstractAppendix(int blockchainHeight) {
+            this(Signum.getFluxCapacitor(), blockchainHeight);
         }
 
         protected abstract String getAppendixName();
@@ -112,7 +121,7 @@ public interface Appendix {
                 throws SignumException.NotValidException {
             super(buffer, transactionVersion);
             int messageLength = buffer.getInt();
-            this.isText = messageLength < 0; // ugly hack
+            this.isText = messageLength < 0;
             if (messageLength < 0) {
                 messageLength &= Integer.MAX_VALUE;
             }
@@ -134,16 +143,32 @@ public interface Appendix {
                     : Convert.parseHexString(messageString);
         }
 
-        public Message(byte[] message, int blockchainHeight) {
-            super(blockchainHeight);
+        public Message(byte[] message, FluxCapacitor fluxCapacitor, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.messageBytes = message;
             this.isText = false;
         }
 
-        public Message(String string, int blockchainHeight) {
-            super(blockchainHeight);
+        /**
+         * @deprecated Use {@link #Message(byte[], FluxCapacitor, int)} with instance-scoped FluxCapacitor.
+         */
+        @Deprecated(since = "4.1", forRemoval = true)
+        public Message(byte[] message, int blockchainHeight) {
+            this(message, Signum.getFluxCapacitor(), blockchainHeight);
+        }
+
+        public Message(String string, FluxCapacitor fluxCapacitor, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.messageBytes = Convert.toBytes(string);
             this.isText = true;
+        }
+
+        /**
+         * @deprecated Use {@link #Message(String, FluxCapacitor, int)} with instance-scoped FluxCapacitor.
+         */
+        @Deprecated(since = "4.1", forRemoval = true)
+        public Message(String string, int blockchainHeight) {
+            this(string, Signum.getFluxCapacitor(), blockchainHeight);
         }
 
         @Override
@@ -191,7 +216,6 @@ public interface Appendix {
                 Transaction transaction,
                 Account senderAccount,
                 Account recipientAccount) {
-            // Do nothing by default
         }
 
         public byte[] getMessageBytes() {
@@ -236,10 +260,22 @@ public interface Appendix {
         private AbstractEncryptedMessage(
                 EncryptedData encryptedData,
                 boolean isText,
+                FluxCapacitor fluxCapacitor,
                 int blockchainHeight) {
-            super(blockchainHeight);
+            super(fluxCapacitor, blockchainHeight);
             this.encryptedData = encryptedData;
             this.isText = isText;
+        }
+
+        /**
+         * @deprecated Use {@link #AbstractEncryptedMessage(EncryptedData, boolean, FluxCapacitor, int)}.
+         */
+        @Deprecated(since = "4.1", forRemoval = true)
+        private AbstractEncryptedMessage(
+                EncryptedData encryptedData,
+                boolean isText,
+                int blockchainHeight) {
+            this(encryptedData, isText, Signum.getFluxCapacitor(), blockchainHeight);
         }
 
         @Override
@@ -313,8 +349,16 @@ public interface Appendix {
             super(attachmentData, JSON.getAsJsonObject(attachmentData.get("encryptedMessage")));
         }
 
+        public EncryptedMessage(EncryptedData encryptedData, boolean isText, FluxCapacitor fluxCapacitor, int blockchainHeight) {
+            super(encryptedData, isText, fluxCapacitor, blockchainHeight);
+        }
+
+        /**
+         * @deprecated Use {@link #EncryptedMessage(EncryptedData, boolean, FluxCapacitor, int)}.
+         */
+        @Deprecated(since = "4.1", forRemoval = true)
         public EncryptedMessage(EncryptedData encryptedData, boolean isText, int blockchainHeight) {
-            super(encryptedData, isText, blockchainHeight);
+            this(encryptedData, isText, Signum.getFluxCapacitor(), blockchainHeight);
         }
 
         @Override
@@ -364,8 +408,20 @@ public interface Appendix {
         public EncryptToSelfMessage(
                 EncryptedData encryptedData,
                 boolean isText,
+                FluxCapacitor fluxCapacitor,
                 int blockchainHeight) {
-            super(encryptedData, isText, blockchainHeight);
+            super(encryptedData, isText, fluxCapacitor, blockchainHeight);
+        }
+
+        /**
+         * @deprecated Use {@link #EncryptToSelfMessage(EncryptedData, boolean, FluxCapacitor, int)}.
+         */
+        @Deprecated(since = "4.1", forRemoval = true)
+        public EncryptToSelfMessage(
+                EncryptedData encryptedData,
+                boolean isText,
+                int blockchainHeight) {
+            this(encryptedData, isText, Signum.getFluxCapacitor(), blockchainHeight);
         }
 
         @Override
@@ -415,9 +471,17 @@ public interface Appendix {
                     JSON.getAsString(attachmentData.get("recipientPublicKey")));
         }
 
-        public PublicKeyAnnouncement(byte[] publicKey, int blockchainHeight) {
-            super(blockchainHeight);
+        public PublicKeyAnnouncement(byte[] publicKey, FluxCapacitor fluxCapacitor, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.publicKey = publicKey;
+        }
+
+        /**
+         * @deprecated Use {@link #PublicKeyAnnouncement(byte[], FluxCapacitor, int)}.
+         */
+        @Deprecated(since = "4.1", forRemoval = true)
+        public PublicKeyAnnouncement(byte[] publicKey, int blockchainHeight) {
+            this(publicKey, Signum.getFluxCapacitor(), blockchainHeight);
         }
 
         @Override
@@ -440,8 +504,8 @@ public interface Appendix {
             json.addProperty("recipientPublicKey", Convert.toHexString(publicKey));
         }
 
-        @Override
-        public void validate(Transaction transaction) throws SignumException.ValidationException {
+        public void validate(Transaction transaction, Blockchain blockchain, FluxCapacitor fluxCapacitor, PropertyService propertyService)
+                throws SignumException.ValidationException {
             if (!transaction.getType().hasRecipient()) {
                 throw new SignumException.NotValidException(
                         "PublicKeyAnnouncement cannot be attached"
@@ -466,23 +530,28 @@ public interface Appendix {
                 throw new SignumException.NotCurrentlyValidException(
                         "A different public key for this account has already been announced");
             }
-            if (Signum.getFluxCapacitor().getValue(FluxValues.PK_FREEZE2)) {
+            if (fluxCapacitor.getValue(FluxValues.PK_FREEZE2)) {
                 if (recipientAccount != null && recipientAccount.getPublicKey() == null
-                        && Signum.getBlockchain().getHeight()
-                                - recipientAccount.getCreationHeight() > Signum
-                                        .getPropertyService().getInt(Props.PK_BLOCKS_PAST)) {
+                        && blockchain.getHeight()
+                                - recipientAccount.getCreationHeight() > propertyService.getInt(Props.PK_BLOCKS_PAST)) {
                     throw new SignumException.NotCurrentlyValidException(
                             "Setting a new key for an old inactivated account");
                 }
-            } else if (Signum.getFluxCapacitor().getValue(FluxValues.PK_FREEZE)
-                    && Signum.getBlockchain().getHeight()
-                            - recipientAccount.getCreationHeight() > Signum
-                                    .getPropertyService().getInt(Props.PK_BLOCKS_PAST)) {
-                // TODO: this entire final condition (else if) can be removed after PK_FREEZE2
-                // is activated
+            } else if (fluxCapacitor.getValue(FluxValues.PK_FREEZE)
+                    && blockchain.getHeight()
+                            - recipientAccount.getCreationHeight() > propertyService.getInt(Props.PK_BLOCKS_PAST)) {
                 throw new SignumException.NotCurrentlyValidException(
                         "Setting a new key for an old inactivated account");
             }
+        }
+
+        /**
+         * @deprecated Use {@link #validate(Transaction, Blockchain, FluxCapacitor, PropertyService)} with instance-scoped dependencies.
+         */
+        @Deprecated(since = "4.1", forRemoval = true)
+        @Override
+        public void validate(Transaction transaction) throws SignumException.ValidationException {
+            validate(transaction, Signum.getBlockchain(), Signum.getFluxCapacitor(), Signum.getPropertyService());
         }
 
         @Override

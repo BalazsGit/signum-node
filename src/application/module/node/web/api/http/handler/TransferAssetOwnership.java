@@ -39,7 +39,7 @@ public final class TransferAssetOwnership extends CreateTransaction {
     protected JsonElement processRequest(HttpServletRequest req) throws SignumException {
 
         Account account = parameterService.getSenderAccount(req);
-        long recipientId = ParameterParser.getRecipientId(req);
+        long recipientId = ParameterParser.getRecipientId(req, fluxCapacitor);
 
         String fullHashReference = Convert.emptyToNull(req.getParameter(REFERENCED_TRANSACTION_FULL_HASH_PARAMETER));
         Transaction assetIssuanceTransaction = blockchain.getTransactionByFullHash(fullHashReference);

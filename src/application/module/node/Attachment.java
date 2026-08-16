@@ -6,6 +6,7 @@ import static application.module.node.web.api.http.common.ResultFields.*;
 import application.module.node.TransactionType.Payment;
 import application.module.node.at.AtConstants;
 import application.module.node.crypto.EncryptedData;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.util.Convert;
 import application.module.node.util.JSON;
@@ -436,15 +437,28 @@ public interface Attachment extends Appendix {
                 String aliasName,
                 String aliasUri,
                 long tld,
+                FluxCapacitor fluxCapacitor,
                 int blockchainHeight) {
-            super((byte) ((Signum.getFluxCapacitor().getValue(
+            super((byte) ((fluxCapacitor.getValue(
                     FluxValues.SMART_ALIASES, blockchainHeight) ? 2
-                            : Signum.getFluxCapacitor().getValue(
+                            : fluxCapacitor.getValue(
                                     FluxValues.DIGITAL_GOODS_STORE, blockchainHeight) ? 1 : 0)));
 
             this.aliasName = aliasName.trim();
             this.aliasUri = aliasUri.trim();
             this.tld = tld;
+        }
+
+        /**
+         * @deprecated Use constructor with instance-scoped FluxCapacitor.
+         */
+        @Deprecated(since = "4.1", forRemoval = true)
+        public MessagingAliasAssignment(
+                String aliasName,
+                String aliasUri,
+                long tld,
+                int blockchainHeight) {
+            this(aliasName, aliasUri, tld, Signum.getFluxCapacitor(), blockchainHeight);
         }
 
         @Override
@@ -593,17 +607,30 @@ public interface Attachment extends Appendix {
                 long aliasId,
                 String aliasName,
                 long priceNqt,
+                FluxCapacitor fluxCapacitor,
                 int blockchainHeight) {
-            super((byte) ((Signum.getFluxCapacitor().getValue(
+            super((byte) ((fluxCapacitor.getValue(
                     FluxValues.SMART_ALIASES, blockchainHeight)
                             ? 2
-                            : Signum.getFluxCapacitor().getValue(
+                            : fluxCapacitor.getValue(
                                     FluxValues.DIGITAL_GOODS_STORE, blockchainHeight)
                                             ? 1
                                             : 0)));
             this.aliasId = aliasId;
             this.aliasName = aliasName;
             this.priceNqt = priceNqt;
+        }
+
+        /**
+         * @deprecated Use constructor with instance-scoped FluxCapacitor.
+         */
+        @Deprecated(since = "4.1", forRemoval = true)
+        public MessagingAliasSell(
+                long aliasId,
+                String aliasName,
+                long priceNqt,
+                int blockchainHeight) {
+            this(aliasId, aliasName, priceNqt, Signum.getFluxCapacitor(), blockchainHeight);
         }
 
         @Override
@@ -689,17 +716,29 @@ public interface Attachment extends Appendix {
         public MessagingAliasBuy(
                 long aliasId,
                 String aliasName,
+                FluxCapacitor fluxCapacitor,
                 int blockchainHeight) {
-            super((byte) ((Signum.getFluxCapacitor().getValue(
+            super((byte) ((fluxCapacitor.getValue(
                     FluxValues.SMART_ALIASES, blockchainHeight)
                             ? 2
-                            : Signum.getFluxCapacitor().getValue(
+                            : fluxCapacitor.getValue(
                                     FluxValues.DIGITAL_GOODS_STORE, blockchainHeight)
                                             ? 1
                                             : 0)));
 
             this.aliasId = aliasId;
             this.aliasName = aliasName;
+        }
+
+        /**
+         * @deprecated Use constructor with instance-scoped FluxCapacitor.
+         */
+        @Deprecated(since = "4.1", forRemoval = true)
+        public MessagingAliasBuy(
+                long aliasId,
+                String aliasName,
+                int blockchainHeight) {
+            this(aliasId, aliasName, Signum.getFluxCapacitor(), blockchainHeight);
         }
 
         @Override
@@ -854,10 +893,11 @@ public interface Attachment extends Appendix {
                 String description,
                 long quantityQnt,
                 byte decimals,
+                FluxCapacitor fluxCapacitor,
                 int blockchainHeight,
                 boolean mintable) {
             super((byte) (mintable ? 2
-                    : Signum.getFluxCapacitor().getValue(
+                    : fluxCapacitor.getValue(
                             FluxValues.DIGITAL_GOODS_STORE, blockchainHeight)
                                     ? 1
                                     : 0));
@@ -866,6 +906,20 @@ public interface Attachment extends Appendix {
             this.quantityQnt = quantityQnt;
             this.decimals = decimals;
             this.mintable = mintable;
+        }
+
+        /**
+         * @deprecated Use constructor with instance-scoped FluxCapacitor.
+         */
+        @Deprecated(since = "4.1", forRemoval = true)
+        public ColoredCoinsAssetIssuance(
+                String name,
+                String description,
+                long quantityQnt,
+                byte decimals,
+                int blockchainHeight,
+                boolean mintable) {
+            this(name, description, quantityQnt, decimals, Signum.getFluxCapacitor(), blockchainHeight, mintable);
         }
 
         @Override

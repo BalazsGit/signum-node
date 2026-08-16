@@ -23,6 +23,7 @@ public final class TransferAsset extends CreateTransaction {
     private final ParameterService parameterService;
     private final Blockchain blockchain;
     private final AccountService accountService;
+    private final FluxCapacitor fluxCapacitor;
 
     public TransferAsset(ParameterService parameterService, Blockchain blockchain,
             APITransactionManager apiTransactionManager, AccountService accountService, FluxCapacitor fluxCapacitor) {
@@ -31,12 +32,13 @@ public final class TransferAsset extends CreateTransaction {
         this.parameterService = parameterService;
         this.blockchain = blockchain;
         this.accountService = accountService;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     @Override
     protected JsonElement processRequest(HttpServletRequest req) throws SignumException {
 
-        long recipient = ParameterParser.getRecipientId(req);
+        long recipient = ParameterParser.getRecipientId(req, fluxCapacitor);
 
         Asset asset = parameterService.getAsset(req);
         long quantityQNT = ParameterParser.getQuantityQNT(req);

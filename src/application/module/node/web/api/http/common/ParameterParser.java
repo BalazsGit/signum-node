@@ -1,8 +1,8 @@
 package application.module.node.web.api.http.common;
 
-import application.module.node.Signum;
 import application.module.node.Constants;
 import application.module.node.crypto.EncryptedData;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.util.Convert;
 import signumj.entity.SignumAddress;
@@ -133,10 +133,10 @@ public final class ParameterParser {
         return timestamp;
     }
 
-    public static long getRecipientId(HttpServletRequest req) throws ParameterException {
+    public static long getRecipientId(HttpServletRequest req, FluxCapacitor fluxCapacitor) throws ParameterException {
         String recipientValue = Convert.emptyToNull(req.getParameter(RECIPIENT_PARAMETER));
         if (recipientValue == null || Parameters.isZero(recipientValue)) {
-            if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_TOKEN)) {
+            if (fluxCapacitor.getValue(FluxValues.SMART_TOKEN)) {
                 return 0L;
             }
             throw new ParameterException(MISSING_RECIPIENT);

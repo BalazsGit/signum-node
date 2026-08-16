@@ -1,7 +1,7 @@
 package application.module.node.web.api.http.handler;
 
-import application.module.node.Signum;
 import application.module.node.at.AT.AtMapEntry;
+import application.module.node.db.store.ATStore;
 import application.module.node.util.CollectionWithIndex;
 import application.module.node.util.Convert;
 
@@ -20,13 +20,16 @@ import static application.module.node.web.api.http.common.ResultFields.*;
 
 public final class GetATMapValues extends ApiServlet.JsonRequestHandler {
 
-    public GetATMapValues() {
+    private final ATStore atStore;
+
+    public GetATMapValues(ATStore atStore) {
         super(new LegacyDocTag[] { LegacyDocTag.AT },
                 AT_PARAMETER,
                 KEY1_PARAMETER,
                 VALUE_PARAMETER,
                 FIRST_INDEX_PARAMETER,
                 LAST_INDEX_PARAMETER);
+        this.atStore = atStore;
     }
 
     @Override
@@ -57,7 +60,7 @@ public final class GetATMapValues extends ApiServlet.JsonRequestHandler {
             throw new IllegalArgumentException("lastIndex must be greater or equal to firstIndex");
         }
 
-        CollectionWithIndex<AtMapEntry> atMapEntries = Signum.getStores().getAtStore().getMapValues(atId, k1, value,
+        CollectionWithIndex<AtMapEntry> atMapEntries = atStore.getMapValues(atId, k1, value,
                 firstIndex, lastIndex);
 
         JsonArray mapValues = new JsonArray();

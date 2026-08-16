@@ -36,7 +36,7 @@ public final class AddAssetTreasuryAccount extends CreateTransaction {
     @Override
     protected JsonElement processRequest(HttpServletRequest req) throws SignumException {
 
-        long recipient = ParameterParser.getRecipientId(req);
+        long recipient = ParameterParser.getRecipientId(req, fluxCapacitor);
         Account sender = parameterService.getSenderAccount(req);
 
         String referenceTransaction = req.getParameter(REFERENCED_TRANSACTION_FULL_HASH_PARAMETER);

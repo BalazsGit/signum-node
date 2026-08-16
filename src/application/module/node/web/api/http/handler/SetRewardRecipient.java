@@ -39,7 +39,7 @@ public final class SetRewardRecipient extends CreateTransaction {
     @Override
     protected JsonElement processRequest(HttpServletRequest req) throws SignumException {
         final Account account = parameterService.getSenderAccount(req);
-        Long recipient = ParameterParser.getRecipientId(req);
+        Long recipient = ParameterParser.getRecipientId(req, fluxCapacitor);
         Account recipientAccount = accountService.getAccount(recipient);
         if (recipientAccount == null || recipientAccount.getPublicKey() == null) {
             JsonObject response = new JsonObject();

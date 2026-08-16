@@ -1,7 +1,6 @@
 package application.module.node.at;
 
 import application.module.node.Account;
-import application.module.node.Signum;
 import application.module.node.crypto.Crypto;
 import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
@@ -118,29 +117,41 @@ public abstract class AtController {
         return 5;
     }
 
-    /**
-     * @deprecated Use {@link #resetMachine(AtMachineState, ATProcessingContext)}.
-     */
-    @Deprecated(since = "4.0", forRemoval = true)
-    public static void resetMachine(AtMachineState state) {
-        ATProcessingContext ctx = new ATProcessingContext(
-                AtController.getAtConstants(),
-                ATProcessorCache.getInstance(),
-                Signum.getPropertyService(),
-                Signum.getFluxCapacitor(),
-                Signum.getBlockchain(),
-                Signum.getStores().getAtStore(),
-                Signum.getStores().getAccountStore(),
-                Signum.getAccountService(),
-                Signum.getAssetExchange(),
-                Signum.getStores().getIndirectIncomingStore(),
-                Signum.getStores().getAssetStore());
-        resetMachine(state, ctx);
-    }
-
     public static void resetMachine(AtMachineState state, ATProcessingContext ctx) {
         state.getMachineState().reset();
         listCode(state, ctx, true, true);
+    }
+
+    /**
+     * @deprecated Legacy bridge for deprecated AT.addAT(). Use resetMachine(state, ctx) instead.
+     */
+    @Deprecated(since = "4.0", forRemoval = true)
+    static void resetMachineLegacy(AtMachineState state) {
+        state.getMachineState().reset();
+        listCodeLegacy(state, true, true);
+    }
+
+    private static void listCodeLegacy(AtMachineState state, boolean disassembly, boolean determineJumps) {
+        AtMachineProcessor processor = new AtMachineProcessor(state, null, false);
+
+        int opc = state.getMachineState().pc;
+        int osteps = state.getMachineState().steps;
+
+        state.getApCode().order(ByteOrder.LITTLE_ENDIAN);
+        state.getApData().order(ByteOrder.LITTLE_ENDIAN);
+
+        state.getMachineState().pc = 0;
+        state.getMachineState().opc = opc;
+
+        while (true) {
+            int rc = processor.processOp(disassembly, determineJumps);
+            if (rc <= 0)
+                break;
+            state.getMachineState().pc += rc;
+        }
+
+        state.getMachineState().steps = osteps;
+        state.getMachineState().pc = opc;
     }
 
     private static void listCode(AtMachineState state, ATProcessingContext ctx, boolean disassembly, boolean determineJumps) {
@@ -254,15 +265,6 @@ public abstract class AtController {
         return codeLen;
     }
 
-    /**
-     * @deprecated Use {@link #getCurrentBlockATs(ATProcessingContext, int, int, long, int)}.
-     */
-    @Deprecated(since = "4.0", forRemoval = true)
-    public static AtBlock getCurrentBlockATs(int freePayload, int blockHeight, long generatorId, int indirectsCount) {
-        ATProcessingContext ctx = createLegacyContext();
-        return getCurrentBlockATs(ctx, freePayload, blockHeight, generatorId, indirectsCount);
-    }
-
     public static AtBlock getCurrentBlockATs(ATProcessingContext ctx, int freePayload, int blockHeight,
             long generatorId, int indirectsCount) {
         final FluxCapacitor fluxCapacitor = ctx.getFluxCapacitor();
@@ -336,15 +338,6 @@ public abstract class AtController {
         }
 
         throw new UnsupportedOperationException("validateATsOriginal requires ATProcessingContext. Use validateATs(ctx, ...) instead.");
-    }
-
-    /**
-     * @deprecated Use {@link #validateATs(ATProcessingContext, byte[], int, long)}.
-     */
-    @Deprecated(since = "4.0", forRemoval = true)
-    public static AtBlock validateATs(byte[] blockATs, int blockHeight, long generatorId) throws AtException {
-        ATProcessingContext ctx = createLegacyContext();
-        return validateATs(ctx, blockATs, blockHeight, generatorId);
     }
 
     public static AtBlock validateATs(ATProcessingContext ctx, byte[] blockATs, int blockHeight, long generatorId)
@@ -526,22 +519,6 @@ public abstract class AtController {
 
         AT.addMapUpdates(at.getMapUpdates(), blockHeight, generatorId);
         return totalAmount;
-    }
-
-    @Deprecated(since = "4.0", forRemoval = true)
-    private static ATProcessingContext createLegacyContext() {
-        return new ATProcessingContext(
-                AtController.getAtConstants(),
-                ATProcessorCache.getInstance(),
-                Signum.getPropertyService(),
-                Signum.getFluxCapacitor(),
-                Signum.getBlockchain(),
-                Signum.getStores().getAtStore(),
-                Signum.getStores().getAccountStore(),
-                Signum.getAccountService(),
-                Signum.getAssetExchange(),
-                Signum.getStores().getIndirectIncomingStore(),
-                Signum.getStores().getAssetStore());
     }
 
     private static long getATAccountBalance(Long id) {

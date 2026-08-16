@@ -2,7 +2,7 @@
  * Some portion .. Copyright (c) 2014 CIYAM Developers
 
  Distributed under the MIT/X11 software license, please refer to the file LICENSE.txt
-*/
+ */
 
 package application.module.node.at;
 
@@ -11,12 +11,10 @@ import application.module.node.Block;
 import application.module.node.Signum;
 import application.module.node.SignumException;
 import application.module.node.Transaction;
-import application.module.node.TransactionType;
 import application.module.node.db.SignumKey;
 import application.module.node.db.TransactionDb;
 import application.module.node.db.VersionedEntityTable;
 import application.module.node.services.AccountService;
-import application.module.node.util.Convert;
 import application.module.node.util.Listener;
 
 import java.io.ByteArrayInputStream;
@@ -42,26 +40,11 @@ public class AT extends AtMachineState {
     private final String description;
     private final int nextHeight;
 
-    /**
-     * @deprecated Use {@link #AT(byte[], byte[], String, String, byte[], int, int)} 
-     * Legacy constructor uses static AtController.getAtConstants() and Signum.getBlockchain()
-     */
     @Deprecated
     private AT(byte[] atId, byte[] creator, String name, String description, byte[] creationBytes, int height) {
         this(atId, creator, name, description, creationBytes, height, height);
     }
 
-    /**
-     * Context-aware constructor that receives all required data as parameters.
-     *
-     * @param atId          raw AT identifier bytes
-     * @param creator       raw creator account bytes
-     * @param name          human-readable name
-     * @param description   human-readable description
-     * @param creationBytes raw creation byte array
-     * @param height        blockchain height at which this AT was created
-     * @param currentHeight current blockchain height (used for nextHeight calculation)
-     */
     private AT(byte[] atId, byte[] creator, String name, String description, byte[] creationBytes, int height, int currentHeight) {
         super(AtController.getAtConstants(), atId, creator, creationBytes, height);
         this.name = name.trim();
@@ -87,7 +70,6 @@ public class AT extends AtMachineState {
     }
 
     public static void clearPending(int blockHeight, long generatorId) {
-        // using height+id as hash
         pendingFeesMap.remove(blockHeight + generatorId);
         pendingTransactionsMap.remove(blockHeight + generatorId);
         pendingEntryUpdatesMap.remove(blockHeight + generatorId);
@@ -139,7 +121,6 @@ public class AT extends AtMachineState {
         return false;
     }
 
-    // Instance-based factory helpers (eliminate static Signum.getStores())
     private static SignumKey.LongKeyFactory<AT> atDbKeyFactory(ATProcessingContext ctx) {
         return ctx.getAtStore().getAtDbKeyFactory();
     }
@@ -156,51 +137,38 @@ public class AT extends AtMachineState {
         return ctx.getAtStore().getAtStateTable();
     }
 
-    // ===== Legacy static helpers — deprecated, use context-aware overloads =====
-
-    /** @deprecated Use {@link #atDbKeyFactory(ATProcessingContext)}. Scheduled for removal in v4.1. */
     @Deprecated(since = "4.0", forRemoval = true)
     private static SignumKey.LongKeyFactory<AT> atDbKeyFactory() {
         return Signum.getStores().getAtStore().getAtDbKeyFactory();
     }
 
-    /** @deprecated Use {@link #atTable(ATProcessingContext)}. Scheduled for removal in v4.1. */
     @Deprecated(since = "4.0", forRemoval = true)
     private static VersionedEntityTable<AT> atTable() {
         return Signum.getStores().getAtStore().getAtTable();
     }
 
-    /** @deprecated Use {@link #atStateDbKeyFactory(ATProcessingContext)}. Scheduled for removal in v4.1. */
     @Deprecated(since = "4.0", forRemoval = true)
     private static SignumKey.LongKeyFactory<ATState> atStateDbKeyFactory() {
         return Signum.getStores().getAtStore().getAtStateDbKeyFactory();
     }
 
-    /** @deprecated Use {@link #atStateTable(ATProcessingContext)}. Scheduled for removal in v4.1. */
     @Deprecated(since = "4.0", forRemoval = true)
     private static VersionedEntityTable<ATState> atStateTable() {
         return Signum.getStores().getAtStore().getAtStateTable();
     }
 
+    /**
+     * @deprecated Legacy bridge. Scheduled for removal in v4.1.
+     */
+    @Deprecated(since = "4.0", forRemoval = true)
     public static AT getAT(byte[] id) {
-        return getAT(AtApiHelper.getLong(id));
+        return Signum.getStores().getAtStore().getAT(AtApiHelper.getLong(id), -1);
     }
 
-    /** Context-aware overload: uses injected AtStore instead of static Signum.getStores() */
     public static AT getAT(ATProcessingContext ctx, Long id) {
         return ctx.getAtStore().getAT(id, -1);
     }
 
-    /** @deprecated Use {@link #getAT(ATProcessingContext, Long)}. Scheduled for removal in v4.1. */
-    @Deprecated(since = "4.0", forRemoval = true)
-    public static AT getAT(Long id) {
-        return Signum.getStores().getAtStore().getAT(id, -1);
-    }
-
-    /**
-     * @deprecated Use {@link #addAT(ATProcessingContext, Long, Long, String, String, byte[], int, long)}.
-     * Legacy method uses static AtController.getAtConstants() and Signum.getStores(). Scheduled for removal in v4.1.
-     */
     @Deprecated(since = "4.0", forRemoval = true)
     public static void addAT(Long atId, Long senderAccountId, String name, String description, byte[] creationBytes,
             int height, long atCodeHashId) {
@@ -223,7 +191,7 @@ public class AT extends AtMachineState {
         if (at.getApCodeHashId() == 0L)
             at.setApCodeHashId(atCodeHashId);
 
-        AtController.resetMachine(at);
+        AtController.resetMachineLegacy(at);
 
         atTable().insert(at);
 
@@ -233,19 +201,6 @@ public class AT extends AtMachineState {
         account.apply(new byte[32], height);
     }
 
-    /**
-     * Context-aware overload: uses injected dependencies via ATProcessingContext.
-     * Replaces static Signum.getXxx() and AtController.getAtConstants() calls.
-     *
-     * @param ctx             the AT processing context with all required dependencies
-     * @param atId            the AT identifier
-     * @param senderAccountId the sender account identifier
-     * @param name            human-readable name
-     * @param description     human-readable description
-     * @param creationBytes   raw AT creation byte array
-     * @param height          blockchain height at which this AT is created
-     * @param atCodeHashId    AT code hash identifier
-     */
     public static void addAT(ATProcessingContext ctx, Long atId, Long senderAccountId, String name, String description, byte[] creationBytes,
             int height, long atCodeHashId) {
         ByteBuffer bf = ByteBuffer.allocate(8 + 8);
@@ -277,12 +232,10 @@ public class AT extends AtMachineState {
         account.apply(new byte[32], height);
     }
 
-    /** Context-aware overload: uses injected AtStore */
     public static List<Long> getOrderedATs(ATProcessingContext ctx) {
         return ctx.getAtStore().getOrderedATs();
     }
 
-    /** @deprecated Use {@link #getOrderedATs(ATProcessingContext)}. Scheduled for removal in v4.1. */
     @Deprecated(since = "4.0", forRemoval = true)
     public static List<Long> getOrderedATs() {
         return Signum.getStores().getAtStore().getOrderedATs();
@@ -324,7 +277,6 @@ public class AT extends AtMachineState {
         }
     }
 
-    /** Context-aware overload: uses injected dependencies */
     public void saveState(ATProcessingContext ctx) {
         int prevHeight = ctx.getBlockchain().getHeight();
         int newNextHeight = prevHeight + getWaitForNumberOfBlocks();
@@ -336,10 +288,6 @@ public class AT extends AtMachineState {
         atStateTable(ctx).insert(state);
     }
 
-    /**
-     * @deprecated Use {@link #saveState(ATProcessingContext)}.
-     * Legacy method uses static Signum.getBlockchain() and Signum.getStores(). Scheduled for removal in v4.1.
-     */
     @Deprecated(since = "4.0", forRemoval = true)
     public void saveState() {
         int prevHeight = Signum.getBlockchain().getHeight();
@@ -352,7 +300,6 @@ public class AT extends AtMachineState {
         atStateTable().insert(state);
     }
 
-    /** Context-aware overload: uses injected AtStore */
     public static void saveMapUpdates(ATProcessingContext ctx, int blockHeight, long generatorId) {
         long hash = blockHeight + generatorId;
         List<AtMapEntry> updates = pendingEntryUpdatesMap.get(hash);
@@ -371,10 +318,6 @@ public class AT extends AtMachineState {
         }
     }
 
-    /**
-     * @deprecated Use {@link #saveMapUpdates(ATProcessingContext, int, long)}.
-     * Legacy method uses static Signum.getStores(). Scheduled for removal in v4.1.
-     */
     @Deprecated(since = "4.0", forRemoval = true)
     public static void saveMapUpdates(int blockHeight, long generatorId) {
         long hash = blockHeight + generatorId;
@@ -407,16 +350,17 @@ public class AT extends AtMachineState {
     }
 
     public static class HandleATBlockTransactionsListener implements Listener<Block> {
-        private final AccountService accountService;
+        private final ATProcessingContext processingContext;
         private final TransactionDb transactionDb;
 
-        public HandleATBlockTransactionsListener(AccountService accountService, TransactionDb transactionDb) {
-            this.accountService = accountService;
+        public HandleATBlockTransactionsListener(ATProcessingContext processingContext, TransactionDb transactionDb) {
+            this.processingContext = processingContext;
             this.transactionDb = transactionDb;
         }
 
         @Override
         public void notify(Block block) {
+            AccountService accountService = processingContext.getAccountService();
             long hash = block.getHeight() + block.getGeneratorId();
             LinkedHashMap<Long, Long> pendingFees = pendingFeesMap.get(hash);
             if (pendingFees != null) {
@@ -435,7 +379,7 @@ public class AT extends AtMachineState {
                         Transaction transaction = atTransaction.build(block);
 
                         if (!transactionDb.hasTransaction(transaction.getIdCheckSignature(false))) {
-                            atTransaction.apply(accountService, transaction);
+                            atTransaction.apply(processingContext, transaction);
                             transactions.add(transaction);
                         }
                     } catch (SignumException.NotValidException e) {
@@ -446,7 +390,6 @@ public class AT extends AtMachineState {
             }
 
             if (!transactions.isEmpty()) {
-                // WATCH: Replace after transactions are converted!
                 transactionDb.saveTransactions(transactions);
                 block.setAtTransactions(transactions);
             }
@@ -465,10 +408,6 @@ public class AT extends AtMachineState {
         private boolean freezeWhenSameBalance;
         private long minActivationAmount;
 
-        /**
-         * @deprecated Use {@link #ATState(ATProcessingContext, long, byte[], int, int, long, boolean, long)}.
-         * Legacy constructor uses static Signum.getStores(). Scheduled for removal in v4.1.
-         */
         @Deprecated(since = "4.0", forRemoval = true)
         protected ATState(long atId, byte[] state,
                 int nextHeight, int sleepBetween, long prevBalance, boolean freezeWhenSameBalance,
@@ -483,18 +422,6 @@ public class AT extends AtMachineState {
             this.minActivationAmount = minActivationAmount;
         }
 
-        /**
-         * Context-aware constructor: uses injected AtStore via ATProcessingContext.
-         *
-         * @param ctx                    the AT processing context
-         * @param atId                   the AT identifier
-         * @param state                  serialized state bytes
-         * @param nextHeight             next block height this AT may run
-         * @param sleepBetween           sleep interval in blocks
-         * @param prevBalance            previous balance snapshot
-         * @param freezeWhenSameBalance  freeze flag when balance unchanged
-         * @param minActivationAmount    minimum activation amount threshold
-         */
         protected ATState(ATProcessingContext ctx, long atId, byte[] state,
                 int nextHeight, int sleepBetween, long prevBalance, boolean freezeWhenSameBalance,
                 long minActivationAmount) {
@@ -541,7 +468,7 @@ public class AT extends AtMachineState {
         }
 
         void setSleepBetween(int newSleepBetween) {
-            this.sleepBetween = newSleepBetween;
+            sleepBetween = newSleepBetween;
         }
 
         public long getPrevBalance() {
@@ -557,7 +484,7 @@ public class AT extends AtMachineState {
         }
 
         void setFreezeWhenSameBalance(boolean newFreezeWhenSameBalance) {
-            this.freezeWhenSameBalance = newFreezeWhenSameBalance;
+            freezeWhenSameBalance = newFreezeWhenSameBalance;
         }
 
         public long getMinActivationAmount() {
@@ -565,7 +492,7 @@ public class AT extends AtMachineState {
         }
 
         void setMinActivationAmount(long newMinActivationAmount) {
-            this.minActivationAmount = newMinActivationAmount;
+            minActivationAmount = newMinActivationAmount;
         }
     }
 

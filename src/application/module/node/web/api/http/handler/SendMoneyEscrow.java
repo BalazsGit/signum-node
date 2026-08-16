@@ -36,7 +36,7 @@ public final class SendMoneyEscrow extends CreateTransaction {
     @Override
     protected JsonElement processRequest(HttpServletRequest req) throws SignumException {
         Account sender = parameterService.getSenderAccount(req);
-        Long recipient = ParameterParser.getRecipientId(req);
+        Long recipient = ParameterParser.getRecipientId(req, fluxCapacitor);
         Long amountNQT = ParameterParser.getAmountNQT(req);
         String signerString = Convert.emptyToNull(req.getParameter(SIGNERS_PARAMETER));
 

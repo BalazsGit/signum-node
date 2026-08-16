@@ -6,6 +6,7 @@ import application.module.node.db.sql.dialects.DatabaseInstance;
 import application.module.node.db.sql.dialects.DatabaseInstanceFactory;
 import application.module.node.db.store.Dbs;
 import application.module.node.db.sql.SqlDbs;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.props.PropertyService;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.exception.FlywayValidateException;
@@ -63,6 +64,9 @@ public final class DbContext {
 
     /** Cache manager associated with this database context. */
     private DBCacheManagerImpl dbCacheManager;
+
+    /** Cached Dbs instance for this context (created lazily on first getDbsByDatabaseType call). */
+    private SqlDbs sqlDbs;
 
     /** Thread-local connection for transaction scoping. */
     private final ThreadLocal<Connection> localConnection = new ThreadLocal<>();
@@ -224,10 +228,26 @@ public final class DbContext {
     // ========================================================================
 
     /**
-     * Returns the {@link Dbs} implementation for the current dialect.
+     * Returns the cached {@link Dbs} instance for the current dialect.
+     * The underlying SqlDbs is created lazily and reused across calls.
      */
     public Dbs getDbsByDatabaseType() {
-        return new SqlDbs(this);
+        if (this.sqlDbs == null) {
+            this.sqlDbs = new SqlDbs(this);
+        }
+        return this.sqlDbs;
+    }
+
+    /**
+     * Sets the FluxCapacitor on the underlying SqlDbs for instance-scoped Block construction.
+     * Called by NodeCoreContext after fluxCapacitor is initialized.
+     *
+     * @param fluxCapacitor the node-scoped FluxCapacitor instance
+     */
+    public void setFluxCapacitor(FluxCapacitor fluxCapacitor) {
+        if (this.sqlDbs != null) {
+            this.sqlDbs.setFluxCapacitor(fluxCapacitor);
+        }
     }
 
     /** Currently a no-op placeholder for future query analysis support. */

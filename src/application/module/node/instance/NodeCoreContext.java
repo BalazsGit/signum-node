@@ -223,6 +223,9 @@ public final class NodeCoreContext {
     /** AT processor cache (instance-scoped to eliminate static Db polling). */
     private ATProcessorCache atProcessorCache;
 
+    /** Immutable context holder for AT processing dependencies. */
+    private ATProcessingContext atProcessingContext;
+
     /** Per-profile peer manager for isolated peer networking. */
     private PeerManager peerManager;
 
@@ -511,6 +514,15 @@ public final class NodeCoreContext {
                 this.dbs);
         ATProcessorCache.setInstance(this.atProcessorCache);
 
+        // Create AtConstants EARLY so it's available for SqlATStore wiring
+        this.atConstants = new AtConstants(this.fluxCapacitor);
+
+        // Wire AtConstants into SqlATStore (for getOrderedATs fee calculations)
+        ((SqlATStore) this.stores.getAtStore()).setAtConstants(this.atConstants);
+
+        // Initialize static AT module references with injected AtConstants
+        AtController.setAtConstants(this.atConstants);
+
         // SubscriptionService (lines 559-566)
         AliasStore aliasStore = this.stores.getAliasStore();
         this.subscriptionService = new SubscriptionServiceImpl(
@@ -552,6 +564,20 @@ public final class NodeCoreContext {
         this.indirectIncomingService = new IndirectIncomingServiceImpl(
                 this.stores.getIndirectIncomingStore(),
                 this.propertyService);
+
+        // Create ATProcessingContext AFTER AssetExchange is initialized
+        this.atProcessingContext = new ATProcessingContext(
+                this.atConstants,
+                this.atProcessorCache,
+                this.propertyService,
+                this.fluxCapacitor,
+                this.blockchain,
+                this.stores.getAtStore(),
+                this.stores.getAccountStore(),
+                this.accountService,
+                this.assetExchange,
+                this.stores.getIndirectIncomingStore(),
+                this.stores.getAssetStore());
 
         // BlockService (lines 599-605)
         NetworkParameters params = this.networkParameters;
@@ -620,7 +646,7 @@ public final class NodeCoreContext {
         // addBlockchainListeners (lines 646-651) - inline migration
         AT.HandleATBlockTransactionsListener handleAtBlockTransactionListener =
                 new AT.HandleATBlockTransactionsListener(
-                        this.accountService,
+                        this.atProcessingContext,
                         transactionDb);
         this.blockchainProcessor.addListener(
                 handleAtBlockTransactionListener,
@@ -674,15 +700,6 @@ public final class NodeCoreContext {
                 this.stores.getUnconfirmedTransactionStore(),
                 this.blockchain,
                 this.fluxCapacitor);
-
-        // Create AtConstants EARLY so it's available for WebServerContext and SqlATStore wiring
-        this.atConstants = new AtConstants(this.fluxCapacitor);
-
-        // Wire AtConstants into SqlATStore (for getOrderedATs fee calculations)
-        ((SqlATStore) this.stores.getAtStore()).setAtConstants(this.atConstants);
-
-        // Initialize static AT module references with injected AtConstants
-        AtController.setAtConstants(this.atConstants);
 
         // WebServerImpl + start() (lines 679-703)
         this.webServer = new WebServerImpl(new WebServerContext(
@@ -1061,6 +1078,15 @@ public final class NodeCoreContext {
      */
     public TransactionApplyContext getTransactionApplyContext() {
         return transactionApplyContext;
+    }
+
+    /**
+     * Returns the ATProcessingContext for AT module processing.
+     * Provides isolated, profile-scoped access to all services needed by
+     * AT components without requiring static Signum.getXxx() calls.
+     */
+    public ATProcessingContext getAtProcessingContext() {
+        return atProcessingContext;
     }
 
     /**

@@ -202,40 +202,6 @@ public class Block {
         this.fluxCapacitor = fluxCapacitor;
     }
 
-    /**
-     * @deprecated Use constructor with instance-scoped FluxCapacitor.
-     * This constructor delegates to activeInstance bridge. Scheduled for removal in v4.1.
-     */
-    @Deprecated
-    public Block(
-            int version,
-            int timestamp,
-            long previousBlockId,
-            long totalAmountNqt,
-            long totalFeeNqt,
-            long totalFeeCashBackNqt,
-            long totalFeeBurntNqt,
-            int payloadLength,
-            byte[] payloadHash,
-            byte[] generatorPublicKey,
-            byte[] generationSignature,
-            byte[] blockSignature,
-            byte[] previousBlockHash,
-            BigInteger cumulativeDifficulty,
-            long baseTarget,
-            long nextBlockId,
-            int height,
-            Long id,
-            long nonce,
-            byte[] blockAts)
-            throws SignumException.ValidationException {
-        this(version, timestamp, previousBlockId, totalAmountNqt, totalFeeNqt,
-                totalFeeCashBackNqt, totalFeeBurntNqt, payloadLength, payloadHash,
-                generatorPublicKey, generationSignature, blockSignature, previousBlockHash,
-                cumulativeDifficulty, baseTarget, nextBlockId, height, id, nonce, blockAts,
-                Signum.getFluxCapacitor());
-    }
-
     public Block(
             int version,
             int timestamp,
@@ -648,16 +614,6 @@ public class Block {
             }
             throw e;
         }
-    }
-
-    /**
-     * @deprecated Use {@link #parseBlock(JsonObject, int, FluxCapacitor)} with instance-scoped FluxCapacitor.
-     * This static overload delegates to activeInstance bridge. Scheduled for removal in v4.1.
-     */
-    @Deprecated
-    static Block parseBlock(JsonObject blockData, int height)
-            throws SignumException.ValidationException {
-        return parseBlock(blockData, height, Signum.getFluxCapacitor());
     }
 
     public byte[] getBytes() {

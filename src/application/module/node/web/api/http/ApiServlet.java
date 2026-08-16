@@ -6,6 +6,7 @@ import application.module.node.deeplink.DeeplinkQRCodeGenerator;
 import application.module.node.feesuggestions.FeeSuggestionCalculator;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
+import application.module.node.db.store.ATStore;
 import application.module.node.services.*;
 import application.module.node.util.JSON;
 import application.module.node.util.Subnet;
@@ -77,6 +78,7 @@ public final class ApiServlet extends HttpServlet {
         FeeSuggestionCalculator feeSuggestionCalculator = context.getFeeSuggestionCalculator();
         DeeplinkQRCodeGenerator deeplinkQRCodeGenerator = context.getDeepLinkQRCodeGenerator();
         FluxCapacitor fluxCapacitor = context.getFluxCapacitor();
+        ATStore atStore = context.getStores().getAtStore();
 
         map.put("broadcastTransaction",
                 new BroadcastTransaction(transactionProcessor, parameterService, transactionService, propertyService, fluxCapacitor));
@@ -95,7 +97,7 @@ public final class ApiServlet extends HttpServlet {
                 new DGSPurchase(parameterService, blockchain, accountService, timeService, apiTransactionManager, fluxCapacitor));
         map.put("dgsQuantityChange", new DGSQuantityChange(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
         map.put("dgsRefund", new DGSRefund(parameterService, blockchain, accountService, apiTransactionManager, fluxCapacitor));
-        map.put("encryptTo", new EncryptTo(parameterService, accountService));
+        map.put("encryptTo", new EncryptTo(parameterService, accountService, fluxCapacitor));
         map.put("generateToken", new GenerateToken(timeService));
         map.put("getAccount", new GetAccount(parameterService, accountService, blockchain, generator));
         map.put("getAccountsWithName", new GetAccountsWithName(accountService));
@@ -119,7 +121,7 @@ public final class ApiServlet extends HttpServlet {
         map.put("getAssetsByIssuer", new GetAssetsByIssuer(parameterService, assetExchange, accountService, blockchain));
         map.put("getAssetsByOwner", new GetAssetsByOwner(parameterService, assetExchange, accountService, blockchain));
         map.put("getAssetsByName", new GetAssetsByName(assetExchange, accountService, blockchain));
-        map.put("getAssetAccounts", new GetAssetAccounts(parameterService, assetExchange));
+        map.put("getAssetAccounts", new GetAssetAccounts(parameterService, assetExchange, fluxCapacitor));
         map.put("getBalance", new GetBalance(parameterService));
         map.put("getBlock", new GetBlock(blockchain, blockService));
         map.put("getBlockId", new GetBlockId(blockchain));
@@ -221,8 +223,8 @@ public final class ApiServlet extends HttpServlet {
         map.put("getATs", new GetATs(atService, blockchain));
         map.put("getATIds", new GetATIds(atService));
         map.put("getATLong", GetATLong.instance);
-        map.put("getATMapValue", new GetATMapValue());
-        map.put("getATMapValues", new GetATMapValues());
+        map.put("getATMapValue", new GetATMapValue(atStore));
+        map.put("getATMapValues", new GetATMapValues(atStore));
         map.put("getAccountATs", new GetAccountATs(parameterService, atService));
         map.put("generateSendTransactionQRCode", new GenerateDeeplinkQRCode(deeplinkQRCodeGenerator));
         map.put("generateDeeplink", GenerateDeeplink.instance);

@@ -1,6 +1,6 @@
 package application.module.node.web.api.http.handler;
 
-import application.module.node.Signum;
+import application.module.node.db.store.ATStore;
 import application.module.node.util.Convert;
 import application.module.node.web.api.http.ApiServlet;
 import application.module.node.web.api.http.common.LegacyDocTag;
@@ -15,8 +15,11 @@ import static application.module.node.web.api.http.common.ResultFields.VALUE_RES
 
 public final class GetATMapValue extends ApiServlet.JsonRequestHandler {
 
-    public GetATMapValue() {
+    private final ATStore atStore;
+
+    public GetATMapValue(ATStore atStore) {
         super(new LegacyDocTag[] { LegacyDocTag.AT }, AT_PARAMETER, KEY1_PARAMETER, KEY2_PARAMETER);
+        this.atStore = atStore;
     }
 
     @Override
@@ -41,7 +44,7 @@ public final class GetATMapValue extends ApiServlet.JsonRequestHandler {
         long k1 = Convert.parseUnsignedLong(key1);
         long k2 = Convert.parseUnsignedLong(key2);
 
-        String value = Convert.toUnsignedLong(Signum.getStores().getAtStore().getMapValue(atId, k1, k2));
+        String value = Convert.toUnsignedLong(atStore.getMapValue(atId, k1, k2));
 
         JsonObject response = new JsonObject();
         response.addProperty(VALUE_RESPONSE, value);

@@ -18,7 +18,6 @@ import application.module.node.Appendix;
 import application.module.node.Asset;
 import application.module.node.Attachment;
 import application.module.node.Block;
-import application.module.node.Signum;
 import application.module.node.SignumException.NotValidException;
 import application.module.node.Constants;
 import application.module.node.Genesis;
@@ -87,7 +86,6 @@ public class AtTransaction {
 
     /**
      * Builds a Transaction from this AT transaction data.
-     * Accepts blockchain height to eliminate static Signum.getBlockchain() calls.
      *
      * @param block the block containing this transaction
      * @param blockchainHeight current blockchain height for message appendix
@@ -147,32 +145,7 @@ public class AtTransaction {
     }
 
     /**
-     * Applies this AT transaction to the blockchain state.
-     * Deprecated bridge: uses static Signum accessors for backward compatibility.
-     *
-     * @param accountService the account service for balance operations
-     * @param transaction the transaction being applied
-     * @deprecated Use {@link #apply(ATProcessingContext, Transaction)} instead. Scheduled for removal in v4.1.
-     */
-    @Deprecated(since = "4.0", forRemoval = true)
-    public void apply(AccountService accountService, Transaction transaction) {
-        apply(new ATProcessingContext(
-                AtController.getAtConstants(),
-                null,
-                Signum.getPropertyService(),
-                Signum.getFluxCapacitor(),
-                Signum.getBlockchain(),
-                Signum.getStores().getAtStore(),
-                Signum.getStores().getAccountStore(),
-                accountService,
-                Signum.getAssetExchange(),
-                Signum.getStores().getIndirectIncomingStore(),
-                Signum.getStores().getAssetStore()), transaction);
-    }
-
-    /**
      * Applies this AT transaction using the provided processing context for all dependencies.
-     * Replaces static Signum.getXxx() calls with injected dependencies.
      *
      * @param context the AT processing context containing all required dependencies
      * @param transaction the transaction being applied

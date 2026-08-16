@@ -4,6 +4,7 @@ import application.module.node.Account;
 import application.module.node.SignumException;
 import application.module.node.crypto.EncryptedData;
 import application.module.node.services.AccountService;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.services.ParameterService;
 import application.module.node.web.api.http.ApiServlet;
 import application.module.node.web.api.http.common.JSONData;
@@ -20,18 +21,20 @@ public final class EncryptTo extends ApiServlet.JsonRequestHandler {
 
     private final ParameterService parameterService;
     private final AccountService accountService;
+    private final FluxCapacitor fluxCapacitor;
 
-    public EncryptTo(ParameterService parameterService, AccountService accountService) {
+    public EncryptTo(ParameterService parameterService, AccountService accountService, FluxCapacitor fluxCapacitor) {
         super(new LegacyDocTag[] { LegacyDocTag.MESSAGES }, RECIPIENT_PARAMETER, MESSAGE_TO_ENCRYPT_PARAMETER,
                 MESSAGE_TO_ENCRYPT_IS_TEXT_PARAMETER, SECRET_PHRASE_PARAMETER);
         this.parameterService = parameterService;
         this.accountService = accountService;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     @Override
     protected JsonElement processRequest(HttpServletRequest req) throws SignumException {
 
-        long recipientId = ParameterParser.getRecipientId(req);
+        long recipientId = ParameterParser.getRecipientId(req, fluxCapacitor);
         Account recipientAccount = accountService.getAccount(recipientId);
         if (recipientAccount == null || recipientAccount.getPublicKey() == null) {
             return INCORRECT_RECIPIENT;

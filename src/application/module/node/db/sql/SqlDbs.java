@@ -4,6 +4,7 @@ import application.module.node.db.BlockDb;
 import application.module.node.db.PeerDb;
 import application.module.node.db.TransactionDb;
 import application.module.node.db.store.Dbs;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 
 public class SqlDbs implements Dbs {
 
@@ -27,6 +28,16 @@ public class SqlDbs implements Dbs {
         this.peerDb = new SqlPeerDb(dbContext);
         // Wire TransactionDb into SqlBlockDb to break circular dependency
         ((SqlBlockDb) this.blockDb).setTransactionDb(this.transactionDb);
+    }
+
+    /**
+     * Sets the FluxCapacitor on SqlBlockDb for instance-scoped Block construction.
+     * Called by NodeCoreContext during initialization.
+     *
+     * @param fluxCapacitor the node-scoped FluxCapacitor instance
+     */
+    public void setFluxCapacitor(FluxCapacitor fluxCapacitor) {
+        ((SqlBlockDb) this.blockDb).setFluxCapacitor(fluxCapacitor);
     }
 
     @Override

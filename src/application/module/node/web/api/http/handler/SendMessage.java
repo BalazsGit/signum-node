@@ -29,7 +29,7 @@ public final class SendMessage extends CreateTransaction {
 
     @Override
     protected JsonElement processRequest(HttpServletRequest req) throws SignumException {
-        long recipient = ParameterParser.getRecipientId(req);
+        long recipient = ParameterParser.getRecipientId(req, fluxCapacitor);
         Account account = parameterService.getSenderAccount(req);
         return createTransaction(req, account, recipient, 0, Attachment.ARBITRARY_MESSAGE);
     }

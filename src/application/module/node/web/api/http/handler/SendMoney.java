@@ -29,7 +29,7 @@ public final class SendMoney extends CreateTransaction {
 
     @Override
     protected JsonElement processRequest(HttpServletRequest req) throws SignumException {
-        long recipient = ParameterParser.getRecipientId(req);
+        long recipient = ParameterParser.getRecipientId(req, fluxCapacitor);
         long amountNQT = ParameterParser.getAmountNQT(req);
         Account account = parameterService.getSenderAccount(req);
         return createTransaction(req, account, recipient, amountNQT);

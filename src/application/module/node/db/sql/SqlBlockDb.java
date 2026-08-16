@@ -4,6 +4,7 @@ import application.module.node.Block;
 import application.module.node.SignumException;
 import application.module.node.db.BlockDb;
 import application.module.node.db.TransactionDb;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.schema.tables.records.BlockRecord;
 import org.jooq.*;
 import org.jooq.Record;
@@ -22,6 +23,7 @@ public class SqlBlockDb implements BlockDb {
 
     private TransactionDb transactionDb;
     private final DbContext dbContext;
+    private FluxCapacitor fluxCapacitor;
 
     /** Default constructor for backward compatibility (transactionDb will be null). */
     @Deprecated
@@ -60,6 +62,16 @@ public class SqlBlockDb implements BlockDb {
      */
     public void setTransactionDb(TransactionDb transactionDb) {
         this.transactionDb = transactionDb;
+    }
+
+    /**
+     * Sets the FluxCapacitor for instance-scoped Block construction.
+     * Called by SqlDbs during initialization to eliminate static Signum.getFluxCapacitor() calls.
+     *
+     * @param fluxCapacitor the node-scoped FluxCapacitor instance
+     */
+    public void setFluxCapacitor(FluxCapacitor fluxCapacitor) {
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     public Block findBlock(long blockId) {
@@ -170,7 +182,7 @@ public class SqlBlockDb implements BlockDb {
                 totalFeeCashBackNQT, totalFeeBurntNQT,
                 payloadLength, payloadHash,
                 generatorPublicKey, generationSignature, blockSignature, previousBlockHash,
-                cumulativeDifficulty, baseTarget, nextBlockId, height, id, nonce, blockATs);
+                cumulativeDifficulty, baseTarget, nextBlockId, height, id, nonce, blockATs, fluxCapacitor);
     }
 
     public void saveBlock(DSLContext ctx, Block block) {

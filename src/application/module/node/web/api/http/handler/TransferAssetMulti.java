@@ -51,7 +51,7 @@ public final class TransferAssetMulti extends CreateTransaction {
     @Override
     protected JsonElement processRequest(HttpServletRequest req) throws SignumException {
 
-        long recipient = ParameterParser.getRecipientId(req);
+        long recipient = ParameterParser.getRecipientId(req, fluxCapacitor);
         Account account = parameterService.getSenderAccount(req);
 
         String assetIdsString = Convert.emptyToNull(req.getParameter(ASSET_IDS_AND_QUANTITIES_PARAMETER));

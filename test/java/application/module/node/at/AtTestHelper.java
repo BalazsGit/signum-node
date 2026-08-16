@@ -3,6 +3,7 @@ package application.module.node.at;
 import application.module.node.Account;
 import application.module.node.Blockchain;
 import application.module.node.Signum;
+import application.module.node.assetexchange.AssetExchange;
 import application.module.node.common.QuickMocker;
 import application.module.node.common.TestConstants;
 import application.module.node.db.SignumKey;
@@ -10,10 +11,13 @@ import application.module.node.db.VersionedBatchEntityTable;
 import application.module.node.db.VersionedEntityTable;
 import application.module.node.db.store.ATStore;
 import application.module.node.db.store.AccountStore;
+import application.module.node.db.store.AssetStore;
+import application.module.node.db.store.IndirectIncomingStore;
 import application.module.node.db.store.Stores;
 import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
+import application.module.node.services.AccountService;
 import application.module.node.util.Convert;
 import org.mockito.ArgumentMatchers;
 
@@ -31,6 +35,7 @@ public class AtTestHelper {
 
     private static List<AT> addedAts = new ArrayList<>();
     private static Consumer<AT> onAtAdded;
+    private static ATProcessingContext testContext;
 
     // Hello World example compiled with BlockTalk v0.0.0
     static byte[] HELLO_WORLD_CREATION_BYTES = getCreationBytes((short) 2, 1, Convert.parseHexString(
@@ -79,6 +84,11 @@ public class AtTestHelper {
         SignumKey.LongKeyFactory<Account> mockAccountKeyFactory = mock(SignumKey.LongKeyFactory.class);
         Account mockAccount = mock(Account.class);
         Account.Balance mockAccountBalance = mock(Account.Balance.class);
+        ATProcessorCache mockProcessorCache = mock(ATProcessorCache.class);
+        AccountService mockAccountService = mock(AccountService.class);
+        AssetExchange mockAssetExchange = mock(AssetExchange.class);
+        IndirectIncomingStore mockIndirectIncomingStore = mock(IndirectIncomingStore.class);
+        AssetStore mockAssetStore = mock(AssetStore.class);
         mockStatic(Account.class);
 
         doAnswer(invoke -> {
@@ -137,6 +147,23 @@ public class AtTestHelper {
         when(mockStores.getAtStore()).thenReturn(mockAtStore);
         when(Signum.getStores()).thenReturn(mockStores);
         when(Signum.getFluxCapacitor()).thenReturn(mockFluxCapacitor);
+
+        testContext = new ATProcessingContext(
+                AtController.getAtConstants(),
+                mockProcessorCache,
+                mockPropertyService,
+                mockFluxCapacitor,
+                mockBlockchain,
+                mockAtStore,
+                mockAccountStore,
+                mockAccountService,
+                mockAssetExchange,
+                mockIndirectIncomingStore,
+                mockAssetStore);
+    }
+
+    static ATProcessingContext getTestContext() {
+        return testContext;
     }
 
     static void clearAddedAts() {
