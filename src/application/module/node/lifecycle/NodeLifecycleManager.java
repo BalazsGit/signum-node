@@ -358,11 +358,11 @@ public class NodeLifecycleManager {
         Runnable startupTask = () -> {
             try {
                 Signum signum = new Signum(profile, Paths.get(confFolderPath));
-                // Set active instance BEFORE start() so that static bridge getters
-                // (e.g., Signum.getFluxCapacitor()) work during doInitialize().
-                // These bridge calls are used by Block constructor, SqlBlockDb.loadBlock(),
-                // and other legacy code paths still inside initServicesAndHooks().
-                Signum.setActive(signum);
+                // Register with NodeFactory first. The factory tracks instances and provides
+                // instance lookup via get(profileName) - no singleton "active" needed.
+                // Note: legacy bootstrap path (Signum.init()) still calls setActive() for
+                // backwards compatibility. Multi-node startup does not use it to avoid
+                // cross-node state mutation when multiple nodes start concurrently.
                 NodeFactory.getInstance().register(signum);
 
                 signum.start();

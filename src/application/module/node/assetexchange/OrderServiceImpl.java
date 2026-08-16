@@ -19,6 +19,7 @@ import java.util.Collection;
 
 class OrderServiceImpl {
 
+    private final Blockchain blockchain;
     private final OrderStore orderStore;
     private final VersionedEntityTable<Ask> askOrderTable;
     private final LongKeyFactory<Ask> askOrderDbKeyFactory;
@@ -27,7 +28,12 @@ class OrderServiceImpl {
     private final AccountService accountService;
     private final TradeServiceImpl tradeService;
 
-    public OrderServiceImpl(OrderStore orderStore, AccountService accountService, TradeServiceImpl tradeService) {
+    /**
+     * Constructs OrderServiceImpl with instance-scoped dependencies.
+     * Eliminates static Signum.getBlockchain() and Signum.getStores() calls.
+     */
+    public OrderServiceImpl(Blockchain blockchain, OrderStore orderStore, AccountService accountService, TradeServiceImpl tradeService) {
+        this.blockchain = blockchain;
         this.orderStore = orderStore;
         this.askOrderTable = orderStore.getAskOrderTable();
         this.askOrderDbKeyFactory = orderStore.getAskOrderDbKeyFactory();
@@ -92,7 +98,7 @@ class OrderServiceImpl {
 
     public CollectionWithIndex<OrderJournal> getTradeJournal(final long accountId, final long assetId, int from,
             int to) {
-        Collection<Transaction> transactions = Signum.getBlockchain().getTransactions(accountId,
+        Collection<Transaction> transactions = blockchain.getTransactions(accountId,
                 TransactionType.TYPE_COLORED_COINS.getType(), TransactionType.SUBTYPE_COLORED_COINS_ASK_ORDER_PLACEMENT,
                 TransactionType.SUBTYPE_COLORED_COINS_BID_ORDER_PLACEMENT, from, to);
 
@@ -111,7 +117,7 @@ class OrderServiceImpl {
         }
 
         // check the cancellations
-        transactions = Signum.getBlockchain().getTransactions(accountId,
+        transactions = blockchain.getTransactions(accountId,
                 TransactionType.TYPE_COLORED_COINS.getType(),
                 TransactionType.SUBTYPE_COLORED_COINS_ASK_ORDER_CANCELLATION,
                 TransactionType.SUBTYPE_COLORED_COINS_BID_ORDER_CANCELLATION, -1, -1);
@@ -153,11 +159,11 @@ class OrderServiceImpl {
     }
 
     private Ask getNextAskOrder(long assetId) {
-        return Signum.getStores().getOrderStore().getNextOrder(assetId);
+        return orderStore.getNextOrder(assetId);
     }
 
     private Bid getNextBidOrder(long assetId) {
-        return Signum.getStores().getOrderStore().getNextBid(assetId);
+        return orderStore.getNextBid(assetId);
     }
 
     private void matchOrders(long assetId) {
@@ -172,7 +178,7 @@ class OrderServiceImpl {
                 break;
             }
 
-            Trade trade = tradeService.addTrade(assetId, Signum.getBlockchain().getLastBlock(), askOrder, bidOrder);
+            Trade trade = tradeService.addTrade(assetId, blockchain.getLastBlock(), askOrder, bidOrder);
 
             askOrderUpdateQuantityQNT(askOrder,
                     Convert.safeSubtract(askOrder.getQuantityQNT(), trade.getQuantityQNT()));

@@ -620,7 +620,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         this.dbType = determinedDbType;
 
         String determinedDbVersion = "N/A";
-        try (Connection con = Db.getConnection()) {
+        // Use instance-scoped DbContext from stores instead of static Db singleton
+        // to enable multi-node isolation (each node has its own Connection pool)
+        try (Connection con = stores.getDbContext().getConnection()) {
             DatabaseMetaData metaData = con.getMetaData();
             determinedDbVersion = metaData.getDatabaseProductVersion();
         } catch (SQLException e) {
@@ -992,7 +994,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                         logger.debug("GetMoreBlocks, wait for other threads to catch up");
                                         break;
                                     }
-                                    block = Block.parseBlock(blockData, height);
+                                    block = Block.parseBlock(blockData, height, fluxCapacitor);
                                     // Make sure it maps back to chain
                                     if (lastBlock.getId() != block.getPreviousBlockId()) {
                                         logger.debug("Discarding downloaded data. Last downloaded blocks is rubbish");
@@ -2838,7 +2840,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
     @Override
     public void processPeerBlock(JsonObject request, Peer peer) throws SignumException {
-        Block newBlock = Block.parseBlock(request, blockchain.getHeight());
+        Block newBlock = Block.parseBlock(request, blockchain.getHeight(), fluxCapacitor);
         // * This process takes care of the blocks that is announced by peers We do not
         // want to be fed forks.
         Block chainblock = downloadCache.getLastBlock();
@@ -3195,7 +3197,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     transactions,
                     0, byteAts,
                     -1,
-                    Constants.INITIAL_BASE_TARGET);
+                    Constants.INITIAL_BASE_TARGET,
+                    fluxCapacitor);
             blockService.setPrevious(genesisBlock, null);
             addBlock(genesisBlock);
         } catch (SignumException.ValidationException e) {
@@ -4206,7 +4209,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         fluxCapacitor.getValue(FluxValues.MAX_PAYLOAD_LENGTH) - payloadSize, payloadHash,
                         publicKey,
                         generationSignature, null, previousBlockHash, new ArrayList<>(orderedBlockTransactions), nonce,
-                        byteAts, previousBlock.getHeight(), Constants.INITIAL_BASE_TARGET);
+                        byteAts, previousBlock.getHeight(), Constants.INITIAL_BASE_TARGET,
+                        fluxCapacitor);
             } catch (SignumException.ValidationException e) {
                 // shouldn't happen because all transactions are already validated
                 logger.info("Error generating block", e);

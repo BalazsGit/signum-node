@@ -131,4 +131,16 @@ public class Stores {
     public IndirectIncomingStore getIndirectIncomingStore() {
         return indirectIncomingStore;
     }
+
+    /**
+     * Returns the per-instance {@link DbContext} for this stores instance.
+     * Enables multi-node isolation by providing instance-scoped database access
+     * instead of static {@link Db} singleton calls.
+     *
+     * @return the DbContext managing connections, transactions, and migrations
+     * @since 4.1
+     */
+    public DbContext getDbContext() {
+        return dbContext;
+    }
 }

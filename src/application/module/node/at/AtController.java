@@ -528,9 +528,6 @@ public abstract class AtController {
         return totalAmount;
     }
 
-    /**
-     * @deprecated Temporary bridge — builds context via static Signum accessors.
-     */
     @Deprecated(since = "4.0", forRemoval = true)
     private static ATProcessingContext createLegacyContext() {
         return new ATProcessingContext(

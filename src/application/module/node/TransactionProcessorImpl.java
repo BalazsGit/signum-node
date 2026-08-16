@@ -3,6 +3,7 @@ package application.module.node;
 import application.module.node.SignumException.ValidationException;
 import application.module.node.db.store.Dbs;
 import application.module.node.db.store.Stores;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.peer.Peer;
 import application.module.node.peer.Peers;
@@ -46,6 +47,7 @@ public class TransactionProcessorImpl implements TransactionProcessor {
     private final Listeners<List<? extends Transaction>, Event> transactionListeners = new Listeners<>();
 
     private final EconomicClustering economicClustering;
+    private final FluxCapacitor fluxCapacitor;
 
     private final Stores stores;
     private final TimeService timeService;
@@ -57,11 +59,16 @@ public class TransactionProcessorImpl implements TransactionProcessor {
     private final Function<Peer, List<Transaction>> foodDispenser;
     private final BiConsumer<Peer, List<Transaction>> doneFeedingLog;
 
+    /**
+     * Constructs TransactionProcessorImpl with instance-scoped dependencies.
+     * Eliminates static Signum.getFluxCapacitor() calls.
+     */
     public TransactionProcessorImpl(PropertyService propertyService,
             EconomicClustering economicClustering, Blockchain blockchain, Stores stores, TimeService timeService,
             Dbs dbs, AccountService accountService,
-            TransactionService transactionService, ThreadPool threadPool) {
+            TransactionService transactionService, FluxCapacitor fluxCapacitor, ThreadPool threadPool) {
         this.economicClustering = economicClustering;
+        this.fluxCapacitor = fluxCapacitor;
         this.blockchain = blockchain;
         this.timeService = timeService;
 
@@ -327,8 +334,8 @@ public class TransactionProcessorImpl implements TransactionProcessor {
 
     @Override
     public int getTransactionVersion(int previousBlockHeight) {
-        if (Signum.getFluxCapacitor().getValue(FluxValues.DIGITAL_GOODS_STORE, previousBlockHeight)) {
-            if (Signum.getFluxCapacitor().getValue(FluxValues.SMART_FEES, previousBlockHeight)) {
+        if (fluxCapacitor.getValue(FluxValues.DIGITAL_GOODS_STORE, previousBlockHeight)) {
+            if (fluxCapacitor.getValue(FluxValues.SMART_FEES, previousBlockHeight)) {
                 return 2;
             }
             return 1;

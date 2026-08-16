@@ -2,6 +2,7 @@ package application.module.node;
 
 import application.module.node.crypto.Crypto;
 import application.module.node.db.TransactionDb;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.peer.Peer;
 import application.module.node.util.Convert;
@@ -46,7 +47,7 @@ import org.slf4j.LoggerFactory;
  * synchronized blocks with double-checked locking.
  * </li>
  * <li>
- * <b>Effective immutability:</b> After signing, the block’s core state does
+ * <b>Effective immutability:</b> After signing, the block's core state does
  * not change. Transaction collections are exposed as unmodifiable lists.
  * </li>
  * </ul>
@@ -120,6 +121,18 @@ public class Block {
     private volatile Peer downloadedFrom = null;
     private volatile int byteLength = 0;
 
+    private final FluxCapacitor fluxCapacitor;
+    private TransactionDb transactionDb;
+
+    /**
+     * Sets the TransactionDb for instance-scoped transaction queries.
+     * Called by BlockchainImpl when loading blocks from database.
+     * @param transactionDb the node-scoped TransactionDb instance
+     */
+    void setTransactionDb(TransactionDb transactionDb) {
+        this.transactionDb = transactionDb;
+    }
+
     Block(
             int version,
             int timestamp,
@@ -138,9 +151,10 @@ public class Block {
             long nonce,
             byte[] blockAts,
             int height,
-            long baseTarget)
+            long baseTarget,
+            FluxCapacitor fluxCapacitor)
             throws SignumException.ValidationException {
-        if (payloadLength > Signum.getFluxCapacitor().getValue(
+        if (payloadLength > fluxCapacitor.getValue(
                 FluxValues.MAX_PAYLOAD_LENGTH, height)
                 || payloadLength < 0) {
             throw new SignumException.NotValidException(
@@ -167,7 +181,7 @@ public class Block {
         this.previousBlockHash = previousBlockHash;
         if (transactions != null) {
             this.blockTransactions = Collections.unmodifiableList(transactions);
-            if (blockTransactions.size() > (Signum.getFluxCapacitor().getValue(
+            if (blockTransactions.size() > (fluxCapacitor.getValue(
                     FluxValues.MAX_NUMBER_TRANSACTIONS, height))) {
                 throw new SignumException.NotValidException(
                         "attempted to create a block with "
@@ -185,8 +199,14 @@ public class Block {
         this.nonce = nonce;
         this.blockAts = blockAts;
         this.baseTarget = baseTarget;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
+    /**
+     * @deprecated Use constructor with instance-scoped FluxCapacitor.
+     * This constructor delegates to activeInstance bridge. Scheduled for removal in v4.1.
+     */
+    @Deprecated
     public Block(
             int version,
             int timestamp,
@@ -209,35 +229,55 @@ public class Block {
             long nonce,
             byte[] blockAts)
             throws SignumException.ValidationException {
-        this(
-                version,
-                timestamp,
-                previousBlockId,
-                totalAmountNqt,
-                totalFeeNqt,
-                totalFeeCashBackNqt,
-                totalFeeBurntNqt,
-                payloadLength,
-                payloadHash,
-                generatorPublicKey,
-                generationSignature,
-                blockSignature,
-                previousBlockHash,
-                null,
-                nonce,
-                blockAts,
-                height,
-                baseTarget);
+        this(version, timestamp, previousBlockId, totalAmountNqt, totalFeeNqt,
+                totalFeeCashBackNqt, totalFeeBurntNqt, payloadLength, payloadHash,
+                generatorPublicKey, generationSignature, blockSignature, previousBlockHash,
+                cumulativeDifficulty, baseTarget, nextBlockId, height, id, nonce, blockAts,
+                Signum.getFluxCapacitor());
+    }
+
+    public Block(
+            int version,
+            int timestamp,
+            long previousBlockId,
+            long totalAmountNqt,
+            long totalFeeNqt,
+            long totalFeeCashBackNqt,
+            long totalFeeBurntNqt,
+            int payloadLength,
+            byte[] payloadHash,
+            byte[] generatorPublicKey,
+            byte[] generationSignature,
+            byte[] blockSignature,
+            byte[] previousBlockHash,
+            BigInteger cumulativeDifficulty,
+            long baseTarget,
+            long nextBlockId,
+            int height,
+            Long id,
+            long nonce,
+            byte[] blockAts,
+            FluxCapacitor fluxCapacitor)
+            throws SignumException.ValidationException {
+        // Delegate to primary constructor for common field initialization
+        this(version, timestamp, previousBlockId, totalAmountNqt, totalFeeNqt,
+                totalFeeCashBackNqt, totalFeeBurntNqt, payloadLength, payloadHash,
+                generatorPublicKey, generationSignature, blockSignature, previousBlockHash,
+                null, nonce, blockAts, height, baseTarget, fluxCapacitor);
+        // Set additional fields not managed by primary constructor
         this.cumulativeDifficulty = cumulativeDifficulty == null
                 ? BigInteger.ZERO
                 : cumulativeDifficulty;
         this.nextBlockId = nextBlockId;
-        this.height = height;
+        // height already set by primary constructor via parameter
         this.id = id;
     }
 
     private TransactionDb transactionDb() {
-        return Signum.getDbs().getTransactionDb();
+        if (transactionDb == null) {
+            throw new IllegalStateException("TransactionDb not set for block; call setTransactionDb() before accessing transactions");
+        }
+        return transactionDb;
     }
 
     public boolean isVerified() {
@@ -372,7 +412,7 @@ public class Block {
 
     public long getCapacityBaseTarget() {
         long capacityBaseTarget = baseTarget;
-        if (Signum.getFluxCapacitor().getValue(FluxValues.POC_PLUS, height)) {
+        if (fluxCapacitor.getValue(FluxValues.POC_PLUS, height)) {
             // Base target encoded as two floats, one for the commitment and the other the
             // classical base target
             float capacityBaseTargetFloat = Float.intBitsToFloat((int) (baseTarget & 0xFFFFFFFFL));
@@ -382,7 +422,7 @@ public class Block {
     }
 
     public long getAverageCommitment() {
-        if (Signum.getFluxCapacitor().getValue(FluxValues.POC_PLUS, height)) {
+        if (fluxCapacitor.getValue(FluxValues.POC_PLUS, height)) {
             // Base target encoded as two floats, one for the commitment and the other the
             // classical base target
             float commitmentBaseTargetFloat = Float.intBitsToFloat((int) ((baseTarget) >> 32));
@@ -538,7 +578,7 @@ public class Block {
     // Option 1: Move variables closer to when they're needed
     // Option 2: Make variables final, if possible
     @SuppressWarnings("checkstyle:VariableDeclarationUsageDistanceCheck")
-    static Block parseBlock(JsonObject blockData, int height)
+    static Block parseBlock(JsonObject blockData, int height, FluxCapacitor fluxCapacitor)
             throws SignumException.ValidationException {
         try {
             int version = JSON.getAsInt(blockData.get("version"));
@@ -567,8 +607,7 @@ public class Block {
             long nonce = Convert.parseUnsignedLong(JSON.getAsString(blockData.get("nonce")));
             long baseTarget = Convert.parseUnsignedLong(
                     JSON.getAsString(blockData.get("baseTarget")));
-            if (Signum.getFluxCapacitor().getValue(
-                    FluxValues.POC_PLUS, height) && baseTarget == 0L) {
+            if (fluxCapacitor.getValue(FluxValues.POC_PLUS, height) && baseTarget == 0L) {
                 throw new SignumException.NotValidException("Block received without a baseTarget");
             }
             SortedMap<Long, Transaction> blockTransactions = new TreeMap<>();
@@ -582,7 +621,7 @@ public class Block {
                             "Block contains duplicate transactions: " + transaction.getStringId());
                 }
             }
-            byte[] blockAts = Convert.parseHexString(JSON.getAsString(blockData.get("blockATs")));
+            byte[] blockAts = Convert.parseHexString(JSON.getAsString(blockData.get("blockAts")));
             return new Block(
                     version,
                     timestamp,
@@ -601,13 +640,24 @@ public class Block {
                     nonce,
                     blockAts,
                     height,
-                    baseTarget);
+                    baseTarget,
+                    fluxCapacitor);
         } catch (SignumException.ValidationException | RuntimeException e) {
             if (logger.isDebugEnabled()) {
                 logger.debug("Failed to parse block: {}", JSON.toJsonString(blockData));
             }
             throw e;
         }
+    }
+
+    /**
+     * @deprecated Use {@link #parseBlock(JsonObject, int, FluxCapacitor)} with instance-scoped FluxCapacitor.
+     * This static overload delegates to activeInstance bridge. Scheduled for removal in v4.1.
+     */
+    @Deprecated
+    static Block parseBlock(JsonObject blockData, int height)
+            throws SignumException.ValidationException {
+        return parseBlock(blockData, height, Signum.getFluxCapacitor());
     }
 
     public byte[] getBytes() {

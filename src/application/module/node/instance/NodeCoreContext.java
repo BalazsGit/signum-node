@@ -445,8 +445,8 @@ public final class NodeCoreContext {
                 this.propertyService);
         this.aliasService.addDefaultTLDs();
 
-        // EconomicClustering (line 522)
-        this.economicClustering = new EconomicClustering(this.blockchain);
+        // EconomicClustering - instance-scoped (P3.7: eliminates Signum.getFluxCapacitor() calls)
+        this.economicClustering = new EconomicClustering(this.blockchain, this.fluxCapacitor);
 
         // AccountService (lines 524-525)
         this.accountService = new AccountServiceImpl(
@@ -477,6 +477,7 @@ public final class NodeCoreContext {
                 this.blockchain);
 
         // TransactionProcessor (lines 548-556)
+        // FIX: Added this.fluxCapacitor as 9th parameter before this.threadPool
         this.transactionProcessor = new TransactionProcessorImpl(
                 this.propertyService,
                 this.economicClustering,
@@ -486,6 +487,7 @@ public final class NodeCoreContext {
                 this.dbs,
                 this.accountService,
                 this.transactionService,
+                this.fluxCapacitor,
                 this.threadPool);
     }
 

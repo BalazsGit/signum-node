@@ -1,5 +1,6 @@
 package application.module.node;
 
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.util.JSON;
 import org.slf4j.Logger;
@@ -28,9 +29,11 @@ public final class EconomicClustering {
     private static final Logger logger = LoggerFactory.getLogger(EconomicClustering.class);
 
     private final Blockchain blockchain;
+    private final FluxCapacitor fluxCapacitor;
 
-    public EconomicClustering(Blockchain blockchain) {
+    public EconomicClustering(Blockchain blockchain, FluxCapacitor fluxCapacitor) {
         this.blockchain = blockchain;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     public Block getECBlock(int timestamp) {
@@ -50,11 +53,11 @@ public final class EconomicClustering {
 
     public boolean verifyFork(Transaction transaction) {
         try {
-            if (!Signum.getFluxCapacitor().getValue(FluxValues.DIGITAL_GOODS_STORE)) {
+            if (!fluxCapacitor.getValue(FluxValues.DIGITAL_GOODS_STORE)) {
                 return true;
             }
             if (transaction.getReferencedTransactionFullHash() != null
-                    && !Signum.getFluxCapacitor().getValue(FluxValues.SPEEDWAY)) {
+                    && !fluxCapacitor.getValue(FluxValues.SPEEDWAY)) {
                 // TODO: remove this conditional above in the future, do the EC check regardless
                 // of a full hash reference
                 return true;

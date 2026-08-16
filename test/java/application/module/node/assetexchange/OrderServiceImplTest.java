@@ -1,5 +1,6 @@
 package application.module.node.assetexchange;
 
+import application.module.node.Blockchain;
 import application.module.node.Order.Ask;
 import application.module.node.Order.Bid;
 import application.module.node.db.SignumKey;
@@ -21,6 +22,7 @@ public class OrderServiceImplTest {
 
     private OrderServiceImpl t;
 
+    private Blockchain blockchainMock;
     private OrderStore orderStoreMock;
     private VersionedEntityTable<Ask> mockAskOrderTable;
     private LongKeyFactory<Ask> mockAskOrderDbKeyFactory;
@@ -32,6 +34,7 @@ public class OrderServiceImplTest {
 
     @Before
     public void setUp() {
+        blockchainMock = mock(Blockchain.class);
         orderStoreMock = mock(OrderStore.class);
         mockAskOrderTable = mock(VersionedEntityTable.class);
         mockAskOrderDbKeyFactory = mock(LongKeyFactory.class);
@@ -46,7 +49,7 @@ public class OrderServiceImplTest {
         when(orderStoreMock.getBidOrderTable()).thenReturn(mockBidOrderTable);
         when(orderStoreMock.getBidOrderDbKeyFactory()).thenReturn(mockBidOrderDbKeyFactory);
 
-        t = new OrderServiceImpl(orderStoreMock, accountServiceMock, tradeServiceMock);
+        t = new OrderServiceImpl(blockchainMock, orderStoreMock, accountServiceMock, tradeServiceMock);
     }
 
     @Test

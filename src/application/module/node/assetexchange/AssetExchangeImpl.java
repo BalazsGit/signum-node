@@ -33,7 +33,7 @@ public class AssetExchangeImpl implements AssetExchange {
         this.assetTransferService = new AssetTransferServiceImpl(assetTransferStore);
         this.assetService = new AssetServiceImpl(blockchain, this.assetAccountService, tradeService, assetStore,
                 assetTransferService);
-        this.orderService = new OrderServiceImpl(orderStore, accountService, tradeService);
+        this.orderService = new OrderServiceImpl(blockchain, orderStore, accountService, tradeService);
     }
 
     @Override
