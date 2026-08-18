@@ -45,7 +45,7 @@ public final class PlaceBidOrder extends CreateTransaction {
             return NOT_ENOUGH_FUNDS;
         }
 
-        Attachment attachment = new Attachment.ColoredCoinsBidOrderPlacement(asset.getId(), quantityQNT, priceNQT,
+        Attachment attachment = new Attachment.ColoredCoinsBidOrderPlacement(fluxCapacitor, asset.getId(), quantityQNT, priceNQT,
                 blockchain.getHeight());
         return createTransaction(req, account, attachment);
     }

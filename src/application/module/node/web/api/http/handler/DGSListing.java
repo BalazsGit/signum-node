@@ -53,7 +53,7 @@ public final class DGSListing extends CreateTransaction {
         }
 
         Account account = parameterService.getSenderAccount(req);
-        Attachment attachment = new Attachment.DigitalGoodsListing(name, description, tags, quantity, priceNQT,
+        Attachment attachment = new Attachment.DigitalGoodsListing(fluxCapacitor, name, description, tags, quantity, priceNQT,
                 blockchain.getHeight());
         return createTransaction(req, account, attachment);
 

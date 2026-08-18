@@ -81,7 +81,7 @@ class GetAccountBlocksTest extends AbstractUnitTest {
             mocked.when(Signum::getPropertyService).thenReturn(propertyService);
             doReturn((int) Constants.ONE_SIGNA).when(propertyService).getInt(eq(Props.ONE_COIN_NQT));
 
-            t = new GetAccountBlocks(blockchainMock, parameterServiceMock, blockServiceMock);
+            t = new GetAccountBlocks(blockchainMock, parameterServiceMock, blockServiceMock, propertyService);
 
             final JsonObject result = (JsonObject) t.processRequest(req);
 

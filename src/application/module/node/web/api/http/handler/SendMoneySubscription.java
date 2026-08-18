@@ -55,7 +55,7 @@ public final class SendMoneySubscription extends CreateTransaction {
         }
 
         Attachment.AdvancedPaymentSubscriptionSubscribe attachment = new Attachment.AdvancedPaymentSubscriptionSubscribe(
-                frequency, blockchain.getHeight());
+                fluxCapacitor, frequency, blockchain.getHeight());
 
         return createTransaction(req, sender, recipient, amountNQT, attachment);
     }

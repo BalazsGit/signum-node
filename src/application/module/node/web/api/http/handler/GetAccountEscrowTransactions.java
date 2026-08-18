@@ -41,7 +41,7 @@ public final class GetAccountEscrowTransactions extends ApiServlet.JsonRequestHa
         JsonArray escrows = new JsonArray();
 
         for (Escrow escrow : accountEscrows) {
-            escrows.add(JSONData.escrowTransaction(escrow));
+            escrows.add(JSONData.escrowTransaction(escrow, escrowService.getDecisions(escrow.getId())));
         }
 
         response.add(ESCROWS_RESPONSE, escrows);

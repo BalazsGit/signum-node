@@ -2,6 +2,7 @@ package application.module.node;
 
 import application.module.node.Appendix.AbstractAppendix;
 import application.module.node.crypto.Crypto;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.transactionduplicates.TransactionDuplicationKey;
 import application.module.node.util.Convert;
@@ -447,6 +448,10 @@ public class Transaction implements Comparable<Transaction> {
     }
 
     public byte[] getBytes() {
+        return getBytes(Signum.getFluxCapacitor());
+    }
+
+    public byte[] getBytes(FluxCapacitor fluxCapacitor) {
         try {
             ByteBuffer buffer = ByteBuffer.allocate(getSize());
             buffer.order(ByteOrder.LITTLE_ENDIAN);
@@ -454,7 +459,7 @@ public class Transaction implements Comparable<Transaction> {
             buffer.put((byte) ((version << 4) | (type.getSubtype() & 0xff)));
             buffer.putInt(timestamp);
             buffer.putShort(deadline);
-            if (type.isSigned() || !Signum.getFluxCapacitor().getValue(FluxValues.AT_FIX_BLOCK_4)) {
+            if (type.isSigned() || !fluxCapacitor.getValue(FluxValues.AT_FIX_BLOCK_4)) {
                 buffer.put(senderPublicKey);
             } else {
                 buffer.putLong(senderId.get());

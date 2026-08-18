@@ -85,7 +85,7 @@ public class AliasServiceImpl implements AliasService {
             // // TODO: end of DB patch, to be removed
 
             if (aliasStore.getTLD(MAIN_TLD) == null) {
-                Attachment.MessagingTldAssignment attachment = new Attachment.MessagingTldAssignment(MAIN_TLD, 0);
+                Attachment.MessagingTldAssignment attachment = new Attachment.MessagingTldAssignment(fluxCapacitor, MAIN_TLD, 0);
                 addTLD(0L, null, attachment);
             }
             for (String tldName : DEFAULT_TLDS) {
@@ -97,7 +97,7 @@ public class AliasServiceImpl implements AliasService {
                 SignumCrypto crypto = SignumCrypto.getInstance();
                 long id = crypto.hashToId(crypto.getSha256().digest(tldName.getBytes(StandardCharsets.UTF_8)))
                         .getSignedLongId();
-                Attachment.MessagingTldAssignment attachment = new Attachment.MessagingTldAssignment(tldName, 0);
+                Attachment.MessagingTldAssignment attachment = new Attachment.MessagingTldAssignment(fluxCapacitor, tldName, 0);
                 addTLD(id, null, attachment);
             }
             this.stores.commitTransaction();

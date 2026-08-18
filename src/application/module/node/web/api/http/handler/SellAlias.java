@@ -63,7 +63,7 @@ public final class SellAlias extends CreateTransaction {
             return INCORRECT_ALIAS_OWNER;
         }
 
-        Attachment attachment = new Attachment.MessagingAliasSell(alias.getId(), alias.getAliasName(), priceNQT,
+        Attachment attachment = new Attachment.MessagingAliasSell(fluxCapacitor, alias.getAliasName(), priceNQT,
                 blockchain.getHeight());
         return createTransaction(req, owner, recipientId, 0, attachment);
     }

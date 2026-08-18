@@ -119,7 +119,7 @@ public final class SendMoneyEscrow extends CreateTransaction {
             return response;
         }
 
-        Attachment.AdvancedPaymentEscrowCreation attachment = new Attachment.AdvancedPaymentEscrowCreation(amountNQT,
+        Attachment.AdvancedPaymentEscrowCreation attachment = new Attachment.AdvancedPaymentEscrowCreation(fluxCapacitor, amountNQT,
                 (int) deadline, deadlineAction, (int) requiredSigners, signers, blockchain.getHeight());
 
         return createTransaction(req, sender, recipient, 0, attachment);

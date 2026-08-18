@@ -42,7 +42,7 @@ public final class DGSFeedback extends CreateTransaction {
         }
 
         Account sellerAccount = accountService.getAccount(purchase.getSellerId());
-        Attachment attachment = new Attachment.DigitalGoodsFeedback(purchase.getId(), blockchain.getHeight());
+        Attachment attachment = new Attachment.DigitalGoodsFeedback(fluxCapacitor, purchase.getId(), blockchain.getHeight());
 
         return createTransaction(req, buyerAccount, sellerAccount.getId(), 0, attachment);
     }

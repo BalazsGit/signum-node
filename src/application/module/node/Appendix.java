@@ -39,6 +39,10 @@ public interface Appendix {
             this.version = version;
         }
 
+        AbstractAppendix() {
+            this.version = 0;
+        }
+
         AbstractAppendix(FluxCapacitor fluxCapacitor, int blockchainHeight) {
             this.version = (byte) (fluxCapacitor.getValue(
                     FluxValues.DIGITAL_GOODS_STORE, blockchainHeight)
@@ -46,13 +50,6 @@ public interface Appendix {
                             : 0);
         }
 
-        /**
-         * @deprecated Use {@link #AbstractAppendix(FluxCapacitor, int)} with instance-scoped FluxCapacitor.
-         */
-        @Deprecated(since = "4.1", forRemoval = true)
-        AbstractAppendix(int blockchainHeight) {
-            this(Signum.getFluxCapacitor(), blockchainHeight);
-        }
 
         protected abstract String getAppendixName();
 
@@ -149,13 +146,6 @@ public interface Appendix {
             this.isText = false;
         }
 
-        /**
-         * @deprecated Use {@link #Message(byte[], FluxCapacitor, int)} with instance-scoped FluxCapacitor.
-         */
-        @Deprecated(since = "4.1", forRemoval = true)
-        public Message(byte[] message, int blockchainHeight) {
-            this(message, Signum.getFluxCapacitor(), blockchainHeight);
-        }
 
         public Message(String string, FluxCapacitor fluxCapacitor, int blockchainHeight) {
             super(fluxCapacitor, blockchainHeight);
@@ -163,13 +153,6 @@ public interface Appendix {
             this.isText = true;
         }
 
-        /**
-         * @deprecated Use {@link #Message(String, FluxCapacitor, int)} with instance-scoped FluxCapacitor.
-         */
-        @Deprecated(since = "4.1", forRemoval = true)
-        public Message(String string, int blockchainHeight) {
-            this(string, Signum.getFluxCapacitor(), blockchainHeight);
-        }
 
         @Override
         protected String getAppendixName() {
@@ -267,16 +250,6 @@ public interface Appendix {
             this.isText = isText;
         }
 
-        /**
-         * @deprecated Use {@link #AbstractEncryptedMessage(EncryptedData, boolean, FluxCapacitor, int)}.
-         */
-        @Deprecated(since = "4.1", forRemoval = true)
-        private AbstractEncryptedMessage(
-                EncryptedData encryptedData,
-                boolean isText,
-                int blockchainHeight) {
-            this(encryptedData, isText, Signum.getFluxCapacitor(), blockchainHeight);
-        }
 
         @Override
         protected int getMySize() {
@@ -353,13 +326,6 @@ public interface Appendix {
             super(encryptedData, isText, fluxCapacitor, blockchainHeight);
         }
 
-        /**
-         * @deprecated Use {@link #EncryptedMessage(EncryptedData, boolean, FluxCapacitor, int)}.
-         */
-        @Deprecated(since = "4.1", forRemoval = true)
-        public EncryptedMessage(EncryptedData encryptedData, boolean isText, int blockchainHeight) {
-            this(encryptedData, isText, Signum.getFluxCapacitor(), blockchainHeight);
-        }
 
         @Override
         protected String getAppendixName() {
@@ -413,16 +379,6 @@ public interface Appendix {
             super(encryptedData, isText, fluxCapacitor, blockchainHeight);
         }
 
-        /**
-         * @deprecated Use {@link #EncryptToSelfMessage(EncryptedData, boolean, FluxCapacitor, int)}.
-         */
-        @Deprecated(since = "4.1", forRemoval = true)
-        public EncryptToSelfMessage(
-                EncryptedData encryptedData,
-                boolean isText,
-                int blockchainHeight) {
-            this(encryptedData, isText, Signum.getFluxCapacitor(), blockchainHeight);
-        }
 
         @Override
         protected String getAppendixName() {
@@ -476,13 +432,6 @@ public interface Appendix {
             this.publicKey = publicKey;
         }
 
-        /**
-         * @deprecated Use {@link #PublicKeyAnnouncement(byte[], FluxCapacitor, int)}.
-         */
-        @Deprecated(since = "4.1", forRemoval = true)
-        public PublicKeyAnnouncement(byte[] publicKey, int blockchainHeight) {
-            this(publicKey, Signum.getFluxCapacitor(), blockchainHeight);
-        }
 
         @Override
         protected String getAppendixName() {
@@ -545,13 +494,10 @@ public interface Appendix {
             }
         }
 
-        /**
-         * @deprecated Use {@link #validate(Transaction, Blockchain, FluxCapacitor, PropertyService)} with instance-scoped dependencies.
-         */
-        @Deprecated(since = "4.1", forRemoval = true)
         @Override
         public void validate(Transaction transaction) throws SignumException.ValidationException {
-            validate(transaction, Signum.getBlockchain(), Signum.getFluxCapacitor(), Signum.getPropertyService());
+            TransactionApplyContext ctx = TransactionType.getContext();
+            validate(transaction, ctx.getBlockchain(), ctx.getFluxCapacitor(), ctx.getPropertyService());
         }
 
         @Override

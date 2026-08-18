@@ -32,7 +32,7 @@ public final class DGSDelisting extends CreateTransaction {
         if (goods.isDelisted() || goods.getSellerId() != account.getId()) {
             return UNKNOWN_GOODS;
         }
-        Attachment attachment = new Attachment.DigitalGoodsDelisting(goods.getId(), blockchain.getHeight());
+        Attachment attachment = new Attachment.DigitalGoodsDelisting(fluxCapacitor, goods.getId(), blockchain.getHeight());
         return createTransaction(req, account, attachment);
     }
 

@@ -25,6 +25,7 @@ import application.module.node.IndirectIncoming;
 import application.module.node.Transaction;
 import application.module.node.TransactionType;
 import application.module.node.crypto.Crypto;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.Attachment.ColoredCoinsAssetIssuance;
 import application.module.node.Attachment.ColoredCoinsAssetTransfer;
@@ -80,8 +81,8 @@ public class AtTransaction {
         }
     }
 
-    public Transaction build(Block block) throws NotValidException {
-        return build(block, block.getHeight());
+    public Transaction build(Block block, FluxCapacitor fluxCapacitor) throws NotValidException {
+        return build(block, block.getHeight(), fluxCapacitor);
     }
 
     /**
@@ -91,13 +92,13 @@ public class AtTransaction {
      * @param blockchainHeight current blockchain height for message appendix
      * @return built Transaction instance
      */
-    public Transaction build(Block block, int blockchainHeight) throws NotValidException {
+    public Transaction build(Block block, int blockchainHeight, FluxCapacitor fluxCapacitor) throws NotValidException {
         attachment = Attachment.AT_PAYMENT;
 
         long recipient = getRecipientId() == null ? 0L : AtApiHelper.getLong(getRecipientId());
 
         if (getType() == TransactionType.ColoredCoins.ASSET_TRANSFER) {
-            attachment = new Attachment.ColoredCoinsAssetTransfer(getAssetId(),
+            attachment = new Attachment.ColoredCoinsAssetTransfer(fluxCapacitor, getAssetId(),
                     quantity, block.getHeight());
         } else if (getType() == TransactionType.ColoredCoins.ASSET_ISSUANCE) {
             String name = Convert.toString(getMessage()).trim();
@@ -115,11 +116,11 @@ public class AtTransaction {
             attachment = new Attachment.ColoredCoinsAssetIssuance(name,
                     "Token issued and controlled by smart contract ID: "
                             + Convert.toUnsignedLong(AtApiHelper.getLong(getSenderId())),
-                    0L, (byte) decimals, block.getHeight(), true);
+                    0L, (byte) decimals, fluxCapacitor, block.getHeight(), true);
         } else if (getType() == TransactionType.ColoredCoins.ASSET_MINT) {
-            attachment = new Attachment.ColoredCoinsAssetMint(getAssetId(), quantity, block.getHeight());
+            attachment = new Attachment.ColoredCoinsAssetMint(fluxCapacitor, getAssetId(), quantity, block.getHeight());
         } else if (getType() == TransactionType.ColoredCoins.ASSET_DISTRIBUTE_TO_HOLDERS) {
-            attachment = new Attachment.ColoredCoinsAssetDistributeToHolders(assetId, minHolding, assetIdToDistribute,
+            attachment = new Attachment.ColoredCoinsAssetDistributeToHolders(fluxCapacitor, assetId, minHolding, assetIdToDistribute,
                     quantity, block.getHeight());
         }
 
@@ -138,7 +139,7 @@ public class AtTransaction {
 
         byte[] message = getMessage();
         if (message != null) {
-            builder.message(new Appendix.Message(message, blockchainHeight));
+            builder.message(new Appendix.Message(message, fluxCapacitor, blockchainHeight));
         }
 
         return builder.build();

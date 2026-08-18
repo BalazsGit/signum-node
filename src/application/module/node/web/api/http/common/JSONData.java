@@ -9,6 +9,7 @@ import application.module.node.crypto.Crypto;
 import application.module.node.crypto.EncryptedData;
 import application.module.node.db.sql.SqlTransactionDb;
 import application.module.node.peer.Peer;
+import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.util.Convert;
 import application.module.node.util.JSON;
@@ -138,7 +139,7 @@ public final class JSONData {
     }
 
     public static JsonObject block(Block block, boolean includeTransactions, int currentBlockchainHeight,
-            long blockReward, int scoopNum) {
+            long blockReward, int scoopNum, PropertyService propertyService) {
         JsonObject json = new JsonObject();
         List<Transaction> allBlockTransactions = block.getAllTransactions();
         json.addProperty(BLOCK_RESPONSE, block.getStringId());
@@ -155,7 +156,7 @@ public final class JSONData {
         json.addProperty(TOTAL_FEE_BURNT_NQT_RESPONSE, String.valueOf(block.getTotalFeeBurntNqt()));
         json.addProperty(BLOCK_REWARD_NQT_RESPONSE, Convert.toUnsignedLong(blockReward));
         json.addProperty(BLOCK_REWARD_RESPONSE,
-                Convert.toUnsignedLong(blockReward / Signum.getPropertyService().getInt(Props.ONE_COIN_NQT)));
+                Convert.toUnsignedLong(blockReward / propertyService.getInt(Props.ONE_COIN_NQT)));
         json.addProperty(PAYLOAD_LENGTH_RESPONSE, block.getPayloadLength());
         json.addProperty(VERSION_RESPONSE, block.getVersion());
         json.addProperty(BASE_TARGET_RESPONSE, Convert.toUnsignedLong(block.getCapacityBaseTarget()));
@@ -198,7 +199,7 @@ public final class JSONData {
         return json;
     }
 
-    public static JsonObject escrowTransaction(Escrow escrow) {
+    public static JsonObject escrowTransaction(Escrow escrow, java.util.Collection<Escrow.Decision> decisions) {
         JsonObject json = new JsonObject();
         json.addProperty(ID_RESPONSE, Convert.toUnsignedLong(escrow.getId()));
         json.addProperty(SENDER_RESPONSE, Convert.toUnsignedLong(escrow.getSenderId()));
@@ -211,7 +212,7 @@ public final class JSONData {
         json.addProperty(DEADLINE_ACTION_RESPONSE, Escrow.decisionToString(escrow.getDeadlineAction()));
 
         JsonArray signers = new JsonArray();
-        for (Escrow.Decision decision : escrow.getDecisions()) {
+        for (Escrow.Decision decision : decisions) {
             if (decision.getAccountId().equals(escrow.getSenderId()) ||
                     decision.getAccountId().equals(escrow.getRecipientId())) {
                 continue;

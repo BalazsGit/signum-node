@@ -28,6 +28,7 @@ public final class PopOff extends ApiServlet.JsonRequestHandler {
     private final BlockchainProcessor blockchainProcessor;
     private final Blockchain blockchain;
     private final BlockService blockService;
+    private final PropertyService propertyService;
     private final List<String> apiAdminKeyList;
 
     public PopOff(BlockchainProcessor blockchainProcessor, Blockchain blockchain, BlockService blockService,
@@ -36,6 +37,7 @@ public final class PopOff extends ApiServlet.JsonRequestHandler {
         this.blockchainProcessor = blockchainProcessor;
         this.blockchain = blockchain;
         this.blockService = blockService;
+        this.propertyService = propertyService;
 
         apiAdminKeyList = propertyService.getStringList(Props.API_ADMIN_KEY_LIST);
     }
@@ -72,7 +74,7 @@ public final class PopOff extends ApiServlet.JsonRequestHandler {
         }
         for (Block block : blocks) {
             blocksJSON.add(JSONData.block(block, true, blockchain.getHeight(), blockService.getBlockReward(block),
-                    blockService.getScoopNum(block)));
+                    blockService.getScoopNum(block), propertyService));
         }
         response.add(BLOCKS_RESPONSE, blocksJSON);
         return response;

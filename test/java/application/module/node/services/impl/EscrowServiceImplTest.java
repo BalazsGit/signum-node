@@ -9,6 +9,7 @@ import application.module.node.db.TransactionDb;
 import application.module.node.db.sql.DbKey;
 import application.module.node.db.VersionedEntityTable;
 import application.module.node.db.store.EscrowStore;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.services.AccountService;
 import application.module.node.services.AliasService;
 import org.junit.Before;
@@ -35,6 +36,7 @@ public class EscrowServiceImplTest {
     private AliasService aliasServiceMock;
     private AccountService accountServiceMock;
     private TransactionDb transactionDbMock;
+    private FluxCapacitor fluxCapacitorMock;
 
     @Before
     public void setUp() {
@@ -48,6 +50,7 @@ public class EscrowServiceImplTest {
         aliasServiceMock = mock(AliasService.class);
         accountServiceMock = mock(AccountService.class);
         transactionDbMock = mock(TransactionDb.class);
+        fluxCapacitorMock = mock(FluxCapacitor.class);
 
         when(mockEscrowStore.getEscrowTable()).thenReturn(mockEscrowTable);
         when(mockEscrowStore.getEscrowDbKeyFactory()).thenReturn(mockEscrowDbKeyFactory);
@@ -55,7 +58,7 @@ public class EscrowServiceImplTest {
         when(mockEscrowStore.getDecisionDbKeyFactory()).thenReturn(mockDecisionDbKeyFactory);
         when(mockEscrowStore.getResultTransactions()).thenReturn(mock(List.class));
 
-        t = new EscrowServiceImpl(mockEscrowStore, blockchainMock, aliasServiceMock, accountServiceMock, transactionDbMock);
+        t = new EscrowServiceImpl(mockEscrowStore, blockchainMock, aliasServiceMock, accountServiceMock, transactionDbMock, fluxCapacitorMock);
     }
 
     @Test

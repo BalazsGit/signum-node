@@ -68,7 +68,7 @@ public final class DGSPurchase extends CreateTransaction {
         Account buyerAccount = parameterService.getSenderAccount(req);
         Account sellerAccount = accountService.getAccount(goods.getSellerId());
 
-        Attachment attachment = new Attachment.DigitalGoodsPurchase(goods.getId(), quantity, priceNQT,
+        Attachment attachment = new Attachment.DigitalGoodsPurchase(fluxCapacitor, goods.getId(), quantity, priceNQT,
                 deliveryDeadline, blockchain.getHeight());
         return createTransaction(req, buyerAccount, sellerAccount.getId(), 0, attachment);
 

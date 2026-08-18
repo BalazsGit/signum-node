@@ -85,7 +85,7 @@ public final class SetAlias extends CreateTransaction {
             return response;
         }
 
-        Attachment attachment = new Attachment.MessagingAliasAssignment(aliasName, aliasURI, tld,
+        Attachment attachment = new Attachment.MessagingAliasAssignment(aliasName, aliasURI, tld, fluxCapacitor,
                 blockchain.getHeight());
         return createTransaction(req, account, attachment);
 

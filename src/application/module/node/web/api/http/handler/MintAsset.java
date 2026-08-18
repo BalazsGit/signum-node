@@ -62,7 +62,7 @@ public final class MintAsset extends CreateTransaction {
             throw new ParameterException(INCORRECT_ASSET_QUANTITY);
         }
 
-        Attachment attachment = new Attachment.ColoredCoinsAssetMint(asset.getId(), quantityQNT,
+        Attachment attachment = new Attachment.ColoredCoinsAssetMint(fluxCapacitor, asset.getId(), quantityQNT,
                 blockchain.getHeight());
         return createTransaction(req, account, null, 0, attachment);
 

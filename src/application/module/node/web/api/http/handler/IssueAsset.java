@@ -80,7 +80,7 @@ public final class IssueAsset extends CreateTransaction {
         }
         Account account = parameterService.getSenderAccount(req);
         Attachment attachment = new Attachment.ColoredCoinsAssetIssuance(name, description, quantityQNT, decimals,
-                blockchain.getHeight(), mintable);
+                fluxCapacitor, blockchain.getHeight(), mintable);
         return createTransaction(req, account, attachment);
 
     }

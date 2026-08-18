@@ -874,7 +874,7 @@ public final class Peers {
             return null;
         }
 
-        peer = new PeerImpl(peerAddress, announcedPeerAddress);
+        peer = new PeerImpl(peerAddress, announcedPeerAddress, propertyService, fluxCapacitor);
         peers.put(peerAddress, peer);
         if (announcedAddress != null) {
             updateAddress(peer);

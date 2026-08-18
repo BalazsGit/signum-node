@@ -102,7 +102,7 @@ public final class ApiServlet extends HttpServlet {
         map.put("getAccount", new GetAccount(parameterService, accountService, blockchain, generator));
         map.put("getAccountsWithName", new GetAccountsWithName(accountService));
         map.put("getAccountBlockIds", new GetAccountBlockIds(parameterService, blockchain));
-        map.put("getAccountBlocks", new GetAccountBlocks(blockchain, parameterService, blockService));
+        map.put("getAccountBlocks", new GetAccountBlocks(blockchain, parameterService, blockService, propertyService));
         map.put("getAccountId", new GetAccountId());
         map.put("getAccountPublicKey", new GetAccountPublicKey(parameterService));
         map.put("getAccountTransactionIds", new GetAccountTransactionIds(parameterService, blockchain));
@@ -123,9 +123,9 @@ public final class ApiServlet extends HttpServlet {
         map.put("getAssetsByName", new GetAssetsByName(assetExchange, accountService, blockchain));
         map.put("getAssetAccounts", new GetAssetAccounts(parameterService, assetExchange, fluxCapacitor));
         map.put("getBalance", new GetBalance(parameterService));
-        map.put("getBlock", new GetBlock(blockchain, blockService));
+        map.put("getBlock", new GetBlock(blockchain, blockService, propertyService));
         map.put("getBlockId", new GetBlockId(blockchain));
-        map.put("getBlocks", new GetBlocks(blockchain, blockService));
+        map.put("getBlocks", new GetBlocks(blockchain, blockService, propertyService));
         map.put("getBlockchainStatus", new GetBlockchainStatus(blockchainProcessor, blockchain, timeService, propertyService));
         map.put("getConstants", new GetConstants(blockchain, propertyService, fluxCapacitor));
         map.put("getDGSGoods", new GetDGSGoods(digitalGoodsStoreService));

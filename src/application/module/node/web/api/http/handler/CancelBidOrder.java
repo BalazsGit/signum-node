@@ -37,7 +37,7 @@ public final class CancelBidOrder extends CreateTransaction {
         if (orderData == null || orderData.getAccountId() != account.getId()) {
             return UNKNOWN_ORDER;
         }
-        Attachment attachment = new Attachment.ColoredCoinsBidOrderCancellation(orderId, blockchain.getHeight());
+        Attachment attachment = new Attachment.ColoredCoinsBidOrderCancellation(fluxCapacitor, orderId, blockchain.getHeight());
         return createTransaction(req, account, attachment);
     }
 

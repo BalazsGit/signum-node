@@ -34,4 +34,6 @@ public interface EscrowService {
 
     void saveResultTransaction(Block block, Long escrowId, Long recipientId, Long amountNQT, DecisionType decision,
             int blockchainHeight);
+
+    Collection<Escrow.Decision> getDecisions(Long escrowId);
 }

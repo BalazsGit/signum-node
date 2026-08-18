@@ -52,7 +52,7 @@ public final class DGSQuantityChange extends CreateTransaction {
             return INCORRECT_DELTA_QUANTITY;
         }
 
-        Attachment attachment = new Attachment.DigitalGoodsQuantityChange(goods.getId(), deltaQuantity,
+        Attachment attachment = new Attachment.DigitalGoodsQuantityChange(fluxCapacitor, goods.getId(), deltaQuantity,
                 blockchain.getHeight());
         return createTransaction(req, account, attachment);
 

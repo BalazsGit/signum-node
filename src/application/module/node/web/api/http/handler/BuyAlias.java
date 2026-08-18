@@ -40,7 +40,7 @@ public final class BuyAlias extends CreateTransaction {
         }
 
         long sellerId = alias.getAccountId();
-        Attachment attachment = new Attachment.MessagingAliasBuy(alias.getId(), alias.getAliasName(),
+        Attachment attachment = new Attachment.MessagingAliasBuy(alias.getId(), alias.getAliasName(), fluxCapacitor,
                 blockchain.getHeight());
         return createTransaction(req, buyer, sellerId, amountNQT, attachment);
     }

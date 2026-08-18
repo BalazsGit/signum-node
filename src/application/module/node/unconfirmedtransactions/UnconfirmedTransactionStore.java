@@ -3,6 +3,7 @@ package application.module.node.unconfirmedtransactions;
 import application.module.node.Blockchain;
 import application.module.node.SignumException;
 import application.module.node.Transaction;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.peer.Peer;
 
 import java.util.List;
@@ -34,4 +35,6 @@ public interface UnconfirmedTransactionStore {
     int getAmount();
 
     void setBlockchain(Blockchain blockchain);
+
+    void setFluxCapacitor(FluxCapacitor fluxCapacitor);
 }

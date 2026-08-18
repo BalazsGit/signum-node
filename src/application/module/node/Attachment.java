@@ -39,8 +39,8 @@ public interface Attachment extends Appendix {
             super(version);
         }
 
-        protected AbstractAttachment(int blockchainHeight) {
-            super(blockchainHeight);
+        protected AbstractAttachment(FluxCapacitor fluxCapacitor, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
         }
 
         @Override
@@ -183,10 +183,11 @@ public interface Attachment extends Appendix {
         }
 
         public PaymentMultiOutCreation(
+                FluxCapacitor fluxCapacitor,
                 Collection<Entry<String, Long>> recipients,
                 int blockchainHeight)
                 throws SignumException.NotValidException {
-            super(blockchainHeight);
+            super(fluxCapacitor, blockchainHeight);
 
             HashMap<Long, Boolean> recipientOf = new HashMap<>();
             for (Entry<String, Long> recipient : recipients) {
@@ -318,9 +319,9 @@ public interface Attachment extends Appendix {
             }
         }
 
-        public PaymentMultiSameOutCreation(Collection<Long> recipients, int blockchainHeight)
+        public PaymentMultiSameOutCreation(FluxCapacitor fluxCapacitor, Collection<Long> recipients, int blockchainHeight)
                 throws SignumException.NotValidException {
-            super(blockchainHeight);
+            super(fluxCapacitor, blockchainHeight);
 
             HashMap<Long, Boolean> recipientOf = new HashMap<>();
             for (Long recipientId : recipients) {
@@ -449,17 +450,6 @@ public interface Attachment extends Appendix {
             this.tld = tld;
         }
 
-        /**
-         * @deprecated Use constructor with instance-scoped FluxCapacitor.
-         */
-        @Deprecated(since = "4.1", forRemoval = true)
-        public MessagingAliasAssignment(
-                String aliasName,
-                String aliasUri,
-                long tld,
-                int blockchainHeight) {
-            this(aliasName, aliasUri, tld, Signum.getFluxCapacitor(), blockchainHeight);
-        }
 
         @Override
         protected String getAppendixName() {
@@ -528,8 +518,8 @@ public interface Attachment extends Appendix {
                     JSON.getAsString(attachmentData.get(TLD_PARAMETER)))).trim();
         }
 
-        public MessagingTldAssignment(String tldName, int blockchainHeight) {
-            super(blockchainHeight);
+        public MessagingTldAssignment(FluxCapacitor fluxCapacitor, String tldName, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.tldName = tldName.trim();
         }
 
@@ -597,8 +587,8 @@ public interface Attachment extends Appendix {
             this.priceNqt = JSON.getAsLong(attachmentData.get(PRICE_NQT_PARAMETER));
         }
 
-        public MessagingAliasSell(String aliasName, long priceNqt, int blockchainHeight) {
-            super(blockchainHeight);
+        public MessagingAliasSell(FluxCapacitor fluxCapacitor, String aliasName, long priceNqt, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.aliasName = aliasName;
             this.priceNqt = priceNqt;
         }
@@ -621,17 +611,6 @@ public interface Attachment extends Appendix {
             this.priceNqt = priceNqt;
         }
 
-        /**
-         * @deprecated Use constructor with instance-scoped FluxCapacitor.
-         */
-        @Deprecated(since = "4.1", forRemoval = true)
-        public MessagingAliasSell(
-                long aliasId,
-                String aliasName,
-                long priceNqt,
-                int blockchainHeight) {
-            this(aliasId, aliasName, priceNqt, Signum.getFluxCapacitor(), blockchainHeight);
-        }
 
         @Override
         protected String getAppendixName() {
@@ -730,16 +709,6 @@ public interface Attachment extends Appendix {
             this.aliasName = aliasName;
         }
 
-        /**
-         * @deprecated Use constructor with instance-scoped FluxCapacitor.
-         */
-        @Deprecated(since = "4.1", forRemoval = true)
-        public MessagingAliasBuy(
-                long aliasId,
-                String aliasName,
-                int blockchainHeight) {
-            this(aliasId, aliasName, Signum.getFluxCapacitor(), blockchainHeight);
-        }
 
         @Override
         protected String getAppendixName() {
@@ -804,8 +773,8 @@ public interface Attachment extends Appendix {
                     JSON.getAsString(attachmentData.get(DESCRIPTION_PARAMETER)));
         }
 
-        public MessagingAccountInfo(String name, String description, int blockchainHeight) {
-            super(blockchainHeight);
+        public MessagingAccountInfo(FluxCapacitor fluxCapacitor, String name, String description, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.name = name;
             this.description = description;
         }
@@ -908,19 +877,6 @@ public interface Attachment extends Appendix {
             this.mintable = mintable;
         }
 
-        /**
-         * @deprecated Use constructor with instance-scoped FluxCapacitor.
-         */
-        @Deprecated(since = "4.1", forRemoval = true)
-        public ColoredCoinsAssetIssuance(
-                String name,
-                String description,
-                long quantityQnt,
-                byte decimals,
-                int blockchainHeight,
-                boolean mintable) {
-            this(name, description, quantityQnt, decimals, Signum.getFluxCapacitor(), blockchainHeight, mintable);
-        }
 
         @Override
         protected String getAppendixName() {
@@ -1018,8 +974,8 @@ public interface Attachment extends Appendix {
                     : null;
         }
 
-        public ColoredCoinsAssetTransfer(long assetId, long quantityQnt, int blockchainHeight) {
-            super(blockchainHeight);
+        public ColoredCoinsAssetTransfer(FluxCapacitor fluxCapacitor, long assetId, long quantityQnt, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.assetId = assetId;
             this.quantityQnt = quantityQnt;
             this.comment = null;
@@ -1143,10 +1099,11 @@ public interface Attachment extends Appendix {
         }
 
         public ColoredCoinsAssetMultiTransfer(
+                FluxCapacitor fluxCapacitor,
                 ArrayList<Long> assetIds,
                 ArrayList<Long> quantitiesQnt,
                 int blockchainHeight) {
-            super(blockchainHeight);
+            super(fluxCapacitor, blockchainHeight);
             this.assetIds = assetIds;
             this.quantitiesQnt = quantitiesQnt;
         }
@@ -1231,8 +1188,8 @@ public interface Attachment extends Appendix {
             this.quantityQnt = JSON.getAsLong(attachmentData.get(QUANTITY_QNT_PARAMETER));
         }
 
-        public ColoredCoinsAssetMint(long assetId, long quantityQnt, int blockchainHeight) {
-            super(blockchainHeight);
+        public ColoredCoinsAssetMint(FluxCapacitor fluxCapacitor, long assetId, long quantityQnt, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.assetId = assetId;
             this.quantityQnt = quantityQnt;
         }
@@ -1303,12 +1260,13 @@ public interface Attachment extends Appendix {
         }
 
         public ColoredCoinsAssetDistributeToHolders(
+                FluxCapacitor fluxCapacitor,
                 long assetId,
                 long minimumAssetQuantityQnt,
                 long assetToDistribute,
                 long quantityQnt,
                 int blockchainHeight) {
-            super(blockchainHeight);
+            super(fluxCapacitor, blockchainHeight);
             this.assetId = assetId;
             this.minimumAssetQuantityQnt = minimumAssetQuantityQnt;
             this.assetIdToDistribute = assetToDistribute;
@@ -1388,11 +1346,12 @@ public interface Attachment extends Appendix {
         }
 
         private ColoredCoinsOrderPlacement(
+                FluxCapacitor fluxCapacitor,
                 long assetId,
                 long quantityQnt,
                 long priceNqt,
                 int blockchainHeight) {
-            super(blockchainHeight);
+            super(fluxCapacitor, blockchainHeight);
             this.assetId = assetId;
             this.quantityQnt = quantityQnt;
             this.priceNqt = priceNqt;
@@ -1442,11 +1401,12 @@ public interface Attachment extends Appendix {
         }
 
         public ColoredCoinsAskOrderPlacement(
+                FluxCapacitor fluxCapacitor,
                 long assetId,
                 long quantityQnt,
                 long priceNqt,
                 int blockchainHeight) {
-            super(assetId, quantityQnt, priceNqt, blockchainHeight);
+            super(fluxCapacitor, assetId, quantityQnt, priceNqt, blockchainHeight);
         }
 
         @Override
@@ -1472,11 +1432,12 @@ public interface Attachment extends Appendix {
         }
 
         public ColoredCoinsBidOrderPlacement(
+                FluxCapacitor fluxCapacitor,
                 long assetId,
                 long quantityQnt,
                 long priceNqt,
                 int blockchainHeight) {
-            super(assetId, quantityQnt, priceNqt, blockchainHeight);
+            super(fluxCapacitor, assetId, quantityQnt, priceNqt, blockchainHeight);
         }
 
         @Override
@@ -1506,8 +1467,8 @@ public interface Attachment extends Appendix {
                     JSON.getAsString(attachmentData.get(ORDER_PARAMETER)));
         }
 
-        private ColoredCoinsOrderCancellation(long orderId, int blockchainHeight) {
-            super(blockchainHeight);
+        private ColoredCoinsOrderCancellation(FluxCapacitor fluxCapacitor, long orderId, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.orderId = orderId;
         }
 
@@ -1542,8 +1503,8 @@ public interface Attachment extends Appendix {
             super(attachmentData);
         }
 
-        public ColoredCoinsAskOrderCancellation(long orderId, int blockchainHeight) {
-            super(orderId, blockchainHeight);
+        public ColoredCoinsAskOrderCancellation(FluxCapacitor fluxCapacitor, long orderId, int blockchainHeight) {
+            super(fluxCapacitor, orderId, blockchainHeight);
         }
 
         @Override
@@ -1568,8 +1529,8 @@ public interface Attachment extends Appendix {
             super(attachmentData);
         }
 
-        public ColoredCoinsBidOrderCancellation(long orderId, int blockchainHeight) {
-            super(orderId, blockchainHeight);
+        public ColoredCoinsBidOrderCancellation(FluxCapacitor fluxCapacitor, long orderId, int blockchainHeight) {
+            super(fluxCapacitor, orderId, blockchainHeight);
         }
 
         @Override
@@ -1621,13 +1582,14 @@ public interface Attachment extends Appendix {
         }
 
         public DigitalGoodsListing(
+                FluxCapacitor fluxCapacitor,
                 String name,
                 String description,
                 String tags,
                 int quantity,
                 long priceNqt,
                 int blockchainHeight) {
-            super(blockchainHeight);
+            super(fluxCapacitor, blockchainHeight);
             this.name = name;
             this.description = description;
             this.tags = tags;
@@ -1712,8 +1674,8 @@ public interface Attachment extends Appendix {
                     JSON.getAsString(attachmentData.get(GOODS_PARAMETER)));
         }
 
-        public DigitalGoodsDelisting(long goodsId, int blockchainHeight) {
-            super(blockchainHeight);
+        public DigitalGoodsDelisting(FluxCapacitor fluxCapacitor, long goodsId, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.goodsId = goodsId;
         }
 
@@ -1766,8 +1728,8 @@ public interface Attachment extends Appendix {
             this.priceNqt = JSON.getAsLong(attachmentData.get(PRICE_NQT_PARAMETER));
         }
 
-        public DigitalGoodsPriceChange(long goodsId, long priceNqt, int blockchainHeight) {
-            super(blockchainHeight);
+        public DigitalGoodsPriceChange(FluxCapacitor fluxCapacitor, long goodsId, long priceNqt, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.goodsId = goodsId;
             this.priceNqt = priceNqt;
         }
@@ -1827,8 +1789,8 @@ public interface Attachment extends Appendix {
             this.deltaQuantity = JSON.getAsInt(attachmentData.get(DELTA_QUANTITY_PARAMETER));
         }
 
-        public DigitalGoodsQuantityChange(long goodsId, int deltaQuantity, int blockchainHeight) {
-            super(blockchainHeight);
+        public DigitalGoodsQuantityChange(FluxCapacitor fluxCapacitor, long goodsId, int deltaQuantity, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.goodsId = goodsId;
             this.deltaQuantity = deltaQuantity;
         }
@@ -1896,12 +1858,13 @@ public interface Attachment extends Appendix {
         }
 
         public DigitalGoodsPurchase(
+                FluxCapacitor fluxCapacitor,
                 long goodsId,
                 int quantity,
                 long priceNqt,
                 int deliveryDeadlineTimestamp,
                 int blockchainHeight) {
-            super(blockchainHeight);
+            super(fluxCapacitor, blockchainHeight);
             this.goodsId = goodsId;
             this.quantity = quantity;
             this.priceNqt = priceNqt;
@@ -1995,12 +1958,13 @@ public interface Attachment extends Appendix {
         }
 
         public DigitalGoodsDelivery(
+                FluxCapacitor fluxCapacitor,
                 long purchaseId,
                 EncryptedData goods,
                 boolean goodsIsText,
                 long discountNqt,
                 int blockchainHeight) {
-            super(blockchainHeight);
+            super(fluxCapacitor, blockchainHeight);
             this.purchaseId = purchaseId;
             this.goods = goods;
             this.discountNqt = discountNqt;
@@ -2075,8 +2039,8 @@ public interface Attachment extends Appendix {
                     JSON.getAsString(attachmentData.get(PURCHASE_PARAMETER)));
         }
 
-        public DigitalGoodsFeedback(long purchaseId, int blockchainHeight) {
-            super(blockchainHeight);
+        public DigitalGoodsFeedback(FluxCapacitor fluxCapacitor, long purchaseId, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.purchaseId = purchaseId;
         }
 
@@ -2129,8 +2093,8 @@ public interface Attachment extends Appendix {
             this.refundNqt = JSON.getAsLong(attachmentData.get(REFUND_NQT_PARAMETER));
         }
 
-        public DigitalGoodsRefund(long purchaseId, long refundNqt, int blockchainHeight) {
-            super(blockchainHeight);
+        public DigitalGoodsRefund(FluxCapacitor fluxCapacitor, long purchaseId, long refundNqt, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.purchaseId = purchaseId;
             this.refundNqt = refundNqt;
         }
@@ -2186,8 +2150,8 @@ public interface Attachment extends Appendix {
             this.period = JSON.getAsShort(attachmentData.get(PERIOD_PARAMETER));
         }
 
-        public AccountControlEffectiveBalanceLeasing(short period, int blockchainHeight) {
-            super(blockchainHeight);
+        public AccountControlEffectiveBalanceLeasing(FluxCapacitor fluxCapacitor, short period, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.period = period;
         }
 
@@ -2232,8 +2196,8 @@ public interface Attachment extends Appendix {
             super(attachmentData);
         }
 
-        public SignaMiningRewardRecipientAssignment(int blockchainHeight) {
-            super(blockchainHeight);
+        public SignaMiningRewardRecipientAssignment(FluxCapacitor fluxCapacitor, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
         }
 
         @Override
@@ -2277,8 +2241,8 @@ public interface Attachment extends Appendix {
             this.amountNqt = JSON.getAsLong(attachmentData.get(AMOUNT_NQT_PARAMETER));
         }
 
-        private CommitmentAttachment(long amountNqt, int blockchainHeight) {
-            super(blockchainHeight);
+        private CommitmentAttachment(FluxCapacitor fluxCapacitor, long amountNqt, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.amountNqt = amountNqt;
         }
 
@@ -2313,8 +2277,8 @@ public interface Attachment extends Appendix {
             super(attachmentData);
         }
 
-        public CommitmentAdd(long amountNqt, int blockchainHeight) {
-            super(amountNqt, blockchainHeight);
+        public CommitmentAdd(FluxCapacitor fluxCapacitor, long amountNqt, int blockchainHeight) {
+            super(fluxCapacitor, amountNqt, blockchainHeight);
         }
 
         @Override
@@ -2339,8 +2303,8 @@ public interface Attachment extends Appendix {
             super(attachmentData);
         }
 
-        public CommitmentRemove(long amountNqt, int blockchainHeight) {
-            super(amountNqt, blockchainHeight);
+        public CommitmentRemove(FluxCapacitor fluxCapacitor, long amountNqt, int blockchainHeight) {
+            super(fluxCapacitor, amountNqt, blockchainHeight);
         }
 
         @Override
@@ -2409,6 +2373,7 @@ public interface Attachment extends Appendix {
         }
 
         public AdvancedPaymentEscrowCreation(
+                FluxCapacitor fluxCapacitor,
                 Long amountNqt,
                 int deadline,
                 Escrow.DecisionType deadlineAction,
@@ -2416,7 +2381,7 @@ public interface Attachment extends Appendix {
                 Collection<Long> signers,
                 int blockchainHeight)
                 throws SignumException.NotValidException {
-            super(blockchainHeight);
+            super(fluxCapacitor, blockchainHeight);
             this.amountNqt = amountNqt;
             this.deadline = deadline;
             this.deadlineAction = deadlineAction;
@@ -2520,10 +2485,11 @@ public interface Attachment extends Appendix {
         }
 
         public AdvancedPaymentEscrowSign(
+                FluxCapacitor fluxCapacitor,
                 Long escrowId,
                 Escrow.DecisionType decision,
                 int blockchainHeight) {
-            super(blockchainHeight);
+            super(fluxCapacitor, blockchainHeight);
             this.escrowId = escrowId;
             this.decision = decision;
         }
@@ -2585,10 +2551,11 @@ public interface Attachment extends Appendix {
         }
 
         public AdvancedPaymentEscrowResult(
+                FluxCapacitor fluxCapacitor,
                 Long escrowId,
                 Escrow.DecisionType decision,
                 int blockchainHeight) {
-            super(blockchainHeight);
+            super(fluxCapacitor, blockchainHeight);
             this.escrowId = escrowId;
             this.decision = decision;
         }
@@ -2636,8 +2603,8 @@ public interface Attachment extends Appendix {
             this.frequency = JSON.getAsInt(attachmentData.get(FREQUENCY_PARAMETER));
         }
 
-        public AdvancedPaymentSubscriptionSubscribe(int frequency, int blockchainHeight) {
-            super(blockchainHeight);
+        public AdvancedPaymentSubscriptionSubscribe(FluxCapacitor fluxCapacitor, int frequency, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.frequency = frequency;
         }
 
@@ -2688,8 +2655,8 @@ public interface Attachment extends Appendix {
                             attachmentData.get(SUBSCRIPTION_ID_PARAMETER)));
         }
 
-        public AdvancedPaymentSubscriptionCancel(Long subscriptionId, int blockchainHeight) {
-            super(blockchainHeight);
+        public AdvancedPaymentSubscriptionCancel(FluxCapacitor fluxCapacitor, Long subscriptionId, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.subscriptionId = subscriptionId;
         }
 
@@ -2742,8 +2709,8 @@ public interface Attachment extends Appendix {
                             attachmentData.get(SUBSCRIPTION_ID_PARAMETER)));
         }
 
-        public AdvancedPaymentSubscriptionPayment(Long subscriptionId, int blockchainHeight) {
-            super(blockchainHeight);
+        public AdvancedPaymentSubscriptionPayment(FluxCapacitor fluxCapacitor, Long subscriptionId, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.subscriptionId = subscriptionId;
         }
 
@@ -2877,9 +2844,9 @@ public interface Attachment extends Appendix {
 
         }
 
-        public AutomatedTransactionsCreation(String name, String description, byte[] creationBytes,
-                int blockchainHeight) {
-            super(blockchainHeight);
+        public AutomatedTransactionsCreation(FluxCapacitor fluxCapacitor, String name, String description,
+                byte[] creationBytes, int blockchainHeight) {
+            super(fluxCapacitor, blockchainHeight);
             this.name = name;
             this.description = description;
             this.creationBytes = creationBytes;

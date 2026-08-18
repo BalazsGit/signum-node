@@ -6,7 +6,9 @@ import application.module.node.Signum;
 import application.module.node.SignumException;
 import application.module.node.Version;
 import application.module.node.crypto.Crypto;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
+import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.util.Convert;
 import application.module.node.util.CountingInputStream;
@@ -68,8 +70,18 @@ final class PeerImpl implements Peer {
     private byte[] lastDownloadedTransactionsDigest;
     private final Object lastDownloadedTransactionsLock = new Object();
 
+    private PropertyService propertyService;
+    private FluxCapacitor fluxCapacitor;
+
     PeerImpl(String peerAddress, String announcedAddress) {
+        this(peerAddress, announcedAddress, null, null);
+    }
+
+    PeerImpl(String peerAddress, String announcedAddress, PropertyService propertyService,
+            FluxCapacitor fluxCapacitor) {
         this.peerAddress = peerAddress;
+        this.propertyService = propertyService;
+        this.fluxCapacitor = fluxCapacitor;
         this.announcedAddress.set(announcedAddress);
         if (announcedAddress != null) {
             try {
@@ -188,14 +200,16 @@ final class PeerImpl implements Peer {
     void setVersion(String version) {
         this.version.set(Version.EMPTY);
         isOldVersion.set(false);
-        if (Signum.getPropertyService()
+        if (propertyService != null && propertyService
                 .getString(Props.APPLICATION)
                 .equals(getApplication())
                 && version != null) {
             try {
                 this.version.set(Version.parse(version));
-                isOldVersion.set(Signum.getFluxCapacitor().getValue(FluxValues.MIN_PEER_VERSION)
-                        .isGreaterThan(this.version.get()));
+                if (fluxCapacitor != null) {
+                    isOldVersion.set(fluxCapacitor.getValue(FluxValues.MIN_PEER_VERSION)
+                            .isGreaterThan(this.version.get()));
+                }
             } catch (IllegalArgumentException e) {
                 isOldVersion.set(true);
             }
@@ -404,7 +418,7 @@ final class PeerImpl implements Peer {
             buf.append(address);
             if (port.get() <= 0) {
                 buf.append(':');
-                buf.append(Signum.getPropertyService().getInt(Props.P2P_PORT));
+                buf.append(propertyService.getInt(Props.P2P_PORT));
             }
             buf.append("/burst");
             URL url = new URI(buf.toString()).toURL();
@@ -552,7 +566,7 @@ final class PeerImpl implements Peer {
                     JSON.getAsString(response.get("announcedAddress")));
             int port = this.port.get();
             if (port < 0) {
-                port = Signum.getPropertyService().getInt(Props.P2P_PORT);
+                port = propertyService.getInt(Props.P2P_PORT);
             }
             if (newAnnouncedAddress != null && !newAnnouncedAddress.equals(announcedAddress.get())
                     && !newAnnouncedAddress.equals(announcedAddress.get() + ":" + port)) {

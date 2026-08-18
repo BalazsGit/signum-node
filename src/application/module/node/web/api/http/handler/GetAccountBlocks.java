@@ -4,6 +4,7 @@ import application.module.node.Account;
 import application.module.node.Block;
 import application.module.node.Blockchain;
 import application.module.node.SignumException;
+import application.module.node.props.PropertyService;
 import application.module.node.web.api.http.common.LegacyDocTag;
 import application.module.node.web.api.http.common.ParameterParser;
 import application.module.node.web.api.http.common.Parameters;
@@ -25,13 +26,16 @@ public final class GetAccountBlocks extends ApiServlet.JsonRequestHandler {
     private final Blockchain blockchain;
     private final ParameterService parameterService;
     private final BlockService blockService;
+    private final PropertyService propertyService;
 
-    public GetAccountBlocks(Blockchain blockchain, ParameterService parameterService, BlockService blockService) {
+    public GetAccountBlocks(Blockchain blockchain, ParameterService parameterService, BlockService blockService,
+            PropertyService propertyService) {
         super(new LegacyDocTag[] { LegacyDocTag.ACCOUNTS }, ACCOUNT_PARAMETER, TIMESTAMP_PARAMETER,
                 FIRST_INDEX_PARAMETER, LAST_INDEX_PARAMETER, INCLUDE_TRANSACTIONS_PARAMETER);
         this.blockchain = blockchain;
         this.parameterService = parameterService;
         this.blockService = blockService;
+        this.propertyService = propertyService;
     }
 
     @Override
@@ -47,7 +51,7 @@ public final class GetAccountBlocks extends ApiServlet.JsonRequestHandler {
         JsonArray blocks = new JsonArray();
         for (Block block : blockchain.getBlocks(account, timestamp, firstIndex, lastIndex)) {
             blocks.add(JSONData.block(block, includeTransactions, blockchain.getHeight(),
-                    blockService.getBlockReward(block), blockService.getScoopNum(block)));
+                    blockService.getBlockReward(block), blockService.getScoopNum(block), propertyService));
         }
 
         JsonObject response = new JsonObject();

@@ -55,7 +55,7 @@ public final class AddCommitment extends CreateTransaction {
             return NOT_ENOUGH_FUNDS;
         }
 
-        Attachment attachment = new Attachment.CommitmentAdd(amountNQT, blockchain.getHeight());
+        Attachment attachment = new Attachment.CommitmentAdd(fluxCapacitor, amountNQT, blockchain.getHeight());
         return createTransaction(req, account, attachment);
     }
 

@@ -72,7 +72,7 @@ public class APITransactionManagerImpl implements APITransactionManager {
                     accountService.getAccount(recipientId), Convert.parseHexString(recipientPublicKeyValue));
             if (encryptedData != null) {
                 encryptedMessage = new EncryptedMessage(encryptedData,
-                        !Parameters.isFalse(req.getParameter(MESSAGE_TO_ENCRYPT_IS_TEXT_PARAMETER)), blockchainHeight);
+                        !Parameters.isFalse(req.getParameter(MESSAGE_TO_ENCRYPT_IS_TEXT_PARAMETER)), fluxCapacitor, blockchainHeight);
             }
         }
 
@@ -81,7 +81,7 @@ public class APITransactionManagerImpl implements APITransactionManager {
         if (encryptedToSelfData != null) {
             encryptToSelfMessage = new EncryptToSelfMessage(encryptedToSelfData,
                     !Parameters.isFalse(req.getParameter(MESSAGE_TO_ENCRYPT_TO_SELF_IS_TEXT_PARAMETER)),
-                    blockchainHeight);
+                    fluxCapacitor, blockchainHeight);
         }
         Message message = null;
         String messageValue = Convert.emptyToNull(req.getParameter(MESSAGE_PARAMETER));
@@ -89,8 +89,8 @@ public class APITransactionManagerImpl implements APITransactionManager {
             boolean messageIsText = fluxCapacitor.getValue(FluxValues.DIGITAL_GOODS_STORE, blockchainHeight)
                     && !Parameters.isFalse(req.getParameter(MESSAGE_IS_TEXT_PARAMETER));
             try {
-                message = messageIsText ? new Message(messageValue, blockchainHeight)
-                        : new Message(Convert.parseHexString(messageValue), blockchainHeight);
+                message = messageIsText ? new Message(messageValue, fluxCapacitor, blockchainHeight)
+                        : new Message(Convert.parseHexString(messageValue), fluxCapacitor, blockchainHeight);
             } catch (RuntimeException e) {
                 throw new ParameterException(INCORRECT_ARBITRARY_MESSAGE);
             }
@@ -98,17 +98,17 @@ public class APITransactionManagerImpl implements APITransactionManager {
                 && fluxCapacitor.getValue(FluxValues.DIGITAL_GOODS_STORE, blockchainHeight)) {
             String commentValue = Convert.emptyToNull(req.getParameter(COMMENT_PARAMETER));
             if (commentValue != null) {
-                message = new Message(commentValue, blockchainHeight);
+                message = new Message(commentValue, fluxCapacitor, blockchainHeight);
             }
         } else if (attachment == Attachment.ARBITRARY_MESSAGE
                 && !fluxCapacitor.getValue(FluxValues.DIGITAL_GOODS_STORE, blockchainHeight)) {
-            message = new Message(new byte[0], blockchainHeight);
+            message = new Message(new byte[0], fluxCapacitor, blockchainHeight);
         }
         PublicKeyAnnouncement publicKeyAnnouncement = null;
         byte[] recipientPublicKey = Convert.parseHexString(recipientPublicKeyValue);
         if (recipientPublicKeyValue != null
                 && fluxCapacitor.getValue(FluxValues.DIGITAL_GOODS_STORE, blockchainHeight)) {
-            publicKeyAnnouncement = new PublicKeyAnnouncement(recipientPublicKey, blockchainHeight);
+            publicKeyAnnouncement = new PublicKeyAnnouncement(recipientPublicKey, fluxCapacitor, blockchainHeight);
         }
 
         if (secretPhrase == null && publicKeyValue == null) {
@@ -197,7 +197,7 @@ public class APITransactionManagerImpl implements APITransactionManager {
                                                           // known
                 response.addProperty(TRANSACTION_RESPONSE, transaction.getStringId());
                 response.addProperty(FULL_HASH_RESPONSE, transaction.getFullHash());
-                response.addProperty(TRANSACTION_BYTES_RESPONSE, Convert.toHexString(transaction.getBytes()));
+response.addProperty(TRANSACTION_BYTES_RESPONSE, Convert.toHexString(transaction.getBytes(fluxCapacitor)));
                 response.addProperty(SIGNATURE_HASH_RESPONSE,
                         Convert.toHexString(Crypto.sha256().digest(transaction.getSignature())));
                 if (broadcast) {

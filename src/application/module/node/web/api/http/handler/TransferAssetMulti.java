@@ -103,7 +103,7 @@ public final class TransferAssetMulti extends CreateTransaction {
             }
         }
 
-        Attachment attachment = new Attachment.ColoredCoinsAssetMultiTransfer(assetIds, quantitiesQNT,
+        Attachment attachment = new Attachment.ColoredCoinsAssetMultiTransfer(fluxCapacitor, assetIds, quantitiesQNT,
                 blockchain.getHeight());
         return createTransaction(req, account, recipient, amountNQT, attachment);
 

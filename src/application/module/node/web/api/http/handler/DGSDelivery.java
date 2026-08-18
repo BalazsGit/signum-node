@@ -79,7 +79,7 @@ public final class DGSDelivery extends CreateTransaction {
             encryptedGoods = buyerAccount.encryptTo(goodsBytes, secretPhrase);
         }
 
-        Attachment attachment = new Attachment.DigitalGoodsDelivery(purchase.getId(), encryptedGoods, goodsIsText,
+        Attachment attachment = new Attachment.DigitalGoodsDelivery(fluxCapacitor, purchase.getId(), encryptedGoods, goodsIsText,
                 discountNQT, blockchain.getHeight());
         return createTransaction(req, sellerAccount, buyerAccount.getId(), 0, attachment);
 

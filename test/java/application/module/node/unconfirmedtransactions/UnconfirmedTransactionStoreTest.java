@@ -52,6 +52,7 @@ public class UnconfirmedTransactionStoreTest {
 
     private TimeService timeService = new TimeServiceImpl();
     private UnconfirmedTransactionStore t;
+    private FluxCapacitor fluxCapacitor;
 
     @Before
     public void setUp() {
@@ -81,13 +82,13 @@ public class UnconfirmedTransactionStoreTest {
         when(accountTableMock.get(eq(mockAccountKey))).thenReturn(mockAccount);
         when(mockAccount.getUnconfirmedBalanceNqt()).thenReturn(Constants.MAX_BALANCE_NQT);
 
-        FluxCapacitor mockFluxCapacitor = QuickMocker.fluxCapacitorEnabledFunctionalities(FluxValues.PRE_POC2,
+        fluxCapacitor = QuickMocker.fluxCapacitorEnabledFunctionalities(FluxValues.PRE_POC2,
                 FluxValues.DIGITAL_GOODS_STORE);
 
-        when(Signum.getFluxCapacitor()).thenReturn(mockFluxCapacitor);
+        when(Signum.getFluxCapacitor()).thenReturn(fluxCapacitor);
 
-        doReturn(Constants.FEE_QUANT_SIP3).when(mockFluxCapacitor).getValue(eq(FluxValues.FEE_QUANT), anyInt());
-        doReturn(Constants.FEE_QUANT_SIP3).when(mockFluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
+        doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT), anyInt());
+        doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
 
         t = new UnconfirmedTransactionStoreImpl(timeService, mockPropertyService, accountStoreMock, transactionDbMock,
                 null);
@@ -317,12 +318,12 @@ public class UnconfirmedTransactionStoreTest {
     public void cheaperDuplicateTransactionGetsRemoved() throws ValidationException {
         Transaction cheap = new Transaction.Builder((byte) 1, TestConstants.TEST_PUBLIC_KEY_BYTES, 1, FEE_QUANT_SIP3,
                 timeService.getEpochTime() + 50000, (short) 500,
-                new MessagingAliasSell("aliasName", 123, 5))
+                new MessagingAliasSell(fluxCapacitor, "aliasName", 123L, 5))
                 .id(1).senderId(123L).build();
 
         Transaction expensive = new Transaction.Builder((byte) 1, TestConstants.TEST_PUBLIC_KEY_BYTES, 1,
                 FEE_QUANT_SIP3 * 2, timeService.getEpochTime() + 50000, (short) 500,
-                new MessagingAliasSell("aliasName", 123, 5))
+                new MessagingAliasSell(fluxCapacitor, "aliasName", 123L, 5))
                 .id(2).senderId(123L).build();
 
         t.put(cheap, null);
@@ -341,12 +342,12 @@ public class UnconfirmedTransactionStoreTest {
     public void cheaperDuplicateTransactionNeverGetsAdded() throws ValidationException {
         Transaction cheap = new Transaction.Builder((byte) 1, TestConstants.TEST_PUBLIC_KEY_BYTES, 1, FEE_QUANT_SIP3,
                 timeService.getEpochTime() + 50000, (short) 500,
-                new MessagingAliasSell("aliasName", 123, 5))
+                new MessagingAliasSell(fluxCapacitor, "aliasName", 123L, 5))
                 .id(1).senderId(123L).build();
 
         Transaction expensive = new Transaction.Builder((byte) 1, TestConstants.TEST_PUBLIC_KEY_BYTES, 1,
                 FEE_QUANT_SIP3 * 2, timeService.getEpochTime() + 50000, (short) 500,
-                new MessagingAliasSell("aliasName", 123, 5))
+                new MessagingAliasSell(fluxCapacitor, "aliasName", 123L, 5))
                 .id(2).senderId(123L).build();
 
         t.put(expensive, null);

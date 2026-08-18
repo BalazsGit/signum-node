@@ -87,7 +87,7 @@ public final class SendMoneyMulti extends CreateTransaction {
             return response;
         }
 
-        Attachment.PaymentMultiOutCreation attachment = new Attachment.PaymentMultiOutCreation(recipients,
+        Attachment.PaymentMultiOutCreation attachment = new Attachment.PaymentMultiOutCreation(fluxCapacitor, recipients,
                 blockchain.getHeight());
 
         return createTransaction(req, sender, null, attachment.getAmountNqt(), attachment);

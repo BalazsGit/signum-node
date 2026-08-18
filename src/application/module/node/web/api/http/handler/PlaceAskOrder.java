@@ -42,7 +42,7 @@ public final class PlaceAskOrder extends CreateTransaction {
             return NOT_ENOUGH_ASSETS;
         }
 
-        Attachment attachment = new Attachment.ColoredCoinsAskOrderPlacement(asset.getId(), quantityQNT, priceNQT,
+        Attachment attachment = new Attachment.ColoredCoinsAskOrderPlacement(fluxCapacitor, asset.getId(), quantityQNT, priceNQT,
                 blockchain.getHeight());
         return createTransaction(req, account, attachment);
 

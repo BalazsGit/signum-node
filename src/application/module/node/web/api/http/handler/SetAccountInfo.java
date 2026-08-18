@@ -45,7 +45,7 @@ public final class SetAccountInfo extends CreateTransaction {
         }
 
         Account account = parameterService.getSenderAccount(req);
-        Attachment attachment = new Attachment.MessagingAccountInfo(name, description, blockchain.getHeight());
+        Attachment attachment = new Attachment.MessagingAccountInfo(fluxCapacitor, name, description, blockchain.getHeight());
         return createTransaction(req, account, attachment);
 
     }

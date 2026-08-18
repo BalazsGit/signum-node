@@ -80,7 +80,7 @@ public class GetAccountEscrowTransactionsTest extends AbstractUnitTest {
         when(escrow.getSenderId()).thenReturn(6L);
 
         final Collection<Decision> decisionsIterator = mockCollection(decision, skippedDecision, otherSkippedDecision);
-        when(escrow.getDecisions()).thenReturn(decisionsIterator);
+        when(escrowServiceMock.getDecisions(eq(escrow.getId()))).thenReturn(decisionsIterator);
 
         final Collection<Escrow> escrowCollection = Arrays.asList(escrow);
         when(escrowServiceMock.getEscrowTransactionsByParticipant(eq(accountId))).thenReturn(escrowCollection);

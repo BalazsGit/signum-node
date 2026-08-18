@@ -35,7 +35,7 @@ public final class DGSPriceChange extends CreateTransaction {
         if (goods.isDelisted() || goods.getSellerId() != account.getId()) {
             return UNKNOWN_GOODS;
         }
-        Attachment attachment = new Attachment.DigitalGoodsPriceChange(goods.getId(), priceNQT, blockchain.getHeight());
+        Attachment attachment = new Attachment.DigitalGoodsPriceChange(fluxCapacitor, goods.getId(), priceNQT, blockchain.getHeight());
         return createTransaction(req, account, attachment);
     }
 

@@ -51,7 +51,7 @@ public final class RemoveCommitment extends CreateTransaction {
         if (committedAmountNQT < amountNQT) {
             return NOT_ENOUGH_FUNDS;
         }
-        Attachment attachment = new Attachment.CommitmentRemove(amountNQT, blockchain.getHeight());
+        Attachment attachment = new Attachment.CommitmentRemove(fluxCapacitor, amountNQT, blockchain.getHeight());
         return createTransaction(req, account, attachment);
     }
 

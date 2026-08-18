@@ -84,7 +84,7 @@ public final class EscrowSign extends CreateTransaction {
             return response;
         }
 
-        Attachment.AdvancedPaymentEscrowSign attachment = new Attachment.AdvancedPaymentEscrowSign(escrow.getId(),
+        Attachment.AdvancedPaymentEscrowSign attachment = new Attachment.AdvancedPaymentEscrowSign(fluxCapacitor, escrow.getId(),
                 decision, blockchain.getHeight());
 
         return createTransaction(req, sender, null, 0, attachment);

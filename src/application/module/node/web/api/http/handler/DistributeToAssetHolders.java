@@ -117,7 +117,7 @@ public final class DistributeToAssetHolders extends CreateTransaction {
             return JSONResponses.incorrect(QUANTITY_MININUM_QNT_PARAMETER);
         }
 
-        Attachment attachment = new Attachment.ColoredCoinsAssetDistributeToHolders(asset.getId(), minimumQuantity,
+        Attachment attachment = new Attachment.ColoredCoinsAssetDistributeToHolders(fluxCapacitor, asset.getId(), minimumQuantity,
                 assetToDistributeId, quantityQNT, blockchain.getHeight());
         return createTransaction(req, account, null, amountNQT, attachment);
     }

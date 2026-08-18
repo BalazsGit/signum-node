@@ -376,7 +376,7 @@ public class AT extends AtMachineState {
             if (pendingTransactions != null) {
                 for (AtTransaction atTransaction : pendingTransactions) {
                     try {
-                        Transaction transaction = atTransaction.build(block);
+                        Transaction transaction = atTransaction.build(block, processingContext.getFluxCapacitor());
 
                         if (!transactionDb.hasTransaction(transaction.getIdCheckSignature(false))) {
                             atTransaction.apply(processingContext, transaction);

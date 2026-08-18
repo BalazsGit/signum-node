@@ -84,7 +84,7 @@ public final class SendMoneyMultiSame extends CreateTransaction {
             return response;
         }
 
-        Attachment.PaymentMultiSameOutCreation attachment = new Attachment.PaymentMultiSameOutCreation(recipients,
+        Attachment.PaymentMultiSameOutCreation attachment = new Attachment.PaymentMultiSameOutCreation(fluxCapacitor, recipients,
                 blockchain.getHeight());
 
         return createTransaction(req, sender, null, totalAmountNQT, attachment);

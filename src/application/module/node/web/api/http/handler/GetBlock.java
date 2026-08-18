@@ -6,6 +6,7 @@ import application.module.node.web.api.http.common.LegacyDocTag;
 import application.module.node.web.api.http.common.Parameters;
 import application.module.node.services.BlockService;
 import application.module.node.util.Convert;
+import application.module.node.props.PropertyService;
 import application.module.node.web.api.http.ApiServlet;
 import application.module.node.web.api.http.common.JSONData;
 import com.google.gson.JsonElement;
@@ -21,11 +22,14 @@ public final class GetBlock extends ApiServlet.JsonRequestHandler {
 
     private final BlockService blockService;
 
-    public GetBlock(Blockchain blockchain, BlockService blockService) {
+    private final PropertyService propertyService;
+
+    public GetBlock(Blockchain blockchain, BlockService blockService, PropertyService propertyService) {
         super(new LegacyDocTag[] { LegacyDocTag.BLOCKS }, BLOCK_PARAMETER, HEIGHT_PARAMETER, TIMESTAMP_PARAMETER,
                 INCLUDE_TRANSACTIONS_PARAMETER);
         this.blockchain = blockchain;
         this.blockService = blockService;
+        this.propertyService = propertyService;
     }
 
     @Override
@@ -72,6 +76,6 @@ public final class GetBlock extends ApiServlet.JsonRequestHandler {
         boolean includeTransactions = Parameters.isTrue(req.getParameter(INCLUDE_TRANSACTIONS_PARAMETER));
 
         return JSONData.block(blockData, includeTransactions, blockchain.getHeight(),
-                blockService.getBlockReward(blockData), blockService.getScoopNum(blockData));
+                blockService.getBlockReward(blockData), blockService.getScoopNum(blockData), propertyService);
     }
 }

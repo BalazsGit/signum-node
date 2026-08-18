@@ -9,6 +9,7 @@ import application.module.node.db.TransactionDb;
 import application.module.node.db.VersionedEntityTable;
 import application.module.node.db.sql.DbKey.LinkKeyFactory;
 import application.module.node.db.store.EscrowStore;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.services.AccountService;
 import application.module.node.services.AliasService;
 import application.module.node.services.EscrowService;
@@ -32,9 +33,10 @@ public class EscrowServiceImpl implements EscrowService {
     private final AccountService accountService;
     private final TransactionDb transactionDb;
     private final List<Transaction> resultTransactions;
+    private final FluxCapacitor fluxCapacitor;
 
     public EscrowServiceImpl(EscrowStore escrowStore, Blockchain blockchain, AliasService aliasService,
-            AccountService accountService, TransactionDb transactionDb) {
+            AccountService accountService, TransactionDb transactionDb, FluxCapacitor fluxCapacitor) {
         this.escrowStore = escrowStore;
         this.escrowTable = escrowStore.getEscrowTable();
         this.escrowDbKeyFactory = escrowStore.getEscrowDbKeyFactory();
@@ -45,6 +47,7 @@ public class EscrowServiceImpl implements EscrowService {
         this.aliasService = aliasService;
         this.accountService = accountService;
         this.transactionDb = transactionDb;
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     @Override
@@ -78,7 +81,7 @@ public class EscrowServiceImpl implements EscrowService {
         if (escrow == null) {
             return;
         }
-        escrow.getDecisions().forEach(decisionTable::delete);
+        escrowStore.getDecisions(escrow.getId()).forEach(decisionTable::delete);
         escrowTable.delete(escrow);
     }
 
@@ -243,10 +246,15 @@ public class EscrowServiceImpl implements EscrowService {
     }
 
     @Override
+    public Collection<Escrow.Decision> getDecisions(Long escrowId) {
+        return escrowStore.getDecisions(escrowId);
+    }
+
+    @Override
     public void saveResultTransaction(Block block, Long escrowId, Long recipientId, Long amountNQT,
             DecisionType decision, int blockchainHeight) {
-        Attachment.AbstractAttachment attachment = new Attachment.AdvancedPaymentEscrowResult(escrowId, decision,
-                blockchainHeight);
+        Attachment.AbstractAttachment attachment = new Attachment.AdvancedPaymentEscrowResult(fluxCapacitor, escrowId,
+                decision, blockchainHeight);
         Transaction.Builder builder = new Transaction.Builder((byte) 1, Genesis.getCreatorPublicKey(),
                 amountNQT, 0L, block.getTimestamp(), (short) 1440, attachment);
         builder.senderId(0L)

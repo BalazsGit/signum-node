@@ -44,6 +44,6 @@ public final class GetEscrowTransaction extends ApiServlet.JsonRequestHandler {
             return response;
         }
 
-        return JSONData.escrowTransaction(escrow);
+        return JSONData.escrowTransaction(escrow, escrowService.getDecisions(escrowId));
     }
 }

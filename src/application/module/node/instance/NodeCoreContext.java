@@ -548,7 +548,8 @@ public final class NodeCoreContext {
                 this.blockchain,
                 this.aliasService,
                 this.accountService,
-                transactionDb);
+                transactionDb,
+                this.fluxCapacitor);
 
         // AssetExchange (lines 578-584)
         this.assetExchange = new AssetExchangeImpl(

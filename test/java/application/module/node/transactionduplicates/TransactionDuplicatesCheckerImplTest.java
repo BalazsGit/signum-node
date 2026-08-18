@@ -35,18 +35,19 @@ import static org.powermock.api.mockito.PowerMockito.mockStatic;
 public class TransactionDuplicatesCheckerImplTest {
 
     private TransactionDuplicatesCheckerImpl t = new TransactionDuplicatesCheckerImpl();
+    private FluxCapacitor fluxCapacitor;
 
     @Before
     public void setUp() {
         mockStatic(Signum.class);
 
-        final FluxCapacitor mockFluxCapacitor = QuickMocker.fluxCapacitorEnabledFunctionalities(FluxValues.PRE_POC2);
-        when(Signum.getFluxCapacitor()).thenReturn(mockFluxCapacitor);
+        fluxCapacitor = QuickMocker.fluxCapacitorEnabledFunctionalities(FluxValues.PRE_POC2);
+        when(Signum.getFluxCapacitor()).thenReturn(fluxCapacitor);
         BlockchainImpl mockBlockchain = mock(BlockchainImpl.class);
         when(mockBlockchain.getHeight()).thenReturn(4);
         when(Signum.getBlockchain()).thenReturn(mockBlockchain);
 
-        doReturn(Constants.FEE_QUANT_SIP3).when(mockFluxCapacitor).getValue(eq(FluxValues.FEE_QUANT), anyInt());
+        doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT), anyInt());
 
         t = new TransactionDuplicatesCheckerImpl();
     }
@@ -56,7 +57,7 @@ public class TransactionDuplicatesCheckerImplTest {
     public void firstTransactionIsNeverADuplicateWhenCheckingForAnyDuplicate() throws NotValidException {
         Transaction transaction = new Transaction.Builder((byte) 0, TestConstants.TEST_PUBLIC_KEY_BYTES, 1, 99999999,
                 50000, (short) 500,
-                new MessagingAliasSell("aliasName", 123, 5))
+                new MessagingAliasSell(fluxCapacitor, "aliasName", 123L, 5))
                 .id(1).senderId(123L).build();
 
         assertFalse(t.hasAnyDuplicate(transaction));
@@ -67,7 +68,7 @@ public class TransactionDuplicatesCheckerImplTest {
     public void addingSameTransactionTwiceCountsAsADuplicate() throws NotValidException {
         Transaction transaction = new Transaction.Builder((byte) 0, TestConstants.TEST_PUBLIC_KEY_BYTES, 1, 99999999,
                 50000, (short) 500,
-                new MessagingAliasSell("aliasName", 123, 5))
+                new MessagingAliasSell(fluxCapacitor, "aliasName", 123L, 5))
                 .id(1).senderId(123L).build();
 
         assertFalse(t.hasAnyDuplicate(transaction));
@@ -79,12 +80,12 @@ public class TransactionDuplicatesCheckerImplTest {
     public void duplicateTransactionIsDuplicateWhenCheckingForAnyDuplicate() throws NotValidException {
         Transaction transaction = new Transaction.Builder((byte) 0, TestConstants.TEST_PUBLIC_KEY_BYTES, 1, 99999999,
                 50000, (short) 500,
-                new MessagingAliasSell("aliasName", 123, 5))
+                new MessagingAliasSell(fluxCapacitor, "aliasName", 123L, 5))
                 .id(1).senderId(123L).build();
 
         Transaction duplicate = new Transaction.Builder((byte) 0, TestConstants.TEST_PUBLIC_KEY_BYTES, 1, 99999999,
                 50000, (short) 500,
-                new MessagingAliasSell("aliasName", 123, 5))
+                new MessagingAliasSell(fluxCapacitor, "aliasName", 123L, 5))
                 .id(2).senderId(345L).build();
 
         assertFalse(t.hasAnyDuplicate(transaction));
@@ -96,12 +97,12 @@ public class TransactionDuplicatesCheckerImplTest {
     public void duplicateTransactionRemovesCheaperDuplicateWhenCheckingForCheapestDuplicate() throws NotValidException {
         Transaction cheaper = new Transaction.Builder((byte) 0, TestConstants.TEST_PUBLIC_KEY_BYTES, 1, 999999, 50000,
                 (short) 500,
-                new MessagingAliasSell("aliasName", 123, 5))
+                new MessagingAliasSell(fluxCapacitor, "aliasName", 123L, 5))
                 .id(1).senderId(123L).build();
 
         Transaction moreExpensive = new Transaction.Builder((byte) 0, TestConstants.TEST_PUBLIC_KEY_BYTES, 1, 999999999,
                 50000, (short) 500,
-                new MessagingAliasSell("aliasName", 123, 5))
+                new MessagingAliasSell(fluxCapacitor, "aliasName", 123L, 5))
                 .id(2).senderId(345L).build();
 
         final TransactionDuplicationResult hasCheaperFirst = t.removeCheaperDuplicate(cheaper);
@@ -124,7 +125,7 @@ public class TransactionDuplicatesCheckerImplTest {
     public void someTransactionsAreAlwaysADuplicate() throws NotValidException {
         Transaction transaction = new Transaction.Builder((byte) 0, TestConstants.TEST_PUBLIC_KEY_BYTES, 1, 99999999,
                 50000, (short) 500,
-                new AdvancedPaymentEscrowResult(123L, DecisionType.REFUND, 5))
+                new AdvancedPaymentEscrowResult(fluxCapacitor, 123L, DecisionType.REFUND, 5))
                 .id(1).senderId(123L).build();
 
         assertTrue(t.hasAnyDuplicate(transaction));
@@ -136,7 +137,7 @@ public class TransactionDuplicatesCheckerImplTest {
     public void someTransactionsAreNeverADuplicate() throws NotValidException {
         Transaction transaction = new Transaction.Builder((byte) 0, TestConstants.TEST_PUBLIC_KEY_BYTES, 1, 99999999,
                 50000, (short) 500,
-                new AdvancedPaymentSubscriptionSubscribe(123, 5))
+                new AdvancedPaymentSubscriptionSubscribe(fluxCapacitor, 123, 5))
                 .id(1).senderId(123L).build();
 
         assertFalse(t.hasAnyDuplicate(transaction));
@@ -149,12 +150,12 @@ public class TransactionDuplicatesCheckerImplTest {
     public void removingTransactionMakesItNotADuplicateAnymore() throws NotValidException {
         Transaction transaction = new Transaction.Builder((byte) 0, TestConstants.TEST_PUBLIC_KEY_BYTES, 1, 99999999,
                 50000, (short) 500,
-                new MessagingAliasSell("aliasName", 123, 5))
+                new MessagingAliasSell(fluxCapacitor, "aliasName", 123L, 5))
                 .id(1).senderId(123L).build();
 
         Transaction duplicate = new Transaction.Builder((byte) 0, TestConstants.TEST_PUBLIC_KEY_BYTES, 1, 99999999,
                 50000, (short) 500,
-                new MessagingAliasSell("aliasName", 123, 5))
+                new MessagingAliasSell(fluxCapacitor, "aliasName", 123L, 5))
                 .id(2).senderId(345L).build();
 
         assertFalse(t.hasAnyDuplicate(transaction));
@@ -170,12 +171,12 @@ public class TransactionDuplicatesCheckerImplTest {
     public void clearingRemovesAllTransactions() throws NotValidException {
         Transaction transaction = new Transaction.Builder((byte) 0, TestConstants.TEST_PUBLIC_KEY_BYTES, 1, 99999999,
                 50000, (short) 500,
-                new MessagingAliasSell("aliasName", 123, 5))
+                new MessagingAliasSell(fluxCapacitor, "aliasName", 123L, 5))
                 .id(1).senderId(123L).build();
 
         Transaction duplicate = new Transaction.Builder((byte) 0, TestConstants.TEST_PUBLIC_KEY_BYTES, 1, 99999999,
                 50000, (short) 500,
-                new MessagingAliasSell("aliasName", 123, 5))
+                new MessagingAliasSell(fluxCapacitor, "aliasName", 123L, 5))
                 .id(2).senderId(345L).build();
 
         assertFalse(t.hasAnyDuplicate(transaction));

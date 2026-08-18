@@ -231,7 +231,7 @@ public class SubscriptionServiceImpl implements SubscriptionService {
         accountService.addToBalanceAndUnconfirmedBalanceNQT(recipient, subscription.getAmountNQT());
 
         Attachment.AbstractAttachment attachment = new Attachment.AdvancedPaymentSubscriptionPayment(
-                subscription.getId(), blockchainHeight);
+                fluxCapacitor, subscription.getId(), blockchainHeight);
         Transaction.Builder builder = new Transaction.Builder((byte) 1,
                 sender.getPublicKey(), subscription.getAmountNQT(),
                 getFee(block.getHeight()),

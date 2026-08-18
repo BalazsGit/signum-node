@@ -1,12 +1,12 @@
 package application.module.node.unconfirmedtransactions;
 
 import application.module.node.Blockchain;
-import application.module.node.Signum;
 import application.module.node.SignumException.ValidationException;
 import application.module.node.Constants;
 import application.module.node.Transaction;
 import application.module.node.db.TransactionDb;
 import application.module.node.db.store.AccountStore;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.peer.Peer;
 import application.module.node.props.PropertyService;
@@ -48,10 +48,18 @@ public class UnconfirmedTransactionStoreImpl implements UnconfirmedTransactionSt
     private final int maxPercentageUnconfirmedTransactionsFullHash;
 
     private NetworkParameters params;
+    private FluxCapacitor fluxCapacitor;
+    private Blockchain blockchain;
 
     @Override
     public void setBlockchain(Blockchain blockchain) {
+        this.blockchain = blockchain;
         this.reservedBalanceCache.setBlockchain(blockchain);
+    }
+
+    @Override
+    public void setFluxCapacitor(FluxCapacitor fluxCapacitor) {
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     public UnconfirmedTransactionStoreImpl(TimeService timeService, PropertyService propertyService,
@@ -286,7 +294,7 @@ public class UnconfirmedTransactionStoreImpl implements UnconfirmedTransactionSt
     private boolean tooManyTransactionsForSlotSize(Transaction transaction) {
         final long slotHeight = this.amountSlotForTransaction(transaction);
         long slotUnconfirmedLimit = slotHeight * 360;
-        if (Signum.getFluxCapacitor().getValue(FluxValues.SPEEDWAY, Signum.getBlockchain().getHeight())) {
+        if (fluxCapacitor.getValue(FluxValues.SPEEDWAY, blockchain.getHeight())) {
             // Use a higher limit per slot, since most transactions will be on the same slot
             // (first)
             slotUnconfirmedLimit = maxSize / 4;
@@ -395,8 +403,8 @@ public class UnconfirmedTransactionStoreImpl implements UnconfirmedTransactionSt
     }
 
     private long amountSlotForTransaction(Transaction transaction) {
-        long slot = transaction.getFeeNqt() / Signum.getFluxCapacitor().getValue(FluxValues.FEE_QUANT);
-        if (Signum.getFluxCapacitor().getValue(FluxValues.SPEEDWAY)) {
+        long slot = transaction.getFeeNqt() / fluxCapacitor.getValue(FluxValues.FEE_QUANT);
+        if (fluxCapacitor.getValue(FluxValues.SPEEDWAY)) {
             // Using the 'slot' now as a priority measure, not exactly as before
             long transactionSize = transaction.getSize() / Constants.ORDINARY_TRANSACTION_BYTES;
             slot /= transactionSize;
@@ -449,11 +457,9 @@ public class UnconfirmedTransactionStoreImpl implements UnconfirmedTransactionSt
         long freeSlot = 1;
 
         long txsPerSlot = 1;
-        if (Signum.getFluxCapacitor().getValue(FluxValues.SPEEDWAY)) {
-            // transactions per slot, we assume transactions can occupy up to 2 times the
-            // ordinary size
-            txsPerSlot = Signum.getFluxCapacitor().getValue(FluxValues.MAX_NUMBER_TRANSACTIONS,
-                    Signum.getBlockchain().getHeight()) / 2;
+        if (fluxCapacitor.getValue(FluxValues.SPEEDWAY)) {
+            txsPerSlot = fluxCapacitor.getValue(FluxValues.MAX_NUMBER_TRANSACTIONS,
+                    blockchain.getHeight()) / 2;
         }
 
         synchronized (internalStore) {

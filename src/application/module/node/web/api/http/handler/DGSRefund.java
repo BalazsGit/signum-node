@@ -60,7 +60,7 @@ public final class DGSRefund extends CreateTransaction {
 
         Account buyerAccount = accountService.getAccount(purchase.getBuyerId());
 
-        Attachment attachment = new Attachment.DigitalGoodsRefund(purchase.getId(), refundNQT, blockchain.getHeight());
+        Attachment attachment = new Attachment.DigitalGoodsRefund(fluxCapacitor, purchase.getId(), refundNQT, blockchain.getHeight());
         return createTransaction(req, sellerAccount, buyerAccount.getId(), 0, attachment);
 
     }

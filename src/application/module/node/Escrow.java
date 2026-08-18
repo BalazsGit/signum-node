@@ -162,10 +162,6 @@ public class Escrow {
         return requiredSigners;
     }
 
-    public Collection<Decision> getDecisions() {
-        return Signum.getStores().getEscrowStore().getDecisions(id);
-    }
-
     public int getDeadline() {
         return deadline;
     }

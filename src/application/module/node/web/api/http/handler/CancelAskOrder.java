@@ -37,7 +37,7 @@ public final class CancelAskOrder extends CreateTransaction {
         if (orderData == null || orderData.getAccountId() != account.getId()) {
             return UNKNOWN_ORDER;
         }
-        Attachment attachment = new Attachment.ColoredCoinsAskOrderCancellation(orderId, blockchain.getHeight());
+        Attachment attachment = new Attachment.ColoredCoinsAskOrderCancellation(fluxCapacitor, orderId, blockchain.getHeight());
         return createTransaction(req, account, attachment);
     }
 

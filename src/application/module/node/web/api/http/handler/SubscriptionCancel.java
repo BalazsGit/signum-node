@@ -72,7 +72,7 @@ public final class SubscriptionCancel extends CreateTransaction {
         }
 
         Attachment.AdvancedPaymentSubscriptionCancel attachment = new Attachment.AdvancedPaymentSubscriptionCancel(
-                subscription.getId(), blockchain.getHeight());
+                fluxCapacitor, subscription.getId(), blockchain.getHeight());
 
         return createTransaction(req, sender, null, 0, attachment);
     }

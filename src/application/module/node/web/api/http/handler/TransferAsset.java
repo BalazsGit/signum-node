@@ -64,7 +64,7 @@ public final class TransferAsset extends CreateTransaction {
             }
         }
 
-        Attachment attachment = new Attachment.ColoredCoinsAssetTransfer(asset.getId(), quantityQNT,
+        Attachment attachment = new Attachment.ColoredCoinsAssetTransfer(fluxCapacitor, asset.getId(), quantityQNT,
                 blockchain.getHeight());
         return createTransaction(req, account, recipient, amountNQT, attachment);
 
