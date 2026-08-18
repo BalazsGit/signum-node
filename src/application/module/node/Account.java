@@ -6,6 +6,7 @@ import application.module.node.crypto.Crypto;
 import application.module.node.crypto.EncryptedData;
 import application.module.node.db.SignumKey;
 import application.module.node.db.VersionedBatchEntityTable;
+import application.module.node.db.store.AccountStore;
 import application.module.node.util.Convert;
 import java.util.Arrays;
 import java.util.logging.Level;
@@ -24,9 +25,18 @@ public class Account {
     private byte[] publicKey;
     private int keyHeight;
     private boolean isAutomatedTransaction;
+    private AccountStore originStore;
 
     protected String name;
     protected String description;
+
+    public AccountStore getOriginStore() {
+        return originStore;
+    }
+
+    void setOriginStore(AccountStore store) {
+        this.originStore = store;
+    }
 
     public static class Balance {
         public final long id;
@@ -36,9 +46,14 @@ public class Account {
         protected long unconfirmedBalanceNqt;
         protected long forgedBalanceNqt;
 
-        public Balance(long id) {
+    public Balance(long id) {
             this.id = id;
             this.nxtKey = accountSignumKeyFactory().newKey(this.id);
+        }
+
+        protected Balance(long id, SignumKey signumKey) {
+            this.id = id;
+            this.nxtKey = signumKey;
         }
 
         public void setForgedBalanceNqt(long forgedBalanceNqt) {
@@ -273,6 +288,53 @@ public class Account {
         return Signum.getStores().getAccountStore().getAccountAsset(id, assetId);
     }
 
+    // =========================================================================
+    // Store-scoped (multi-node) accessors.
+    // Prefer these over the legacy static methods above: they operate on the
+    // AccountStore owned by a specific node, guaranteeing cross-node isolation.
+    //
+    // @since 4.1
+    // =========================================================================
+
+    /**
+     * Retrieves an account by id from the given {@link AccountStore}.
+     *
+     * @param store the node's account store
+     * @param id    the account id
+     * @return the account, or {@code null} if id is 0 or not found
+     */
+    public static Account getAccount(AccountStore store, long id) {
+        Account result = id == 0 ? null : store.getAccountTable().get(store.getAccountKeyFactory().newKey(id));
+        if (result != null) {
+            result.setOriginStore(store);
+        }
+        return result;
+    }
+
+    /**
+     * Retrieves an account balance by id from the given {@link AccountStore}.
+     *
+     * @param store the node's account store
+     * @param id    the account id
+     * @return the balance, or {@code null} if id is 0 or not found
+     */
+    public static Account.Balance getAccountBalance(AccountStore store, long id) {
+        return id == 0 ? null : store.getAccountBalanceTable()
+                .get(store.getAccountBalanceKeyFactory().newKey(id));
+    }
+
+    /**
+     * Retrieves an account asset balance from the given {@link AccountStore}.
+     *
+     * @param store   the node's account store
+     * @param id      the account id
+     * @param assetId the asset id
+     * @return the account asset
+     */
+    public static Account.AccountAsset getAccountAssetBalance(AccountStore store, long id, long assetId) {
+        return store.getAccountAsset(id, assetId);
+    }
+
     public long getId() {
         return id;
     }
@@ -291,13 +353,15 @@ public class Account {
         return account;
     }
 
-    /**
-     * Constructs an Account with the given ID and creation height.
-     * Accepts blockchain height to eliminate static Signum.getBlockchain() calls.
-     *
-     * @param id              the account ID
-     * @param creationHeight  the blockchain height at which this account was created
-     */
+    public static Account getOrAddAccount(AccountStore store, long id, int height) {
+        Account account = getAccount(store, id);
+        if (account == null) {
+            account = new Account(id, height, store);
+            store.getAccountTable().insert(account);
+        }
+        return account;
+    }
+
     public Account(long id, int creationHeight) {
         if (id != Crypto.rsDecode(Crypto.rsEncode(id))) {
             logger.log(Level.INFO, "CRITICAL ERROR: Reed-Solomon encoding fails for {0}", id);
@@ -305,6 +369,16 @@ public class Account {
         this.id = id;
         this.nxtKey = accountSignumKeyFactory().newKey(this.id);
         this.creationHeight = creationHeight;
+    }
+
+    public Account(long id, int creationHeight, AccountStore store) {
+        if (id != Crypto.rsDecode(Crypto.rsEncode(id))) {
+            logger.log(Level.INFO, "CRITICAL ERROR: Reed-Solomon encoding fails for {0}", id);
+        }
+        this.id = id;
+        this.nxtKey = store.getAccountKeyFactory().newKey(this.id);
+        this.creationHeight = creationHeight;
+        this.originStore = store;
     }
 
     /**
@@ -349,18 +423,23 @@ public class Account {
     }
 
     public long getUnconfirmedBalanceNqt() {
-        Balance balance = Account.getAccountBalance(id);
+        Balance balance = getBalanceFromStore();
         return balance == null ? 0L : balance.getUnconfirmedBalanceNqt();
     }
 
     public long getBalanceNqt() {
-        Balance balance = Account.getAccountBalance(id);
+        Balance balance = getBalanceFromStore();
         return balance == null ? 0L : balance.getBalanceNqt();
     }
 
     public long getForgedBalanceNqt() {
-        Balance balance = Account.getAccountBalance(id);
+        Balance balance = getBalanceFromStore();
         return balance == null ? 0L : balance.getForgedBalanceNqt();
+    }
+
+    private Balance getBalanceFromStore() {
+        AccountStore store = this.originStore != null ? this.originStore : Signum.getStores().getAccountStore();
+        return Account.getAccountBalance(store, id);
     }
 
     public EncryptedData encryptTo(byte[] data, String senderSecretPhrase) {
@@ -393,7 +472,8 @@ public class Account {
     // or
     // this.publicKey is already set to an array equal to key
     public boolean setOrVerify(byte[] key, int height) {
-        return Signum.getStores().getAccountStore().setOrVerify(this, key, height);
+        AccountStore store = this.originStore != null ? this.originStore : Signum.getStores().getAccountStore();
+        return store.setOrVerify(this, key, height);
     }
 
     public void apply(byte[] key, int height) {
@@ -407,7 +487,8 @@ public class Account {
         }
         if (this.keyHeight == -1 || this.keyHeight > height) {
             this.keyHeight = height;
-            accountTable().insert(this);
+            AccountStore store = this.originStore != null ? this.originStore : Signum.getStores().getAccountStore();
+            store.getAccountTable().insert(this);
         }
     }
 

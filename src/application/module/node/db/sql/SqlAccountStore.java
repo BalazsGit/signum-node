@@ -493,7 +493,7 @@ public class SqlAccountStore implements AccountStore {
 
     class SqlAccountBalance extends Account.Balance {
         SqlAccountBalance(Record record) {
-            super(record.get(ACCOUNT_BALANCE.ID));
+            super(record.get(ACCOUNT_BALANCE.ID), accountBalanceDbKeyFactory.newKey(record.get(ACCOUNT_BALANCE.ID)));
             this.balanceNqt = record.get(ACCOUNT_BALANCE.BALANCE);
             this.unconfirmedBalanceNqt = record.get(ACCOUNT_BALANCE.UNCONFIRMED_BALANCE);
             this.forgedBalanceNqt = record.get(ACCOUNT_BALANCE.FORGED_BALANCE);
