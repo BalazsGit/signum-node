@@ -2,6 +2,7 @@ package application.module.node;
 
 import application.module.node.at.AtConstants;
 import application.module.node.assetexchange.AssetExchange;
+import application.module.node.db.store.AccountStore;
 import application.module.node.db.store.ATStore;
 import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.props.PropertyService;
@@ -56,6 +57,7 @@ public final class TransactionApplyContext {
     private final PropertyService propertyService;
     private final ATStore atStore;
     private final AtConstants atConstants;
+    private final AccountStore accountStore;
 
     /**
      * Creates a new immutable transaction processing context.
@@ -83,7 +85,8 @@ public final class TransactionApplyContext {
             EscrowService escrowService,
             PropertyService propertyService,
             ATStore atStore,
-            AtConstants atConstants) {
+            AtConstants atConstants,
+            AccountStore accountStore) {
 
         this.blockchain = blockchain;
         this.fluxCapacitor = fluxCapacitor;
@@ -96,6 +99,7 @@ public final class TransactionApplyContext {
         this.propertyService = propertyService;
         this.atStore = atStore;
         this.atConstants = atConstants;
+        this.accountStore = accountStore;
     }
 
     /** @return the blockchain instance for this context */
@@ -151,6 +155,10 @@ public final class TransactionApplyContext {
     /** @return the AT constants for automated transaction configuration */
     public AtConstants getAtConstants() {
         return atConstants;
+    }
+
+    public AccountStore getAccountStore() {
+        return accountStore;
     }
 
     @Override

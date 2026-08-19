@@ -37,6 +37,7 @@ public class PeersDialog extends JFrame {
 
     private final Listener<Block> peerListener;
     private final JTabbedPane tabbedPane;
+    private final BlockchainProcessor blockchainProcessor;
 
     public enum PeerCategory {
         ACTIVE("Active", p -> p.getState() != Peer.State.NON_CONNECTED),
@@ -71,10 +72,21 @@ public class PeersDialog extends JFrame {
      * @param owner The parent frame.
      */
     public static void showPeersDialog(JFrame owner) {
+        showPeersDialog(owner, Signum.getBlockchainProcessor());
+    }
+
+    /**
+     * Displays the peers dialog with an explicitly injected BlockchainProcessor
+     * for multi-node isolation.
+     *
+     * @param owner               The parent frame.
+     * @param blockchainProcessor The per-instance BlockchainProcessor to observe.
+     */
+    public static void showPeersDialog(JFrame owner, BlockchainProcessor blockchainProcessor) {
         if (instance == null) {
             synchronized (PeersDialog.class) {
                 if (instance == null) {
-                    instance = new PeersDialog(owner);
+                    instance = new PeersDialog(owner, blockchainProcessor);
                 }
             }
         }
@@ -84,8 +96,9 @@ public class PeersDialog extends JFrame {
         instance.requestFocus();
     }
 
-    private PeersDialog(JFrame owner) {
+    private PeersDialog(JFrame owner, BlockchainProcessor blockchainProcessor) {
         super("Peer Information");
+        this.blockchainProcessor = blockchainProcessor;
 
         JPanel mainPanel = new JPanel(new BorderLayout(0, 5));
         mainPanel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
@@ -135,12 +148,12 @@ public class PeersDialog extends JFrame {
         updateTabs(); // Initial population
 
         peerListener = block -> SwingUtilities.invokeLater(this::updateTabs);
-        Signum.getBlockchainProcessor().addListener(peerListener, BlockchainProcessor.Event.PEERS_UPDATED);
+        blockchainProcessor.addListener(peerListener, BlockchainProcessor.Event.PEERS_UPDATED);
 
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
-                Signum.getBlockchainProcessor().removeListener(peerListener, BlockchainProcessor.Event.PEERS_UPDATED);
+                blockchainProcessor.removeListener(peerListener, BlockchainProcessor.Event.PEERS_UPDATED);
                 instance = null;
                 dispose();
             }
@@ -159,7 +172,7 @@ public class PeersDialog extends JFrame {
     }
 
     private void updateTabs() {
-        Collection<Peer> allPeers = Signum.getBlockchainProcessor().getAllPeers();
+        Collection<Peer> allPeers = blockchainProcessor.getAllPeers();
 
         long maxHeight = 0;
         String latestVersion = Signum.VERSION.toString();

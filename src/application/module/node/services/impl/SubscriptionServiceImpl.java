@@ -202,7 +202,7 @@ public class SubscriptionServiceImpl implements SubscriptionService {
         Account sender = getSender(subscription);
         long totalAmountNQT = Convert.safeAdd(subscription.getAmountNQT(), getFee(height));
 
-        Account.Balance senderBalance = sender == null ? null : Account.getAccountBalance(sender.getId());
+        Account.Balance senderBalance = sender == null ? null : accountService.getAccountBalance(sender.getId());
         if (sender == null || senderBalance.getUnconfirmedBalanceNqt() < totalAmountNQT) {
             return false;
         }

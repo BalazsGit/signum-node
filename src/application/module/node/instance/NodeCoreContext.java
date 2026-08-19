@@ -764,7 +764,8 @@ public final class NodeCoreContext {
                 this.escrowService,
                 this.propertyService,
                 this.stores.getAtStore(),
-                this.atConstants);
+                this.atConstants,
+                this.stores.getAccountStore());
 
         // Wire TransactionApplyContext into TransactionType
         TransactionType.setContext(this.transactionApplyContext);

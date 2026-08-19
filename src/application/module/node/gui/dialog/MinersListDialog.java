@@ -1,5 +1,6 @@
 package application.module.node.gui.dialog;
 
+import application.module.node.Blockchain;
 import application.module.node.Generator;
 import application.module.node.Signum;
 import application.module.node.gui.metrics.BlockGenerationMetricsPanel;
@@ -44,6 +45,7 @@ import java.util.stream.Collectors;
  */
 public class MinersListDialog extends JFrame {
     private static volatile MinersListDialog instance;
+    private final Blockchain blockchain;
     private DefaultTableModel nodeMinersModel;
     private DefaultTableModel networkMinersModel;
     private JTable nodeMinersTable;
@@ -81,10 +83,17 @@ public class MinersListDialog extends JFrame {
     public static void showDialog(JFrame owner, int tabIndex,
             List<BlockGenerationMetricsPanel.BlockHistoryEntry> history,
             Map<Integer, List<MinerEntry>> nodeHistory) {
+        showDialog(owner, tabIndex, history, nodeHistory, Signum.getBlockchain());
+    }
+
+    public static void showDialog(JFrame owner, int tabIndex,
+            List<BlockGenerationMetricsPanel.BlockHistoryEntry> history,
+            Map<Integer, List<MinerEntry>> nodeHistory,
+            Blockchain blockchain) {
         if (instance == null) {
             synchronized (MinersListDialog.class) {
                 if (instance == null) {
-                    instance = new MinersListDialog(owner);
+                    instance = new MinersListDialog(owner, blockchain);
                 }
             }
         }
@@ -125,8 +134,9 @@ public class MinersListDialog extends JFrame {
         return instance != null && instance.isVisible();
     }
 
-    private MinersListDialog(JFrame owner) {
+    private MinersListDialog(JFrame owner, Blockchain blockchain) {
         super("Miners List");
+        this.blockchain = blockchain;
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
             @Override
@@ -271,8 +281,8 @@ public class MinersListDialog extends JFrame {
         // --- Node Miners Data ---
         List<Object[]> nodeMinersData = new ArrayList<>();
         Map<Long, NodeMinerStats> nodeStats = new HashMap<>();
-        int nextHeight = (Signum.getBlockchain().getLastBlock() != null
-                ? Signum.getBlockchain().getLastBlock().getHeight()
+        int nextHeight = (blockchain.getLastBlock() != null
+                ? blockchain.getLastBlock().getHeight()
                 : 0) + 1;
 
         // Aggregate data from node history

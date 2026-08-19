@@ -473,7 +473,7 @@ public interface Appendix {
                 throw new SignumException.NotValidException(
                         "Public key announcements not enabled for version 0 transactions");
             }
-            Account recipientAccount = Account.getAccount(recipientId);
+            Account recipientAccount = Account.getAccount(TransactionType.getContext().getAccountStore(), recipientId);
             if (recipientAccount != null && recipientAccount.getPublicKey() != null
                     && !Arrays.equals(publicKey, recipientAccount.getPublicKey())) {
                 throw new SignumException.NotCurrentlyValidException(

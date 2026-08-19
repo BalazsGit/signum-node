@@ -532,7 +532,7 @@ public class PeerMetricsPanel extends JPanel {
                 if ((SwingUtilities.isLeftMouseButton(e) || SwingUtilities.isRightMouseButton(e)) && isTitleHit(e)) {
                     Window window = SwingUtilities.getWindowAncestor(PeerMetricsPanel.this);
                     if (window instanceof JFrame) {
-                        PeersDialog.showPeersDialog((JFrame) window);
+                        PeersDialog.showPeersDialog((JFrame) window, ctx.getBlockchainProcessor());
                     }
                 }
             }

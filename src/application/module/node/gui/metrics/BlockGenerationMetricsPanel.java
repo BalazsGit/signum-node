@@ -2405,7 +2405,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (SwingUtilities.isLeftMouseButton(e) || SwingUtilities.isRightMouseButton(e)) {
-                    MinersListDialog.showDialog(parentFrame, tabIndex, recentGenerators, nodeDeadlineHistory);
+                    MinersListDialog.showDialog(parentFrame, tabIndex, recentGenerators, nodeDeadlineHistory, ctx.getBlockchain());
                 }
             }
         });

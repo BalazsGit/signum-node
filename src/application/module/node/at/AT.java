@@ -228,7 +228,7 @@ public class AT extends AtMachineState {
 
         at.saveState(ctx);
 
-        Account account = Account.getOrAddAccount(atId);
+        Account account = ctx.getAccountService().getOrAddAccount(atId);
         account.apply(new byte[32], height);
     }
 

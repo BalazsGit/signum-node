@@ -176,7 +176,7 @@ public class AliasServiceImpl implements AliasService {
             this.stores.getSubscriptionStore().saveSubscriptions(subscriptions);
         }
         if (subscription == null) {
-            this.subscriptionService.addSubscription(Account.getAccount(alias.getAccountId()), alias.getId(), alias.getId(),
+            this.subscriptionService.addSubscription(Account.getAccount(stores.getAccountStore(), alias.getAccountId()), alias.getId(), alias.getId(),
                     fee, timestamp, frequency);
         }
     }
