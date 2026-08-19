@@ -2,7 +2,6 @@ package application.module.node.gui.dialog;
 
 import application.module.node.Blockchain;
 import application.module.node.Generator;
-import application.module.node.Signum;
 import application.module.node.gui.metrics.BlockGenerationMetricsPanel;
 import application.module.node.gui.metrics.BlockGenerationMetricsPanel.MinerEntry;
 import application.module.node.util.Convert;
@@ -80,12 +79,6 @@ public class MinersListDialog extends JFrame {
      * @param nodeHistory The history of deadlines submitted to this node, used for
      *                    node miner statistics.
      */
-    public static void showDialog(JFrame owner, int tabIndex,
-            List<BlockGenerationMetricsPanel.BlockHistoryEntry> history,
-            Map<Integer, List<MinerEntry>> nodeHistory) {
-        showDialog(owner, tabIndex, history, nodeHistory, Signum.getBlockchain());
-    }
-
     public static void showDialog(JFrame owner, int tabIndex,
             List<BlockGenerationMetricsPanel.BlockHistoryEntry> history,
             Map<Integer, List<MinerEntry>> nodeHistory,

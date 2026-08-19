@@ -1,6 +1,7 @@
 package application.module.node;
 
 import application.module.node.assetexchange.AssetExchange;
+import application.module.node.db.store.AccountStore;
 import application.module.node.props.Props;
 import application.module.node.services.AccountService;
 import application.module.node.services.DGSGoodsStoreService;
@@ -93,6 +94,7 @@ public final class DebugTrace {
     private final DGSGoodsStoreService dgsGoodsStoreService;
     private final AssetExchange assetExchange;
     private final Blockchain blockchain;
+    private final AccountStore accountStore;
 
     private PrintWriter log;
 
@@ -107,10 +109,11 @@ public final class DebugTrace {
      * @param dgsGoodsStoreService DGS goods store service reference
      * @param assetExchange      asset exchange reference
      * @param blockchain         instance-scoped blockchain reference (eliminates static Signum.getBlockchain())
+     * @param accountStore       account data store (eliminates static Account.getAccountBalance())
      */
     DebugTrace(Set<Long> accountIds, String logName, String quote, String separator,
             boolean logUnconfirmed, DGSGoodsStoreService dgsGoodsStoreService, AssetExchange assetExchange,
-            Blockchain blockchain) {
+            Blockchain blockchain, AccountStore accountStore) {
         this.accountIds = accountIds;
         this.logName = logName;
         this.quote = quote != null ? quote : DEFAULT_QUOTE;
@@ -119,6 +122,7 @@ public final class DebugTrace {
         this.dgsGoodsStoreService = dgsGoodsStoreService;
         this.assetExchange = assetExchange;
         this.blockchain = blockchain;
+        this.accountStore = accountStore;
         resetLog();
     }
 
@@ -151,7 +155,8 @@ public final class DebugTrace {
             AccountService accountService,
             AssetExchange assetExchange,
             DGSGoodsStoreService dgsGoodsStoreService,
-            Blockchain blockchain) {
+            Blockchain blockchain,
+            AccountStore accountStore) {
 
         String quote = propertyService.getString(Props.NODE_DEBUG_TRACE_QUOTE);
         String separator = propertyService.getString(Props.NODE_DEBUG_TRACE_SEPARATOR);
@@ -173,7 +178,7 @@ public final class DebugTrace {
         }
 
         DebugTrace debugTrace = new DebugTrace(
-                accountIds, logName, quote, separator, logUnconfirmed, dgsGoodsStoreService, assetExchange, blockchain);
+                accountIds, logName, quote, separator, logUnconfirmed, dgsGoodsStoreService, assetExchange, blockchain, accountStore);
         debugTrace.registerListeners(blockchainProcessor, accountService);
 
         logger.debug("Debug tracing of " + (accountIdStrings.contains("*") ? "ALL"
@@ -277,7 +282,7 @@ public final class DebugTrace {
     private Map<String, String> getValues(long accountId, boolean unconfirmed) {
         Map<String, String> map = new HashMap<>();
         map.put("account", Convert.toUnsignedLong(accountId));
-        Account.Balance account = Account.getAccountBalance(accountId);
+        Account.Balance account = Account.getAccountBalance(accountStore, accountId);
         map.put("balance", String.valueOf(account != null ? account.getBalanceNqt() : 0));
         map.put("unconfirmed balance", String.valueOf(account != null ? account.getUnconfirmedBalanceNqt() : 0));
         Block lastBlock = blockchain.getLastBlock();

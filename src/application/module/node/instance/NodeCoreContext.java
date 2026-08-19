@@ -779,7 +779,8 @@ public final class NodeCoreContext {
                 this.accountService,
                 this.assetExchange,
                 this.digitalGoodsStoreService,
-                this.blockchain);
+                this.blockchain,
+                this.stores.getAccountStore());
     }
 
     /**

@@ -1,6 +1,7 @@
 package application.module.node.at;
 
 import application.module.node.Account;
+import application.module.node.db.store.AccountStore;
 import application.module.node.crypto.Crypto;
 import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
@@ -284,7 +285,7 @@ public abstract class AtController {
             AT at = AT.getAT(ctx, id);
             at.addIndirectsCount(indirectsCount);
 
-            long atAccountBalance = getATAccountBalance(id);
+            long atAccountBalance = getATAccountBalance(id, ctx.getAccountStore());
             long atStateBalance = at.getgBalance();
 
             if (at.freezeOnSameBalance()
@@ -371,7 +372,7 @@ public abstract class AtController {
                 at.setHeight(blockHeight);
                 at.setWaitForNumberOfBlocks(at.getSleepBetween());
 
-                long atAccountBalance = getATAccountBalance(atIdLong);
+                long atAccountBalance = getATAccountBalance(atIdLong, ctx.getAccountStore());
                 if (atAccountBalance < Convert.safeMultiply(atConstants.stepFee(at.getVersion()),
                         atConstants.apiStepMultiplier(at.getVersion()))) {
                     throw new AtException("AT has insufficient balance to run");
@@ -521,8 +522,8 @@ public abstract class AtController {
         return totalAmount;
     }
 
-    private static long getATAccountBalance(Long id) {
-        Account.Balance atAccount = Account.getAccountBalance(id);
+    private static long getATAccountBalance(Long id, AccountStore accountStore) {
+        Account.Balance atAccount = Account.getAccountBalance(accountStore, id);
         if (atAccount != null) {
             return atAccount.getBalanceNqt();
         }

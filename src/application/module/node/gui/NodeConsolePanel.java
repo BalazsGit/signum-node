@@ -1755,7 +1755,12 @@ public class NodeConsolePanel extends JPanel {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (SwingUtilities.isLeftMouseButton(e) || SwingUtilities.isRightMouseButton(e)) {
-                    PeersDialog.showPeersDialog(parentFrame);
+                    NodeCoreContext peersCtx = getNodeContext();
+                    if (peersCtx != null && peersCtx.getBlockchainProcessor() != null) {
+                        PeersDialog.showPeersDialog(parentFrame, peersCtx.getBlockchainProcessor());
+                    } else {
+                        showMessage("Blockchain processor not initialized.");
+                    }
                 }
             }
         };

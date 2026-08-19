@@ -63,21 +63,12 @@ public class PeersDialog extends JFrame {
     }
 
     /**
-     * Displays the peers dialog.
+     * Displays the peers dialog with an explicitly injected BlockchainProcessor
+     * for multi-node isolation.
      * <p>
      * If the dialog is already open, it brings it to the front. Otherwise, it
      * creates a new instance.
      * </p>
-     *
-     * @param owner The parent frame.
-     */
-    public static void showPeersDialog(JFrame owner) {
-        showPeersDialog(owner, Signum.getBlockchainProcessor());
-    }
-
-    /**
-     * Displays the peers dialog with an explicitly injected BlockchainProcessor
-     * for multi-node isolation.
      *
      * @param owner               The parent frame.
      * @param blockchainProcessor The per-instance BlockchainProcessor to observe.
