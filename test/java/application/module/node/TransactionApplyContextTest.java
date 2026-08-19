@@ -65,7 +65,8 @@ public class TransactionApplyContextTest {
                 propertyServiceMock,
                 atStoreMock,
                 atConstantsMock,
-                accountStoreMock);
+                accountStoreMock,
+                null);
     }
 
     @Test
@@ -133,7 +134,7 @@ public class TransactionApplyContextTest {
         TransactionApplyContext nullCtx = new TransactionApplyContext(
                 blockchainMock, fluxCapacitorMock, accountServiceMock, dgsGoodsStoreServiceMock,
                 aliasServiceMock, assetExchangeMock, subscriptionServiceMock, escrowServiceMock,
-                propertyServiceMock, atStoreMock, null, accountStoreMock);
+                propertyServiceMock, atStoreMock, null, accountStoreMock, null);
         assertNull(nullCtx.getAtConstants());
     }
 
@@ -149,7 +150,7 @@ public class TransactionApplyContextTest {
         TransactionApplyContext nullCtx = new TransactionApplyContext(
                 null, fluxCapacitorMock, accountServiceMock, dgsGoodsStoreServiceMock,
                 aliasServiceMock, assetExchangeMock, subscriptionServiceMock, escrowServiceMock,
-                propertyServiceMock, atStoreMock, atConstantsMock, accountStoreMock);
+                propertyServiceMock, atStoreMock, atConstantsMock, accountStoreMock, null);
         assertNull(nullCtx.getBlockchain());
     }
 
@@ -158,7 +159,7 @@ public class TransactionApplyContextTest {
         TransactionApplyContext nullCtx = new TransactionApplyContext(
                 blockchainMock, fluxCapacitorMock, accountServiceMock, dgsGoodsStoreServiceMock,
                 aliasServiceMock, assetExchangeMock, subscriptionServiceMock, escrowServiceMock,
-                propertyServiceMock, null, atConstantsMock, accountStoreMock);
+                propertyServiceMock, null, atConstantsMock, accountStoreMock, null);
         assertNull(nullCtx.getAtStore());
     }
 
@@ -167,7 +168,7 @@ public class TransactionApplyContextTest {
         TransactionApplyContext second = new TransactionApplyContext(
                 blockchainMock, fluxCapacitorMock, accountServiceMock, dgsGoodsStoreServiceMock,
                 aliasServiceMock, assetExchangeMock, subscriptionServiceMock, escrowServiceMock,
-                propertyServiceMock, atStoreMock, atConstantsMock, accountStoreMock);
+                propertyServiceMock, atStoreMock, atConstantsMock, accountStoreMock, null);
 
         assertNotSame(context, second);
         assertSame(context.getBlockchain(), second.getBlockchain());

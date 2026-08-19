@@ -448,7 +448,7 @@ public class Transaction implements Comparable<Transaction> {
     }
 
     public byte[] getBytes() {
-        return getBytes(Signum.getFluxCapacitor());
+        return getBytes(TransactionType.getContext().getFluxCapacitor());
     }
 
     public byte[] getBytes(FluxCapacitor fluxCapacitor) {

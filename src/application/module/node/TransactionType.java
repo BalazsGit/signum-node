@@ -3826,9 +3826,9 @@ public abstract class TransactionType {
                     codeHashId = atCreationRef.getApCodeHashId();
                 }
 
-                AT.addAT(transaction.getId(), transaction.getSenderId(), attachment.getName(),
-                        attachment.getDescription(), attachment.getCreationBytes(), transaction.getHeight(),
-                        codeHashId);
+                AT.addAT(getContext().getAtProcessingContext(), transaction.getId(), transaction.getSenderId(),
+                        attachment.getName(), attachment.getDescription(), attachment.getCreationBytes(),
+                        transaction.getHeight(), codeHashId);
             }
 
             @Override
