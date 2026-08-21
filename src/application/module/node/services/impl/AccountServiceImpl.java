@@ -77,7 +77,7 @@ public class AccountServiceImpl implements AccountService {
     public Account.Balance getAccountBalance(long id) {
         Account.Balance account = accountBalanceTable.get(accountBalanceSignumKeyFactory.newKey(id));
         if (account == null) {
-            account = new Account.Balance(id);
+            account = Account.Balance.of(id, accountBalanceSignumKeyFactory.newKey(id));
         }
         return account;
     }
@@ -144,7 +144,7 @@ public class AccountServiceImpl implements AccountService {
     public Account getOrAddAccount(long id) {
         Account account = accountTable.get(accountSignumKeyFactory.newKey(id));
         if (account == null) {
-            account = new Account(id, this.blockchain.getHeight());
+            account = new Account(id, this.blockchain.getHeight(), this.accountStore);
             accountTable.insert(account);
         }
         return account;

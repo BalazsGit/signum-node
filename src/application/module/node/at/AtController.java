@@ -156,6 +156,13 @@ public abstract class AtController {
     }
 
     private static void listCode(AtMachineState state, ATProcessingContext ctx, boolean disassembly, boolean determineJumps) {
+        // Bind instance-level dependencies required for canonical serialization
+        // (FluxCapacitor feature flags gate SMART_ATS / AT_FIX_BLOCK_2 byte blocks,
+        // AccountStore backs per-asset balance lookups, ATStore backs map lookups).
+        state.setFluxCapacitor(ctx.getFluxCapacitor());
+        state.setAccountStore(ctx.getAccountStore());
+        state.setAtStore(ctx.getAtStore());
+
         AtMachineProcessor machineProcessor = new AtMachineProcessor(state, ctx,
                 ctx.getPropertyService().getBoolean(Props.ENABLE_AT_DEBUG_LOG));
 
@@ -320,7 +327,7 @@ public abstract class AtController {
                     }
 
                     totalFee = Convert.safeAdd(totalFee, fee);
-                    AT.addPendingFee(id, fee, blockHeight, generatorId);
+                    AT.addPendingFee(ctx.getPendingState(), id, fee, blockHeight, generatorId);
                     payload += costOfOneAT;
                     processedATs.add(at);
                 } catch (Exception e) {
@@ -407,7 +414,7 @@ public abstract class AtController {
                 }
 
                 totalFee = Convert.safeAdd(totalFee, fee);
-                AT.addPendingFee(atIdLong, fee, blockHeight, generatorId);
+                AT.addPendingFee(ctx.getPendingState(), atIdLong, fee, blockHeight, generatorId);
                 processedATs.add(at);
 
                 md5 = digest.digest(at.getBytes());
@@ -500,7 +507,7 @@ public abstract class AtController {
 
         if (!fluxCapacitor.getValue(FluxValues.AT_FIX_BLOCK_4, at.getHeight())) {
             for (AtTransaction tx : ordered) {
-                if (AT.findPendingTransaction(tx.getRecipientId(), blockHeight, generatorId)) {
+                if (AT.findPendingTransaction(ctx.getPendingState(), tx.getRecipientId(), blockHeight, generatorId)) {
                     throw new AtException("Conflicting transaction found");
                 }
             }
@@ -508,7 +515,7 @@ public abstract class AtController {
 
         for (AtTransaction tx : ordered) {
             totalAmount = Convert.safeAdd(totalAmount, tx.getAmount());
-            AT.addPendingTransaction(tx, blockHeight, generatorId);
+            AT.addPendingTransaction(ctx.getPendingState(), tx, blockHeight, generatorId);
             if (logger.isDebugEnabled()) {
                 logger.debug(
                         "Transaction to {}, amount {}",
@@ -518,7 +525,7 @@ public abstract class AtController {
             }
         }
 
-        AT.addMapUpdates(at.getMapUpdates(), blockHeight, generatorId);
+        AT.addMapUpdates(ctx.getPendingState(), at.getMapUpdates(), blockHeight, generatorId);
         return totalAmount;
     }
 

@@ -3,6 +3,7 @@ package application.module.node.services.impl;
 import application.module.node.*;
 import application.module.node.SignumException.ValidationException;
 import application.module.node.assetexchange.AssetExchange;
+import application.module.node.db.store.AccountStore;
 import application.module.node.at.AT;
 import application.module.node.common.QuickMocker;
 import application.module.node.common.QuickMocker.MockParam;
@@ -42,6 +43,7 @@ public class ParameterServiceImplTest {
     private BlockchainProcessor blockchainProcessorMock;
     private TransactionProcessor transactionProcessorMock;
     private ATService atServiceMock;
+    private AccountStore accountStoreMock;
 
     @Before
     public void setUp() {
@@ -53,9 +55,10 @@ public class ParameterServiceImplTest {
         blockchainProcessorMock = mock(BlockchainProcessor.class);
         transactionProcessorMock = mock(TransactionProcessor.class);
         atServiceMock = mock(ATService.class);
+        accountStoreMock = mock(AccountStore.class);
 
         t = new ParameterServiceImpl(accountServiceMock, aliasServiceMock, assetExchangeMock, dgsGoodsStoreServiceMock,
-                blockchainMock, blockchainProcessorMock, transactionProcessorMock, atServiceMock);
+                blockchainMock, blockchainProcessorMock, transactionProcessorMock, atServiceMock, accountStoreMock);
     }
 
     @Test

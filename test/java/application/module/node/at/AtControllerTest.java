@@ -1,23 +1,22 @@
 package application.module.node.at;
 
-import application.module.node.Account;
-import application.module.node.Signum;
 import application.module.node.util.Convert;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest({ Signum.class, Account.class })
 public class AtControllerTest {
     @Before
     public void setUp() {
         AtTestHelper.setupMocks();
+    }
+
+    @After
+    public void tearDown() {
+        AtTestHelper.closeStatics();
     }
 
     @Test
@@ -34,8 +33,8 @@ public class AtControllerTest {
         AtTestHelper.addHelloWorldAT();
         AtTestHelper.addEchoAT();
         AtTestHelper.addTipThanksAT();
-        assertEquals(3, AT.getOrderedATs().size());
         ATProcessingContext ctx = AtTestHelper.getTestContext();
+        assertEquals(3, AT.getOrderedATs(ctx).size());
         AtBlock atBlock = AtController.getCurrentBlockATs(ctx, Integer.MAX_VALUE, Integer.MAX_VALUE, 0L, 0);
         assertNotNull(atBlock);
         assertNotNull(atBlock.getBytesForBlock());
@@ -50,8 +49,8 @@ public class AtControllerTest {
         AtTestHelper.addHelloWorldAT();
         AtTestHelper.addEchoAT();
         AtTestHelper.addTipThanksAT();
-        assertEquals(3, AT.getOrderedATs().size());
         ATProcessingContext ctx = AtTestHelper.getTestContext();
+        assertEquals(3, AT.getOrderedATs(ctx).size());
         AtBlock atBlock = AtController.validateATs(ctx, Convert.parseHexString(
                 "010000000000000097c1d1e5b25c1d109f2ba522d1dda248020000000000000014ea12712c274caebc49ccd7fff0b0b703000000000000009f1af5443c8d1e7b492f848e91fccb1f"),
                 Integer.MAX_VALUE, 0L);
@@ -66,8 +65,8 @@ public class AtControllerTest {
         AtTestHelper.addHelloWorldATV3();
         AtTestHelper.addEchoATV3();
         AtTestHelper.addTipThanksATV3();
-        assertEquals(3, AT.getOrderedATs().size());
         ATProcessingContext ctx = AtTestHelper.getTestContext();
+        assertEquals(3, AT.getOrderedATs(ctx).size());
         AtBlock atBlock = AtController.validateATs(ctx, Convert.parseHexString(
                 "010000000000000097c1d1e5b25c1d109f2ba522d1dda248020000000000000014ea12712c274caebc49ccd7fff0b0b703000000000000009f1af5443c8d1e7b492f848e91fccb1f"),
                 Integer.MAX_VALUE, 0L);

@@ -8,6 +8,7 @@ import application.module.node.Attachment.ColoredCoinsAssetTransfer;
 import application.module.node.assetexchange.AssetExchange;
 import application.module.node.Blockchain;
 import application.module.node.Constants;
+import application.module.node.db.store.AccountStore;
 import application.module.node.db.store.AssetStore;
 import application.module.node.db.store.ATStore;
 import application.module.node.props.PropertyService;
@@ -142,6 +143,12 @@ public class AtApiPlatformImpl extends AtApiImpl {
     private PropertyService getPropertyService() {
         Objects.requireNonNull(context, "ATProcessingContext must not be null — use constructor injection");
         return context.getPropertyService();
+    }
+
+    /** @return AccountStore instance from context */
+    private AccountStore getAccountStoreBridge() {
+        Objects.requireNonNull(context, "ATProcessingContext must not be null — use constructor injection");
+        return context.getAccountStore();
     }
 
     // ==================== AtApiImpl overrides ====================
@@ -363,7 +370,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
             int page = Math.max(0, (int) AtApiHelper.getLong(state.getA2()));
 
             long accountId = AtApiHelper.getLong(state.getA3());
-            Account account = Account.getAccount(accountId);
+            Account account = Account.getAccount(getAccountStoreBridge(), accountId);
             if (account == null || account.getPublicKey() == null) {
                 return 0L;
             }
@@ -597,10 +604,10 @@ public class AtApiPlatformImpl extends AtApiImpl {
         long assetId = AtApiHelper.getLong(state.getB2());
 
         if (assetId == 0L) {
-            Account.Balance balance = Account.getAccountBalance(accountId);
+            Account.Balance balance = Account.getAccountBalance(getAccountStoreBridge(), accountId);
             return balance == null ? 0L : balance.getBalanceNqt();
         }
-        AccountAsset assetBalance = Account.getAccountAssetBalance(accountId, assetId);
+        AccountAsset assetBalance = Account.getAccountAssetBalance(getAccountStoreBridge(), accountId, assetId);
 
         return assetBalance == null ? 0 : assetBalance.getQuantityQnt();
     }

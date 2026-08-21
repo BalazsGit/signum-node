@@ -23,7 +23,7 @@ import java.util.Arrays;
  * and uses injected {@link FluxCapacitor} for feature flag evaluation.
  */
 public class AtApiImpl implements AtApi {
-    private final AtApiPlatformImpl platform = AtApiPlatformImpl.getInstance();
+    private final AtApiPlatformImpl platform;
     private FluxCapacitor fluxCapacitor;
 
     /**
@@ -31,6 +31,19 @@ public class AtApiImpl implements AtApi {
      * TODO: Replace with constructor injection when AtApiPlatformImpl singleton is eliminated.
      */
     public AtApiImpl() {
+        this.platform = AtApiPlatformImpl.getInstance();
+    }
+
+    /**
+     * Creates an API implementation bound to the given processing context.
+     * This is the multi-node safe constructor: the platform and feature flags
+     * are resolved from the {@link ATProcessingContext} rather than the static singleton.
+     *
+     * @param context the AT processing context for this node instance
+     */
+    public AtApiImpl(ATProcessingContext context) {
+        this.platform = new AtApiPlatformImpl(context);
+        this.fluxCapacitor = context.getFluxCapacitor();
     }
 
     /**

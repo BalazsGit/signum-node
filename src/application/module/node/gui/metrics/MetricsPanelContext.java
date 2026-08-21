@@ -5,6 +5,7 @@ import application.module.node.BlockchainProcessor;
 import application.module.node.Generator;
 import application.module.node.Signum;
 import application.module.node.TransactionProcessorImpl;
+import application.module.node.db.store.AccountStore;
 import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.peer.PeerManager;
 import application.module.node.props.PropertyService;
@@ -148,5 +149,17 @@ public final class MetricsPanelContext {
      */
     public PeerManager getPeerManager() {
         return coreContext != null ? coreContext.getPeerManager() : null;
+    }
+
+    /**
+     * Returns the AccountStore for this profile.
+     * Used by: BlockGenerationMetricsPanel, MinersListDialog.
+     * Replaces: {@code Signum.getStores().getAccountStore()}
+     *
+     * @return account store, or null if not yet initialized
+     * @since 4.1 P3 Bridge Cleanup
+     */
+    public AccountStore getAccountStore() {
+        return coreContext != null ? coreContext.getStores().getAccountStore() : null;
     }
 }

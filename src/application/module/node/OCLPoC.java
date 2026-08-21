@@ -26,8 +26,8 @@ final class OCLPoC {
 
     private static final Logger logger = LoggerFactory.getLogger(OCLPoC.class);
     private static int HASHES_PER_ENQUEUE_DYNAMIC;
-    private static final int HASHES_PER_ENQUEUE;
-    private static final int MEM_PERCENT;
+    private static int HASHES_PER_ENQUEUE;
+    private static int MEM_PERCENT;
 
     private static cl_context ctx;
     private static cl_command_queue queue;
@@ -37,7 +37,9 @@ final class OCLPoC {
     private static cl_kernel getKernel2;
 
     private static long maxItems;
-    private static final long MAX_GROUP_ITEMS;
+    private static long MAX_GROUP_ITEMS;
+
+    private static volatile boolean initialized = false;
 
     private static final Object oclLock = new Object();
 
@@ -48,8 +50,28 @@ final class OCLPoC {
             + 4 // scoop num
             + MiningPlot.SCOOP_SIZE; // output scoop
 
-    static {
-        PropertyService propertyService = Signum.getPropertyService();
+    /**
+     * Initializes the OpenCL environment with the given PropertyService.
+     * Must be called before any other OCLPoC method. Thread-safe (idempotent).
+     *
+     * @param propertyService the node-scoped property service for GPU configuration
+     * @throws OCLCheckerException if OpenCL initialization fails
+     */
+    public static synchronized void configure(PropertyService propertyService) {
+        if (initialized) {
+            return;
+        }
+        init(propertyService);
+        initialized = true;
+    }
+
+    private static synchronized void ensureInitialized() {
+        if (!initialized) {
+            throw new OCLCheckerException("OCLPoC not initialized — call configure(PropertyService) first");
+        }
+    }
+
+    private static void init(PropertyService propertyService) {
         HASHES_PER_ENQUEUE = propertyService.getInt(Props.GPU_HASHES_PER_BATCH);
         MEM_PERCENT = propertyService.getInt(Props.GPU_MEM_PERCENT);
 
@@ -252,10 +274,12 @@ final class OCLPoC {
     }
 
     public static long getMaxItems() {
+        ensureInitialized();
         return maxItems;
     }
 
     public static void validatePoC(HashMap<Block, Block> blocks, int pocVersion, BlockService blockService) {
+        ensureInitialized();
         try {
             if (logger.isDebugEnabled()) {
                 logger.debug("starting ocl verify for: {}", blocks.size());

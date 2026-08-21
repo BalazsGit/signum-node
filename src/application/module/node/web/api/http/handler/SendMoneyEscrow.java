@@ -1,6 +1,7 @@
 package application.module.node.web.api.http.handler;
 
 import application.module.node.*;
+import application.module.node.services.AccountService;
 import application.module.node.services.ParameterService;
 import application.module.node.util.Convert;
 import application.module.node.web.api.http.common.APITransactionManager;
@@ -22,15 +23,17 @@ public final class SendMoneyEscrow extends CreateTransaction {
     private final ParameterService parameterService;
     private final Blockchain blockchain;
     private final FluxCapacitor fluxCapacitor;
+    private final AccountService accountService;
 
     public SendMoneyEscrow(ParameterService parameterService, Blockchain blockchain,
-            APITransactionManager apiTransactionManager, FluxCapacitor fluxCapacitor) {
+            APITransactionManager apiTransactionManager, FluxCapacitor fluxCapacitor, AccountService accountService) {
         super(new LegacyDocTag[] { LegacyDocTag.TRANSACTIONS, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
                 fluxCapacitor, RECIPIENT_PARAMETER, AMOUNT_NQT_PARAMETER, ESCROW_DEADLINE_PARAMETER, SIGNERS_PARAMETER,
                 REQUIRED_SIGNERS_PARAMETER, DEADLINE_ACTION_PARAMETER);
         this.parameterService = parameterService;
         this.blockchain = blockchain;
         this.fluxCapacitor = fluxCapacitor;
+        this.accountService = accountService;
     }
 
     @Override
@@ -87,7 +90,7 @@ public final class SendMoneyEscrow extends CreateTransaction {
         }
 
         long totalAmountNQT = Convert.safeAdd(amountNQT, signers.size() * Constants.ONE_SIGNA);
-        Account.Balance senderBalance = Account.getAccountBalance(sender.getId());
+        Account.Balance senderBalance = accountService.getAccountBalance(sender.getId());
         if (senderBalance.getBalanceNqt() < totalAmountNQT) {
             JsonObject response = new JsonObject();
             response.addProperty(ERROR_CODE_RESPONSE, 6);

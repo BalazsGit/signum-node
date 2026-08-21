@@ -2,6 +2,7 @@ package application.module.node.gui.dialog;
 
 import application.module.node.Blockchain;
 import application.module.node.Generator;
+import application.module.node.db.store.AccountStore;
 import application.module.node.gui.metrics.BlockGenerationMetricsPanel;
 import application.module.node.gui.metrics.BlockGenerationMetricsPanel.MinerEntry;
 import application.module.node.util.Convert;
@@ -45,6 +46,7 @@ import java.util.stream.Collectors;
 public class MinersListDialog extends JFrame {
     private static volatile MinersListDialog instance;
     private final Blockchain blockchain;
+    private final AccountStore accountStore;
     private DefaultTableModel nodeMinersModel;
     private DefaultTableModel networkMinersModel;
     private JTable nodeMinersTable;
@@ -82,11 +84,12 @@ public class MinersListDialog extends JFrame {
     public static void showDialog(JFrame owner, int tabIndex,
             List<BlockGenerationMetricsPanel.BlockHistoryEntry> history,
             Map<Integer, List<MinerEntry>> nodeHistory,
-            Blockchain blockchain) {
+            Blockchain blockchain,
+            AccountStore accountStore) {
         if (instance == null) {
             synchronized (MinersListDialog.class) {
                 if (instance == null) {
-                    instance = new MinersListDialog(owner, blockchain);
+                    instance = new MinersListDialog(owner, blockchain, accountStore);
                 }
             }
         }
@@ -127,9 +130,10 @@ public class MinersListDialog extends JFrame {
         return instance != null && instance.isVisible();
     }
 
-    private MinersListDialog(JFrame owner, Blockchain blockchain) {
+    private MinersListDialog(JFrame owner, Blockchain blockchain, AccountStore accountStore) {
         super("Miners List");
         this.blockchain = blockchain;
+        this.accountStore = accountStore;
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
             @Override
@@ -365,7 +369,7 @@ public class MinersListDialog extends JFrame {
 
     private Object[] createNodeMinerRow(long accountId, NodeMinerStats stats, long blocksFound) {
         String accountRS = SignumAddress.fromId(SignumID.fromLong(accountId)).toString();
-        application.module.node.Account account = application.module.node.Account.getAccount(accountId);
+        application.module.node.Account account = application.module.node.Account.getAccount(accountStore, accountId);
         String name = (account != null && account.getName() != null) ? account.getName() : "";
         String avgDeadline = stats.count > 0
                 ? String.format("%.0f s", stats.sumDeadline.doubleValue() / stats.count)
@@ -391,7 +395,7 @@ public class MinersListDialog extends JFrame {
 
     private Object[] createNetworkMinerRow(long accountId, NetworkMinerStats stats, long blocksFound) {
         String accountRS = SignumAddress.fromId(SignumID.fromLong(accountId)).toString();
-        application.module.node.Account account = application.module.node.Account.getAccount(accountId);
+        application.module.node.Account account = application.module.node.Account.getAccount(accountStore, accountId);
         String name = (account != null && account.getName() != null) ? account.getName() : "";
 
         String avgDeadline = stats.count > 0

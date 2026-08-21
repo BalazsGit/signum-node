@@ -1,6 +1,7 @@
 package application.module.node.web.api.http.handler;
 
 import application.module.node.*;
+import application.module.node.services.AccountService;
 import application.module.node.services.ParameterService;
 import application.module.node.util.Convert;
 import application.module.node.web.api.http.common.APITransactionManager;
@@ -29,15 +30,17 @@ public final class SendMoneyMulti extends CreateTransaction {
     private final ParameterService parameterService;
     private final Blockchain blockchain;
     private final FluxCapacitor fluxCapacitor;
+    private final AccountService accountService;
 
     public SendMoneyMulti(ParameterService parameterService, Blockchain blockchain,
-            APITransactionManager apiTransactionManager, FluxCapacitor fluxCapacitor) {
+            APITransactionManager apiTransactionManager, FluxCapacitor fluxCapacitor, AccountService accountService) {
         super(new LegacyDocTag[] { LegacyDocTag.TRANSACTIONS, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
                 fluxCapacitor, true, commonParameters);
 
         this.parameterService = parameterService;
         this.blockchain = blockchain;
         this.fluxCapacitor = fluxCapacitor;
+        this.accountService = accountService;
     }
 
     @Override
@@ -79,7 +82,7 @@ public final class SendMoneyMulti extends CreateTransaction {
             return response;
         }
 
-        Account.Balance senderBalance = Account.getAccountBalance(sender.getId());
+        Account.Balance senderBalance = accountService.getAccountBalance(sender.getId());
         if (senderBalance.getBalanceNqt() < totalAmountNQT) {
             JsonObject response = new JsonObject();
             response.addProperty(ERROR_CODE_RESPONSE, 6);

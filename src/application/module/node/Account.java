@@ -5,7 +5,6 @@ import static application.module.node.Constants.AT_PUBLIC_KEY_BYTES;
 import application.module.node.crypto.Crypto;
 import application.module.node.crypto.EncryptedData;
 import application.module.node.db.SignumKey;
-import application.module.node.db.VersionedBatchEntityTable;
 import application.module.node.db.store.AccountStore;
 import application.module.node.util.Convert;
 import java.util.Arrays;
@@ -34,7 +33,7 @@ public class Account {
         return originStore;
     }
 
-    void setOriginStore(AccountStore store) {
+    public void setOriginStore(AccountStore store) {
         this.originStore = store;
     }
 
@@ -46,14 +45,13 @@ public class Account {
         protected long unconfirmedBalanceNqt;
         protected long forgedBalanceNqt;
 
-    public Balance(long id) {
-            this.id = id;
-            this.nxtKey = accountSignumKeyFactory().newKey(this.id);
-        }
-
         protected Balance(long id, SignumKey signumKey) {
             this.id = id;
             this.nxtKey = signumKey;
+        }
+
+        public static Balance of(long id, SignumKey signumKey) {
+            return new Balance(id, signumKey);
         }
 
         public void setForgedBalanceNqt(long forgedBalanceNqt) {
@@ -257,37 +255,6 @@ public class Account {
 
     }
 
-    private static SignumKey.LongKeyFactory<Account> accountSignumKeyFactory() {
-        return Signum.getStores().getAccountStore().getAccountKeyFactory();
-    }
-
-    private static SignumKey.LongKeyFactory<Account.Balance> accountBalanceSignumKeyFactory() {
-        return Signum.getStores().getAccountStore().getAccountBalanceKeyFactory();
-    }
-
-    private static VersionedBatchEntityTable<Account> accountTable() {
-        return Signum.getStores().getAccountStore().getAccountTable();
-    }
-
-    private static VersionedBatchEntityTable<Account.Balance> accountBalanceTable() {
-        return Signum.getStores().getAccountStore().getAccountBalanceTable();
-    }
-
-    public static Account getAccount(long id) {
-        return id == 0 ? null : accountTable().get(accountSignumKeyFactory().newKey(id));
-    }
-
-    public static Account.Balance getAccountBalance(long id) {
-        return id == 0 ? null
-                : accountBalanceTable()
-                        .get(accountBalanceSignumKeyFactory()
-                                .newKey(id));
-    }
-
-    public static Account.AccountAsset getAccountAssetBalance(long id, long assetId) {
-        return Signum.getStores().getAccountStore().getAccountAsset(id, assetId);
-    }
-
     // =========================================================================
     // Store-scoped (multi-node) accessors.
     // Prefer these over the legacy static methods above: they operate on the
@@ -344,15 +311,6 @@ public class Account {
         return Convert.fullHashToId(publicKeyHash);
     }
 
-    public static Account getOrAddAccount(long id) {
-        Account account = getAccount(id);
-        if (account == null) {
-            account = new Account(id);
-            accountTable().insert(account);
-        }
-        return account;
-    }
-
     public static Account getOrAddAccount(AccountStore store, long id, int height) {
         Account account = getAccount(store, id);
         if (account == null) {
@@ -360,15 +318,6 @@ public class Account {
             store.getAccountTable().insert(account);
         }
         return account;
-    }
-
-    public Account(long id, int creationHeight) {
-        if (id != Crypto.rsDecode(Crypto.rsEncode(id))) {
-            logger.log(Level.INFO, "CRITICAL ERROR: Reed-Solomon encoding fails for {0}", id);
-        }
-        this.id = id;
-        this.nxtKey = accountSignumKeyFactory().newKey(this.id);
-        this.creationHeight = creationHeight;
     }
 
     public Account(long id, int creationHeight, AccountStore store) {
@@ -379,15 +328,6 @@ public class Account {
         this.nxtKey = store.getAccountKeyFactory().newKey(this.id);
         this.creationHeight = creationHeight;
         this.originStore = store;
-    }
-
-    /**
-     * @deprecated Use {@link #Account(long, int)} with explicit creation height.
-     * This constructor uses a static Signum.getBlockchain() call which breaks multi-node isolation.
-     */
-    @Deprecated
-    public Account(long id) {
-        this(id, Signum.getBlockchain().getHeight());
     }
 
     protected Account(long id, SignumKey signumKey, int creationHeight) {
@@ -438,8 +378,7 @@ public class Account {
     }
 
     private Balance getBalanceFromStore() {
-        AccountStore store = this.originStore != null ? this.originStore : Signum.getStores().getAccountStore();
-        return Account.getAccountBalance(store, id);
+        return Account.getAccountBalance(this.originStore, id);
     }
 
     public EncryptedData encryptTo(byte[] data, String senderSecretPhrase) {
@@ -472,8 +411,7 @@ public class Account {
     // or
     // this.publicKey is already set to an array equal to key
     public boolean setOrVerify(byte[] key, int height) {
-        AccountStore store = this.originStore != null ? this.originStore : Signum.getStores().getAccountStore();
-        return store.setOrVerify(this, key, height);
+        return this.originStore.setOrVerify(this, key, height);
     }
 
     public void apply(byte[] key, int height) {
@@ -487,8 +425,7 @@ public class Account {
         }
         if (this.keyHeight == -1 || this.keyHeight > height) {
             this.keyHeight = height;
-            AccountStore store = this.originStore != null ? this.originStore : Signum.getStores().getAccountStore();
-            store.getAccountTable().insert(this);
+            this.originStore.getAccountTable().insert(this);
         }
     }
 

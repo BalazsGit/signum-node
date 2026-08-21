@@ -2,6 +2,7 @@ package application.module.node.services.impl;
 
 import application.module.node.*;
 import application.module.node.assetexchange.AssetExchange;
+import application.module.node.db.store.AccountStore;
 import application.module.node.at.AT;
 import application.module.node.crypto.Crypto;
 import application.module.node.crypto.EncryptedData;
@@ -38,11 +39,12 @@ public class ParameterServiceImpl implements ParameterService {
     private final BlockchainProcessor blockchainProcessor;
     private final TransactionProcessor transactionProcessor;
     private final ATService atService;
+    private final AccountStore accountStore;
 
     public ParameterServiceImpl(AccountService accountService, AliasService aliasService, AssetExchange assetExchange,
             DGSGoodsStoreService dgsGoodsStoreService, Blockchain blockchain,
             BlockchainProcessor blockchainProcessor,
-            TransactionProcessor transactionProcessor, ATService atService) {
+            TransactionProcessor transactionProcessor, ATService atService, AccountStore accountStore) {
         this.accountService = accountService;
         this.aliasService = aliasService;
         this.assetExchange = assetExchange;
@@ -51,6 +53,7 @@ public class ParameterServiceImpl implements ParameterService {
         this.blockchainProcessor = blockchainProcessor;
         this.transactionProcessor = transactionProcessor;
         this.atService = atService;
+        this.accountStore = accountStore;
     }
 
     @Override
@@ -88,7 +91,7 @@ public class ParameterServiceImpl implements ParameterService {
                 throw new ParameterException(UNKNOWN_ACCOUNT);
             }
             if (account == null) {
-                account = new Account(accountAddress.getSignedLongId());
+                account = Account.getOrAddAccount(accountStore, accountAddress.getSignedLongId(), blockchain.getHeight());
                 account.setPublicKey(accountAddress.getPublicKey());
             }
             if (account.getPublicKey() == null && accountAddress.getPublicKey() != null) {

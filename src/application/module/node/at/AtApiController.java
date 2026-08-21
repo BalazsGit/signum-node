@@ -37,7 +37,8 @@ class AtApiController {
         return atConstants;
     }
 
-    public static long func(int funcNum, AtMachineState state) {
+    public static long func(ATProcessingContext ctx, int funcNum, AtMachineState state) {
+        final AtApiImpl atApi = new AtApiImpl(ctx);
         switch (funcNum) {
             case Get_A1:
                 return atApi.getA1(state);
@@ -223,7 +224,8 @@ class AtApiController {
         return 0;
     }
 
-    public static long func1(int funcNum, long val, AtMachineState state) {
+    public static long func1(ATProcessingContext ctx, int funcNum, long val, AtMachineState state) {
+        final AtApiImpl atApi = new AtApiImpl(ctx);
         switch (funcNum) {
             case Set_A1:
                 atApi.setA1(val, state);
@@ -261,7 +263,8 @@ class AtApiController {
         return 0;
     }
 
-    public static long func2(int funcNum, long val1, long val2, AtMachineState state) {
+    public static long func2(ATProcessingContext ctx, int funcNum, long val1, long val2, AtMachineState state) {
+        final AtApiImpl atApi = new AtApiImpl(ctx);
         switch (funcNum) {
             case Set_A1_A2:
                 atApi.setA1A2(val1, val2, state);

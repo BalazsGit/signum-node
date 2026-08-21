@@ -2,6 +2,7 @@ package application.module.node.gui.metrics;
 
 import application.module.node.Account;
 import application.module.node.Block;
+import application.module.node.db.store.AccountStore;
 import application.module.node.Blockchain;
 import application.module.node.BlockchainProcessor;
 import application.module.node.Constants;
@@ -235,6 +236,16 @@ public class BlockGenerationMetricsPanel extends JPanel {
     private final Listener<Block> blockPoppedListener = this::onBlockPopped;
 
     /**
+     * Package-visible static reference to the profile-scoped AccountStore.
+     * Set during {@link #init()} and used by static inner classes
+     * ({@link MinerEntry}, {@link MinerPieToolTipGenerator}, {@link MinerPieSectionLabelGenerator})
+     * to resolve account names without a static Signum bridge.
+     *
+     * @since 4.1 P3 Bridge Cleanup
+     */
+    static volatile AccountStore accountStore;
+
+    /**
      * Profile-aware context providing access to node components.
      * Replaces static {@code Signum.getXxx()} calls.
      */
@@ -294,6 +305,9 @@ public class BlockGenerationMetricsPanel extends JPanel {
      * Initializes the panel, loads initial data, and registers event listeners.
      */
     public void init() {
+        // P3: Wire the profile-scoped AccountStore for static inner classes
+        accountStore = ctx != null ? ctx.getAccountStore() : null;
+
         // Initial update on EDT is fine as listeners aren't active yet
         BlockchainUpdateData data = calculateBlockchainInfo(false);
         if (data != null) {
@@ -2405,7 +2419,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (SwingUtilities.isLeftMouseButton(e) || SwingUtilities.isRightMouseButton(e)) {
-                    MinersListDialog.showDialog(parentFrame, tabIndex, recentGenerators, nodeDeadlineHistory, ctx.getBlockchain());
+                    MinersListDialog.showDialog(parentFrame, tabIndex, recentGenerators, nodeDeadlineHistory, ctx.getBlockchain(), accountStore);
                 }
             }
         });
@@ -2634,7 +2648,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 double share = dataset.getValue(key).doubleValue();
 
                 String accountRS = SignumAddress.fromId(SignumID.fromLong(generatorId)).toString();
-                application.module.node.Account account = application.module.node.Account.getAccount(generatorId);
+                application.module.node.Account account = Account.getAccount(accountStore, generatorId);
                 String name = (account != null && account.getName() != null && !account.getName().isEmpty())
                         ? account.getName()
                         : "N/A";
@@ -2700,7 +2714,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
             } else {
                 try {
                     long generatorId = Long.parseLong(keyString);
-                    application.module.node.Account account = application.module.node.Account.getAccount(generatorId);
+                    application.module.node.Account account = Account.getAccount(accountStore, generatorId);
                     String name = (account != null && account.getName() != null && !account.getName().isEmpty())
                             ? account.getName()
                             : Convert.toUnsignedLong(generatorId);
@@ -2782,7 +2796,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
         MinerEntry(long accountId, BigInteger deadline, Type type, int height, long timestamp, long blockId) {
             this.accountId = accountId;
             this.accountRS = SignumAddress.fromId(SignumID.fromLong(accountId)).toString();
-            application.module.node.Account account = application.module.node.Account.getAccount(accountId);
+            application.module.node.Account account = Account.getAccount(accountStore, accountId);
             this.minerName = (account != null && account.getName() != null) ? account.getName() : "";
             this.deadline = deadline;
             this.type = type;

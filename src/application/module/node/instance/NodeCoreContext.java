@@ -503,9 +503,6 @@ public final class NodeCoreContext {
         final BlockDb blockDb = this.dbs.getBlockDb();
         final BlockchainStore blockchainStore = this.stores.getBlockchainStore();
 
-        // ATService (line 558)
-        this.atService = new ATServiceImpl(this.stores.getAtStore());
-
         // ATProcessorCache - instance-scoped with injected DbContext + Dbs (eliminates static Db polling)
         this.atProcessorCache = new ATProcessorCache(
                 this.propertyService,
@@ -580,6 +577,20 @@ public final class NodeCoreContext {
                 this.stores.getIndirectIncomingStore(),
                 this.stores.getAssetStore());
 
+        // ATService - full-args constructor with processing context for validateATs/getCurrentBlockATs
+        this.atService = new ATServiceImpl(
+                this.stores.getAtStore(),
+                this.atConstants,
+                this.atProcessorCache,
+                this.propertyService,
+                this.fluxCapacitor,
+                this.blockchain,
+                this.stores.getAccountStore(),
+                this.accountService,
+                this.assetExchange,
+                this.stores.getIndirectIncomingStore(),
+                this.stores.getAssetStore());
+
         // BlockService (lines 599-605)
         NetworkParameters params = this.networkParameters;
         this.blockService = new BlockServiceImpl(
@@ -642,7 +653,8 @@ public final class NodeCoreContext {
                 this.blockchain,
                 this.blockchainProcessor,
                 this.transactionProcessor,
-                this.atService);
+                this.atService,
+                this.stores.getAccountStore());
 
         // addBlockchainListeners (lines 646-651) - inline migration
         AT.HandleATBlockTransactionsListener handleAtBlockTransactionListener =

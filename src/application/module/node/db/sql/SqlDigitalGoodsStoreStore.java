@@ -67,6 +67,7 @@ public class SqlDigitalGoodsStoreStore implements DigitalGoodsStoreStore {
 
     public SqlDigitalGoodsStoreStore(DerivedTableManager derivedTableManager, StoreDependencies storeDependencies) {
         this.blockchain = storeDependencies.blockchain();
+        DigitalGoodsStore.setOriginStore(this);
         this.dbContext = storeDependencies.dbContext();
         initTables(derivedTableManager);
     }
@@ -74,6 +75,7 @@ public class SqlDigitalGoodsStoreStore implements DigitalGoodsStoreStore {
     @Deprecated
     public SqlDigitalGoodsStoreStore(DerivedTableManager derivedTableManager) {
         this.blockchain = null;
+        DigitalGoodsStore.setOriginStore(this);
         this.dbContext = null;
         initTables(derivedTableManager);
     }

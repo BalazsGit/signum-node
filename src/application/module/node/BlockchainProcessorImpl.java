@@ -646,6 +646,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
         oclVerify = propertyService.getBoolean(Props.GPU_ACCELERATION); // use GPU acceleration ?
         oclUnverifiedQueue = propertyService.getInt(Props.GPU_UNVERIFIED_QUEUE);
+        if (oclVerify) {
+            OCLPoC.configure(propertyService);
+        }
 
         String archivalModeStr = propertyService.getString(Props.DB_ARCHIVAL_MODE).toUpperCase();
         ArchivalMode mode;
@@ -3556,7 +3559,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
         // ATs
         AtBlock atBlock;
-        AT.clearPending(block.getHeight(), block.getGeneratorId());
+        atService.clearPending(block.getHeight(), block.getGeneratorId());
         long atStartTime = 0;
         long atEndTime = 0;
         try {
@@ -4172,7 +4175,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 // ATs for block - MUST be called while temporary balance changes are still in
                 // the DB
                 long generatorId = Account.getId(publicKey);
-                AT.clearPending(blockHeight, generatorId);
+                atService.clearPending(blockHeight, generatorId);
                 atBlock = atService.getCurrentBlockATs(payloadSize, blockHeight, generatorId, indirectsCount);
             } catch (Exception e) {
                 stores.rollbackTransaction();

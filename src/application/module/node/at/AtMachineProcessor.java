@@ -992,7 +992,7 @@ class AtMachineProcessor {
                         logger.debug("FUN {}", fun.fun);
                 } else {
                     machineData.getMachineState().pc += rc;
-                    AtApiController.func(fun.fun, machineData);
+                    AtApiController.func(context, fun.fun, machineData);
                 }
             }
         } else if (op == OpCode.E_OP_CODE_EXT_FUN_DAT) {
@@ -1006,7 +1006,7 @@ class AtMachineProcessor {
                 } else {
                     machineData.getMachineState().pc += rc;
                     long val = (machineData.getApData()).getLong(fun.addr1 * 8);
-                    AtApiController.func1(fun.fun, val, machineData);
+                    AtApiController.func1(context, fun.fun, val, machineData);
                 }
             }
         } else if (op == OpCode.E_OP_CODE_EXT_FUN_DAT_2) {
@@ -1024,7 +1024,7 @@ class AtMachineProcessor {
                     long val1 = machineData.getApData().getLong((fun.addr3 * 8));
                     long val2 = machineData.getApData().getLong((fun.addr2 * 8));
 
-                    AtApiController.func2(fun.fun, val1, val2, machineData);
+                    AtApiController.func2(context, fun.fun, val1, val2, machineData);
                 }
             }
         } else if (op == OpCode.E_OP_CODE_EXT_FUN_RET) {
@@ -1040,7 +1040,7 @@ class AtMachineProcessor {
                 } else {
                     machineData.getMachineState().pc += rc;
 
-                    machineData.getApData().putLong(fun.addr1 * 8, AtApiController.func(fun.fun, machineData));
+                    machineData.getApData().putLong(fun.addr1 * 8, AtApiController.func(context, fun.fun, machineData));
                     machineData.getApData().clear();
                 }
             }
@@ -1070,11 +1070,11 @@ class AtMachineProcessor {
 
                     if (op != OpCode.E_OP_CODE_EXT_FUN_RET_DAT_2)
                         machineData.getApData().putLong((fun.addr3 * 8),
-                                AtApiController.func1(fun.fun, val, machineData));
+                                AtApiController.func1(context, fun.fun, val, machineData));
                     else {
                         long val2 = machineData.getApData().getLong((fun.addr1 * 8));
                         machineData.getApData().putLong((fun.addr3 * 8),
-                                AtApiController.func2(fun.fun, val, val2, machineData));
+                                AtApiController.func2(context, fun.fun, val, val2, machineData));
                     }
                     machineData.getApData().clear();
                 }

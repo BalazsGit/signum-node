@@ -182,8 +182,8 @@ public final class ApiServlet extends HttpServlet {
         map.put("readMessage", new ReadMessage(blockchain, accountService));
         map.put("sendMessage", new SendMessage(parameterService, apiTransactionManager, fluxCapacitor));
         map.put("sendMoney", new SendMoney(parameterService, apiTransactionManager, fluxCapacitor));
-        map.put("sendMoneyMulti", new SendMoneyMulti(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
-        map.put("sendMoneyMultiSame", new SendMoneyMultiSame(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
+        map.put("sendMoneyMulti", new SendMoneyMulti(parameterService, blockchain, apiTransactionManager, fluxCapacitor, accountService));
+        map.put("sendMoneyMultiSame", new SendMoneyMultiSame(parameterService, blockchain, apiTransactionManager, fluxCapacitor, accountService));
         map.put("setAccountInfo", new SetAccountInfo(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
         map.put("setAlias", new SetAlias(parameterService, blockchain, aliasService, apiTransactionManager, fluxCapacitor));
         map.put("setTLD", new SetTLD(parameterService, blockchain, aliasService, apiTransactionManager, fluxCapacitor));
@@ -204,7 +204,7 @@ public final class ApiServlet extends HttpServlet {
         map.put("removeCommitment",
                 new RemoveCommitment(parameterService, blockchain, accountService, apiTransactionManager, fluxCapacitor));
         map.put("getAccountsWithRewardRecipient", new GetAccountsWithRewardRecipient(parameterService, accountService));
-        map.put("sendMoneyEscrow", new SendMoneyEscrow(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
+        map.put("sendMoneyEscrow", new SendMoneyEscrow(parameterService, blockchain, apiTransactionManager, fluxCapacitor, accountService));
         map.put("escrowSign", new EscrowSign(parameterService, blockchain, escrowService, apiTransactionManager, fluxCapacitor));
         map.put("getEscrowTransaction", new GetEscrowTransaction(escrowService));
         map.put("getAccountEscrowTransactions", new GetAccountEscrowTransactions(parameterService, escrowService));

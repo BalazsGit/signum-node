@@ -328,7 +328,7 @@ public class SqlATStore implements ATStore {
                 application.module.node.at.AT.decompressState(atState.getState()), codeSize, at.getDsize(),
                 at.getCUserStackBytes(),
                 at.getCCallStackBytes(), at.getCreationHeight(), atState.getSleepBetween(), atState.getNextHeight(),
-                atState.getFreezeWhenSameBalance(), atState.getMinActivateAmount(), code, codeHashId);
+                atState.getFreezeWhenSameBalance(), atState.getMinActivateAmount(), code, codeHashId, atDbKeyFactory);
     }
 
     @Override
@@ -469,7 +469,8 @@ public class SqlATStore implements ATStore {
                     record.get(AT_STATE.SLEEP_BETWEEN),
                     record.get(AT_STATE.PREV_BALANCE),
                     record.get(AT_STATE.FREEZE_WHEN_SAME_BALANCE),
-                    record.get(AT_STATE.MIN_ACTIVATE_AMOUNT));
+                    record.get(AT_STATE.MIN_ACTIVATE_AMOUNT),
+                    atStateDbKeyFactory);
         }
     }
 

@@ -9,6 +9,8 @@ import application.module.node.common.TestConstants;
 import application.module.node.db.SignumKey;
 import application.module.node.db.VersionedBatchEntityTable;
 import application.module.node.db.VersionedEntityTable;
+import application.module.node.db.store.Dbs;
+import application.module.node.db.sql.DbContext;
 import application.module.node.db.store.ATStore;
 import application.module.node.db.store.AccountStore;
 import application.module.node.db.store.AssetStore;
@@ -20,6 +22,8 @@ import application.module.node.props.Props;
 import application.module.node.services.AccountService;
 import application.module.node.util.Convert;
 import org.mockito.ArgumentMatchers;
+import org.mockito.MockedStatic;
+import org.mockito.Mockito;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -29,13 +33,22 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static org.junit.Assert.assertEquals;
-import static org.powermock.api.mockito.PowerMockito.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public class AtTestHelper {
 
     private static List<AT> addedAts = new ArrayList<>();
     private static Consumer<AT> onAtAdded;
     private static ATProcessingContext testContext;
+    private static MockedStatic<Account> accountStaticMock;
+    private static MockedStatic<Signum> signumStaticMock;
 
     // Hello World example compiled with BlockTalk v0.0.0
     static byte[] HELLO_WORLD_CREATION_BYTES = getCreationBytes((short) 2, 1, Convert.parseHexString(
@@ -62,15 +75,20 @@ public class AtTestHelper {
             "12fb0000003033040301000000350001020000001e02000000072835070301000000122c0000001a0600000033100102000000320a0335040103000000100300000011030000003316010300000001030000005468616e6b20796f33100103000000010300000075210000000000003311010300000001030000000000000000000000331201030000000103000000000000000000000033130103000000320504350004030000001003000000010300000000e87648170000001003000000110400000011030000000703000000040000001003000000110300000003040000001f03000000040000000f1afa00000033160100000000320304130103000000d70faeecffc5c4e41003000000110000000013"));
 
     static void setupMocks() {
+        onAtAdded = null;
+        addedAts.clear();
         Stores mockStores = mock(Stores.class);
         ATStore mockAtStore = mock(ATStore.class);
+
+        FluxCapacitor earlyFluxCap = QuickMocker.latestValueFluxCapacitor();
+        AtController.setAtConstants(new AtConstants(earlyFluxCap));
 
         FluxCapacitor mockFluxCapacitor = QuickMocker.latestValueFluxCapacitor();
         // noinspection unchecked
         SignumKey.LongKeyFactory<AT> atLongKeyFactory = mock(SignumKey.LongKeyFactory.class);
         // noinspection unchecked
         SignumKey.LongKeyFactory<AT.ATState> atStateLongKeyFactory = mock(SignumKey.LongKeyFactory.class);
-        mockStatic(Signum.class);
+        signumStaticMock = Mockito.mockStatic(Signum.class);
         Blockchain mockBlockchain = mock(Blockchain.class);
         PropertyService mockPropertyService = mock(PropertyService.class);
         // noinspection unchecked
@@ -84,12 +102,14 @@ public class AtTestHelper {
         SignumKey.LongKeyFactory<Account> mockAccountKeyFactory = mock(SignumKey.LongKeyFactory.class);
         Account mockAccount = mock(Account.class);
         Account.Balance mockAccountBalance = mock(Account.Balance.class);
-        ATProcessorCache mockProcessorCache = mock(ATProcessorCache.class);
+        DbContext mockDbContext = mock(DbContext.class);
+        Dbs mockDbs = mock(Dbs.class);
+        ATProcessorCache realProcessorCache = new ATProcessorCache(mockPropertyService, mockAtStore, mockDbContext, mockDbs);
         AccountService mockAccountService = mock(AccountService.class);
         AssetExchange mockAssetExchange = mock(AssetExchange.class);
         IndirectIncomingStore mockIndirectIncomingStore = mock(IndirectIncomingStore.class);
         AssetStore mockAssetStore = mock(AssetStore.class);
-        mockStatic(Account.class);
+        accountStaticMock = Mockito.mockStatic(Account.class);
 
         doAnswer(invoke -> {
             AT at = invoke.getArgument(0);
@@ -129,28 +149,30 @@ public class AtTestHelper {
         }).when(mockAtStore).getAT(ArgumentMatchers.anyLong(), ArgumentMatchers.anyInt());
         when(mockAtStore.getATs(ArgumentMatchers.anyCollection())).thenReturn(addedAts);
         when(mockAtTable.getAll(ArgumentMatchers.anyInt(), ArgumentMatchers.anyInt())).thenReturn(addedAts);
-        when(Account.getOrAddAccount(ArgumentMatchers.anyLong())).thenReturn(mockAccount);
-        when(Account.getAccount(ArgumentMatchers.anyLong())).thenReturn(mockAccount);
-        when(Account.getAccountBalance(ArgumentMatchers.anyLong())).thenReturn(mockAccountBalance);
+        accountStaticMock.when(() -> Account.getOrAddAccount(any(AccountStore.class), anyLong(), anyInt())).thenReturn(mockAccount);
+        accountStaticMock.when(() -> Account.getAccount(any(AccountStore.class), anyLong())).thenReturn(mockAccount);
+        accountStaticMock.when(() -> Account.getAccountBalance(any(AccountStore.class), anyLong())).thenReturn(mockAccountBalance);
         when(mockAccountTable.get(ArgumentMatchers.any())).thenReturn(mockAccount);
+        when(mockAccountService.getAccountBalance(ArgumentMatchers.anyLong())).thenReturn(mockAccountBalance);
+        when(mockAccountService.getOrAddAccount(ArgumentMatchers.anyLong())).thenReturn(mockAccount);
         when(mockStores.getAccountStore()).thenReturn(mockAccountStore);
         when(mockAccountStore.getAccountKeyFactory()).thenReturn(mockAccountKeyFactory);
         when(mockAtStore.getAtStateTable()).thenReturn(mockAtStateTable);
         when(mockPropertyService.getBoolean(ArgumentMatchers.eq(Props.ENABLE_AT_DEBUG_LOG))).thenReturn(true);
         when(mockPropertyService.getInt(ArgumentMatchers.eq(Props.NODE_AT_PROCESSOR_CACHE_BLOCK_COUNT))).thenReturn(-1);
         when(mockAtStore.getAtTable()).thenReturn(mockAtTable);
-        when(Signum.getPropertyService()).thenReturn(mockPropertyService);
-        when(Signum.getBlockchain()).thenReturn(mockBlockchain);
+        signumStaticMock.when(Signum::getPropertyService).thenReturn(mockPropertyService);
+        signumStaticMock.when(Signum::getBlockchain).thenReturn(mockBlockchain);
         when(mockBlockchain.getHeight()).thenReturn(Integer.MAX_VALUE);
         when(mockAtStore.getAtDbKeyFactory()).thenReturn(atLongKeyFactory);
         when(mockAtStore.getAtStateDbKeyFactory()).thenReturn(atStateLongKeyFactory);
         when(mockStores.getAtStore()).thenReturn(mockAtStore);
-        when(Signum.getStores()).thenReturn(mockStores);
-        when(Signum.getFluxCapacitor()).thenReturn(mockFluxCapacitor);
+        signumStaticMock.when(Signum::getStores).thenReturn(mockStores);
+        signumStaticMock.when(Signum::getFluxCapacitor).thenReturn(mockFluxCapacitor);
 
         testContext = new ATProcessingContext(
                 AtController.getAtConstants(),
-                mockProcessorCache,
+                realProcessorCache,
                 mockPropertyService,
                 mockFluxCapacitor,
                 mockBlockchain,
@@ -168,7 +190,21 @@ public class AtTestHelper {
 
     static void clearAddedAts() {
         addedAts.clear();
-        assertEquals(0, AT.getOrderedATs().size());
+        onAtAdded = null;
+        if (testContext != null) {
+            assertEquals(0, AT.getOrderedATs(testContext).size());
+        }
+    }
+
+    static void closeStatics() {
+        if (accountStaticMock != null) {
+            accountStaticMock.close();
+            accountStaticMock = null;
+        }
+        if (signumStaticMock != null) {
+            signumStaticMock.close();
+            signumStaticMock = null;
+        }
     }
 
     static void setOnAtAdded(Consumer<AT> onAtAdded) {
@@ -217,32 +253,32 @@ public class AtTestHelper {
     }
 
     public static void addHelloWorldAT() {
-        AT.addAT(1L, TestConstants.TEST_ACCOUNT_NUMERIC_ID_PARSED, "HelloWorld", "Hello World AT",
+        AT.addAT(testContext, 1L, TestConstants.TEST_ACCOUNT_NUMERIC_ID_PARSED, "HelloWorld", "Hello World AT",
                 AtTestHelper.HELLO_WORLD_CREATION_BYTES, Integer.MAX_VALUE, 0L);
     }
 
     public static void addEchoAT() {
-        AT.addAT(2L, TestConstants.TEST_ACCOUNT_NUMERIC_ID_PARSED, "Echo", "Message Echo AT",
+        AT.addAT(testContext, 2L, TestConstants.TEST_ACCOUNT_NUMERIC_ID_PARSED, "Echo", "Message Echo AT",
                 AtTestHelper.ECHO_CREATION_BYTES, Integer.MAX_VALUE, 0L);
     }
 
     public static void addTipThanksAT() {
-        AT.addAT(3L, TestConstants.TEST_ACCOUNT_NUMERIC_ID_PARSED, "TipThanks", "Tip Thanks AT",
+        AT.addAT(testContext, 3L, TestConstants.TEST_ACCOUNT_NUMERIC_ID_PARSED, "TipThanks", "Tip Thanks AT",
                 AtTestHelper.TIP_THANKS_CREATION_BYTES, Integer.MAX_VALUE, 0L);
     }
 
     public static void addHelloWorldATV3() {
-        AT.addAT(1L, TestConstants.TEST_ACCOUNT_NUMERIC_ID_PARSED, "HelloWorld", "Hello World AT",
+        AT.addAT(testContext, 1L, TestConstants.TEST_ACCOUNT_NUMERIC_ID_PARSED, "HelloWorld", "Hello World AT",
                 AtTestHelper.HELLO_WORLD_CREATION_BYTES_V3, Integer.MAX_VALUE, 0L);
     }
 
     public static void addEchoATV3() {
-        AT.addAT(2L, TestConstants.TEST_ACCOUNT_NUMERIC_ID_PARSED, "Echo", "Message Echo AT",
+        AT.addAT(testContext, 2L, TestConstants.TEST_ACCOUNT_NUMERIC_ID_PARSED, "Echo", "Message Echo AT",
                 AtTestHelper.ECHO_CREATION_BYTES_V3, Integer.MAX_VALUE, 0L);
     }
 
     public static void addTipThanksATV3() {
-        AT.addAT(3L, TestConstants.TEST_ACCOUNT_NUMERIC_ID_PARSED, "TipThanks", "Tip Thanks AT",
+        AT.addAT(testContext, 3L, TestConstants.TEST_ACCOUNT_NUMERIC_ID_PARSED, "TipThanks", "Tip Thanks AT",
                 AtTestHelper.TIP_THANKS_CREATION_BYTES_V3, Integer.MAX_VALUE, 0L);
     }
 

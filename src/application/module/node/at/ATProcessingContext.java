@@ -40,22 +40,19 @@ public final class ATProcessingContext {
     private final AssetExchange assetExchange;
     private final IndirectIncomingStore indirectIncomingStore;
     private final AssetStore assetStore;
+    /**
+     * Instance-scoped pending AT state (fees, transactions, map updates).
+     * One per node, eliminating JVM-wide shared mutable state.
+     */
+    private final ATPendingState pendingState;
 
     /**
      * Creates a new AT processing context with all required dependencies.
      *
-     * @param atConstants      the AT configuration constants
-     * @param processorCache   the AT processor cache for transaction lookups
-     * @param propertyService  configuration properties service
-     * @param fluxCapacitor    feature flag / epoch tracking
-     * @param blockchain       the blockchain instance
-     * @param atStore          AT data store
-     * @param accountStore          account data store
-     * @param accountService        account balance and data service
-     * @param assetExchange         asset exchange service
-     * @param indirectIncomingStore indirect incoming data store
-     * @param assetStore            asset data store
+     * The {@link ATPendingState} is created internally to guarantee
+     * per-instance isolation.
      */
+    @Deprecated
     public ATProcessingContext(
             AtConstants atConstants,
             ATProcessorCache processorCache,
@@ -68,7 +65,27 @@ public final class ATProcessingContext {
             AssetExchange assetExchange,
             IndirectIncomingStore indirectIncomingStore,
             AssetStore assetStore) {
+        this(atConstants, processorCache, propertyService, fluxCapacitor, blockchain,
+                atStore, accountStore, accountService, assetExchange, indirectIncomingStore,
+                assetStore, new ATPendingState());
+    }
 
+    /**
+     * Creates a new AT processing context with an explicit pending state.
+     */
+    public ATProcessingContext(
+            AtConstants atConstants,
+            ATProcessorCache processorCache,
+            PropertyService propertyService,
+            FluxCapacitor fluxCapacitor,
+            Blockchain blockchain,
+            ATStore atStore,
+            AccountStore accountStore,
+            AccountService accountService,
+            AssetExchange assetExchange,
+            IndirectIncomingStore indirectIncomingStore,
+            AssetStore assetStore,
+            ATPendingState pendingState) {
         this.atConstants = atConstants;
         this.processorCache = processorCache;
         this.propertyService = propertyService;
@@ -80,6 +97,7 @@ public final class ATProcessingContext {
         this.assetExchange = assetExchange;
         this.indirectIncomingStore = indirectIncomingStore;
         this.assetStore = assetStore;
+        this.pendingState = pendingState;
     }
 
     /** @return the AT configuration constants */
@@ -135,6 +153,13 @@ public final class ATProcessingContext {
     /** @return the asset data store */
     public AssetStore getAssetStore() {
         return assetStore;
+    }
+
+    /**
+     * @return the instance-scoped pending AT state (fees, transactions, map updates).
+     */
+    public ATPendingState getPendingState() {
+        return pendingState;
     }
 
     @Override

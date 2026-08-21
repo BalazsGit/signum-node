@@ -4,12 +4,25 @@ import application.module.node.crypto.EncryptedData;
 import application.module.node.db.SignumKey;
 import application.module.node.db.VersionedEntityTable;
 import application.module.node.db.VersionedValuesTable;
+import application.module.node.db.store.DigitalGoodsStoreStore;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 public final class DigitalGoodsStore {
+
+    private static volatile DigitalGoodsStoreStore originStore;
+
+    public static void setOriginStore(DigitalGoodsStoreStore store) {
+        originStore = store;
+    }
+
+    private static void requireOriginStore() {
+        if (originStore == null) {
+            throw new IllegalStateException("DigitalGoodsStore not wired — call SqlDigitalGoodsStoreStore constructor first");
+        }
+    }
 
     public enum Event {
         GOODS_LISTED, GOODS_DELISTED, GOODS_PRICE_CHANGE, GOODS_QUANTITY_CHANGE,
@@ -19,11 +32,13 @@ public final class DigitalGoodsStore {
     public static class Goods {
 
         private static SignumKey.LongKeyFactory<Goods> goodsDbKeyFactory() {
-            return Signum.getStores().getDigitalGoodsStoreStore().getGoodsDbKeyFactory();
+            requireOriginStore();
+            return originStore.getGoodsDbKeyFactory();
         }
 
         private static VersionedEntityTable<Goods> goodsTable() {
-            return Signum.getStores().getDigitalGoodsStoreStore().getGoodsTable();
+            requireOriginStore();
+            return originStore.getGoodsTable();
         }
 
         private final long id;
@@ -123,23 +138,28 @@ public final class DigitalGoodsStore {
     public static class Purchase {
 
         private static SignumKey.LongKeyFactory<Purchase> purchaseDbKeyFactory() {
-            return Signum.getStores().getDigitalGoodsStoreStore().getPurchaseDbKeyFactory();
+            requireOriginStore();
+            return originStore.getPurchaseDbKeyFactory();
         }
 
         private static SignumKey.LongKeyFactory<Purchase> feedbackDbKeyFactory() {
-            return Signum.getStores().getDigitalGoodsStoreStore().getFeedbackDbKeyFactory();
+            requireOriginStore();
+            return originStore.getFeedbackDbKeyFactory();
         }
 
         private static VersionedValuesTable<Purchase, EncryptedData> feedbackTable() {
-            return Signum.getStores().getDigitalGoodsStoreStore().getFeedbackTable();
+            requireOriginStore();
+            return originStore.getFeedbackTable();
         }
 
         private static SignumKey.LongKeyFactory<Purchase> publicFeedbackDbKeyFactory() {
-            return Signum.getStores().getDigitalGoodsStoreStore().getPublicFeedbackDbKeyFactory();
+            requireOriginStore();
+            return originStore.getPublicFeedbackDbKeyFactory();
         }
 
         private static VersionedValuesTable<Purchase, String> publicFeedbackTable() {
-            return Signum.getStores().getDigitalGoodsStoreStore().getPublicFeedbackTable();
+            requireOriginStore();
+            return originStore.getPublicFeedbackTable();
         }
 
         private final long id;
@@ -322,6 +342,7 @@ public final class DigitalGoodsStore {
     }
 
     private static Goods getGoods(long goodsId) {
+        requireOriginStore();
         return Goods.goodsTable().get(Goods.goodsDbKeyFactory().newKey(goodsId));
     }
 

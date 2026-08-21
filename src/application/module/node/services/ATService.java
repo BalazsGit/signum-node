@@ -88,15 +88,23 @@ public interface ATService {
     AtBlock validateATs(byte[] blockATs, int blockHeight, long generatorId)
             throws application.module.node.at.AtException;
 
-    /**
-     * Processes ATs for a newly forged (current) block, using the service's internal context.
-     *
-     * @param freePayload the remaining payload size available in the block
-     * @param blockHeight the height of the block being forged
-     * @param generatorId the generator account ID
-     * @param indirectsCount initial indirect transactions count
-     * @return an {@link AtBlock} describing fees, amounts and resulting bytes
-     */
-    AtBlock getCurrentBlockATs(int freePayload, int blockHeight,
-            long generatorId, int indirectsCount);
-}
+     /**
+      * Processes ATs for a newly forged (current) block, using the service's internal context.
+      *
+      * @param freePayload the remaining payload size available in the block
+      * @param blockHeight the height of the block being forged
+      * @param generatorId the generator account ID
+      * @param indirectsCount initial indirect transactions count
+      * @return an {@link AtBlock} describing fees, amounts and resulting bytes
+      */
+     AtBlock getCurrentBlockATs(int freePayload, int blockHeight,
+             long generatorId, int indirectsCount);
+
+     /**
+      * Clears all pending AT state (fees, transactions, map updates) for the given block/generator.
+      *
+      * @param blockHeight the block height
+      * @param generatorId the generator account ID
+      */
+     void clearPending(int blockHeight, long generatorId);
+ }

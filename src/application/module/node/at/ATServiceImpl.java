@@ -198,7 +198,7 @@ public class ATServiceImpl implements ATService {
                 }
 
                 totalFee = Convert.safeAdd(totalFee, fee);
-                AT.addPendingFee(atIdLong, fee, blockHeight, generatorId);
+                AT.addPendingFee(ctx.getPendingState(), atIdLong, fee, blockHeight, generatorId);
                 processedATs.add(at);
 
                 md5 = digest.digest(at.getBytes());
@@ -279,7 +279,7 @@ public class ATServiceImpl implements ATService {
                     }
 
                     totalFee = Convert.safeAdd(totalFee, fee);
-                    AT.addPendingFee(id, fee, blockHeight, generatorId);
+                    AT.addPendingFee(ctx.getPendingState(), id, fee, blockHeight, generatorId);
                     payload += costOfOneAT;
                     processedATs.add(at);
                 } catch (Exception e) {
@@ -450,7 +450,7 @@ public class ATServiceImpl implements ATService {
 
         if (!fluxCapacitor.getValue(FluxValues.AT_FIX_BLOCK_4, at.getHeight())) {
             for (AtTransaction tx : ordered) {
-                if (AT.findPendingTransaction(tx.getRecipientId(), blockHeight, generatorId)) {
+                if (AT.findPendingTransaction(ctx.getPendingState(), tx.getRecipientId(), blockHeight, generatorId)) {
                     throw new AtException("Conflicting transaction found");
                 }
             }
@@ -458,7 +458,7 @@ public class ATServiceImpl implements ATService {
 
         for (AtTransaction tx : ordered) {
             totalAmount = Convert.safeAdd(totalAmount, tx.getAmount());
-            AT.addPendingTransaction(tx, blockHeight, generatorId);
+            AT.addPendingTransaction(ctx.getPendingState(), tx, blockHeight, generatorId);
             if (logger.isDebugEnabled()) {
                 logger.debug(
                         "Transaction to {}, amount {}",
@@ -468,7 +468,7 @@ public class ATServiceImpl implements ATService {
             }
         }
 
-        AT.addMapUpdates(at.getMapUpdates(), blockHeight, generatorId);
+        AT.addMapUpdates(ctx.getPendingState(), at.getMapUpdates(), blockHeight, generatorId);
         return totalAmount;
     }
 
@@ -519,5 +519,20 @@ public class ATServiceImpl implements ATService {
             throw new IllegalStateException("ATProcessingContext not available. Use full constructor for block processing.");
         }
         return getCurrentBlockATs(processingContext, freePayload, blockHeight, generatorId, indirectsCount);
+    }
+
+    /**
+     * Clears all pending AT state (fees, transactions, map updates) for the given block/generator.
+     * <p>
+     * Delegates to the instance-scoped {@link ATPendingState}. A no-op when no processing
+     * context is available (CRUD-only construction).
+     * </p>
+     */
+    @Override
+    public void clearPending(int blockHeight, long generatorId) {
+        if (processingContext == null) {
+            return;
+        }
+        AT.clearPending(processingContext, blockHeight, generatorId);
     }
 }

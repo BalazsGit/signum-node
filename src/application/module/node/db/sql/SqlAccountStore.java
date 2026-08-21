@@ -488,6 +488,7 @@ public class SqlAccountStore implements AccountStore {
             this.setKeyHeight(record.get(ACCOUNT.KEY_HEIGHT));
             this.name = record.get(ACCOUNT.NAME);
             this.description = record.get(ACCOUNT.DESCRIPTION);
+            this.setOriginStore(SqlAccountStore.this);
         }
     }
 

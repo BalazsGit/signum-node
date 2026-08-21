@@ -1,24 +1,23 @@
 package application.module.node.at;
 
-import application.module.node.Account;
-import application.module.node.Signum;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest({ Signum.class, Account.class })
 public class ATTest {
     @Before
     public void setUp() {
         AtTestHelper.setupMocks();
+    }
+
+    @After
+    public void tearDown() {
+        AtTestHelper.closeStatics();
     }
 
     @Test
@@ -47,6 +46,6 @@ public class ATTest {
         });
         AtTestHelper.addTipThanksAT();
         assertTrue(tipThanksReceived.get());
-        assertEquals(3, AT.getOrderedATs().size());
+        assertEquals(3, AT.getOrderedATs(AtTestHelper.getTestContext()).size());
     }
 }
