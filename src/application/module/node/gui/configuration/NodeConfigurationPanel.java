@@ -78,6 +78,15 @@ public class NodeConfigurationPanel extends JPanel {
     private final Runnable backAction;
     private final Runnable switchAction;
     private final String confFolder;
+
+    /**
+     * Per-profile {@code Signum} facade injected by {@code NodeProfilePanel} (Facade
+     * Pattern). Provides this node's own {@link application.module.node.instance.NodeCoreContext}
+     * and, with it, the running {@code PropertyService}. In the multi-node architecture
+     * each node profile owns its own facade, so this panel intentionally has <b>no</b>
+     * global "active node" pointer. May be {@code null} until the node has started.
+     */
+    private Signum signum;
     private Path propertiesFile;
     private JComboBox<String> profileComboBox;
     private final java.util.List<PropertyRow> allPropertyRows = new ArrayList<>();
@@ -1656,11 +1665,24 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(panel, prop, labelText, options, false);
     }
 
+    /**
+     * Sets the per-profile {@code Signum} facade for this configuration panel.
+     * Called by {@code NodeProfilePanel} after construction, mirroring how the
+     * console panel is wired. Replaces the deprecated static
+     * {@code Signum.getPropertyService()} bridge with a per-node, instance-scoped
+     * lookup (no global active-instance indirection).
+     *
+     * @param signum this profile's Signum facade (may be null before start)
+     */
+    public void setSignum(Signum signum) {
+        this.signum = signum;
+    }
+
     public void loadAppliedProperties() {
         // Node may not be started yet when this panel is constructed.
         // Defer loading until the node is running (will be called from onNodeStateChanged).
         try {
-            application.module.node.props.PropertyService service = application.module.node.Signum.getPropertyService();
+            application.module.node.props.PropertyService service = resolvePropertyService();
             if (service == null) {
                 LOGGER.debug("[DIAG] loadAppliedProperties - PropertyService is null, deferring until node starts");
                 return;
@@ -1689,6 +1711,20 @@ public class NodeConfigurationPanel extends JPanel {
             // Properties will be loaded when the node starts via onNodeStateChanged callback.
             LOGGER.debug("[DIAG] loadAppliedProperties - Node not started yet, properties will load on node start: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Resolves this profile's running {@code PropertyService} from the injected
+     * {@code Signum} facade. Returns {@code null} until the node has started, which
+     * callers already treat as "defer until node start". This replaces the deprecated
+     * static {@code Signum.getPropertyService()} without any global active-instance.
+     */
+    private application.module.node.props.PropertyService resolvePropertyService() {
+        Signum facade = this.signum;
+        if (facade == null || facade.getContext() == null) {
+            return null;
+        }
+        return facade.getContext().getPropertyService();
     }
 
     private String getServiceValueAsString(application.module.node.props.PropertyService service, Prop prop) {

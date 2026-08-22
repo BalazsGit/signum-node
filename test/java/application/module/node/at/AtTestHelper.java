@@ -161,14 +161,10 @@ public class AtTestHelper {
         when(mockPropertyService.getBoolean(ArgumentMatchers.eq(Props.ENABLE_AT_DEBUG_LOG))).thenReturn(true);
         when(mockPropertyService.getInt(ArgumentMatchers.eq(Props.NODE_AT_PROCESSOR_CACHE_BLOCK_COUNT))).thenReturn(-1);
         when(mockAtStore.getAtTable()).thenReturn(mockAtTable);
-        signumStaticMock.when(Signum::getPropertyService).thenReturn(mockPropertyService);
-        signumStaticMock.when(Signum::getBlockchain).thenReturn(mockBlockchain);
         when(mockBlockchain.getHeight()).thenReturn(Integer.MAX_VALUE);
         when(mockAtStore.getAtDbKeyFactory()).thenReturn(atLongKeyFactory);
         when(mockAtStore.getAtStateDbKeyFactory()).thenReturn(atStateLongKeyFactory);
         when(mockStores.getAtStore()).thenReturn(mockAtStore);
-        signumStaticMock.when(Signum::getStores).thenReturn(mockStores);
-        signumStaticMock.when(Signum::getFluxCapacitor).thenReturn(mockFluxCapacitor);
 
         testContext = new ATProcessingContext(
                 AtController.getAtConstants(),

@@ -177,30 +177,6 @@ class RealMultiNodeIntegrationTest {
             });
         }
 
-        @Test
-        @DisplayName("Signum activeInstance bridge works correctly")
-        void activeInstanceBridge() {
-            // Arrange
-            NodeProfile profile = new NodeProfile("bridge-test");
-            Signum mockSignum = mock(Signum.class);
-            when(mockSignum.getProfile()).thenReturn(profile);
-
-            // Act
-            Signum.setActive(mockSignum);
-
-            // Assert
-            assertSame(mockSignum, Signum.getActiveInstance());
-        }
-
-        @Test
-        @DisplayName("getActiveInstance returns null when not set")
-        void getActiveInstanceReturnsNull() {
-            // Arrange - clear active instance
-            Signum.setActive(null);
-
-            // Act + Assert
-            assertNull(Signum.getActiveInstance());
-        }
     }
 
     // =========================================================================

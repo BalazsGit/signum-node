@@ -59,7 +59,6 @@ public class UnconfirmedTransactionStoreTest {
         mockStatic(Signum.class);
 
         final PropertyService mockPropertyService = mock(PropertyService.class);
-        when(Signum.getPropertyService()).thenReturn(mockPropertyService);
         when(mockPropertyService.getInt(eq(Props.P2P_MAX_UNCONFIRMED_TRANSACTIONS))).thenReturn(8192);
         when(mockPropertyService.getInt(eq(Props.P2P_MAX_PERCENTAGE_UNCONFIRMED_TRANSACTIONS_FULL_HASH_REFERENCE)))
                 .thenReturn(5);
@@ -67,7 +66,6 @@ public class UnconfirmedTransactionStoreTest {
                 .thenReturn(175000);
 
         mockBlockChain = mock(BlockchainImpl.class);
-        when(Signum.getBlockchain()).thenReturn(mockBlockChain);
 
         accountStoreMock = mock(AccountStore.class);
         accountTableMock = mock(VersionedBatchEntityTable.class);
@@ -84,8 +82,6 @@ public class UnconfirmedTransactionStoreTest {
 
         fluxCapacitor = QuickMocker.fluxCapacitorEnabledFunctionalities(FluxValues.PRE_POC2,
                 FluxValues.DIGITAL_GOODS_STORE);
-
-        when(Signum.getFluxCapacitor()).thenReturn(fluxCapacitor);
 
         doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT), anyInt());
         doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));

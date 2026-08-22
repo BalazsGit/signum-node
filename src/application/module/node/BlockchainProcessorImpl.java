@@ -8,7 +8,6 @@ import application.module.node.crypto.Crypto;
 import application.module.node.db.BlockDb;
 import application.module.node.db.DerivedTable;
 import application.module.node.db.TransactionDb;
-import application.module.node.db.sql.Db;
 import application.module.node.db.cache.DBCacheManagerImpl;
 import application.module.node.db.store.BlockchainStore;
 import application.module.node.db.store.DerivedTableManager;

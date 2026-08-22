@@ -19,6 +19,8 @@ import application.utils.gui.console.UnifiedConsolePanel;
 import application.utils.logging.ConsoleColorScheme;
 import application.utils.logging.SystemLogger;
 import application.utils.logging.event.LogFilter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * System Console module that aggregates ALL log events from every running profile.
@@ -37,6 +39,8 @@ import application.utils.logging.event.LogFilter;
  * </p>
  */
 public class SystemConsoleModule implements Module {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(SystemConsoleModule.class);
 
     private UnifiedConsolePanel unifiedPanel;
     private Runnable appearanceListener;
@@ -60,7 +64,13 @@ public class SystemConsoleModule implements Module {
                 .withMaxLines(1000)
                 .withColorScheme(ConsoleColorScheme.getDefault())
                 .withCommandHandler(cmd -> {
-                    new Thread(() -> Signum.processCommand(cmd)).start();
+                    // PLACEHOLDER (P3 Unit 8): This System Console is a cross-profile aggregator and
+                    // owns no single node facade, so there is no architecture-correct way to route a
+                    // node command here yet. The legacy Signum.processCommand(cmd) bridge has been
+                    // removed. Command routing is expected to be defined later — most likely via
+                    // targeted controls that address a specific module/node so each command is
+                    // delivered to the right instance. Until then this is a deliberate no-op.
+                    LOGGER.info("[SystemConsole] Command input received but routing not yet defined: '{}'", cmd);
                 });
 
         this.unifiedPanel = new UnifiedConsolePanel(config, SystemConsoleSubscriber.class);

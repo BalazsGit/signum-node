@@ -72,7 +72,6 @@ class SubscriptionCancelTest extends AbstractTransactionTest {
         try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
             final FluxCapacitor fluxCapacitor = QuickMocker
                     .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
-            mocked.when(Signum::getFluxCapacitor).thenReturn(fluxCapacitor);
             doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
 
             final Attachment.AdvancedPaymentSubscriptionCancel attachment = (Attachment.AdvancedPaymentSubscriptionCancel) attachmentCreatedTransaction(

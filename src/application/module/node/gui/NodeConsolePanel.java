@@ -183,7 +183,10 @@ public class NodeConsolePanel extends JPanel {
      * @param signum Per-instance Signum facade (may be null if not yet started)
      * @since 4.0 Phase G - Greenfield wiring
      */
+    private Signum signum;
+
     public void setSignum(Signum signum) {
+        this.signum = signum;
         this.nodeContext = (signum != null) ? signum.getContext() : null;
     }
 
@@ -1144,9 +1147,7 @@ public class NodeConsolePanel extends JPanel {
                 .withCommandInputVisible(false)
                 .withEnableCommandToggle(true)
                 .withMaxLines(OUTPUT_MAX_LINES)
-                .withCommandHandler(cmd -> {
-                    new Thread(() -> Signum.processCommand(cmd)).start();
-                })
+                .withCommandHandler(cmd -> executeCommand(cmd))
                 .withEnableSmartScroll(true),
             ProfileConsoleSubscriber.class
         );
@@ -1358,7 +1359,7 @@ public class NodeConsolePanel extends JPanel {
             String cmd = commandField.getText().trim();
             if (!cmd.isEmpty()) {
                 LOGGER.info("Executing command: " + cmd);
-                new Thread(() -> Signum.processCommand(cmd)).start();
+                executeCommand(cmd);
                 commandField.setText("");
             }
         };
@@ -2830,6 +2831,27 @@ public class NodeConsolePanel extends JPanel {
             }
             // updateTitle() removed - title management moved to NodeInfoBar
         });
+    }
+
+    /**
+     * Executes a node console command on this profile's own Signum instance.
+     * <p>
+     * Uses the per-node {@link #signum} facade that {@code NodeProfilePanel} injects
+     * for this profile. In the multi-node architecture each node is an independent
+     * profile object, so this intentionally has <b>no</b> global "active node"
+     * fallback. It routes through the non-deprecated
+     * {@link Signum#processCommandInstance(String)} instance method rather than the
+     * legacy static {@code Signum.processCommand(String)} bridge.
+     * </p>
+     *
+     * @param cmd the command to execute
+     */
+    private void executeCommand(String cmd) {
+        if (signum == null) {
+            LOGGER.warn("Cannot execute command '{}': no Signum facade wired for this profile", cmd);
+            return;
+        }
+        new Thread(() -> signum.processCommandInstance(cmd)).start();
     }
 
     public void startSignumWithGUI() {

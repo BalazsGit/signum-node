@@ -42,10 +42,6 @@ public class TransactionDuplicatesCheckerImplTest {
         mockStatic(Signum.class);
 
         fluxCapacitor = QuickMocker.fluxCapacitorEnabledFunctionalities(FluxValues.PRE_POC2);
-        when(Signum.getFluxCapacitor()).thenReturn(fluxCapacitor);
-        BlockchainImpl mockBlockchain = mock(BlockchainImpl.class);
-        when(mockBlockchain.getHeight()).thenReturn(4);
-        when(Signum.getBlockchain()).thenReturn(mockBlockchain);
 
         doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT), anyInt());
 

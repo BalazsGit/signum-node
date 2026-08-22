@@ -64,7 +64,6 @@ class SetRewardRecipientTest extends AbstractTransactionTest {
         try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
             final FluxCapacitor fluxCapacitor = QuickMocker
                     .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
-            mocked.when(Signum::getFluxCapacitor).thenReturn(fluxCapacitor);
             doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
 
             final Attachment.SignaMiningRewardRecipientAssignment attachment = (Attachment.SignaMiningRewardRecipientAssignment) attachmentCreatedTransaction(
@@ -85,7 +84,6 @@ class SetRewardRecipientTest extends AbstractTransactionTest {
         try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
             final FluxCapacitor fluxCapacitor = QuickMocker
                     .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
-            mocked.when(Signum::getFluxCapacitor).thenReturn(fluxCapacitor);
             doReturn(false).when(fluxCapacitor).getValue(eq(FluxValues.SMART_TOKEN));
 
             assertEquals(8, JSONTestHelper.errorCode(t.processRequest(req)));
@@ -104,7 +102,6 @@ class SetRewardRecipientTest extends AbstractTransactionTest {
         try (MockedStatic<Signum> mocked = mockStatic(Signum.class)) {
             final FluxCapacitor fluxCapacitor = QuickMocker
                     .fluxCapacitorEnabledFunctionalities(FluxValues.DIGITAL_GOODS_STORE);
-            mocked.when(Signum::getFluxCapacitor).thenReturn(fluxCapacitor);
             doReturn(false).when(fluxCapacitor).getValue(eq(FluxValues.SMART_TOKEN));
 
             assertEquals(8, JSONTestHelper.errorCode(t.processRequest(req)));

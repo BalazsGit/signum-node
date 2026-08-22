@@ -17,7 +17,6 @@ import application.module.node.Transaction;
 import application.module.node.TransactionType;
 import application.module.node.db.SignumKey;
 import application.module.node.db.VersionedEntityTable;
-import application.module.node.db.sql.Db;
 import application.module.node.db.store.AliasStore;
 import application.module.node.db.store.Stores;
 import application.module.node.fluxcapacitor.FluxCapacitor;
@@ -134,7 +133,7 @@ public class AliasServiceImpl implements AliasService {
 
     @Override
     public int getAliasCount(long tld) {
-        return Db.fetchWithDSLContext(ctx -> {
+        return this.stores.getDbContext().fetchWithDSLContext(ctx -> {
             SelectJoinStep<?> r = ctx.selectCount().from(ALIAS);
             return (r.where(ALIAS.LATEST.isTrue()).and(ALIAS.TLD.eq(tld))).fetchOne(0, int.class);
         });

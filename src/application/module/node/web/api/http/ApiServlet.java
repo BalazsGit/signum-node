@@ -235,7 +235,7 @@ public final class ApiServlet extends HttpServlet {
                 new ClearUnconfirmedTransactions(transactionProcessor, propertyService));
         map.put("fullReset", new FullReset(blockchainProcessor, propertyService));
         map.put("popOff", new PopOff(blockchainProcessor, blockchain, blockService, propertyService));
-        map.put("backupDB", new BackupDB(propertyService));
+        map.put("backupDB", new BackupDB(propertyService, context.getStores().getDbContext()));
 
         NetworkParameters networkParameters = context.getNetworkParameters();
         if (networkParameters != null) {

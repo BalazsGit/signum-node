@@ -14,18 +14,20 @@ import application.module.node.web.api.http.common.LegacyDocTag;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
-import application.module.node.db.sql.Db;
+import application.module.node.db.sql.DbContext;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 
 public final class BackupDB extends ApiServlet.JsonRequestHandler {
 
     private final List<String> apiAdminKeyList;
+    private final DbContext dbContext;
 
-    public BackupDB(PropertyService propertyService) {
+    public BackupDB(PropertyService propertyService, DbContext dbContext) {
         super(new LegacyDocTag[] { LegacyDocTag.ADMIN }, FILENAME_PARAMETER, API_KEY_PARAMETER);
 
         apiAdminKeyList = propertyService.getStringList(Props.API_ADMIN_KEY_LIST);
+        this.dbContext = dbContext;
     }
 
     @Override
@@ -44,7 +46,7 @@ public final class BackupDB extends ApiServlet.JsonRequestHandler {
             return response;
         }
 
-        Db.backup(filename);
+        dbContext.backup(filename);
 
         return response;
     }

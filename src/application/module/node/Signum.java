@@ -1,26 +1,14 @@
 package application.module.node;
 
-import application.module.node.assetexchange.AssetExchange;
-import application.module.node.at.AtConstants;
-import application.module.node.db.cache.DBCacheManagerImpl;
-import application.module.node.db.sql.Db;
-import application.module.node.db.store.Dbs;
-import application.module.node.db.store.Stores;
-import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.props.CaselessProperties;
 import application.module.node.props.PropertyService;
 import application.module.node.props.PropertyServiceImpl;
 import application.module.node.props.Props;
-import application.module.node.services.AccountService;
-import application.module.node.services.AliasService;
-import application.module.node.services.DGSGoodsStoreService;
-import application.module.node.services.EscrowService;
-import application.module.node.services.SubscriptionService;
-import application.module.node.services.TransactionService;
 import application.module.node.util.LoggerConfigurator;
 import application.module.node.web.server.WebServer;
 import application.module.node.instance.NodeCoreContext;
 import application.module.node.instance.NodeCoreContextBuilder;
+import application.module.node.instance.NodeFactory;
 import application.module.node.lifecycle.NodeLifecycleManager;
 import application.module.node.profile.NodeProfile;
 import application.utils.config.ConfigPaths;
@@ -255,221 +243,6 @@ public final class Signum {
     }
 
     // =========================================================================
-    // Active instance registry (bridge support – transitional)
-    // =========================================================================
-
-    /**
-     * Active Signum instance for backwards-compatible static delegation.
-     * Set during Phase E2 bridge migration so that existing callers using
-     * {@code Signum.getBlockchain()} continue to work via the active facade.
-     * Will be removed after all callers migrate to constructor injection.
-     */
-    private static volatile Signum activeInstance;
-
-    /**
-     * Registers a Signum instance as the active one for static bridge support.
-     * <p>
-     * Must be called from outside packages (e.g., {@code application.module.node.lifecycle})
-     * so visibility is {@code public}.
-     * </p>
-     *
-     * @param signum the Signum instance to mark as active
-     */
-    public static void setActive(Signum signum) {
-        activeInstance = signum;
-    }
-
-    /**
-     * Returns the currently active Signum instance (for bridge support).
-     *
-     * @return the active Signum, or null if none registered
-     */
-    public static Signum getActiveInstance() {
-        return activeInstance;
-    }
-
-    // =========================================================================
-    // Deprecated static bridge getters – delegate via active instance context
-    // =========================================================================
-
-    /**
-     * Bridge getter: delegates to active Signum instance context.
-     * @deprecated Use Signum instance method or constructor injection instead.
-     */
-    @Deprecated
-    public static Blockchain getBlockchain() {
-        NodeCoreContext ctx = resolveContext();
-        if (ctx == null) throw new IllegalStateException("No active Signum instance – call via instance API");
-        return ctx.getBlockchain();
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context.
-     * @deprecated Use Signum instance method or constructor injection instead.
-     */
-    @Deprecated
-    public static BlockchainProcessor getBlockchainProcessor() {
-        NodeCoreContext ctx = resolveContext();
-        if (ctx == null) throw new IllegalStateException("No active Signum instance");
-        return ctx.getBlockchainProcessor();
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context.
-     * @deprecated Use Signum instance method or constructor injection instead.
-     */
-    @Deprecated
-    public static Generator getGenerator() {
-        NodeCoreContext ctx = resolveContext();
-        if (ctx == null) throw new IllegalStateException("No active Signum instance");
-        return ctx.getGenerator();
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context.
-     * @deprecated Use Signum instance method or constructor injection instead.
-     */
-    @Deprecated
-    public static TransactionProcessorImpl getTransactionProcessor() {
-        NodeCoreContext ctx = resolveContext();
-        if (ctx == null) throw new IllegalStateException("No active Signum instance");
-        return ctx.getTransactionProcessor();
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context.
-     * @deprecated Use Signum instance method or constructor injection instead.
-     */
-    @Deprecated
-    public static TransactionService getTransactionService() {
-        NodeCoreContext ctx = resolveContext();
-        if (ctx == null) throw new IllegalStateException("No active Signum instance");
-        return ctx.getTransactionService();
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context.
-     * @deprecated Use Signum instance method or constructor injection instead.
-     */
-    @Deprecated
-    public static SubscriptionService getSubscriptionService() {
-        NodeCoreContext ctx = resolveContext();
-        if (ctx == null) throw new IllegalStateException("No active Signum instance");
-        return ctx.getSubscriptionService();
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context.
-     * @deprecated Use Signum instance method or constructor injection instead.
-     */
-    @Deprecated
-    public static AssetExchange getAssetExchange() {
-        NodeCoreContext ctx = resolveContext();
-        if (ctx == null) throw new IllegalStateException("No active Signum instance");
-        return ctx.getAssetExchange();
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context.
-     * @deprecated Use Signum instance method or constructor injection instead.
-     */
-    @Deprecated
-    public static Stores getStores() {
-        NodeCoreContext ctx = resolveContext();
-        if (ctx == null) throw new IllegalStateException("No active Signum instance");
-        return ctx.getStores();
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context.
-     * @deprecated Use Signum instance method or constructor injection instead.
-     */
-    @Deprecated
-    public static Dbs getDbs() {
-        NodeCoreContext ctx = resolveContext();
-        if (ctx == null) throw new IllegalStateException("No active Signum instance");
-        return ctx.getDbs();
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context.
-     * @deprecated Use NodeCoreContext.getPropertyService() instead.
-     */
-    @Deprecated
-    public static PropertyService getPropertyService() {
-        NodeCoreContext ctx = resolveContext();
-        if (ctx == null) throw new IllegalStateException("No active Signum instance");
-        return ctx.getPropertyService();
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context.
-     * @deprecated Use NodeCoreContext.getFluxCapacitor() instead.
-     */
-    @Deprecated
-    public static FluxCapacitor getFluxCapacitor() {
-        NodeCoreContext ctx = resolveContext();
-        if (ctx == null) throw new IllegalStateException("No active Signum instance");
-        return ctx.getFluxCapacitor();
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context.
-     * @deprecated Use NodeCoreContext.getAccountService() instead.
-     */
-    @Deprecated
-    public static AccountService getAccountService() {
-        NodeCoreContext ctx = resolveContext();
-        if (ctx == null) throw new IllegalStateException("No active Signum instance");
-        return ctx.getAccountService();
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context.
-     * @deprecated Use NodeCoreContext.getAliasService() instead.
-     */
-    @Deprecated
-    public static AliasService getAliasService() {
-        NodeCoreContext ctx = resolveContext();
-        if (ctx == null) throw new IllegalStateException("No active Signum instance");
-        return ctx.getAliasService();
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context.
-     * @deprecated Use NodeCoreContext.getEscrowService() instead.
-     */
-    @Deprecated
-    public static EscrowService getEscrowService() {
-        NodeCoreContext ctx = resolveContext();
-        if (ctx == null) throw new IllegalStateException("No active Signum instance");
-        return ctx.getEscrowService();
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context.
-     * @deprecated Use NodeCoreContext.getDigitalGoodsStoreService() instead.
-     */
-    @Deprecated
-    public static DGSGoodsStoreService getDgsGoodsStoreService() {
-        NodeCoreContext ctx = resolveContext();
-        if (ctx == null) throw new IllegalStateException("No active Signum instance");
-        return ctx.getDigitalGoodsStoreService();
-    }
-
-    /**
-     * Bridge getter: delegates to active Signum instance context.
-     * @deprecated Use WebServerContext.getAtConstants() or TransactionApplyContext.getAtConstants().
-     */
-    @Deprecated
-    public static AtConstants getAtConstants() {
-        // AtConstants is not directly exposed by NodeCoreContext – use the bridge path
-        throw new UnsupportedOperationException(
-                "getAtConstants() via static bridge is not supported. " +
-                "Use TransactionApplyContext.getAtConstants() or WebServerContext.getAtConstants().");
-    }
-
-    // =========================================================================
     // Profile management
     // =========================================================================
 
@@ -487,19 +260,6 @@ public final class Signum {
 
     public static void setActiveLoggingProfile(String profile) {
         activeLoggingProfile = profile;
-    }
-
-    // =========================================================================
-    // Helper: resolve NodeCoreContext from active instance
-    // =========================================================================
-
-    /**
-     * Resolves the NodeCoreContext from the active Signum instance, if registered.
-     * Returns null when no active instance is set (legacy mode).
-     */
-    private static NodeCoreContext resolveContext() {
-        Signum active = activeInstance;
-        return active != null ? active.getContext() : null;
     }
 
     // =========================================================================
@@ -674,8 +434,8 @@ public final class Signum {
                 Path confFolder = PathUtils.resolvePath(CONF_FOLDER);
                 NodeCoreContext ctx = new NodeCoreContextBuilder(profile.getName(), confFolder).build();
                 Signum signum = new Signum(profile, ctx);
-                setActive(signum);
                 signum.start();
+                NodeFactory.getInstance().register(signum);
             } catch (Exception e) {
                 logger.error("Failed to initialize node via greenfield path", e);
                 throw new RuntimeException("Failed to initialize Signum node", e);
@@ -726,8 +486,8 @@ public final class Signum {
         try {
             NodeCoreContext ctx = new NodeCoreContextBuilder(profile.getName(), confPath).build();
             Signum signum = new Signum(profile, ctx);
-            setActive(signum);
             signum.start();
+            NodeFactory.getInstance().register(signum);
         } catch (Exception e) {
             logger.error("Failed to initialize node via greenfield builder", e);
             throw new RuntimeException("Failed to initialize Signum node", e);
@@ -743,7 +503,10 @@ public final class Signum {
         try {
             String command;
             while ((command = reader.readLine()) != null) {
-                processCommand(command);
+                Signum node = NodeFactory.getInstance().get(getActiveNodeProfile());
+                if (node != null) {
+                    node.processCommandInstance(command);
+                }
             }
         } catch (IOException e) {
             // ignore
@@ -751,15 +514,16 @@ public final class Signum {
     }
 
     /**
-     * Processes a console command.
-     * Resolves the active context for greenfield mode.
+     * Instance-scoped command processing.
+     * Operates on this Signum instance's context directly (no static bridge).
+     *
+     * @param command the console command string
      */
-    public static void processCommand(String command) {
+    public void processCommandInstance(String command) {
         ensureLogger();
         logger.debug("received command: >{}<", command);
 
-        // Resolve active context for greenfield mode
-        NodeCoreContext ctx = getActiveInstance() != null ? getActiveInstance().getContext() : null;
+        NodeCoreContext ctx = this.context;
         BlockchainProcessor proc = ctx != null ? ctx.getBlockchainProcessor() : null;
         Blockchain chain = ctx != null ? (Blockchain) ctx.getBlockchain() : null;
 
@@ -818,12 +582,10 @@ public final class Signum {
     public static void shutdown(boolean ignoreDbShutdown) {
         ensureLogger();
 
-        // Greenfield mode: delegate to active Signum's NodeCoreContext.stop()
-        Signum active = getActiveInstance();
-        if (active != null && active.getContext() != null) {
-            logger.info("Greenfield shutdown: delegating to Signum[{}] context.stop()",
-                    active.getProfileName());
-            active.getContext().stop();
+        // Multi-node mode: stop all registered nodes via NodeFactory
+        if (NodeFactory.getInstance().size() > 0) {
+            logger.info("Shutting down all {} registered node(s)", NodeFactory.getInstance().size());
+            NodeFactory.getInstance().stopAll();
             isShutdown.set(true);
             nodeStopped.set(true);
             LoggerConfigurator.shutdown();

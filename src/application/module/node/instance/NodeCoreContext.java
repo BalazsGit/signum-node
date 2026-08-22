@@ -20,7 +20,6 @@ import application.module.node.at.ATProcessingContext;
 import application.module.node.db.BlockDb;
 import application.module.node.db.TransactionDb;
 import application.module.node.db.cache.DBCacheManagerImpl;
-import application.module.node.db.sql.Db;
 import application.module.node.db.sql.DbContext;
 import application.module.node.db.sql.SqlATStore;
 import application.module.node.db.sql.StoreDependencies;
@@ -405,10 +404,8 @@ public final class NodeCoreContext {
         this.dbContext = DbContext.create(this.propertyService, this.dbCacheManager);
         this.dbs = this.dbContext.getDbsByDatabaseType();
 
-        // Bridge pattern: set static activeContext for legacy code paths that still use
-        // Db.getConnection() statically (e.g., BlockchainProcessorImpl constructor).
-        // This is a temporary measure until all static Db refs are migrated to instance access.
-        Db.setActiveContext(this.dbContext);
+        // NOTE: All database access is instance-scoped via this.dbContext (multi-node safe).
+        // No static Db.activeContext bridge is set — legacy static callers have been migrated.
 
         TransactionDb transactionDb = dbs.getTransactionDb();
         BlockDb blockDb = dbs.getBlockDb();

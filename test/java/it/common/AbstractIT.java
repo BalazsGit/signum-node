@@ -3,6 +3,7 @@ package it.common;
 import static org.powermock.api.mockito.PowerMockito.mockStatic;
 
 import application.module.node.Signum;
+import application.module.node.instance.NodeFactory;
 import application.module.node.common.TestInfrastructure;
 import application.module.node.peer.Peers;
 import application.module.node.peer.ProcessBlock;
@@ -38,7 +39,9 @@ public abstract class AbstractIT {
         mockStatic(Peers.class);
         Signum.init(testProperties());
 
-        processBlock = new ProcessBlock(Signum.getBlockchain(), Signum.getBlockchainProcessor());
+        // Access the specific node by profile name (multi-node: no "active" concept)
+        var ctx = NodeFactory.getInstance().get("node").getContext();
+        processBlock = new ProcessBlock(ctx.getBlockchain(), ctx.getBlockchainProcessor());
     }
 
     @After
@@ -68,6 +71,6 @@ public abstract class AbstractIT {
     }
 
     public void rollback(int height) {
-        Signum.getBlockchainProcessor().popOffTo(0);
+        NodeFactory.getInstance().get("node").getContext().getBlockchainProcessor().popOffTo(0);
     }
 }

@@ -137,6 +137,9 @@ public class NodeProfilePanel extends JPanel {
                     },
                     null
             );
+            if (signum != null) {
+                configurationPanel.setSignum(signum);
+            }
             innerTabbedPane.addTab("Configuration", configurationPanel);
             LOGGER.info("[DIAG] Configuration tab added successfully");
 
