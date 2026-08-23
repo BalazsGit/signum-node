@@ -2,8 +2,6 @@ package application.module.node.gui;
 
 import application.module.appearance.AppearanceModule;
 import application.module.node.Signum;
-import application.module.node.lifecycle.NodeLifecycleManager;
-import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.profile.NodeProfile;
 import application.utils.gui.CustomDrawingComponent;
 import application.utils.gui.CustomDrawings;
@@ -34,6 +32,7 @@ import javax.swing.UIManager;
 import net.miginfocom.swing.MigLayout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import application.module.node.NodeModule;
 
 /**
  * Toolbar panel that sits below the NodeInfoBar in a NodeProfilePanel.
@@ -530,13 +529,10 @@ public class NodeToolbar extends JPanel {
      * If node is running/paused, shows confirmation and stops; otherwise starts.
      */
     private void handleStartStopToggle() {
-        NodeLifecycleManager manager = NodeLifecycleManager.getInstance();
-        NodeProfile profileFromManager = manager.getProfile(profile.getName());
-        NodeLifecycleState state = (profileFromManager != null)
-                ? profileFromManager.getRuntime().getLifecycleState()
-                : NodeLifecycleState.STOPPED;
+        Signum signum = NodeModule.getInstance().get(profile.getName());
+        Signum.State state = (signum != null) ? signum.getState() : Signum.State.CREATED;
 
-        if (state == NodeLifecycleState.RUNNING || state == NodeLifecycleState.PAUSED) {
+        if (state == Signum.State.RUNNING || false) {
             // Currently running/paused -> stop
             int result = JOptionPane.showConfirmDialog(
                     this,
@@ -546,12 +542,12 @@ public class NodeToolbar extends JPanel {
                     JOptionPane.WARNING_MESSAGE
             );
             if (result == JOptionPane.YES_OPTION) {
-                manager.stopProfile(profile.getName());
+                Signum s = NodeModule.getInstance().get(profile.getName()); if (s != null) s.stop();
                 LOGGER.info("Stop requested for profile: {}", profile.getName());
             }
         } else {
             // Currently stopped/ready/error -> start
-            manager.startProfile(profile.getName());
+            Signum s = NodeModule.getInstance().get(profile.getName()); if (s != null) s.start();
             LOGGER.info("Start requested for profile: {}", profile.getName());
         }
     }
@@ -562,11 +558,11 @@ public class NodeToolbar extends JPanel {
      *
      * @param state The current lifecycle state of the node
      */
-    public void updateButtonStates(NodeLifecycleState state) {
-        boolean isRunning = (state == NodeLifecycleState.RUNNING || state == NodeLifecycleState.PAUSED);
-        boolean isTransitioning = (state == NodeLifecycleState.INITIALIZING
-                || state == NodeLifecycleState.STOPPING
-                || state == NodeLifecycleState.WAITING_FOR_DATABASE);
+    public void updateButtonStates(Signum.State state) {
+        boolean isRunning = (state == Signum.State.RUNNING || false);
+        boolean isTransitioning = (false
+                || false
+                );
 
         float iconSize = GuiConstants.getToolBarIconSize();
 
@@ -584,7 +580,7 @@ public class NodeToolbar extends JPanel {
             // Update sync icon based on pause state
             syncButton.setIcon(IconFontSwing.buildIcon(
                     isSyncStopped ? FontAwesome.PLAY : FontAwesome.PAUSE, iconSize, GuiColors.getButtonIcon()));
-        } else if (state == NodeLifecycleState.ERROR) {
+        } else if (state == Signum.State.ERROR) {
             // Show PLAY icon - can restart after error
             startStopButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PLAY, iconSize, GuiColors.getPeerActive()));
             startStopButton.setToolTipText("Start the node");
@@ -598,9 +594,9 @@ public class NodeToolbar extends JPanel {
             // Show SPINNER icon during transitions
             startStopButton.setIcon(IconFontSwing.buildIcon(FontAwesome.SPINNER, iconSize, new Color(255, 193, 7)));
             String tooltip = switch (state) {
-                case INITIALIZING -> "Initializing...";
+                default -> state.name().toLowerCase();
                 case STOPPING -> "Stopping...";
-                default -> "Waiting for database...";
+                
             };
             startStopButton.setToolTipText(tooltip);
             startStopButton.setEnabled(false);
@@ -613,7 +609,7 @@ public class NodeToolbar extends JPanel {
             // STOPPED / READY / IDLE -> show PLAY icon
             startStopButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PLAY, iconSize, GuiColors.getPeerActive()));
             startStopButton.setToolTipText("Start the node");
-            startStopButton.setEnabled(state != NodeLifecycleState.IDLE);
+            startStopButton.setEnabled(state != Signum.State.CREATED);
             restartButton.setEnabled(false);
             syncButton.setEnabled(false);
             popOff10Button.setEnabled(false);

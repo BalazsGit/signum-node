@@ -1,8 +1,8 @@
 package application.module.node.gui;
 
 import application.module.appearance.AppearanceModule;
-import application.module.node.lifecycle.NodeLifecycleManager;
-import application.module.node.lifecycle.NodeLifecycleState;
+import application.module.node.NodeModule;
+import application.module.node.Signum;
 import application.module.node.profile.NodeProfile;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiFontManager;
@@ -36,7 +36,7 @@ import java.util.Map;
  * - Database engine
  * - Database port (if applicable)
  *
- * Follows the Observer pattern: listens for lifecycle state changes via NodeLifecycleManager.
+ * Follows the Observer pattern: listens for state changes via Signum.StateListener.
  */
 @SuppressWarnings("serial")
 public class NodeInfoBar extends JPanel {
@@ -215,15 +215,14 @@ public class NodeInfoBar extends JPanel {
      */
     public void refreshState() {
         SwingUtilities.invokeLater(() -> {
-            NodeLifecycleManager manager = NodeLifecycleManager.getInstance();
-            NodeProfile managedProfile = manager.getProfile(profile.getName());
+            Signum signum = NodeModule.getInstance().get(profile.getName());
 
-            NodeLifecycleState state = NodeLifecycleState.IDLE;
-            String stateText = "IDLE";
+            Signum.State state = Signum.State.CREATED;
+            String stateText = state.name();
             Icon stateIcon = null;
 
-            if (managedProfile != null) {
-                state = managedProfile.getRuntime().getLifecycleState();
+            if (signum != null) {
+                state = signum.getState();
                 stateText = state.name();
                 stateIcon = stateIconFor(state);
             }
@@ -238,12 +237,11 @@ public class NodeInfoBar extends JPanel {
     /**
      * Gets the appropriate icon for a lifecycle state (for state chip).
      */
-    private Icon stateIconFor(NodeLifecycleState state) {
+    private Icon stateIconFor(Signum.State state) {
         return switch (state) {
             case RUNNING -> GuiIcons.running(GuiIcons.sizeTiny());
-            case PAUSED -> GuiIcons.paused(GuiIcons.sizeTiny());
             case ERROR -> GuiIcons.error(GuiIcons.sizeTiny());
-            case INITIALIZING, STOPPING -> GuiIcons.initializing(GuiIcons.sizeTiny());
+            case STARTING, STOPPING -> GuiIcons.initializing(GuiIcons.sizeTiny());
             default -> null;
         };
     }
@@ -253,31 +251,27 @@ public class NodeInfoBar extends JPanel {
      * Each lifecycle state has a dedicated FontAwesome icon and descriptive tooltip.
      * Icon size scales dynamically with the current font size via GuiIcons.sizeSmall().
      */
-    private void updateStatusIcon(NodeLifecycleState state, String stateDescription) {
+    private void updateStatusIcon(Signum.State state, String stateDescription) {
         int size = GuiIcons.sizeSmall();
         Icon icon = null;
         String tooltip = null;
 
         switch (state) {
-            case IDLE -> {
+            case CREATED -> {
                 icon = GuiIcons.build(FontAwesome.CIRCLE_O, size, GuiColors.getFaintText());
-                tooltip = "IDLE: Profile exists but not initialized yet";
+                tooltip = "CREATED: Node exists but not initialized yet";
             }
-            case INITIALIZING -> {
+            case STARTING -> {
                 icon = GuiIcons.build(FontAwesome.SPINNER, size, new Color(255, 193, 7));
-                tooltip = "INITIALIZING: Loading configuration and preparing resources...";
+                tooltip = "STARTING: Loading configuration and preparing resources...";
             }
-            case READY -> {
+            case INITIALIZED -> {
                 icon = GuiIcons.build(FontAwesome.CHECK_CIRCLE_O, size, new Color(100, 149, 237));
-                tooltip = "READY: Initialized and ready to start. Click Start to begin.";
+                tooltip = "INITIALIZED: Ready to start. Click Start to begin.";
             }
             case RUNNING -> {
                 icon = GuiIcons.build(FontAwesome.CIRCLE, size, GuiColors.getPeerActive());
                 tooltip = "RUNNING: Node is actively running, P2P active, serving API";
-            }
-            case PAUSED -> {
-                icon = GuiIcons.build(FontAwesome.PAUSE, size, new Color(103, 58, 183));
-                tooltip = "PAUSED: Synchronization paused by user command";
             }
             case STOPPING -> {
                 icon = GuiIcons.build(FontAwesome.SPINNER, size, new Color(255, 193, 7));
@@ -290,10 +284,6 @@ public class NodeInfoBar extends JPanel {
             case ERROR -> {
                 icon = GuiIcons.build(FontAwesome.EXCLAMATION_TRIANGLE, size, GuiColors.getContrastRed());
                 tooltip = "ERROR: Node failed. Reset or restart required.";
-            }
-            case WAITING_FOR_DATABASE -> {
-                icon = GuiIcons.build(FontAwesome.DATABASE, size, new Color(255, 193, 7));
-                tooltip = "WAITING_FOR_DATABASE: Retry loop active until database available";
             }
         }
 
@@ -308,12 +298,11 @@ public class NodeInfoBar extends JPanel {
         return switch (state) {
             case "RUNNING" -> "Running";
             case "STOPPED" -> "Stopped";
-            case "READY" -> "Ready";
-            case "PAUSED" -> "Paused";
+            case "CREATED" -> "Created";
+            case "INITIALIZED" -> "Ready";
             case "ERROR" -> "Error";
-            case "INITIALIZING" -> "Initializing";
+            case "STARTING" -> "Starting";
             case "STOPPING" -> "Stopping";
-            case "WAITING_FOR_DATABASE" -> "Waiting for DB";
             default -> state;
         };
     }

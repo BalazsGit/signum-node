@@ -96,7 +96,6 @@ import org.apache.commons.cli.DefaultParser;
 
 import application.module.node.Signum;
 import application.module.node.BlockchainProcessor;
-import application.module.node.instance.NodeCoreContext;
 import application.module.node.Constants;
 import application.module.node.Block;
 import application.module.node.peer.Peer;
@@ -115,7 +114,6 @@ import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
 import application.utils.gui.SmartScrollController;
 import application.module.node.util.Convert;
-import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.profile.NodeProfile;
 import application.utils.logging.ProfileLogger;
 import application.utils.gui.console.ConsoleInputPosition;
@@ -124,6 +122,7 @@ import application.utils.gui.console.UnifiedConsolePanel;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
+import application.module.node.NodeModule;
 
 @SuppressWarnings("serial")
 public class NodeConsolePanel extends JPanel {
@@ -157,49 +156,54 @@ public class NodeConsolePanel extends JPanel {
     private static String[] args;
 
     /**
-     * Per-instance NodeCoreContext reference injected by NodeProfilePanel.
+     * Per-instance Signum facade injected by NodeProfilePanel.
      * Provides access to BlockchainProcessor, PropertyService, DbContext, etc.
      * for this specific node profile, replacing static Signum.getXxx() calls.
      * May be null in legacy single-instance mode or before the node starts.
      */
-    private NodeCoreContext nodeContext;
-
-    /**
-     * Injects the per-instance NodeCoreContext into this console panel.
-     * Called by NodeProfilePanel after construction so that all node component
-     * access goes through the instance context rather than static Signum calls.
-     *
-     * @param context the node core context for this profile (may be null)
-     */
-    public void setNodeContext(NodeCoreContext context) {
-        this.nodeContext = context;
-    }
+    private Signum signum;
 
     /**
      * Sets the Signum facade for per-instance access to node services.
-     * This is the preferred wiring method (Facade Pattern). The facade owns the NodeCoreContext,
-     * so we extract the context from it for backward compatibility with existing API.
      *
      * @param signum Per-instance Signum facade (may be null if not yet started)
-     * @since 4.0 Phase G - Greenfield wiring
      */
-    private Signum signum;
-
     public void setSignum(Signum signum) {
         this.signum = signum;
-        this.nodeContext = (signum != null) ? signum.getContext() : null;
     }
 
     /**
-     * Returns the injected NodeCoreContext, or falls back to the legacy
-     * static bridge via NodeCoreContextManager.getActive() if not set.
+     * Returns this console panel's Signum facade.
+     * <p>
+     * There is no "active node" in the multi-node architecture: each console
+     * panel is owned by a specific {@link Signum} instance, wired by
+     * {@link NodeProfilePanel} via {@link #setSignum(Signum)}. Returns
+     * {@code null} when no node is bound to this panel (e.g. headless mode
+     * or before the node is started).
      */
-    NodeCoreContext getNodeContext() {
-        if (nodeContext != null) {
-            return nodeContext;
-        }
-        // Fallback: try to get from manager for backwards compatibility
-        return application.module.node.instance.NodeCoreContextManager.getInstance().getActive();
+    Signum getSignum() {
+        return signum;
+    }
+
+    /**
+     * Optional late-binding callback, invoked once per started Signum instance.
+     * <p>
+     * When this panel itself starts the node ({@link #startSignumWithGUI()}),
+     * the owning {@link NodeProfilePanel} may not have been constructed with a
+     * Signum yet (the node did not exist at that time). This callback lets the
+     * profile panel adopt the freshly started instance — registering its single
+     * state listener and performing the initial UI refresh.
+     * </p>
+     */
+    private volatile java.util.function.Consumer<Signum> onSignumStarted;
+
+    /**
+     * Registers the callback invoked when this panel starts a Signum instance.
+     *
+     * @param callback consumer receiving the started Signum (may be null to clear)
+     */
+    public void setOnSignumStarted(java.util.function.Consumer<Signum> callback) {
+        this.onSignumStarted = callback;
     }
 
     private static void applyFontRecursively(Component comp, Font font) {
@@ -1165,11 +1169,10 @@ public class NodeConsolePanel extends JPanel {
         iconColor = textPane.getForeground();
         this.dbConsistencyColor = GuiColors.getButtonIcon();
 
-        // Flush legacy static bootstrap logs directly to the console for backward compatibility
-        flushLegacyBootstrapLogs(textPane);
-
-        // Scroll to bottom after bootstrap logs are rendered so the console
-        // shows the latest content when the user first opens the tab.
+        // Bootstrap history needs no special handling here: the ProfileLogger
+        // replays its recent-event buffer to this console's subscriber at attach
+        // time (see attachProfileLogger()), so early startup lines appear
+        // automatically, in order, regardless of when the tab was opened.
         GuiUtils.scrollToBottom(textScrollPane);
         textScrollPane.setBorder(BorderFactory.createEmptyBorder());
         textScrollPane.getVerticalScrollBar().setUnitIncrement(16);
@@ -1642,7 +1645,7 @@ public class NodeConsolePanel extends JPanel {
         // Skip DB Check on Manual Pop-off — console-specific setting for pop-off decisions
         skipDbCheckItem = new JCheckBox("Skip DB Check on Manual Pop-off");
         skipDbCheckItem.addActionListener(e -> {
-            NodeCoreContext ctx = getNodeContext();
+            Signum ctx = getSignum();
             if (ctx != null) {
                 BlockchainProcessor bp = ctx.getBlockchainProcessor();
                 if (bp != null) {
@@ -1756,7 +1759,7 @@ public class NodeConsolePanel extends JPanel {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (SwingUtilities.isLeftMouseButton(e) || SwingUtilities.isRightMouseButton(e)) {
-                    NodeCoreContext peersCtx = getNodeContext();
+                    Signum peersCtx = getSignum();
                     if (peersCtx != null && peersCtx.getBlockchainProcessor() != null) {
                         PeersDialog.showPeersDialog(parentFrame, peersCtx.getBlockchainProcessor());
                     } else {
@@ -2048,7 +2051,7 @@ public class NodeConsolePanel extends JPanel {
                     }
 
                     try {
-                        NodeCoreContext context = getNodeContext();
+                        Signum context = getSignum();
                         if (context != null) {
                             context.stop();
                         }
@@ -2177,8 +2180,8 @@ public class NodeConsolePanel extends JPanel {
 
         try {
             String newIconLocation = iconLocation;
-            if (this.nodeContext.getPropertyService() != null) {
-                newIconLocation = this.nodeContext.getPropertyService().getString(Props.ICON_LOCATION);
+            if (this.signum.getPropertyService() != null) {
+                newIconLocation = this.signum.getPropertyService().getString(Props.ICON_LOCATION);
             }
             if (!newIconLocation.equals(iconLocation)) {
                 // update the icon
@@ -2210,7 +2213,7 @@ public class NodeConsolePanel extends JPanel {
     private void syncButtonAction() {
         // The UI will update via the onSyncStateChanged listener when the core
         // processes the change.
-        BlockchainProcessor blockchainProcessor = getNodeContext().getBlockchainProcessor();
+        BlockchainProcessor blockchainProcessor = getSignum().getBlockchainProcessor();
         if (blockchainProcessor != null) {
             blockchainProcessor.setSyncPaused(!isSyncStopped);
         }
@@ -2260,7 +2263,7 @@ public class NodeConsolePanel extends JPanel {
      * </ul>
      */
     private void dbCheckAction() {
-        BlockchainProcessor blockchainProcessor = getNodeContext().getBlockchainProcessor();
+        BlockchainProcessor blockchainProcessor = getSignum().getBlockchainProcessor();
         if (blockchainProcessor == null) {
             showMessage("Blockchain processor not initialized.");
             return;
@@ -2373,7 +2376,7 @@ public class NodeConsolePanel extends JPanel {
 
     private void showDbCheckResult(int result, int height, long totalMined, long totalEffectiveBalance,
             boolean wasResolutionActive, int limitHeight, int lastTrimHeight) {
-        BlockchainProcessor blockchainProcessor = getNodeContext().getBlockchainProcessor();
+        BlockchainProcessor blockchainProcessor = getSignum().getBlockchainProcessor();
         final double totalMinedSigna = (double) totalMined / Constants.ONE_SIGNA;
         final double totalEffectiveBalanceSigna = (double) totalEffectiveBalance / Constants.ONE_SIGNA;
         final long difference = totalMined - totalEffectiveBalance;
@@ -2432,7 +2435,7 @@ public class NodeConsolePanel extends JPanel {
                 int messageType;
 
                 if (!wasResolutionActive
-                        && this.nodeContext.getPropertyService().getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED)) {
+                        && this.signum.getPropertyService().getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED)) {
                     activeMessage = "The database is INCONSISTENT.\n\n" +
                             "An automatic consistency resolution has been started.\n" +
                             "Please check the logs for progress.";
@@ -2486,11 +2489,11 @@ public class NodeConsolePanel extends JPanel {
 
     private void popOff(int count) {
         // LOGGER.info("Pop off requested, this can take a while...");
-        if (getNodeContext().getBlockchainProcessor() == null) {
+        if (getSignum().getBlockchainProcessor() == null) {
             showMessage("Blockchain processor not initialized.");
             return;
         }
-        new Thread(() -> getNodeContext().getBlockchainProcessor().popOff(count)).start();
+        new Thread(() -> getSignum().getBlockchainProcessor().popOff(count)).start();
     }
 
     /**
@@ -2578,7 +2581,7 @@ public class NodeConsolePanel extends JPanel {
 
     private void openWebUi(String path) {
         try {
-            PropertyService propertyService = this.nodeContext.getPropertyService();
+            PropertyService propertyService = this.signum.getPropertyService();
             int port = propertyService.getInt(Props.API_PORT);
             String httpPrefix = propertyService.getBoolean(Props.API_SSL) ? "https://" : "http://";
             String address = httpPrefix + "localhost:" + port + path;
@@ -2595,7 +2598,7 @@ public class NodeConsolePanel extends JPanel {
     }
 
     private void initListeners() {
-        BlockchainProcessor blockchainProcessor = getNodeContext().getBlockchainProcessor();
+        BlockchainProcessor blockchainProcessor = getSignum().getBlockchainProcessor();
         blockchainProcessor.addListener(block -> onPeersUpdated(), BlockchainProcessor.Event.PEERS_UPDATED);
         blockchainProcessor.addListener(block -> onNetVolumeChanged(), BlockchainProcessor.Event.NET_VOLUME_CHANGED);
         blockchainProcessor.addListener(this::onBlockPushed, BlockchainProcessor.Event.BLOCK_PUSHED);
@@ -2625,7 +2628,7 @@ public class NodeConsolePanel extends JPanel {
     }
 
     public void onPeersUpdated() {
-        BlockchainProcessor blockchainProcessor = getNodeContext().getBlockchainProcessor();
+        BlockchainProcessor blockchainProcessor = getSignum().getBlockchainProcessor();
         Collection<Peer> allPeers = blockchainProcessor.getAllPeers();
         long connectedCount = allPeers.stream().filter(p -> p.getState() == Peer.State.CONNECTED).count();
         long allKnownCount = allPeers.size();
@@ -2634,7 +2637,7 @@ public class NodeConsolePanel extends JPanel {
     }
 
     public void onNetVolumeChanged() {
-        BlockchainProcessor blockchainProcessor = getNodeContext().getBlockchainProcessor();
+        BlockchainProcessor blockchainProcessor = getSignum().getBlockchainProcessor();
         long uploaded = blockchainProcessor.getUploadedVolume();
         long downloaded = blockchainProcessor.getDownloadedVolume();
         SwingUtilities.invokeLater(() -> {
@@ -2643,7 +2646,7 @@ public class NodeConsolePanel extends JPanel {
 
             // Start the GUI timer only once, when the first download volume is received,
             // and if experimental features are enabled in the config.
-            if (this.nodeContext.getPropertyService().getBoolean(Props.EXPERIMENTAL)
+            if (this.signum.getPropertyService().getBoolean(Props.EXPERIMENTAL)
                     && downloaded > 0
                     && !guiTimerStarted.getAndSet(true)) {
                 startGuiTimer();
@@ -2653,7 +2656,7 @@ public class NodeConsolePanel extends JPanel {
 
     private void startGuiTimer() {
         guiTimer = new Timer(1000, e -> {
-            if (this.nodeContext.getBlockchain() != null && this.nodeContext.getBlockchainProcessor() != null) {
+            if (this.signum.getBlockchain() != null && this.signum.getBlockchainProcessor() != null) {
                 guiAccumulatedSyncTimeMs += 1000;
                 totalTimeLabel.setText(DurationFormatter.format(guiAccumulatedSyncTimeMs,
                         DurationFormatter.Unit.YEAR, DurationFormatter.Unit.SECOND));
@@ -2715,7 +2718,7 @@ public class NodeConsolePanel extends JPanel {
     }
 
     private void onConsistencyUpdate() {
-        BlockchainProcessor.ConsistencyState state = getNodeContext().getBlockchainProcessor().getConsistencyState();
+        BlockchainProcessor.ConsistencyState state = getSignum().getBlockchainProcessor().getConsistencyState();
         SwingUtilities.invokeLater(() -> {
             switch (state) {
                 case CONSISTENT:
@@ -2735,31 +2738,31 @@ public class NodeConsolePanel extends JPanel {
         if (block == null)
             return;
         int maxPeerHeight = calculateMaxPeerHeight();
-        long blockTime = this.nodeContext.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
+        long blockTime = this.signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
         SwingUtilities.invokeLater(() -> {
             updateLatestBlock(block, maxPeerHeight, blockTime);
 
             // Start the GUI timer only once, when the first block is pushed,
             // and if experimental features are enabled in the config.
-            if (this.nodeContext.getPropertyService().getBoolean(Props.EXPERIMENTAL) && !guiTimerStarted.getAndSet(true)) {
+            if (this.signum.getPropertyService().getBoolean(Props.EXPERIMENTAL) && !guiTimerStarted.getAndSet(true)) {
                 startGuiTimer();
             }
         });
     }
 
     private void onBlockPopped() {
-        Block lastBlock = this.nodeContext.getBlockchain().getLastBlock();
+        Block lastBlock = this.signum.getBlockchain().getLastBlock();
         int maxPeerHeight = calculateMaxPeerHeight();
-        long blockTime = this.nodeContext.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
+        long blockTime = this.signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
         SwingUtilities.invokeLater(() -> {
             updateLatestBlock(lastBlock, maxPeerHeight, blockTime);
         });
     }
 
     private void onManualPopOffProgress() {
-        int remaining = getNodeContext().getBlockchainProcessor().getManualPopOffBlocksCount();
-        int blockHeight = getNodeContext().getBlockchainProcessor().getBeforeRollbackHeight();
-        int targetHeight = getNodeContext().getBlockchainProcessor().getManualLastPopOffHeight();
+        int remaining = getSignum().getBlockchainProcessor().getManualPopOffBlocksCount();
+        int blockHeight = getSignum().getBlockchainProcessor().getBeforeRollbackHeight();
+        int targetHeight = getSignum().getBlockchainProcessor().getManualLastPopOffHeight();
         SwingUtilities.invokeLater(() -> {
             Color textColor = remaining > 0 ? GuiColors.getSaved() : GuiColors.getApplied();
             popOffBlockCountLabel.setText("Pop off blocks: " + remaining);
@@ -2777,12 +2780,12 @@ public class NodeConsolePanel extends JPanel {
     }
 
     private void onAutoPopOffProgress() {
-        int remaining = getNodeContext().getBlockchainProcessor().getAutoPopOffBlocksCount();
-        int blockHeight = getNodeContext().getBlockchainProcessor().getBeforeRollbackHeight();
-        int targetHeight = getNodeContext().getBlockchainProcessor().getAutoLastPopOffHeight();
+        int remaining = getSignum().getBlockchainProcessor().getAutoPopOffBlocksCount();
+        int blockHeight = getSignum().getBlockchainProcessor().getBeforeRollbackHeight();
+        int targetHeight = getSignum().getBlockchainProcessor().getAutoLastPopOffHeight();
         SwingUtilities.invokeLater(() -> {
             Color textColor;
-            if (getNodeContext().getBlockchainProcessor().getResolutionState() == BlockchainProcessor.ResolutionState.ACTIVE) {
+            if (getSignum().getBlockchainProcessor().getResolutionState() == BlockchainProcessor.ResolutionState.ACTIVE) {
                 textColor = GuiColors.getContrastRed();
             } else {
                 textColor = GuiColors.getSaved();
@@ -2854,17 +2857,85 @@ public class NodeConsolePanel extends JPanel {
         new Thread(() -> signum.processCommandInstance(cmd)).start();
     }
 
+    /**
+     * Attaches the unified console's subscriber to this node's {@link ProfileLogger}.
+     * <p>
+     * This wires the per-node console tab to receive SLF4J log events via the
+     * {@code ProfileLogger} subscriber model, replacing the deprecated MDC-based
+     * routing. The subscriber already exists (created during {@link #initConsoleUI()});
+     * this method simply registers it with the {@code ProfileLogger} so log events
+     * flow to the console text pane.
+     * </p>
+     * <p>
+     * Called once after {@code Signum.startNode()} succeeds, when the
+     * {@code ProfileLogger} is guaranteed to be initialised.
+     * </p>
+     * <p>
+     * Attaching is idempotent: {@code ProfileLogger.addSubscriber()} ignores
+     * duplicate subscriber instances, and any log lines produced between node
+     * construction and this attach are replayed to the subscriber (bounded
+     * replay buffer), so no startup output is lost and no line is duplicated.
+     * </p>
+     */
+    private void attachProfileLogger() {
+        ProfileLogger pl = null;
+        Signum ctx = getSignum();
+        if (ctx != null) {
+            try {
+                pl = ctx.getProfileLogger();
+            } catch (Exception e) {
+                LOGGER.debug("attachProfileLogger: getProfileLogger() threw for profile '{}', trying registry", profileName);
+            }
+        }
+        // Fallback: look up in the global registry (covers the case where the node
+        // instance hasn't been wired into this panel yet, but the ProfileLogger was
+        // already registered by Signum.doInitialize()).
+        if (pl == null) {
+            pl = application.utils.logging.NodeLoggerRegistry.get(profileName);
+        }
+        if (pl == null) {
+            LOGGER.warn("Cannot attach ProfileLogger: no ProfileLogger found for profile '{}' (node not yet started?)", profileName);
+            return;
+        }
+        if (unifiedConsole == null || unifiedConsole.getSubscriber() == null) {
+            LOGGER.warn("Cannot attach ProfileLogger: unified console subscriber is null for profile '{}'", profileName);
+            return;
+        }
+        try {
+            pl.addSubscriber(unifiedConsole.getSubscriber());
+            LOGGER.info("Attached console subscriber to ProfileLogger '{}' for profile '{}'",
+                    pl.getName(), profileName);
+        } catch (Exception e) {
+            LOGGER.error("Failed to attach console subscriber to ProfileLogger for profile '{}'", profileName, e);
+        }
+    }
+
     public void startSignumWithGUI() {
         try {
             // Delegates to NodeLifecycleManager via bridge. Falls back to legacy init only when no active profile is set.
-            Signum.startNode();
+            Signum ctx = Signum.startNode();
+            if (ctx != null) {
+                this.signum = ctx;
+                // Late binding: the owning NodeProfilePanel was constructed before the
+                // node existed. Let it adopt this instance (single state listener +
+                // initial refresh). Idempotent on the profile panel side.
+                java.util.function.Consumer<Signum> adoption = this.onSignumStarted;
+                if (adoption != null) {
+                    try {
+                        adoption.accept(ctx);
+                    } catch (Exception ex) {
+                        LOGGER.warn("Signum adoption callback failed for profile '{}': {}", profileName, ex.getMessage());
+                    }
+                }
+            }
+            attachProfileLogger();
             loadGuiSettings();
             
             // Now that properties are loaded, set the correct values for the GUI
-            showPopOff = this.nodeContext.getPropertyService().getBoolean(Props.EXPERIMENTAL);
-            measurementActive = this.nodeContext.getPropertyService().getBoolean(Props.MEASUREMENT_ACTIVE);
-            experimentalActive = this.nodeContext.getPropertyService().getBoolean(Props.EXPERIMENTAL);
-            String archivalMode = this.nodeContext.getPropertyService().getString(Props.DB_ARCHIVAL_MODE).toUpperCase();
+            showPopOff = this.signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
+            measurementActive = this.signum.getPropertyService().getBoolean(Props.MEASUREMENT_ACTIVE);
+            experimentalActive = this.signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
+            String archivalMode = this.signum.getPropertyService().getString(Props.DB_ARCHIVAL_MODE).toUpperCase();
             boolean isPruneMode = "PRUNE".equals(archivalMode);
             boolean isTrimMode = "TRIM".equals(archivalMode);
             trimEnabled = isTrimMode || isPruneMode;
@@ -2894,16 +2965,16 @@ public class NodeConsolePanel extends JPanel {
             trimLabel.setToolTipText(shortTooltip);
             addInfoTooltip(trimLabel, detailedTooltip, archivalMode);
 
-            autoResolveEnabled = this.nodeContext.getPropertyService().getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED);
+            autoResolveEnabled = this.signum.getPropertyService().getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED);
 
-            Block lastBlock = this.nodeContext.getBlockchain().getLastBlock();
+            Block lastBlock = this.signum.getBlockchain().getLastBlock();
             int maxPeerHeight = calculateMaxPeerHeight();
-            BlockchainProcessor blockchainProcessor = this.nodeContext.getBlockchainProcessor();
+            BlockchainProcessor blockchainProcessor = this.signum.getBlockchainProcessor();
             Collection<Peer> allPeers = blockchainProcessor.getAllPeers();
             long connectedCount = allPeers.stream().filter(p -> p.getState() == Peer.State.CONNECTED).count();
             long allKnownCount = allPeers.size();
             long blacklistedCount = allPeers.stream().filter(Peer::isBlacklisted).count();
-            long blockTime = this.nodeContext.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
+            long blockTime = this.signum.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME);
 
             try {
                 SwingUtilities.invokeLater(() -> {
@@ -3000,7 +3071,7 @@ public class NodeConsolePanel extends JPanel {
                 // updateTitle() removed - title management moved to NodeInfoBar
 
                 initListeners();
-                if (this.nodeContext.getPropertyService().getBoolean(Props.EXPERIMENTAL)) {
+                if (this.signum.getPropertyService().getBoolean(Props.EXPERIMENTAL)) {
                     // Initialize timers from the log file.
                     if (blockchainProcessor != null) {
                         this.guiAccumulatedSyncTimeMs = blockchainProcessor.getAccumulatedSyncTimeMs();
@@ -3017,7 +3088,7 @@ public class NodeConsolePanel extends JPanel {
                         updateTimeLabelVisibility(); // Initial visibility check
                     });
                 }
-                if (this.nodeContext.getBlockchain() == null) {
+                if (this.signum.getBlockchain() == null) {
                     onBrsStopped();
                 }
             } catch (Exception t) {
@@ -3240,7 +3311,7 @@ public class NodeConsolePanel extends JPanel {
     }
 
     private void updateTimeLabelVisibility() {
-        if (!this.nodeContext.getPropertyService().getBoolean(Props.EXPERIMENTAL)) {
+        if (!this.signum.getPropertyService().getBoolean(Props.EXPERIMENTAL)) {
             totalTimeLabel.setVisible(false);
             innerTimeSeparator.setVisible(false);
             syncInProgressTimeLabel.setVisible(false);
@@ -3347,7 +3418,7 @@ public class NodeConsolePanel extends JPanel {
 
     private int calculateMaxPeerHeight() {
         try {
-            return getNodeContext().getBlockchainProcessor().getAllPeers().stream()
+            return getSignum().getBlockchainProcessor().getAllPeers().stream()
                     .filter(p -> p.getState() == Peer.State.CONNECTED)
                     .mapToInt(p -> (int) p.getHeight())
                     .max()
@@ -3400,7 +3471,7 @@ public class NodeConsolePanel extends JPanel {
      */
     private boolean loadAutostartSetting() {
         try {
-            String settingsDir = this.nodeContext.getPropertyService().getString(Props.SETTINGS_DIR);
+            String settingsDir = this.signum.getPropertyService().getString(Props.SETTINGS_DIR);
             Path settingsPath = application.utils.io.PathUtils
                     .resolvePath(Paths.get(settingsDir, "gui-settings.json").toString());
             if (Files.exists(settingsPath)) {
@@ -3431,7 +3502,7 @@ public class NodeConsolePanel extends JPanel {
      */
     private void saveAutostartSetting(boolean value) {
         try {
-            String settingsDir = this.nodeContext.getPropertyService().getString(Props.SETTINGS_DIR);
+            String settingsDir = this.signum.getPropertyService().getString(Props.SETTINGS_DIR);
             Path settingsPath = application.utils.io.PathUtils
                     .resolvePath(Paths.get(settingsDir, "gui-settings.json").toString());
             if (settingsPath.getParent() != null) {
@@ -3475,7 +3546,7 @@ public class NodeConsolePanel extends JPanel {
      */
     private String resolveSettingsDir() {
         try {
-            PropertyService ps = this.nodeContext.getPropertyService();
+            PropertyService ps = this.signum.getPropertyService();
             if (ps != null) {
                 return ps.getString(Props.SETTINGS_DIR);
             }
@@ -4031,16 +4102,16 @@ public class NodeConsolePanel extends JPanel {
      * @param scrollPane the parent JScrollPane for smart auto-scroll behavior (null to disable)
      */
     private void initProfileLogging(JTextPane textPane, JScrollPane scrollPane) {
-        // Load or create NodeProfile for this profile name and get its ProfileLogger.
-        // The ProfileLogger is part of the new centralized logger architecture:
-        //   SLF4J/Logback → ProfileLogger → (forward to SystemLogger) + GUI subscribers
-        NodeProfile nodeProfile = NodeProfile.loadByName(profileName);
-        if (nodeProfile == null) {
-            // Fallback: create a new profile if file doesn't exist yet
-            nodeProfile = new NodeProfile(profileName);
+        // Get ProfileLogger from the Signum instance (per-node logging ownership).
+        // Architecture: Signum → ProfileLogger → (forward to SystemLogger) + GUI subscribers
+        Signum ctx = getSignum();
+        if (ctx != null) {
+            profileLogger = ctx.getProfileLogger();
         }
-
-        profileLogger = nodeProfile.getLogger();
+        if (profileLogger == null) {
+            LOGGER.warn("ProfileLogger not available for profile '{}' — node not yet started, deferring", profileName);
+            return;
+        }
 
         // Create subscriber that renders log events to the console JTextPane
         consoleSubscriber = new ProfileConsoleSubscriber(profileName, textPane.getStyledDocument());
@@ -4050,38 +4121,6 @@ public class NodeConsolePanel extends JPanel {
         }
         // Subscribe directly to ProfileLogger instead of legacy ProfileLogContext
         profileLogger.addSubscriber(consoleSubscriber);
-    }
-
-    /**
-     * Flushes legacy static bootstrap logs to the console for backward compatibility.
-     * <p>
-     * Old code may have written directly to {@code Signum.BOOTSTRAP_LOGS} before the
-     * new ProfileLogRouter was installed. This method renders those leftover entries
-     * so the user does not lose early startup output.
-     * </p>
-     * <p>
-     * Note: The modern buffering mechanism ({@link application.utils.logging.BootstrapLogBuffer})
-     * is managed at the {@link application.utils.logging.ProfileLogRouter} level and flushes
-     * automatically; this method only handles the deprecated static list.
-     * </p>
-     *
-     * @param textPane the target JTextPane, never null
-     */
-    private void flushLegacyBootstrapLogs(JTextPane textPane) {
-        // Flush legacy static bootstrap logs for backward compatibility.
-        // BootstrapLogBuffer is managed at the ProfileLogRouter level and will be
-        // flushed automatically when the router redistributes buffered entries.
-        if (Signum.BOOTSTRAP_LOGS.isEmpty()) {
-            return;
-        }
-        // Create output stream without timer (push-based model schedules flush on write)
-        TextAreaOutputStream taos = new TextAreaOutputStream(textPane, textScrollPane, null, false);
-        for (String line : Signum.BOOTSTRAP_LOGS) {
-            taos.append(line + "\n");
-        }
-        // Trigger a final flush to render all buffered bootstrap lines
-        taos.flush();
-        Signum.BOOTSTRAP_LOGS.clear();
     }
 
     /**
@@ -4120,12 +4159,12 @@ public class NodeConsolePanel extends JPanel {
      * @param oldState the previous lifecycle state
      * @param newState the current lifecycle state
      */
-    public void onNodeStateChanged(NodeLifecycleState oldState, NodeLifecycleState newState) {
+    public void onNodeStateChanged(Signum.State oldState, Signum.State newState) {
         LOGGER.debug("[MetricsPanel] Lifecycle state change: {} -> {}", oldState, newState);
 
         SwingUtilities.invokeLater(() -> {
             // When node becomes READY/RUNNING, ensure MetricsPanel visibility matches user preference
-            if (newState == NodeLifecycleState.RUNNING || newState == NodeLifecycleState.READY) {
+            if (newState == Signum.State.RUNNING || newState == Signum.State.RUNNING) {
                 LOGGER.info("[MetricsPanel] Node reached {} — applying visibility preference: showMetricsPanel={}", 
                     newState, showMetricsPanel);
                 
@@ -4153,7 +4192,7 @@ public class NodeConsolePanel extends JPanel {
             }
 
             // When node stops, hide and shutdown MetricsPanel to release resources
-            if (newState == NodeLifecycleState.STOPPED || newState == NodeLifecycleState.IDLE) {
+            if (newState == Signum.State.STOPPED || newState == Signum.State.CREATED) {
                 LOGGER.debug("[MetricsPanel] Node stopped — shutting down MetricsPanel");
                 if (metricsPanel != null) {
                     updateMetricsPanelState(false);

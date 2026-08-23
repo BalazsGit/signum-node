@@ -4,11 +4,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import application.module.node.logging.NodeLoggingProfile;
-import application.module.node.lifecycle.NodeProfileRuntime;
 import application.utils.config.ConfigPaths;
 import application.utils.config.PropertiesProfileEntity;
 import application.utils.config.PropertiesProfileLoader;
-import application.utils.logging.ProfileLogger;
 
 import java.io.InputStream;
 import java.nio.file.Path;
@@ -17,6 +15,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
+import application.module.node.Signum;
 
 /**
  * Represents a single node profile configuration loaded from disk.
@@ -103,12 +102,9 @@ public class NodeProfile implements PropertiesProfileEntity {
      * Always initialized at construction time (never null after build).
      * @see NodeProfileRuntime
      */
-    private final NodeProfileRuntime runtime;
+    
 
-    // ── Logging Reference ──────────────────────────────────────────────
-
-    /** SLF4J-compatible logger for this profile (lazy init). */
-    private volatile ProfileLogger logger;
+    // ── Logging Profile Reference ──────────────────────────────────────
 
     /**
      * Reference to the associated NodeLoggingProfile.
@@ -138,7 +134,7 @@ public class NodeProfile implements PropertiesProfileEntity {
         this.profileName = Objects.requireNonNull(profileName, "profileName must not be null");
         this.propertiesPath = null;
         this.headlessMode = true;
-        this.runtime = new NodeProfileRuntime(profileName);
+        
     }
 
     /**
@@ -151,7 +147,7 @@ public class NodeProfile implements PropertiesProfileEntity {
         this.profileName = Objects.requireNonNull(builder.name, "name must not be null");
         this.propertiesPath = builder.propertiesPath;
         this.headlessMode = builder.headlessMode;
-        this.runtime = new NodeProfileRuntime(builder.name);
+        
 
         if (builder.properties != null) {
             this.properties.putAll(builder.properties);
@@ -213,45 +209,6 @@ public class NodeProfile implements PropertiesProfileEntity {
             properties.remove(key);
         } else {
             properties.setProperty(key, value);
-        }
-    }
-
-    // ── Centralized Logger Integration ─────────────────────────────────
-
-    /**
-     * Returns the ProfileLogger for this profile, lazily creating it on first access.
-     * The logger is auto-configured to forward events to SystemLogger.
-     *
-     * @return the ProfileLogger instance (never null)
-     */
-    public ProfileLogger getLogger() {
-        if (logger == null) {
-            synchronized (this) {
-                if (logger == null) {
-                    logger = new ProfileLogger("node", profileName);
-                }
-            }
-        }
-        return logger;
-    }
-
-    /**
-     * Returns an SLF4J Logger adapter backed by this profile's ProfileLogger.
-     * Use this instead of LoggerFactory.getLogger() in Services that belong to this profile.
-     *
-     * @return the SLF4J Logger adapter (never null)
-     */
-    public org.slf4j.Logger getSlf4jLogger() {
-        return new NodeProfileAdapter(getLogger());
-    }
-
-    /**
-     * Closes the ProfileLogger when this profile is shut down.
-     * Should be called during profile cleanup.
-     */
-    public void closeLogger() {
-        if (logger != null) {
-            logger.close();
         }
     }
 
@@ -330,8 +287,8 @@ public class NodeProfile implements PropertiesProfileEntity {
      *
      * @return the {@link NodeProfileRuntime} (never null)
      */
-    public NodeProfileRuntime getRuntime() {
-        return runtime;
+    public Signum getSignum() {
+        return null; // Signum is managed by NodeModule
     }
 
     // ── PropertiesPath Access ──────────────────────────────────────────
@@ -625,6 +582,6 @@ public class NodeProfile implements PropertiesProfileEntity {
     @Override
     public String toString() {
         return "NodeProfile{name='" + profileName + "', properties=" + properties.size() +
-                " entries, runtime=" + (runtime != null ? "present" : "null") + "}";
+                " entries, runtime=" + (loggingProfile != null ? loggingProfile : "none") + "}";
     }
 }

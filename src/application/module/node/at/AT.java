@@ -36,6 +36,10 @@ public class AT extends AtMachineState {
     private final String description;
     private final int nextHeight;
 
+    /**
+     * @deprecated Use the constructor that accepts {@link AtConstants} explicitly.
+     */
+    @Deprecated
     private AT(byte[] atId, byte[] creator, String name, String description, byte[] creationBytes, int height, int currentHeight,
             SignumKey.LongKeyFactory<AT> atDbKeyFactory) {
         super(AtController.getAtConstants(), atId, creator, creationBytes, height);
@@ -45,6 +49,23 @@ public class AT extends AtMachineState {
         this.nextHeight = currentHeight;
     }
 
+    /**
+     * Creates a new AT instance from creation bytes with explicit AtConstants.
+     */
+    protected AT(AtConstants atConstants, byte[] atId, byte[] creator, String name, String description,
+            byte[] creationBytes, int height, int currentHeight,
+            SignumKey.LongKeyFactory<AT> atDbKeyFactory) {
+        super(atConstants, atId, creator, creationBytes, height);
+        this.name = name.trim();
+        this.description = description.trim();
+        dbKey = atDbKeyFactory.newKey(AtApiHelper.getLong(atId));
+        this.nextHeight = currentHeight;
+    }
+
+    /**
+     * @deprecated Use the constructor that accepts {@link AtConstants} explicitly.
+     */
+    @Deprecated
     public AT(byte[] atId, byte[] creator, String name, String description, short version,
             int height,
             byte[] stateBytes, int csize, int dsize, int cUserStackBytes, int cCallStackBytes,
@@ -52,6 +73,26 @@ public class AT extends AtMachineState {
             boolean freezeWhenSameBalance, long minActivationAmount, byte[] apCode, long apCodeHashId,
             SignumKey.LongKeyFactory<AT> atDbKeyFactory) {
         super(AtController.getAtConstants(), atId, creator, version,
+                height,
+                stateBytes, csize, dsize, cUserStackBytes, cCallStackBytes,
+                creationBlockHeight, sleepBetween,
+                freezeWhenSameBalance, minActivationAmount, apCode, apCodeHashId);
+        this.name = name.trim();
+        this.description = description.trim();
+        dbKey = atDbKeyFactory.newKey(AtApiHelper.getLong(atId));
+        this.nextHeight = nextHeight;
+    }
+
+    /**
+     * Creates a new AT instance from stored state with explicit AtConstants.
+     */
+    public AT(AtConstants atConstants, byte[] atId, byte[] creator, String name, String description, short version,
+            int height,
+            byte[] stateBytes, int csize, int dsize, int cUserStackBytes, int cCallStackBytes,
+            int creationBlockHeight, int sleepBetween, int nextHeight,
+            boolean freezeWhenSameBalance, long minActivationAmount, byte[] apCode, long apCodeHashId,
+            SignumKey.LongKeyFactory<AT> atDbKeyFactory) {
+        super(atConstants, atId, creator, version,
                 height,
                 stateBytes, csize, dsize, cUserStackBytes, cCallStackBytes,
                 creationBlockHeight, sleepBetween,
@@ -131,7 +172,8 @@ public class AT extends AtMachineState {
         bf.get(id, 0, 8);
         bf.get(creator, 0, 8);
 
-        AT at = new AT(id, creator, name, description, creationBytes, height, ctx.getBlockchain().getHeight(),
+        AT at = new AT(ctx.getAtConstants(), id, creator, name, description, creationBytes,
+                height, ctx.getBlockchain().getHeight(),
                 ctx.getAtStore().getAtDbKeyFactory());
 
         if (at.getApCodeHashId() == 0L)

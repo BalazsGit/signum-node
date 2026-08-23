@@ -1,5 +1,6 @@
 package application.module.node.web.server;
 
+import application.module.node.TransactionApplyContext;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.util.Subnet;
@@ -36,6 +37,7 @@ public final class WebServerImpl implements WebServer {
     private BlockchainEventNotifier eventNotifier = null;
 
     private final WebServerContext context;
+    private ServletContextHandler servletContextHandler;
 
     public WebServerImpl(WebServerContext context) {
 
@@ -52,7 +54,7 @@ public final class WebServerImpl implements WebServer {
     private Server createServerInstance() {
         final Server jettyServer = new Server();
 
-        ServletContextHandler servletContextHandler = new ServletContextHandler();
+        servletContextHandler = new ServletContextHandler();
         ServerConnectorFactory connectorFactory = new ServerConnectorFactory(context, jettyServer);
 
         jettyServer.addConnector(connectorFactory.createHttpConnector());
@@ -98,6 +100,7 @@ public final class WebServerImpl implements WebServer {
 
         Set<Subnet> allowedBotHosts = getAllowedBotHosts();
         ApiServlet apiServlet = new ApiServlet(context, allowedBotHosts);
+
 
         // set up HTTP API paths
         ServletHolder apiServletHolder = new ServletHolder(apiServlet);
@@ -162,6 +165,23 @@ public final class WebServerImpl implements WebServer {
             servletContextHandler.addServlet(defaultServletHolder, "/*");
             servletContextHandler.setWelcomeFiles(new String[] { "index.html" });
         }
+    }
+
+    /**
+     * Binds the TransactionApplyContext for multi-node isolation.
+     * Registers a TransactionContextFilter on the API servlet paths so that
+     * each Jetty request thread binds only this node's context.
+     * Must be called after TransactionApplyContext is created.
+     */
+    public void bindTransactionContext(TransactionApplyContext txContext) {
+        if (servletContextHandler == null || txContext == null) {
+            return;
+        }
+        FilterHolder ctxFilter = new FilterHolder(new TransactionContextFilter(txContext));
+        servletContextHandler.addFilter(ctxFilter, API_PATH, EnumSet.of(jakarta.servlet.DispatcherType.REQUEST));
+        servletContextHandler.addFilter(ctxFilter, LEGACY_API_PATH, EnumSet.of(jakarta.servlet.DispatcherType.REQUEST));
+        logger.info("TransactionContextFilter bound for multi-node isolation (port: {})",
+                context.getPropertyService().getInt(Props.API_PORT));
     }
 
     @Override

@@ -111,6 +111,26 @@ public class NodeConfigurationPanel extends JPanel {
 
     public NodeConfigurationPanel(Runnable restartAction, String confFolder, Runnable backAction,
             Runnable switchAction) {
+        this(restartAction, confFolder, backAction, switchAction, null);
+    }
+
+    /**
+     * Creates a configuration panel for a specific node profile.
+     * <p>
+     * In the multi-node architecture there is no "active node": each panel belongs to
+     * a specific node. Pass the node's own profile name explicitly so the panel does
+     * not have to fall back to a global lookup.
+     * </p>
+     *
+     * @param restartAction restart callback
+     * @param confFolder    configuration folder
+     * @param backAction    back callback (may be null)
+     * @param switchAction  switch callback (may be null)
+     * @param profileName   the node's own profile name, or {@code null} to fall back to
+     *                      the legacy global lookup
+     */
+    public NodeConfigurationPanel(Runnable restartAction, String confFolder, Runnable backAction,
+            Runnable switchAction, String profileName) {
         super(new BorderLayout());
         LOGGER.info("[DIAG] NodeConfigurationPanel constructor START");
         this.restartAction = restartAction;
@@ -118,8 +138,13 @@ public class NodeConfigurationPanel extends JPanel {
         this.backAction = backAction;
         this.switchAction = switchAction;
 
-        // Determine the currently applied profile name from metadata once at startup
-        this.runningProfileName = Signum.getActiveNodeProfile();
+        // Determine the currently applied profile name once at startup. Prefer the
+        // explicitly passed node profile name (per-node ownership); only fall back to
+        // the legacy global lookup when none was provided (single-node / headless).
+        String resolvedProfileName = (profileName != null && !profileName.isEmpty())
+                ? profileName
+                : Signum.getActiveNodeProfile();
+        this.runningProfileName = resolvedProfileName;
         this.activeProfileName = this.runningProfileName;
         this.loadedProfileName = this.runningProfileName;
 
@@ -1721,10 +1746,10 @@ public class NodeConfigurationPanel extends JPanel {
      */
     private application.module.node.props.PropertyService resolvePropertyService() {
         Signum facade = this.signum;
-        if (facade == null || facade.getContext() == null) {
+        if (facade == null || facade.getPropertyService() == null) {
             return null;
         }
-        return facade.getContext().getPropertyService();
+        return facade.getPropertyService();
     }
 
     private String getServiceValueAsString(application.module.node.props.PropertyService service, Prop prop) {

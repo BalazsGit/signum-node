@@ -1,9 +1,5 @@
 package application.gui.tray;
 
-import application.module.node.lifecycle.LifecycleListener;
-import application.module.node.lifecycle.NodeLifecycleManager;
-import application.module.node.lifecycle.NodeLifecycleState;
-import application.module.node.lifecycle.NodeOperatingState;
 import application.module.node.profile.NodeProfile;
 
 import java.awt.Image;
@@ -21,6 +17,8 @@ import javax.swing.SwingUtilities;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import application.module.node.NodeModule;
+import application.module.node.Signum;
 
 /**
  * Manages the application SystemTray icon with lifecycle integration.
@@ -39,7 +37,7 @@ import org.slf4j.LoggerFactory;
  *   <li>Graceful degradation when SystemTray is not supported</li>
  * </ul>
  */
-public class TrayIconManager implements LifecycleListener {
+public class TrayIconManager  {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(TrayIconManager.class);
 
@@ -53,7 +51,7 @@ public class TrayIconManager implements LifecycleListener {
     private static volatile TrayIconManager instance;
 
     // Dependencies (constructor-injected)
-    private final NodeLifecycleManager lifecycleManager;
+    private final NodeModule nodeModule;
 
     // Tray state
     private final boolean traySupported;
@@ -69,8 +67,8 @@ public class TrayIconManager implements LifecycleListener {
     /**
      * Private constructor. Use {@link #getInstance(NodeLifecycleManager)} to obtain an instance.
      */
-    private TrayIconManager(NodeLifecycleManager lifecycleManager) {
-        this.lifecycleManager = lifecycleManager;
+    private TrayIconManager(NodeModule nodeModule) {
+        this.nodeModule = nodeModule;
         this.traySupported = SystemTray.isSupported();
         this.popupMenu = new PopupMenu();
 
@@ -85,9 +83,9 @@ public class TrayIconManager implements LifecycleListener {
      * @param lifecycleManager the lifecycle manager to observe
      * @return the singleton TrayIconManager
      */
-    public static synchronized TrayIconManager getInstance(NodeLifecycleManager lifecycleManager) {
+    public static synchronized TrayIconManager getInstance(NodeModule nodeModule) {
         if (instance == null) {
-            instance = new TrayIconManager(lifecycleManager);
+            instance = new TrayIconManager(nodeModule);
         }
         return instance;
     }
@@ -119,7 +117,7 @@ public class TrayIconManager implements LifecycleListener {
         try {
             trayIcon = createTrayIcon();
             SystemTray.getSystemTray().add(trayIcon);
-            lifecycleManager.addListener(this);
+            
 
             trayIcon.displayMessage("Signum Running",
                     "Signum is running in background, use this icon to interact with it.",
@@ -225,19 +223,16 @@ public class TrayIconManager implements LifecycleListener {
     // LifecycleListener implementation (Observer pattern)
     // ====================================================================
 
-    @Override
-    public void onStateChanged(NodeProfile profile, NodeLifecycleState oldState, NodeLifecycleState newState) {
+    public void onStateChanged(NodeProfile profile, Signum.State oldState, Signum.State newState) {
         SwingUtilities.invokeLater(() -> updateTrayForState(profile, newState));
     }
 
-    @Override
     public void onOperatingStateChanged(NodeProfile profile,
-                                        NodeOperatingState oldSubstate,
-                                        NodeOperatingState newSubstate) {
+                                        Signum.OperatingState oldSubstate,
+                                        Signum.OperatingState newSubstate) {
         SwingUtilities.invokeLater(() -> updateTrayTooltip(profile, newSubstate));
     }
 
-    @Override
     public void onStatusMessage(NodeProfile profile, String message) {
         // Optionally show status messages via tray tooltip
         SwingUtilities.invokeLater(() -> {
@@ -248,7 +243,6 @@ public class TrayIconManager implements LifecycleListener {
         });
     }
 
-    @Override
     public void onError(NodeProfile profile, String errorMessage) {
         SwingUtilities.invokeLater(() -> {
             if (trayIcon != null) {
@@ -264,24 +258,24 @@ public class TrayIconManager implements LifecycleListener {
     // Tray state update helpers
     // ====================================================================
 
-    private void updateTrayForState(NodeProfile profile, NodeLifecycleState newState) {
+    private void updateTrayForState(NodeProfile profile, Signum.State newState) {
         if (trayIcon == null) {
             return;
         }
 
-        var runtime = profile.getRuntime();
+        var signum = NodeModule.getInstance().get(profile.getName());
 
-        if (newState == NodeLifecycleState.STOPPED || newState == NodeLifecycleState.ERROR) {
+        if (newState == Signum.State.STOPPED || newState == Signum.State.ERROR) {
             String tooltip = trayIcon.getToolTip();
             if (tooltip != null && !tooltip.endsWith(" (STOPPED)")) {
                 trayIcon.setToolTip(tooltip + " (STOPPED)");
             }
-        } else if (newState == NodeLifecycleState.RUNNING) {
-            updateTrayTooltip(profile, runtime.getOperatingState());
+        } else if (newState == Signum.State.RUNNING) {
+            updateTrayTooltip(profile, (signum != null) ? signum.getOperatingState() : Signum.OperatingState.SYNC_IDLE);
         }
     }
 
-    private void updateTrayTooltip(NodeProfile profile, NodeOperatingState operatingState) {
+    private void updateTrayTooltip(NodeProfile profile, Signum.OperatingState operatingState) {
         if (trayIcon == null) {
             return;
         }
@@ -289,23 +283,23 @@ public class TrayIconManager implements LifecycleListener {
     }
 
     private String buildTooltip(NodeProfile profile) {
-        var runtime = profile.getRuntime();
+        var signum = NodeModule.getInstance().get(profile.getName());
 
         StringBuilder sb = new StringBuilder();
         sb.append(DEFAULT_TOOLTIP);
         sb.append(" [").append(profile.getName()).append("]");
 
-        NodeLifecycleState state = runtime.getLifecycleState();
-        if (state.isActive()) {
-            NodeOperatingState substate = runtime.getOperatingState();
-            sb.append(" - ").append(substate.getDescription());
-            if (substate == NodeOperatingState.SYNCING && runtime.getMissingBlocks() > 0) {
-                sb.append(" (").append(runtime.getMissingBlocks()).append(" blocks behind)");
+        Signum.State state = (signum != null) ? signum.getState() : Signum.State.CREATED;
+        if (state == Signum.State.RUNNING) {
+            Signum.OperatingState substate = (signum != null) ? signum.getOperatingState() : Signum.OperatingState.SYNC_IDLE;
+            sb.append(" - ").append(substate.name().toLowerCase());
+            if (substate == Signum.OperatingState.SYNCING && ((signum != null) ? signum.getMissingBlocks() : 0) > 0) {
+                sb.append(" (").append((signum != null) ? signum.getMissingBlocks() : 0).append(" blocks behind)");
             }
-        } else if (state == NodeLifecycleState.STOPPED) {
+        } else if (state == Signum.State.STOPPED) {
             sb.append(" - STOPPED");
-        } else if (state == NodeLifecycleState.ERROR) {
-            sb.append(" - ERROR: ").append(runtime.getErrorMessage());
+        } else if (state == Signum.State.ERROR) {
+            sb.append(" - ERROR");
         }
 
         return sb.toString();
@@ -328,7 +322,7 @@ public class TrayIconManager implements LifecycleListener {
                 LOGGER.warn("Error removing tray icon", e);
             }
         }
-        lifecycleManager.removeListener(this);
+        
         trayIcon = null;
     }
 

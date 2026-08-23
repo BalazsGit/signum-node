@@ -2,11 +2,7 @@ package application.module.node.gui;
 
 import application.module.appearance.AppearanceModule;
 import application.module.node.Signum;
-import application.module.node.instance.NodeCoreContext;
-import application.module.node.instance.NodeFactory;
-import application.module.node.lifecycle.LifecycleListener;
-import application.module.node.lifecycle.NodeLifecycleManager;
-import application.module.node.lifecycle.NodeLifecycleState;
+import application.module.node.NodeModule;
 import application.module.node.profile.NodeProfile;
 import application.module.node.profile.ProfileConfig;
 import application.utils.gui.GuiFontManager;
@@ -43,7 +39,7 @@ import java.util.Map;
  * Supports user-defined tab order via ProfileConfig.tabOrder (saved to profiles.json).
  */
 @SuppressWarnings("serial")
-public class NodePanel extends JPanel implements LifecycleListener {
+public class NodePanel extends JPanel  {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(NodePanel.class);
 
@@ -58,7 +54,7 @@ public class NodePanel extends JPanel implements LifecycleListener {
     /** Reverse lookup: profile name -> tab index for O(1) access by name */
     private final Map<String, Integer> profileNameToTabIndex = new LinkedHashMap<>();
     /** Singleton lifecycle manager */
-    private final NodeLifecycleManager lifecycleManager = NodeLifecycleManager.getInstance();
+    private final NodeModule nodeModule = NodeModule.getInstance();
     /** ProfileConfig for tab order management */
     private final ProfileConfig profileConfig = new ProfileConfig();
 
@@ -104,7 +100,7 @@ public class NodePanel extends JPanel implements LifecycleListener {
         add(profileTabbedPane, BorderLayout.CENTER);
 
         // Register as lifecycle listener for push-based updates
-        lifecycleManager.addListener(this);
+        
 
         // Register for appearance updates
         AppearanceModule.registerAppearanceListener(() -> {
@@ -168,7 +164,7 @@ public class NodePanel extends JPanel implements LifecycleListener {
                 }
 
                 // Register profiles first
-                lifecycleManager.discoverProfiles();
+                
 
                 int count = 0;
                 for (NodeProfile profile : profiles) {
@@ -197,14 +193,14 @@ public class NodePanel extends JPanel implements LifecycleListener {
                     progressBar.setIndeterminate(true);
                 });
 
-                lifecycleManager.initializeAllProfiles();
+                
 
                 // Start autostart profiles
                 SwingUtilities.invokeLater(() -> {
                     updateProgress(95, "Starting autostart nodes...");
                 });
 
-                lifecycleManager.startAutostartProfiles();
+                
 
                 // Apply tab order from ProfileConfig (user-defined or default filesystem order)
                 final NodeProfile[] loadedProfiles = profiles;
@@ -283,7 +279,7 @@ public class NodePanel extends JPanel implements LifecycleListener {
         // Wire the per-instance Signum facade from the NodeFactory registry.
         // If the node hasn't been started yet, signum will be null - that's fine,
         // the panel handles null signum gracefully (profile not yet started).
-        Signum signum = NodeFactory.getInstance().get(profileName);
+        Signum signum = NodeModule.getInstance().get(profileName);
 
         NodeProfilePanel actualPanel = new NodeProfilePanel(null, profile, signum);
         loadedProfilePanels.put(profileName, actualPanel);
@@ -304,8 +300,7 @@ public class NodePanel extends JPanel implements LifecycleListener {
     // LifecycleListener implementation (push-based)
     // ====================================================================
 
-    @Override
-    public void onStateChanged(NodeProfile profile, NodeLifecycleState oldState, NodeLifecycleState newState) {
+    public void onStateChanged(NodeProfile profile, Signum.State oldState, Signum.State newState) {
         SwingUtilities.invokeLater(() -> {
             NodeProfilePanel panel = loadedProfilePanels.get(profile.getName());
             if (panel != null) {
@@ -316,7 +311,6 @@ public class NodePanel extends JPanel implements LifecycleListener {
         });
     }
 
-    @Override
     public void onStatusMessage(NodeProfile profile, String message) {
         SwingUtilities.invokeLater(() -> {
             NodeProfilePanel panel = loadedProfilePanels.get(profile.getName());
@@ -327,7 +321,6 @@ public class NodePanel extends JPanel implements LifecycleListener {
         });
     }
 
-    @Override
     public void onError(NodeProfile profile, String errorMessage) {
         SwingUtilities.invokeLater(() -> {
             NodeProfilePanel panel = loadedProfilePanels.get(profile.getName());
@@ -338,7 +331,6 @@ public class NodePanel extends JPanel implements LifecycleListener {
         });
     }
 
-    @Override
     public void onShutdownRequested(NodeProfile profile) {
         // Forward shutdown request to the corresponding profile panel so it can
         // save GUI settings (metrics panel state, command input visibility, etc.)
@@ -360,7 +352,7 @@ public class NodePanel extends JPanel implements LifecycleListener {
      * Icon sizes scale dynamically with the global UI font size.
      * Tooltip shows the current node state description on hover.
      */
-    private void updateTabIcon(String profileName, NodeLifecycleState state) {
+    private void updateTabIcon(String profileName, Signum.State state) {
         Integer tabIndex = profileNameToTabIndex.get(profileName);
         if (tabIndex == null) {
             return; // Tab not found
@@ -372,27 +364,21 @@ public class NodePanel extends JPanel implements LifecycleListener {
             case RUNNING:
                 icon = GuiIcons.running(GuiIcons.sizeTiny());
                 break;
-            case INITIALIZING:
+            case STARTING:
             case STOPPING:
                 icon = GuiIcons.initializing(GuiIcons.sizeSmall());
                 break;
             case ERROR:
                 icon = GuiIcons.error(GuiIcons.sizeSmall());
                 break;
-            case PAUSED:
-                icon = GuiIcons.paused(GuiIcons.sizeSmall());
-                break;
-            case READY:
+            case INITIALIZED:
                 icon = GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.CHECK_CIRCLE_O, GuiIcons.sizeTiny(), new Color(100, 149, 237));
                 break;
             case STOPPED:
                 icon = GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.STOP, GuiIcons.sizeTiny(), new Color(150, 150, 150));
                 break;
-            case IDLE:
+            case CREATED:
                 icon = GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.CIRCLE_O, GuiIcons.sizeTiny(), new Color(150, 150, 150));
-                break;
-            case WAITING_FOR_DATABASE:
-                icon = GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.DATABASE, GuiIcons.sizeSmall(), new Color(255, 193, 7));
                 break;
             default:
                 icon = null;
@@ -404,7 +390,7 @@ public class NodePanel extends JPanel implements LifecycleListener {
         profileTabbedPane.setIconAt(tabIndex, icon);
 
         // Set tooltip with node state information for hover display
-        String tooltip = "Profile: " + profileName + "\nNode State: " + state.getDescription();
+        String tooltip = "Profile: " + profileName + "\nNode State: " + state.name().toLowerCase();
         profileTabbedPane.setToolTipTextAt(tabIndex, tooltip);
     }
 
@@ -565,15 +551,15 @@ public class NodePanel extends JPanel implements LifecycleListener {
     /**
      * Gets the lifecycle manager instance.
      */
-    public NodeLifecycleManager getLifecycleManager() {
-        return lifecycleManager;
+    public NodeModule getNodeModule() {
+        return nodeModule;
     }
 
     /**
      * Cleanup: unregister listener when panel is closed.
      */
     public void dispose() {
-        lifecycleManager.removeListener(this);
+        
         LOGGER.info("NodePanel disposed, listener unregistered");
     }
 }

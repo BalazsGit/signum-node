@@ -3,7 +3,6 @@ package application.launcher;
 import application.kernel.ApplicationKernel;
 import application.module.node.util.LoggerConfigurator;
 import application.utils.io.PathUtils;
-import application.utils.logging.SystemLogRouterHandler;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
@@ -87,14 +86,8 @@ public class Launcher {
             System.err.println("Failed to initialize LoggerConfigurator: " + e.getMessage());
         }
 
-        // Install SystemLogRouterHandler EARLY so ALL SLF4J→JUL log events are captured
-        // and routed to SystemLogger → GUI subscribers. This replaces the legacy ProfileLogRouter.
-        // This must happen before ApplicationKernel.boot() which calls module init()/start().
-        try {
-            SystemLogRouterHandler.getInstance().install();
-        } catch (Exception e) {
-            System.err.println("[Launcher] Failed to install SystemLogRouterHandler: " + e.getMessage());
-        }
+        // Install the JUL handler that bridges SLF4J → SystemLogger + per-node ProfileLogger
+        application.utils.logging.SystemLoggerJulHandler.install();
 
         logger = LoggerFactory.getLogger(Launcher.class);
         // Print bootstrap logs to console

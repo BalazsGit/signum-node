@@ -1,7 +1,5 @@
 package application.utils.logging.event;
 
-import application.utils.logging.ProfileThreadContext;
-
 import java.util.Arrays;
 import java.util.logging.LogRecord;
 
@@ -93,14 +91,6 @@ public final class LogEvent {
         // Extract throwable
         if (record.getThrown() != null) {
             builder.throwable(record.getThrown());
-        }
-
-        // Capture profile name from MDC context so the LogEvent carries routing metadata.
-        // This ensures SystemConsoleSubscriber can display the correct <profileName> tag,
-        // and ProfileFilter can match events even when they arrive via broadcast.
-        String profileFromMdc = ProfileThreadContext.getProfile();
-        if (profileFromMdc != null) {
-            builder.profileName(profileFromMdc);
         }
 
         return builder.build();

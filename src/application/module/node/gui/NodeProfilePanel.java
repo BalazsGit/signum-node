@@ -5,9 +5,6 @@ import application.module.node.BlockchainProcessor;
 import application.module.node.Signum;
 import application.module.node.gui.configuration.LoggerConfigurationPanel;
 import application.module.node.gui.configuration.NodeConfigurationPanel;
-import application.module.node.instance.NodeCoreContext;
-import application.module.node.lifecycle.NodeLifecycleManager;
-import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.profile.NodeProfile;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
@@ -56,8 +53,19 @@ public class NodeProfilePanel extends JPanel {
 
     private final JFrame parentFrame;
     private final NodeProfile profile;
-    /** Per-instance Signum facade (may be null if the node has not been started yet). */
-    private final Signum signum;
+    /**
+     * Per-instance Signum facade (may be null if the node has not been started yet).
+     * Not final: the console panel may start the node after panel construction
+     * (late binding) and then hand the instance back via {@link #adoptSignum(Signum)}.
+     */
+    private volatile Signum signum;
+
+    /**
+     * The single {@link Signum.StateListener} (PUSH trigger) registered on the
+     * adopted Signum. It only calls {@link #onNodeStateChanged(Signum.State, Signum.State)};
+     * all data is always re-read from the Signum (single source of truth).
+     */
+    private volatile Signum.StateListener stateListener;
     private final JTabbedPane innerTabbedPane;
     private final NodeConsolePanel consolePanel;
     private final NodeConfigurationPanel configurationPanel;
@@ -87,6 +95,14 @@ public class NodeProfilePanel extends JPanel {
             this.profile = profile;
             this.signum = signum;
             this.confFolder = determineConfFolder();
+
+            // In the multi-node architecture every GUI element belongs to its specific
+            // Signum. Register this panel on the node so the Signum "knows" its GUI
+            // (non-null in GUI mode, null in headless mode). This removes any need for
+            // a global "active node" lookup.
+            if (signum != null) {
+                signum.setGuiPanel(this);
+            }
 
             setLayout(new BorderLayout());
             setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
@@ -126,16 +142,22 @@ public class NodeProfilePanel extends JPanel {
                 consolePanel.setSignum(signum);
             }
             consolePanel.setSwitchToConsoleAction(() -> switchToConsoleTab());
+            // Late binding: if the console panel starts the node itself (this panel
+            // was constructed before the Signum existed), adopt the started instance.
+            consolePanel.setOnSignumStarted(this::adoptSignum);
             innerTabbedPane.addTab("Console", consolePanel);
             LOGGER.info("[DIAG] Console tab added successfully");
 
             LOGGER.info("[DIAG] Creating NodeConfigurationPanel for profile: {}", profile.getName());
+            // Pass this node's own profile name explicitly so the panel does not rely
+            // on the deprecated global "active node" lookup.
             configurationPanel = new NodeConfigurationPanel(
                     this::restartNode,
                     this.confFolder,
                     () -> {
                     },
-                    null
+                    null,
+                    profile.getName()
             );
             if (signum != null) {
                 configurationPanel.setSignum(signum);
@@ -166,6 +188,12 @@ public class NodeProfilePanel extends JPanel {
             LOGGER.info("[DIAG] Wiring console visibility tracking for profile: {}", profile.getName());
             wireConsoleVisibilityTracking();
 
+            // Adopt the Signum if it already exists at construction time:
+            // registers the single state listener (PUSH) + performs the initial
+            // refresh. No-op if the node does not exist yet — in that case it is
+            // adopted later via the console panel's onSignumStarted callback.
+            adoptSignum(this.signum);
+
             AppearanceModule.registerAppearanceListener(() -> {
                 GuiFontManager.applyDefaultFont(innerTabbedPane);
             });
@@ -176,6 +204,41 @@ public class NodeProfilePanel extends JPanel {
             LOGGER.error("[DIAG] NodeProfilePanel constructor FAILED for profile: {}", profile.getName(), e);
             throw e;
         }
+    }
+
+    /**
+     * Single convergence point for binding this panel to a Signum instance.
+     * <p>
+     * Called with the Signum at construction time (if it already exists) and —
+     * for late binding — when the console panel starts the node via
+     * {@code Signum.startNode()} and hands the instance back. Idempotent for the
+     * same instance; when a <i>different</i> instance is adopted (restart flow)
+     * the previous state listener is unregistered first, so this panel always
+     * has exactly one {@link Signum.StateListener} (PUSH trigger) and it only
+     * invokes {@link #refreshFromSignum(Signum.State, Signum.State)}.
+     * </p>
+     *
+     * @param newSignum the Signum instance to bind (null is ignored)
+     */
+    public void adoptSignum(Signum newSignum) {
+        if (newSignum == null) {
+            return;
+        }
+        if (newSignum == this.signum) {
+            return; // already bound to this instance
+        }
+        Signum previous = this.signum;
+        if (previous != null && stateListener != null) {
+            previous.removeStateListener(stateListener);
+            stateListener = null;
+        }
+        this.signum = newSignum;
+        stateListener = (s, oldState, newState) -> onNodeStateChanged(oldState, newState);
+        newSignum.addStateListener(stateListener);
+        newSignum.setGuiPanel(this);
+        // Initial refresh so the UI immediately reflects the current node state.
+        SwingUtilities.invokeLater(() -> refreshFromSignum(null, newSignum.getState()));
+        LOGGER.info("Adopted Signum for profile: {} (state={})", profile.getName(), newSignum.getState());
     }
 
     /**
@@ -221,8 +284,8 @@ public class NodeProfilePanel extends JPanel {
 
     /** Copy from NodeConsolePanel.syncButtonAction */
     public void toggleSync() {
-        NodeCoreContext ctx = signum != null ? signum.getContext() : null;
-        BlockchainProcessor blockchainProcessor = ctx != null ? ctx.getBlockchainProcessor() : null;
+        Signum node = signum;
+        BlockchainProcessor blockchainProcessor = node != null ? node.getBlockchainProcessor() : null;
         if (blockchainProcessor != null) {
             syncPaused = !syncPaused;
             blockchainProcessor.setSyncPaused(syncPaused);
@@ -253,8 +316,8 @@ public class NodeProfilePanel extends JPanel {
     /** Copy from NodeConsolePanel.openWebUi */
     public void openWebUi(String path) {
         try {
-            NodeCoreContext ctx = signum != null ? signum.getContext() : null;
-            PropertyService propertyService = ctx != null ? ctx.getPropertyService() : null;
+            Signum node = signum;
+            PropertyService propertyService = node != null ? node.getPropertyService() : null;
             if (propertyService == null) {
                 JOptionPane.showMessageDialog(this,
                         "PropertyService not available. Node may not be started.",
@@ -276,13 +339,13 @@ public class NodeProfilePanel extends JPanel {
 
     /** Copy from NodeConsolePanel.popOff */
     public void popOff(int count) {
-        NodeCoreContext ctx = signum != null ? signum.getContext() : null;
-        BlockchainProcessor blockchainProcessor = ctx != null ? ctx.getBlockchainProcessor() : null;
+        Signum node = signum;
+        BlockchainProcessor blockchainProcessor = node != null ? node.getBlockchainProcessor() : null;
         if (blockchainProcessor == null) {
             return;
         }
-        int height = (ctx != null && ctx.getBlockchain() != null) 
-                ? ctx.getBlockchain().getHeight() : 0;
+        int height = (node != null && node.getBlockchain() != null) 
+                ? node.getBlockchain().getHeight() : 0;
         int targetHeight = Math.max(0, height - count);
         if (!blockchainProcessor.isSkipDbCheckOnManualPopOff()) {
             blockchainProcessor.checkDatabaseStateRequest();
@@ -292,8 +355,8 @@ public class NodeProfilePanel extends JPanel {
 
     /** Copy from NodeConsolePanel.dbCheckAction */
     public void dbCheckAction() {
-        NodeCoreContext ctx = signum != null ? signum.getContext() : null;
-        BlockchainProcessor blockchainProcessor = ctx != null ? ctx.getBlockchainProcessor() : null;
+        Signum node = signum;
+        BlockchainProcessor blockchainProcessor = node != null ? node.getBlockchainProcessor() : null;
         if (blockchainProcessor == null) {
             JOptionPane.showMessageDialog(this, "Blockchain processor not initialized.",
                     "Error", JOptionPane.ERROR_MESSAGE);
@@ -325,9 +388,6 @@ public class NodeProfilePanel extends JPanel {
     public JTabbedPane getInnerTabbedPane() { return innerTabbedPane; }
     public NodeInfoBar getInfoBar() { return infoBar; }
     public NodeToolbar getToolbar() { return toolbar; }
-    /** Returns the injected NodeCoreContext (null if node not started). */
-    public NodeCoreContext getContext() { return signum != null ? signum.getContext() : null; }
-
     /** Returns the injected Signum facade (null if node not started). */
     public Signum getSignum() { return signum; }
 
@@ -351,61 +411,80 @@ public class NodeProfilePanel extends JPanel {
     }
 
     public void startNode() {
-        NodeLifecycleManager.getInstance().startProfile(profile.getName());
+        Signum s = this.signum; if (s != null) s.start();
         LOGGER.info("Start requested for profile: {}", profile.getName());
     }
 
-    public void onNodeStateChanged(NodeLifecycleState oldState, NodeLifecycleState newState) {
-        SwingUtilities.invokeLater(() -> {
-            String profileName = profile.getName();
-            LOGGER.info("[{}] State change: {} -> {}", profileName, oldState, newState);
+    /**
+     * Push trigger (PUSH, called by the single {@link Signum.StateListener} or by
+     * {@link NodePanel}). Threads the update to the EDT and delegates to
+     * {@link #refreshFromSignum(Signum.State, Signum.State)} — it never carries
+     * data itself.
+     */
+    public void onNodeStateChanged(Signum.State oldState, Signum.State newState) {
+        SwingUtilities.invokeLater(() -> refreshFromSignum(oldState, newState));
+    }
 
-            int consoleIndex = innerTabbedPane.indexOfTab("Console");
-            if (consoleIndex >= 0) {
-                // Use getDescription() instead of Unicode symbols to avoid square characters
-                String stateText = newState.getDescription();
-                innerTabbedPane.setTitleAt(consoleIndex,
-                        "Console" + (stateText.isEmpty() ? "" : " [" + stateText + "]"));
-                // Add tooltip with detailed state information for hover
-                innerTabbedPane.setToolTipTextAt(consoleIndex,
-                        "Node State: " + stateText + "\nProfile: " + profile.getName());
-                // Set state icon in the Console tab title so the user can see node state at a glance
-                Icon stateIcon = getStateIcon(newState);
-                innerTabbedPane.setIconAt(consoleIndex, stateIcon);
-            }
+    /**
+     * Single refresh point (D2/D3): this panel owns <b>no</b> node state — it
+     * re-reads everything from the Signum (single source of truth):
+     * <pre>
+     *   signum == null  → child panels render placeholders / inactive
+     *   otherwise       → child panels render the real values from the Signum
+     * </pre>
+     * Must be called on the EDT (see {@link #onNodeStateChanged}).
+     *
+     * @param oldState  previous node state (null on initial refresh)
+     * @param newState  current node state, as reported by the Signum
+     */
+    public void refreshFromSignum(Signum.State oldState, Signum.State newState) {
+        String profileName = profile.getName();
+        LOGGER.info("[{}] State change: {} -> {}", profileName, oldState, newState);
 
-            if (infoBar != null) {
-                infoBar.refreshState();
-            }
+        int consoleIndex = innerTabbedPane.indexOfTab("Console");
+        if (consoleIndex >= 0) {
+            // Use name() instead of Unicode symbols to avoid square characters
+            String stateText = newState.name().toLowerCase();
+            innerTabbedPane.setTitleAt(consoleIndex,
+                    "Console" + (stateText.isEmpty() ? "" : " [" + stateText + "]"));
+            // Add tooltip with detailed state information for hover
+            innerTabbedPane.setToolTipTextAt(consoleIndex,
+                    "Node State: " + stateText + "\nProfile: " + profile.getName());
+            // Set state icon in the Console tab title so the user can see node state at a glance
+            Icon stateIcon = getStateIcon(newState);
+            innerTabbedPane.setIconAt(consoleIndex, stateIcon);
+        }
 
-            if (toolbar != null) {
-                toolbar.updateButtonStates(newState);
-            }
+        if (infoBar != null) {
+            infoBar.refreshState();
+        }
 
-            // Forward lifecycle events to the console panel so it can manage MetricsPanel
-            // visibility in sync with the node state. When the node reaches READY/RUNNING,
-            // Signum.getPropertyService() is available and the MetricsPanel can initialize.
-            if (consolePanel != null) {
-                consolePanel.onNodeStateChanged(oldState, newState);
-            }
-        });
+        if (toolbar != null) {
+            toolbar.updateButtonStates(newState);
+        }
+
+        // Forward lifecycle events to the console panel so it can manage MetricsPanel
+        // visibility in sync with the node state. When the node reaches READY/RUNNING,
+        // Signum.getPropertyService() is available and the MetricsPanel can initialize.
+        if (consolePanel != null) {
+            consolePanel.onNodeStateChanged(oldState, newState);
+        }
     }
 
     /**
      * Returns a FontAwesome-based icon for the given node lifecycle state.
      * Used to display state indicators in the inner JTabbedPane tab titles.
      */
-    private Icon getStateIcon(NodeLifecycleState state) {
+    private Icon getStateIcon(Signum.State state) {
         int size = GuiIcons.sizeTiny();
         return switch (state) {
             case RUNNING -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.CIRCLE, size, GuiColors.getPeerActive());
-            case PAUSED -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.PAUSE, size, new java.awt.Color(103, 58, 183));
             case ERROR -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.EXCLAMATION_TRIANGLE, size, GuiColors.getContrastRed());
-            case INITIALIZING, STOPPING -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.SPINNER, size, new java.awt.Color(255, 193, 7));
-            case READY -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.CHECK_CIRCLE_O, size, new java.awt.Color(100, 149, 237));
+            case STARTING -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.SPINNER, size, new java.awt.Color(255, 193, 7));
             case STOPPED -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.STOP, size, GuiColors.getFaintText());
-            case IDLE -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.CIRCLE_O, size, GuiColors.getFaintText());
-            case WAITING_FOR_DATABASE -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.DATABASE, size, new java.awt.Color(255, 193, 7));
+            case CREATED -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.CIRCLE_O, size, GuiColors.getFaintText());
+            case INITIALIZED -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.CHECK_CIRCLE_O, size, new java.awt.Color(100, 149, 237));
+            case STOPPING -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.PAUSE, size, new java.awt.Color(103, 58, 183));
         };
     }
 

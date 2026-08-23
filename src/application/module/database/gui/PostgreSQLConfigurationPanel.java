@@ -16,7 +16,6 @@ import application.module.database.profile.PostgresProfile;
 import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.database.utils.DatabaseConfigurationUtils.ProgressListener;
 import application.module.node.Signum;
-import application.module.node.lifecycle.NodeLifecycleManager;
 import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.CustomDrawingComponent;
 import application.utils.gui.CustomDrawings;
@@ -64,6 +63,7 @@ import java.util.Comparator;
 import java.util.UUID;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import application.module.node.NodeModule;
 
 /**
  * PostgreSQL specific configuration and portable installation panel.
@@ -1304,7 +1304,7 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
             protected Void doInBackground() throws Exception {
                 if (isRunning) {
                     publish(new ProgressInfo("Stopping node lifecycle...", 10));
-                    NodeLifecycleManager.getInstance().stopAllProfiles();
+                    NodeModule.getInstance().stopAll();
                     Thread.sleep(2000);
 
                     publish(new ProgressInfo("Stopping PostgreSQL instance...", 30));
@@ -1336,9 +1336,9 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
                     }
 
                     publish(new ProgressInfo("Restarting node lifecycle...", 95));
-                    NodeLifecycleManager manager = NodeLifecycleManager.getInstance();
-                    manager.discoverProfiles();
-                    manager.startProfile(runningProfileName);
+                    NodeModule manager = NodeModule.getInstance();
+                    
+                    Signum s = manager.get(runningProfileName); if (s != null) s.start();
                 }
 
                 return null;

@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentMap;
 /**
  * Thread-safe collector for profile-scoped metrics.
  * <p>
- * Each {@link NodeProfileRuntime} owns exactly one collector instance.
+ * Each {@code Signum} instance owns exactly one collector instance.
  * The collector stores the latest value for every metric key
  * ({@code moduleId + "." + metricName}) and allows read access for
  * GUI panels, API endpoints, or external monitoring systems.

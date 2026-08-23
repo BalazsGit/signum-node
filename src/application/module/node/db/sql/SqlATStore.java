@@ -316,13 +316,13 @@ public class SqlATStore implements ATStore {
                     && transaction.getAttachment() instanceof Attachment.AutomatedTransactionsCreation) {
                 Attachment.AutomatedTransactionsCreation atCreationAttachment = (Attachment.AutomatedTransactionsCreation) transaction
                         .getAttachment();
-                AtMachineState atCreation = AtMachineState.parseForValidation(atCreationAttachment.getCreationBytes(), 0);
+                AtMachineState atCreation = AtMachineState.parseForValidation(this.atConstants, atCreationAttachment.getCreationBytes(), 0);
                 code = atCreation.getApCodeBytes();
                 codeSize = atCreation.getcSize();
                 codeHashId = atCreation.getApCodeHashId();
             }
         }
-        return new AT(AtApiHelper.getByteArray(at.getId()), AtApiHelper.getByteArray(at.getCreatorId()), at.getName(),
+        return new AT(this.atConstants, AtApiHelper.getByteArray(at.getId()), AtApiHelper.getByteArray(at.getCreatorId()), at.getName(),
                 at.getDescription(), at.getVersion(),
                 height,
                 application.module.node.at.AT.decompressState(atState.getState()), codeSize, at.getDsize(),

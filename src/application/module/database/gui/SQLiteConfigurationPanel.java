@@ -8,7 +8,6 @@ import application.module.database.gui.DatabaseConfigurationPanel.PropertyRow;
 import application.module.database.profile.SQLiteProfile;
 import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.node.Signum;
-import application.module.node.lifecycle.NodeLifecycleManager;
 import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
@@ -41,6 +40,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
+import application.module.node.NodeModule;
 
 /**
  * SQLite specific configuration and profile management.
@@ -382,7 +382,7 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
             protected Void doInBackground() throws Exception {
                 if (isRunning) {
                     publish(new ProgressInfo("Stopping node lifecycle...", 20));
-                    NodeLifecycleManager.getInstance().stopAllProfiles();
+                    NodeModule.getInstance().stopAll();
                     Thread.sleep(2000);
                 }
 
@@ -404,9 +404,9 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
 
                 if (isRunning) {
                     publish(new ProgressInfo("Restarting node lifecycle...", 90));
-                    NodeLifecycleManager manager = NodeLifecycleManager.getInstance();
-                    manager.discoverProfiles();
-                    manager.startProfile(runningProfileName);
+                    NodeModule manager = NodeModule.getInstance();
+                    
+                    Signum s = manager.get(runningProfileName); if (s != null) s.start();
                 }
                 return null;
             }

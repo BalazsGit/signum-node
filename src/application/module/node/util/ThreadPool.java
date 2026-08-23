@@ -1,9 +1,9 @@
 package application.module.node.util;
 
+import application.module.node.TransactionApplyContext;
+import application.module.node.TransactionType;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
-import application.utils.logging.MdcPropagatingThreadFactory;
-import application.utils.logging.ProfileThreadContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,8 +46,81 @@ public final class ThreadPool {
 
     private final PropertyService propertyService;
 
+    /**
+     * The node profile name that owns this thread pool.
+     * <p>
+     * Set by the owning {@code Signum} instance at startup. When present, every
+     * task executed by this pool runs inside a {@link application.utils.logging.NodeLogContext}
+     * scoped to this profile, so the {@code SystemLoggerJulHandler} can route its
+     * log events to the correct per-node {@code ProfileLogger} (Node Console).
+     * </p>
+     */
+    private volatile String profileName;
+
+    /**
+     * Per-node transaction context bound to each thread in this pool.
+     * Ensures multi-node isolation: each pool thread sees only its own node's context.
+     */
+    private volatile TransactionApplyContext transactionApplyContext;
+
     public ThreadPool(PropertyService propertyService) {
         this.propertyService = propertyService;
+    }
+
+    /**
+     * Binds the per-node TransactionApplyContext to all threads in this pool.
+     * Each task executed by this pool will have the context available via
+     * {@link TransactionType#bindContext(TransactionApplyContext)}.
+     */
+    public void setTransactionApplyContext(TransactionApplyContext ctx) {
+        this.transactionApplyContext = ctx;
+    }
+
+    /**
+     * Sets the node profile name that owns this pool.
+     * When set, all tasks executed by this pool run inside a
+     * {@link application.utils.logging.NodeLogContext} scoped to this profile,
+     * so log events are routed to the correct per-node {@code ProfileLogger}.
+     *
+     * @param profileName the node profile name (e.g. "mainnet")
+     */
+    public void setProfileName(String profileName) {
+        this.profileName = profileName;
+    }
+
+    /**
+     * Wraps a Runnable to bind/clear the node's TransactionApplyContext
+     * and (if a profile name is set) to set/clear the {@code NodeLogContext}.
+     * Reads both lazily at execution time to support contexts set after pool start.
+     */
+    private Runnable withContext(Runnable task) {
+        ThreadPool self = this;
+        return () -> {
+            TransactionApplyContext ctx = self.transactionApplyContext;
+            String profile = self.profileName;
+            boolean hasTxCtx = (ctx != null);
+            boolean hasLogCtx = (profile != null);
+            if (!hasTxCtx && !hasLogCtx) {
+                task.run();
+            } else {
+                if (hasTxCtx) {
+                    TransactionType.bindContext(ctx);
+                }
+                if (hasLogCtx) {
+                    application.utils.logging.NodeLogContext.set(profile);
+                }
+                try {
+                    task.run();
+                } finally {
+                    if (hasLogCtx) {
+                        application.utils.logging.NodeLogContext.clear();
+                    }
+                    if (hasTxCtx) {
+                        TransactionType.clearContext();
+                    }
+                }
+            }
+        };
     }
 
     public synchronized void runBeforeStart(Runnable runnable, boolean runLast) {
@@ -114,14 +187,12 @@ public final class ThreadPool {
         logger.info("Using {} msec Thread delay", propertyService.getInt(Props.BLOCK_PROCESS_THREAD_DELAY));
         int totalThreads = backgroundJobs.size() + backgroundJobsCores.size() * cores;
         logger.debug("Starting {} background jobs", totalThreads);
-        // Use MdcPropagatingThreadFactory so child threads inherit the parent's MDC context.
-        // Since NodeLifecycleManager wraps startup in ProfileThreadContext.wrap(module, profile),
-        // all scheduled workers will carry module="node" + profile=<profileName> for proper log routing.
+        // MDC propagation removed — ProfileLogger subscriber model replaces it
         scheduledThreadPool = Executors.newScheduledThreadPool(
-                totalThreads, new MdcPropagatingThreadFactory("Node-Worker-", true));
+                totalThreads, r -> { Thread t = new Thread(r, "Node-Worker-"); t.setDaemon(true); return t; });
         for (Map.Entry<Runnable, Long> entry : backgroundJobs.entrySet()) {
-            final Runnable inner = entry.getKey();
-            final String name = backgroundJobNames.get(inner);
+            final Runnable inner = withContext(entry.getKey());
+            final String name = backgroundJobNames.get(entry.getKey());
             Runnable toRun = () -> {
                 Thread currentThread = Thread.currentThread();
                 String oldName = currentThread.getName();
@@ -148,9 +219,10 @@ public final class ThreadPool {
 
         // Starting multicore-Threads:
         for (Map.Entry<Runnable, Long> entry : backgroundJobsCores.entrySet()) {
-            final Runnable inner = entry.getKey();
-            final String name = "CoreTask-" + inner.getClass().getSimpleName();
+            final Runnable inner = withContext(entry.getKey());
+            final String name = "CoreTask-" + entry.getKey().getClass().getSimpleName();
             Runnable toRun = () -> {
+                // Context is already bound by withContext wrapper
                 Thread currentThread = Thread.currentThread();
                 activeThreadsStartTime.put(currentThread, System.currentTimeMillis());
                 activeThreadsJobName.put(currentThread, name);
@@ -254,18 +326,15 @@ public final class ThreadPool {
     private void runAll(List<Runnable> jobs) {
         List<Thread> threads = new ArrayList<>();
         final StringBuffer errors = new StringBuffer();
-        // Capture current MDC so spawned startup threads also carry the routing context.
-        String capturedModule = ProfileThreadContext.getModuleId();
-        String capturedProfile = ProfileThreadContext.getProfile();
         for (final Runnable runnable : jobs) {
-            Thread thread = new Thread(ProfileThreadContext.wrap(() -> {
+            Thread thread = new Thread(() -> {
                 try {
                     runnable.run();
                 } catch (Exception t) {
                     errors.append(t.getMessage()).append('\n');
                     throw t;
                 }
-            }, capturedModule, capturedProfile));
+            });
             thread.setDaemon(true);
             thread.start();
             threads.add(thread);

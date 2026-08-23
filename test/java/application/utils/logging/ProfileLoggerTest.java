@@ -31,7 +31,7 @@ class ProfileLoggerTest {
         SystemLogger.resetInstance();
     }
 
-    // ── Constructor & Identity ──────────────────────────────────────────
+    // â”€â”€ Constructor & Identity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Nested
     @DisplayName("Constructor")
@@ -73,7 +73,7 @@ class ProfileLoggerTest {
         }
     }
 
-    // ── Logging & Level Filtering ───────────────────────────────────────
+    // â”€â”€ Logging & Level Filtering â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Nested
     @DisplayName("Logging")
@@ -130,7 +130,7 @@ class ProfileLoggerTest {
         }
     }
 
-    // ── Forwarding to SystemLogger ──────────────────────────────────────
+    // â”€â”€ Forwarding to SystemLogger â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Nested
     @DisplayName("Forwarding")
@@ -183,7 +183,7 @@ class ProfileLoggerTest {
         }
     }
 
-    // ── Lifecycle ───────────────────────────────────────────────────────
+    // â”€â”€ Lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Nested
     @DisplayName("Lifecycle")
@@ -211,7 +211,7 @@ class ProfileLoggerTest {
         }
     }
 
-    // ── toString ────────────────────────────────────────────────────────
+    // â”€â”€ toString â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Test
     void toString_ContainsProfileInfo() {
@@ -222,7 +222,93 @@ class ProfileLoggerTest {
         assertTrue(s.contains("mainnet"));
     }
 
-    // ── Test Helper ─────────────────────────────────────────────────────
+    // â”€â”€ Replay (late-attaching subscribers) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    @Nested
+    @DisplayName("Replay")
+    class ReplayTests {
+
+        @Test
+        void lateSubscriber_receivesPreviousEvents_inOrder() {
+            ProfileLogger logger = new ProfileLogger("node", "mainnet");
+            for (int i = 1; i <= 5; i++) {
+                logger.info("line-" + i);
+            }
+
+            java.util.List<String> received = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+            logger.addSubscriber(new TestSubscriber(e -> received.add(e.getMessage())));
+
+            assertEquals(java.util.Arrays.asList("line-1", "line-2", "line-3", "line-4", "line-5"), received);
+        }
+
+        @Test
+        void replay_isBoundedByCapacity_keepsMostRecent() {
+            ProfileLogger logger = new ProfileLogger("node", "mainnet", 3);
+            for (int i = 1; i <= 10; i++) {
+                logger.info("line-" + i);
+            }
+            assertEquals(3, logger.getReplayBufferSize());
+
+            java.util.List<String> received = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+            logger.addSubscriber(new TestSubscriber(e -> received.add(e.getMessage())));
+
+            assertEquals(java.util.Arrays.asList("line-8", "line-9", "line-10"), received);
+        }
+
+        @Test
+        void lateSubscriber_noDuplicatesOrGaps_whenLoggingAfterAttach() {
+            ProfileLogger logger = new ProfileLogger("node", "mainnet", 100);
+            for (int i = 1; i <= 5; i++) {
+                logger.info("line-" + i);
+            }
+            java.util.List<String> received = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+            logger.addSubscriber(new TestSubscriber(e -> received.add(e.getMessage())));
+            for (int i = 6; i <= 8; i++) {
+                logger.info("line-" + i);
+            }
+
+            assertEquals(java.util.Arrays.asList("line-1", "line-2", "line-3", "line-4", "line-5",
+                    "line-6", "line-7", "line-8"), received);
+        }
+
+        @Test
+        void addSubscriber_sameInstanceTwice_deliversOnce() {
+            ProfileLogger logger = new ProfileLogger("node", "mainnet");
+            logger.info("line-1");
+            java.util.List<String> received = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+            TestSubscriber subscriber = new TestSubscriber(e -> received.add(e.getMessage()));
+
+            logger.addSubscriber(subscriber); // replay: line-1
+            logger.addSubscriber(subscriber); // idempotent no-op
+            logger.info("line-2");
+
+            assertEquals(java.util.Arrays.asList("line-1", "line-2"), received);
+        }
+
+        @Test
+        void closedLogger_addSubscriber_receivesNothing() {
+            ProfileLogger logger = new ProfileLogger("node", "mainnet");
+            logger.info("line-1");
+            logger.close();
+
+            java.util.List<String> received = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+            logger.addSubscriber(new TestSubscriber(e -> received.add(e.getMessage())));
+
+            assertTrue(received.isEmpty());
+        }
+
+        @Test
+        void replayCapacity_invalid_throwsIAE() {
+            assertThrows(IllegalArgumentException.class, () -> new ProfileLogger("node", "mainnet", 0));
+        }
+
+        @Test
+        void defaultReplayCapacity_isAlignedWithConsoleMaxLines() {
+            assertEquals(500, ProfileLogger.DEFAULT_REPLAY_CAPACITY);
+        }
+    }
+
+    // â”€â”€ Test Helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     private static class TestSubscriber implements LogSubscriber {
         private final Consumer<LogEvent> onEvent;

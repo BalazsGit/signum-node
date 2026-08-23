@@ -17,7 +17,6 @@ import application.module.database.profile.MariadbProfile;
 import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.database.utils.DatabaseConfigurationUtils.ProgressListener;
 import application.module.node.Signum;
-import application.module.node.lifecycle.NodeLifecycleManager;
 import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.CustomDrawingComponent;
 import application.utils.gui.CustomDrawings;
@@ -64,6 +63,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import application.module.node.NodeModule;
 
 /**
  * MariaDB specific configuration and version management.
@@ -3787,7 +3787,7 @@ public class MariaDBProfilePanel extends JPanel {
             protected Void doInBackground() throws Exception {
                 if (isRunning) {
                     publish(new ProgressInfo("Stopping node lifecycle...", 10));
-                    NodeLifecycleManager.getInstance().stopAllProfiles();
+                    NodeModule.getInstance().stopAll();
                     Thread.sleep(2000);
 
                     if (currentProfile != null && currentProfile.isInstanceRunning()) {
@@ -3824,9 +3824,9 @@ public class MariaDBProfilePanel extends JPanel {
                     }
 
                     publish(new ProgressInfo("Restarting node lifecycle...", 95));
-                    NodeLifecycleManager manager = NodeLifecycleManager.getInstance();
-                    manager.discoverProfiles();
-                    manager.startProfile(currentProfile.getProfileName());
+                    NodeModule manager = NodeModule.getInstance();
+                    
+                    Signum s = manager.get(currentProfile.getProfileName()); if (s != null) s.start();
                 }
 
                 return null;

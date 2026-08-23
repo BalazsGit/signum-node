@@ -188,8 +188,24 @@ public class AtMachineState {
      * @param height        blockchain height for version resolution
      * @return parsed AtMachineState instance
      */
+    /**
+     * @deprecated Use {@link #parseForValidation(AtConstants, byte[], int)} instead.
+     */
+    @Deprecated
     public static AtMachineState parseForValidation(byte[] creationBytes, int height) {
         return new AtMachineState(AtController.getAtConstants(), null, null, creationBytes, height);
+    }
+
+    /**
+     * Parses creation bytes for validation using the provided AtConstants instance.
+     *
+     * @param atConstants the AT configuration constants for this node instance
+     * @param creationBytes the raw creation bytes
+     * @param height the block height
+     * @return the parsed machine state
+     */
+    public static AtMachineState parseForValidation(AtConstants atConstants, byte[] creationBytes, int height) {
+        return new AtMachineState(atConstants, null, null, creationBytes, height);
     }
 
     /**
@@ -202,8 +218,26 @@ public class AtMachineState {
      * @param height     blockchain height for version resolution
      * @return parsed AtMachineState instance
      */
+    /**
+     * @deprecated Use {@link #parse(AtConstants, byte[], byte[], byte[], int)} instead.
+     */
+    @Deprecated
     public static AtMachineState parse(byte[] atId, byte[] creator, byte[] creationBytes, int height) {
         return new AtMachineState(AtController.getAtConstants(), atId, creator, creationBytes, height);
+    }
+
+    /**
+     * Parses an AT machine state using the provided AtConstants instance.
+     *
+     * @param atConstants the AT configuration constants for this node instance
+     * @param atId        the AT identifier
+     * @param creator     the creator account ID
+     * @param creationBytes the raw creation bytes
+     * @param height      the creation block height
+     * @return the parsed machine state
+     */
+    public static AtMachineState parse(AtConstants atConstants, byte[] atId, byte[] creator, byte[] creationBytes, int height) {
+        return new AtMachineState(atConstants, atId, creator, creationBytes, height);
     }
 
     byte[] getA1() {

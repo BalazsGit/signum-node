@@ -11,6 +11,7 @@ import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.props.PropertyService;
 import application.module.node.services.*;
 import application.module.node.util.ThreadPool;
+import application.module.node.TransactionApplyContext;
 import application.module.node.web.api.http.common.APITransactionManager;
 import signum.net.NetworkParameters;
 
@@ -41,6 +42,15 @@ public class WebServerContext {
     private final AtConstants atConstants;
     private final FluxCapacitor fluxCapacitor;
     private final Stores stores;
+    private volatile TransactionApplyContext transactionApplyContext;
+
+    public TransactionApplyContext getTransactionApplyContext() {
+        return transactionApplyContext;
+    }
+
+    public void setTransactionApplyContext(TransactionApplyContext transactionApplyContext) {
+        this.transactionApplyContext = transactionApplyContext;
+    }
 
     public WebServerContext(TransactionProcessor transactionProcessor, Blockchain blockchain,
             BlockchainProcessor blockchainProcessor, ParameterService parameterService, AccountService accountService,

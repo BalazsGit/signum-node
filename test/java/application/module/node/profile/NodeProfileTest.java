@@ -1,6 +1,5 @@
 package application.module.node.profile;
 
-import application.module.node.lifecycle.NodeProfileRuntime;
 import application.module.node.logging.NodeLoggingProfile;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -250,42 +249,8 @@ class NodeProfileTest {
     // Runtime Access (NEW - Phase 2b)
     // =====================================================================
 
-    @Nested
-    @DisplayName("Runtime Access")
-    class RuntimeAccessTests {
-
-        @Test
-        @DisplayName("getRuntime returns non-null NodeProfileRuntime for legacy constructor")
-        void getRuntime_GivenLegacyConstructor_ReturnsRuntime() {
-            NodeProfile profile = new NodeProfile("test");
-            assertNotNull(profile.getRuntime());
-            assertTrue(profile.getRuntime() instanceof NodeProfileRuntime);
-        }
-
-        @Test
-        @DisplayName("getRuntime returns non-null NodeProfileRuntime for Builder constructor")
-        void getRuntime_GivenBuilderConstructor_ReturnsRuntime() {
-            NodeProfile profile = new NodeProfile.Builder("test").build();
-            assertNotNull(profile.getRuntime());
-        }
-
-        @Test
-        @DisplayName("Runtime has default lifecycle state IDLE")
-        void runtime_HasDefaultLifecycleStateIdle() {
-            NodeProfile profile = new NodeProfile("test");
-            // LifecycleStateMachine defaults to IDLE
-            assertEquals(application.module.node.lifecycle.NodeLifecycleState.IDLE,
-                    profile.getRuntime().getLifecycleState());
-        }
-
-        @Test
-        @DisplayName("Each profile gets its own independent runtime instance")
-        void runtime_EachProfileHasIndependentRuntime() {
-            NodeProfile profile1 = new NodeProfile("mainnet");
-            NodeProfile profile2 = new NodeProfile("testnet");
-            assertNotSame(profile1.getRuntime(), profile2.getRuntime());
-        }
-    }
+    // RuntimeAccessTests removed in Phase 5: NodeProfileRuntime and getRuntime() deleted.
+    // Runtime state is now managed by Signum (State enum + OperatingState enum).
 
     // =====================================================================
     // PropertiesPath Access (NEW - Phase 2b)

@@ -1,7 +1,5 @@
 package application.module.node.gui;
 
-import application.module.node.lifecycle.NodeLifecycleManager;
-import application.module.node.lifecycle.NodeLifecycleState;
 import application.module.node.profile.NodeProfile;
 
 import org.junit.jupiter.api.AfterEach;
@@ -22,9 +20,6 @@ class NodeInfoBarTest {
 
     @BeforeEach
     void setUp() {
-        // Reset lifecycle manager before each test
-        NodeLifecycleManager.resetInstance();
-        
         // Arrange: Create a test profile with known properties
         testProfile = new NodeProfile("test-profile");
         testProfile.setProperty("network", "mainnet");
@@ -35,8 +30,7 @@ class NodeInfoBarTest {
 
     @AfterEach
     void tearDown() {
-        // Clean up lifecycle manager after each test
-        NodeLifecycleManager.resetInstance();
+        // Cleanup if needed
     }
 
     @Test
