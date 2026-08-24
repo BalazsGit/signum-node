@@ -65,7 +65,6 @@ public final class LogEventBatcher implements AutoCloseable {
     private final AtomicInteger writeIndex;
     private final AtomicInteger count;
     private final AtomicBoolean running;
-    private final AtomicBoolean flushPending;
 
     /**
      * Lazy-activation timer: only scheduled when there are events to flush.
@@ -110,7 +109,6 @@ public final class LogEventBatcher implements AutoCloseable {
         this.writeIndex = new AtomicInteger(0);
         this.count = new AtomicInteger(0);
         this.running = new AtomicBoolean(true);
-        this.flushPending = new AtomicBoolean(false);
     }
 
     /**
@@ -159,7 +157,7 @@ public final class LogEventBatcher implements AutoCloseable {
                         flushTaskScheduled = false;
                     }
                     if (running.get() && count.get() > 0) {
-                        flushInternal(false);
+                        flushInternal();
                     }
                 }
             };
@@ -190,7 +188,7 @@ public final class LogEventBatcher implements AutoCloseable {
         int currentCount = count.get();
         if (currentCount >= maxBatchSize) {
             // Buffer full - trigger immediate flush
-            flushInternal(true);
+            flushInternal();
         }
 
         int idx = writeIndex.getAndIncrement() % maxBatchSize;
@@ -216,7 +214,7 @@ public final class LogEventBatcher implements AutoCloseable {
         if (!running.get()) {
             return;
         }
-        flushInternal(true);
+        flushInternal();
     }
 
     /**
@@ -240,7 +238,7 @@ public final class LogEventBatcher implements AutoCloseable {
             flushTaskScheduled = false;
         }
         
-        flushInternal(true);
+        flushInternal();
 
         synchronized (this) {
             if (flushTimer != null) {
@@ -261,42 +259,38 @@ public final class LogEventBatcher implements AutoCloseable {
     private void scheduleEdtFlush() {
         SwingUtilities.invokeLater(() -> {
             if (running.get() && count.get() > 0) {
-                flushInternal(false);
+                flushInternal();
             }
         });
     }
 
     /**
      * Internal flush logic. Collects all buffered events and delivers them to the consumer on EDT.
-     *
-     * @param reset true to clear the buffer after collecting (for capacity-based forced flush)
+     * <p>
+     * The buffer is always <b>consumed</b> (slots cleared + count reset) as part of the flush,
+     * so every event is delivered <b>exactly once</b>. The read, snapshot and reset happen under
+     * a single lock, making the flush atomic with respect to concurrent {@link #enqueue(LogEvent)}
+     * / {@link #flush()} calls and therefore preventing the same batch from being delivered twice.
+     * </p>
      */
-    private void flushInternal(boolean reset) {
-        int currentCount = count.get();
-        if (currentCount == 0) {
-            flushPending.set(false);
-            return;
-        }
-
-        // Snapshot events from ring buffer in chronological order
+    private void flushInternal() {
         List<LogEvent> snapshot;
         synchronized (ringBuffer) {
+            int currentCount = count.get();
+            if (currentCount == 0) {
+                return;
+            }
+            // Snapshot the buffered events in chronological order, then consume them
+            // (clear the slots + reset the count) so nothing is re-delivered.
             snapshot = new ArrayList<>(currentCount);
             int startIdx = (writeIndex.get() - currentCount + maxBatchSize) % maxBatchSize;
             for (int i = 0; i < currentCount; i++) {
                 int idx = (startIdx + i) % maxBatchSize;
                 snapshot.add(ringBuffer[idx]);
-                if (reset) {
-                    ringBuffer[idx] = null; // Help GC
-                }
+                ringBuffer[idx] = null; // Help GC
             }
-        }
-
-        if (reset) {
             count.set(0);
         }
-
-        flushPending.set(false);
 
         // Dispatch to EDT
         if (!snapshot.isEmpty()) {
@@ -308,10 +302,6 @@ public final class LogEventBatcher implements AutoCloseable {
                     } catch (Exception e) {
                         // Log error but don't crash the EDT
                         System.err.println("LogEventBatcher consumer error: " + e.getMessage());
-                    } finally {
-                        if (reset) {
-                            // Already reset above
-                        }
                     }
                 }
             });

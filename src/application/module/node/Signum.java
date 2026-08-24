@@ -305,17 +305,17 @@ public final class Signum {
         this.profile = Objects.requireNonNull(profile, "profile must not be null");
         this.confFolder = Objects.requireNonNull(confFolder, "confFolder must not be null");
 
-        // ── Step 1: Create the per-node ProfileLogger up front (moved here from doInitialize) ──
-        // Creating it in the constructor — before init()/start() — lets GUI consoles
+        // ── Step 1: Obtain the per-node ProfileLogger (moved here from doInitialize) ──
+        // Acquiring it in the constructor — before init()/start() — lets GUI consoles
         // attach before the node starts, and ProfileLogger's replay buffer guarantees
         // that no log line is lost even when the subscriber attaches late: every event
         // logged before the attach is replayed to it in chronological order.
-        // SystemLoggerJulHandler already dispatches all events to SystemLogger,
-        // so we disable the ProfileLogger's own forwarding to avoid duplicates.
-        this.profileLogger = new ProfileLogger("node", profile.getName());
-        this.profileLogger.setForwardToSystem(false);
-        // Register in the global registry so the handler can route logs here
-        application.utils.logging.NodeLoggerRegistry.register(profile.getName(), this.profileLogger);
+        // getOrCreate() adopts the instance the GUI panel may have created early (see
+        // NodeProfilePanel), so the GUI-construction logs captured before the Signum
+        // existed are preserved; otherwise it creates + registers a fresh one. Either
+        // way the ProfileLogger's forwarding to SystemLogger stays disabled (the
+        // SystemLoggerJulHandler already forwards), avoiding System Console duplicates.
+        this.profileLogger = application.utils.logging.NodeLoggerRegistry.getOrCreate("node", profile.getName());
     }
 
     // =========================================================================
@@ -358,31 +358,77 @@ public final class Signum {
      * @throws application.module.node.instance.NodeStartupException if startup fails
      */
     public synchronized void start() {
-        if (this.state == State.CREATED) {
-            this.init();
-        }
-        if (this.state != State.INITIALIZED && this.state != State.STOPPED) {
-            throw new IllegalStateException("Cannot start from state " + this.state);
-        }
-        setState(State.STARTING);
-        try {
-            doInitialize();
-            setState(State.RUNNING);
-        } catch (Exception e) {
-            setState(State.ERROR);
-            throw e;
-        }
+        // Route this startup's SLF4J output to this node's ProfileLogger (Node Console).
+        // The SystemLoggerJulHandler forwards an event to the per-profile ProfileLogger
+        // only when NodeLogContext.current() carries the profile name; otherwise every
+        // line (DB init, sync start, …) goes to SystemLogger alone and the per-profile
+        // console stays empty. Binding the context on the thread that runs init() +
+        // doInitialize() is what lets the ProfileLogger's replay buffer actually capture
+        // those lines for late-attaching GUI subscribers (v2 plan D4).
+        withProfileLogContext(() -> {
+            if (this.state == State.CREATED) {
+                this.init();
+            }
+            if (this.state != State.INITIALIZED && this.state != State.STOPPED) {
+                throw new IllegalStateException("Cannot start from state " + this.state);
+            }
+            setState(State.STARTING);
+            try {
+                doInitialize();
+                setState(State.RUNNING);
+            } catch (Exception e) {
+                setState(State.ERROR);
+                throw e;
+            }
+        });
     }
 
     public void stop() {
         if (this.state == State.RUNNING) {
-            setState(State.STOPPING);
-            try {
-                doShutdown();
-                setState(State.STOPPED);
-            } catch (Exception e) {
-                setState(State.ERROR);
-                throw e;
+            // Same log-context binding as start() so shutdown lines reach the profile console.
+            withProfileLogContext(() -> {
+                setState(State.STOPPING);
+                try {
+                    doShutdown();
+                    setState(State.STOPPED);
+                } catch (Exception e) {
+                    setState(State.ERROR);
+                    throw e;
+                }
+            });
+        }
+    }
+
+    /**
+     * Runs the given lifecycle block on the current thread with the
+     * {@link application.utils.logging.NodeLogContext} bound to this node's profile,
+     * so SLF4J log output is routed to this node's {@link ProfileLogger} (Node Console
+     * tab) in addition to {@link application.utils.logging.SystemLogger}. The previous
+     * context (if any) is restored afterwards.
+     * <p>
+     * Without this binding the startup/shutdown thread has no active profile context,
+     * so the JUL bridge ({@code SystemLoggerJulHandler}) would drop those events to the
+     * per-profile console — leaving the Node Console empty even though the replay buffer
+     * (see {@link ProfileLogger}) is otherwise correct.
+     * </p>
+     *
+     * @param task the lifecycle block to execute (init/doInitialize or doShutdown)
+     */
+    private void withProfileLogContext(Runnable task) {
+        String previousContext = application.utils.logging.NodeLogContext.current();
+        boolean bound = this.profile != null;
+        if (bound) {
+            application.utils.logging.NodeLogContext.set(this.profile.getName());
+        }
+        try {
+            task.run();
+        } finally {
+            if (bound) {
+                if (previousContext != null) {
+                    application.utils.logging.NodeLogContext.set(previousContext);
+                } else {
+                    application.utils.logging.NodeLogContext.clear();
+                }
             }
         }
     }

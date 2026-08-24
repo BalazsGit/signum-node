@@ -284,6 +284,39 @@ class LogEventBatcherTest {
 
             assertEquals(0, consumer.getTotalEventsDelivered());
         }
+
+        @Test
+        @DisplayName("REGRESSION: delayed flush delivers each event exactly once (no re-delivery)")
+        void delayedFlush_MultipleBatches_DeliversEachEventExactlyOnce() throws Exception {
+            LatchCaptureConsumer consumer = new LatchCaptureConsumer(3);
+            LogEventBatcher batcher = new LogEventBatcher(consumer, 20, 50);
+            batcher.start();
+
+            // Three separate batches, each delivered by the timer-driven delayed flush.
+            batcher.enqueue(createTestEvent("A"));
+            Thread.sleep(120);
+            batcher.enqueue(createTestEvent("B"));
+            Thread.sleep(120);
+            batcher.enqueue(createTestEvent("C"));
+            Thread.sleep(120);
+
+            waitForEdtDispatch();
+            consumer.await(10);
+
+            List<String> delivered = new ArrayList<>();
+            for (List<LogEvent> batch : consumer.getCapturedBatches()) {
+                for (LogEvent e : batch) {
+                    delivered.add(e.getMessage());
+                }
+            }
+            Collections.sort(delivered);
+            // A, B, C each exactly once. The previous non-consuming delayed flush
+            // (flushInternal(false)) re-delivered A (and B) on every later flush (6 total).
+            assertEquals(List.of("A", "B", "C"), delivered,
+                    "each event must be delivered exactly once, with no re-delivery");
+            assertEquals(3, consumer.getTotalEventsDelivered(), "no duplicate deliveries");
+            batcher.stop();
+        }
     }
 
     // ── Capacity-based auto-flush ────────────────────────────────────

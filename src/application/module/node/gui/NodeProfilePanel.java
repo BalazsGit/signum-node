@@ -88,6 +88,14 @@ public class NodeProfilePanel extends JPanel {
      * @since 4.0 Phase G - Greenfield wiring
      */
     public NodeProfilePanel(JFrame parentFrame, NodeProfile profile, Signum signum) {
+        // Bind the profile log context EARLY so this panel's construction logs (emitted on
+        // the Swing EDT, before the node has even started) are routed to the node's
+        // ProfileLogger (Node Console tab) as well as the System Console. The profile is
+        // known here, so we also ensure the ProfileLogger exists now; the Signum adopts
+        // this same instance when the node starts, so nothing logged before then is lost.
+        application.utils.logging.NodeLoggerRegistry.getOrCreate("node", profile.getName());
+        String previousContext = application.utils.logging.NodeLogContext.current();
+        application.utils.logging.NodeLogContext.set(profile.getName());
         LOGGER.info("[DIAG] NodeProfilePanel constructor START for profile: {}", profile.getName());
         
         try {
@@ -203,6 +211,14 @@ public class NodeProfilePanel extends JPanel {
         } catch (Exception e) {
             LOGGER.error("[DIAG] NodeProfilePanel constructor FAILED for profile: {}", profile.getName(), e);
             throw e;
+        } finally {
+            // Restore the thread-local log context — the EDT is shared, so it must never
+            // leak past this panel's construction.
+            if (previousContext != null) {
+                application.utils.logging.NodeLogContext.set(previousContext);
+            } else {
+                application.utils.logging.NodeLogContext.clear();
+            }
         }
     }
 

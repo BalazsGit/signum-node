@@ -64,4 +64,39 @@ public final class NodeLoggerRegistry {
     public static ProfileLogger get(String profileName) {
         return profileName != null ? REGISTRY.get(profileName) : null;
     }
+
+    /**
+     * Returns the registered ProfileLogger for the given profile, or creates and
+     * registers a new one if none exists yet.
+     * <p>
+     * This lets early components — e.g. the per-profile GUI panel, which is built on
+     * the Swing EDT <b>before</b> the node is started — route their logs to the profile
+     * console. The {@code Signum} adopts this same instance at startup
+     * (see {@code Signum(NodeProfile, Path)}), so no log line emitted before the
+     * Signum exists is lost.
+     * </p>
+     * <p>
+     * The created logger has forwarding to {@link SystemLogger} disabled: the
+     * {@link SystemLoggerJulHandler} already dispatches every event to the System
+     * Console, so a second forward from the ProfileLogger would duplicate lines.
+     * </p>
+     *
+     * @param moduleId    the module identifier (e.g. "node"), never null
+     * @param profileName the profile name, never null or empty
+     * @return the (possibly newly created) ProfileLogger for the profile
+     * @throws IllegalArgumentException if profileName is null or empty
+     */
+    public static ProfileLogger getOrCreate(String moduleId, String profileName) {
+        if (profileName == null || profileName.isEmpty()) {
+            throw new IllegalArgumentException("profileName must not be null or empty");
+        }
+        ProfileLogger existing = REGISTRY.get(profileName);
+        if (existing != null) {
+            return existing;
+        }
+        ProfileLogger created = new ProfileLogger(moduleId, profileName);
+        created.setForwardToSystem(false);
+        ProfileLogger previous = REGISTRY.putIfAbsent(profileName, created);
+        return previous != null ? previous : created;
+    }
 }
