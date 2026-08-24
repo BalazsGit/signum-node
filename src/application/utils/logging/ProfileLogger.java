@@ -133,6 +133,30 @@ public final class ProfileLogger extends LoggerImpl {
         return profileName;
     }
 
+    /**
+     * The composite (module, profile) scope this logger is bound to.
+     *
+     * @return the scope (never null)
+     */
+    public LogScope getScope() {
+        return LogScope.of(moduleId, profileName);
+    }
+
+    /**
+     * Returns a copy of the given event stamped with this logger's scope
+     * (module + profile), so downstream consumers see the qualified identity
+     * regardless of whether the event arrived already scoped.
+     *
+     * @param event the event to stamp (never null)
+     * @return a copy of the event with module + profile set
+     */
+    private LogEvent withScope(LogEvent event) {
+        return event.toBuilder()
+                .module(moduleId)
+                .profileName(profileName)
+                .build();
+    }
+
     /** @return the maximum number of events retained for replay (always &gt; 0) */
     public int getReplayCapacity() {
         return replayCapacity;
@@ -164,6 +188,9 @@ public final class ProfileLogger extends LoggerImpl {
 
     @Override
     protected void dispatch(LogEvent event) {
+        // Stamp this logger's (module, profile) scope so downstream consumers
+        // (System Console tag, color scheme, filters) see the qualified identity.
+        event = withScope(event);
         // Buffer the event and dispatch to this profile's subscribers atomically
         // w.r.t. addSubscriber(): this is what guarantees a late subscriber either
         // sees the event in the replay snapshot (if it was appended before the

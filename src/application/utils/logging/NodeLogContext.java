@@ -32,7 +32,7 @@ import java.util.Objects;
  */
 public final class NodeLogContext {
 
-    private static final ThreadLocal<String> CURRENT = new ThreadLocal<>();
+    private static final ThreadLocal<LogScope> CURRENT = new ThreadLocal<>();
 
     private NodeLogContext() {
         // Utility class
@@ -43,8 +43,18 @@ public final class NodeLogContext {
      *
      * @param profileName the profile name (e.g. "mainnet", "testnet")
      */
-    public static void set(String profileName) {
-        CURRENT.set(Objects.requireNonNull(profileName, "profileName must not be null"));
+    public static void set(LogScope scope) {
+        CURRENT.set(Objects.requireNonNull(scope, "scope must not be null"));
+    }
+
+    /**
+     * Binds a (module, profile) scope to the current thread.
+     *
+     * @param module  the module id (e.g. "node")
+     * @param profile the profile name within the module (e.g. "mainnet")
+     */
+    public static void set(String module, String profile) {
+        set(LogScope.of(module, profile));
     }
 
     /**
@@ -53,7 +63,7 @@ public final class NodeLogContext {
      *
      * @return the profile name, or null
      */
-    public static String current() {
+    public static LogScope current() {
         return CURRENT.get();
     }
 
@@ -75,9 +85,9 @@ public final class NodeLogContext {
      * @param profileName the profile name to scope
      * @param task        the task to execute
      */
-    public static void runIn(String profileName, Runnable task) {
-        String previous = CURRENT.get();
-        set(profileName);
+    public static void runIn(LogScope scope, Runnable task) {
+        LogScope previous = CURRENT.get();
+        set(scope);
         try {
             task.run();
         } finally {
@@ -87,5 +97,16 @@ public final class NodeLogContext {
                 clear();
             }
         }
+    }
+
+    /**
+     * Runs the given task within a (module, profile) scope.
+     *
+     * @param module  the module id
+     * @param profile the profile name within the module
+     * @param task    the task to execute
+     */
+    public static void runIn(String module, String profile, Runnable task) {
+        runIn(LogScope.of(module, profile), task);
     }
 }

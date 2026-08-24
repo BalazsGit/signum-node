@@ -69,13 +69,13 @@ class NodeLogContextRoutingTest {
         profileLogger.setForwardToSystem(false);
         profileLogger.addSubscriber(profileSub);
         SystemLogger.getInstance().addSubscriber(systemSub);
-        NodeLoggerRegistry.register(PROFILE, profileLogger);
+        NodeLoggerRegistry.register("node", PROFILE, profileLogger);
     }
 
     @AfterEach
     void tearDown() {
         NodeLogContext.clear();
-        NodeLoggerRegistry.unregister(PROFILE);
+        NodeLoggerRegistry.unregister("node", PROFILE);
         if (profileLogger != null) {
             profileLogger.close();
         }
@@ -103,7 +103,7 @@ class NodeLogContextRoutingTest {
     @Test
     @DisplayName("with NodeLogContext: ProfileLogger receives the event (the mechanism Signum.start() now uses)")
     void withContext_routesToProfileLogger() {
-        NodeLogContext.set(PROFILE);
+        NodeLogContext.set("node", PROFILE);
         try {
             SystemLoggerJulHandler.getInstance().publish(sampleRecord());
         } finally {
@@ -120,7 +120,7 @@ class NodeLogContextRoutingTest {
     void runIn_bindsAndRestoresContext() {
         NodeLogContext.clear();
 
-        NodeLogContext.runIn(PROFILE, () -> SystemLoggerJulHandler.getInstance().publish(sampleRecord()));
+        NodeLogContext.runIn("node", PROFILE, () -> SystemLoggerJulHandler.getInstance().publish(sampleRecord()));
 
         assertEquals(1, systemEvents.get());
         assertEquals(1, profileEvents.get());

@@ -47,7 +47,12 @@ public class MariadbProfile {
         if (logger == null) {
             synchronized (this) {
                 if (logger == null) {
-                    logger = new ProfileLogger("database", profileName);
+                    // Register the database profile logger in the shared registry under the
+                    // collision-safe "database.<profile>" scope. Database logs do not pass
+                    // through the SystemLoggerJulHandler, so forwarding to the SystemLogger
+                    // must stay enabled (unlike node loggers, which the handler already forwards).
+                    logger = application.utils.logging.NodeLoggerRegistry.getOrCreate("database", profileName);
+                    logger.setForwardToSystem(true);
                 }
             }
         }

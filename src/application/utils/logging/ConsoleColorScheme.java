@@ -224,10 +224,41 @@ public final class ConsoleColorScheme {
      * @return the resolved color (never null; returns fallback for null profile)
      */
     public Color resolveEventColor(String profileName) {
-        if (profileName == null || profileName.isEmpty()) {
+        return resolveEventColor(profileName, null);
+    }
+
+    /**
+     * Resolves the color for a profile, preferring an explicit (custom) color.
+     * <p>
+     * Tries the qualified {@code module.profile} key first, then the bare
+     * {@code profile} key (for legacy custom colors keyed by the bare name), then
+     * auto-assigns a color under the qualified key.
+     * </p>
+     *
+     * @param qualifiedKey the qualified {@code module.profile} name, may be null
+     * @param fallbackKey  the bare profile name, may be null
+     * @return the resolved color (never null)
+     */
+    public synchronized Color resolveEventColor(String qualifiedKey, String fallbackKey) {
+        if (qualifiedKey == null || qualifiedKey.isEmpty()) {
+            qualifiedKey = fallbackKey;
+        }
+        if (qualifiedKey == null || qualifiedKey.isEmpty()) {
             return FALLBACK_COLOR;
         }
-        return getColorForProfile(profileName);
+        // Prefer an explicit custom color: qualified first, then bare (legacy).
+        Color custom = customColors.get(qualifiedKey);
+        if (custom != null) {
+            return custom;
+        }
+        if (fallbackKey != null && !fallbackKey.isEmpty() && !fallbackKey.equals(qualifiedKey)) {
+            Color legacy = customColors.get(fallbackKey);
+            if (legacy != null) {
+                return legacy;
+            }
+        }
+        // No explicit custom color: auto-assign (or reuse) under the qualified key.
+        return getColorForProfile(qualifiedKey);
     }
 
     /**

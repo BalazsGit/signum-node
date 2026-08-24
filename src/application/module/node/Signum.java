@@ -415,10 +415,10 @@ public final class Signum {
      * @param task the lifecycle block to execute (init/doInitialize or doShutdown)
      */
     private void withProfileLogContext(Runnable task) {
-        String previousContext = application.utils.logging.NodeLogContext.current();
+        application.utils.logging.LogScope previousContext = application.utils.logging.NodeLogContext.current();
         boolean bound = this.profile != null;
         if (bound) {
-            application.utils.logging.NodeLogContext.set(this.profile.getName());
+            application.utils.logging.NodeLogContext.set("node", this.profile.getName());
         }
         try {
             task.run();
@@ -1513,7 +1513,7 @@ public final class Signum {
             if (this.profileLogger != null) {
                 this.profileLogger.close();
                 this.profileLogger = null;
-                application.utils.logging.NodeLoggerRegistry.unregister(profileName);
+                application.utils.logging.NodeLoggerRegistry.unregister("node", profileName);
             }
             // ProfileThreadContext removed — ProfileLogger subscriber model replaces MDC routing
         }

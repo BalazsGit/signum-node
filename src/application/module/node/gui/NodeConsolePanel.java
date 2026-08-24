@@ -2891,7 +2891,7 @@ public class NodeConsolePanel extends JPanel {
         // instance hasn't been wired into this panel yet, but the ProfileLogger was
         // already registered by Signum.doInitialize()).
         if (pl == null) {
-            pl = application.utils.logging.NodeLoggerRegistry.get(profileName);
+            pl = application.utils.logging.NodeLoggerRegistry.get("node", profileName);
         }
         if (pl == null) {
             LOGGER.warn("Cannot attach ProfileLogger: no ProfileLogger found for profile '{}' (node not yet started?)", profileName);

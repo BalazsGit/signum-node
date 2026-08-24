@@ -1,5 +1,7 @@
 package application.utils.logging.event;
 
+import application.utils.logging.LogScope;
+
 import java.util.Arrays;
 import java.util.logging.LogRecord;
 
@@ -30,6 +32,7 @@ public final class LogEvent {
     private final int sourceLineNumber;
     private final String threadName;
     private final String profileName;
+    private final String module;
     private final Throwable throwable;
     private final Object[] parameters;
 
@@ -47,6 +50,7 @@ public final class LogEvent {
         this.sourceLineNumber = builder.sourceLineNumber;
         this.threadName = builder.threadName;
         this.profileName = builder.profileName;
+        this.module = builder.module;
         this.throwable = builder.throwable;
         this.parameters = builder.parameters != null ? builder.parameters.clone() : null;
     }
@@ -156,6 +160,63 @@ public final class LogEvent {
         return profileName;
     }
 
+    /**
+     * @return the module this event belongs to (e.g. "node", "database"), or null if unscoped
+     */
+    public String getModule() {
+        return module;
+    }
+
+    /**
+     * The composite {@code (module, profile)} scope of this event, or null if either part is
+     * absent. This is the collision-safe identifier used for routing, registry lookup, and display.
+     *
+     * @return the scope, or null
+     */
+    public LogScope getScope() {
+        return (module != null && profileName != null) ? LogScope.of(module, profileName) : null;
+    }
+
+    /**
+     * The qualified {@code module.profile} name, or the bare profile name if no module is set,
+     * or null if neither is set. Suitable for display (e.g. {@code <node.mainnet>}).
+     *
+     * @return the qualified name, or the bare profile name, or null
+     */
+    public String getQualifiedName() {
+        if (module != null && profileName != null) {
+            return module + "." + profileName;
+        }
+        return profileName;
+    }
+
+    /**
+     * Returns a new builder pre-populated with this event's values, for creating a modified copy
+     * (e.g. stamping the module/profile scope onto an event).
+     *
+     * @return a new builder
+     */
+    public Builder toBuilder() {
+        Builder b = new Builder()
+                .timestamp(timestamp)
+                .level(level)
+                .loggerName(loggerName)
+                .message(message)
+                .sourceClassName(sourceClassName)
+                .sourceMethodName(sourceMethodName)
+                .sourceLineNumber(sourceLineNumber)
+                .threadName(threadName)
+                .profileName(profileName)
+                .module(module);
+        if (throwable != null) {
+            b.throwable(throwable);
+        }
+        if (parameters != null) {
+            b.parameters(parameters);
+        }
+        return b;
+    }
+
     /** @return the associated throwable, or null if none */
     public Throwable getThrowable() {
         return throwable;
@@ -208,6 +269,7 @@ public final class LogEvent {
         private int sourceLineNumber = -1;
         private String threadName;
         private String profileName;
+        private String module;
         private Throwable throwable;
         private Object[] parameters;
 
@@ -253,6 +315,11 @@ public final class LogEvent {
 
         public Builder profileName(String profileName) {
             this.profileName = profileName;
+            return this;
+        }
+
+        public Builder module(String module) {
+            this.module = module;
             return this;
         }
 

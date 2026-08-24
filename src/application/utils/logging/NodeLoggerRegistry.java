@@ -24,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class NodeLoggerRegistry {
 
-    private static final Map<String, ProfileLogger> REGISTRY = new ConcurrentHashMap<>();
+    private static final Map<LogScope, ProfileLogger> REGISTRY = new ConcurrentHashMap<>();
 
     private NodeLoggerRegistry() {
         // Utility class
@@ -36,11 +36,15 @@ public final class NodeLoggerRegistry {
      * @param profileName   the node profile name (e.g. "mainnet")
      * @param profileLogger the logger to associate (never null)
      */
-    public static void register(String profileName, ProfileLogger profileLogger) {
-        if (profileName == null || profileName.isEmpty()) {
+    public static void register(LogScope scope, ProfileLogger profileLogger) {
+        if (scope == null || profileLogger == null) {
             return;
         }
-        REGISTRY.put(profileName, profileLogger);
+        REGISTRY.put(scope, profileLogger);
+    }
+
+    public static void register(String module, String profile, ProfileLogger profileLogger) {
+        register(LogScope.of(module, profile), profileLogger);
     }
 
     /**
@@ -48,10 +52,14 @@ public final class NodeLoggerRegistry {
      *
      * @param profileName the node profile name
      */
-    public static void unregister(String profileName) {
-        if (profileName != null) {
-            REGISTRY.remove(profileName);
+    public static void unregister(LogScope scope) {
+        if (scope != null) {
+            REGISTRY.remove(scope);
         }
+    }
+
+    public static void unregister(String module, String profile) {
+        unregister(LogScope.of(module, profile));
     }
 
     /**
@@ -61,8 +69,12 @@ public final class NodeLoggerRegistry {
      * @param profileName the node profile name
      * @return the ProfileLogger, or null
      */
-    public static ProfileLogger get(String profileName) {
-        return profileName != null ? REGISTRY.get(profileName) : null;
+    public static ProfileLogger get(LogScope scope) {
+        return scope != null ? REGISTRY.get(scope) : null;
+    }
+
+    public static ProfileLogger get(String module, String profile) {
+        return get(LogScope.of(module, profile));
     }
 
     /**
@@ -90,13 +102,14 @@ public final class NodeLoggerRegistry {
         if (profileName == null || profileName.isEmpty()) {
             throw new IllegalArgumentException("profileName must not be null or empty");
         }
-        ProfileLogger existing = REGISTRY.get(profileName);
+        LogScope scope = LogScope.of(moduleId, profileName);
+        ProfileLogger existing = REGISTRY.get(scope);
         if (existing != null) {
             return existing;
         }
         ProfileLogger created = new ProfileLogger(moduleId, profileName);
         created.setForwardToSystem(false);
-        ProfileLogger previous = REGISTRY.putIfAbsent(profileName, created);
+        ProfileLogger previous = REGISTRY.putIfAbsent(scope, created);
         return previous != null ? previous : created;
     }
 }

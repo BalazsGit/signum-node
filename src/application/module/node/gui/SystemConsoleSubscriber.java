@@ -117,8 +117,15 @@ public final class SystemConsoleSubscriber extends BaseConsoleSubscriber {
 
     @Override
     protected Color resolveLineColor(LogEvent event) {
-        // Composite color: blend profile color with level color
-        Color profileColor = colorScheme.resolveEventColor(event.getProfileName());
+        // Composite color: blend profile color with level color.
+        // Key the color by the qualified (module.profile) name, falling back to the
+        // bare profile name for legacy custom colors keyed by the bare name.
+        String profile = event.getProfileName();
+        String module = event.getModule();
+        String qualified = (module != null && profile != null && !profile.isEmpty())
+                ? module + "." + profile
+                : profile;
+        Color profileColor = colorScheme.resolveEventColor(qualified, profile);
         Color levelColor = resolveLevelColor(event.getLevel());
         return blendColors(profileColor, levelColor);
     }
@@ -134,8 +141,16 @@ public final class SystemConsoleSubscriber extends BaseConsoleSubscriber {
      * For events without a profile, uses "<system>" as the tag.
      */
     private String formatAggregatedLine(LogEvent event) {
-        String profileTag = event.getProfileName();
-        if (profileTag == null || profileTag.isEmpty()) {
+        String profile = event.getProfileName();
+        String module = event.getModule();
+        // Prefer the qualified (module.profile) tag; fall back to the bare profile
+        // name, then to "system" for unscoped/bootstrap events.
+        String profileTag;
+        if (module != null && profile != null && !profile.isEmpty()) {
+            profileTag = module + "." + profile;
+        } else if (profile != null && !profile.isEmpty()) {
+            profileTag = profile;
+        } else {
             profileTag = "system";
         }
         return formatter.formatWithProfile(event, profileTag);

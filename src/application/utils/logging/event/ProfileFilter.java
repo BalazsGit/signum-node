@@ -122,7 +122,13 @@ public final class ProfileFilter implements LogFilter {
             return includeMode ? matchNull : !matchNull;
         }
 
+        // Match on the bare profile name OR the qualified (module.profile) name,
+        // so both "mainnet" and "node.mainnet" address the same profile.
         boolean contained = profiles.contains(eventProfile);
+        String eventModule = event.getModule();
+        if (!contained && eventModule != null && !eventModule.isEmpty()) {
+            contained = profiles.contains(eventModule + "." + eventProfile);
+        }
         return includeMode ? contained : !contained;
     }
 

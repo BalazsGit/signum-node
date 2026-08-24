@@ -86,20 +86,21 @@ public final class SystemLoggerJulHandler extends Handler {
         }
         try {
             LogEvent event = LogEvent.from(record);
-            // Set the profile name from ThreadLocal context (if active)
-            String profile = NodeLogContext.current();
-            if (profile != null) {
-                event = withProfile(event, profile);
+            // Stamp the (module, profile) scope from the ThreadLocal context (if active),
+            // so the System Console shows the qualified name and routing is unambiguous.
+            LogScope scope = NodeLogContext.current();
+            if (scope != null) {
+                event = withScope(event, scope);
             }
 
             // 1. Always dispatch to SystemLogger (System Console)
             SystemLogger.getInstance().dispatch(event);
 
-            // 2. Also dispatch to per-node ProfileLogger if context is active
-            if (profile != null) {
-                ProfileLogger nodeLogger = NodeLoggerRegistry.get(profile);
-                if (nodeLogger != null && !nodeLogger.isClosed()) {
-                    nodeLogger.dispatch(event);
+            // 2. Also dispatch to the per-profile ProfileLogger if a scope is active
+            if (scope != null) {
+                ProfileLogger profileLogger = NodeLoggerRegistry.get(scope);
+                if (profileLogger != null && !profileLogger.isClosed()) {
+                    profileLogger.dispatch(event);
                 }
             }
         } catch (Exception e) {
@@ -112,28 +113,11 @@ public final class SystemLoggerJulHandler extends Handler {
      * Creates a copy of the event with the profile name set.
      * LogEvent is immutable, so we rebuild it with the profile added.
      */
-    private static LogEvent withProfile(LogEvent source, String profile) {
-        LogEvent.Builder builder = new LogEvent.Builder()
-                .timestamp(source.getTimestamp())
-                .level(source.getLevel())
-                .loggerName(source.getLoggerName())
-                .message(source.getMessage())
-                .threadName(source.getThreadName())
-                .profileName(profile);
-
-        if (source.getSourceClassName() != null) {
-            builder.sourceClassName(source.getSourceClassName());
-        }
-        if (source.getSourceMethodName() != null) {
-            builder.sourceMethodName(source.getSourceMethodName());
-        }
-        if (source.getThrowable() != null) {
-            builder.throwable(source.getThrowable());
-        }
-        if (source.getParameters() != null) {
-            builder.parameters(source.getParameters());
-        }
-        return builder.build();
+    private static LogEvent withScope(LogEvent source, LogScope scope) {
+        return source.toBuilder()
+                .module(scope.module())
+                .profileName(scope.profile())
+                .build();
     }
 
     @Override

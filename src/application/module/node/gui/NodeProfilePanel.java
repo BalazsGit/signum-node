@@ -94,8 +94,8 @@ public class NodeProfilePanel extends JPanel {
         // known here, so we also ensure the ProfileLogger exists now; the Signum adopts
         // this same instance when the node starts, so nothing logged before then is lost.
         application.utils.logging.NodeLoggerRegistry.getOrCreate("node", profile.getName());
-        String previousContext = application.utils.logging.NodeLogContext.current();
-        application.utils.logging.NodeLogContext.set(profile.getName());
+        application.utils.logging.LogScope previousContext = application.utils.logging.NodeLogContext.current();
+        application.utils.logging.NodeLogContext.set("node", profile.getName());
         LOGGER.info("[DIAG] NodeProfilePanel constructor START for profile: {}", profile.getName());
         
         try {

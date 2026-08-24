@@ -107,7 +107,7 @@ public final class ThreadPool {
                     TransactionType.bindContext(ctx);
                 }
                 if (hasLogCtx) {
-                    application.utils.logging.NodeLogContext.set(profile);
+                    application.utils.logging.NodeLogContext.set("node", profile);
                 }
                 try {
                     task.run();
