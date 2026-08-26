@@ -1,5 +1,6 @@
 package application.module.node;
 
+import application.module.node.at.ATProcessorCache;
 import application.module.node.db.BlockDb;
 import application.module.node.db.TransactionDb;
 import application.module.node.db.cache.DBCacheManagerImpl;
@@ -143,6 +144,8 @@ public final class NodeComponentFactory {
       * @param indirectIncomingService the indirect incoming service
       * @param aliasService          the alias service
       * @param atService             the AT service
+      * @param atProcessorCache      the AT processor cache (must be non-null; used during
+      *                              initial database cleanup in the constructor)
       * @return a new {@link BlockchainProcessorImpl} instance
       */
     public static BlockchainProcessorImpl createBlockchainProcessor(
@@ -169,7 +172,8 @@ public final class NodeComponentFactory {
             IndirectIncomingService indirectIncomingService,
             AliasService aliasService,
             FluxCapacitor fluxCapacitor,
-            ATService atService) {
+            ATService atService,
+            ATProcessorCache atProcessorCache) {
         return new BlockchainProcessorImpl(
                 threadPool,
                 blockService,
@@ -194,7 +198,8 @@ public final class NodeComponentFactory {
                 indirectIncomingService,
                 aliasService,
                 fluxCapacitor,
-                atService);
+                atService,
+                atProcessorCache);
     }
 
 }

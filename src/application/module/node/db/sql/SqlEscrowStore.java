@@ -18,7 +18,7 @@ import static application.module.node.schema.Tables.ESCROW;
 import static application.module.node.schema.Tables.ESCROW_DECISION;
 
 public class SqlEscrowStore implements EscrowStore {
-    private final Blockchain blockchain;
+    private Blockchain blockchain;
 
     private final SignumKey.LongKeyFactory<Escrow> escrowDbKeyFactory = new DbKey.LongKeyFactory<Escrow>(ESCROW.ID) {
         @Override
@@ -97,6 +97,17 @@ public class SqlEscrowStore implements EscrowStore {
                 saveDecision(ctx, decision);
             }
         };
+    }
+
+    /**
+     * Wires the blockchain reference after construction (breaks the circular
+     * dependency where Stores are created before Blockchain).
+     */
+    public void setBlockchain(Blockchain blockchain) {
+        this.blockchain = blockchain;
+        // Propagate to the tables (created before the blockchain existed).
+        ((VersionedEntitySqlTable<Escrow>) escrowTable).setBlockchain(blockchain);
+        ((VersionedEntitySqlTable<Escrow.Decision>) decisionTable).setBlockchain(blockchain);
     }
 
     private void saveDecision(DSLContext ctx, Escrow.Decision decision) {

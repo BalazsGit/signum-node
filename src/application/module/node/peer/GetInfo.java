@@ -8,10 +8,12 @@ import com.google.gson.JsonObject;
 
 final class GetInfo implements PeerServlet.PeerRequestHandler {
 
+    private final Peers peers;
     private final TimeService timeService;
     private final Blockchain blockchain;
 
-    GetInfo(TimeService timeService, Blockchain blockchain) {
+    GetInfo(Peers peers, TimeService timeService, Blockchain blockchain) {
+        this.peers = peers;
         this.timeService = timeService;
         this.blockchain = blockchain;
     }
@@ -56,10 +58,10 @@ final class GetInfo implements PeerServlet.PeerRequestHandler {
                 JSON.getAsBoolean(request.get("shareAddress"))));
         peerImpl.setLastUpdated(timeService.getEpochTime());
 
-        Peers.notifyListeners(peerImpl, Peers.Event.ADDED_ACTIVE_PEER);
+        peers.notifyListeners(peerImpl, Peers.Event.ADDED_ACTIVE_PEER);
 
         // Clone the static response and add dynamic height
-        JsonObject response = JSON.cloneJson(Peers.myPeerInfoResponse).getAsJsonObject();
+        JsonObject response = JSON.cloneJson(peers.myPeerInfoResponse).getAsJsonObject();
         response.addProperty("height", blockchain.getHeight());
         return response;
     }

@@ -7,17 +7,18 @@ import com.google.gson.JsonObject;
 
 final class AddPeers implements PeerServlet.PeerRequestHandler {
 
-    static final AddPeers instance = new AddPeers();
+    private final Peers peers;
 
-    private AddPeers() {
+    AddPeers(Peers peers) {
+        this.peers = peers;
     }
 
     @Override
     public JsonElement processRequest(JsonObject request, Peer peer) {
-        JsonArray peers = JSON.getAsJsonArray(request.get("peers"));
-        if (peers != null && Peers.getMorePeers) {
-            for (JsonElement announcedAddress : peers) {
-                Peers.addPeer(JSON.getAsString(announcedAddress));
+        JsonArray peersJson = JSON.getAsJsonArray(request.get("peers"));
+        if (peersJson != null && peers.getMorePeers) {
+            for (JsonElement announcedAddress : peersJson) {
+                peers.addPeer(JSON.getAsString(announcedAddress));
             }
         }
         return JSON.emptyJSON;

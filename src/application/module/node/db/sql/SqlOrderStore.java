@@ -155,6 +155,9 @@ public class SqlOrderStore implements OrderStore {
      */
     public void setBlockchain(Blockchain blockchain) {
         this.blockchain = blockchain;
+        // Propagate to the tables (created before the blockchain existed).
+        ((VersionedEntitySqlTable<Order.Ask>) askOrderTable).setBlockchain(blockchain);
+        ((VersionedEntitySqlTable<Order.Bid>) bidOrderTable).setBlockchain(blockchain);
     }
 
     private void saveAsk(DSLContext ctx, Order.Ask ask) {

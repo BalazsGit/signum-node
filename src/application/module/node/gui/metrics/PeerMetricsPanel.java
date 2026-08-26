@@ -1603,14 +1603,15 @@ public class PeerMetricsPanel extends JPanel {
     }
 
     private List<PeerStatsSnapshot> getPeerSnapshots(MetricType type) {
+        PeerManager manager = ctx != null ? ctx.getPeerManager() : null;
         List<PeerStatsSnapshot> snapshots = new ArrayList<>();
         for (PeerHistory ph : peerHistories.values()) {
             if (type == MetricType.RX && ph.blockRequestCount > 0)
-                snapshots.add(new PeerStatsSnapshot(ph, type, latestNetworkVersion));
+                snapshots.add(new PeerStatsSnapshot(ph, type, latestNetworkVersion, manager));
             else if (type == MetricType.TX && ph.txBlockRequestCount > 0)
-                snapshots.add(new PeerStatsSnapshot(ph, type, latestNetworkVersion));
+                snapshots.add(new PeerStatsSnapshot(ph, type, latestNetworkVersion, manager));
             else if (type == MetricType.OTHER && ph.otherRequestCount > 0)
-                snapshots.add(new PeerStatsSnapshot(ph, type, latestNetworkVersion));
+                snapshots.add(new PeerStatsSnapshot(ph, type, latestNetworkVersion, manager));
         }
         snapshots.sort((p1, p2) -> Long.compare(p2.lastTimestamp, p1.lastTimestamp));
         return snapshots;
@@ -1730,12 +1731,14 @@ public class PeerMetricsPanel extends JPanel {
 
     private OverviewUpdateData calculateOverviewUpdate(long counter) {
         OverviewUpdateData data = new OverviewUpdateData();
-        int all = Peers.getAllPeers().size();
+        PeerManager manager = ctx != null ? ctx.getPeerManager() : null;
+        Collection<Peer> allPeers = manager != null ? manager.getAllPeers() : Collections.emptyList();
+        int all = allPeers.size();
         int connected = 0;
         int active = 0;
         int blacklisted = 0;
 
-        for (Peer p : Peers.getAllPeers()) {
+        for (Peer p : allPeers) {
             if (p.getState() == Peer.State.CONNECTED)
                 connected++;
             if (p.getState() != Peer.State.NON_CONNECTED)
@@ -1744,11 +1747,10 @@ public class PeerMetricsPanel extends JPanel {
                 blacklisted++;
         }
 
-        Collection<Peer> allPeersList = Peers.getAllPeers();
         long maxHeight = 0;
         String latestVersion = Signum.VERSION.toString();
 
-        for (Peer p : allPeersList) {
+        for (Peer p : allPeers) {
             if (p.getState() == Peer.State.CONNECTED) {
                 maxHeight = Math.max(maxHeight, p.getHeight());
             }
@@ -1774,7 +1776,7 @@ public class PeerMetricsPanel extends JPanel {
         data.allList = new ArrayList<>();
         data.blacklistedList = new ArrayList<>();
 
-        for (Peer p : allPeersList) {
+        for (Peer p : allPeers) {
             if (PeersDialog.PeerCategory.CONNECTED.getFilter().test(p))
                 data.connectedList.add(p);
             if (PeersDialog.PeerCategory.ACTIVE.getFilter().test(p))
@@ -2564,7 +2566,7 @@ public class PeerMetricsPanel extends JPanel {
         final boolean isBlacklisted;
         final boolean isYellowState;
 
-        PeerStatsSnapshot(PeerHistory ph, MetricType type, String latestVersion) {
+        PeerStatsSnapshot(PeerHistory ph, MetricType type, String latestVersion, PeerManager peerManager) {
             this.address = ph.address;
             this.creationTime = ph.creationTime;
             if (type == MetricType.RX) {
@@ -2596,7 +2598,7 @@ public class PeerMetricsPanel extends JPanel {
                 this.lastTimestamp = ph.getOtherLastTimestamp();
             }
 
-            Peer peer = Peers.getPeer(ph.address);
+            Peer peer = peerManager != null ? peerManager.getPeer(ph.address) : null;
             if (peer != null) {
                 this.announcedAddress = peer.getAnnouncedAddress() != null ? peer.getAnnouncedAddress() : "-";
                 this.state = String.valueOf(peer.getState());

@@ -542,12 +542,18 @@ public class NodeToolbar extends JPanel {
                     JOptionPane.WARNING_MESSAGE
             );
             if (result == JOptionPane.YES_OPTION) {
-                Signum s = NodeModule.getInstance().get(profile.getName()); if (s != null) s.stop();
+                // Single lifecycle entry point (v4): NodeModule stops this profile's node.
+                NodeModule.getInstance().stopNode(profile.getName());
                 LOGGER.info("Stop requested for profile: {}", profile.getName());
             }
         } else {
-            // Currently stopped/ready/error -> start
-            Signum s = NodeModule.getInstance().get(profile.getName()); if (s != null) s.start();
+            // Currently stopped/ready/error -> start (NodeModule creates the
+            // Signum if it does not exist yet).
+            try {
+                NodeModule.getInstance().startNode(profile.getName());
+            } catch (Exception e) {
+                LOGGER.error("Start failed for profile: {}", profile.getName(), e);
+            }
             LOGGER.info("Start requested for profile: {}", profile.getName());
         }
     }

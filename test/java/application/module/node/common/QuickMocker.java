@@ -15,18 +15,18 @@ import java.util.List;
 
 import static application.module.node.web.api.http.common.Parameters.*;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 public class QuickMocker {
 
     public static FluxCapacitor fluxCapacitorEnabledFunctionalities(FluxEnable... enabledToggles) {
         final FluxCapacitor mockCapacitor = mock(FluxCapacitor.class);
-        when(mockCapacitor.getValue(any())).thenReturn(false);
-        when(mockCapacitor.getValue(any(), anyInt())).thenReturn(false);
+        lenient().when(mockCapacitor.getValue(any())).thenReturn(false);
+        lenient().when(mockCapacitor.getValue(any(), anyInt())).thenReturn(false);
         for (FluxEnable ft : enabledToggles) {
-            when(mockCapacitor.getValue(eq(ft))).thenReturn(true);
-            when(mockCapacitor.getValue(eq(ft), anyInt())).thenReturn(true);
+            lenient().when(mockCapacitor.getValue(eq(ft))).thenReturn(true);
+            lenient().when(mockCapacitor.getValue(eq(ft), anyInt())).thenReturn(true);
         }
         return mockCapacitor;
     }
@@ -34,7 +34,7 @@ public class QuickMocker {
     public static FluxCapacitor latestValueFluxCapacitor() {
         Blockchain blockchain = mock(Blockchain.class);
         PropertyService propertyService = mock(PropertyService.class);
-        when(blockchain.getHeight()).thenReturn(Integer.MAX_VALUE);
+        lenient().when(blockchain.getHeight()).thenReturn(Integer.MAX_VALUE);
         return new FluxCapacitorImpl(blockchain, propertyService);
     }
 
@@ -42,7 +42,7 @@ public class QuickMocker {
         final HttpServletRequest mockedRequest = mock(HttpServletRequest.class);
 
         for (MockParam mp : parameters) {
-            when(mockedRequest.getParameter(mp.key)).thenReturn(mp.value);
+            lenient().when(mockedRequest.getParameter(mp.key)).thenReturn(mp.value);
         }
 
         return mockedRequest;

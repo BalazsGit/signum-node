@@ -191,20 +191,36 @@ public final class ProfileLogger extends LoggerImpl {
         // Stamp this logger's (module, profile) scope so downstream consumers
         // (System Console tag, color scheme, filters) see the qualified identity.
         event = withScope(event);
-        // Buffer the event and dispatch to this profile's subscribers atomically
-        // w.r.t. addSubscriber(): this is what guarantees a late subscriber either
-        // sees the event in the replay snapshot (if it was appended before the
-        // subscribe) or receives it live (if it was appended after). No gaps,
-        // no duplicates, chronological order.
+        // Buffer the event and snapshot the recipients atomically w.r.t.
+        // addSubscriber(): this is what guarantees a late subscriber either sees
+        // the event in the replay snapshot (if it was appended before the
+        // subscribe) or receives it live (if it was appended after).
+        // No gaps, no duplicates, chronological order.
+        List<LogSubscriber> recipients;
         synchronized (replayLock) {
             replayBuffer.addLast(event);
             while (replayBuffer.size() > replayCapacity) {
                 replayBuffer.removeFirst();
             }
-            super.dispatch(event);
+            // v4 (P1.5): recipient snapshot is taken UNDER the lock so the
+            // split point vs. addSubscriber stays atomic — but the callbacks
+            // themselves run OUTSIDE the lock (snapshot pattern): a slow or
+            // misbehaving subscriber can no longer block addSubscriber /
+            // removeSubscriber or other dispatches.
+            recipients = new ArrayList<>(subscribers);
+        }
+        for (LogSubscriber recipient : recipients) {
+            try {
+                recipient.onLogEvent(event);
+            } catch (Exception e) {
+                System.err.println("[ProfileLogger] Delivery error in '" + name + "': " + e.getMessage());
+            }
         }
 
-        // Then forward to SystemLogger for unified viewing
+        // Then forward to SystemLogger for unified viewing.
+        // Documented order (v4 P1.5): profile subscribers FIRST, then the
+        // SystemLogger — the profile console always sees an event before the
+        // System Console.
         if (forwardToSystem) {
             try {
                 SystemLogger.getInstance().dispatch(event);
@@ -239,16 +255,17 @@ public final class ProfileLogger extends LoggerImpl {
             }
             snapshot = replayBuffer.isEmpty() ? null : new ArrayList<>(replayBuffer);
             super.addSubscriber(subscriber);
-            // Replay inside the lock: concurrent dispatches from other threads
-            // are held until the replay burst completes, so the new subscriber
-            // sees history strictly before live events (chronological order).
-            if (snapshot != null) {
-                for (LogEvent buffered : snapshot) {
-                    try {
-                        subscriber.onLogEvent(buffered);
-                    } catch (Exception e) {
-                        System.err.println("[ProfileLogger] Replay error in '" + name + "': " + e.getMessage());
-                    }
+        }
+        // v4 (P1.5): the replay burst runs OUTSIDE the lock (snapshot pattern) —
+        // subscriber callbacks must not hold the replay lock. No-gap/no-dup is
+        // preserved by the atomic snapshot above; under a concurrent dispatch a
+        // live event may interleave with the replay burst (documented trade-off).
+        if (snapshot != null) {
+            for (LogEvent buffered : snapshot) {
+                try {
+                    subscriber.onLogEvent(buffered);
+                } catch (Exception e) {
+                    System.err.println("[ProfileLogger] Replay error in '" + name + "': " + e.getMessage());
                 }
             }
         }

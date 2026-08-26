@@ -110,6 +110,9 @@ public class SqlAliasStore implements AliasStore {
      */
     public void setBlockchain(Blockchain blockchain) {
         this.blockchain = blockchain;
+        // Propagate to the tables (created before the blockchain existed).
+        ((VersionedEntitySqlTable<Alias.Offer>) offerTable).setBlockchain(blockchain);
+        ((VersionedEntitySqlTable<Alias>) aliasTable).setBlockchain(blockchain);
     }
 
     private void saveOffer(Alias.Offer offer) {

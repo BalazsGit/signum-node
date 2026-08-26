@@ -1,21 +1,14 @@
 package application.module.node.profile;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import application.module.node.logging.NodeLoggingProfile;
 import application.utils.config.ConfigPaths;
 import application.utils.config.PropertiesProfileEntity;
 import application.utils.config.PropertiesProfileLoader;
 
-import java.io.InputStream;
 import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.List;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
-import application.module.node.Signum;
 
 /**
  * Represents a single node profile configuration loaded from disk.
@@ -40,8 +33,6 @@ import application.module.node.Signum;
  * @see PropertiesProfileEntity
  */
 public class NodeProfile implements PropertiesProfileEntity {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(NodeProfile.class);
 
     // ── Constants ──────────────────────────────────────────────────────
 
@@ -87,39 +78,10 @@ public class NodeProfile implements PropertiesProfileEntity {
     /** Path to the .properties file this profile was loaded from (immutable). */
     private final Path propertiesPath;
 
-    /** True when running in headless mode -- GUI settings will never be loaded. */
-    private final boolean headlessMode;
-
     // ── Config Data ────────────────────────────────────────────────────
 
     /** Properties backing store (Single Source of Truth for config values). */
     private final Properties properties = new Properties();
-
-    // ── Runtime Composition (SRP: state separated from config) ─────────
-
-    /**
-     * Runtime state container -- lifecycle, sync tracking, port info.
-     * Always initialized at construction time (never null after build).
-     * @see NodeProfileRuntime
-     */
-    
-
-    // ── Logging Profile Reference ──────────────────────────────────────
-
-    /**
-     * Reference to the associated NodeLoggingProfile.
-     * Can be changed at runtime by the user swapping logging presets.
-     */
-    private NodeLoggingProfile loggingProfile;
-
-    // ── GUI Settings (Lazy-Loaded, Optional) ───────────────────────────
-
-    /** Dedicated lock object for thread-safe lazy loading of guiSettings. */
-    private final Object guiSettingsLock = new Object();
-
-    /** GUI-specific settings for this profile (loaded on first access). */
-    private volatile GuiProfileSettings guiSettings;
-
     // ── Construction ───────────────────────────────────────────────────
 
     /**
@@ -133,8 +95,6 @@ public class NodeProfile implements PropertiesProfileEntity {
     public NodeProfile(String profileName) {
         this.profileName = Objects.requireNonNull(profileName, "profileName must not be null");
         this.propertiesPath = null;
-        this.headlessMode = true;
-        
     }
 
     /**
@@ -146,7 +106,6 @@ public class NodeProfile implements PropertiesProfileEntity {
     NodeProfile(Builder builder) {
         this.profileName = Objects.requireNonNull(builder.name, "name must not be null");
         this.propertiesPath = builder.propertiesPath;
-        this.headlessMode = builder.headlessMode;
         
 
         if (builder.properties != null) {
@@ -279,17 +238,6 @@ public class NodeProfile implements PropertiesProfileEntity {
         return properties.containsKey(PROPERTY_AUTOSTART);
     }
 
-    // ── Runtime Access ─────────────────────────────────────────────────
-
-    /**
-     * Returns the runtime state container for this profile.
-     * Contains lifecycle state machine, sync tracking, port info.
-     *
-     * @return the {@link NodeProfileRuntime} (never null)
-     */
-    public Signum getSignum() {
-        return null; // Signum is managed by NodeModule
-    }
 
     // ── PropertiesPath Access ──────────────────────────────────────────
 
@@ -302,206 +250,19 @@ public class NodeProfile implements PropertiesProfileEntity {
         return propertiesPath;
     }
 
-    // ── Headless Mode Access ───────────────────────────────────────────
-
-    /**
-     * Returns true if running in headless mode (no GUI support).
-     *
-     * @return true if headless
-     */
-    public boolean isHeadlessMode() {
-        return headlessMode;
-    }
-
-    // ── LoggingProfile Access ──────────────────────────────────────────
-
-    /**
-     * Returns the associated NodeLoggingProfile, or null if not yet set.
-     *
-     * @return the logging profile reference, or null
-     */
-    public NodeLoggingProfile getLoggingProfile() {
-        return loggingProfile;
-    }
-
-    /**
-     * Sets (or replaces) the associated NodeLoggingProfile.
-     *
-     * @param loggingProfile the logging profile to associate, or null to clear
-     */
-    public void setLoggingProfile(NodeLoggingProfile loggingProfile) {
-        this.loggingProfile = loggingProfile;
-    }
-
-    // ── GuiSettings Access (Lazy-Loaded) ───────────────────────────────
-
-    /**
-     * Returns the GUI-specific settings for this profile, lazily loading them
-     * on first access. Returns null in headless mode or if no GUI settings found.
-     * <p>
-     * Thread-safe using double-checked locking with a dedicated lock object.
-     *
-     * @return the {@link GuiProfileSettings}, or null if unavailable
-     */
-    public GuiProfileSettings getGuiSettings() {
-        // Fast path: volatile read
-        GuiProfileSettings local = guiSettings;
-        if (local == null) {
-            synchronized (guiSettingsLock) {
-                // Double-check after acquiring lock
-                local = guiSettings;
-                    if (local == null) {
-                        local = GuiSettingsLoader.loadForProfile(MODULE_ID, profileName);
-                        guiSettings = local; // volatile write
-                }
-            }
-        }
-        return headlessMode ? null : local;
-    }
-
-    // ── Static Factory Methods (delegating to PropertiesProfileLoader) ─
-
-    /**
-     * Discovers and loads all node profiles from {@code conf/node/profiles/*.properties}.
-     * <p>
-     * This method delegates to {@link PropertiesProfileLoader#loadAll} using the
-     * standardized path schema. Reserved profile names (default templates)
-     * are excluded from discovery.
-     *
-     * @return array of loaded NodeProfiles, empty if none found
-     */
-    public static NodeProfile[] loadAll() {
-        try {
-            return PropertiesProfileLoader.loadAll(
-                    CONF_ROOT, MODULE_ID, CATEGORY, RESERVED_PROFILE_NAMES,
-                    name -> new NodeProfile(name), NodeProfile.class);
-        } catch (Exception e) {
-            LOGGER.error("Error loading node profiles", e);
-            return new NodeProfile[0];
-        }
-    }
-
-    /**
-     * Loads a specific profile by name from {@code conf/node/profiles/{name}.properties}.
-     * <p>
-     * Uses the Builder to create a fully-initialized profile with properties path set.
-     *
-     * @param profileName the profile name (without extension)
-     * @return the loaded NodeProfile, or null if not found
-     */
-    public static NodeProfile loadByName(String profileName) {
-        try {
-            Properties props = PropertiesProfileLoader.loadProfile(
-                    CONF_ROOT, MODULE_ID, CATEGORY, profileName);
-
-            if (props.isEmpty()) {
-                LOGGER.debug("Profile file not found or empty: {}", profileName);
-                return null;
-            }
-
-            Path propsPath = Paths.get(CONF_ROOT, MODULE_ID, CATEGORY, profileName + ".properties");
-
-            return new Builder(profileName)
-                    .properties(props)
-                    .propertiesPath(propsPath)
-                    .headless(false)
-                    .build();
-        } catch (Exception e) {
-            LOGGER.error("Error loading profile {}", profileName, e);
-            return null;
-        }
-    }
-
-    /**
-     * Checks if a profile name is reserved.
-     *
-     * @param profileName the name to check
-     * @return true if the name is reserved and cannot be used as a profile
-     */
-    public static boolean isReservedProfileName(String profileName) {
-        return profileName != null && RESERVED_PROFILE_NAMES.contains(profileName);
-    }
-
-    /**
-     * Discovers all available (non-reserved) profile names.
-     *
-     * @return sorted list of discoverable profile names
-     */
-    public static List<String> discoverProfileNames() {
-        return PropertiesProfileLoader.discoverProfiles(
-                CONF_ROOT, MODULE_ID, CATEGORY, RESERVED_PROFILE_NAMES);
-    }
-
-    // ── Default File Management ────────────────────────────────────────
-
-    /**
-     * Synchronizes the default profile file from classpath resources to runtime conf/.
-     * Uses SHA-256 hash comparison to detect updates.
-     */
-    public static void syncDefaultProfileFile() {
-        InputStream is = NodeProfile.class.getResourceAsStream(
-                "/conf/node/profiles/node-default.properties");
-        if (is != null) {
-            PropertiesProfileLoader.syncDefaultFile(
-                    CONF_ROOT, MODULE_ID, CATEGORY, DEFAULT_PROFILE_FILENAME, is);
-        } else {
-            LOGGER.warn("Default profile resource not found on classpath");
-        }
-    }
-
-    /**
-     * Synchronizes the default logging file from classpath resources to runtime conf/.
-     */
-    public static void syncDefaultLoggingFile() {
-        InputStream is = NodeProfile.class.getResourceAsStream(
-                "/conf/node/logging/logging-default.properties");
-        if (is != null) {
-            PropertiesProfileLoader.syncDefaultFile(
-                    CONF_ROOT, MODULE_ID, PropertiesProfileLoader.DEFAULT_CATEGORY_LOGGING,
-                    DEFAULT_LOGGING_FILENAME, is);
-        } else {
-            LOGGER.warn("Default logging resource not found on classpath");
-        }
-    }
-
-    /**
-     * Ensures empty placeholder files exist for both profiles and logging
-     * categories when no user profiles are discovered.
-     */
-    public static void ensureEmptyPlaceholdersIfNeeded() {
-        PropertiesProfileLoader.ensureEmptyPlaceholdersForModule(
-                CONF_ROOT, MODULE_ID, RESERVED_PROFILE_NAMES,
-                "node", "logging");
-    }
-
-    /**
-     * Full initialization: sync defaults + create placeholders if needed.
-     * <p>
-     * Delegates to {@link PropertiesProfileLoader#initializeModule} for centralized
-     * bootstrap of both profile and logging configurations.
-     * <p>
-     * Call this once during application startup, before any profile loading occurs.
-     */
-    public static void initialize() {
-        PropertiesProfileLoader.initializeModule(
-                CONF_ROOT, MODULE_ID, RESERVED_PROFILE_NAMES,
-                "node", "logging");
-    }
-
     // ── Builder Pattern ────────────────────────────────────────────────
 
     /**
      * Fluent API for constructing {@link NodeProfile} instances with full control.
      * <p>
      * <b>Required:</b> name, properties (can be empty).
-     * <b>Optional:</b> propertiesPath, headlessMode (defaults to false).
+      * <b>Optional:</b> properties, propertiesPath.
      * <p>
      * Usage:
      * <pre>{@code
      * NodeProfile profile = new NodeProfile.Builder("mainnet")
      *         .properties(loadedProperties)
      *         .propertiesPath(somePath)
-     *         .headless(false)
      *         .build();
      * }</pre>
      */
@@ -509,7 +270,6 @@ public class NodeProfile implements PropertiesProfileEntity {
         private final String name;
         private Properties properties;
         private Path propertiesPath;
-        private boolean headlessMode = false;
 
         /**
          * Starts building a profile with the given name.
@@ -543,17 +303,6 @@ public class NodeProfile implements PropertiesProfileEntity {
         }
 
         /**
-         * Configures headless mode. When true, GUI settings are never loaded.
-         *
-         * @param headless true for headless, false for GUI support (default: false)
-         * @return this builder for chaining
-         */
-        public Builder headless(boolean headless) {
-            this.headlessMode = headless;
-            return this;
-        }
-
-        /**
          * Builds the NodeProfile. Validates that required fields are set.
          *
          * @return a fully initialized {@link NodeProfile}
@@ -582,6 +331,6 @@ public class NodeProfile implements PropertiesProfileEntity {
     @Override
     public String toString() {
         return "NodeProfile{name='" + profileName + "', properties=" + properties.size() +
-                " entries, runtime=" + (loggingProfile != null ? loggingProfile : "none") + "}";
+                " entries}";
     }
 }

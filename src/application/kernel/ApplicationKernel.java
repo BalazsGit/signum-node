@@ -112,13 +112,13 @@ public class ApplicationKernel {
 
                 // Dynamically add tabs for each module's UI
                 for (Module m : registry.getModules()) {
-                    logger.info("[DIAG] ApplicationKernel - calling getUI() for module: {}", m.getDisplayName());
+                    logger.debug("ApplicationKernel - calling getUI() for module: {}", m.getDisplayName());
                     JComponent moduleUI = m.getUI();
                     if (moduleUI != null) {
-                        logger.info("[DIAG] ApplicationKernel - got non-null UI for module: {}, type: {}", m.getDisplayName(), moduleUI.getClass().getSimpleName());
+                        logger.debug("ApplicationKernel - got non-null UI for module: {}, type: {}", m.getDisplayName(), moduleUI.getClass().getSimpleName());
                         tabManager.addModuleTab(m.getDisplayName(), moduleUI);
                     } else {
-                        logger.warn("[DIAG] ApplicationKernel - module returned null UI: {}", m.getDisplayName());
+                        logger.warn("ApplicationKernel - module returned null UI: {}", m.getDisplayName());
                     }
                 }
 

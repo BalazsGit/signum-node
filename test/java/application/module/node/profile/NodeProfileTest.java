@@ -1,6 +1,5 @@
 package application.module.node.profile;
 
-import application.module.node.logging.NodeLoggingProfile;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -16,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * <p>
  * Follows AAA pattern (Arrange-Act-Assert) with JUnit 5.
  * Tests cover isReservedProfileName() filtering logic, loadAll() discovery behavior,
- * Builder pattern, and new fields (runtime, propertiesPath, headlessMode, loggingProfile).
+ * Builder pattern, and propertiesPath.
  *
  * @since 4.0
  */
@@ -34,41 +33,41 @@ class NodeProfileTest {
         @Test
         @DisplayName("returns true for 'node-default' reserved profile name")
         void isReservedProfileName_GivenNodeDefault_ReturnsTrue() {
-            boolean result = NodeProfile.isReservedProfileName("node-default");
+            boolean result = NodeProfileRepository.isReservedProfileName("node-default");
             assertTrue(result);
         }
 
         @Test
         @DisplayName("returns true for 'logging-default' reserved profile name")
         void isReservedProfileName_GivenLoggingDefault_ReturnsTrue() {
-            boolean result = NodeProfile.isReservedProfileName("logging-default");
+            boolean result = NodeProfileRepository.isReservedProfileName("logging-default");
             assertTrue(result);
         }
 
         @Test
         @DisplayName("returns false for user profile ending with '-default' (exact-name matching, not suffix)")
         void isReservedProfileName_GivenCustomDefaultSuffix_ReturnsFalse() {
-            assertFalse(NodeProfile.isReservedProfileName("test-node-default"));
-            assertFalse(NodeProfile.isReservedProfileName("my-custom-default"));
+            assertFalse(NodeProfileRepository.isReservedProfileName("test-node-default"));
+            assertFalse(NodeProfileRepository.isReservedProfileName("my-custom-default"));
         }
 
         @Test
         @DisplayName("returns false for regular profile names")
         void isReservedProfileName_GivenRegularProfileName_ReturnsFalse() {
-            assertFalse(NodeProfile.isReservedProfileName("mainnet"));
-            assertFalse(NodeProfile.isReservedProfileName("testnet"));
+            assertFalse(NodeProfileRepository.isReservedProfileName("mainnet"));
+            assertFalse(NodeProfileRepository.isReservedProfileName("testnet"));
         }
 
         @Test
         @DisplayName("returns false for null profile name")
         void isReservedProfileName_GivenNull_ReturnsFalse() {
-            assertFalse(NodeProfile.isReservedProfileName(null));
+            assertFalse(NodeProfileRepository.isReservedProfileName(null));
         }
 
         @Test
         @DisplayName("returns false for empty string")
         void isReservedProfileName_GivenEmptyString_ReturnsFalse() {
-            assertFalse(NodeProfile.isReservedProfileName(""));
+            assertFalse(NodeProfileRepository.isReservedProfileName(""));
         }
     }
 
@@ -279,93 +278,6 @@ class NodeProfileTest {
     }
 
     // =====================================================================
-    // Headless Mode Access (NEW - Phase 2b)
-    // =====================================================================
-
-    @Nested
-    @DisplayName("Headless Mode Access")
-    class HeadlessModeTests {
-
-        @Test
-        @DisplayName("isHeadlessMode returns true for legacy constructor")
-        void isHeadlessMode_GivenLegacyConstructor_ReturnsTrue() {
-            NodeProfile profile = new NodeProfile("test");
-            assertTrue(profile.isHeadlessMode());
-        }
-
-        @Test
-        @DisplayName("isHeadlessMode returns false when Builder sets headless(false)")
-        void isHeadlessMode_GivenBuilderGuiMode_ReturnsFalse() {
-            NodeProfile profile = new NodeProfile.Builder("test")
-                    .headless(false)
-                    .build();
-            assertFalse(profile.isHeadlessMode());
-        }
-
-        @Test
-        @DisplayName("isHeadlessMode returns true when Builder sets headless(true)")
-        void isHeadlessMode_GivenBuilderHeadless_ReturnsTrue() {
-            NodeProfile profile = new NodeProfile.Builder("test")
-                    .headless(true)
-                    .build();
-            assertTrue(profile.isHeadlessMode());
-        }
-
-        @Test
-        @DisplayName("getGuiSettings returns null in headless mode")
-        void getGuiSettings_GivenHeadlessMode_ReturnsNull() {
-            NodeProfile profile = new NodeProfile.Builder("test")
-                    .headless(true)
-                    .build();
-            assertNull(profile.getGuiSettings());
-        }
-
-        @Test
-        @DisplayName("getGuiSettings returns null when GuiSettingsLoader stubbed (Phase 4 pending)")
-        void getGuiSettings_GivenGuiMode_ReturnsNull() {
-            NodeProfile profile = new NodeProfile.Builder("test")
-                    .headless(false)
-                    .build();
-            // Stub until GuiSettingsLoader is implemented in Phase 4
-            assertNull(profile.getGuiSettings());
-        }
-    }
-
-    // =====================================================================
-    // LoggingProfile Access (NEW - Phase 2b)
-    // =====================================================================
-
-    @Nested
-    @DisplayName("LoggingProfile Access")
-    class LoggingProfileTests {
-
-        @Test
-        @DisplayName("getLoggingProfile returns null initially")
-        void getLoggingProfile_GivenNotSet_ReturnsNull() {
-            NodeProfile profile = new NodeProfile("test");
-            assertNull(profile.getLoggingProfile());
-        }
-
-        @Test
-        @DisplayName("setLoggingProfile sets and returns the logging profile")
-        void setLoggingProfile_GivenProfile_ReturnsIt() {
-            NodeProfile profile = new NodeProfile("test");
-            NodeLoggingProfile logProfile = new NodeLoggingProfile();
-            profile.setLoggingProfile(logProfile);
-            assertSame(logProfile, profile.getLoggingProfile());
-        }
-
-        @Test
-        @DisplayName("setLoggingProfile with null clears the reference")
-        void setLoggingProfile_GivenNull_ClearsReference() {
-            NodeProfile profile = new NodeProfile("test");
-            profile.setLoggingProfile(new NodeLoggingProfile());
-            profile.setLoggingProfile(null);
-            assertNull(profile.getLoggingProfile());
-        }
-    }
-
-    // =====================================================================
     // Builder Pattern (NEW - Phase 2c)
     // =====================================================================
 
@@ -416,14 +328,6 @@ class NodeProfileTest {
             NodeProfile.Builder builder = new NodeProfile.Builder("test");
             assertSame(builder, builder.properties(new Properties()));
             assertSame(builder, builder.propertiesPath(Paths.get("/path")));
-            assertSame(builder, builder.headless(true));
-        }
-
-        @Test
-        @DisplayName("Builder defaults headlessMode to false")
-        void builder_DefaultsHeadlessModeToFalse() {
-            NodeProfile profile = new NodeProfile.Builder("test").build();
-            assertFalse(profile.isHeadlessMode());
         }
     }
 
@@ -438,10 +342,10 @@ class NodeProfileTest {
         @Test
         @DisplayName("loadAll never returns reserved profile names in results")
         void loadAll_NeverReturnsReservedProfiles() {
-            NodeProfile[] result = NodeProfile.loadAll();
+            NodeProfile[] result = NodeProfileRepository.loadAll();
             assertNotNull(result);
             for (NodeProfile profile : result) {
-                assertFalse(NodeProfile.isReservedProfileName(profile.getName()),
+                assertFalse(NodeProfileRepository.isReservedProfileName(profile.getName()),
                         "Reserved profile '" + profile.getName() + "' should not appear");
             }
         }
@@ -449,7 +353,7 @@ class NodeProfileTest {
         @Test
         @DisplayName("loadByName returns null for non-existent profile")
         void loadByName_GivenNonExistentProfile_ReturnsNull() {
-            assertNull(NodeProfile.loadByName("nonexistent-profile-xyz"));
+            assertNull(NodeProfileRepository.loadByName("nonexistent-profile-xyz"));
         }
     }
 
@@ -496,12 +400,12 @@ class NodeProfileTest {
     class ObjectContractTests {
 
         @Test
-        @DisplayName("toString includes name and runtime info")
+        @DisplayName("toString includes name and property count")
         void toString_ContainsNameAndRuntimeInfo() {
             NodeProfile profile = new NodeProfile.Builder("test").build();
             String result = profile.toString();
             assertTrue(result.contains("test"));
-            assertTrue(result.contains("runtime="));
+            assertTrue(result.contains("entries"));
         }
 
         @Test

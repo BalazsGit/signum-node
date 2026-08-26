@@ -104,6 +104,8 @@ public class SqlSubscriptionStore implements SubscriptionStore {
      */
     public void setBlockchain(Blockchain blockchain) {
         this.blockchain = blockchain;
+        // Propagate to the table (created before the blockchain existed).
+        ((VersionedEntitySqlTable<Subscription>) subscriptionTable).setBlockchain(blockchain);
     }
 
     private Query insertSubscription(DSLContext ctx, Subscription subscription) {

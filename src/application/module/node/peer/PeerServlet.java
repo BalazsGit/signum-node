@@ -65,20 +65,23 @@ public final class PeerServlet extends HttpServlet {
 
     private final Map<String, PeerRequestHandler> peerRequestHandlers;
 
-    public PeerServlet(TimeService timeService, AccountService accountService,
+    private final Peers peers;
+
+    public PeerServlet(Peers peers, TimeService timeService, AccountService accountService,
             Blockchain blockchain,
             TransactionProcessor transactionProcessor,
             BlockchainProcessor blockchainProcessor,
             PropertyService propertyService) {
+        this.peers = peers;
         final Map<String, PeerRequestHandler> map = new HashMap<>();
-        map.put("addPeers", AddPeers.instance);
+        map.put("addPeers", new AddPeers(peers));
         map.put("getCumulativeDifficulty", new GetCumulativeDifficulty(blockchain));
-        map.put("getInfo", new GetInfo(timeService, blockchain));
+        map.put("getInfo", new GetInfo(peers, timeService, blockchain));
         map.put("getMilestoneBlockIds", new GetMilestoneBlockIds(blockchain));
         map.put("getNextBlockIds", new GetNextBlockIds(blockchain));
         map.put("getBlocksFromHeight", new GetBlocksFromHeight(blockchain));
         map.put("getNextBlocks", new GetNextBlocks(blockchain, propertyService));
-        map.put("getPeers", GetPeers.instance);
+        map.put("getPeers", new GetPeers(peers));
         map.put("getUnconfirmedTransactions", new GetUnconfirmedTransactions(transactionProcessor));
         map.put("processBlock", new ProcessBlock(blockchain, blockchainProcessor));
         map.put("processTransactions", new ProcessTransactions(transactionProcessor));
@@ -109,7 +112,7 @@ public final class PeerServlet extends HttpServlet {
     @Override
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) {
         try {
-            if (!Peers.isSupportedUserAgent(req.getHeader("User-Agent"))) {
+            if (!peers.isSupportedUserAgent(req.getHeader("User-Agent"))) {
                 return;
             }
             process(req, resp);
@@ -127,7 +130,7 @@ public final class PeerServlet extends HttpServlet {
 
         String requestType = "unknown";
         try {
-            peer = Peers.addPeer(req.getRemoteAddr(), null);
+            peer = peers.addPeer(req.getRemoteAddr(), null);
             if (peer == null || peer.isBlacklisted()) {
                 return;
             }
@@ -144,7 +147,7 @@ public final class PeerServlet extends HttpServlet {
             if (peer.isState(Peer.State.DISCONNECTED)) {
                 peer.setState(Peer.State.CONNECTED);
                 if (peer.getAnnouncedAddress() != null) {
-                    Peers.updateAddress(peer);
+                    peers.updateAddress(peer);
                 }
             }
             peer.updateDownloadedVolume(cis.getCount());

@@ -110,16 +110,15 @@ test {
         "--add-opens=java.base/java.util=ALL-UNNAMED",
         "--add-opens=java.base/java.io=ALL-UNNAMED",
         "--add-opens=java.base/java.net=ALL-UNNAMED",
-        "--add-opens=java.base/jdk.internal.reflect=ALL-UNNAMED"
+        "--add-opens=java.base/jdk.internal.reflect=ALL-UNNAMED",
+        "--add-opens=java.logging/java.util.logging=ALL-UNNAMED"
     ]
 
-    exclude '**/ATTest.class',
-            '**/FeeSuggestionCalculatorTest.class',
+    exclude '**/FeeSuggestionCalculatorTest.class',
             '**/AliasServiceImplTest.class',
             '**/TransactionDuplicatesCheckerImplTest.class',
             '**/UnconfirmedTransactionStoreTest.class',
-            '**/it/java/node/**',
-            '**/node/at/AtControllerTest.class'
+            '**/it/java/node/**'
 }
 
 application {

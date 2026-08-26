@@ -2,6 +2,7 @@ package application.module.node.gui;
 
 import application.module.appearance.AppearanceModule;
 import application.module.node.BlockchainProcessor;
+import application.module.node.NodeModule;
 import application.module.node.Signum;
 import application.module.node.gui.configuration.LoggerConfigurationPanel;
 import application.module.node.gui.configuration.NodeConfigurationPanel;
@@ -74,8 +75,9 @@ public class NodeProfilePanel extends JPanel {
     private final NodeToolbar toolbar;
     private final String confFolder;
 
-    /** Tracks sync pause state locally since BlockchainProcessor has no getter */
-    private boolean syncPaused = false;
+    // v4 (P1.3): the local syncPaused shadow flag was removed — pause state is
+    // owned by the Signum instance (getOperatingState()/getPauseReason(), PUSH
+    // via onOperatingStateChanged).
 
     /**
      * Creates a profile panel with an injected Signum facade.
@@ -96,7 +98,7 @@ public class NodeProfilePanel extends JPanel {
         application.utils.logging.NodeLoggerRegistry.getOrCreate("node", profile.getName());
         application.utils.logging.LogScope previousContext = application.utils.logging.NodeLogContext.current();
         application.utils.logging.NodeLogContext.set("node", profile.getName());
-        LOGGER.info("[DIAG] NodeProfilePanel constructor START for profile: {}", profile.getName());
+        LOGGER.debug("NodeProfilePanel constructor START for profile: {}", profile.getName());
         
         try {
             this.parentFrame = parentFrame;
@@ -115,10 +117,10 @@ public class NodeProfilePanel extends JPanel {
             setLayout(new BorderLayout());
             setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
 
-            LOGGER.info("[DIAG] Creating NodeInfoBar for profile: {}", profile.getName());
+            LOGGER.debug("Creating NodeInfoBar for profile: {}", profile.getName());
             infoBar = new NodeInfoBar(profile);
             
-            LOGGER.info("[DIAG] Creating NodeToolbar for profile: {}", profile.getName());
+            LOGGER.debug("Creating NodeToolbar for profile: {}", profile.getName());
             toolbar = new NodeToolbar(profile);
 
             // Wrap infoBar in a responsive scroll pane so info chips are accessible when window is narrow
@@ -144,7 +146,7 @@ public class NodeProfilePanel extends JPanel {
             GuiFontManager.applyDefaultFont(innerTabbedPane);
             GuiUtils.applyDefaultTabLayoutPolicy(innerTabbedPane);
 
-            LOGGER.info("[DIAG] Creating NodeConsolePanel for profile: {}", profile.getName());
+            LOGGER.debug("Creating NodeConsolePanel for profile: {}", profile.getName());
             consolePanel = new NodeConsolePanel(parentFrame, profile);
             if (signum != null) {
                 consolePanel.setSignum(signum);
@@ -154,9 +156,9 @@ public class NodeProfilePanel extends JPanel {
             // was constructed before the Signum existed), adopt the started instance.
             consolePanel.setOnSignumStarted(this::adoptSignum);
             innerTabbedPane.addTab("Console", consolePanel);
-            LOGGER.info("[DIAG] Console tab added successfully");
+            LOGGER.debug("Console tab added successfully");
 
-            LOGGER.info("[DIAG] Creating NodeConfigurationPanel for profile: {}", profile.getName());
+            LOGGER.debug("Creating NodeConfigurationPanel for profile: {}", profile.getName());
             // Pass this node's own profile name explicitly so the panel does not rely
             // on the deprecated global "active node" lookup.
             configurationPanel = new NodeConfigurationPanel(
@@ -171,9 +173,9 @@ public class NodeProfilePanel extends JPanel {
                 configurationPanel.setSignum(signum);
             }
             innerTabbedPane.addTab("Configuration", configurationPanel);
-            LOGGER.info("[DIAG] Configuration tab added successfully");
+            LOGGER.debug("Configuration tab added successfully");
 
-            LOGGER.info("[DIAG] Creating LoggerConfigurationPanel for profile: {}", profile.getName());
+            LOGGER.debug("Creating LoggerConfigurationPanel for profile: {}", profile.getName());
             loggingPanel = new LoggerConfigurationPanel(
                     this::restartNode,
                     this.confFolder,
@@ -185,15 +187,15 @@ public class NodeProfilePanel extends JPanel {
                     () -> "logging"
             );
             innerTabbedPane.addTab("Logging", loggingPanel);
-            LOGGER.info("[DIAG] Logging tab added successfully");
+            LOGGER.debug("Logging tab added successfully");
 
-            LOGGER.info("[DIAG] Adding innerTabbedPane to CENTER (total tabs: {})", innerTabbedPane.getTabCount());
+            LOGGER.debug("Adding innerTabbedPane to CENTER (total tabs: {})", innerTabbedPane.getTabCount());
             add(innerTabbedPane, BorderLayout.CENTER);
             
-            LOGGER.info("[DIAG] Wiring toolbar callbacks for profile: {}", profile.getName());
+            LOGGER.debug("Wiring toolbar callbacks for profile: {}", profile.getName());
             wireToolbarCallbacks();
             
-            LOGGER.info("[DIAG] Wiring console visibility tracking for profile: {}", profile.getName());
+            LOGGER.debug("Wiring console visibility tracking for profile: {}", profile.getName());
             wireConsoleVisibilityTracking();
 
             // Adopt the Signum if it already exists at construction time:
@@ -206,10 +208,10 @@ public class NodeProfilePanel extends JPanel {
                 GuiFontManager.applyDefaultFont(innerTabbedPane);
             });
 
-            LOGGER.info("[DIAG] NodeProfilePanel constructor COMPLETED SUCCESSFULLY for profile: {} (tabs: {})", 
+            LOGGER.debug("NodeProfilePanel constructor COMPLETED SUCCESSFULLY for profile: {} (tabs: {})", 
                     profile.getName(), innerTabbedPane.getTabCount());
         } catch (Exception e) {
-            LOGGER.error("[DIAG] NodeProfilePanel constructor FAILED for profile: {}", profile.getName(), e);
+            LOGGER.error("NodeProfilePanel constructor FAILED for profile: {}", profile.getName(), e);
             throw e;
         } finally {
             // Restore the thread-local log context — the EDT is shared, so it must never
@@ -227,7 +229,7 @@ public class NodeProfilePanel extends JPanel {
      * <p>
      * Called with the Signum at construction time (if it already exists) and —
      * for late binding — when the console panel starts the node via
-     * {@code Signum.startNode()} and hands the instance back. Idempotent for the
+     * {@code NodeModule.startNode(name)} and hands the instance back. Idempotent for the
      * same instance; when a <i>different</i> instance is adopted (restart flow)
      * the previous state listener is unregistered first, so this panel always
      * has exactly one {@link Signum.StateListener} (PUSH trigger) and it only
@@ -249,7 +251,23 @@ public class NodeProfilePanel extends JPanel {
             stateListener = null;
         }
         this.signum = newSignum;
-        stateListener = (s, oldState, newState) -> onNodeStateChanged(oldState, newState);
+        stateListener = new Signum.StateListener() {
+            @Override
+            public void onStateChanged(Signum s, Signum.State oldState, Signum.State newState) {
+                onNodeStateChanged(oldState, newState);
+            }
+
+            @Override
+            public void onOperatingStateChanged(Signum s, Signum.OperatingState oldState, Signum.OperatingState newState) {
+                boolean paused = newState == Signum.OperatingState.PAUSED_USER
+                        || newState == Signum.OperatingState.PAUSED_SYSTEM;
+                SwingUtilities.invokeLater(() -> {
+                    if (toolbar != null) {
+                        toolbar.updateSyncIcon(paused);
+                    }
+                });
+            }
+        };
         newSignum.addStateListener(stateListener);
         newSignum.setGuiPanel(this);
         // Initial refresh so the UI immediately reflects the current node state.
@@ -283,10 +301,7 @@ public class NodeProfilePanel extends JPanel {
 
     private void wireToolbarCallbacks() {
         toolbar.setOnRestart(this::restartNode);
-        toolbar.setOnSyncToggle(() -> {
-            toggleSync();
-            toolbar.updateSyncIcon(syncPaused);
-        });
+        toolbar.setOnSyncToggle(this::toggleSync);
         toolbar.setOpenPhoenix(() -> openWebUi("/phoenix"));
         toolbar.setOpenClassic(() -> openWebUi("/classic"));
         toolbar.setOpenApi(() -> openWebUi("/api-doc"));
@@ -298,14 +313,25 @@ public class NodeProfilePanel extends JPanel {
         toolbar.setOnMenuToggle(() -> consolePanel.toggleMenu(toolbar.getMenuButton()));
     }
 
-    /** Copy from NodeConsolePanel.syncButtonAction */
+    /**
+     * v4 (P1.3): pause/resume is owned by the Signum instance (PUSH).
+     * The GUI no longer keeps a shadow syncPaused flag — the toolbar icon is
+     * driven by onOperatingStateChanged (and by the explicit update below).
+     */
     public void toggleSync() {
         Signum node = signum;
-        BlockchainProcessor blockchainProcessor = node != null ? node.getBlockchainProcessor() : null;
-        if (blockchainProcessor != null) {
-            syncPaused = !syncPaused;
-            blockchainProcessor.setSyncPaused(syncPaused);
+        if (node == null) {
+            return;
         }
+        Signum.OperatingState os = node.getOperatingState();
+        if (os == Signum.OperatingState.PAUSED_USER || os == Signum.OperatingState.PAUSED_SYSTEM) {
+            node.resumeByUser();
+        } else {
+            node.pauseByUser();
+        }
+        Signum.OperatingState after = node.getOperatingState();
+        boolean paused = after == Signum.OperatingState.PAUSED_USER || after == Signum.OperatingState.PAUSED_SYSTEM;
+        toolbar.updateSyncIcon(paused);
     }
 
     /** Copy from NodeConsolePanel.editConf */
@@ -388,6 +414,10 @@ public class NodeProfilePanel extends JPanel {
     }
 
     private void restartNode() {
+        // v4 (P1.6): the node lifecycle restart is owned by NodeModule
+        // (restartNode(name) = stop + start on the same Signum instance).
+        // The console panel provides the user-facing progress dialog and
+        // delegates the actual restart to NodeModule.
         LOGGER.info("Restart requested for profile: {}", profile.getName());
         if (consolePanel != null) {
             consolePanel.restartNode();
@@ -427,7 +457,13 @@ public class NodeProfilePanel extends JPanel {
     }
 
     public void startNode() {
-        Signum s = this.signum; if (s != null) s.start();
+        // Single lifecycle entry point (v4): NodeModule creates (if missing) and
+        // starts the node for this profile.
+        try {
+            NodeModule.getInstance().startNode(profile.getName());
+        } catch (Exception e) {
+            LOGGER.error("Start failed for profile: {}", profile.getName(), e);
+        }
         LOGGER.info("Start requested for profile: {}", profile.getName());
     }
 

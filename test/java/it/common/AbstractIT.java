@@ -4,13 +4,9 @@ import static org.powermock.api.mockito.PowerMockito.mockStatic;
 
 import application.module.node.NodeModule;
 import application.module.node.Signum;
-import application.module.node.common.TestInfrastructure;
 import application.module.node.peer.Peers;
 import application.module.node.peer.ProcessBlock;
-import application.module.node.props.CaselessProperties;
-import application.module.node.props.Props;
 import com.google.gson.JsonObject;
-import java.util.Properties;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.runner.RunWith;
@@ -37,33 +33,17 @@ public abstract class AbstractIT {
     @Before
     public void setUp() {
         mockStatic(Peers.class);
-        Signum.init(testProperties());
+        // v4 (P0.1): NodeModule is the sole lifecycle entry point — the legacy
+        // Signum.init(CaselessProperties) static was removed (its properties
+        // argument was never applied to the node anyway).
+        Signum signum = NodeModule.getInstance().startNode(Signum.PROPERTIES_NAME);
 
-        // Access the specific node by profile name (multi-node: no "active" concept)
-        var signum = NodeModule.getInstance().get("node");
         processBlock = new ProcessBlock(signum.getBlockchain(), signum.getBlockchainProcessor());
     }
 
     @After
     public void shutdown() {
-        Signum.shutdown(true);
-    }
-
-    private CaselessProperties testProperties() {
-        final CaselessProperties props = new CaselessProperties();
-
-        props.setProperty(Props.DEV_OFFLINE.getName(), "true");
-        props.setProperty(Props.NETWORK_NAME.getName(), "Unit tests");
-        props.setProperty(Props.DB_URL.getName(), TestInfrastructure.IN_MEMORY_DB_URL);
-        props.setProperty(Props.DB_CONNECTIONS.getName(), "1");
-
-        props.setProperty(Props.API_SERVER.getName(), "on");
-        props.setProperty(Props.API_LISTEN.getName(), "127.0.0.1");
-        props.setProperty(Props.API_PORT.getName(), "" + TestInfrastructure.TEST_API_PORT);
-        props.setProperty(Props.API_ALLOWED.getName(), "*");
-        props.setProperty(Props.API_UI_DIR.getName(), "html/ui");
-
-        return props;
+        NodeModule.getInstance().stopAll();
     }
 
     public void processBlock(JsonObject jsonFirstBlock) {

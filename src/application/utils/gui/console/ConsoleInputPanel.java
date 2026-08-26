@@ -150,6 +150,18 @@ public final class ConsoleInputPanel extends JPanel {
     }
 
     /**
+     * Prefills the command field with initial text (fully editable).
+     * Used e.g. to pre-address profile-targeted commands ("-node.node ").
+     *
+     * @param text the initial text ({@code null} is a no-op)
+     */
+    public void prefill(String text) {
+        if (text != null) {
+            commandField.setText(text);
+        }
+    }
+
+    /**
      * Enables or disables the panel. When disabled, all child components
      * are disabled and commands are not processed.
      *

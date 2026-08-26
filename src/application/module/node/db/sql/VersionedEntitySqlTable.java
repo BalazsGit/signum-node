@@ -19,7 +19,7 @@ public abstract class VersionedEntitySqlTable<T> extends EntitySqlTable<T> imple
 
     private static final Logger logger = LoggerFactory.getLogger(VersionedEntitySqlTable.class);
 
-    private final Blockchain blockchain;
+    private Blockchain blockchain;
 
     VersionedEntitySqlTable(String table, TableImpl<?> tableClass, SignumKey.Factory<T> dbKeyFactory,
             DerivedTableManager derivedTableManager, DbContext dbContext) {
@@ -30,6 +30,15 @@ public abstract class VersionedEntitySqlTable<T> extends EntitySqlTable<T> imple
     VersionedEntitySqlTable(String table, TableImpl<?> tableClass, SignumKey.Factory<T> dbKeyFactory,
             DerivedTableManager derivedTableManager, Blockchain blockchain, DbContext dbContext) {
         super(table, tableClass, dbKeyFactory, true, derivedTableManager, dbContext);
+        this.blockchain = blockchain;
+    }
+
+    /**
+     * Re-binds the blockchain reference after construction. Stores create their
+     * tables before the Blockchain exists (circular dependency), so their
+     * {@code setBlockchain} propagation updates this late.
+     */
+    void setBlockchain(Blockchain blockchain) {
         this.blockchain = blockchain;
     }
 

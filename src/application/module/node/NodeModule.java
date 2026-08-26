@@ -8,11 +8,15 @@ import application.module.node.gui.NodePanel;
 import application.module.node.logging.NodeLoggingProvider;
 import application.module.node.props.Prop;
 import application.module.node.props.Props;
+import application.module.node.profile.NodeProfile;
+import application.module.node.profile.NodeProfileRepository;
+import application.utils.io.PathUtils;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -224,15 +228,6 @@ public class NodeModule implements Module {
     }
 
     /**
-     * Returns the first registered Signum (for legacy callers).
-     *
-     * @return the first Signum, or null if none
-     */
-    public Signum getActive() {
-        return nodes.isEmpty() ? null : nodes.get(0);
-    }
-
-    /**
      * Stops all registered Signum instances and clears the registry.
      */
     public synchronized void stopAll() {
@@ -262,6 +257,124 @@ public class NodeModule implements Module {
                 }
             }
         }
+    }
+
+    /**
+     * Starts the node for the given profile, creating the {@link Signum} instance
+     * if it does not exist yet.
+     * <p>
+     * This is the <b>single lifecycle entry point</b> for node startup: the GUI and
+     * all other callers MUST use this method instead of touching {@code Signum}
+     * instances directly or resolving a global "active" profile. Semantics:
+     * </p>
+     * <ul>
+     *   <li>profile already registered and RUNNING → returns the existing instance (no-op)</li>
+     *   <li>profile already registered but not running → retries {@code start()} on the same instance</li>
+     *   <li>profile not registered → creates a {@link Signum}, registers it, then starts it
+     *       (port conflicts surface as startup failure, state → ERROR, retryable)</li>
+     * </ul>
+     *
+     * @param profileName the profile name to start (never null/blank)
+     * @return the started (or already running) {@link Signum} instance
+     * @throws IllegalArgumentException if {@code profileName} is null or blank
+     * @throws RuntimeException if node startup fails (the instance stays registered
+     *         so the failure can be retried via the GUI)
+     */
+    public Signum startNode(String profileName) {
+        return startNode(profileName, PathUtils.resolvePath(Signum.CONF_FOLDER));
+    }
+
+    /**
+     * Starts the node for the given profile using an explicit configuration folder.
+     * See {@link #startNode(String)} for the full semantics.
+     *
+     * @param profileName the profile name to start (never null/blank)
+     * @param confRoot    the base configuration folder for a newly created instance
+     * @return the started (or already running) {@link Signum} instance
+     * @throws IllegalArgumentException if {@code profileName} is null/blank or
+     *         {@code confRoot} is null
+     */
+    public Signum startNode(String profileName, Path confRoot) {
+        if (profileName == null || profileName.isBlank()) {
+            throw new IllegalArgumentException("Profile name must not be null or blank");
+        }
+        if (confRoot == null) {
+            throw new IllegalArgumentException("confRoot must not be null");
+        }
+
+        Signum target;
+        synchronized (this) {
+            Signum existing = get(profileName);
+            if (existing != null) {
+                target = existing;
+            } else {
+                NodeProfile profile = resolveProfile(profileName);
+                LOGGER.info("startNode('{}'): creating new Signum instance (confRoot={})", profileName, confRoot);
+                Signum fresh = new Signum(profile, confRoot);
+                addNode(fresh);
+                target = fresh;
+            }
+        }
+
+        if (target.isRunning()) {
+            LOGGER.debug("startNode('{}'): already RUNNING — no-op", profileName);
+            return target;
+        }
+
+        LOGGER.info("startNode('{}'): starting node", profileName);
+        target.start();
+        return target;
+    }
+
+    /**
+     * Stops the node for the given profile.
+     *
+     * @param profileName the profile name to stop
+     * @return the affected {@link Signum} instance, or {@code null} if the profile
+     *         was not registered (no-op)
+     */
+    public Signum stopNode(String profileName) {
+        Signum signum = get(profileName);
+        if (signum == null) {
+            LOGGER.debug("stopNode('{}'): not registered — no-op", profileName);
+            return null;
+        }
+        LOGGER.info("stopNode('{}'): stopping node", profileName);
+        signum.stop();
+        return signum;
+    }
+
+    /**
+     * Restarts the node for the given profile: stop (if running) then start.
+     * <p>
+     * The same {@link Signum} instance is reused ({@code doShutdown} +
+     * {@code doInitialize}); a missing instance is created first.
+     * </p>
+     *
+     * @param profileName the profile name to restart (never null/blank)
+     * @return the restarted {@link Signum} instance
+     */
+    public Signum restartNode(String profileName) {
+        LOGGER.info("restartNode('{}')", profileName);
+        stopNode(profileName);
+        return startNode(profileName);
+    }
+
+    /**
+     * Resolves the {@link NodeProfile} for a profile name: loads it from the
+     * profile system when available, otherwise falls back to a name-only profile
+     * (hardcoded defaults apply).
+     *
+     * @param profileName the profile name
+     * @return the resolved profile, never null
+     */
+    private NodeProfile resolveProfile(String profileName) {
+        NodeProfile profile = NodeProfileRepository.loadByName(profileName);
+        if (profile == null) {
+            LOGGER.debug("resolveProfile('{}'): profile system returned null — using name-only profile", profileName);
+            profile = new NodeProfile(profileName);
+        }
+        return profile;
     }
 
     // =====================================================================
@@ -363,6 +476,23 @@ public class NodeModule implements Module {
             loggingProvider = new NodeLoggingProvider();
         }
         loggingProvider.register();
+
+        // Multi-node boot path: boot every profile with autostart enabled.
+        // NodeModule is the only composition root, so profile discovery and
+        // startup happen here — never in Signum or the GUI (v4 architecture).
+        try {
+            for (NodeProfile profile : NodeProfileRepository.loadAll()) {
+                if (profile != null && profile.isAutostart() && get(profile.getName()) == null) {
+                    try {
+                        startNode(profile.getName());
+                    } catch (Exception e) {
+                        LOGGER.error("Failed to autostart profile '{}'", profile.getName(), e);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Autostart profile discovery skipped: {}", e.getMessage());
+        }
     }
 
     @Override
@@ -411,7 +541,7 @@ public class NodeModule implements Module {
             synchronized (this) {
                 panel = gui;
                 if (panel == null) {
-                    LOGGER.info("[DIAG] NodeModule.getUI() - creating NEW NodePanel instance");
+                    LOGGER.debug("NodeModule.getUI() - creating NEW NodePanel instance");
                     JFrame parentFrame = null;
                     for (java.awt.Frame f : java.awt.Frame.getFrames()) {
                         if (f instanceof JFrame) {
@@ -424,15 +554,15 @@ public class NodeModule implements Module {
                     try {
                         panel = new NodePanel(parentFrame);
                         gui = panel;
-                        LOGGER.info("[DIAG] NodeModule.getUI() - NodePanel created successfully");
+                        LOGGER.debug("NodeModule.getUI() - NodePanel created successfully");
                     } catch (Exception e) {
-                        LOGGER.error("[DIAG] NodeModule.getUI() - FAILED to create NodePanel", e);
+                        LOGGER.error("NodeModule.getUI() - FAILED to create NodePanel", e);
                         throw e;
                     }
                 }
             }
         } else {
-            LOGGER.debug("[DIAG] NodeModule.getUI() - returning cached NodePanel instance");
+            LOGGER.debug("NodeModule.getUI() - returning cached NodePanel instance");
         }
         return panel;
     }

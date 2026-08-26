@@ -178,11 +178,15 @@ public class SqlBlockDb implements BlockDb {
         long nonce = r.field(BLOCK.NONCE) != null ? r.get(BLOCK.NONCE) : 0L;
         byte[] blockATs = r.get(BLOCK.ATS);
 
-        return new Block(version, timestamp, previousBlockId, totalAmountNQT, totalFeeNQT,
+        Block block = new Block(version, timestamp, previousBlockId, totalAmountNQT, totalFeeNQT,
                 totalFeeCashBackNQT, totalFeeBurntNQT,
                 payloadLength, payloadHash,
                 generatorPublicKey, generationSignature, blockSignature, previousBlockHash,
                 cumulativeDifficulty, baseTarget, nextBlockId, height, id, nonce, blockATs, fluxCapacitor);
+        // Instance-scoped transaction lookup: getTransactions() needs the node's
+        // TransactionDb (previously resolved via the removed static Signum access).
+        block.setTransactionDb(this.transactionDb);
+        return block;
     }
 
     public void saveBlock(DSLContext ctx, Block block) {

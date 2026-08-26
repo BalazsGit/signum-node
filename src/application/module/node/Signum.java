@@ -4,11 +4,9 @@ import application.module.node.props.CaselessProperties;
 import application.module.node.props.PropertyService;
 import application.module.node.props.PropertyServiceImpl;
 import application.module.node.props.Props;
-import application.module.node.util.LoggerConfigurator;
 import application.module.node.web.server.WebServer;
 import application.module.node.instance.NodeStartupException;
 import application.module.node.profile.NodeProfile;
-import application.utils.config.ConfigPaths;
 import application.utils.config.PropertiesProfileLoader;
 import application.utils.io.PathUtils;
 
@@ -17,6 +15,7 @@ import application.module.node.at.AtConstants;
 import application.module.node.at.ATProcessorCache;
 import application.module.node.at.ATProcessingContext;
 import application.module.node.at.ATServiceImpl;
+import application.module.node.at.AtController;
 import application.module.node.assetexchange.AssetExchange;
 import application.module.node.assetexchange.AssetExchangeImpl;
 import application.module.node.db.BlockDb;
@@ -73,7 +72,6 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import java.io.BufferedReader;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -122,13 +120,6 @@ public final class Signum {
     public static final String LOGGING_PROPERTIES_NAME = "logging";
 
 
-    /**
-     * Stores log messages produced during the bootstrap phase before the GUI is
-     * ready.
-     */
-    public static final List<String> BOOTSTRAP_LOGS = java.util.Collections
-            .synchronizedList(new java.util.ArrayList<>());
-
     public static final Option CONF_FOLDER_OPTION = Option.builder("c")
             .longOpt("config")
             .argName("conf folder")
@@ -170,6 +161,8 @@ public final class Signum {
      */
     private volatile OperatingState operatingState = OperatingState.SYNC_IDLE;
     private volatile long missingBlocks = 0;
+    /** Reason the node is currently paused (null when not paused). */
+    private volatile String pauseReason;
 
     // =========================================================================
     // Instance state
@@ -278,22 +271,14 @@ public final class Signum {
     private final AtomicBoolean contextStopped = new AtomicBoolean(false);
 
     // =========================================================================
-    // Bootstrap helpers
+    // Logging (class-level, stateless; per-node routing goes through ProfileLogger)
     // =========================================================================
 
-    private static Logger logger;
-    private static final AtomicBoolean isInitialized = new AtomicBoolean(false);
-    private static final AtomicBoolean isShutdown = new AtomicBoolean(false);
-    private static final AtomicBoolean nodeStopped = new AtomicBoolean(false);
+    private static final Logger LOGGER = LoggerFactory.getLogger(Signum.class);
 
     // =========================================================================
     // Constructors
     // =========================================================================
-
-    private Signum() {
-        this.profile = null;
-        this.confFolder = null;
-    }
 
     /**
      * Creates a new Signum instance with the given profile.
@@ -489,23 +474,68 @@ public final class Signum {
         }
     }
 
+    /**
+     * Pauses blockchain synchronization on user request.
+     * <p>v4 (P1.3): the pause action (sync stop) + state change + PUSH notify are
+     * owned here — the GUI only renders the state, it never pauses directly.</p>
+     */
     public void pauseByUser() {
-        this.operatingState = OperatingState.PAUSED_USER;
+        setPaused(OperatingState.PAUSED_USER, "paused by user request");
     }
 
+    /**
+     * Pauses blockchain synchronization for a system-level reason (e.g., DB error).
+     */
     public void pauseBySystem(String reason) {
-        this.operatingState = OperatingState.PAUSED_SYSTEM;
+        setPaused(OperatingState.PAUSED_SYSTEM, "paused by system: " + reason);
         for (StateListener l : stateListeners) {
             try { l.onStatusMessage(this, "Paused by system: " + reason); } catch (Exception ignored) {}
         }
     }
 
     public void resumeByUser() {
-        this.operatingState = missingBlocks > 10 ? OperatingState.SYNCING : OperatingState.SYNC_IDLE;
+        resumePaused();
     }
 
     public void resumeBySystem() {
+        resumePaused();
+    }
+
+    private void setPaused(OperatingState newState, String reason) {
+        OperatingState old = this.operatingState;
+        this.operatingState = newState;
+        this.pauseReason = reason;
+        BlockchainProcessor proc = getBlockchainProcessor();
+        if (proc != null) {
+            try { proc.setSyncPaused(true); } catch (Exception ignored) {}
+        }
+        if (old != newState) {
+            for (StateListener l : stateListeners) {
+                try { l.onOperatingStateChanged(this, old, newState); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    private void resumePaused() {
+        OperatingState old = this.operatingState;
         this.operatingState = missingBlocks > 10 ? OperatingState.SYNCING : OperatingState.SYNC_IDLE;
+        this.pauseReason = null;
+        BlockchainProcessor proc = getBlockchainProcessor();
+        if (proc != null) {
+            try { proc.setSyncPaused(false); } catch (Exception ignored) {}
+        }
+        if (old != this.operatingState) {
+            for (StateListener l : stateListeners) {
+                try { l.onOperatingStateChanged(this, old, this.operatingState); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    /**
+     * Returns the reason the node is currently paused, or {@code null} when not paused.
+     */
+    public String getPauseReason() {
+        return pauseReason;
     }
 
     // =========================================================================
@@ -716,50 +746,11 @@ public final class Signum {
     // Profile management
     // =========================================================================
 
-    /**
-     * @deprecated Use {@code signum.getProfileName()} on the specific Signum instance instead.
-     * In multi-node architecture, the profile is a property of each node, not a global state.
-     */
-    @Deprecated
-    public static String getActiveNodeProfile() {
-        Signum active = NodeModule.getInstance().getActive();
-        return active != null ? active.getProfileName() : PROPERTIES_NAME;
-    }
-
-    /** @deprecated No-op. Profile is a per-node property, not global state. */
-    @Deprecated
-    public static void setActiveNodeProfile(String profile) {
-        // No-op: in multi-node, profile is set per-node via NodeProfile
-    }
-
-    /**
-     * @deprecated Use the Signum instance's property service to get the logging profile.
-     */
-    @Deprecated
-    public static String getActiveLoggingProfile() {
-        // In multi-node, logging profile is per-node. Return default as fallback.
-        return LOGGING_PROPERTIES_NAME;
-    }
-
-    /** @deprecated No-op. Logging profile is resolved per-node. */
-    @Deprecated
-    public static void setActiveLoggingProfile(String profile) {
-        // No-op: in multi-node, logging profile is per-node
-    }
-
-    // =========================================================================
-    // Bootstrap helpers (logger)
-    // =========================================================================
-
-    public static void setLogger(Logger l) {
-        logger = l;
-    }
-
-    private static void ensureLogger() {
-        if (logger == null) {
-            logger = LoggerFactory.getLogger(Signum.class);
-        }
-    }
+    // v4: Global "active node profile" statics removed — profile identity is
+    // per-node (NodeProfile / NodeModule registry). Use
+    // NodeModule.getInstance().get(profileName) for node resolution.
+    // (The legacy getActiveLoggingProfile() constant-alias was removed as well;
+    //  callers use the Signum.LOGGING_PROPERTIES_NAME constant directly.)
 
     // =========================================================================
     // Properties loading
@@ -768,38 +759,35 @@ public final class Signum {
     /**
      * Loads properties for a specific named profile using the unified PropertiesProfileLoader.
      * Architecture: Hardcoded defaults (Props.java) -> Profile .properties file only.
-     * Path schema: ../conf/node/profiles/{profileName}.properties
+     * Path schema: {confFolder}/node/profiles/{profileName}.properties
      *
-     * @param confFolder  The base configuration folder (e.g., "../conf")
+     * @param confFolder  The base configuration folder for this node (e.g., "./conf",
+     *                    or "conf/junit" in tests) — the profile is resolved RELATIVE TO IT
      * @param profileName The profile name to load (without .properties extension)
      * @return PropertyService with loaded properties, or empty one if file not found
      */
     public static PropertyService loadPropertiesForProfile(String confFolder, String profileName) {
         CaselessProperties properties = new CaselessProperties();
 
-        // Use unified profile loader for path resolution: ../conf/node/profiles/{profileName}.properties
+        // Use unified profile loader for path resolution: {confFolder}/node/profiles/{profileName}.properties
+        // (v4: the confFolder parameter is the node's configuration root — honoring it is what
+        // makes per-node conf roots work, e.g. the JUnit mock profile under "conf/junit".)
         Path profileFile = PropertiesProfileLoader.resolveProfileFile(
-                ConfigPaths.RUNTIME_CONF_ROOT, "node", "profiles", profileName);
+                confFolder, "node", "profiles", profileName);
 
-        if (logger != null)
-            logger.info("Initializing Signum Node version {}", VERSION);
-        if (logger != null)
-            logger.info("Looking for profile '{}' at {}", profileName, profileFile.toAbsolutePath());
+        LOGGER.info("Initializing Signum Node version {}", VERSION);
+        LOGGER.info("Looking for profile '{}' at {}", profileName, profileFile.toAbsolutePath());
 
         if (Files.exists(profileFile)) {
             try (Reader reader = new InputStreamReader(new FileInputStream(profileFile.toFile()),
                     StandardCharsets.UTF_8)) {
-                if (logger != null)
-                    logger.info("Loading profile '{}' from {}", profileName, profileFile.toAbsolutePath());
+                LOGGER.info("Loading profile '{}' from {}", profileName, profileFile.toAbsolutePath());
                 properties.load(reader);
             } catch (IOException e) {
-                if (logger != null) {
-                    logger.warn("Error loading profile '{}', using internal defaults.", profileName, e);
-                }
+                LOGGER.warn("Error loading profile '{}', using internal defaults.", profileName, e);
             }
         } else {
-            if (logger != null)
-                logger.info("No profile file found for '{}'. Using internal defaults from Props.java.", profileName);
+            LOGGER.info("No profile file found for '{}'. Using internal defaults from Props.java.", profileName);
         }
 
         // Ensure SETTINGS_DIR is set if not in file
@@ -810,45 +798,23 @@ public final class Signum {
         return new PropertyServiceImpl(properties);
     }
 
-    /**
-     * Legacy method for backward compatibility.
-     * Loads a profile by name using the simplified architecture.
-     */
-    private static PropertyService loadProperties(String confFolder) {
-        String defaultProfile = PROPERTIES_NAME;
-        return loadPropertiesForProfile(confFolder, defaultProfile);
-    }
-
-    /**
-     * Resolves a properties file path directly from the given directory.
-     *
-     * @param dir        The directory to look in
-     * @param fileName   The exact filename to resolve (e.g., "myprofile.properties")
-     * @param defaultFileName Unused (kept for signature compatibility)
-     * @param confPath   Unused (kept for signature compatibility)
-     * @return The path if the file exists, null otherwise
-     * @deprecated Use direct Path.resolve() and Files.exists() instead.
-     */
-    @Deprecated
-    public static Path resolvePropertiesPath(Path dir, String fileName, String defaultFileName, Path confPath) {
-        Path propsFile = dir.resolve(fileName);
-        if (Files.exists(propsFile)) {
-            return propsFile;
-        }
-        return null;
-    }
-
     // =========================================================================
     // Main / init / shutdown (legacy entry points)
     // =========================================================================
 
     /**
-     * The main entry point for the node.
+     * The headless entry point for the node.
+     * <p>
+     * v4 (P0.1): delegates to the single composition root — {@link NodeModule}
+     * boots every autostart-enabled profile. When no profile is autostart-enabled,
+     * the default {@code "node"} profile is started so legacy
+     * {@code -c <confFolder>} CLI usage keeps working.
+     * </p>
      *
      * @param args arguments for the node.
      */
     public static void main(String[] args) {
-        Runtime.getRuntime().addShutdownHook(new Thread(Signum::shutdown));
+        Runtime.getRuntime().addShutdownHook(new Thread(NodeModule.getInstance()::stop));
         String confFolder = CONF_FOLDER;
         try {
             CommandLine cmd = new DefaultParser().parse(CLI_OPTIONS, args, true);
@@ -858,150 +824,24 @@ public final class Signum {
         } catch (Exception e) {
             System.err.println("Exception parsing command line arguments: " + e.getMessage());
         }
-        init(confFolder);
-    }
-
-    private static boolean validateVersionNotDev(PropertyService propertyService) {
-        if (VERSION.isPrelease()
-                && propertyService.getString(Props.NETWORK_NAME)
-                        .equals(Constants.SIGNUM_NETWORK_NAME)) {
-            logger.error("THIS IS A DEVELOPMENT VERSION, PLEASE DO NOT USE THIS ON Signum MAINNET");
-            return false;
-        }
-        return true;
-    }
-
-    // Init shutdown flags in case of restart node
-    public static void initShutdown() {
-        isShutdown.set(false);
-        nodeStopped.set(false);
-        isInitialized.set(false);
-    }
-
-    /**
-     * Shuts down all running node profiles via NodeModule.
-     */
-    public static void shutdownNode() {
-        ensureLogger();
-        if (NodeModule.getInstance().size() > 0) {
-            NodeModule.getInstance().stopAll();
-        }
-        if (!isShutdown.get()) {
-            shutdown(false);
+        LOGGER.info("Headless boot: delegating to NodeModule (confFolder={})", confFolder);
+        NodeModule module = NodeModule.getInstance();
+        Path confRoot = PathUtils.resolvePath(confFolder);
+        module.start();
+        if (module.size() == 0) {
+            LOGGER.info("No autostart profile registered — starting default profile '{}'", PROPERTIES_NAME);
+            module.startNode(PROPERTIES_NAME, confRoot);
         }
     }
 
-    /**
-     * Starts the default node profile via NodeModule.
-     *
-     * @return the started {@link Signum} instance, or {@code null} if the legacy
-     *         fallback path was taken or an error occurred during startup.
-     * @since 4.0
-     */
-    public static Signum startNode() {
-        initShutdown();
-        String profile = getActiveNodeProfile();
-        if (profile != null && !profile.isEmpty()) {
-            try {
-                NodeProfile np = new NodeProfile(profile);
-                Path confPath = PathUtils.resolvePath(CONF_FOLDER);
-                Signum signum = new Signum(np, confPath);
-                signum.start();
-                NodeModule.getInstance().addNode(signum);
-                return signum;
-            } catch (Exception e) {
-                if (logger != null)
-                    logger.error("Failed to start node profile '{}'", profile, e);
-            }
-        } else {
-            // Fallback: legacy init when no profile discovered
-            if (logger != null)
-                logger.warn("No active node profile configured. Falling back to legacy Signum.init()");
-            init(CONF_FOLDER);
-        }
-        return null;
-    }
-
-    public static void init(CaselessProperties customProperties) {
-        if (isInitialized.compareAndSet(false, true)) {
-            ensureLogger();
-            String profileName = getActiveNodeProfile();
-            try {
-                NodeProfile np = new NodeProfile(profileName != null ? profileName : PROPERTIES_NAME);
-                Path confPath = PathUtils.resolvePath(CONF_FOLDER);
-                Signum signum = new Signum(np, confPath);
-                signum.start();
-                NodeModule.getInstance().addNode(signum);
-            } catch (Exception e) {
-                if (logger != null)
-                    logger.error("Failed to initialize node", e);
-                throw new RuntimeException("Failed to initialize Signum node", e);
-            }
-        } else {
-            if (logger != null)
-                logger.warn("Signum node already initialized. Skipping re-initialization.");
-        }
-    }
-
-    public static void init(String confFolder) {
-        if (!isInitialized.compareAndSet(false, true)) {
-            if (logger != null)
-                logger.warn("Signum node already initialized. Skipping.");
-            return;
-        }
-
-        ensureLogger();
-
-        // Initialize unified profile system
-        NodeProfile.initialize();
-
-        // Resolve logging properties priority
-        Path confPath = PathUtils.resolvePath(confFolder);
-        Path loggingPath = confPath.resolve(LOGGING_CONF_DIR);
-        Path loggingFileToLoad = resolvePropertiesPath(loggingPath, LOGGING_PROPERTIES_NAME + ".properties",
-                DEFAULT_LOGGING_PROPERTIES_NAME + ".properties", confPath);
-
-        try {
-            if (Files.notExists(loggingPath)) {
-                Files.createDirectories(loggingPath);
-                logger.info("Created missing logging configuration directory: {}", loggingPath.toAbsolutePath());
-            }
-        } catch (IOException e) {
-            logger.warn("Failed to create logging configuration directory: {}", loggingPath.toAbsolutePath(), e);
-        }
-        // Logging profile is resolved per-node, not globally
-
-        // Create and start the node
-        String profileName = getActiveNodeProfile();
-        NodeProfile np = new NodeProfile(profileName != null ? profileName : PROPERTIES_NAME);
-        try {
-            Signum signum = new Signum(np, confPath);
-            signum.start();
-            NodeModule.getInstance().addNode(signum);
-        } catch (Exception e) {
-            logger.error("Failed to initialize node", e);
-            throw new RuntimeException("Failed to initialize Signum node", e);
-        }
-    }
+    // v4: The legacy global lifecycle statics (startNode / shutdownNode /
+    // initShutdown / init(CaselessProperties) / init(String) / shutdown(boolean))
+    // were removed. NodeModule is the sole lifecycle entry point:
+    //   NodeModule.getInstance().startNode(profileName)
 
     // =========================================================================
-    // Console command handler (legacy)
+    // Console command handler
     // =========================================================================
-
-    private static void commandHandler() {
-        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
-        try {
-            String command;
-            while ((command = reader.readLine()) != null) {
-                Signum node = NodeModule.getInstance().get(getActiveNodeProfile());
-                if (node != null) {
-                    node.processCommandInstance(command);
-                }
-            }
-        } catch (IOException e) {
-            // ignore
-        }
-    }
 
     /**
      * Instance-scoped command processing.
@@ -1010,14 +850,14 @@ public final class Signum {
      * @param command the console command string
      */
     public void processCommandInstance(String command) {
-        ensureLogger();
-        logger.debug("received command: >{}<", command);
+        LOGGER.debug("received command: >{}<", command);
 
         BlockchainProcessor proc = this.blockchainProcessor;
         Blockchain chain = this.blockchain;
 
         if (command.equals(".shutdown")) {
-            shutdown(false);
+            // v4 (P0.1): shutdown goes through the single composition root
+            NodeModule.getInstance().stop();
             System.exit(0);
         } else if (command.equals(".restart")) {
             application.launcher.Launcher.restart();
@@ -1032,16 +872,16 @@ public final class Signum {
         } else if (command.equals(".dbcheck")) {
             if (proc != null) proc.checkDatabaseStateRequest();
         } else if (command.equals(".help")) {
-            logger.info("Available commands:");
-            logger.info("  .shutdown     - Gracefully shuts down the node.");
-            logger.info("  .restart      - Restarts the node application.");
-            logger.info("  .pause        - Pauses blockchain synchronization.");
-            logger.info("  .resume       - Resumes blockchain synchronization.");
-            logger.info("  .autoresolve  - Triggers manual database consistency resolution.");
-            logger.info("  .trim         - Schedules a database trim.");
-            logger.info("  .dbcheck      - Performs a database consistency check.");
-            logger.info("  .popoff <n>   - Pops off the last n blocks from the blockchain (e.g., .popoff 10).");
-            logger.info("  .help         - Displays this help message.");
+            LOGGER.info("Available commands:");
+            LOGGER.info("  .shutdown     - Gracefully shuts down the node.");
+            LOGGER.info("  .restart      - Restarts the node application.");
+            LOGGER.info("  .pause        - Pauses blockchain synchronization.");
+            LOGGER.info("  .resume       - Resumes blockchain synchronization.");
+            LOGGER.info("  .autoresolve  - Triggers manual database consistency resolution.");
+            LOGGER.info("  .trim         - Schedules a database trim.");
+            LOGGER.info("  .dbcheck      - Performs a database consistency check.");
+            LOGGER.info("  .popoff <n>   - Pops off the last n blocks from the blockchain (e.g., .popoff 10).");
+            LOGGER.info("  .help         - Displays this help message.");
         } else if (command.startsWith(".popoff ")) {
             Pattern r = Pattern.compile("^\\.popoff (\\d+)$");
             Matcher m = r.matcher(command);
@@ -1052,50 +892,12 @@ public final class Signum {
                 }
             }
         } else if (!command.trim().isEmpty()) {
-            logger.info("Unknown command: \"{}\". Type .help to see the list of available commands.", command);
+            LOGGER.info("Unknown command: \"{}\". Type .help to see the list of available commands.", command);
         }
     }
 
-    private static void shutdown() {
-        shutdown(false);
-    }
-
-    /**
-     * Cleans up the node prior to shutting down.
-     * Supports both multi-node mode and legacy static mode.
-     *
-     * @param ignoreDbShutdown if true, shuts down everything but the database.
-     */
-    public static void shutdown(boolean ignoreDbShutdown) {
-        ensureLogger();
-
-        // Multi-node mode: stop all registered nodes via NodeModule
-        if (NodeModule.getInstance().size() > 0) {
-            logger.info("Shutting down all {} registered node(s)", NodeModule.getInstance().size());
-            NodeModule.getInstance().stopAll();
-            isShutdown.set(true);
-            nodeStopped.set(true);
-            LoggerConfigurator.shutdown();
-            return;
-        }
-
-        // Legacy static mode
-        if (isShutdown.get() && !nodeStopped.get()) {
-            logger.info("Already shutting down...");
-        }
-
-        synchronized (isShutdown) {
-            if (isShutdown.getAndSet(true)) {
-                return;
-            }
-
-            logger.info("Shutting down...");
-            logger.info("Do not force exit or kill the node process.");
-            logger.info("BRS {} stopped.", VERSION);
-            LoggerConfigurator.shutdown();
-            nodeStopped.set(true);
-        }
-    }
+    // v4 (P0.1): the legacy static Signum.shutdown() was removed — application
+    // shutdown goes through NodeModule.stop() (stopAll + logging teardown).
 
     // =========================================================================
     // Internal bootstrap / teardown (absorbed from NodeCoreContext)
@@ -1145,8 +947,8 @@ public final class Signum {
         }
 
         // ── Step 4: Log initialization summary ──
-        logger.info("Node profile '{}' initialization completed.", profileName);
-        logger.info("Running network: {}", propertyService.getString(Props.NETWORK_NAME));
+        LOGGER.info("Node profile '{}' initialization completed.", profileName);
+        LOGGER.info("Running network: {}", propertyService.getString(Props.NETWORK_NAME));
     }
 
     /**
@@ -1215,10 +1017,22 @@ public final class Signum {
         this.blockchain = NodeComponentFactory.createBlockchain(
                 transactionDb, blockDb, blockchainStore, this.propertyService);
 
+        // Wire the per-node blockchain reference into the stores that were created
+        // before the blockchain existed (breaks the circular dependency).
+        this.stores.wireDependencies(this.blockchain);
+
         UnconfirmedTransactionStore unconfirmedTransactionStore = this.stores.getUnconfirmedTransactionStore();
         unconfirmedTransactionStore.setBlockchain(this.blockchain);
 
         this.fluxCapacitor = new FluxCapacitorImpl(this.blockchain, this.propertyService);
+        // Wire the flux capacitor into the stores that were created before it
+        // existed (breaks the circular dependency, same pattern as wireDependencies).
+        this.stores.wireFluxCapacitor(this.fluxCapacitor);
+        // Same for the DB layer: SqlBlockDb builds Block objects with it.
+        this.dbs.setFluxCapacitor(this.fluxCapacitor);
+        // And for the unconfirmed transaction store (created in Stores before the
+        // FluxCapacitor existed).
+        unconfirmedTransactionStore.setFluxCapacitor(this.fluxCapacitor);
         this.aliasService = new AliasServiceImpl(
                 this.stores.getAliasStore(), this.stores, this.fluxCapacitor, this.propertyService);
         this.aliasService.addDefaultTLDs();
@@ -1260,6 +1074,7 @@ public final class Signum {
         this.atConstants = new AtConstants(this.fluxCapacitor);
 
         ((SqlATStore) this.stores.getAtStore()).setAtConstants(this.atConstants);
+        AtController.setAtConstants(this.atConstants);
 
         AliasStore aliasStore = this.stores.getAliasStore();
         this.subscriptionService = new SubscriptionServiceImpl(
@@ -1311,7 +1126,8 @@ public final class Signum {
                 this.escrowService, this.transactionService, this.downloadCache,
                 this.generator, this.statisticsManager, this.dbCacheManager,
                 this.accountService, this.indirectIncomingService,
-                this.aliasService, this.fluxCapacitor, this.atService);
+                this.aliasService, this.fluxCapacitor, this.atService,
+                this.atProcessorCache);
 
         this.derivedTableManager.setMinRollbackHeightSupplier(this.blockchainProcessor::getMinRollbackHeight);
         this.downloadCache.setBlockchainProcessor(this.blockchainProcessor);
@@ -1343,7 +1159,11 @@ public final class Signum {
         this.peerManager.start(
                 this.timeService, this.accountService, this.blockchain,
                 this.transactionProcessor, this.blockchainProcessor,
-                this.propertyService, this.threadPool);
+                this.propertyService, this.threadPool,
+                this.fluxCapacitor, this.dbs, this.stores);
+        // Bind the profile's peer manager to the processors constructed above
+        this.blockchainProcessor.setPeerManager(this.peerManager);
+        this.transactionProcessor.setPeerManager(this.peerManager);
 
         if (this.networkParameters != null) {
             this.networkParameters.initialize(this.parameterService, this.accountService, this.apiTransactionManager);
@@ -1362,7 +1182,8 @@ public final class Signum {
                 this.transactionService, this.blockService, this.generator,
                 this.apiTransactionManager, this.feeSuggestionCalculator,
                 this.deeplinkQRCodeGenerator, this.indirectIncomingService,
-                this.networkParameters, this.atConstants, this.fluxCapacitor, this.stores));
+                this.networkParameters, this.atConstants, this.fluxCapacitor, this.stores,
+                this.peerManager));
         try {
             this.webServer.start();
         } catch (Exception e) {
@@ -1380,7 +1201,7 @@ public final class Signum {
             this.timeService.setTime(new application.module.node.util.Time.FasterTime(
                     Math.max(this.timeService.getEpochTime(), this.blockchain.getLastBlock().getTimestamp()),
                     timeMultiplier));
-            logger.info("TIME WILL FLOW {} TIMES FASTER!", timeMultiplier);
+            LOGGER.info("TIME WILL FLOW {} TIMES FASTER!", timeMultiplier);
         }
 
         this.transactionApplyContext = new TransactionApplyContext(
@@ -1436,10 +1257,10 @@ public final class Signum {
             Path parent = dbPath.getParent();
             if (parent != null && Files.notExists(parent)) {
                 Files.createDirectories(parent);
-                logger.info("Created missing database directory: {}", parent.toAbsolutePath());
+                LOGGER.info("Created missing database directory: {}", parent.toAbsolutePath());
             }
         } catch (Exception e) {
-            logger.warn("Failed to ensure database directory exists: {}", e.getMessage());
+            LOGGER.warn("Failed to ensure database directory exists: {}", e.getMessage());
         }
     }
 
@@ -1454,7 +1275,7 @@ public final class Signum {
                     this.webServer.shutdown();
                 } catch (Throwable t) {
                     if (this.shutdownManager != null) this.shutdownManager.markFailure("WebServer");
-                    logger.error("Error shutting down WebServer for profile '{}'", profileName, t);
+                    LOGGER.error("Error shutting down WebServer for profile '{}'", profileName, t);
                 }
             }
 
@@ -1463,7 +1284,7 @@ public final class Signum {
                     this.blockchainProcessor.shutdown();
                 } catch (Throwable t) {
                     if (this.shutdownManager != null) this.shutdownManager.markFailure("BlockchainProcessor");
-                    logger.error("Error shutting down BlockchainProcessor for profile '{}'", profileName, t);
+                    LOGGER.error("Error shutting down BlockchainProcessor for profile '{}'", profileName, t);
                 }
             }
 
@@ -1472,7 +1293,7 @@ public final class Signum {
                     this.peerManager.shutdown(this.threadPool);
                 } catch (Throwable t) {
                     if (this.shutdownManager != null) this.shutdownManager.markFailure("PeerManager");
-                    logger.error("Error shutting down PeerManager for profile '{}'", profileName, t);
+                    LOGGER.error("Error shutting down PeerManager for profile '{}'", profileName, t);
                 }
             }
 
@@ -1481,7 +1302,7 @@ public final class Signum {
                     this.threadPool.shutdown();
                 } catch (Throwable t) {
                     if (this.shutdownManager != null) this.shutdownManager.markFailure("ThreadPool");
-                    logger.error("Error shutting down ThreadPool for profile '{}'", profileName, t);
+                    LOGGER.error("Error shutting down ThreadPool for profile '{}'", profileName, t);
                 }
             }
 
@@ -1490,7 +1311,7 @@ public final class Signum {
                     this.dbCacheManager.close();
                 } catch (Throwable t) {
                     if (this.shutdownManager != null) this.shutdownManager.markFailure("DBCacheManager");
-                    logger.error("Error closing DBCacheManager for profile '{}'", profileName, t);
+                    LOGGER.error("Error closing DBCacheManager for profile '{}'", profileName, t);
                 }
             }
 
@@ -1498,16 +1319,16 @@ public final class Signum {
                 if (this.dbContext != null) this.dbContext.shutdown();
             } catch (Throwable t) {
                 if (this.shutdownManager != null) this.shutdownManager.markFailure("Database");
-                logger.error("Error shutting down DB for profile '{}'", profileName, t);
+                LOGGER.error("Error shutting down DB for profile '{}'", profileName, t);
             }
 
             if (this.shutdownManager != null) {
                 this.shutdownManager.finishShutdown();
             }
 
-            logger.info("Node profile '{}' stopped.", profileName);
+            LOGGER.info("Node profile '{}' stopped.", profileName);
         } catch (Exception e) {
-            logger.error("Unexpected error during shutdown of profile '{}'", profileName, e);
+            LOGGER.error("Unexpected error during shutdown of profile '{}'", profileName, e);
         } finally {
             contextStarted.set(false);
             if (this.profileLogger != null) {

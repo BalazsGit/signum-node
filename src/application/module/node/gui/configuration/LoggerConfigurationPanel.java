@@ -107,7 +107,7 @@ public class LoggerConfigurationPanel extends JPanel {
         this.linkedProfileSupplier = linkedProfileSupplier;
 
         // Determine the currently applied profile name from metadata once at startup
-        this.runningProfileName = Signum.getActiveLoggingProfile();
+        this.runningProfileName = Signum.LOGGING_PROPERTIES_NAME;
         this.activeProfileName = this.runningProfileName;
         this.loadedProfileName = this.runningProfileName;
 
@@ -544,7 +544,7 @@ public class LoggerConfigurationPanel extends JPanel {
             String currentSelection = (String) profileComboBox.getSelectedItem();
             profileComboBox.removeAllItems();
 
-            this.activeProfileName = Signum.getActiveLoggingProfile();
+            this.activeProfileName = Signum.LOGGING_PROPERTIES_NAME;
 
             Path loggingConfPath = ConfigurationUtils.getNodeLoggingDir();
             String baseFileName = Signum.LOGGING_PROPERTIES_NAME + ".properties";

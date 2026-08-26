@@ -66,27 +66,36 @@ class PeerManagerTest {
     class ThreadSafetyTests {
 
         @Test
-        @DisplayName("peers field is ConcurrentMap interface for thread safety")
-        void peersField_IsConcurrentMap() throws Exception {
+        @DisplayName("peers field is the instance-scoped Peers engine")
+        void peersField_IsInstanceScopedPeers() throws Exception {
             Field field = PeerManager.class.getDeclaredField("peers");
             Class<?> fieldType = field.getType();
-            assertSame(java.util.concurrent.ConcurrentMap.class, fieldType,
-                    "peers should be ConcurrentMap for lock-free concurrent access");
+            assertSame(Peers.class, fieldType,
+                    "peers should be the instance-scoped Peers engine for this profile");
         }
 
         @Test
-        @DisplayName("announcedAddresses field is ConcurrentMap interface for thread safety")
+        @DisplayName("Peers.peers registry is ConcurrentMap interface for thread safety")
+        void peersRegistry_IsConcurrentMap() throws Exception {
+            Field field = Peers.class.getDeclaredField("peers");
+            Class<?> fieldType = field.getType();
+            assertSame(java.util.concurrent.ConcurrentMap.class, fieldType,
+                    "peers registry should be ConcurrentMap for lock-free concurrent access");
+        }
+
+        @Test
+        @DisplayName("Peers.announcedAddresses is ConcurrentMap interface for thread safety")
         void announcedAddressesField_IsConcurrentMap() throws Exception {
-            Field field = PeerManager.class.getDeclaredField("announcedAddresses");
+            Field field = Peers.class.getDeclaredField("announcedAddresses");
             Class<?> fieldType = field.getType();
             assertSame(java.util.concurrent.ConcurrentMap.class, fieldType,
                     "announcedAddresses should be ConcurrentMap for lock-free concurrent access");
         }
 
         @Test
-        @DisplayName("allPeers is unmodifiable Collection")
+        @DisplayName("Peers.allPeers is unmodifiable Collection")
         void allPeersField_IsUnmodifiableCollection() throws Exception {
-            Field field = PeerManager.class.getDeclaredField("allPeers");
+            Field field = Peers.class.getDeclaredField("allPeers");
             // Verify it's a Collection type (immutable view)
             assertTrue(java.util.Collection.class.isAssignableFrom(field.getType()),
                     "allPeers should be a Collection");

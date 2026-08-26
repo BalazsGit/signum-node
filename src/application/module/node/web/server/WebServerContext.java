@@ -8,6 +8,7 @@ import application.module.node.db.store.Stores;
 import application.module.node.deeplink.DeeplinkQRCodeGenerator;
 import application.module.node.feesuggestions.FeeSuggestionCalculator;
 import application.module.node.fluxcapacitor.FluxCapacitor;
+import application.module.node.peer.PeerManager;
 import application.module.node.props.PropertyService;
 import application.module.node.services.*;
 import application.module.node.util.ThreadPool;
@@ -42,6 +43,7 @@ public class WebServerContext {
     private final AtConstants atConstants;
     private final FluxCapacitor fluxCapacitor;
     private final Stores stores;
+    private final PeerManager peerManager;
     private volatile TransactionApplyContext transactionApplyContext;
 
     public TransactionApplyContext getTransactionApplyContext() {
@@ -61,7 +63,7 @@ public class WebServerContext {
             Generator generator, APITransactionManager apiTransactionManager,
             FeeSuggestionCalculator feeSuggestionCalculator, DeeplinkQRCodeGenerator deepLinkQRCodeGenerator,
             IndirectIncomingService indirectIncomingService, NetworkParameters params, AtConstants atConstants,
-            FluxCapacitor fluxCapacitor, Stores stores) {
+            FluxCapacitor fluxCapacitor, Stores stores, PeerManager peerManager) {
         this.transactionProcessor = transactionProcessor;
         this.blockchain = blockchain;
         this.blockchainProcessor = blockchainProcessor;
@@ -88,6 +90,16 @@ public class WebServerContext {
         this.atConstants = atConstants;
         this.fluxCapacitor = fluxCapacitor;
         this.stores = stores;
+        this.peerManager = peerManager;
+    }
+
+    /**
+     * Returns the profile's instance-scoped peer manager (may be null if P2P is not started).
+     *
+     * @return the peer manager
+     */
+    public PeerManager getPeerManager() {
+        return peerManager;
     }
 
     public Stores getStores() {

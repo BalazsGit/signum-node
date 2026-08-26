@@ -5,6 +5,7 @@ import application.module.node.db.BlockDb;
 import application.module.node.db.TransactionDb;
 import application.module.node.db.cache.DBCacheManagerImpl;
 import application.module.node.db.sql.*;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.props.Props;
 import application.module.node.props.PropertyService;
 import application.module.node.services.TimeService;
@@ -62,6 +63,22 @@ public class Stores {
         subscriptionStore.setBlockchain(blockchain);
         aliasStoreImpl.setBlockchain(blockchain);
         orderStoreImpl.setBlockchain(blockchain);
+        ((SqlBlockchainStore) blockchainStore).setBlockchain(blockchain);
+        ((SqlAccountStore) accountStore).setBlockchain(blockchain);
+        ((SqlATStore) atStore).setBlockchain(blockchain);
+        ((SqlAssetStore) assetStore).setBlockchain(blockchain);
+        ((SqlDigitalGoodsStoreStore) digitalGoodsStoreStore).setBlockchain(blockchain);
+        ((SqlEscrowStore) escrowStore).setBlockchain(blockchain);
+    }
+
+    /**
+     * Wires the FluxCapacitor into stores after construction.
+     * The FluxCapacitor is created after Stores (it depends on Blockchain),
+     * so it cannot be provided via {@link StoreDependencies} at construction time.
+     */
+    public void wireFluxCapacitor(FluxCapacitor fluxCapacitor) {
+        ((SqlBlockchainStore) blockchainStore).setFluxCapacitor(fluxCapacitor);
+        ((SqlAccountStore) accountStore).setFluxCapacitor(fluxCapacitor);
     }
 
     public AccountStore getAccountStore() {

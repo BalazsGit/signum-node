@@ -68,7 +68,7 @@ public final class LoggerConfigurator {
         if (!Boolean.getBoolean(SYSTEM_PROPERTY_DO_NOT_CONFIGURE)) {
             try {
                 LoggerProfile effectiveProfile = ConfigurationUtils.loadEffectiveLoggerProfile(confFolder,
-                        Signum.getActiveLoggingProfile());
+                        Signum.LOGGING_PROPERTIES_NAME);
                 Properties loggingProperties = effectiveProfile.getProperties();
 
                 // Remap 'node.*' shorthand to actual package 'application.module.node.*'
@@ -81,7 +81,7 @@ public final class LoggerConfigurator {
                                 value);
                     }
                 }
-                logs.add("INFO: Logging configuration resolved for profile: " + Signum.getActiveLoggingProfile());
+                logs.add("INFO: Logging configuration resolved for profile: " + Signum.LOGGING_PROPERTIES_NAME);
 
                 ByteArrayOutputStream outStream = new ByteArrayOutputStream();
                 mappedProperties.store(outStream, LOGGING_PROPERTIES_COMMENT);

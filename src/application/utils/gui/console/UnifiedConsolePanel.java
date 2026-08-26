@@ -220,6 +220,9 @@ public final class UnifiedConsolePanel extends JPanel {
         if (config.getCommandHandler() != null) {
             panel.setCommandHandler(config.getCommandHandler());
         }
+        if (config.getDefaultCommandPrefix() != null) {
+            panel.prefill(config.getDefaultCommandPrefix());
+        }
         return panel;
     }
 

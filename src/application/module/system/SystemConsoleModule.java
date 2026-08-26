@@ -12,7 +12,6 @@ import javax.swing.text.StyledDocument;
 import application.api.Module;
 import application.api.ModuleContext;
 import application.module.appearance.AppearanceModule;
-import application.module.node.Signum;
 import application.module.node.gui.SystemConsoleSubscriber;
 import application.utils.gui.console.ConsolePanelConfiguration;
 import application.utils.gui.console.UnifiedConsolePanel;
@@ -64,13 +63,17 @@ public class SystemConsoleModule implements Module {
                 .withMaxLines(1000)
                 .withColorScheme(ConsoleColorScheme.getDefault())
                 .withCommandHandler(cmd -> {
-                    // PLACEHOLDER (P3 Unit 8): This System Console is a cross-profile aggregator and
-                    // owns no single node facade, so there is no architecture-correct way to route a
-                    // node command here yet. The legacy Signum.processCommand(cmd) bridge has been
-                    // removed. Command routing is expected to be defined later — most likely via
-                    // targeted controls that address a specific module/node so each command is
-                    // delivered to the right instance. Until then this is a deliberate no-op.
-                    LOGGER.info("[SystemConsole] Command input received but routing not yet defined: '{}'", cmd);
+                    // v4 (P1.8): the System Console routes through the universal CommandRouter —
+                    // addressed commands ("-node.<profile> <cmd>") are dispatched to the matching
+                    // Signum instance via the NodeModule registry; global commands (".help")
+                    // execute here. Unknown targets produce an explicit error (never a silent
+                    // no-op, never a "first node" fallback).
+                    CommandRouter.Result result = CommandRouter.route(cmd);
+                    if (result.isOk()) {
+                        LOGGER.info("[SystemConsole] {}", result.getMessage());
+                    } else {
+                        LOGGER.warn("[SystemConsole] {}", result.getMessage());
+                    }
                 });
 
         this.unifiedPanel = new UnifiedConsolePanel(config, SystemConsoleSubscriber.class);
@@ -114,14 +117,11 @@ public class SystemConsoleModule implements Module {
             return;
         }
 
-        // Signum.BOOTSTRAP_LOGS is a synchronized ArrayList - copy to avoid holding lock during EDT dispatch
-        ArrayList<String> snapshot;
-        synchronized (Signum.BOOTSTRAP_LOGS) {
-            snapshot = new ArrayList<>(Signum.BOOTSTRAP_LOGS);
-        }
-
-        // Consolidate all bootstrap lines into ONE EDT callback to prevent scroll jumping
-        final ArrayList<String> linesToAppend = new ArrayList<>(snapshot);
+        // v4: the legacy Signum.BOOTSTRAP_LOGS static capture list was removed —
+        // bootstrap logging is now owned by the per-node ProfileLogger replay
+        // buffer (and the SystemLogger for app-level lines). Only the
+        // "console ready" marker is appended below (single EDT dispatch).
+        final ArrayList<String> linesToAppend = new ArrayList<>();
         linesToAppend.add("--- System Console initialized ---");
 
         SwingUtilities.invokeLater(() -> {

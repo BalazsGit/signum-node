@@ -3,6 +3,9 @@ package application.module.node.peer;
 import application.module.node.Blockchain;
 import application.module.node.BlockchainProcessor;
 import application.module.node.TransactionProcessor;
+import application.module.node.db.store.Dbs;
+import application.module.node.db.store.Stores;
+import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.props.PropertyService;
 import application.module.node.services.AccountService;
 import application.module.node.services.TimeService;
@@ -63,13 +66,8 @@ public final class PeerManager {
     private final ThreadPool threadPool;
     private final TimeService timeService;
 
-    // Per-instance peer registry (NOT static!)
-    private final ConcurrentMap<String, Peer> peers = new ConcurrentHashMap<>();
-    private final ConcurrentMap<String, String> announcedAddresses = new ConcurrentHashMap<>();
-    private final Collection<Peer> allPeers = Collections.unmodifiableCollection(peers.values());
-
-    // Event listeners for this instance
-    private final Listeners<Peer, Peers.Event> listeners = new Listeners<>();
+    // Instance-scoped P2P engine for this profile (created by start(), cleared by shutdown())
+    private volatile Peers peers;
 
     // Lifecycle state
     private volatile boolean running = false;
@@ -93,10 +91,9 @@ public final class PeerManager {
     /**
      * Starts the peer networking subsystem for this profile.
      * <p>
-     * This delegates to {@link Peers#init(TimeService, AccountService, Blockchain,
-     * TransactionProcessor, BlockchainProcessor, PropertyService, ThreadPool)} which
-     * currently uses static state. Future work will replace this with fully
-     * instance-scoped peer management.
+     * Creates this profile's instance-scoped {@link Peers} engine (peer registry,
+     * connection pools, scheduler threads, per-node peer server, UPnP). Other
+     * profiles' peer networks are not affected.
      * </p>
      *
      * @param timeService          the time service
@@ -106,27 +103,30 @@ public final class PeerManager {
      * @param blockchainProcessor  the blockchain processor
      * @param propertyService      the property service
      * @param threadPool           the thread pool
+     * @param fluxCapacitor        the flux capacitor
+     * @param dbs                  the dbs (peer database access)
+     * @param stores               the stores
      */
     public void start(TimeService timeService, AccountService accountService, Blockchain blockchain,
                       TransactionProcessor transactionProcessor, BlockchainProcessor blockchainProcessor,
-                      PropertyService propertyService, ThreadPool threadPool) {
+                      PropertyService propertyService, ThreadPool threadPool,
+                      FluxCapacitor fluxCapacitor, Dbs dbs, Stores stores) {
         if (running) {
             logger.warn("PeerManager already running for profile, ignoring duplicate start()");
             return;
         }
         this.running = true;
-        // Delegate to existing static init — bridges legacy Peers during migration
-        Peers.init(timeService, accountService, blockchain,
-                   transactionProcessor, blockchainProcessor, propertyService, threadPool);
-        logger.info("PeerManager started (delegating to Peers.init())");
+        this.peers = new Peers(timeService, accountService, blockchain,
+                transactionProcessor, blockchainProcessor, propertyService, threadPool,
+                fluxCapacitor, dbs, stores);
+        logger.info("PeerManager started (instance-scoped Peers created)");
     }
 
     /**
      * Shuts down the peer networking subsystem for this profile.
      * <p>
-     * This delegates to {@link Peers#shutdown(ThreadPool)} which currently
-     * stops shared static resources. Future work will replace this with cleanup
-     * of only this instance's resources.
+     * Stops only this instance's resources (peer server, UPnP mapping, executor
+     * services). Other profiles' peer networks keep running.
      * </p>
      *
      * @param threadPool the thread pool to use for executor cleanup
@@ -137,9 +137,12 @@ public final class PeerManager {
             return;
         }
         this.running = false;
-        // Delegate to existing static shutdown — bridges legacy Peers during migration
-        Peers.shutdown(threadPool);
-        logger.info("PeerManager shutdown complete (delegating to Peers.shutdown())");
+        Peers peers = this.peers;
+        this.peers = null;
+        if (peers != null) {
+            peers.shutdown(threadPool);
+        }
+        logger.info("PeerManager shutdown complete");
     }
 
     /**
@@ -152,32 +155,43 @@ public final class PeerManager {
     }
 
     /**
+     * Returns this profile's instance-scoped P2P engine.
+     *
+     * @return the {@link Peers} instance, or null before start()/after shutdown()
+     */
+    public Peers getPeers() {
+        return peers;
+    }
+
+    /**
      * Returns an unmodifiable collection of all known peers for this profile.
      *
-     * @return all peers managed by this instance
+     * @return all peers managed by this instance (empty if not started)
      */
     public Collection<Peer> getAllPeers() {
-        // During migration, Peers holds the actual registry — delegate to it
-        return Peers.getAllPeers();
+        Peers peers = this.peers;
+        return peers != null ? peers.getAllPeers() : Collections.emptyList();
     }
 
     /**
      * Returns all active (non-NON_CONNECTED) peers.
      *
-     * @return list of active peers
+     * @return list of active peers (empty if not started)
      */
     public List<Peer> getActivePeers() {
-        return Peers.getActivePeers();
+        Peers peers = this.peers;
+        return peers != null ? peers.getActivePeers() : Collections.emptyList();
     }
 
     /**
      * Returns peers matching the given state.
      *
      * @param state the peer state to filter by
-     * @return collection of peers in the specified state
+     * @return collection of peers in the specified state (empty if not started)
      */
     public Collection<Peer> getPeers(Peer.State state) {
-        return Peers.getPeers(state);
+        Peers peers = this.peers;
+        return peers != null ? peers.getPeers(state) : Collections.emptyList();
     }
 
     /**
@@ -187,27 +201,30 @@ public final class PeerManager {
      * @return the peer if found, null otherwise
      */
     public Peer getPeer(String peerAddress) {
-        return Peers.getPeer(peerAddress);
+        Peers peers = this.peers;
+        return peers != null ? peers.getPeer(peerAddress) : null;
     }
 
     /**
      * Adds or returns an existing peer by announced address.
      *
      * @param announcedAddress the announced address of the peer
-     * @return the peer instance, or null if invalid
+     * @return the peer instance, or null if invalid or not started
      */
     public Peer addPeer(String announcedAddress) {
-        return Peers.addPeer(announcedAddress);
+        Peers peers = this.peers;
+        return peers != null ? peers.addPeer(announcedAddress) : null;
     }
 
     /**
      * Removes a peer from this profile's registry.
      *
      * @param peer the peer to remove
-     * @return the removed peer, or null if not found
+     * @return the removed peer, or null if not found or not started
      */
     public Peer removePeer(Peer peer) {
-        return Peers.removePeer(peer);
+        Peers peers = this.peers;
+        return peers != null ? peers.removePeer(peer) : null;
     }
 
     /**
@@ -218,7 +235,8 @@ public final class PeerManager {
      * @return true if the listener was added successfully
      */
     public boolean addListener(Listener<Peer> listener, Peers.Event eventType) {
-        return Peers.listeners.addListener(listener, eventType);
+        Peers peers = this.peers;
+        return peers != null && peers.listeners.addListener(listener, eventType);
     }
 
     /**
@@ -229,7 +247,8 @@ public final class PeerManager {
      * @return true if the listener was removed
      */
     public boolean removeListener(Listener<Peer> listener, Peers.Event eventType) {
-        return Peers.removeListener(listener, eventType);
+        Peers peers = this.peers;
+        return peers != null && peers.removeListener(listener, eventType);
     }
 
     /**
@@ -238,7 +257,8 @@ public final class PeerManager {
      * @return peer count
      */
     public int getPeerCount() {
-        return Peers.getAllPeers().size();
+        Peers peers = this.peers;
+        return peers != null ? peers.getAllPeers().size() : 0;
     }
 
     /**
@@ -247,8 +267,12 @@ public final class PeerManager {
      * @return connected peer count
      */
     public int getConnectedPeerCount() {
+        Peers peers = this.peers;
+        if (peers == null) {
+            return 0;
+        }
         int count = 0;
-        for (Peer peer : Peers.getAllPeers()) {
+        for (Peer peer : peers.getAllPeers()) {
             if (peer.getState() == Peer.State.CONNECTED) {
                 count++;
             }

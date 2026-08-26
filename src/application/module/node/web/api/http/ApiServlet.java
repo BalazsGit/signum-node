@@ -135,12 +135,12 @@ public final class ApiServlet extends HttpServlet {
         map.put("getDGSPendingPurchases", new GetDGSPendingPurchases(digitalGoodsStoreService));
         map.put("getECBlock", new GetECBlock(blockchain, timeService, economicClustering));
         map.put("getMyInfo", GetMyInfo.instance);
-        map.put("getPeer", GetPeer.instance);
+        map.put("getPeer", new GetPeer(context.getPeerManager()));
         map.put("getMyPeerInfo", new GetMyPeerInfo(transactionProcessor));
-        map.put("getPeers", GetPeers.instance);
+        map.put("getPeers", new GetPeers(context.getPeerManager()));
         map.put("getState", new GetState(blockchain, assetExchange, accountService, aliasService,
                 timeService, atService, generator, propertyService, blockchainProcessor,
-                context.getStores().getAccountStore()));
+                context.getStores().getAccountStore(), context.getPeerManager()));
         map.put("getTime", new GetTime(timeService));
         map.put("getTrades", new GetTrades(parameterService, assetExchange));
         map.put("getTradeJournal", new GetTradeJournal(parameterService, assetExchange));

@@ -127,7 +127,6 @@ import application.module.node.NodeModule;
 @SuppressWarnings("serial")
 public class NodeConsolePanel extends JPanel {
     private static final String FAILED_TO_START_MESSAGE = "Signum caught exception while starting";
-    private static NodeConsolePanel instance;
     /** Parent frame reference (used for dialogs and window ancestor lookup) */
     private final JFrame parentFrame;
     /** Current node profile name for hierarchical GUI settings storage */
@@ -143,6 +142,9 @@ public class NodeConsolePanel extends JPanel {
     /** Reference to the ProfileLogger for cleanup on panel disposal */
     private ProfileLogger profileLogger;
 
+    /** True once this panel's subscriber is attached to the node's ProfileLogger. */
+    private volatile boolean profileLoggerAttached = false;
+
     private static final String UNEXPECTED_EXIT_MESSAGE = "Signum Quit unexpectedly! Exit code ";
 
     public static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("HH:mm:ss yyyy-MM-dd");
@@ -152,8 +154,6 @@ public class NodeConsolePanel extends JPanel {
     private static final int ANIMATION_DURATION_MS = 250;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(NodeConsolePanel.class);
-
-    private static String[] args;
 
     /**
      * Per-instance Signum facade injected by NodeProfilePanel.
@@ -1011,10 +1011,6 @@ public class NodeConsolePanel extends JPanel {
         BOTTOM
     }
 
-    public static NodeConsolePanel getInstance() {
-        return instance;
-    }
-
     /**
      * Returns the underlying UnifiedConsolePanel instance.
      * Used by NodeProfilePanel to control scroll visibility on tab switching.
@@ -1038,10 +1034,6 @@ public class NodeConsolePanel extends JPanel {
             return (JTextPane) textScrollPane.getViewport().getView();
         }
         return null;
-    }
-
-    public void showLookAndFeelSettings() {
-        cardLayout.show(mainCardPanel, VIEW_CONFIGURATION);
     }
 
     public static void main(String[] args) {
@@ -1094,8 +1086,6 @@ public class NodeConsolePanel extends JPanel {
         this.parentFrame = parentFrame;
         this.profileName = "default"; // Legacy single-instance mode uses default key
 
-        NodeConsolePanel.args = args;
-        instance = this;
         this.programName = programName;
         this.version = version;
         this.iconLocation = iconLocation;
@@ -1147,6 +1137,7 @@ public class NodeConsolePanel extends JPanel {
                 .withShowFilterHeader(true)
                 .withShowCommandInput(false)  // Command input is managed via hamburger menu toggle
                 .withCommandPosition(ConsoleInputPosition.BOTTOM)
+                .withDefaultCommandPrefix("-node." + profileName + " ")
                 .withAnimateCommandInput(true)
                 .withCommandInputVisible(false)
                 .withEnableCommandToggle(true)
@@ -2051,10 +2042,10 @@ public class NodeConsolePanel extends JPanel {
                     }
 
                     try {
-                        Signum context = getSignum();
-                        if (context != null) {
-                            context.stop();
-                        }
+                        // v4: single lifecycle path — NodeModule stops this panel's own
+                        // profile (null-safe even if this panel never started the node).
+                        NodeModule.getInstance().stopNode(NodeConsolePanel.this.profileName);
+                        NodeConsolePanel.this.signum = null;
                     } catch (Throwable t) {
                         LOGGER.error("Unexpected error during Signum core shutdown", t);
                     }
@@ -2211,11 +2202,18 @@ public class NodeConsolePanel extends JPanel {
     }
 
     private void syncButtonAction() {
-        // The UI will update via the onSyncStateChanged listener when the core
-        // processes the change.
-        BlockchainProcessor blockchainProcessor = getSignum().getBlockchainProcessor();
-        if (blockchainProcessor != null) {
-            blockchainProcessor.setSyncPaused(!isSyncStopped);
+        // v4 (P1.3): pause/resume is owned by the Signum instance — this button is
+        // only a view of the node's OperatingState. The UI refresh happens via the
+        // onSyncStateChanged PUSH listener (wired on the blockchain processor).
+        Signum node = getSignum();
+        if (node == null) {
+            return;
+        }
+        Signum.OperatingState os = node.getOperatingState();
+        if (os == Signum.OperatingState.PAUSED_USER || os == Signum.OperatingState.PAUSED_SYSTEM) {
+            node.resumeByUser();
+        } else {
+            node.pauseByUser();
         }
     }
 
@@ -2549,7 +2547,17 @@ public class NodeConsolePanel extends JPanel {
             public void windowOpened(WindowEvent e) {
                 new Thread(() -> {
                     saveGuiSettings();
-                    application.launcher.Launcher.restart();
+                    // v4 (P1.6): restart ONLY this profile's node via NodeModule —
+                    // the legacy full-application restart (Launcher.restart()) was
+                    // removed: in multi-node mode it would kill every other running
+                    // node. Signum's state machine supports in-place restart
+                    // (STOPPED -> start() -> doInitialize() -> RUNNING).
+                    NodeModule.getInstance().restartNode(NodeConsolePanel.this.profileName);
+                    SwingUtilities.invokeLater(() -> {
+                        rotatingIcon.stop();
+                        restartDialog.setVisible(false);
+                        restartDialog.dispose();
+                    });
                 }).start();
             }
         });
@@ -2837,24 +2845,25 @@ public class NodeConsolePanel extends JPanel {
     }
 
     /**
-     * Executes a node console command on this profile's own Signum instance.
+     * Routes a node console command through the universal {@link application.module.system.CommandRouter}.
      * <p>
-     * Uses the per-node {@link #signum} facade that {@code NodeProfilePanel} injects
-     * for this profile. In the multi-node architecture each node is an independent
-     * profile object, so this intentionally has <b>no</b> global "active node"
-     * fallback. It routes through the non-deprecated
-     * {@link Signum#processCommandInstance(String)} instance method rather than the
-     * legacy static {@code Signum.processCommand(String)} bridge.
+     * This console's profile is the implicit default target, so a bare command (e.g.
+     * {@code ".pause"}) still lands on the right node; an explicit
+     * {@code -node.<profile>} prefix (the prefilled default) can address any node.
+     * Targeting happens against the {@code NodeModule} registry — there is no
+     * global "active node" fallback and no silent no-op on unknown targets.
      * </p>
      *
-     * @param cmd the command to execute
+     * @param cmd the command to route and execute
      */
     private void executeCommand(String cmd) {
-        if (signum == null) {
-            LOGGER.warn("Cannot execute command '{}': no Signum facade wired for this profile", cmd);
-            return;
+        application.module.system.CommandRouter.Result result =
+                application.module.system.CommandRouter.route(cmd, profileName);
+        if (result.isOk()) {
+            LOGGER.info("[Command] {}", result.getMessage());
+        } else {
+            LOGGER.warn("[Command] {}", result.getMessage());
         }
-        new Thread(() -> signum.processCommandInstance(cmd)).start();
     }
 
     /**
@@ -2867,7 +2876,7 @@ public class NodeConsolePanel extends JPanel {
      * flow to the console text pane.
      * </p>
      * <p>
-     * Called once after {@code Signum.startNode()} succeeds, when the
+     * Called once after {@code NodeModule.startNode(name)} succeeds, when the
      * {@code ProfileLogger} is guaranteed to be initialised.
      * </p>
      * <p>
@@ -2880,6 +2889,11 @@ public class NodeConsolePanel extends JPanel {
     private void attachProfileLogger() {
         ProfileLogger pl = null;
         Signum ctx = getSignum();
+        if (ctx == null) {
+            // v4: this panel may not be the one that started the node (e.g. toolbar
+            // Start) — resolve the instance for THIS panel's profile from NodeModule.
+            ctx = NodeModule.getInstance().get(profileName);
+        }
         if (ctx != null) {
             try {
                 pl = ctx.getProfileLogger();
@@ -2887,12 +2901,9 @@ public class NodeConsolePanel extends JPanel {
                 LOGGER.debug("attachProfileLogger: getProfileLogger() threw for profile '{}', trying registry", profileName);
             }
         }
-        // Fallback: look up in the global registry (covers the case where the node
-        // instance hasn't been wired into this panel yet, but the ProfileLogger was
-        // already registered by Signum.doInitialize()).
-        if (pl == null) {
-            pl = application.utils.logging.NodeLoggerRegistry.get("node", profileName);
-        }
+        // v4 single-path logging: only the owning Signum's ProfileLogger is valid.
+        // (The former NodeLoggerRegistry fallback was removed — the registry is a
+        // routing table, not an ownership source.)
         if (pl == null) {
             LOGGER.warn("Cannot attach ProfileLogger: no ProfileLogger found for profile '{}' (node not yet started?)", profileName);
             return;
@@ -2905,32 +2916,57 @@ public class NodeConsolePanel extends JPanel {
             pl.addSubscriber(unifiedConsole.getSubscriber());
             LOGGER.info("Attached console subscriber to ProfileLogger '{}' for profile '{}'",
                     pl.getName(), profileName);
+            profileLoggerAttached = true;
         } catch (Exception e) {
             LOGGER.error("Failed to attach console subscriber to ProfileLogger for profile '{}'", profileName, e);
         }
     }
 
+    /**
+     * Idempotently attaches this panel's subscriber to the node's ProfileLogger.
+     * <p>
+     * Used when the node was started by a component other than this panel
+     * (toolbar Start), or to retry a previously deferred attach.
+     * </p>
+     */
+    public void ensureProfileLoggerAttached() {
+        if (profileLoggerAttached) {
+            return;
+        }
+        attachProfileLogger();
+    }
+
     public void startSignumWithGUI() {
+        Signum ctx = null;
         try {
-            // Delegates to NodeLifecycleManager via bridge. Falls back to legacy init only when no active profile is set.
-            Signum ctx = Signum.startNode();
-            if (ctx != null) {
-                this.signum = ctx;
-                // Late binding: the owning NodeProfilePanel was constructed before the
-                // node existed. Let it adopt this instance (single state listener +
-                // initial refresh). Idempotent on the profile panel side.
-                java.util.function.Consumer<Signum> adoption = this.onSignumStarted;
-                if (adoption != null) {
-                    try {
-                        adoption.accept(ctx);
-                    } catch (Exception ex) {
-                        LOGGER.warn("Signum adoption callback failed for profile '{}': {}", profileName, ex.getMessage());
-                    }
+            // v4: single lifecycle entry point — NodeModule creates (if missing) and
+            // starts the Signum for THIS panel's own profile (never a global
+            // "active" profile).
+            ctx = NodeModule.getInstance().startNode(this.profileName);
+        } catch (Exception e) {
+            LOGGER.error("Signum startup failed for profile '{}': {}", profileName, e.getMessage(), e);
+        }
+        if (ctx != null) {
+            this.signum = ctx;
+            // Late binding: the owning NodeProfilePanel was constructed before the
+            // node existed. Let it adopt this instance (single state listener +
+            // initial refresh). Idempotent on the profile panel side.
+            java.util.function.Consumer<Signum> adoption = this.onSignumStarted;
+            if (adoption != null) {
+                try {
+                    adoption.accept(ctx);
+                } catch (Exception ex) {
+                    LOGGER.warn("Signum adoption callback failed for profile '{}': {}", profileName, ex.getMessage());
                 }
             }
-            attachProfileLogger();
-            loadGuiSettings();
-            
+        }
+        attachProfileLogger();
+        loadGuiSettings();
+        if (this.signum == null) {
+            LOGGER.warn("startSignumWithGUI: no Signum available for profile '{}' — skipping runtime settings", profileName);
+            return;
+        }
+        try {
             // Now that properties are loaded, set the correct values for the GUI
             showPopOff = this.signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
             measurementActive = this.signum.getPropertyService().getBoolean(Props.MEASUREMENT_ACTIVE);
@@ -4161,6 +4197,12 @@ public class NodeConsolePanel extends JPanel {
      */
     public void onNodeStateChanged(Signum.State oldState, Signum.State newState) {
         LOGGER.debug("[MetricsPanel] Lifecycle state change: {} -> {}", oldState, newState);
+
+        // If the node reached a live state (possibly started by the toolbar or
+        // another panel), make sure this console is attached to its ProfileLogger.
+        if (newState == Signum.State.STARTING || newState == Signum.State.RUNNING) {
+            ensureProfileLoggerAttached();
+        }
 
         SwingUtilities.invokeLater(() -> {
             // When node becomes READY/RUNNING, ensure MetricsPanel visibility matches user preference

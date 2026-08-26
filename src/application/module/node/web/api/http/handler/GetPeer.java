@@ -1,7 +1,7 @@
 package application.module.node.web.api.http.handler;
 
 import application.module.node.peer.Peer;
-import application.module.node.peer.Peers;
+import application.module.node.peer.PeerManager;
 import application.module.node.web.api.http.ApiServlet;
 import application.module.node.web.api.http.common.JSONData;
 import application.module.node.web.api.http.common.LegacyDocTag;
@@ -15,10 +15,11 @@ import static application.module.node.web.api.http.common.Parameters.PEER_PARAME
 
 public final class GetPeer extends ApiServlet.JsonRequestHandler {
 
-    public static final GetPeer instance = new GetPeer();
+    private final PeerManager peerManager;
 
-    private GetPeer() {
+    public GetPeer(PeerManager peerManager) {
         super(new LegacyDocTag[] { LegacyDocTag.INFO }, PEER_PARAMETER);
+        this.peerManager = peerManager;
     }
 
     @Override
@@ -29,7 +30,7 @@ public final class GetPeer extends ApiServlet.JsonRequestHandler {
             return MISSING_PEER;
         }
 
-        Peer peer = Peers.getPeer(peerAddress);
+        Peer peer = peerManager != null ? peerManager.getPeer(peerAddress) : null;
         if (peer == null) {
             return UNKNOWN_PEER;
         }

@@ -72,16 +72,18 @@ final class PeerImpl implements Peer {
 
     private PropertyService propertyService;
     private FluxCapacitor fluxCapacitor;
+    private final Peers peers;
 
     PeerImpl(String peerAddress, String announcedAddress) {
-        this(peerAddress, announcedAddress, null, null);
+        this(peerAddress, announcedAddress, null, null, null);
     }
 
     PeerImpl(String peerAddress, String announcedAddress, PropertyService propertyService,
-            FluxCapacitor fluxCapacitor) {
+            FluxCapacitor fluxCapacitor, Peers peers) {
         this.peerAddress = peerAddress;
         this.propertyService = propertyService;
         this.fluxCapacitor = fluxCapacitor;
+        this.peers = peers;
         this.announcedAddress.set(announcedAddress);
         if (announcedAddress != null) {
             try {
@@ -96,6 +98,12 @@ final class PeerImpl implements Peer {
         this.version.set(Version.EMPTY); // not null
         this.shareAddress.set(true);
         this.archivalMode.set(ArchivalMode.UNKNOWN);
+    }
+
+    private void notify(Peers.Event event) {
+        if (peers != null) {
+            peers.notifyListeners(this, event);
+        }
     }
 
     @Override
@@ -120,13 +128,13 @@ final class PeerImpl implements Peer {
         }
         if (this.state.get() == State.NON_CONNECTED) {
             this.state.set(state);
-            Peers.notifyListeners(this, Peers.Event.ADDED_ACTIVE_PEER);
+            notify(Peers.Event.ADDED_ACTIVE_PEER);
         } else if (state != State.NON_CONNECTED) {
             this.state.set(state);
-            Peers.notifyListeners(this, Peers.Event.CHANGED_ACTIVE_PEER);
+            notify(Peers.Event.CHANGED_ACTIVE_PEER);
         } else {
             this.state.set(state);
-            Peers.notifyListeners(this, Peers.Event.DEACTIVATE);
+            notify(Peers.Event.DEACTIVATE);
         }
     }
 
@@ -152,7 +160,7 @@ final class PeerImpl implements Peer {
         synchronized (this) {
             downloadedVolume.addAndGet(volume);
         }
-        Peers.notifyListeners(this, Peers.Event.DOWNLOADED_VOLUME);
+        notify(Peers.Event.DOWNLOADED_VOLUME);
     }
 
     @Override
@@ -165,7 +173,7 @@ final class PeerImpl implements Peer {
         synchronized (this) {
             uploadedVolume.addAndGet(volume);
         }
-        Peers.notifyListeners(this, Peers.Event.UPLOADED_VOLUME);
+        notify(Peers.Event.UPLOADED_VOLUME);
     }
 
     @Override
@@ -296,20 +304,20 @@ final class PeerImpl implements Peer {
     @Override
     public boolean isWellKnown() {
         return announcedAddress.get() != null
-                && Peers.wellKnownPeers.contains(announcedAddress.get());
+                && peers != null && peers.wellKnownPeers.contains(announcedAddress.get());
     }
 
     @Override
     public boolean isRebroadcastTarget() {
         return announcedAddress.get() != null
-                && Peers.rebroadcastPeers.contains(announcedAddress.get());
+                && peers != null && peers.rebroadcastPeers.contains(announcedAddress.get());
     }
 
     @Override
     public boolean isBlacklisted() {
         return blacklistingTime.get() > 0
                 || isOldVersion.get()
-                || Peers.knownBlacklistedPeers.contains(peerAddress);
+                || (peers != null && peers.knownBlacklistedPeers.contains(peerAddress));
     }
 
     @Override
@@ -353,14 +361,14 @@ final class PeerImpl implements Peer {
     public void blacklist() {
         blacklistingTime.set(System.currentTimeMillis());
         setState(State.NON_CONNECTED);
-        Peers.notifyListeners(this, Peers.Event.BLACKLIST);
+        notify(Peers.Event.BLACKLIST);
     }
 
     @Override
     public void unBlacklist() {
         setState(State.NON_CONNECTED);
         blacklistingTime.set(0);
-        Peers.notifyListeners(this, Peers.Event.UNBLACKLIST);
+        notify(Peers.Event.UNBLACKLIST);
     }
 
     @Override
@@ -376,15 +384,18 @@ final class PeerImpl implements Peer {
     @Override
     public void updateBlacklistedStatus(long curTime) {
         if (blacklistingTime.get() > 0
-                && blacklistingTime.get() + Peers.blacklistingPeriod <= curTime) {
+                && peers != null
+                && blacklistingTime.get() + peers.blacklistingPeriod <= curTime) {
             unBlacklist();
         }
     }
 
     @Override
     public void remove() {
-        Peers.removePeer(this);
-        Peers.notifyListeners(this, Peers.Event.REMOVE);
+        if (peers != null) {
+            peers.removePeer(this);
+            notify(Peers.Event.REMOVE);
+        }
     }
 
     @Override
@@ -423,7 +434,7 @@ final class PeerImpl implements Peer {
             buf.append("/burst");
             URL url = new URI(buf.toString()).toURL();
 
-            if (Peers.communicationLoggingMask != 0) {
+            if (peers != null && peers.communicationLoggingMask != 0) {
                 StringWriter stringWriter = new StringWriter();
                 JSON.writeTo(request, stringWriter);
                 log = "\"" + url.toString() + "\": " + stringWriter.toString();
@@ -432,8 +443,8 @@ final class PeerImpl implements Peer {
             connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod("POST");
             connection.setDoOutput(true);
-            connection.setConnectTimeout(Peers.connectTimeout);
-            connection.setReadTimeout(Peers.readTimeout);
+            connection.setConnectTimeout(peers != null ? peers.connectTimeout : 0);
+            connection.setReadTimeout(peers != null ? peers.readTimeout : 0);
             connection.addRequestProperty("User-Agent", "BRS/" + Signum.VERSION.toString());
             connection.setRequestProperty("Accept-Encoding", "gzip");
             connection.setRequestProperty("Connection", "close");
@@ -451,7 +462,7 @@ final class PeerImpl implements Peer {
                 if ("gzip".equals(connection.getHeaderField("Content-Encoding"))) {
                     responseStream = new GZIPInputStream(cis);
                 }
-                if ((Peers.communicationLoggingMask & Peers.LOGGING_MASK_200_RESPONSES) != 0) {
+                if (peers != null && (peers.communicationLoggingMask & Peers.LOGGING_MASK_200_RESPONSES) != 0) {
                     ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
                     byte[] buffer = new byte[1024];
                     int numberOfBytes;
@@ -489,7 +500,7 @@ final class PeerImpl implements Peer {
                 updateDownloadedVolume(cis.getCount());
             } else {
 
-                if ((Peers.communicationLoggingMask & Peers.LOGGING_MASK_NON200_RESPONSES) != 0) {
+                if (peers != null && (peers.communicationLoggingMask & Peers.LOGGING_MASK_NON200_RESPONSES) != 0) {
                     log += " >>> Peer responded with HTTP "
                             + connection.getResponseCode() + " code!";
                     showLog = true;
@@ -506,7 +517,7 @@ final class PeerImpl implements Peer {
             if (!isConnectionException(e)) {
                 logger.debug("Error sending JSON request", e);
             }
-            if ((Peers.communicationLoggingMask & Peers.LOGGING_MASK_EXCEPTIONS) != 0) {
+            if (peers != null && (peers.communicationLoggingMask & Peers.LOGGING_MASK_EXCEPTIONS) != 0) {
                 log += " >>> " + e.toString();
                 showLog = true;
             }
@@ -554,7 +565,7 @@ final class PeerImpl implements Peer {
     @Override
     public void connect(int currentTime) {
         logger.debug("Trying to connect to {}", peerAddress);
-        JsonObject response = send(Peers.myPeerInfoRequest);
+        JsonObject response = send(peers != null ? peers.myPeerInfoRequest : null);
         if (response != null && response.get("error") == null) {
             application.set(JSON.getAsString(response.get("application")));
             setVersion(JSON.getAsString(response.get("version")));
@@ -580,7 +591,9 @@ final class PeerImpl implements Peer {
             }
 
             setState(State.CONNECTED);
-            Peers.updateAddress(this);
+            if (peers != null) {
+                peers.updateAddress(this);
+            }
             lastUpdated.set(currentTime);
             logger.debug("Connected to {}", peerAddress);
         } else {

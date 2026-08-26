@@ -1,6 +1,7 @@
 package application.module.node;
 
 import application.module.node.peer.Peer;
+import application.module.node.peer.PeerManager;
 import application.module.node.peer.PeerMetric;
 import application.module.node.util.JSON;
 import application.module.node.util.Observable;
@@ -241,6 +242,20 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
     QueueStatus getQueueStatus();
 
     Collection<Peer> getAllPeers();
+
+    /**
+     * Binds the profile's instance-scoped {@link PeerManager} to this processor.
+     * <p>
+     * Setter injection is required because the processor is constructed before
+     * the profile's PeerManager exists. Implementations that do not use P2P
+     * may ignore this (default no-op).
+     * </p>
+     *
+     * @param peerManager the profile's peer manager (may be null to unbind)
+     */
+    default void setPeerManager(PeerManager peerManager) {
+        // no-op by default
+    }
 
     PerformanceStats getPerformanceStats();
 

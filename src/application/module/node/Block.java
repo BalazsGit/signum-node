@@ -126,10 +126,10 @@ public class Block {
 
     /**
      * Sets the TransactionDb for instance-scoped transaction queries.
-     * Called by BlockchainImpl when loading blocks from database.
+     * Called by SqlBlockDb when loading blocks from database.
      * @param transactionDb the node-scoped TransactionDb instance
      */
-    void setTransactionDb(TransactionDb transactionDb) {
+    public void setTransactionDb(TransactionDb transactionDb) {
         this.transactionDb = transactionDb;
     }
 
@@ -198,6 +198,7 @@ public class Block {
         }
         this.nonce = nonce;
         this.blockAts = blockAts;
+        this.height = height;
         this.baseTarget = baseTarget;
         this.fluxCapacitor = fluxCapacitor;
     }

@@ -17,7 +17,7 @@ import java.util.Collection;
 import static application.module.node.schema.Tables.ASSET;
 
 public class SqlAssetStore implements AssetStore {
-    private final Blockchain blockchain;
+    private Blockchain blockchain;
     private final DbContext dbContext;
 
     public SqlAssetStore(DerivedTableManager derivedTableManager, StoreDependencies storeDependencies) {
@@ -32,6 +32,14 @@ public class SqlAssetStore implements AssetStore {
         this.blockchain = null;
         this.dbContext = null;
         initTable(derivedTableManager);
+    }
+
+    /**
+     * Wires the blockchain reference after construction (breaks the circular
+     * dependency where Stores are created before Blockchain).
+     */
+    public void setBlockchain(Blockchain blockchain) {
+        this.blockchain = blockchain;
     }
 
     private final SignumKey.LongKeyFactory<Asset> assetDbKeyFactory = new DbKey.LongKeyFactory<Asset>(ASSET.ID) {

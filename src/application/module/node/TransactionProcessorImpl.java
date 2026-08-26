@@ -6,6 +6,7 @@ import application.module.node.db.store.Stores;
 import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.peer.Peer;
+import application.module.node.peer.PeerManager;
 import application.module.node.peer.Peers;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
@@ -59,6 +60,19 @@ public class TransactionProcessorImpl implements TransactionProcessor {
     private final Function<Peer, List<Transaction>> foodDispenser;
     private final BiConsumer<Peer, List<Transaction>> doneFeedingLog;
 
+    // Profile-scoped peer manager (setter-injected after construction, see setPeerManager)
+    private volatile PeerManager peerManager;
+
+    /**
+     * Binds the profile's instance-scoped peer manager (setter injection,
+     * because this processor is constructed before the PeerManager).
+     *
+     * @param peerManager the profile's peer manager (may be null to unbind)
+     */
+    public void setPeerManager(PeerManager peerManager) {
+        this.peerManager = peerManager;
+    }
+
     /**
      * Constructs TransactionProcessorImpl with instance-scoped dependencies.
      * Eliminates static Signum.getFluxCapacitor() calls.
@@ -93,12 +107,13 @@ public class TransactionProcessorImpl implements TransactionProcessor {
             // block
             // to avoid blocking the entire unconfirmedTransactionsSyncObj while waiting for
             // network I/O.
-            Peer initialPeer = Peers.getAnyPeer(Peer.State.CONNECTED);
+            Peers peers = peerManager != null ? peerManager.getPeers() : null;
+            Peer initialPeer = peers != null ? peers.getAnyPeer(Peer.State.CONNECTED) : null;
             if (initialPeer == null) {
                 return;
             }
 
-            Peers.readUnconfirmedTransactionsNonBlocking(initialPeer)
+            peers.readUnconfirmedTransactionsNonBlocking(initialPeer)
                     .whenComplete((response, throwable) -> {
                         if (throwable != null) {
                             logger.debug("Error pulling unconfirmed transactions from initial peer {}: {}",
@@ -123,16 +138,16 @@ public class TransactionProcessorImpl implements TransactionProcessor {
                             try {
                                 List<Transaction> addedTransactions = processPeerTransactions(transactionsData,
                                         initialPeer);
-                                Peers.feedingTime(initialPeer, foodDispenser, doneFeedingLog);
+                                peers.feedingTime(initialPeer, foodDispenser, doneFeedingLog);
 
                                 if (!addedTransactions.isEmpty()) {
-                                    List<Peer> activePrioPlusExtra = Peers.getAllActivePriorityPlusSomeExtraPeers();
+                                    List<Peer> activePrioPlusExtra = peers.getAllActivePriorityPlusSomeExtraPeers();
                                     activePrioPlusExtra.remove(initialPeer);
 
                                     List<CompletableFuture<Void>> expectedResults = new ArrayList<>();
 
                                     for (Peer otherPeer : activePrioPlusExtra) {
-                                        CompletableFuture<Void> peerTransactionFuture = Peers
+                                        CompletableFuture<Void> peerTransactionFuture = peers
                                                 .readUnconfirmedTransactionsNonBlocking(otherPeer)
                                                 .whenComplete((otherResponse, otherThrowable) -> {
                                                     if (otherThrowable != null) {
@@ -153,7 +168,7 @@ public class TransactionProcessorImpl implements TransactionProcessor {
                                                                         JSON.getAsJsonArray(otherResponse.get(
                                                                                 UNCONFIRMED_TRANSACTIONS_RESPONSE)),
                                                                         otherPeer);
-                                                                Peers.feedingTime(otherPeer, foodDispenser,
+                                                                peers.feedingTime(otherPeer, foodDispenser,
                                                                         doneFeedingLog);
                                                             } catch (ValidationException | RuntimeException e) {
                                                                 otherPeer.blacklist(e,
@@ -446,14 +461,18 @@ public class TransactionProcessorImpl implements TransactionProcessor {
     }
 
     private int broadcastToPeers(boolean toAll) {
+        Peers peers = peerManager != null ? peerManager.getPeers() : null;
+        if (peers == null) {
+            return 0;
+        }
         List<? extends Peer> peersToSendTo = toAll
-                ? Peers.getActivePeers().stream().limit(100).collect(Collectors.toList())
-                : Peers.getAllActivePriorityPlusSomeExtraPeers();
+                ? peers.getActivePeers().stream().limit(100).collect(Collectors.toList())
+                : peers.getAllActivePriorityPlusSomeExtraPeers();
 
         logger.trace("Queueing up {} Peers for feeding", peersToSendTo.size());
 
         for (Peer p : peersToSendTo) {
-            Peers.feedingTime(p, foodDispenser, doneFeedingLog);
+            peers.feedingTime(p, foodDispenser, doneFeedingLog);
         }
 
         return peersToSendTo.size();

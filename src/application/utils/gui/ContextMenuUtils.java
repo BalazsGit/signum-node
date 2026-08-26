@@ -1,7 +1,6 @@
 package application.utils.gui;
 
 import application.module.node.gui.ColorSettingsPanel;
-import application.module.node.gui.NodeConsolePanel;
 import application.module.appearance.gui.AppearancePanel;
 
 import javax.swing.*;
@@ -59,16 +58,6 @@ public final class ContextMenuUtils {
         }
         deleteItem.addActionListener(ae -> appearancePanel.deleteProfile(currentProfile));
         popup.add(deleteItem);
-
-        popup.addSeparator();
-        JMenuItem goToSettings = new JMenuItem("Open Look and Feel Settings...");
-        goToSettings.addActionListener(ae -> {
-            NodeConsolePanel gui = NodeConsolePanel.getInstance();
-            if (gui != null) {
-                gui.showLookAndFeelSettings();
-            }
-        });
-        popup.add(goToSettings);
     }
 
     public static void addInfoTooltip(JFrame parentFrame, JLabel label, String text, String colorKey) {

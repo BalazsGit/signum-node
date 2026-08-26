@@ -60,8 +60,8 @@ public class SqlAccountStore implements AccountStore {
         }
     };
 
-    private final Blockchain blockchain;
-    private final FluxCapacitor fluxCapacitor;
+    private Blockchain blockchain;
+    private FluxCapacitor fluxCapacitor;
     private final PropertyService propertyService;
     private final int insertMaxBatchSize;
     private final Set<String> pkChecks;
@@ -92,6 +92,24 @@ public class SqlAccountStore implements AccountStore {
         this.insertMaxBatchSize = 1000;
         this.pkChecks = Collections.emptySet();
         initTables(derivedTableManager, dbCacheManager);
+    }
+
+    /**
+     * Wires the blockchain reference after construction (breaks the circular
+     * dependency where Stores are created before Blockchain).
+     */
+    public void setBlockchain(Blockchain blockchain) {
+        this.blockchain = blockchain;
+        // Propagate to the tables (created before the blockchain existed).
+        ((VersionedEntitySqlTable<Account.AccountAsset>) accountAssetTable).setBlockchain(blockchain);
+        ((VersionedEntitySqlTable<Account.RewardRecipientAssignment>) rewardRecipientAssignmentTable).setBlockchain(blockchain);
+    }
+
+    /**
+     * Wires the flux capacitor after construction (created after Stores).
+     */
+    public void setFluxCapacitor(FluxCapacitor fluxCapacitor) {
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     private void initTables(DerivedTableManager derivedTableManager, DBCacheManagerImpl dbCacheManager) {

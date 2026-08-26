@@ -4,7 +4,7 @@ import application.module.node.*;
 import application.module.node.assetexchange.AssetExchange;
 import application.module.node.db.store.AccountStore;
 import application.module.node.peer.Peer;
-import application.module.node.peer.Peers;
+import application.module.node.peer.PeerManager;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.services.ATService;
@@ -38,11 +38,13 @@ public final class GetState extends ApiServlet.JsonRequestHandler {
     private final PropertyService propertyService;
     private final BlockchainProcessor blockchainProcessor;
     private final AccountStore accountStore;
+    private final PeerManager peerManager;
     private final List<String> apiAdminKeyList;
 
     public GetState(Blockchain blockchain, AssetExchange assetExchange, AccountService accountService,
             AliasService aliasService, TimeService timeService, ATService atService, Generator generator,
-            PropertyService propertyService, BlockchainProcessor blockchainProcessor, AccountStore accountStore) {
+            PropertyService propertyService, BlockchainProcessor blockchainProcessor, AccountStore accountStore,
+            PeerManager peerManager) {
         super(new LegacyDocTag[] { LegacyDocTag.INFO }, INCLUDE_COUNTS_PARAMETER, API_KEY_PARAMETER);
         this.blockchain = blockchain;
         this.assetExchange = assetExchange;
@@ -54,6 +56,7 @@ public final class GetState extends ApiServlet.JsonRequestHandler {
         this.propertyService = propertyService;
         this.blockchainProcessor = blockchainProcessor;
         this.accountStore = accountStore;
+        this.peerManager = peerManager;
 
         apiAdminKeyList = propertyService.getStringList(Props.API_ADMIN_KEY_LIST);
     }
@@ -118,7 +121,7 @@ public final class GetState extends ApiServlet.JsonRequestHandler {
                         TransactionType.SUBTYPE_ADVANCED_PAYMENT_SUBSCRIPTION_PAYMENT,
                         TransactionType.SUBTYPE_ADVANCED_PAYMENT_SUBSCRIPTION_PAYMENT));
 
-        response.addProperty("numberOfPeers", Peers.getAllPeers().size());
+        response.addProperty("numberOfPeers", peerManager != null ? peerManager.getPeerCount() : 0);
         response.addProperty("numberOfUnlockedAccounts", generator.getAllGenerators().size());
         Peer lastBlockchainFeeder = blockchainProcessor.getLastBlockchainFeeder();
         response.addProperty("lastBlockchainFeeder",

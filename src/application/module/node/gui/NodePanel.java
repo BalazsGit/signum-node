@@ -4,6 +4,7 @@ import application.module.appearance.AppearanceModule;
 import application.module.node.Signum;
 import application.module.node.NodeModule;
 import application.module.node.profile.NodeProfile;
+import application.module.node.profile.NodeProfileRepository;
 import application.module.node.profile.ProfileConfig;
 import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiIcons;
@@ -149,10 +150,10 @@ public class NodePanel extends JPanel  {
         Thread loaderThread = new Thread(() -> {
             try {
                 // Initialize profiles first: sync defaults, create fallback placeholders if needed
-                NodeProfile.initialize();
+                NodeProfileRepository.initialize();
 
                 // Discover profiles from filesystem
-                NodeProfile[] profiles = NodeProfile.loadAll();
+                NodeProfile[] profiles = NodeProfileRepository.loadAll();
                 int total = profiles.length;
 
                 if (total == 0) {
@@ -271,7 +272,7 @@ public class NodePanel extends JPanel  {
         LOGGER.info("Lazy-loading profile panel for: {}", profileName);
 
         // Load the profile and create the actual panel
-        NodeProfile profile = NodeProfile.loadByName(profileName);
+        NodeProfile profile = NodeProfileRepository.loadByName(profileName);
         if (profile == null) {
             profile = new NodeProfile(profileName);
         }

@@ -7,6 +7,8 @@ import application.module.node.common.AbstractUnitTest;
 import application.module.node.web.api.http.common.APITransactionManager;
 import com.google.gson.JsonElement;
 import org.mockito.ArgumentCaptor;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -14,6 +16,11 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+// These transaction-handler tests share the QuickMocker fixtures and a set of
+// pre-existing per-test stubs that are not all consumed on every code path.
+// Relaxing strictness for this test family avoids UnnecessaryStubbingException
+// while keeping the functional assertions intact.
+@MockitoSettings(strictness = Strictness.LENIENT)
 public abstract class AbstractTransactionTest extends AbstractUnitTest {
 
     @FunctionalInterface

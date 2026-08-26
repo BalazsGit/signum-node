@@ -37,6 +37,7 @@ public final class ConsolePanelConfiguration {
     private LogFilter initialFilter;
     private ConsoleColorScheme colorScheme;
     private Consumer<String> commandHandler;
+    private String defaultCommandPrefix;       // optional prefilled (editable) command text
     private boolean enableSmartScroll = true;
     
     // ── Command Panel Animation & Visibility Control ─────────────────────
@@ -101,6 +102,15 @@ public final class ConsolePanelConfiguration {
             throw new NullPointerException("Command position must not be null");
         }
         this.commandPosition = position;
+        return this;
+    }
+
+    /**
+     * Sets an initial (prefilled, fully editable) text for the command input field,
+     * e.g. {@code "-node.node "} so profile-targeted commands are addressed by default.
+     */
+    public ConsolePanelConfiguration withDefaultCommandPrefix(String prefix) {
+        this.defaultCommandPrefix = prefix;
         return this;
     }
 
@@ -206,6 +216,10 @@ public final class ConsolePanelConfiguration {
     /** @return the command handler (null if no input configured) */
     public Consumer<String> getCommandHandler() {
         return commandHandler;
+    }
+
+    public String getDefaultCommandPrefix() {
+        return defaultCommandPrefix;
     }
 
     /** @return true if smart auto-scroll is enabled */

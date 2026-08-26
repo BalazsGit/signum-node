@@ -59,7 +59,7 @@ public class SqlATStore implements ATStore {
 
     private VersionedEntityTable<application.module.node.at.AT.AtMapEntry> atMapTable;
 
-    private final Blockchain blockchain;
+    private Blockchain blockchain;
     private AtConstants atConstants;
     private final DbContext dbContext;
 
@@ -74,6 +74,18 @@ public class SqlATStore implements ATStore {
         this.blockchain = null;
         this.dbContext = null;
         initTables(derivedTableManager);
+    }
+
+    /**
+     * Wires the blockchain reference after construction (breaks the circular
+     * dependency where Stores are created before Blockchain).
+     */
+    public void setBlockchain(Blockchain blockchain) {
+        this.blockchain = blockchain;
+        // Propagate to the tables (created before the blockchain existed).
+        ((VersionedEntitySqlTable<application.module.node.at.AT>) atTable).setBlockchain(blockchain);
+        ((VersionedEntitySqlTable<application.module.node.at.AT.ATState>) atStateTable).setBlockchain(blockchain);
+        ((VersionedEntitySqlTable<application.module.node.at.AT.AtMapEntry>) atMapTable).setBlockchain(blockchain);
     }
 
     /**

@@ -62,7 +62,7 @@ public class SqlDigitalGoodsStoreStore implements DigitalGoodsStoreStore {
 
     private VersionedEntityTable<DigitalGoodsStore.Goods> goodsTable;
 
-    private final Blockchain blockchain;
+    private Blockchain blockchain;
     private final DbContext dbContext;
 
     public SqlDigitalGoodsStoreStore(DerivedTableManager derivedTableManager, StoreDependencies storeDependencies) {
@@ -78,6 +78,17 @@ public class SqlDigitalGoodsStoreStore implements DigitalGoodsStoreStore {
         DigitalGoodsStore.setOriginStore(this);
         this.dbContext = null;
         initTables(derivedTableManager);
+    }
+
+    /**
+     * Wires the blockchain reference after construction (breaks the circular
+     * dependency where Stores are created before Blockchain).
+     */
+    public void setBlockchain(Blockchain blockchain) {
+        this.blockchain = blockchain;
+        // Propagate to the tables (created before the blockchain existed).
+        ((VersionedEntitySqlTable<DigitalGoodsStore.Purchase>) purchaseTable).setBlockchain(blockchain);
+        ((VersionedEntitySqlTable<DigitalGoodsStore.Goods>) goodsTable).setBlockchain(blockchain);
     }
 
     private void initTables(DerivedTableManager derivedTableManager) {

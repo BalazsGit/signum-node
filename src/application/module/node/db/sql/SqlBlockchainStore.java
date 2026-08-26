@@ -37,8 +37,8 @@ public class SqlBlockchainStore implements BlockchainStore {
 
     private final TransactionDb transactionDb;
     private final BlockDb blockDb;
-    private final Blockchain blockchain;
-    private final FluxCapacitor fluxCapacitor;
+    private Blockchain blockchain;
+    private FluxCapacitor fluxCapacitor;
     private final DbContext dbContext;
 
     private static final int[] totalTransactions = new int[1];
@@ -59,6 +59,21 @@ public class SqlBlockchainStore implements BlockchainStore {
         this.blockchain = null;
         this.fluxCapacitor = null;
         this.dbContext = null;
+    }
+
+    /**
+     * Wires the blockchain reference after construction (breaks the circular
+     * dependency where Stores are created before Blockchain).
+     */
+    public void setBlockchain(Blockchain blockchain) {
+        this.blockchain = blockchain;
+    }
+
+    /**
+     * Wires the flux capacitor after construction (created after Stores).
+     */
+    public void setFluxCapacitor(FluxCapacitor fluxCapacitor) {
+        this.fluxCapacitor = fluxCapacitor;
     }
 
     @Override

@@ -6,9 +6,10 @@ import com.google.gson.JsonObject;
 
 final class GetPeers implements PeerServlet.PeerRequestHandler {
 
-    static final GetPeers instance = new GetPeers();
+    private final Peers peers;
 
-    private GetPeers() {
+    GetPeers(Peers peers) {
+        this.peers = peers;
     }
 
     @Override
@@ -16,18 +17,18 @@ final class GetPeers implements PeerServlet.PeerRequestHandler {
 
         JsonObject response = new JsonObject();
 
-        JsonArray peers = new JsonArray();
-        for (Peer otherPeer : Peers.getAllPeers()) {
+        JsonArray peersArray = new JsonArray();
+        for (Peer otherPeer : peers.getAllPeers()) {
 
             if (!otherPeer.isBlacklisted() && otherPeer.getAnnouncedAddress() != null
                     && otherPeer.getState() == Peer.State.CONNECTED && otherPeer.shareAddress()) {
 
-                peers.add(otherPeer.getAnnouncedAddress());
+                peersArray.add(otherPeer.getAnnouncedAddress());
 
             }
 
         }
-        response.add("peers", peers);
+        response.add("peers", peersArray);
 
         return response;
     }

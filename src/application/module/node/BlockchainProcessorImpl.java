@@ -15,6 +15,7 @@ import application.module.node.db.store.Stores;
 import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.peer.Peer;
+import application.module.node.peer.PeerManager;
 import application.module.node.peer.PeerMetric;
 import application.module.node.peer.Peers;
 import application.module.node.props.PropertyService;
@@ -239,6 +240,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
     private final Listener<Peer> netVolumeListener = peer -> updateAndFireNetVolume();
 
+    // Profile-scoped peer manager (setter-injected after construction, see setPeerManager)
+    private volatile PeerManager peerManager;
+
     private final boolean autoPopOffEnabled;
     private final AtomicBoolean skipDbCheckOnManualPopOff = new AtomicBoolean(false);
 
@@ -437,8 +441,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 }
 
                 blockListeners.clear();
-                for (Peers.Event event : Peers.Event.values()) {
-                    Peers.removeListener(peerListener, event);
+                PeerManager peerManager = this.peerManager;
+                if (peerManager != null) {
+                    for (Peers.Event event : Peers.Event.values()) {
+                        peerManager.removeListener(peerListener, event);
+                    }
                 }
 
                 if (oclInitialized.get()) {
@@ -529,7 +536,22 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
     @Override
     public Collection<Peer> getAllPeers() {
-        return Peers.getAllPeers();
+        PeerManager peerManager = this.peerManager;
+        Peers peers = peerManager != null ? peerManager.getPeers() : null;
+        return peers != null ? peers.getAllPeers() : Collections.emptyList();
+    }
+
+    @Override
+    public void setPeerManager(PeerManager peerManager) {
+        this.peerManager = peerManager;
+        Peers peers = peerManager != null ? peerManager.getPeers() : null;
+        if (peers != null) {
+            peers.listeners.addListener(netVolumeListener, Peers.Event.UPLOADED_VOLUME);
+            peers.listeners.addListener(netVolumeListener, Peers.Event.DOWNLOADED_VOLUME);
+            for (Peers.Event event : Peers.Event.values()) {
+                peers.listeners.addListener(peerListener, event);
+            }
+        }
     }
 
     @Override
@@ -578,7 +600,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             IndirectIncomingService indirectIncomingService,
             AliasService aliasService,
             FluxCapacitor fluxCapacitor,
-            ATService atService) {
+            ATService atService,
+            ATProcessorCache atProcessorCache) {
+        this.atProcessorCache = atProcessorCache;
         this.blockService = blockService;
         this.atService = atService;
         this.fluxCapacitor = fluxCapacitor;
@@ -636,8 +660,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             this.measurementLogExecutor = null;
         }
 
-        Peers.listeners.addListener(netVolumeListener, Peers.Event.UPLOADED_VOLUME);
-        Peers.listeners.addListener(netVolumeListener, Peers.Event.DOWNLOADED_VOLUME);
+        // (peer listeners are registered in setPeerManager — the PeerManager is created
+        //  after this processor, so they cannot be bound in the constructor)
 
         autoPopOffEnabled = propertyService.getBoolean(Props.AUTO_POP_OFF_ENABLED);
 
@@ -682,10 +706,6 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         this.dbPruneLogFilename = this.measurementDir != null && archivalMode == ArchivalMode.PRUNE
                 ? Paths.get(this.measurementDir, "db_prune_log.csv").toString()
                 : null;
-
-        for (Peers.Event event : Peers.Event.values()) {
-            Peers.listeners.addListener(peerListener, event);
-        }
 
         genesisBlockId = Convert.parseUnsignedLong(
                 propertyService.getString(Props.GENESIS_BLOCK_ID));
@@ -857,7 +877,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                 if (!ThreadPool.running.get() || isShutdown.get() || getMoreBlocksAutoPause.get()) {
                                     return;
                                 }
-                                peer = Peers.getAnyPeer(Peer.State.CONNECTED);
+                                Peers peers = peerManager != null ? peerManager.getPeers() : null;
+                                peer = peers != null ? peers.getAnyPeer(Peer.State.CONNECTED) : null;
                                 if (peer == null) {
                                     logger.debug("No peer connected.");
                                     return;
@@ -1599,7 +1620,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     }
 
     private void updateAndFireNetVolume() {
-        List<Peer> peersList = Peers.getActivePeers();
+        PeerManager peerManager = this.peerManager;
+        Peers peers = peerManager != null ? peerManager.getPeers() : null;
+        List<Peer> peersList = peers != null ? peers.getActivePeers() : Collections.emptyList();
         long sumUploadedVolume = 0;
         long sumDownloadedVolume = 0;
         for (Peer peer : peersList) {
@@ -3505,7 +3528,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             statisticsManager.blockAdded();
             blockListeners.notify(block, Event.BLOCK_PUSHED);
             if (block.getTimestamp() >= timeService.getEpochTime() - MAX_TIMESTAMP_DIFFERENCE) {
-                Peers.sendToSomePeers(block);
+                Peers peers = peerManager != null ? peerManager.getPeers() : null;
+                if (peers != null) {
+                    peers.sendToSomePeers(block);
+                }
             }
             if (block.getHeight() >= autoPopOffLastStuckHeight) {
                 autoPopOffNumberOfBlocks = 0;

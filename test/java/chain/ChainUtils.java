@@ -1,5 +1,6 @@
 package chain;
 
+import application.module.node.NodeModule;
 import application.module.node.Signum;
 import signumj.Constants;
 import signumj.crypto.SignumCrypto;
@@ -30,8 +31,10 @@ public class ChainUtils {
         }
 
         // a mock node with memory DB
-        String[] args = { "-l", "-c", "conf/junit" };
-        Signum.main(args);
+        // v4 (P0.1): NodeModule is the single lifecycle entry point — the legacy
+        // Signum.main() CLI bootstrap (init/conf) no longer boots nodes directly.
+        NodeModule.getInstance().startNode(Signum.PROPERTIES_NAME,
+                application.utils.io.PathUtils.resolvePath("conf/junit"));
 
         crypto = SignumCrypto.getInstance();
         nodeService = new HttpNodeService(Constants.HTTP_NODE_LOCAL_TESTNET, "mock-node-testing");
