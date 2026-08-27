@@ -83,17 +83,29 @@ public final class ConsoleFilterHeader extends JPanel {
 
     private final Consumer<LogFilter> callback;
     private volatile LogFilter currentFilter = null;
+    /**
+     * Fingerprint of the last delivered control state (see {@link #currentStateKey()}).
+     * Makes {@link #rebuildFilter()} idempotent: an unchanged state re-fires no callback.
+     * EDT-only.
+     */
+    private volatile String lastStateKey = null;
 
     // ── Constructor ───────────────────────────────────────────────────────
 
     /**
      * Creates a filter header toolbar.
+     * <p>
+     * The initial filter expression is built eagerly, so
+     * {@link #getCurrentFilter()} is non-null right after construction.
+     * </p>
      *
      * @param callback receiver for combined filter changes (may be null)
      */
     public ConsoleFilterHeader(Consumer<LogFilter> callback) {
         this.callback = callback;
         initUI();
+        // Establish the initial filter from the default control state.
+        rebuildFilter();
     }
 
     // ── UI Initialization ────────────────────────────────────────────────
@@ -233,6 +245,13 @@ public final class ConsoleFilterHeader extends JPanel {
      * Must be called on the Swing EDT.
      */
     public void rebuildFilter() {
+        // Idempotency (v4 P2.2): if the control state is unchanged, nothing was
+        // delivered differently — skip building and skip the callback.
+        String stateKey = currentStateKey();
+        if (stateKey.equals(lastStateKey)) {
+            return;
+        }
+
         List<LogFilter> filters = new ArrayList<>();
 
         // Level filter
@@ -268,15 +287,29 @@ public final class ConsoleFilterHeader extends JPanel {
             combined = CompositeFilter.and(filters.toArray(new LogFilter[0]));
         }
 
-        // Only invoke callback if the filter actually changed
-        if (areFiltersEqual(combined, currentFilter)) {
-            return;
-        }
+        lastStateKey = stateKey;
         currentFilter = combined;
 
         if (callback != null) {
             callback.accept(combined);
         }
+    }
+
+    /**
+     * Canonical fingerprint of the current control state (levels, profile,
+     * module, search text, search mode). Used by {@link #rebuildFilter()} to
+     * detect no-op rebuilds without relying on {@code LogFilter} identity.
+     */
+    private String currentStateKey() {
+        Object selectedProfile = profileCombo.getItemCount() > 0
+                ? profileCombo.getSelectedItem()
+                : null;
+        return getSelectedLevels() + "|"
+                + String.valueOf(selectedProfile) + "|"
+                + moduleField.getText() + "|"
+                + searchField.getText() + "|"
+                + searchIncludeBtn.isSelected() + "|"
+                + searchContainsBtn.isSelected();
     }
 
     private LogFilter buildLevelFilter() {
@@ -454,6 +487,11 @@ public final class ConsoleFilterHeader extends JPanel {
      * @param name the profile name to select, or "(all)" / empty string for all
      */
     public void setProfileText(String name) {
+        // Ensure the combo has at least the "(all)" entry — setSelectedIndex(0)
+        // throws IllegalArgumentException on an empty combo (before setProfiles()).
+        if (profileCombo.getItemCount() == 0) {
+            profileCombo.addItem("(all)");
+        }
         if (name == null || name.isEmpty()) {
             profileCombo.setSelectedIndex(0);
         } else {
@@ -534,15 +572,6 @@ public final class ConsoleFilterHeader extends JPanel {
             searchContainsBtn.setSelected(true);
         }
         rebuildFilter();
-    }
-
-    // ── Utility ──────────────────────────────────────────────────────────
-
-    private static boolean areFiltersEqual(LogFilter a, LogFilter b) {
-        if (a == null && b == null) {
-            return true;
-        }
-        return a == b;
     }
 
     @Override

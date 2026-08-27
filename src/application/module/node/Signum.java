@@ -550,6 +550,17 @@ public final class Signum {
         stateListeners.remove(listener);
     }
 
+    /**
+     * PULL accessor (v4 P2.2): returns an unmodifiable snapshot of the currently
+     * registered state listeners. Used to verify the single-listener binding
+     * contract (exactly one listener per owning GUI panel).
+     *
+     * @return unmodifiable list of registered listeners (never null)
+     */
+    public java.util.List<StateListener> getStateListeners() {
+        return java.util.List.copyOf(stateListeners);
+    }
+
     private void setState(State newState) {
         State oldState = this.state;
         this.state = newState;

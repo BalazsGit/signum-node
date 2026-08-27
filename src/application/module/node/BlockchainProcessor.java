@@ -201,6 +201,20 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
         ACTIVE
     }
 
+    /**
+     * Represents the state of the database archival maintenance process.
+     * In PRUNE mode two separate phases run sequentially: first the derived
+     * tables are trimmed, then old blocks are physically pruned.
+     */
+    enum ArchivalMaintenanceState {
+        /** No archival maintenance is in progress. */
+        IDLE,
+        /** Trimming of derived tables is in progress. */
+        TRIMMING,
+        /** Physical pruning (deletion) of old blocks is in progress. */
+        PRUNING
+    }
+
     Peer getLastBlockchainFeeder();
 
     int getLastBlockchainFeederHeight();
@@ -282,6 +296,23 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
     ConsistencyState getConsistencyState();
 
     ArchivalMode getArchivalMode();
+
+    /**
+     * Returns whether a database archival maintenance task (trim or prune) is currently
+     * running. This is a sub-state of a running node, not a lifecycle state.
+     *
+     * @see #getArchivalMaintenanceState()
+     */
+    boolean isArchivalMaintenanceRunning();
+
+    /**
+     * Returns the current archival maintenance state:
+     * {@link ArchivalMaintenanceState#TRIMMING} while derived tables are being trimmed,
+     * {@link ArchivalMaintenanceState#PRUNING} while old blocks are being pruned,
+     * {@link ArchivalMaintenanceState#IDLE} otherwise. This is a sub-state of a
+     * running node, not a lifecycle state.
+     */
+    ArchivalMaintenanceState getArchivalMaintenanceState();
 
     ResolutionState getResolutionState();
 

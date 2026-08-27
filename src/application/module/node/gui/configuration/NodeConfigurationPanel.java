@@ -98,6 +98,7 @@ public class NodeConfigurationPanel extends JPanel {
     private JButton renameProfileBtn;
     private JButton deleteProfileBtn;
     private JButton newProfileBtn;
+    private JButton copyProfileDataBtn;
     private JButton reloadProfileBtn;
     private JButton resetToDefaultsBtn;
     private JButton refreshProfilesBtn;
@@ -208,7 +209,7 @@ public class NodeConfigurationPanel extends JPanel {
         JPanel profilePanel = new JPanel(new MigLayout("insets 0, gap 5"));
         profilePanel.setBorder(BorderFactory.createEmptyBorder()); // Remove internal padding, rely on scroll pane's
                                                                    // padding
-        profilePanel.add(new JLabel("Configuration Profile:"));
+        profilePanel.add(new JLabel("Copy Data From:"));
 
         profileComboBox = new JComboBox<>();
         profileComboBox.setEditable(false);
@@ -245,8 +246,16 @@ public class NodeConfigurationPanel extends JPanel {
         resetToDefaultsBtn.addActionListener(e -> resetToDefaults());
         profilePanel.add(resetToDefaultsBtn);
 
+        copyProfileDataBtn = new JButton("Copy Profile Data");
+        copyProfileDataBtn.setToolTipText("Copy the selected profile's data into the editor as a starting state (unsaved changes are discarded)");
+        copyProfileDataBtn.addActionListener(e -> copyProfileData());
+        copyProfileDataBtn.setIcon(
+                IconFontSwing.buildIcon(FontAwesome.CLIPBOARD, GuiConstants.getHelpIconSize(), GuiColors.getButtonIcon()));
+        ConfigurationUtils.fixComponentSize(copyProfileDataBtn);
+        profilePanel.add(copyProfileDataBtn);
+
         reloadProfileBtn = new JButton("Reload Profile");
-        reloadProfileBtn.setToolTipText("Reload settings from the current profile file on disk");
+        reloadProfileBtn.setToolTipText("Reload the current profile file from disk (e.g. after external edits)");
         reloadProfileBtn.addActionListener(e -> reloadProfile());
         profilePanel.add(reloadProfileBtn);
 
@@ -1138,6 +1147,49 @@ public class NodeConfigurationPanel extends JPanel {
         return changesFound ? report.toString() : null;
     }
 
+    /**
+     * Copies the data of the profile currently selected in the "Copy Data From"
+     * dropdown into the editor, as a starting state for modification. Unsaved
+     * changes in the editor are discarded (with confirmation).
+     */
+    private void copyProfileData() {
+        if (loadedProfileName != null) {
+            if (hasUnsavedChanges()) {
+                String message = "You have unsaved changes. Are you sure you want to copy from the selected profile and discard these changes?";
+                Object[] options = { "Discard and Copy", "Cancel" };
+                int result = JOptionPane.showOptionDialog(this, message, "Copy Profile Data",
+                        JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE,
+                        null, options, options[1]);
+                if (result != JOptionPane.YES_OPTION) {
+                    return;
+                }
+            }
+
+            Path targetFile = ConfigurationUtils.resolveNodeProfilePath(loadedProfileName);
+            if (Files.exists(targetFile)) {
+                Properties loaded = new Properties();
+                try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
+                    isProgrammaticChange = true;
+                    loaded.load(in);
+                    savedProfile = new NodeProfile(loadedProfileName);
+                    savedProfile.setProperties(loaded);
+                    updateUIFromProperties(loaded);
+                    updateDirtyStatus();
+                    updateProfileComboBoxColor();
+                    isProgrammaticChange = false;
+                } catch (Exception e) {
+                    JOptionPane.showMessageDialog(this, "Error copying profile data: " + e.getMessage(), "Error",
+                            JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }
+    }
+
+    /**
+     * Reloads the <b>current</b> profile file from disk into the editor —
+     * intended for picking up changes made externally (e.g. the properties file
+     * was edited by hand). Unsaved UI changes are discarded (with confirmation).
+     */
     private void reloadProfile() {
         if (loadedProfileName != null) {
             if (hasUnsavedChanges()) {
@@ -1364,11 +1416,15 @@ public class NodeConfigurationPanel extends JPanel {
                 +
                 "<li><b>Reset to Defaults</b>: Resets all current settings to their application default values without saving.</li>"
                 +
-                "<li><b>Reload Profile</b>: Reloads settings from the profile file on disk, discarding any unsaved changes in the UI.</li>"
+                "<li><b>Copy Profile Data</b>: Copies the selected profile's data into the editor as a starting state for modification, discarding any unsaved changes in the UI.</li>"
+                +
+                "<li><b>Reload Profile</b>: Reloads the current profile file from disk (e.g. after external edits), discarding any unsaved changes in the UI.</li>"
                 +
                 "<li><b>Refresh Profiles</b>: Synchronizes the profile list with the files currently available on disk.</li>"
                 +
                 "</ul>" +
+                "<p>Dropdown colors: <b>green</b> = the profile currently running (active) on the node; " +
+                "<b>yellow</b> = the profile whose data is currently copied into the editor.</p>" +
                 "<p>Profiles are stored as \".properties\" files within the node sub-directory of the configuration folder.</p>"
                 +
                 "</body></html>";

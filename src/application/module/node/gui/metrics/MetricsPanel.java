@@ -13,6 +13,8 @@ import application.utils.gui.CustomDrawingComponent;
 import application.utils.gui.CustomDrawings;
 import application.utils.gui.TabbedPaneHoverHelper;
 
+import application.module.node.Signum;
+
 @SuppressWarnings("serial")
 public class MetricsPanel extends JTabbedPane {
 
@@ -48,6 +50,16 @@ public class MetricsPanel extends JTabbedPane {
      */
     public void setExpansionListener(ExpansionListener listener) {
         this.expansionListener = listener;
+    }
+
+    /**
+     * Returns the Signum instance backing this panel's profile context.
+     *
+     * @return the bound Signum, or {@code null} if this panel was created
+     *         without a profile context (deprecated constructor)
+     */
+    public Signum getSignum() {
+        return metricsContext != null ? metricsContext.getSignum() : null;
     }
 
     // Dedicated executors for each panel to ensure isolation and prevent starvation

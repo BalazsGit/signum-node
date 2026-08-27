@@ -32,6 +32,20 @@ public final class ThreadPool {
 
     public static final AtomicBoolean running = new AtomicBoolean(true);
 
+    /**
+     * Number of currently active (started, not yet shut down) main thread pools.
+     * <p>
+     * The global {@link #running} flag is only cleared when the LAST active pool
+     * goes down, and re-armed whenever any pool (re)starts. Without the count a
+     * single stop would (a) permanently zombie every pool started afterwards —
+     * e.g. the restart sequence — because worker loops gate on
+     * {@code running.get()}, and (b) kill the worker loops of every other
+     * running node profile in multi-node mode.
+     * </p>
+     */
+    private static final java.util.concurrent.atomic.AtomicInteger activePoolCount =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+
     private static final Logger logger = LoggerFactory.getLogger(ThreadPool.class);
     private final Map<Thread, Long> activeThreadsStartTime = new ConcurrentHashMap<>();
     private final Map<Thread, String> activeThreadsJobName = new ConcurrentHashMap<>();
@@ -169,6 +183,14 @@ public final class ThreadPool {
         if (scheduledThreadPool != null) {
             throw new IllegalStateException("Executor service already started");
         }
+        // A live pool means the node subsystem is active again: re-arm the global
+        // flag so worker loops (which gate on ThreadPool.running) keep running,
+        // and the "… stopped." shutdown log lines stop spewing on every periodic
+        // task execution (observed as a multi-thousand-line log flood after a
+        // restart, because a previous stop had cleared the flag and nothing
+        // re-armed it).
+        activePoolCount.incrementAndGet();
+        running.set(true);
 
         logger.debug("Running {} tasks...", beforeStartJobs.size());
         runAll(beforeStartJobs);
@@ -257,6 +279,12 @@ public final class ThreadPool {
 
     public synchronized void shutdown() {
         if (scheduledThreadPool != null) {
+            // Only the LAST pool clearing the global flag may stop the worker
+            // loops of other running node profiles; a stale global false is also
+            // what zombied pools started after the first stop (restart case).
+            if (activePoolCount.decrementAndGet() <= 0) {
+                running.set(false);
+            }
             shutdownExecutor("MainThreadPool", scheduledThreadPool);
             scheduledThreadPool = null;
         }
@@ -267,7 +295,10 @@ public final class ThreadPool {
     }
 
     public void shutdownExecutor(String name, ExecutorService executor) {
-        running.set(false); // Signal all loops to stop
+        // NOTE: the global "running" flag is managed by start()/shutdown() with
+        // pool reference counting — auxiliary executor shutdowns (e.g. the peer
+        // acceptor "UnnamedExecutor") must not clear it, otherwise they would
+        // stop the worker loops of other running node profiles.
         if (executor == null || executor.isTerminated()) {
             return;
         }

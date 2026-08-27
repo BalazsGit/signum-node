@@ -45,8 +45,8 @@ import org.slf4j.LoggerFactory;
  * - CENTER: JTabbedPane with Console, Configuration, Logging tabs
  * <p>
  * Uses constructor-injected {@link Signum} facade for per-instance access to
- * BlockchainProcessor, PropertyService, Blockchain, etc. The Signum facade owns
- * the {@link NodeCoreContext} implementation detail (Facade Pattern).
+ * BlockchainProcessor, PropertyService, Blockchain, etc. The Signum facade is
+ * the single per-instance entry point (Facade Pattern).
  */
 @SuppressWarnings("serial")
 public class NodeProfilePanel extends JPanel {
@@ -82,7 +82,7 @@ public class NodeProfilePanel extends JPanel {
     /**
      * Creates a profile panel with an injected Signum facade.
      * The facade provides per-instance access to BlockchainProcessor, PropertyService, etc.,
-     * replacing both static Signum.getXxx() calls and direct NodeCoreContext access.
+     * replacing the former static Signum.getXxx() access.
      *
      * @param parentFrame Parent JFrame for dialogs
      * @param profile     The node profile
@@ -122,6 +122,9 @@ public class NodeProfilePanel extends JPanel {
             
             LOGGER.debug("Creating NodeToolbar for profile: {}", profile.getName());
             toolbar = new NodeToolbar(profile);
+            // v4: when the toolbar starts the node, hand the instance back so this
+            // panel can adopt it (single state listener) and attach the console.
+            toolbar.setOnNodeStarted(this::onNodeStarted);
 
             // Wrap infoBar in a responsive scroll pane so info chips are accessible when window is narrow
             ResponsiveToolbarScrollPane infoBarScrollPane = new ResponsiveToolbarScrollPane(infoBar,
@@ -240,6 +243,15 @@ public class NodeProfilePanel extends JPanel {
      */
     public void adoptSignum(Signum newSignum) {
         if (newSignum == null) {
+            // The node has not been started yet in this session: there is no Signum to
+            // observe, so no state pushes will ever arrive. Present the toolbar in a
+            // startable state — the Start button is constructed disabled
+            // (NodeToolbar.createButtons) and without this refresh it would stay gray
+            // forever for a never-started profile (lazy-load flow: panel created with
+            // a null Signum).
+            if (toolbar != null) {
+                toolbar.updateButtonStates(Signum.State.STOPPED);
+            }
             return;
         }
         if (newSignum == this.signum) {
@@ -273,6 +285,30 @@ public class NodeProfilePanel extends JPanel {
         // Initial refresh so the UI immediately reflects the current node state.
         SwingUtilities.invokeLater(() -> refreshFromSignum(null, newSignum.getState()));
         LOGGER.info("Adopted Signum for profile: {} (state={})", profile.getName(), newSignum.getState());
+    }
+
+    /**
+     * Unbinds this panel from the Signum instance it currently holds: the single
+     * {@link Signum.StateListener} is removed so the (possibly still running) Signum
+     * no longer pushes state to a dead panel. The Console tab cleans itself up via
+     * {@code removeNotify()} (ProfileLogger subscriber disposal).
+     * <p>
+     * Safe to call multiple times; does not stop the node (lifecycle is owned by
+     * {@code NodeModule} — v4 principle 2).
+     * </p>
+     */
+    public void dispose() {
+        Signum current = this.signum;
+        if (current != null && stateListener != null) {
+            current.removeStateListener(stateListener);
+            stateListener = null;
+        }
+        if (toolbar != null) {
+            // Stop the Start/Stop spinner animation so its Timer cannot outlive
+            // the toolbar.
+            toolbar.stopSpinnerAnimation();
+        }
+        LOGGER.info("NodeProfilePanel disposed for profile: {}", profile.getName());
     }
 
     /**
@@ -450,21 +486,40 @@ public class NodeProfilePanel extends JPanel {
     }
 
     public void stopNode() {
-        if (consolePanel != null) {
-            consolePanel.stopNode();
-        }
+        // Single lifecycle entry point (v4): NodeModule stops this profile's node
+        // asynchronously on the lifecycle thread (never blocks the EDT).
+        NodeModule.getInstance().stopNode(profile.getName());
         LOGGER.info("Stop requested for profile: {}", profile.getName());
     }
 
     public void startNode() {
         // Single lifecycle entry point (v4): NodeModule creates (if missing) and
         // starts the node for this profile.
+        Signum started = null;
         try {
-            NodeModule.getInstance().startNode(profile.getName());
+            started = NodeModule.getInstance().startNode(profile.getName());
         } catch (Exception e) {
             LOGGER.error("Start failed for profile: {}", profile.getName(), e);
         }
         LOGGER.info("Start requested for profile: {}", profile.getName());
+        onNodeStarted(started);
+    }
+
+    /**
+     * Called after this profile's node was started (toolbar Start, this panel's
+     * {@link #startNode()}, or the console's Start). Binds the panel to the
+     * returned instance — single {@link Signum.StateListener} (v4 D3, idempotent)
+     * — and attaches the console subscriber so the profile console receives the
+     * node's logs (replayed from the ProfileLogger buffer if attached late).
+     */
+    private void onNodeStarted(Signum signum) {
+        if (signum == null) {
+            return;
+        }
+        adoptSignum(signum);
+        if (consolePanel != null) {
+            consolePanel.ensureProfileLoggerAttached();
+        }
     }
 
     /**

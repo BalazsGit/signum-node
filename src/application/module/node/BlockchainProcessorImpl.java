@@ -82,7 +82,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -349,22 +351,30 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         // NEW: Shut down transaction processor first
         transactionProcessor.shutdown();
 
-        if (isMaintenanceRunning.get()) {
-            String phase = isPruning.get() ? "pruning" : "trimming";
-            logger.info("Waiting for database {} maintenance to finish before shutdown...", phase);
-        }
-
-        if (isPruning.get()) {
-            logger.info("Waiting for database prune to finish before shutdown...");
-        }
-
         CompletableFuture<Void> maintenanceFuture = archivalMaintenanceFuture.get();
         if (maintenanceFuture != null && !maintenanceFuture.isDone()) {
-            logger.info("Waiting for database archival maintenance task to finish before shutdown...");
-            try {
-                maintenanceFuture.join();
-            } catch (Exception e) {
-                logger.warn("Archival maintenance task finished with error during shutdown: {}", e.getMessage());
+            // Wait until the archiving task actually finishes — it may legitimately take
+            // many minutes (or hours on a large chain), so there is no artificial deadline.
+            // Each get(60s) parks this thread event-driven (no polling) and wakes as soon
+            // as the future completes, so the wait lasts exactly as long as the work. A
+            // heartbeat appears at most once per minute: the console stays clean in the
+            // normal case, yet the wait remains visible if the task is genuinely stuck.
+            logger.info("Waiting for database archival maintenance to finish before shutdown... (state: {})",
+                    getArchivalMaintenanceState());
+            long startedAt = System.currentTimeMillis();
+            while (!maintenanceFuture.isDone()) {
+                try {
+                    maintenanceFuture.get(60, TimeUnit.SECONDS);
+                } catch (TimeoutException te) {
+                    long elapsed = (System.currentTimeMillis() - startedAt) / 1000;
+                    logger.warn("Still waiting for archival maintenance to finish... (state: {}, {}s elapsed)",
+                            getArchivalMaintenanceState(), elapsed);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (ExecutionException e) {
+                    logger.warn("Archival maintenance task finished with error during shutdown: {}", e.getMessage());
+                }
             }
         }
 
@@ -2578,17 +2588,25 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             return;
         }
 
-        int targetHeight = Math.max(block.getHeight() - Constants.MAX_ROLLBACK, 0);
+        long startedAt = System.currentTimeMillis();
+        logger.info("Archival maintenance started (block height {}, mode {})",
+                block.getHeight(), archivalMode);
+        try {
+            int targetHeight = Math.max(block.getHeight() - Constants.MAX_ROLLBACK, 0);
 
-        if (archivalMode == ArchivalMode.TRIM) {
-            trimDerivedTables(targetHeight);
-        } else if (archivalMode == ArchivalMode.PRUNE) {
-            trimDerivedTables(targetHeight);
-            pruneBlocks(targetHeight);
+            if (archivalMode == ArchivalMode.TRIM) {
+                trimDerivedTables(targetHeight);
+            } else if (archivalMode == ArchivalMode.PRUNE) {
+                trimDerivedTables(targetHeight);
+                pruneBlocks(targetHeight);
+            }
+        } finally {
+            // Always restore the state (even on failure) so isArchivalMaintenanceRunning()
+            // can never get stuck at true.
+            isMaintenanceRunning.set(false);
+            logger.info("Archival maintenance finished in {}",
+                    DurationFormatter.format(System.currentTimeMillis() - startedAt));
         }
-
-        isMaintenanceRunning.set(false);
-
     }
 
     /**
@@ -2815,6 +2833,22 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     @Override
     public ArchivalMode getArchivalMode() {
         return archivalMode;
+    }
+
+    @Override
+    public boolean isArchivalMaintenanceRunning() {
+        return getArchivalMaintenanceState() != ArchivalMaintenanceState.IDLE;
+    }
+
+    @Override
+    public ArchivalMaintenanceState getArchivalMaintenanceState() {
+        if (isPruning.get()) {
+            return ArchivalMaintenanceState.PRUNING;
+        }
+        if (isTrimming.get()) {
+            return ArchivalMaintenanceState.TRIMMING;
+        }
+        return ArchivalMaintenanceState.IDLE;
     }
 
     @Override

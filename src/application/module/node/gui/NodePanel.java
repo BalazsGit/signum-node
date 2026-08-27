@@ -36,7 +36,9 @@ import java.util.Map;
  * Dynamically loads profiles asynchronously with progress feedback.
  * Heavy NodeProfilePanel instances are lazy-loaded on first tab selection.
  * <p>
- * Integrates with NodeLifecycleManager for push-based lifecycle notifications.
+ * Per-profile push-based lifecycle notifications are owned by each
+ * {@link NodeProfilePanel} (a single {@code Signum.StateListener} per panel);
+ * this container only manages tab lifecycle.
  * Supports user-defined tab order via ProfileConfig.tabOrder (saved to profiles.json).
  */
 @SuppressWarnings("serial")
@@ -54,10 +56,18 @@ public class NodePanel extends JPanel  {
     private final Map<String, Boolean> placeholderReplaced = new LinkedHashMap<>();
     /** Reverse lookup: profile name -> tab index for O(1) access by name */
     private final Map<String, Integer> profileNameToTabIndex = new LinkedHashMap<>();
-    /** Singleton lifecycle manager */
+    /** Sole composition root / lifecycle entry point (v4) */
     private final NodeModule nodeModule = NodeModule.getInstance();
     /** ProfileConfig for tab order management */
     private final ProfileConfig profileConfig = new ProfileConfig();
+    /**
+     * Appearance listener (kept as a field so {@link #dispose()} can unregister
+     * it — AppearanceModule listeners are identity-based).
+     */
+    private final Runnable appearanceListener = () -> {
+        GuiFontManager.applyDefaultFont(profileTabbedPane);
+        GuiFontManager.applyDefaultFont(statusLabel);
+    };
 
     /**
      * Creates the main Node panel with dynamic profile loading and progress feedback.
@@ -100,14 +110,11 @@ public class NodePanel extends JPanel  {
         GuiFontManager.applyDefaultFont(profileTabbedPane);
         add(profileTabbedPane, BorderLayout.CENTER);
 
-        // Register as lifecycle listener for push-based updates
+        // (v4: per-profile push notifications are owned by NodeProfilePanel)
         
 
         // Register for appearance updates
-        AppearanceModule.registerAppearanceListener(() -> {
-            GuiFontManager.applyDefaultFont(profileTabbedPane);
-            GuiFontManager.applyDefaultFont(statusLabel);
-        });
+        AppearanceModule.registerAppearanceListener(appearanceListener);
 
         // Start async profile loading
         startAsyncProfileLoading();
@@ -557,10 +564,19 @@ public class NodePanel extends JPanel  {
     }
 
     /**
-     * Cleanup: unregister listener when panel is closed.
+     * Cleanup when the panel is closed: unregisters the appearance listener and
+     * disposes every loaded profile panel (unregistering its Signum StateListener).
+     * Does not stop any node — node lifecycle is owned by {@link NodeModule} (v4).
+     * <p>
+     * Idempotent: safe to call multiple times.
+     * </p>
      */
     public void dispose() {
-        
-        LOGGER.info("NodePanel disposed, listener unregistered");
+        AppearanceModule.removeAppearanceListener(appearanceListener);
+        for (NodeProfilePanel panel : loadedProfilePanels.values()) {
+            panel.dispose();
+        }
+        LOGGER.info("NodePanel disposed: appearance listener unregistered, {} profile panel(s) disposed",
+                loadedProfilePanels.size());
     }
 }

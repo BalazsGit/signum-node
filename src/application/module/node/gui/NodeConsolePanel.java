@@ -50,6 +50,7 @@ import application.module.node.gui.configuration.ConfigurationPanel;
 import application.gui.glassPanel.GlassPanelManager;
 import application.module.node.gui.dialog.PeersDialog;
 import application.module.node.gui.metrics.MetricsPanel;
+import application.module.node.gui.metrics.MetricsPanelContext;
 import application.gui.glassPanel.GlassPanel;
 import application.module.appearance.AppearanceModule;
 import application.module.appearance.gui.AppearancePanel;
@@ -170,6 +171,12 @@ public class NodeConsolePanel extends JPanel {
      */
     public void setSignum(Signum signum) {
         this.signum = signum;
+        // v4: the panel is a receiving view — the moment it is handed the instance,
+        // attach the console subscriber (idempotent). This covers boot autostart,
+        // where the node is started before this console tab is constructed.
+        if (signum != null) {
+            ensureProfileLoggerAttached();
+        }
     }
 
     /**
@@ -465,6 +472,12 @@ public class NodeConsolePanel extends JPanel {
     private JButton editConfButton;
 
     private MetricsPanel metricsPanel;
+    /**
+     * The Signum instance whose BlockchainProcessor this console's runtime
+     * listeners (block push, peers, sync state) are registered on. Reset to
+     * {@code null} when the node stops so the next start re-wires fresh.
+     */
+    private volatile Signum listenerOwner;
     private JPanel metricsPanelWrapper;
     private Timer metricsPanelAnimator;
     private static final int COMMAND_PANEL_ANIMATION_DURATION = 250;
@@ -1952,12 +1965,14 @@ public class NodeConsolePanel extends JPanel {
         updateCustomComponents();
 
         // Apply Metrics Panel visibility NOW so the hamburger menu checkbox state matches
-        // the actual panel on first render. This is critical in multi-profile mode where
-        // startSignumWithGUI() runs in a background thread and may not apply settings in time.
+        // the actual panel on first render.
         applyPanelVisibilityState();
 
-        // Start BRS
-        new Thread(this::startSignumWithGUI).start();
+        // v4 Principle 4: the GUI is a pure view — it NEVER starts the node during
+        // construction. The node is started either by NodeModule (boot autostart) or
+        // by an explicit user action (toolbar/console Start → NodeModule.startNode),
+        // and this panel receives the instance via setSignum() / onSignumStarted
+        // (console attach is idempotent via ensureProfileLoggerAttached()).
     }
     /*
      * private boolean checkAllUnsavedChanges() {
@@ -2042,9 +2057,19 @@ public class NodeConsolePanel extends JPanel {
                     }
 
                     try {
-                        // v4: single lifecycle path — NodeModule stops this panel's own
-                        // profile (null-safe even if this panel never started the node).
-                        NodeModule.getInstance().stopNode(NodeConsolePanel.this.profileName);
+                        // v4: single lifecycle path — stop this panel's own profile
+                        // (null-safe even if this panel never started the node).
+                        // This is the full-app EXIT path (System.exit below) and it
+                        // runs on a background thread: stop SYNCHRONOUSLY here so
+                        // the node is fully shut down (DB closed) before the JVM
+                        // terminates — NodeModule.stopNode() would only queue the
+                        // stop on the lifecycle executor and return immediately.
+                        Signum stopTarget = NodeConsolePanel.this.signum != null
+                                ? NodeConsolePanel.this.signum
+                                : NodeModule.getInstance().get(NodeConsolePanel.this.profileName);
+                        if (stopTarget != null) {
+                            stopTarget.stop();
+                        }
                         NodeConsolePanel.this.signum = null;
                     } catch (Throwable t) {
                         LOGGER.error("Unexpected error during Signum core shutdown", t);
@@ -2552,11 +2577,51 @@ public class NodeConsolePanel extends JPanel {
                     // removed: in multi-node mode it would kill every other running
                     // node. Signum's state machine supports in-place restart
                     // (STOPPED -> start() -> doInitialize() -> RUNNING).
-                    NodeModule.getInstance().restartNode(NodeConsolePanel.this.profileName);
+                    Signum restarted = NodeModule.getInstance().restartNode(NodeConsolePanel.this.profileName);
+                    if (restarted == null) {
+                        LOGGER.warn("Restart: no Signum instance for profile '{}' — closing dialog", profileName);
+                        SwingUtilities.invokeLater(() -> {
+                            rotatingIcon.stop();
+                            restartDialog.setVisible(false);
+                            restartDialog.dispose();
+                        });
+                        return;
+                    }
+                    // restartNode() is asynchronous (NodeModule lifecycle thread):
+                    // keep the "Please wait" dialog open until the node reaches a
+                    // terminal state (RUNNING or ERROR). Observed via a one-shot
+                    // state listener; a 15-minute watchdog Timer is the fallback
+                    // should the push ever be missed.
+                    final Signum target = restarted;
+                    final java.util.concurrent.atomic.AtomicBoolean dialogClosed =
+                            new java.util.concurrent.atomic.AtomicBoolean(false);
+                    // Array wrapper: the lambda cannot reference itself before it
+                    // is initialized (JLS 6.1.3.8), so the watchdog removes the
+                    // listener through this indirection.
+                    final Signum.StateListener[] holder = new Signum.StateListener[1];
+                    holder[0] = (s, oldState, newState) -> {
+                        if ((newState == Signum.State.RUNNING || newState == Signum.State.ERROR)
+                                && dialogClosed.compareAndSet(false, true)) {
+                            s.removeStateListener(holder[0]);
+                            SwingUtilities.invokeLater(() -> {
+                                rotatingIcon.stop();
+                                restartDialog.setVisible(false);
+                                restartDialog.dispose();
+                            });
+                        }
+                    };
+                    target.addStateListener(holder[0]);
                     SwingUtilities.invokeLater(() -> {
-                        rotatingIcon.stop();
-                        restartDialog.setVisible(false);
-                        restartDialog.dispose();
+                        javax.swing.Timer watchdog = new javax.swing.Timer(15 * 60 * 1000, ev -> {
+                            if (dialogClosed.compareAndSet(false, true)) {
+                                target.removeStateListener(holder[0]);
+                                rotatingIcon.stop();
+                                restartDialog.setVisible(false);
+                                restartDialog.dispose();
+                            }
+                        });
+                        watchdog.setRepeats(false);
+                        watchdog.start();
                     });
                 }).start();
             }
@@ -3203,6 +3268,169 @@ public class NodeConsolePanel extends JPanel {
         }
     }
 
+    /**
+     * Resolves the Signum bound to this console for its profile.
+     * <p>
+     * Prefers the panel's own {@code signum} reference; falls back to the
+     * {@link NodeModule} registry — this covers the v4 toolbar-start flow,
+     * where the node is started by {@code NodeModule} and the panel never
+     * runs {@link #startSignumWithGUI()}.
+     * </p>
+     *
+     * @return the Signum instance for this profile, or {@code null} if the
+     *         node has not been started yet
+     */
+    private Signum resolveBoundSignum() {
+        if (signum != null) {
+            return signum;
+        }
+        try {
+            return NodeModule.getInstance().get(profileName);
+        } catch (Exception e) {
+            LOGGER.debug("resolveBoundSignum: registry lookup failed for profile '{}'", profileName, e);
+            return null;
+        }
+    }
+
+    /**
+     * Wires this console's runtime listeners to the bound node (v4 lazy-start
+     * path): registers the BlockchainProcessor listeners that drive the
+     * "Latest block", peer-count and net-volume labels, then performs the
+     * initial refresh of those labels.
+     * <p>
+     * Previously this wiring only happened inside
+     * {@link #startSignumWithGUI()} — the v4 toolbar-start flow never calls
+     * it, so the labels stayed at their initial placeholders forever.
+     * </p>
+     * <p>
+     * Idempotent per Signum instance — safe to call on every STARTING/RUNNING
+     * state push.
+     * </p>
+     */
+    private void ensureRuntimeWiring() {
+        Signum bound = resolveBoundSignum();
+        if (bound == null) {
+            return;
+        }
+        if (listenerOwner == bound) {
+            return; // already wired to this instance
+        }
+        if (signum != bound) {
+            // Late binding: listeners and label refresh read this.signum —
+            // make sure the panel points at the bound instance.
+            setSignum(bound);
+        }
+        try {
+            BlockchainProcessor processor = bound.getBlockchainProcessor();
+            if (processor == null) {
+                // Not wired yet — do NOT mark this instance as done, so the
+                // next state push retries the wiring.
+                LOGGER.warn("[{}] ensureRuntimeWiring: BlockchainProcessor not available yet — will retry on next state push", profileName);
+                return;
+            }
+            initListeners();
+            listenerOwner = bound;
+
+            final Block lastBlock = bound.getBlockchain() != null ? bound.getBlockchain().getLastBlock() : null;
+            final int maxPeerHeight = calculateMaxPeerHeight();
+            final long blockTime = bound.getFluxCapacitor() != null
+                    ? bound.getFluxCapacitor().getValue(FluxValues.BLOCK_TIME) : 0;
+            Collection<Peer> allPeers = processor.getAllPeers();
+            final long connectedCount = allPeers.stream().filter(p -> p.getState() == Peer.State.CONNECTED).count();
+            final long allKnownCount = allPeers.size();
+            final long blacklistedCount = allPeers.stream().filter(Peer::isBlacklisted).count();
+
+            SwingUtilities.invokeLater(() -> {
+                if (lastBlock != null) {
+                    updateLatestBlock(lastBlock, maxPeerHeight, blockTime);
+                }
+                updatePeerCount(connectedCount, allKnownCount, blacklistedCount);
+            });
+            LOGGER.info("[{}] Runtime listeners wired — Latest block / peer / volume labels active", profileName);
+        } catch (Exception e) {
+            LOGGER.error("[{}] ensureRuntimeWiring failed", profileName, e);
+        }
+    }
+
+    /**
+     * Writes the closing "node is running" feedback line to the profile console
+     * when the node reaches RUNNING (v4 §9.4): it confirms the startup finished,
+     * paired with the "please wait" placeholder that {@code NodeModule} emits
+     * right before the start begins.
+     * <p>
+     * Safe to call from any thread — {@link ProfileLogger} is thread-safe and
+     * the console subscriber renders on the EDT. The block height is included
+     * when the chain is available.
+     * </p>
+     */
+    private void announceRunning() {
+        Signum bound = resolveBoundSignum();
+        if (bound == null) {
+            return;
+        }
+        ProfileLogger logger = bound.getProfileLogger();
+        if (logger == null) {
+            return;
+        }
+        StringBuilder message = new StringBuilder("✔ '").append(profileName).append("' node is running");
+        try {
+            if (bound.getBlockchain() != null && bound.getBlockchain().getLastBlock() != null) {
+                message.append(" — block height: ").append(bound.getBlockchain().getLastBlock().getHeight());
+            }
+        } catch (Exception e) {
+            // Chain not fully available yet — the plain "running" line is enough.
+        }
+        logger.info(message.toString());
+    }
+
+    /**
+     * Creates the lazily-initialised MetricsPanel bound to this profile's
+     * Signum context.
+     * <p>
+     * A panel created without a profile context renders no data at all (the
+     * child panels' data sources resolve to {@code null}), so the
+     * deprecated context-less constructor is only a fallback for the
+     * node-not-yet-started case.
+     * </p>
+     */
+    private MetricsPanel createMetricsPanel() {
+        Signum bound = resolveBoundSignum();
+        if (bound != null) {
+            return new MetricsPanel(parentFrame, new MetricsPanelContext(bound));
+        }
+        LOGGER.warn("[MetricsPanel] Created without profile context for profile '{}' (node not started yet) — data will not load until it is recreated", profileName);
+        return new MetricsPanel(parentFrame);
+    }
+
+    /**
+     * Tears down the lazily-created MetricsPanel so the next show rebuilds it
+     * with a fresh profile context. A restarted node is a new Signum instance,
+     * and the old panel's executors + context would otherwise stay stale.
+     * <p>
+     * Skipped while the show/hide animator is running — in that case the
+     * staleness check in {@link #updateMetricsPanelState(boolean)} replaces
+     * the panel on the next show.
+     * </p>
+     */
+    private void disposeStaleMetricsPanel() {
+        if (metricsPanel == null) {
+            return;
+        }
+        if (metricsPanelAnimator != null && metricsPanelAnimator.isRunning()) {
+            LOGGER.debug("[MetricsPanel] Animator running — stale panel will be recreated on next show");
+            return;
+        }
+        try {
+            metricsPanel.shutdown();
+        } catch (Exception e) {
+            LOGGER.warn("[MetricsPanel] Error shutting down MetricsPanel for profile '{}'", profileName, e);
+        }
+        metricsPanelWrapper.remove(metricsPanel);
+        metricsPanelWrapper.revalidate();
+        metricsPanelWrapper.repaint();
+        metricsPanel = null;
+    }
+
     private void updateMetricsPanelState(boolean show) {
         LOGGER.info("[DEBUG-MetricsPanel] ==== updateMetricsPanelState(show={}) CALLED ===== thread={}, showMetricsPanel={}, metricsPanel={}, animatorRunning={}",
             show, Thread.currentThread().getName(), showMetricsPanel, metricsPanel != null ? "exists" : "null",
@@ -3233,8 +3461,17 @@ public class NodeConsolePanel extends JPanel {
             // LAZY-INIT: Create and initialise the panel only on the first show request.
             // This ensures child timers/executors start at the right time and avoids wasting
             // resources when the user never toggles the MetricsPanel visible.
+            // If a panel from a previous node instance still exists (a restart
+            // replaces the Signum), replace it so its data sources bind to the
+            // live node instead of the stale instance.
+            Signum boundForCheck = resolveBoundSignum();
+            if (metricsPanel != null && boundForCheck != null && metricsPanel.getSignum() != boundForCheck) {
+                LOGGER.info("[MetricsPanel] Recreating panel — bound context {} does not match current Signum for profile '{}'",
+                        metricsPanel.getSignum(), profileName);
+                disposeStaleMetricsPanel();
+            }
             if (metricsPanel == null) {
-                metricsPanel = new MetricsPanel(parentFrame);
+                metricsPanel = createMetricsPanel();
                 // Wire ExpansionListener so that chevron toggle updates our tracked state
                 metricsPanel.setExpansionListener(expanded -> this.metricsExpanded = expanded);
                 metricsPanel.init();
@@ -4202,6 +4439,18 @@ public class NodeConsolePanel extends JPanel {
         // another panel), make sure this console is attached to its ProfileLogger.
         if (newState == Signum.State.STARTING || newState == Signum.State.RUNNING) {
             ensureProfileLoggerAttached();
+            // v4 lazy-start: the node may have been started from the toolbar —
+            // register this console's runtime listeners (Latest block, peer
+            // counts, net volume) and perform the initial label refresh.
+            // Idempotent per Signum instance.
+            SwingUtilities.invokeLater(this::ensureRuntimeWiring);
+        }
+
+        // v4 §9.4: closing feedback line ("✔ '<profil>' node is running — block
+        // height: N") confirming the startup finished — pairs with the "please
+        // wait" placeholder NodeModule emits right before the start begins.
+        if (newState == Signum.State.RUNNING) {
+            announceRunning();
         }
 
         SwingUtilities.invokeLater(() -> {
@@ -4239,6 +4488,12 @@ public class NodeConsolePanel extends JPanel {
                 if (metricsPanel != null) {
                     updateMetricsPanelState(false);
                 }
+                // The next start creates a fresh Signum instance — reset the
+                // listener wiring so ensureRuntimeWiring() re-registers on the
+                // new instance, and drop a stale MetricsPanel so it is rebuilt
+                // with live data sources.
+                listenerOwner = null;
+                disposeStaleMetricsPanel();
             }
         });
     }

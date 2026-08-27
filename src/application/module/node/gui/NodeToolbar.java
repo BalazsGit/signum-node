@@ -1,14 +1,17 @@
 package application.module.node.gui;
 
 import application.module.appearance.AppearanceModule;
+import application.module.node.BlockchainProcessor;
 import application.module.node.Signum;
 import application.module.node.profile.NodeProfile;
+import application.module.node.util.Listener;
 import application.utils.gui.CustomDrawingComponent;
 import application.utils.gui.CustomDrawings;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiIcons;
+import application.utils.gui.SpinnerIcon;
 
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
@@ -23,6 +26,7 @@ import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.Box;
 import javax.swing.JButton;
+import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
@@ -93,9 +97,35 @@ public class NodeToolbar extends JPanel {
     // Sync state tracking
     private boolean isSyncStopped = false;
 
+    /**
+     * Spinner animation for the Start/Stop button while the node is in the
+     * STARTING/STOPPING state (v4 §9.4). Driven by an EDT Timer; stopped as soon
+     * as the button leaves the transitioning state.
+     */
+    private Timer spinnerTimer;
+    private SpinnerIcon spinnerIcon;
+
+    /**
+     * DB archival maintenance status label (v4 §9.6). Visible only while a
+     * TRIMMING or PRUNING phase is active; driven by pushed trim/prune listener
+     * events — no polling.
+     */
+    private JLabel maintenanceLabel;
+
+    private final Listener<BlockchainProcessor.TrimStats> trimStateListener =
+            stats -> refreshMaintenanceState();
+    private final Listener<BlockchainProcessor.PruneStats> pruneStateListener =
+            stats -> refreshMaintenanceState();
+
     // Callbacks delegated to NodeConsolePanel or parent
     private Runnable onStartStop;
     private Runnable onRestart;
+    /**
+     * v4: invoked after the toolbar started the node via {@code NodeModule.startNode}.
+     * The owning {@code NodeProfilePanel} uses it to adopt the returned instance
+     * (single state listener + console attach) — the GUI never keeps its own copy.
+     */
+    private NodeStartedListener onNodeStarted;
     private Runnable onSyncToggle;
     private Runnable onOpenPhoenix;
     private Runnable onOpenClassic;
@@ -106,11 +136,6 @@ public class NodeToolbar extends JPanel {
     private Runnable onDbCheck;
     private Runnable onMenuToggle;
 
-    /**
-     * Creates a new NodeToolbar for the given profile.
-     *
-     * @param profile The NodeProfile this toolbar belongs to
-     */
     /**
      * Creates a new NodeToolbar for the given profile.
      *
@@ -130,7 +155,11 @@ public class NodeToolbar extends JPanel {
      * @since 4.0 Phase G - Greenfield wiring
      */
     public void setSignum(Signum signum) {
+        Signum previous = this.signum;
         this.signum = signum;
+        detachMaintenanceStateListeners(previous);
+        attachMaintenanceStateListeners(signum);
+        refreshMaintenanceState();
     }
 
     /**
@@ -200,6 +229,11 @@ public class NodeToolbar extends JPanel {
         // --- DB Check ---
         dbCheckButton = createIconButton(FontAwesome.DATABASE, "Run database consistency check");
 
+        // --- DB maintenance state label (trim/prune) — hidden unless a phase is active ---
+        maintenanceLabel = new JLabel(" ");
+        maintenanceLabel.setForeground(GuiColors.getButtonIcon());
+        maintenanceLabel.setVisible(false);
+
         // --- Hamburger menu button (right side) ---
         menuButton = new JButton();
         menuButton.setIcon(IconFontSwing.buildIcon(FontAwesome.BARS, iconSize, iconColor));
@@ -248,6 +282,7 @@ public class NodeToolbar extends JPanel {
         buildPopOffSection(leftButtons);
 
         leftButtons.add(dbCheckButton);
+        leftButtons.add(maintenanceLabel, "gapleft 8");
         leftButtons.add(popOffToggle);
 
         // Wrap leftButtons in ResponsiveToolbarScrollPane for horizontal overflow scrolling
@@ -550,7 +585,11 @@ public class NodeToolbar extends JPanel {
             // Currently stopped/ready/error -> start (NodeModule creates the
             // Signum if it does not exist yet).
             try {
-                NodeModule.getInstance().startNode(profile.getName());
+                Signum started = NodeModule.getInstance().startNode(profile.getName());
+                // v4: hand the instance back to the owning panel (adopt + console attach).
+                if (onNodeStarted != null) {
+                    onNodeStarted.onNodeStarted(started);
+                }
             } catch (Exception e) {
                 LOGGER.error("Start failed for profile: {}", profile.getName(), e);
             }
@@ -566,14 +605,15 @@ public class NodeToolbar extends JPanel {
      */
     public void updateButtonStates(Signum.State state) {
         boolean isRunning = (state == Signum.State.RUNNING || false);
-        boolean isTransitioning = (false
-                || false
+        boolean isTransitioning = (state == Signum.State.STARTING
+                || state == Signum.State.STOPPING
                 );
 
         float iconSize = GuiConstants.getToolBarIconSize();
 
         if (isRunning) {
             // Show POWER_OFF icon - node is running, click to stop
+            stopSpinner();
             startStopButton.setIcon(IconFontSwing.buildIcon(FontAwesome.POWER_OFF, iconSize, GuiColors.getContrastRed()));
             startStopButton.setToolTipText("Stop the node (shutdown)");
             startStopButton.setEnabled(true);
@@ -588,6 +628,7 @@ public class NodeToolbar extends JPanel {
                     isSyncStopped ? FontAwesome.PLAY : FontAwesome.PAUSE, iconSize, GuiColors.getButtonIcon()));
         } else if (state == Signum.State.ERROR) {
             // Show PLAY icon - can restart after error
+            stopSpinner();
             startStopButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PLAY, iconSize, GuiColors.getPeerActive()));
             startStopButton.setToolTipText("Start the node");
             startStopButton.setEnabled(true);
@@ -597,12 +638,14 @@ public class NodeToolbar extends JPanel {
             popOff100Button.setEnabled(false);
             dbCheckButton.setEnabled(false);
         } else if (isTransitioning) {
-            // Show SPINNER icon during transitions
-            startStopButton.setIcon(IconFontSwing.buildIcon(FontAwesome.SPINNER, iconSize, new Color(255, 193, 7)));
+            // Animated SPINNER while the node is starting/stopping (v4 §9.4):
+            // the heavy work runs on the NodeModule lifecycle thread, so the EDT
+            // stays free and the animation is visible.
+            startSpinner();
             String tooltip = switch (state) {
-                default -> state.name().toLowerCase();
+                case STARTING -> "Starting...";
                 case STOPPING -> "Stopping...";
-                
+                default -> state.name().toLowerCase();
             };
             startStopButton.setToolTipText(tooltip);
             startStopButton.setEnabled(false);
@@ -612,16 +655,131 @@ public class NodeToolbar extends JPanel {
             popOff100Button.setEnabled(false);
             dbCheckButton.setEnabled(false);
         } else {
-            // STOPPED / READY / IDLE -> show PLAY icon
+            // STOPPED / READY / IDLE / CREATED -> show PLAY icon.
+            // CREATED is a valid startable state: NodeModule.startNode() creates the
+            // Signum and Signum.init() requires exactly the CREATED state, and
+            // handleStartStopToggle() explicitly starts from any non-RUNNING state.
+            stopSpinner();
             startStopButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PLAY, iconSize, GuiColors.getPeerActive()));
             startStopButton.setToolTipText("Start the node");
-            startStopButton.setEnabled(state != Signum.State.CREATED);
+            startStopButton.setEnabled(true);
             restartButton.setEnabled(false);
             syncButton.setEnabled(false);
             popOff10Button.setEnabled(false);
             popOff100Button.setEnabled(false);
             dbCheckButton.setEnabled(false);
         }
+    }
+
+    /**
+     * Starts the animated spinner on the Start/Stop button (EDT only).
+     * <p>
+     * The arc advances 30° every 50 ms; the animation keeps running until
+     * {@link #stopSpinner()} is called (i.e. until {@link #updateButtonStates(Signum.State)}
+     * receives a non-transitioning state). Repeated calls are idempotent.
+     * </p>
+     */
+    private void startSpinner() {
+        if (spinnerIcon == null) {
+            int size = Math.max(12, (int) Math.ceil(GuiConstants.getToolBarIconSize()));
+            spinnerIcon = new SpinnerIcon(size, new Color(255, 193, 7));
+        }
+        if (spinnerTimer == null) {
+            spinnerTimer = new Timer(50, e -> {
+                spinnerIcon.advance(30f);
+                startStopButton.repaint();
+            });
+        }
+        spinnerTimer.start();
+        startStopButton.setIcon(spinnerIcon);
+    }
+
+    /** Stops the spinner animation without changing the current button icon. */
+    private void stopSpinner() {
+        if (spinnerTimer != null) {
+            spinnerTimer.stop();
+        }
+    }
+
+    /**
+     * Stops the spinner animation. Called from the owning panel's dispose
+     * (JComponent has no instance-level dispose hook), so the animation Timer
+     * cannot outlive the toolbar.
+     */
+    public void stopSpinnerAnimation() {
+        stopSpinner();
+        detachMaintenanceStateListeners(signum);
+    }
+
+    // ====================================================================
+    // DB archival maintenance state (trim/prune) — push-based (v4 §9.6)
+    // ====================================================================
+
+    /**
+     * Resolves the BlockchainProcessor from the given facade, or null when the
+     * facade is not present or not ready (node not started yet).
+     */
+    private BlockchainProcessor resolveProcessor(Signum s) {
+        if (s == null) {
+            return null;
+        }
+        try {
+            return s.getBlockchainProcessor();
+        } catch (Exception e) {
+            LOGGER.debug("Signum facade not ready; maintenance state listeners not attached", e);
+            return null;
+        }
+    }
+
+    private void attachMaintenanceStateListeners(Signum s) {
+        BlockchainProcessor bp = resolveProcessor(s);
+        if (bp == null) {
+            return;
+        }
+        bp.addTrimListener(trimStateListener, BlockchainProcessor.Event.TRIM_START);
+        bp.addTrimListener(trimStateListener, BlockchainProcessor.Event.TRIM_END);
+        bp.addPruneListener(pruneStateListener, BlockchainProcessor.Event.PRUNE_START);
+        bp.addPruneListener(pruneStateListener, BlockchainProcessor.Event.PRUNE_END);
+        LOGGER.debug("Maintenance state listeners attached for profile: {}", profile.getName());
+    }
+
+    private void detachMaintenanceStateListeners(Signum s) {
+        BlockchainProcessor bp = resolveProcessor(s);
+        if (bp == null) {
+            return;
+        }
+        bp.removeTrimListener(trimStateListener, BlockchainProcessor.Event.TRIM_START);
+        bp.removeTrimListener(trimStateListener, BlockchainProcessor.Event.TRIM_END);
+        bp.removePruneListener(pruneStateListener, BlockchainProcessor.Event.PRUNE_START);
+        bp.removePruneListener(pruneStateListener, BlockchainProcessor.Event.PRUNE_END);
+    }
+
+    /**
+     * Pushed by trim/prune phase events (TRIM_START/END, PRUNE_START/END) on the
+     * maintenance thread; marshals to the EDT and (re)renders the label from the
+     * processor's current {@code ArchivalMaintenanceState}. Event-driven, no polling.
+     */
+    private void refreshMaintenanceState() {
+        SwingUtilities.invokeLater(this::updateMaintenanceStateLabel);
+    }
+
+    private void updateMaintenanceStateLabel() {
+        BlockchainProcessor.ArchivalMaintenanceState state = null;
+        BlockchainProcessor bp = resolveProcessor(signum);
+        if (bp != null) {
+            state = bp.getArchivalMaintenanceState();
+        }
+        boolean active = state != null && state != BlockchainProcessor.ArchivalMaintenanceState.IDLE;
+        if (active) {
+            maintenanceLabel.setText(state == BlockchainProcessor.ArchivalMaintenanceState.TRIMMING
+                    ? "DB maintenance: trimming..." : "DB maintenance: pruning...");
+        } else {
+            maintenanceLabel.setText(" ");
+        }
+        JPanel row = (JPanel) maintenanceLabel.getParent();
+        maintenanceLabel.setVisible(active);
+        row.revalidate();
+        row.repaint();
     }
 
     /**
@@ -640,6 +798,7 @@ public class NodeToolbar extends JPanel {
 
     public void setOnStartStop(Runnable action) { this.onStartStop = action; }
     public void setOnRestart(Runnable action) { this.onRestart = action; }
+    public void setOnNodeStarted(NodeStartedListener listener) { this.onNodeStarted = listener; }
     public void setOnSyncToggle(Runnable action) { this.onSyncToggle = action; }
     public void setOpenPhoenix(Runnable action) { this.onOpenPhoenix = action; }
     public void setOpenClassic(Runnable action) { this.onOpenClassic = action; }
@@ -701,5 +860,18 @@ public class NodeToolbar extends JPanel {
                 updateFontsRecursively(child);
             }
         }
+    }
+
+    /**
+     * Listener for the toolbar's Start action (v4 single lifecycle path).
+     * Invoked after {@code NodeModule.startNode(profile)} succeeds, receiving
+     * the started (or reused) {@link Signum} instance.
+     */
+    public interface NodeStartedListener {
+        /**
+         * @param signum the Signum instance NodeModule started for this profile
+         *               (may be null if startup failed — implementations must be null-safe)
+         */
+        void onNodeStarted(Signum signum);
     }
 }

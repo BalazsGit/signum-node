@@ -11,6 +11,7 @@ import application.module.node.props.Props;
 import application.module.node.profile.NodeProfile;
 import application.module.node.profile.NodeProfileRepository;
 import application.utils.io.PathUtils;
+import application.utils.logging.ProfileLogger;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
 import org.slf4j.Logger;
@@ -23,6 +24,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * The Signum Node module implementation for the application framework.
@@ -72,6 +75,20 @@ public class NodeModule implements Module {
 
     /** P2P ports currently in use by registered nodes. */
     private final Set<Integer> p2pPortsInUse = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Single-threaded, daemon lifecycle executor: heavy node start/stop work
+     * ({@code Signum.start()} / {@code Signum.stop()}) runs HERE — never on the
+     * caller's thread (e.g. the EDT), so the GUI stays responsive during long
+     * initializations. FIFO ordering also guarantees that a restart
+     * (stop → start) executes sequentially for the same profile. GUI feedback
+     * is delivered through {@code Signum} state pushes (STARTING/RUNNING/ERROR).
+     */
+    private final ExecutorService lifecycleExecutor = Executors.newSingleThreadExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "signum-lifecycle");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     // =====================================================================
     // Module fields
@@ -246,15 +263,22 @@ public class NodeModule implements Module {
 
     /**
      * Starts all registered Signum instances that are not yet running.
+     * <p>
+     * Starts are queued on the lifecycle executor (never blocks the caller,
+     * e.g. the EDT) and run sequentially in registry order.
+     * </p>
      */
     public void startAll() {
-        for (Signum signum : nodes) {
+        List<Signum> snapshot = List.copyOf(nodes);
+        for (Signum signum : snapshot) {
             if (!signum.isRunning()) {
-                try {
-                    signum.start();
-                } catch (Exception e) {
-                    LOGGER.error("Error starting profile '{}'", signum.getProfileName(), e);
-                }
+                lifecycleExecutor.execute(() -> {
+                    try {
+                        signum.start();
+                    } catch (Exception e) {
+                        LOGGER.error("Error starting profile '{}'", signum.getProfileName(), e);
+                    }
+                });
             }
         }
     }
@@ -269,16 +293,24 @@ public class NodeModule implements Module {
      * </p>
      * <ul>
      *   <li>profile already registered and RUNNING → returns the existing instance (no-op)</li>
-     *   <li>profile already registered but not running → retries {@code start()} on the same instance</li>
-     *   <li>profile not registered → creates a {@link Signum}, registers it, then starts it
+     *   <li>profile already registered but not running → queues {@code start()} on the same instance</li>
+     *   <li>profile not registered → creates a {@link Signum}, registers it, then queues the start
      *       (port conflicts surface as startup failure, state → ERROR, retryable)</li>
      * </ul>
+     * <p>
+     * <b>Asynchronous:</b> creation/registration happens synchronously, but the
+     * heavy {@code Signum.start()} runs on the module lifecycle thread — this
+     * method returns immediately and NEVER blocks the caller (e.g. the EDT).
+     * Progress is observed through {@code Signum} state pushes
+     * (STARTING → RUNNING, or STARTING → ERROR); the state reaches ERROR when
+     * startup fails. A "please wait" placeholder line is emitted to the profile
+     * console (via the {@link ProfileLogger} replay buffer, so an inactive
+     * Console tab still shows it later) right before the start begins.
+     * </p>
      *
      * @param profileName the profile name to start (never null/blank)
-     * @return the started (or already running) {@link Signum} instance
+     * @return the registered {@link Signum} instance (starting or already running)
      * @throws IllegalArgumentException if {@code profileName} is null or blank
-     * @throws RuntimeException if node startup fails (the instance stays registered
-     *         so the failure can be retried via the GUI)
      */
     public Signum startNode(String profileName) {
         return startNode(profileName, PathUtils.resolvePath(Signum.CONF_FOLDER));
@@ -286,11 +318,12 @@ public class NodeModule implements Module {
 
     /**
      * Starts the node for the given profile using an explicit configuration folder.
-     * See {@link #startNode(String)} for the full semantics.
+     * See {@link #startNode(String)} for the full semantics (including the
+     * asynchronous start contract).
      *
      * @param profileName the profile name to start (never null/blank)
      * @param confRoot    the base configuration folder for a newly created instance
-     * @return the started (or already running) {@link Signum} instance
+     * @return the registered {@link Signum} instance (starting or already running)
      * @throws IllegalArgumentException if {@code profileName} is null/blank or
      *         {@code confRoot} is null
      */
@@ -321,26 +354,61 @@ public class NodeModule implements Module {
             return target;
         }
 
-        LOGGER.info("startNode('{}'): starting node", profileName);
-        target.start();
+        LOGGER.info("startNode('{}'): queuing async start on lifecycle thread", profileName);
+        lifecycleExecutor.execute(() -> {
+            try {
+                // A queued duplicate (double click, restart cycle) may find the node
+                // already starting by the time this task executes.
+                if (target.isRunning() || target.getState() == Signum.State.STARTING) {
+                    LOGGER.debug("startNode('{}'): already starting/running — skipping", profileName);
+                    return;
+                }
+                // Immediate user feedback: a "please wait" line in the profile console
+                // before any node log arrives. The ProfileLogger replay buffer covers
+                // the case where the Console tab (subscriber) attaches later.
+                ProfileLogger profileLogger = target.getProfileLogger();
+                if (profileLogger != null) {
+                    profileLogger.info(String.format(
+                            "→ '%s' node is loading — please wait (first start can take several minutes)...",
+                            profileName));
+                }
+                target.start();
+            } catch (Exception e) {
+                LOGGER.error("Startup failed for profile '{}'", profileName, e);
+            }
+        });
         return target;
     }
 
     /**
      * Stops the node for the given profile.
+     * <p>
+     * <b>Asynchronous:</b> the stop runs on the module lifecycle thread — this
+     * method returns immediately and never blocks the caller (e.g. the EDT).
+     * The result is observed through state pushes (STOPPING → STOPPED).
+     * </p>
      *
      * @param profileName the profile name to stop
      * @return the affected {@link Signum} instance, or {@code null} if the profile
      *         was not registered (no-op)
      */
     public Signum stopNode(String profileName) {
+        if (profileName == null || profileName.isBlank()) {
+            throw new IllegalArgumentException("Profile name must not be null or blank");
+        }
         Signum signum = get(profileName);
         if (signum == null) {
             LOGGER.debug("stopNode('{}'): not registered — no-op", profileName);
             return null;
         }
-        LOGGER.info("stopNode('{}'): stopping node", profileName);
-        signum.stop();
+        LOGGER.info("stopNode('{}'): queuing async stop on lifecycle thread", profileName);
+        lifecycleExecutor.execute(() -> {
+            try {
+                signum.stop();
+            } catch (Exception e) {
+                LOGGER.error("Stop failed for profile '{}'", profileName, e);
+            }
+        });
         return signum;
     }
 
@@ -348,13 +416,17 @@ public class NodeModule implements Module {
      * Restarts the node for the given profile: stop (if running) then start.
      * <p>
      * The same {@link Signum} instance is reused ({@code doShutdown} +
-     * {@code doInitialize}); a missing instance is created first.
+     * {@code doInitialize}); a missing instance is created first. Both steps are
+     * queued on the lifecycle thread in order (stop, then start).
      * </p>
      *
      * @param profileName the profile name to restart (never null/blank)
      * @return the restarted {@link Signum} instance
      */
     public Signum restartNode(String profileName) {
+        if (profileName == null || profileName.isBlank()) {
+            throw new IllegalArgumentException("Profile name must not be null or blank");
+        }
         LOGGER.info("restartNode('{}')", profileName);
         stopNode(profileName);
         return startNode(profileName);
@@ -516,6 +588,12 @@ public class NodeModule implements Module {
             // 2. Stop all running nodes via direct ownership
             stopAll();
             LOGGER.debug("Stopped all nodes via NodeModule");
+
+            // 3. Shut down the lifecycle executor (cancels any still-queued
+            //    start/stop tasks; the thread is a daemon, so it cannot hold
+            //    the JVM open either way).
+            lifecycleExecutor.shutdownNow();
+            LOGGER.debug("Lifecycle executor shut down");
 
         } catch (Exception e) {
             LOGGER.error("Error during NodeModule stop sequence", e);
