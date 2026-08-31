@@ -308,24 +308,39 @@ public class BlockGenerationMetricsPanel extends JPanel {
         // P3: Wire the profile-scoped AccountStore for static inner classes
         accountStore = ctx != null ? ctx.getAccountStore() : null;
 
-        // Initial update on EDT is fine as listeners aren't active yet
-        BlockchainUpdateData data = calculateBlockchainInfo(false);
-        if (data != null) {
-            updateBlockchainInfoUI(data);
-        }
+        // A panel created while the node is NOT running owns a closed database —
+        // querying it would throw on the EDT (HikariPool has been closed). Start in
+        // an empty state instead; a panel (re)created while RUNNING loads its data
+        // normally. (ctx == null keeps the existing no-context fallback.)
+        Signum signum = ctx != null ? ctx.getSignum() : null;
+        if (signum != null && !signum.isRunning()) {
+            logger.warn("Node is not RUNNING — BlockGenerationMetricsPanel will show an empty state until the node is started");
+        } else {
+            try {
+                // Initial update on EDT is fine as listeners aren't active yet
+                BlockchainUpdateData data = calculateBlockchainInfo(false);
+                if (data != null) {
+                    updateBlockchainInfoUI(data);
+                }
 
-        Blockchain blockchain = ctx != null ? ctx.getBlockchain() : null;
-        Generator generator = ctx != null ? ctx.getGenerator() : null;
-        if (currentBlockDeadlines.isEmpty() && generator != null && blockchain != null) {
-            Block lastBlock = blockchain.getLastBlock();
-            int nextHeight = (lastBlock != null ? lastBlock.getHeight() : 0) + 1;
-            for (Generator.GeneratorState state : generator.getAllGenerators()) {
-                currentBlockDeadlines.add(new MinerEntry(state.getAccountId(), state.getDeadline(),
-                        MinerEntry.Type.ACTIVE_LOCAL, nextHeight, System.currentTimeMillis(), 0));
+                Blockchain blockchain = ctx != null ? ctx.getBlockchain() : null;
+                Generator generator = ctx != null ? ctx.getGenerator() : null;
+                if (currentBlockDeadlines.isEmpty() && generator != null && blockchain != null) {
+                    Block lastBlock = blockchain.getLastBlock();
+                    int nextHeight = (lastBlock != null ? lastBlock.getHeight() : 0) + 1;
+                    for (Generator.GeneratorState state : generator.getAllGenerators()) {
+                        currentBlockDeadlines.add(new MinerEntry(state.getAccountId(), state.getDeadline(),
+                                MinerEntry.Type.ACTIVE_LOCAL, nextHeight, System.currentTimeMillis(), 0));
+                    }
+                }
+                updateMinersUI(calculateMinerData(false));
+                updatePieChartUI(calculatePieChartData());
+            } catch (Exception e) {
+                // Defensive: the node may have stopped between the state check and
+                // the data load — degrade to an empty state instead of crashing the EDT.
+                logger.warn("Initial data load failed (node database unavailable?) — showing empty state", e);
             }
         }
-        updateMinersUI(calculateMinerData(false));
-        updatePieChartUI(calculatePieChartData());
         initListeners();
 
         addHierarchyListener(e -> {

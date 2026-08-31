@@ -136,4 +136,33 @@ class NodeConsolePanelAttachTest {
         panel.ensureProfileLoggerAttached();
         assertTrue(true, "ensureProfileLoggerAttached must not throw when no Signum exists");
     }
+
+    @Test
+    @DisplayName("attach latch resets on STOPPED so a restart can re-attach (restart-safe)")
+    void restart_attachLatchResetsOnStopped() throws Exception {
+        String profileName = "restart-" + System.nanoTime();
+        NodeConsolePanel panel = new NodeConsolePanel(null, new NodeProfile(profileName));
+
+        // First lifecycle: attach + a delivered event.
+        Signum first = new Signum(new NodeProfile(profileName), Paths.get("./conf"));
+        panel.setSignum(first); // attaches → latch becomes true
+        String m1 = "RESTART_M1_" + System.nanoTime();
+        first.getProfileLogger().info(m1);
+        assertEventuallyOccurrences(panel, m1, 1, "first-cycle event must be delivered");
+
+        // Node stops: onNodeStateChanged(STOPPED) must clear the attach latch.
+        panel.onNodeStateChanged(Signum.State.RUNNING, Signum.State.STOPPED);
+        javax.swing.SwingUtilities.invokeAndWait(() -> { }); // pump EDT → STOPPED branch (latch reset) runs
+
+        // Restart: a fresh Signum (fresh ProfileLogger) is adopted. Its startup log
+        // (emitted before the console re-attaches) must be replayed — this only works
+        // if the latch was cleared on STOPPED (otherwise the re-attach is a no-op).
+        Signum second = new Signum(new NodeProfile(profileName), Paths.get("./conf"));
+        String m2 = "RESTART_M2_" + System.nanoTime();
+        second.getProfileLogger().info(m2);
+        panel.setSignum(second); // ensureProfileLoggerAttached → attaches to SECOND (latch was reset)
+
+        assertEventuallyOccurrences(panel, m2, 1,
+                "after STOPPED the attach latch must be cleared so the restarted node's logs are delivered");
+    }
 }

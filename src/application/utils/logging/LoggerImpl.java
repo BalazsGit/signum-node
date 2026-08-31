@@ -123,9 +123,11 @@ public abstract class LoggerImpl implements ModuleLogger {
             return;
         }
         LogEvent event = new LogEvent.Builder()
+                .timestamp(System.currentTimeMillis())
                 .loggerName(name)
                 .level(level)
                 .message(message)
+                .threadName(Thread.currentThread().getName())
                 .throwable(cause)
                 .build();
         dispatch(event);

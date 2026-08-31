@@ -10,6 +10,7 @@ import application.module.node.props.Prop;
 import application.module.node.props.Props;
 import application.module.node.profile.NodeProfile;
 import application.module.node.profile.NodeProfileRepository;
+import application.module.node.profile.ProfileConflictDetector;
 import application.utils.io.PathUtils;
 import application.utils.logging.ProfileLogger;
 import javax.swing.JComponent;
@@ -20,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import java.nio.file.Path;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -70,11 +72,17 @@ public class NodeModule implements Module {
     /** All managed Signum instances (thread-safe for reads). */
     private final List<Signum> nodes = new CopyOnWriteArrayList<>();
 
-    /** HTTP ports currently in use by registered nodes. */
-    private final Set<Integer> httpPortsInUse = ConcurrentHashMap.newKeySet();
+    /** API (HTTP) port → owning profile name (reserved at start, released at stop). */
+    private final java.util.Map<Integer, String> httpPortOwner = new ConcurrentHashMap<>();
 
-    /** P2P ports currently in use by registered nodes. */
-    private final Set<Integer> p2pPortsInUse = ConcurrentHashMap.newKeySet();
+    /** P2P port → owning profile name (reserved at start, released at stop). */
+    private final java.util.Map<Integer, String> p2pPortOwner = new ConcurrentHashMap<>();
+
+    /** WebSocket port → owning profile name (only reserved when WebSocket is enabled). */
+    private final java.util.Map<Integer, String> wsPortOwner = new ConcurrentHashMap<>();
+
+    /** Canonical database identity ({@link ProfileConflictDetector#dbIdentity}) → owning profile name. */
+    private final java.util.Map<String, String> dbOwner = new ConcurrentHashMap<>();
 
     /**
      * Single-threaded, daemon lifecycle executor: heavy node start/stop work
@@ -131,14 +139,16 @@ public class NodeModule implements Module {
     // =====================================================================
 
     /**
-     * Registers a Signum instance under its profile name, with port conflict checking.
+     * Registers a Signum instance under its profile name.
      * <p>
-     * Validates that no other registered node is using the same HTTP or P2P port.
-     * Throws {@link PortConflictException} if a conflict is detected.
+     * Registration only records the instance; it does <b>not</b> claim any resources
+     * (ports/DB). Resource claiming (and conflict enforcement) happens at start time in
+     * {@link #startNode(String, Path)}, where ordering is deterministic. If an existing
+     * instance is registered for the same profile it is replaced and its resources released.
+     * </p>
      *
      * @param signum the Signum to register (must not be null)
      * @throws IllegalArgumentException if signum is null or profile name is blank
-     * @throws PortConflictException    if HTTP or P2P port is already in use
      */
     public synchronized void addNode(Signum signum) {
         if (signum == null) {
@@ -149,7 +159,7 @@ public class NodeModule implements Module {
             throw new IllegalArgumentException("Signum profile name must not be blank");
         }
 
-        // Replace existing node with same profile name first (release its ports before re-adding)
+        // Replace existing node with same profile name first (release its resources before re-adding)
         Signum previous = null;
         for (int i = 0; i < nodes.size(); i++) {
             if (profileName.equals(nodes.get(i).getProfileName())) {
@@ -159,26 +169,9 @@ public class NodeModule implements Module {
             }
         }
         if (previous != null) {
-            releasePorts(previous);
+            releaseResources(previous);
             LOGGER.warn("Replaced existing Signum for profile '{}'", profileName);
         }
-
-        // Track ports (warn on conflict but do not block registration)
-        // Actual port binding validation happens at start() time.
-        int httpPort = resolvePort(signum, Props.API_PORT);
-        int p2pPort = resolvePort(signum, Props.P2P_PORT);
-
-        if (!httpPortsInUse.add(httpPort)) {
-            LOGGER.warn("HTTP port {} is already in use by another node - potential conflict for profile '{}'. " +
-                    "This will fail at startup if both nodes try to bind the same port.", httpPort, profileName);
-        }
-
-        if (!p2pPortsInUse.add(p2pPort)) {
-            LOGGER.warn("P2P port {} is already in use by another node - potential conflict for profile '{}'. " +
-                    "This will fail at startup if both nodes try to bind the same port.", p2pPort, profileName);
-        }
-
-        LOGGER.debug("Registered ports for profile '{}': HTTP={}, P2P={}", profileName, httpPort, p2pPort);
 
         nodes.add(signum);
         LOGGER.info("Registered Signum for profile '{}'", profileName);
@@ -201,6 +194,11 @@ public class NodeModule implements Module {
         }
         if (removed != null) {
             releasePorts(removed);
+            // Permanent removal: this Signum is gone from the registry, so release its
+            // per-Signum logging resources too (closes the ProfileLogger + its GUI
+            // console subscriber). The normal stop/start (restart) path never does this —
+            // only true removal/app-shutdown does, so the console survives restarts.
+            removed.dispose();
             LOGGER.info("Unregistered Signum for profile '{}'", profileName);
         } else {
             LOGGER.debug("No Signum found to unregister for profile '{}'", profileName);
@@ -254,11 +252,20 @@ public class NodeModule implements Module {
                 signum.stop();
             } catch (Exception e) {
                 LOGGER.error("Error stopping profile '{}'", signum.getProfileName(), e);
+            } finally {
+                // stopAll() permanently clears the registry (nodes.clear() below), so this
+                // is a teardown path — release each Signum's per-Signum logging resources
+                // (closes the ProfileLogger + its GUI console subscriber). This is safe
+                // here because the instances are being removed; a single-profile restart
+                // (stopNode + startNode) keeps its instance registered and never disposes.
+                signum.dispose();
             }
         }
         nodes.clear();
-        httpPortsInUse.clear();
-        p2pPortsInUse.clear();
+        httpPortOwner.clear();
+        p2pPortOwner.clear();
+        wsPortOwner.clear();
+        dbOwner.clear();
     }
 
     /**
@@ -347,11 +354,27 @@ public class NodeModule implements Module {
                 addNode(fresh);
                 target = fresh;
             }
-        }
 
-        if (target.isRunning()) {
-            LOGGER.debug("startNode('{}'): already RUNNING — no-op", profileName);
-            return target;
+            if (target.isRunning()) {
+                LOGGER.debug("startNode('{}'): already RUNNING — no-op", profileName);
+                return target;
+            }
+
+            // ── Conflict pre-check (deterministic inside the synchronized block) ──
+            // If another live profile already claims one of this profile's resources
+            // (API / P2P / WebSocket port, or the same database), reject the start now
+            // rather than letting it fail later at OS port-bind time. This enforces the
+            // autostart order: the profile queued first wins; a conflicting later one is
+            // simply not started (and stays startable once the conflict is resolved).
+            String conflict = findResourceConflict(target);
+            if (conflict != null) {
+                LOGGER.warn("startNode('{}'): REJECTED — {}", profileName, conflict);
+                target.reportStartRejected(conflict);
+                return target;
+            }
+
+            // ── Reserve resources (idempotent; putIfAbsent never steals another owner) ──
+            reserveResources(target);
         }
 
         LOGGER.info("startNode('{}'): queuing async start on lifecycle thread", profileName);
@@ -375,6 +398,12 @@ public class NodeModule implements Module {
                 target.start();
             } catch (Exception e) {
                 LOGGER.error("Startup failed for profile '{}'", profileName, e);
+                // A failed start (e.g. the OS port is already bound by a non-profile
+                // process) leaves the node in ERROR, i.e. NOT running — so it must not
+                // keep holding its API/P2P/WS port or database reservation. Releasing it
+                // keeps the "only running nodes conflict" invariant intact and lets
+                // another profile (or a retry) take the resources.
+                releaseResources(target);
             }
         });
         return target;
@@ -407,6 +436,11 @@ public class NodeModule implements Module {
                 signum.stop();
             } catch (Exception e) {
                 LOGGER.error("Stop failed for profile '{}'", profileName, e);
+            } finally {
+                // Release the resources this profile claimed (API/P2P/WebSocket ports,
+                // database) once the stop has run, so another profile can take them and a
+                // later restart of this profile re-reserves them cleanly.
+                releaseResources(signum);
             }
         });
         return signum;
@@ -454,31 +488,31 @@ public class NodeModule implements Module {
     // =====================================================================
 
     /**
-     * Checks if an HTTP port is already in use by any registered node.
+     * Checks if an API/HTTP port is currently claimed by any live node.
      */
     public boolean isHttpPortInUse(int port) {
-        return httpPortsInUse.contains(port);
+        return httpPortOwner.containsKey(port);
     }
 
     /**
-     * Checks if a P2P port is already in use by any registered node.
+     * Checks if a P2P port is currently claimed by any live node.
      */
     public boolean isP2pPortInUse(int port) {
-        return p2pPortsInUse.contains(port);
+        return p2pPortOwner.containsKey(port);
     }
 
     /**
-     * Returns the set of HTTP ports currently in use.
+     * Returns the set of API/HTTP ports currently claimed.
      */
     public Set<Integer> getHttpPortsInUse() {
-        return Collections.unmodifiableSet(httpPortsInUse);
+        return Collections.unmodifiableSet(new HashSet<>(httpPortOwner.keySet()));
     }
 
     /**
-     * Returns the set of P2P ports currently in use.
+     * Returns the set of P2P ports currently claimed.
      */
     public Set<Integer> getP2pPortsInUse() {
-        return Collections.unmodifiableSet(p2pPortsInUse);
+        return Collections.unmodifiableSet(new HashSet<>(p2pPortOwner.keySet()));
     }
 
     // =====================================================================
@@ -512,13 +546,111 @@ public class NodeModule implements Module {
     }
 
     private void releasePorts(Signum signum) {
-        if (signum.getProfile() == null) return;
-        int httpPort = resolvePort(signum, Props.API_PORT);
+        releaseResources(signum);
+    }
+
+    /**
+     * Reserves the resources (API/P2P/WebSocket ports and database) that the given
+     * node's profile requires. Idempotent: {@code putIfAbsent} never overwrites a key
+     * already owned by a different profile. Must be called from within the
+     * {@code synchronized(this)} lifecycle section, <i>after</i> {@link #findResourceConflict}.
+     */
+    private void reserveResources(Signum signum) {
+        NodeProfile profile = signum.getProfile();
+        if (profile == null) {
+            return;
+        }
+        String owner = signum.getProfileName();
+        int apiPort = resolvePort(signum, Props.API_PORT);
         int p2pPort = resolvePort(signum, Props.P2P_PORT);
-        httpPortsInUse.remove(httpPort);
-        p2pPortsInUse.remove(p2pPort);
-        LOGGER.debug("Released ports for profile '{}': HTTP={}, P2P={}",
-                signum.getProfileName(), httpPort, p2pPort);
+        httpPortOwner.putIfAbsent(apiPort, owner);
+        p2pPortOwner.putIfAbsent(p2pPort, owner);
+        if (ProfileConflictDetector.wsEnabled(profile)) {
+            int wsPort = resolvePort(signum, Props.API_WEBSOCKET_PORT);
+            wsPortOwner.putIfAbsent(wsPort, owner);
+        }
+        String dbKey = ProfileConflictDetector.dbIdentity(profile);
+        if (!dbKey.isEmpty()) {
+            dbOwner.putIfAbsent(dbKey, owner);
+        }
+        LOGGER.debug("Reserved resources for profile '{}': API={}, P2P={}, DB={}",
+                owner, apiPort, p2pPort, dbKey.isEmpty() ? "(none)" : dbKey);
+    }
+
+    /**
+     * Releases the resources the given node's profile reserved. Only removes entries
+     * that this node actually owns (so it never frees another profile's reservation).
+     */
+    private void releaseResources(Signum signum) {
+        NodeProfile profile = signum.getProfile();
+        if (profile == null) {
+            return;
+        }
+        String owner = signum.getProfileName();
+        int apiPort = resolvePort(signum, Props.API_PORT);
+        int p2pPort = resolvePort(signum, Props.P2P_PORT);
+        removeOwnerIf(httpPortOwner, apiPort, owner);
+        removeOwnerIf(p2pPortOwner, p2pPort, owner);
+        if (ProfileConflictDetector.wsEnabled(profile)) {
+            int wsPort = resolvePort(signum, Props.API_WEBSOCKET_PORT);
+            removeOwnerIf(wsPortOwner, wsPort, owner);
+        }
+        String dbKey = ProfileConflictDetector.dbIdentity(profile);
+        if (!dbKey.isEmpty()) {
+            removeOwnerIf(dbOwner, dbKey, owner);
+        }
+        LOGGER.debug("Released resources for profile '{}': API={}, P2P={}, DB={}",
+                owner, apiPort, p2pPort, dbKey.isEmpty() ? "(none)" : dbKey);
+    }
+
+    /**
+     * Returns a human-readable reason if the given node's resources are already claimed
+     * by another live profile, or {@code null} when there is no conflict.
+     * <p>
+     * Used by {@link #startNode} to reject a start (e.g. the second of two conflicting
+     * autostart profiles) before it can fail at the OS port-bind stage.
+     * </p>
+     */
+    private String findResourceConflict(Signum target) {
+        NodeProfile profile = target.getProfile();
+        if (profile == null) {
+            return null;
+        }
+        String me = target.getProfileName();
+
+        int apiPort = resolvePort(target, Props.API_PORT);
+        String owner = httpPortOwner.get(apiPort);
+        if (owner != null && !owner.equals(me)) {
+            return "API.Port " + apiPort + " is already claimed by running profile '" + owner + "'";
+        }
+
+        int p2pPort = resolvePort(target, Props.P2P_PORT);
+        String ownerP2p = p2pPortOwner.get(p2pPort);
+        if (ownerP2p != null && !ownerP2p.equals(me)) {
+            return "P2P.Port " + p2pPort + " is already claimed by running profile '" + ownerP2p + "'";
+        }
+
+        if (ProfileConflictDetector.wsEnabled(profile)) {
+            int wsPort = resolvePort(target, Props.API_WEBSOCKET_PORT);
+            String ownerWs = wsPortOwner.get(wsPort);
+            if (ownerWs != null && !ownerWs.equals(me)) {
+                return "WebSocket port " + wsPort + " is already claimed by running profile '" + ownerWs + "'";
+            }
+        }
+
+        String dbKey = ProfileConflictDetector.dbIdentity(profile);
+        if (!dbKey.isEmpty()) {
+            String ownerDb = dbOwner.get(dbKey);
+            if (ownerDb != null && !ownerDb.equals(me)) {
+                return "database '" + ProfileConflictDetector.dbDisplayName(profile)
+                        + "' is already used by running profile '" + ownerDb + "'";
+            }
+        }
+        return null;
+    }
+
+    private static <K> void removeOwnerIf(java.util.Map<K, String> owners, K key, String expectedOwner) {
+        owners.computeIfPresent(key, (k, current) -> current.equals(expectedOwner) ? null : current);
     }
 
     // =====================================================================

@@ -522,6 +522,12 @@ public final class Peers {
 
                 int now = timeService.getEpochTime();
                 for (Peer peer : peers.values()) {
+                    // The shutdown may have been requested while the connection loop
+                    // was finishing — a fresh round of reconnects would only add
+                    // pointless network I/O at shutdown time.
+                    if (!ThreadPool.running.get() || Thread.currentThread().isInterrupted()) {
+                        break;
+                    }
                     if (peer.getState() == Peer.State.CONNECTED && now - peer.getLastUpdated() > 3600) {
                         peer.connect(timeService.getEpochTime());
                         if (!peer.isHigherOrEqualVersionThan(

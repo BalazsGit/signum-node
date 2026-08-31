@@ -3471,6 +3471,13 @@ public class NodeConsolePanel extends JPanel {
                 disposeStaleMetricsPanel();
             }
             if (metricsPanel == null) {
+                // The GUI is the presentation layer: the panel is ALWAYS created on
+                // request, regardless of node state. With a stopped/unavailable
+                // Signum the child panels simply initialise in an empty state (their
+                // data sources resolve to null or the init guards skip the closed
+                // database) — active data features are unavailable until the node is
+                // running, but the component itself keeps working. It is only
+                // replaced when the Signum instance changes (restart) or on app exit.
                 metricsPanel = createMetricsPanel();
                 // Wire ExpansionListener so that chevron toggle updates our tracked state
                 metricsPanel.setExpansionListener(expanded -> this.metricsExpanded = expanded);
@@ -4485,6 +4492,10 @@ public class NodeConsolePanel extends JPanel {
             // When node stops, hide and shutdown MetricsPanel to release resources
             if (newState == Signum.State.STOPPED || newState == Signum.State.CREATED) {
                 LOGGER.debug("[MetricsPanel] Node stopped — shutting down MetricsPanel");
+                // Restart-safe: clear the attach latch so the NEXT start can re-attach
+                // the (re-created) ProfileLogger. Without this, the first attach is a
+                // permanent latch and all logs after a stop/start cycle are lost.
+                profileLoggerAttached = false;
                 if (metricsPanel != null) {
                     updateMetricsPanelState(false);
                 }

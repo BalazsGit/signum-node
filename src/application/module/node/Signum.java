@@ -385,6 +385,28 @@ public final class Signum {
     }
 
     /**
+     * Reports a rejected start (e.g. a resource conflict with another profile) to this
+     * node's {@link ProfileLogger} and the SLF4J log, so the reason is visible in the
+     * Node Console tab.
+     * <p>
+     * This does <b>not</b> change the lifecycle state: the node is left in its current
+     * (non-running) state so it can be (re)started once the conflict is resolved. This
+     * is deliberately different from a genuine start failure (which transitions to
+     * {@link State#ERROR}).
+     * </p>
+     *
+     * @param reason human-readable description of the conflict (never null)
+     */
+    public void reportStartRejected(String reason) {
+        String r = (reason == null || reason.isBlank()) ? "resource conflict" : reason;
+        ProfileLogger pl = this.profileLogger;
+        if (pl != null && !pl.isClosed()) {
+            pl.error("Start rejected — " + r);
+        }
+        LOGGER.warn("Start rejected for profile '{}': {}", getProfileName(), r);
+    }
+
+    /**
      * Runs the given lifecycle block on the current thread with the
      * {@link application.utils.logging.NodeLogContext} bound to this node's profile,
      * so SLF4J log output is routed to this node's {@link ProfileLogger} (Node Console
@@ -421,6 +443,34 @@ public final class Signum {
     public void restart() {
         this.stop();
         this.start();
+    }
+
+    /**
+     * Terminal teardown for this Signum instance.
+     * <p>
+     * Unlike {@link #stop()} — which keeps the node restartable and deliberately leaves
+     * the {@link ProfileLogger} alive so the GUI console subscriber persists across
+     * restarts — {@code dispose()} is the <b>final</b> release: it closes the node's
+     * {@link ProfileLogger} (disposing its subscribers, e.g. the Node Console) and
+     * unregisters it from the {@code NodeLoggerRegistry}.
+     * </p>
+     * <p>
+     * Call this <b>only</b> when the Signum is being permanently removed from the
+     * {@code NodeModule} (profile removal / application shutdown) — <b>never</b> in the
+     * normal stop/start cycle, where the logger must stay alive so the console keeps
+     * receiving logs after a restart.
+     * </p>
+     * <p>Idempotent and safe to call from any thread.</p>
+     */
+    public synchronized void dispose() {
+        ProfileLogger pl = this.profileLogger;
+        if (pl != null) {
+            pl.close();
+            if (this.profile != null) {
+                application.utils.logging.NodeLoggerRegistry.unregister("node", this.profile.getName());
+            }
+        }
+        this.profileLogger = null;
     }
 
     // =========================================================================
@@ -920,9 +970,36 @@ public final class Signum {
     private void doInitialize() {
         String profileName = this.profile.getName();
 
+        // ── Step 0: Re-apply the logging configuration (logging.properties) ──
+        // LoggerConfigurator.init() (application.module.node.util) configures the
+        // JVM-wide LogManager from this profile's logging.properties. It runs once at
+        // app startup (Launcher), but the user may edit the properties file between stop
+        // and start. Re-applying it here — on every (re)start, and before any component
+        // below emits a log — makes the new log levels / handlers take effect
+        // immediately (the expected "edit logging.properties → restart → new settings
+        // apply"). Safe to call repeatedly: it just re-reads the properties and re-wires
+        // the handlers.
+        try {
+            for (String line : application.module.node.util.LoggerConfigurator.init(this.confFolder.toString())) {
+                System.out.println("[logging] " + line);
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to re-apply logging configuration on (re)start: " + e.getMessage());
+        }
+
         // ── Step 1: ProfileLogger ── created in the Signum(NodeProfile, Path) constructor
         // (moved out of here) so GUI consoles can attach before start() and no
-        // bootstrap log line is lost; nothing to do at this point.
+        // bootstrap log line is lost.
+        //
+        // The logger is the FIRST thing established on (re)start: it must exist and be
+        // registered before any component below emits a log, so every startup line is
+        // captured and routed to the Node Console. getOrCreate() is idempotent — it
+        // returns the SAME per-Signum logger created in the constructor. doShutdown()
+        // deliberately does NOT close it (see there), so this logger survives
+        // stop/start cycles and the console subscriber stays live across restarts.
+        // (Mirrors the constructor, so the first start and any restart behave
+        // identically.)
+        this.profileLogger = application.utils.logging.NodeLoggerRegistry.getOrCreate("node", profileName);
 
         // ── Step 2.5: Create profile-scoped ShutdownManager ──
         this.shutdownManager = new ShutdownManager(this.propertyService, profileName);
@@ -1288,6 +1365,7 @@ public final class Signum {
                     if (this.shutdownManager != null) this.shutdownManager.markFailure("WebServer");
                     LOGGER.error("Error shutting down WebServer for profile '{}'", profileName, t);
                 }
+                this.webServer = null;
             }
 
             if (this.blockchainProcessor != null) {
@@ -1297,6 +1375,14 @@ public final class Signum {
                     if (this.shutdownManager != null) this.shutdownManager.markFailure("BlockchainProcessor");
                     LOGGER.error("Error shutting down BlockchainProcessor for profile '{}'", profileName, t);
                 }
+                // CRITICAL: null out the reference so getBlockchainProcessor()
+                // returns null during the STOPPED state. Without this, a racing
+                // EDT call to ensureRuntimeWiring() (scheduled during STARTING
+                // before doInitialize() has re-created the processor) would
+                // register GUI listeners on the OLD shut-down instance and mark
+                // listenerOwner as wired — blocking re-registration on the new
+                // instance during RUNNING, leaving the status bar dead.
+                this.blockchainProcessor = null;
             }
 
             if (this.peerManager != null) {
@@ -1306,6 +1392,7 @@ public final class Signum {
                     if (this.shutdownManager != null) this.shutdownManager.markFailure("PeerManager");
                     LOGGER.error("Error shutting down PeerManager for profile '{}'", profileName, t);
                 }
+                this.peerManager = null;
             }
 
             if (this.threadPool != null) {
@@ -1315,6 +1402,7 @@ public final class Signum {
                     if (this.shutdownManager != null) this.shutdownManager.markFailure("ThreadPool");
                     LOGGER.error("Error shutting down ThreadPool for profile '{}'", profileName, t);
                 }
+                this.threadPool = null;
             }
 
             if (this.dbCacheManager != null) {
@@ -1324,6 +1412,7 @@ public final class Signum {
                     if (this.shutdownManager != null) this.shutdownManager.markFailure("DBCacheManager");
                     LOGGER.error("Error closing DBCacheManager for profile '{}'", profileName, t);
                 }
+                this.dbCacheManager = null;
             }
 
             try {
@@ -1332,6 +1421,7 @@ public final class Signum {
                 if (this.shutdownManager != null) this.shutdownManager.markFailure("Database");
                 LOGGER.error("Error shutting down DB for profile '{}'", profileName, t);
             }
+            this.dbContext = null;
 
             if (this.shutdownManager != null) {
                 this.shutdownManager.finishShutdown();
@@ -1342,12 +1432,20 @@ public final class Signum {
             LOGGER.error("Unexpected error during shutdown of profile '{}'", profileName, e);
         } finally {
             contextStarted.set(false);
-            if (this.profileLogger != null) {
-                this.profileLogger.close();
-                this.profileLogger = null;
-                application.utils.logging.NodeLoggerRegistry.unregister("node", profileName);
-            }
-            // ProfileThreadContext removed — ProfileLogger subscriber model replaces MDC routing
+            // ── The ProfileLogger is INTENTIONALLY KEPT ALIVE across stop/start cycles ──
+            // It is a per-Signum (long-lived) resource and the GUI console subscriber
+            // must persist across restarts. ProfileLogger.close() DISPOSES its
+            // subscribers — and BaseConsoleSubscriber.dispose() is one-way (it stops the
+            // LogEventBatcher and sets disposed=true, after which onLogEvent() bails out
+            // immediately). So destroying + rebuilding the logger on every stop/start
+            // would permanently kill the Node Console: every log after the FIRST
+            // stop/start cycle would be silently dropped. Keeping the logger stable
+            // (created in the constructor, re-adopted as Step 1 of doInitialize) means
+            // the console subscriber stays live, so BOTH the shutdown lines (this
+            // method) and the next startup lines (doInitialize) reach it. The logger is
+            // closed only on permanent removal — see Signum.dispose(), invoked by
+            // NodeModule in its stopAll()/removeNode() teardown paths (never in the
+            // normal stop/start cycle).
         }
     }
 }

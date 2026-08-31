@@ -4,6 +4,8 @@ import application.module.appearance.AppearanceModule;
 import application.module.node.NodeModule;
 import application.module.node.Signum;
 import application.module.node.profile.NodeProfile;
+import application.module.node.profile.NodeProfileRepository;
+import application.module.node.profile.ProfileConflictDetector;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiIcons;
@@ -21,8 +23,12 @@ import javax.swing.SwingUtilities;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.FlowLayout;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Information bar displayed at the top of a NodeProfilePanel tab.
@@ -155,59 +161,72 @@ public class NodeInfoBar extends JPanel {
 
     /**
      * Refreshes the displayed data from the profile and lifecycle manager.
+     * <p>
+     * All values are read from the canonical {@link Props} keys (API.Port, P2P.Port,
+     * API.WebSocketPort, DB.Url) so they always match the runtime configuration, and
+     * any resource conflict with another profile is surfaced as a red warning + tooltip.
+     * </p>
      */
     public void refreshData() {
         SwingUtilities.invokeLater(() -> {
-            // Profile name
-            updateLabel(profileNameLabel, "Profile", profile.getName(),
-                    GuiIcons.build(FontAwesome.USER, GuiIcons.sizeTiny(), GuiColors.getButtonIcon()));
-
-            // Network type (mainnet/testnet)
-            String network = profile.getProperty("network", "mainnet");
-            Color networkColor = "testnet".equalsIgnoreCase(network)
-                    ? new Color(255, 193, 7) // Amber/yellow for testnet
-                    : GuiColors.getPeerActive(); // Green for mainnet
-            updateLabel(networkLabel, "Network", network.toUpperCase(),
-                    GuiIcons.build(FontAwesome.GLOBE, GuiIcons.sizeTiny(), networkColor));
-
-            // API port
-            String apiPort = profile.getProperty("httpport", "8125");
-            updateLabel(apiPortLabel, "API Port", apiPort,
-                    GuiIcons.build(FontAwesome.LINK, GuiIcons.sizeTiny(), GuiColors.getButtonIcon()));
-
-            // P2P port
-            String p2pPort = profile.getProperty("peer.port", "8123");
-            updateLabel(p2pPortLabel, "P2P Port", p2pPort,
-                    GuiIcons.build(FontAwesome.SHARE_ALT, GuiIcons.sizeTiny(), GuiColors.getButtonIcon()));
-
-            // Database info from profile properties
-            String dbEngine = determineDatabaseEngine();
-            updateLabel(databaseEngineLabel, "Database", dbEngine,
-                    GuiIcons.database(GuiIcons.sizeTiny()));
-
-            String dbPort = determineDatabasePort(dbEngine);
-            updateLabel(databasePortLabel, "DB Port", dbPort != null ? dbPort : "N/A",
-                    GuiIcons.database(GuiIcons.sizeTiny()));
-
-            // WebSocket port - check multiple possible property keys
-            String wsPort = profile.getProperty("API.WebSocketPort");
-            if (wsPort == null || wsPort.isEmpty()) {
-                wsPort = profile.getProperty("websocketport");
-            }
-            if (wsPort == null || wsPort.isEmpty()) {
-                wsPort = "8126"; // Default from Props.java
-            }
-            boolean wsEnabled = Boolean.parseBoolean(profile.getProperty("API.WebSocketEnable"));
-            updateLabel(websocketPortLabel, "WebSocket", wsEnabled ? wsPort : "Disabled",
-                    GuiIcons.build(FontAwesome.BOLT, GuiIcons.sizeTiny(),
-                        wsEnabled ? GuiColors.getButtonIcon() : GuiColors.getFaintText()));
-
+            refreshChips();
             // Refresh state from lifecycle manager
             refreshState();
-
             revalidate();
             repaint();
         });
+    }
+
+    /**
+     * Renders the data chips (profile, network, ports, database) using canonical
+     * property keys, overlaying a red warning + tooltip on any chip that conflicts
+     * with another profile.
+     */
+    private void refreshChips() {
+        Map<ProfileConflictDetector.ConflictField, ProfileConflictDetector.Conflict> conflicts = conflictByField();
+
+        // Profile name
+        updateLabel(profileNameLabel, "Profile", profile.getName(),
+                GuiIcons.build(FontAwesome.USER, GuiIcons.sizeTiny(), GuiColors.getButtonIcon()), null);
+
+        // Network type (mainnet/testnet)
+        String network = profile.getProperty("network", "mainnet");
+        Color networkColor = "testnet".equalsIgnoreCase(network)
+                ? new Color(255, 193, 7) // Amber/yellow for testnet
+                : GuiColors.getPeerActive(); // Green for mainnet
+        updateLabel(networkLabel, "Network", network.toUpperCase(),
+                GuiIcons.build(FontAwesome.GLOBE, GuiIcons.sizeTiny(), networkColor), null);
+
+        // API port (canonical key: API.Port)
+        String apiPort = ProfileConflictDetector.apiPort(profile);
+        updateLabel(apiPortLabel, "API Port", apiPort,
+                GuiIcons.build(FontAwesome.LINK, GuiIcons.sizeTiny(), GuiColors.getButtonIcon()),
+                conflicts.get(ProfileConflictDetector.ConflictField.API_PORT));
+
+        // P2P port (canonical key: P2P.Port)
+        String p2pPort = ProfileConflictDetector.p2pPort(profile);
+        updateLabel(p2pPortLabel, "P2P Port", p2pPort,
+                GuiIcons.build(FontAwesome.SHARE_ALT, GuiIcons.sizeTiny(), GuiColors.getButtonIcon()),
+                conflicts.get(ProfileConflictDetector.ConflictField.P2P_PORT));
+
+        // Database (engine + database/file name) parsed from the canonical DB.Url
+        String dbLabel = ProfileConflictDetector.dbDisplayName(profile);
+        updateLabel(databaseEngineLabel, "Database", dbLabel,
+                GuiIcons.database(GuiIcons.sizeTiny()),
+                conflicts.get(ProfileConflictDetector.ConflictField.DATABASE));
+
+        // Database port (derived from the JDBC URL for server engines; N/A for SQLite)
+        int dbPort = ProfileConflictDetector.dbPort(profile);
+        updateLabel(databasePortLabel, "DB Port", dbPort > 0 ? String.valueOf(dbPort) : "N/A",
+                GuiIcons.database(GuiIcons.sizeTiny()), null);
+
+        // WebSocket port (canonical keys: API.WebSocketPort / API.WebSocketEnable)
+        boolean wsEnabled = ProfileConflictDetector.wsEnabled(profile);
+        String wsPort = ProfileConflictDetector.wsPort(profile);
+        updateLabel(websocketPortLabel, "WebSocket", wsEnabled ? wsPort : "Disabled",
+                GuiIcons.build(FontAwesome.BOLT, GuiIcons.sizeTiny(),
+                        wsEnabled ? GuiColors.getButtonIcon() : GuiColors.getFaintText()),
+                wsEnabled ? conflicts.get(ProfileConflictDetector.ConflictField.WEBSOCKET_PORT) : null);
     }
 
     /**
@@ -227,10 +246,15 @@ public class NodeInfoBar extends JPanel {
                 stateIcon = stateIconFor(state);
             }
 
-            updateLabel(stateLabel, "State", formatStateText(stateText), stateIcon);
+            updateLabel(stateLabel, "State", formatStateText(stateText), stateIcon, null);
 
             // Update the status icon next to profile name with detailed tooltip
             updateStatusIcon(state, stateText);
+
+            // Re-sync the data chips so conflict indicators reflect the latest
+            // running set (a node starting/stopping can change whether a conflict
+            // is "currently running" or merely "configured").
+            refreshChips();
         });
     }
 
@@ -311,8 +335,93 @@ public class NodeInfoBar extends JPanel {
      * Updates a label with new key, value and icon using HTML formatting.
      */
     private void updateLabel(JLabel label, String key, String value, Icon icon) {
-        label.setText(buildHtmlText(key, value));
-        label.setIcon(icon);
+        updateLabel(label, key, value, icon, null);
+    }
+
+    /**
+     * Updates a label; when a {@link ProfileConflictDetector.Conflict} is supplied the
+     * chip is flagged red (warning icon + red value) with a detailed hover tooltip,
+     * otherwise it renders normally.
+     */
+    private void updateLabel(JLabel label, String key, String value, Icon icon,
+                             ProfileConflictDetector.Conflict conflict) {
+        if (conflict != null) {
+            label.setIcon(GuiIcons.build(FontAwesome.EXCLAMATION_TRIANGLE, GuiIcons.sizeTiny(), GuiColors.getContrastRed()));
+            label.setText(buildConflictText(key, value, conflict));
+            label.setToolTipText(buildConflictTooltip(conflict));
+        } else {
+            label.setIcon(icon);
+            label.setText(buildHtmlText(key, value));
+            label.setToolTipText(null);
+        }
+    }
+
+    /**
+     * Computes the conflicts of this profile against all other profiles, indexed by the
+     * conflicting resource field (first conflict per field wins).
+     */
+    private Map<ProfileConflictDetector.ConflictField, ProfileConflictDetector.Conflict> conflictByField() {
+        Map<ProfileConflictDetector.ConflictField, ProfileConflictDetector.Conflict> byField = new HashMap<>();
+        try {
+            List<NodeProfile> others = new ArrayList<>();
+            for (NodeProfile p : NodeProfileRepository.loadAll()) {
+                if (p != null && !p.getName().equals(profile.getName())) {
+                    others.add(p);
+                }
+            }
+            Set<String> running = new HashSet<>();
+            for (Signum s : NodeModule.getInstance().getAll()) {
+                if (s != null && s.isRunning() && s.getProfileName() != null) {
+                    running.add(s.getProfileName());
+                }
+            }
+            for (ProfileConflictDetector.Conflict c : ProfileConflictDetector.detect(profile, others, running)) {
+                // A profile that is merely *configured* (not running) does not hold any
+                // port/database — it does not block a start. Only a conflict with a
+                // currently RUNNING profile is meaningful here (and is what the start-time
+                // rejection actually enforces), so surface those and ignore the rest.
+                if (!c.isOtherRunning()) {
+                    continue;
+                }
+                byField.putIfAbsent(c.getField(), c);
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Failed to compute profile conflicts: {}", e.getMessage());
+        }
+        return byField;
+    }
+
+    /**
+     * Builds red, highlighted conflict text for a chip value.
+     */
+    private String buildConflictText(String key, String value, ProfileConflictDetector.Conflict conflict) {
+        String safeKey = escapeHtml(key);
+        String safeValue = escapeHtml(value);
+        String red = Integer.toHexString(GuiColors.getContrastRed().getRGB() & 0xFFFFFF);
+        return "<html><b>" + safeKey + ":</b> <font color=\"#" + red + "\"><b>" + safeValue + " !</b></font></html>";
+    }
+
+    /**
+     * Builds a detailed, actionable hover tooltip for a conflict.
+     */
+    private String buildConflictTooltip(ProfileConflictDetector.Conflict conflict) {
+        String status = conflict.isOtherRunning() ? "currently RUNNING" : "configured";
+        return "Konfliktus: a(z) " + fieldLabel(conflict.getField()) + " (" + conflict.getOwnValue() + ")"
+                + " a(z) '" + conflict.getOtherProfile() + "' profiléval ütközik (" + status + ")."
+                + "\n\nOldal: írd át a portot vagy az adatbázist, vagy futtasd az első profilt"
+                + " egyedül — a konfliktusos indítást a rendszer elutasítja.";
+    }
+
+    /**
+     * Human-readable (Hungarian) name of a conflicting resource.
+     */
+    private String fieldLabel(ProfileConflictDetector.ConflictField field) {
+        return switch (field) {
+            case API_PORT -> "API.Port";
+            case P2P_PORT -> "P2P.Port";
+            case WEBSOCKET_PORT -> "WebSocket port";
+            case DATABASE -> "adatbázis";
+        };
     }
 
     /**
@@ -325,54 +434,6 @@ public class NodeInfoBar extends JPanel {
                    .replace("<", new String(new char[]{'&', 'l', 't', ';'}))
                    .replace(">", new String(new char[]{'&', 'g', 't', ';'}))
                    .replace("\"", new String(new char[]{'&', 'q', 'u', 'o', 't', ';'}));
-    }
-
-    /**
-     * Determines the database engine from profile properties.
-     */
-    private String determineDatabaseEngine() {
-        // Check for database.type or similar property in profile
-        String dbType = profile.getProperty("database.type");
-        if (dbType != null && !dbType.isEmpty()) {
-            return dbType;
-        }
-
-        // Try to infer from JDBC URL pattern
-        String jdbcUrl = profile.getProperty("database.jdbc.url", "");
-        if (jdbcUrl.contains(":mysql:") || jdbcUrl.contains(":mariadb:")) {
-            return "MariaDB";
-        } else if (jdbcUrl.contains(":postgresql:") || jdbcUrl.contains(":postgres:")) {
-            return "PostgreSQL";
-        } else if (jdbcUrl.contains(":sqlite:")) {
-            return "SQLite";
-        }
-
-        return "Unknown";
-    }
-
-    /**
-     * Determines the database port from profile properties or JDBC URL.
-     */
-    private String determineDatabasePort(String engine) {
-        // Check for explicit database port property
-        String dbPort = profile.getProperty("database.port");
-        if (dbPort != null && !dbPort.isEmpty()) {
-            return dbPort;
-        }
-
-        // Try to extract from JDBC URL
-        String jdbcUrl = profile.getProperty("database.jdbc.url", "");
-        if (jdbcUrl.isEmpty()) {
-            return null;
-        }
-
-        // Default ports by engine
-        return switch (engine.toLowerCase()) {
-            case "mariadb", "mysql" -> "3306";
-            case "postgresql", "postgres" -> "5432";
-            case "sqlite" -> null; // SQLite is file-based, no port
-            default -> null;
-        };
     }
 
     /**

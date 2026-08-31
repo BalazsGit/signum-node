@@ -1,6 +1,8 @@
 package application.module.node.gui;
 
 import application.module.node.profile.NodeProfile;
+import application.module.node.profile.ProfileConflictDetector;
+import application.module.node.props.Props;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,12 +22,12 @@ class NodeInfoBarTest {
 
     @BeforeEach
     void setUp() {
-        // Arrange: Create a test profile with known properties
+        // Arrange: Create a test profile with canonical property keys (as used by the runtime)
         testProfile = new NodeProfile("test-profile");
         testProfile.setProperty("network", "mainnet");
-        testProfile.setProperty("httpport", "8125");
-        testProfile.setProperty("peer.port", "8123");
-        testProfile.setProperty("database.jdbc.url", "jdbc:mysql://localhost:3306/signum");
+        testProfile.setProperty(Props.API_PORT.getName(), "8125");
+        testProfile.setProperty(Props.P2P_PORT.getName(), "8123");
+        testProfile.setProperty(Props.DB_URL.getName(), "jdbc:mariadb://localhost:3306/signum");
     }
 
     @AfterEach
@@ -34,133 +36,95 @@ class NodeInfoBarTest {
     }
 
     @Test
-    void profile_GivenMysqlJdbcUrl_DetectsMariaDB() {
-        // Arrange
-        testProfile.setProperty("database.jdbc.url", "jdbc:mysql://localhost/signum");
-        
-        // Act - verify property is correctly set
-        String jdbcUrl = testProfile.getProperty("database.jdbc.url");
-        
-        // Assert
-        assertTrue(jdbcUrl.contains(":mysql:"), "JDBC URL should contain mysql identifier");
-    }
+    void profile_MariaDbUrl_RendersEngineAndName() {
+        // Arrange: DB.Url is the canonical database property
+        testProfile.setProperty(Props.DB_URL.getName(), "jdbc:mariadb://localhost:3306/signum_main");
 
-    @Test
-    void profile_GivenPostgresqlJdbcUrl_DetectsPostgreSQL() {
-        // Arrange
-        testProfile.setProperty("database.jdbc.url", "jdbc:postgresql://localhost/signum");
-        
         // Act
-        String jdbcUrl = testProfile.getProperty("database.jdbc.url");
-        
-        // Assert
-        assertTrue(jdbcUrl.contains(":postgresql:"), "JDBC URL should contain postgresql identifier");
+        String display = ProfileConflictDetector.dbDisplayName(testProfile);
+
+        // Assert: engine + database name (was previously broken by reading database.type)
+        assertEquals("MariaDB/signum_main", display);
+        assertEquals(3306, ProfileConflictDetector.dbPort(testProfile));
     }
 
     @Test
-    void profile_GivenSqliteJdbcUrl_DetectsSQLite() {
-        // Arrange
-        testProfile.setProperty("database.jdbc.url", "jdbc:sqlite:/path/to/signum.db");
-        
-        // Act
-        String jdbcUrl = testProfile.getProperty("database.jdbc.url");
-        
-        // Assert
-        assertTrue(jdbcUrl.contains(":sqlite:"), "JDBC URL should contain sqlite identifier");
+    void profile_PostgresqlUrl_RendersEngineAndName() {
+        testProfile.setProperty(Props.DB_URL.getName(), "jdbc:postgresql://localhost:5432/signum");
+
+        assertEquals("PostgreSQL/signum", ProfileConflictDetector.dbDisplayName(testProfile));
+        assertEquals(5432, ProfileConflictDetector.dbPort(testProfile));
     }
 
     @Test
-    void profile_GivenMainnet_NetworkPropertyIsMainnet() {
+    void profile_SqliteUrl_RendersFileName() {
+        testProfile.setProperty(Props.DB_URL.getName(), "jdbc:sqlite:file:./database/SQLite/sqlite/signum.sqlite.db");
+
+        String display = ProfileConflictDetector.dbDisplayName(testProfile);
+        assertTrue(display.startsWith("SQLite/"), "SQLite label should start with SQLite/: " + display);
+        assertTrue(display.endsWith("signum.sqlite.db"), "SQLite label should end with the file name: " + display);
+        assertEquals(0, ProfileConflictDetector.dbPort(testProfile), "SQLite is file-based → no port");
+    }
+
+    @Test
+    void profile_Mainnet_NetworkPropertyIsMainnet() {
         // Arrange already done in setUp
-        
-        // Act
-        String network = testProfile.getProperty("network");
-        
-        // Assert
-        assertEquals("mainnet", network);
+        assertEquals("mainnet", testProfile.getProperty("network"));
     }
 
     @Test
-    void profile_GivenTestnet_NetworkPropertyIsTestnet() {
-        // Arrange
+    void profile_Testnet_NetworkPropertyIsTestnet() {
         testProfile.setProperty("network", "testnet");
-        
-        // Act
-        String network = testProfile.getProperty("network");
-        
-        // Assert
-        assertEquals("testnet", network);
+        assertEquals("testnet", testProfile.getProperty("network"));
     }
 
     @Test
-    void profile_GivenCustomHttpPort_ReturnsCorrectPort() {
-        // Arrange
-        testProfile.setProperty("httpport", "9999");
-        
-        // Act
-        String httpPort = testProfile.getProperty("httpport");
-        
-        // Assert
-        assertEquals("9999", httpPort);
+    void profile_CustomApiPort_ReturnsCorrectPort() {
+        testProfile.setProperty(Props.API_PORT.getName(), "9999");
+        assertEquals("9999", ProfileConflictDetector.apiPort(testProfile));
     }
 
     @Test
-    void profile_GivenCustomPeerPort_ReturnsCorrectPort() {
-        // Arrange
-        testProfile.setProperty("peer.port", "7777");
-        
-        // Act
-        String peerPort = testProfile.getProperty("peer.port");
-        
-        // Assert
-        assertEquals("7777", peerPort);
+    void profile_CustomP2pPort_ReturnsCorrectPort() {
+        testProfile.setProperty(Props.P2P_PORT.getName(), "7777");
+        assertEquals("7777", ProfileConflictDetector.p2pPort(testProfile));
     }
 
     @Test
-    void profile_GivenDatabasePortProperty_ReturnsCorrectPort() {
-        // Arrange
-        testProfile.setProperty("database.port", "3307");
-        
-        // Act
-        String dbPort = testProfile.getProperty("database.port");
-        
-        // Assert
-        assertEquals("3307", dbPort);
-    }
-
-    @Test
-    void profile_GivenDefaultHttpPort_Returns8125() {
-        // Arrange - testProfile already created without httpport set in a fresh profile
+    void profile_DefaultApiPort_FallsBackToDeclaredDefault() {
         NodeProfile freshProfile = new NodeProfile("fresh");
-        
-        // Act
-        String defaultPort = freshProfile.getProperty("httpport", "8125");
-        
-        // Assert
-        assertEquals("8125", defaultPort);
+        assertEquals(String.valueOf(Props.API_PORT.getDefaultValue()), ProfileConflictDetector.apiPort(freshProfile));
     }
 
     @Test
-    void profile_GivenDefaultPeerPort_Returns8123() {
-        // Arrange
+    void profile_DefaultP2pPort_FallsBackToDeclaredDefault() {
         NodeProfile freshProfile = new NodeProfile("fresh");
-        
-        // Act
-        String defaultPort = freshProfile.getProperty("peer.port", "8123");
-        
-        // Assert
-        assertEquals("8123", defaultPort);
+        assertEquals(String.valueOf(Props.P2P_PORT.getDefaultValue()), ProfileConflictDetector.p2pPort(freshProfile));
     }
 
     @Test
-    void profile_GivenDatabaseTypeProperty_ReturnsType() {
-        // Arrange
-        testProfile.setProperty("database.type", "PostgreSQL");
-        
+    void profile_ConflictWithOtherProfile_IsDetected() {
+        // Arrange: another profile on the same API.Port
+        NodeProfile other = new NodeProfile("conflict-other");
+        other.setProperty(Props.API_PORT.getName(), ProfileConflictDetector.apiPort(testProfile));
+        other.setProperty(Props.P2P_PORT.getName(), "9002");
+        other.setProperty(Props.DB_URL.getName(), "jdbc:mariadb://localhost:3306/otherdb");
+
         // Act
-        String dbType = testProfile.getProperty("database.type");
-        
-        // Assert
-        assertEquals("PostgreSQL", dbType);
+        var conflicts = ProfileConflictDetector.detect(testProfile, java.util.List.of(other), java.util.Set.of());
+
+        // Assert: an API.Port conflict is surfaced (drives the red warning in the info bar)
+        assertTrue(conflicts.stream().anyMatch(c -> c.getField() == ProfileConflictDetector.ConflictField.API_PORT),
+                "an API.Port collision with another profile must be detected");
+    }
+
+    @Test
+    void infoBar_ConstructAndRefresh_DoesNotThrow() {
+        // Act: build a headless info bar and drive a data refresh (no-op safe in headless).
+        NodeInfoBar bar = new NodeInfoBar(testProfile);
+        bar.refreshData();
+
+        // Assert: the bar is wired to the profile and renders without throwing.
+        assertSame(testProfile, bar.getProfile());
     }
 }

@@ -305,12 +305,34 @@ public final class ThreadPool {
         logger.info("Stopping executor '{}'...", name);
         long shutdownStartTime = System.currentTimeMillis();
 
-        // Phase 1: Request graceful shutdown.
+        // Phase 1: Request graceful shutdown (no new tasks will start).
         executor.shutdown();
 
+        // Phase 2: Abort the non-essential idler loops IMMEDIATELY — the moment a
+        // shutdown is requested, network idler loops (PeerConnecting, GetMoreBlocks,
+        // GetCumulativeDifficulty) must stop instead of completing their current
+        // cycle. They gate on the running flag / interrupt status and exit at the
+        // next sleep or loop check, usually within milliseconds. Only the essential
+        // (vital) jobs get the grace period below.
+        activeThreadsJobName.forEach((thread, jobName) -> {
+            if (INTERRUPTIBLE_JOBS.contains(jobName)) {
+                logger.info("Aborting non-essential job on shutdown request: '{}'", jobName);
+                thread.interrupt();
+            }
+        });
+
+        // Phase 3: report which ESSENTIAL (vital) jobs still need the grace period;
+        // interruptible idlers were already aborted in Phase 2.
         if ("MainThreadPool".equals(name) && !activeThreadsJobName.isEmpty()) {
-            logger.info("Waiting for essential background jobs to finish: {}",
-                    new ArrayList<>(activeThreadsJobName.values()));
+            List<String> essential = new ArrayList<>();
+            for (String jobName : activeThreadsJobName.values()) {
+                if (!INTERRUPTIBLE_JOBS.contains(jobName) && !essential.contains(jobName)) {
+                    essential.add(jobName);
+                }
+            }
+            if (!essential.isEmpty()) {
+                logger.info("Waiting for essential background jobs to finish: {}", essential);
+            }
         }
 
         int timeout = propertyService.getInt(Props.NODE_SHUTDOWN_TIMEOUT);
@@ -319,20 +341,12 @@ public final class ThreadPool {
         try {
             // 1. Wait a short grace period for essential tasks to finish voluntarily
             if (!executor.awaitTermination(SHUTDOWN_GRACE_PERIOD_SECONDS, TimeUnit.SECONDS)) {
-                logger.warn("Executor '{}' still busy after {}s. Interrupting non-essential idlers...",
-                        name, SHUTDOWN_GRACE_PERIOD_SECONDS);
-
-                // Targeted Nudge: Interrupt ONLY non-essential jobs now that grace period
-                // expired
+                // Non-essential idlers were already interrupted in Phase 2 — only
+                // vital jobs can still be running. Report their runtime.
                 activeThreadsJobName.forEach((thread, jobName) -> {
-                    if (INTERRUPTIBLE_JOBS.contains(jobName)) {
-                        logger.info("  - Interrupting non-essential job: '{}'", jobName);
-                        thread.interrupt();
-                    } else {
-                        Long startTime = activeThreadsStartTime.get(thread);
-                        long duration = (startTime != null) ? (System.currentTimeMillis() - startTime) : -1;
-                        logger.info("  - Vital job still running: '{}' ({} ms)", jobName, duration);
-                    }
+                    Long startTime = activeThreadsStartTime.get(thread);
+                    long duration = (startTime != null) ? (System.currentTimeMillis() - startTime) : -1;
+                    logger.info("  - Vital job still running: '{}' ({} ms)", jobName, duration);
                 });
 
                 // 2. Wait for the remaining timeout for vital tasks to finish naturally.
