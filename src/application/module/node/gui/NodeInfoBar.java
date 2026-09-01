@@ -29,6 +29,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Information bar displayed at the top of a NodeProfilePanel tab.
@@ -42,7 +43,9 @@ import java.util.Set;
  * - Database engine
  * - Database port (if applicable)
  *
- * Follows the Observer pattern: listens for state changes via Signum.StateListener.
+ * Follows the Observer pattern: the owning {@link NodeProfilePanel} listens for state
+ * changes via {@code Signum.StateListener} and, on each change, broadcasts a cross-profile
+ * conflict refresh to every visible bar (see {@link #refreshAllConflicts()}).
  */
 @SuppressWarnings("serial")
 public class NodeInfoBar extends JPanel {
@@ -65,6 +68,19 @@ public class NodeInfoBar extends JPanel {
 
     /** Maps info key to chip component for quick access */
     private final Map<String, JLabel> labelMap = new HashMap<>();
+
+    /**
+     * Registry of all live info bars, used by {@link #refreshAllConflicts()}.
+     * <p>
+     * A profile's cross-profile resource conflicts depend on which <b>other</b> profiles
+     * are RUNNING (their API/P2P/WebSocket ports and database). That set changes whenever
+     * any profile starts or stops, but an info bar only re-evaluates its conflicts when
+     * it is refreshed — so without a broadcast, starting one profile would leave every
+     * other already-shown bar stale (missing / wrong red warnings). Every bar registers
+     * itself here (in {@link #initialize()}) and is unregistered in {@link #dispose()}.
+     * </p>
+     */
+    private static final Set<NodeInfoBar> LIVE_BARS = ConcurrentHashMap.newKeySet();
 
     /**
      * Creates a new NodeInfoBar for the given profile.
@@ -123,6 +139,10 @@ public class NodeInfoBar extends JPanel {
         AppearanceModule.registerAppearanceListener(() -> {
             SwingUtilities.invokeLater(this::refreshStyles);
         });
+
+        // Register for the cross-profile conflict broadcast: any profile's start/stop
+        // changes which resources are held, so every visible bar must be refreshable.
+        LIVE_BARS.add(this);
 
         // Populate initial data from profile properties
         refreshData();
@@ -449,6 +469,34 @@ public class NodeInfoBar extends JPanel {
         refreshState();
         revalidate();
         repaint();
+    }
+
+    /**
+     * Removes this info bar from the live registry. Called by the owning
+     * {@link NodeProfilePanel} when it is disposed, so a bar that is no longer shown
+     * is no longer refreshed by {@link #refreshAllConflicts()} (prevents a leak).
+     */
+    public void dispose() {
+        LIVE_BARS.remove(this);
+    }
+
+    /**
+     * Re-evaluates the cross-profile resource conflicts on <b>every</b> live info bar.
+     * <p>
+     * A profile's red conflict warnings depend on which other profiles are currently
+     * RUNNING (their API/P2P/WebSocket ports and database). When any profile starts or
+     * stops, the set of held resources changes, so every already-shown bar may need to
+     * re-render — e.g. starting profile A must immediately surface A's conflict on an
+     * already-open, conflicting profile B without waiting for B to be (re)started.
+     * Each bar re-reads the live running set via {@link #refreshData()}, so the result
+     * is always current.
+     * </p>
+     * <p>Thread-safe: {@link #refreshData()} dispatches to the EDT as needed.</p>
+     */
+    public static void refreshAllConflicts() {
+        for (NodeInfoBar bar : LIVE_BARS) {
+            bar.refreshData();
+        }
     }
 
     /**

@@ -309,6 +309,12 @@ public class NodeProfilePanel extends JPanel {
             toolbar.stopSpinnerAnimation();
         }
         LOGGER.info("NodeProfilePanel disposed for profile: {}", profile.getName());
+
+        // Unregister the info bar from the cross-profile conflict broadcast so a disposed
+        // panel is no longer refreshed by NodeInfoBar.refreshAllConflicts() (avoids a leak).
+        if (infoBar != null) {
+            infoBar.dispose();
+        }
     }
 
     /**
@@ -470,6 +476,27 @@ public class NodeProfilePanel extends JPanel {
     public JTabbedPane getInnerTabbedPane() { return innerTabbedPane; }
     public NodeInfoBar getInfoBar() { return infoBar; }
     public NodeToolbar getToolbar() { return toolbar; }
+
+    /**
+     * Re-evaluates this profile's information bar so its cross-profile resource-conflict
+     * warnings (API/P2P/WebSocket port, database) reflect the profiles that are RUNNING
+     * at the moment it is viewed.
+     * <p>
+     * A {@link NodeInfoBar} computes its conflicts only when it is built and when its own
+     * profile restarts — it does not observe the other profiles. Because the set of running
+     * profiles can change afterwards (e.g. another profile auto-starts later), the red
+     * conflict chips would otherwise go stale. This is invoked when the profile's tab is
+     * (re)selected so that switching from a running profile to a conflicting one surfaces
+     * the warning immediately.
+     * </p>
+     * <p>No-op when the info bar is not present.</p>
+     */
+    public void refreshConflictWarnings() {
+        if (infoBar != null) {
+            infoBar.refreshData();
+        }
+    }
+
     /** Returns the injected Signum facade (null if node not started). */
     public Signum getSignum() { return signum; }
 
@@ -565,6 +592,12 @@ public class NodeProfilePanel extends JPanel {
         if (infoBar != null) {
             infoBar.refreshState();
         }
+
+        // PUSH: this profile's state change (start/stop) alters which resources are held
+        // by running profiles, so EVERY other visible info bar must re-evaluate its
+        // cross-profile conflict warnings. This surfaces the red conflict on an already-open,
+        // conflicting profile the moment another profile starts (and clears it when one stops).
+        NodeInfoBar.refreshAllConflicts();
 
         if (toolbar != null) {
             toolbar.updateButtonStates(newState);

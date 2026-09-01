@@ -37,8 +37,23 @@ public class SignumLogManager extends LogManager {
     @Override
     public void readConfiguration(InputStream inStream) throws IOException {
         loggingReconfiguration.set(true);
-        super.readConfiguration(inStream);
-        loggingReconfiguration.set(false);
+        try {
+            super.readConfiguration(inStream);
+        } finally {
+            loggingReconfiguration.set(false);
+        }
+        // readConfiguration() resets the ROOT logger's handlers: it removes every
+        // attached handler and re-creates only the ones listed in the properties
+        // file (FileHandler / ConsoleHandler). That silently drops the
+        // SystemLoggerJulHandler the Launcher installed, which is the bridge that
+        // forwards SLF4J/JUL events into the SystemLogger and the per-node
+        // ProfileLogger (the Node Console). Without this, every startup line
+        // logged AFTER this re-configuration (DB init, blockchain, peers, web
+        // server, statistics, ...) still reaches the terminal but never the Node
+        // Console — which is exactly the "incomplete console" symptom. Re-install
+        // the bridge (idempotent) so GUI log routing survives (re)applying the
+        // logging configuration.
+        application.utils.logging.SystemLoggerJulHandler.install();
     }
 
     /**
