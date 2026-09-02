@@ -324,6 +324,25 @@ public final class GuiIcons {
         return build(FontAwesome.CHECK_CIRCLE, size, new Color(0, 128, 0));
     }
 
+    /**
+     * Pickaxe icon rendered from the Unicode PICK character (U+26CF, ⛏).
+     * <p>
+     * The bundled FontAwesome 4.7 icon set contains no pickaxe glyph (it only
+     * appears in FontAwesome 6), so this icon paints the Unicode character
+     * instead. It uses a <b>dedicated symbol font</b> that is selected once
+     * and does NOT follow the global GUI font selection: GUI settings may
+     * only change the icon's <i>size</i> (via the toolbar icon size), never
+     * its type, so the icon always looks the same. The glyph is monochrome,
+     * so the requested color (e.g. green/red verification state) is applied.
+     *
+     * @param size  the icon size in pixels (square)
+     * @param color the icon color
+     * @return a square {@link Icon} of the requested size and color
+     */
+    public static Icon pickaxe(int size, Color color) {
+        return new PickaxeIcon(size, color);
+    }
+
     /** Backward/rewind icon. */
     public static Icon backward() {
         return build(FontAwesome.BACKWARD, SIZE_MEDIUM, GuiColors.getButtonIcon());
@@ -389,6 +408,82 @@ public final class GuiIcons {
     private static void ensureFontAwesomeRegistered() {
         if (FONT_REGISTERED.compareAndSet(false, true)) {
             IconFontSwing.register(FontAwesome.getIconFont());
+        }
+    }
+
+    /**
+     * Renders the Unicode PICK character (U+26CF, ⛏) centered in a square
+     * icon.
+     * <p>
+     * The font family is intentionally hardcoded to a symbol font that
+     * contains the glyph (verified via {@link Font#canDisplay}) and renders
+     * it monochrome so the requested color can be applied. It deliberately
+     * does NOT derive from the global GUI font, so GUI font changes cannot
+     * alter the icon's appearance — only its size may change.
+     */
+    private static final class PickaxeIcon implements Icon {
+
+        /** The PICK character (U+26CF, Miscellaneous Symbols block). */
+        private static final char PICK = '\u26CF';
+
+        /**
+         * Preferred symbol fonts that contain U+26CF, in order.
+         * "Segoe UI Symbol" is listed before "Segoe UI Emoji" on purpose:
+         * the Emoji variant may render a color (uncolorable) emoji glyph,
+         * while the Symbol variant renders a monochrome, colorable glyph.
+         */
+        private static final String[] PICKAXE_FONT_CANDIDATES = {
+                "Segoe UI Symbol", "Segoe UI Emoji",
+                "Noto Sans Symbols 2", "Noto Sans Symbols",
+                "DejaVu Sans", "Arial Unicode MS"};
+
+        private final int size;
+        private final Color color;
+        private final Font font;
+
+        private PickaxeIcon(int size, Color color) {
+            this.size = Math.max(MIN_ICON_SIZE, size);
+            this.color = color;
+            this.font = resolvePickaxeFont(this.size);
+        }
+
+        /**
+         * Picks the first available font family that can display the PICK
+         * character. Falls back to the default dialog font if none does.
+         */
+        private static Font resolvePickaxeFont(int size) {
+            for (String family : PICKAXE_FONT_CANDIDATES) {
+                Font font = new Font(family, Font.PLAIN, size);
+                if (font.canDisplay(PICK)) {
+                    return font;
+                }
+            }
+            return new Font(Font.DIALOG, Font.PLAIN, size);
+        }
+
+        @Override
+        public void paintIcon(Component c, Graphics g, int x, int y) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            g2.setColor(color);
+            g2.setFont(font);
+            FontMetrics fm = g2.getFontMetrics();
+            String text = String.valueOf(PICK);
+            int tx = x + (size - fm.stringWidth(text)) / 2;
+            int ty = y + (size + fm.getAscent() - fm.getDescent()) / 2;
+            g2.drawString(text, tx, ty);
+            g2.dispose();
+        }
+
+        @Override
+        public int getIconWidth() {
+            return size;
+        }
+
+        @Override
+        public int getIconHeight() {
+            return size;
         }
     }
 }

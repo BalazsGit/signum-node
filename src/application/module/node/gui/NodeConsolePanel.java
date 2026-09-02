@@ -111,6 +111,7 @@ import application.utils.gui.CustomDrawings;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiFontManager;
+import application.utils.gui.GuiIcons;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
 import application.utils.gui.SmartScrollController;
@@ -464,6 +465,8 @@ public class NodeConsolePanel extends JPanel {
     private boolean measurementActive = false;
     private boolean experimentalActive = false;
     private boolean trimEnabled = false;
+    private boolean trimModeActive = false;
+    private boolean pruneModeActive = false;
     private boolean autoResolveEnabled = false;
 
     private JButton openPhoenixButton;
@@ -532,6 +535,16 @@ public class NodeConsolePanel extends JPanel {
     private JSeparator experimentalSeparator;
     private JSeparator trimIconSeparator;
     private JSeparator autoResolveSeparator;
+    /**
+     * Bottom-panel pickaxe icon indicating whether the latest block's PoC+
+     * (Proof-of-Consensus+) consensus proof was fully verified by the node
+     * (green — the block was really mined by the holder of the scope/account)
+     * or lies below the configured checkpoint height and the verification was
+     * skipped (red). Always shown once the node is running — deliberately
+     * NOT tied to the experimental setting.
+     */
+    private JLabel checkpointVerificationLabel;
+    private JSeparator checkpointVerificationSeparator;
 
     private final AtomicBoolean isDbCheckRunning = new AtomicBoolean(false);
 
@@ -1895,6 +1908,28 @@ public class NodeConsolePanel extends JPanel {
         infoPanel.add(autoResolveLabel);
         infoPanel.add(autoResolveSeparator, "gapleft 5, gapright 5");
 
+        // --- PoC+ (consensus) verification status pickaxe ---
+        // Always shown once the node is running (NOT tied to the experimental
+        // setting): green pickaxe = the node fully verified the latest
+        // block's PoC+ consensus proof (it was really mined by the holder of
+        // the scope/account), red pickaxe = block below the checkpoint height
+        // (consensus verification skipped, trusted fast-sync).
+        checkpointVerificationSeparator = new JSeparator(SwingConstants.VERTICAL);
+        checkpointVerificationSeparator.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
+        checkpointVerificationSeparator.setMaximumSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
+        checkpointVerificationLabel = new JLabel(
+                GuiIcons.pickaxe((int) GuiConstants.getToolBarIconSize(), GuiColors.getButtonIcon()));
+        tooltip = "PoC+ (Proof-of-Consensus+) verification of the latest block:\n\n"
+                + "GREEN = the node verified the block's consensus proof, i.e. it was really mined by the holder of the scope/account.\n"
+                + "RED   = the block lies below the checkpoint height, so the consensus verification was skipped (trusted fast-sync).\n\n"
+                + "Controlled by property: node.checkPointHeight";
+        addInfoTooltip(checkpointVerificationLabel, tooltip, "PoC+ VERIFICATION");
+        checkpointVerificationLabel.setVisible(false);
+        checkpointVerificationSeparator.setVisible(false);
+
+        infoPanel.add(checkpointVerificationLabel);
+        infoPanel.add(checkpointVerificationSeparator, "gapleft 5, gapright 5");
+
         infoPanel.add(syncProgressBar, "growx");
 
         bottomPanel.add(latestBlockInfoPanel, BorderLayout.CENTER);
@@ -2516,7 +2551,18 @@ public class NodeConsolePanel extends JPanel {
             showMessage("Blockchain processor not initialized.");
             return;
         }
-        new Thread(() -> getSignum().getBlockchainProcessor().popOff(count)).start();
+        final BlockchainProcessor processor = getSignum().getBlockchainProcessor();
+        // Run inside this profile's log context so that every pop-off log line
+        // ("Request adds N blocks to pop off.", "Block processing threads paused
+        // for pop-off.", "Pop-off height to X from Y", "Pop-off completed.", ...)
+        // is routed to this profile's Node Console (SystemLoggerJulHandler →
+        // ProfileLogger) — exactly as in the original single-console
+        // architecture. Without the context these logs would only reach the
+        // System Console, while pool-thread logs (e.g. "Forkprocessing
+        // complete.") would still appear here, creating the confusing
+        // "fork log yes, pop-off log no" asymmetry.
+        new Thread(() -> application.utils.logging.NodeLogContext
+                .runIn("node", profileName, () -> processor.popOff(count))).start();
     }
 
     /**
@@ -2667,6 +2713,97 @@ public class NodeConsolePanel extends JPanel {
         } catch (Exception e) { // Catches error accessing PropertyService
             LOGGER.error("Could not access PropertyService", e);
             showMessage("Could not open web UI as could not read the configuration file.");
+        }
+    }
+
+    /**
+     * Recomputes the cached feature flags (pop-off buttons, measurement,
+     * experimental, DB archival mode, auto-resolve) from the bound Signum's
+     * property service.
+     * <p>
+     * Previously these were only computed inside
+     * {@link #startSignumWithGUI()}; the v4 toolbar-start flow (NodeToolbar →
+     * NodeModule → {@link #ensureRuntimeWiring()}) never computed them, so
+     * {@code trimEnabled} stayed {@code false} and {@link #initListeners()}
+     * skipped registering the trim/prune listeners (the bottom-panel trim
+     * height label never updated), and the feature icons stayed at their
+     * initial hidden state. Calling this before wiring on both paths fixes it.
+     * </p>
+     */
+    private void refreshFeatureFlags() {
+        PropertyService propertyService = this.signum != null ? this.signum.getPropertyService() : null;
+        if (propertyService == null) {
+            return;
+        }
+        this.showPopOff = propertyService.getBoolean(Props.EXPERIMENTAL);
+        this.measurementActive = propertyService.getBoolean(Props.MEASUREMENT_ACTIVE);
+        this.experimentalActive = propertyService.getBoolean(Props.EXPERIMENTAL);
+        String archivalMode = propertyService.getString(Props.DB_ARCHIVAL_MODE).toUpperCase();
+        this.trimModeActive = "TRIM".equals(archivalMode);
+        this.pruneModeActive = "PRUNE".equals(archivalMode);
+        this.trimEnabled = this.trimModeActive || this.pruneModeActive;
+        this.autoResolveEnabled = propertyService.getBoolean(Props.AUTO_CONSISTENCY_RESOLVE_ENABLED);
+    }
+
+    /**
+     * Applies the bottom-panel feature indicators: measurement flask,
+     * experimental gear, DB-mode scissors, trim/prune height labels and
+     * auto-resolve wrench, plus the initial trim/prune/pop-off state refresh.
+     * <p>
+     * Called from BOTH wiring paths — {@link #startSignumWithGUI()} (console
+     * Start) and {@link #ensureRuntimeWiring()} (v4 toolbar Start) — so the
+     * indicators are configured identically regardless of which Start button
+     * was used. Idempotent and safe to call repeatedly.
+     * </p>
+     * <p>Must be called on the EDT, after {@link #refreshFeatureFlags()}.</p>
+     *
+     * @param blockchainProcessor the bound processor (used for the initial
+     *                            trim/prune heights; may be null to skip it)
+     */
+    private void configureFeatureIndicators(BlockchainProcessor blockchainProcessor) {
+        if (measurementActive) {
+            measurementLabel.setVisible(true);
+            measurementSeparator.setVisible(true);
+        } else {
+            measurementLabel.setVisible(false);
+            measurementSeparator.setVisible(false);
+        }
+
+        if (experimentalActive) {
+            experimentalLabel.setVisible(true);
+            experimentalSeparator.setVisible(true);
+            // Initial time label visibility is handled by updateTimeLabelVisibility later
+            syncInProgressTimeLabel.setVisible(true);
+            timeSeparator.setVisible(true);
+        } else {
+            experimentalLabel.setVisible(false);
+            experimentalSeparator.setVisible(false);
+        }
+
+        // Scissors icon is always visible to show database mode status
+        trimLabel.setVisible(trimEnabled);
+        trimIconSeparator.setVisible(trimEnabled);
+
+        // Maintenance labels are only visible if TRIM or PRUNE is active
+        trimHeightLabel.setVisible(trimModeActive);
+        trimSeparator.setVisible(trimModeActive);
+        pruneHeightLabel.setVisible(pruneModeActive);
+        pruneSeparator.setVisible(pruneModeActive);
+
+        if (autoResolveEnabled) {
+            autoResolveLabel.setVisible(true);
+            autoResolveSeparator.setVisible(true);
+        } else {
+            autoResolveLabel.setVisible(false);
+            autoResolveSeparator.setVisible(false);
+        }
+
+        if (blockchainProcessor != null) {
+            onTrimEnd(blockchainProcessor.getCurrentTrimHeight().get());
+            onPruneEnd(blockchainProcessor.getCurrentPruneHeight().get());
+            onConsistencyUpdate();
+            onManualPopOffProgress();
+            onAutoPopOffProgress();
         }
     }
 
@@ -3033,25 +3170,20 @@ public class NodeConsolePanel extends JPanel {
         }
         try {
             // Now that properties are loaded, set the correct values for the GUI
-            showPopOff = this.signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
-            measurementActive = this.signum.getPropertyService().getBoolean(Props.MEASUREMENT_ACTIVE);
-            experimentalActive = this.signum.getPropertyService().getBoolean(Props.EXPERIMENTAL);
+            refreshFeatureFlags();
             String archivalMode = this.signum.getPropertyService().getString(Props.DB_ARCHIVAL_MODE).toUpperCase();
-            boolean isPruneMode = "PRUNE".equals(archivalMode);
-            boolean isTrimMode = "TRIM".equals(archivalMode);
-            trimEnabled = isTrimMode || isPruneMode;
 
             String shortTooltip = "Database Mode: " + archivalMode;
             String detailedTooltip = "Database Archival Mode: " + archivalMode + "\n\n";
 
-            if (isPruneMode) {
+            if (this.pruneModeActive) {
                 shortTooltip += " - Physical pruning is active (blocks deleted).";
                 detailedTooltip += "Physical pruning is active. Blocks and associated data older than the rollback limit ("
                         + application.module.node.Constants.MAX_ROLLBACK
                         + " blocks) are permanently deleted from the database to save disk space.\n\n"
                         + "Maintenance occurs automatically every " + application.module.node.Constants.TRIM_PERIOD
                         + " blocks.";
-            } else if (isTrimMode) {
+            } else if (this.trimModeActive) {
                 shortTooltip += " - Table trimming is active (history cleaned).";
                 detailedTooltip += "Table trimming is active. Only temporary derived table history is periodically cleaned to maintain performance. All blocks and transactions are kept.\n\n"
                         + "Trimming occurs automatically every " + application.module.node.Constants.TRIM_PERIOD
@@ -3121,42 +3253,12 @@ public class NodeConsolePanel extends JPanel {
                     metricsPanelWrapper.setMinimumSize(new Dimension(0, 0)); // Initial state shrinkable
                     toolBar.revalidate();
 
-                    if (measurementActive) {
-                        measurementLabel.setVisible(true);
-                        measurementSeparator.setVisible(true);
-                    }
-
-                    if (experimentalActive) {
-                        experimentalLabel.setVisible(true);
-                        experimentalSeparator.setVisible(true);
-                        // Initial time label visibility is handled by updateTimeLabelVisibility later
-                        syncInProgressTimeLabel.setVisible(true);
-                        timeSeparator.setVisible(true);
-                    }
-
-                    // Scissors icon is always visible to show database mode status
-                    trimLabel.setVisible(trimEnabled);
-                    trimIconSeparator.setVisible(trimEnabled);
-
-                    // Maintenance labels are only visible if TRIM or PRUNE is active
-                    trimHeightLabel.setVisible(isTrimMode);
-                    trimSeparator.setVisible(isTrimMode);
-                    pruneHeightLabel.setVisible(isPruneMode);
-                    pruneSeparator.setVisible(isPruneMode);
-
-                    if (autoResolveEnabled) {
-                        autoResolveLabel.setVisible(true);
-                        autoResolveSeparator.setVisible(true);
-                    } else {
-                        autoResolveLabel.setVisible(false);
-                        autoResolveSeparator.setVisible(false);
-                    }
-
-                    onTrimEnd(blockchainProcessor.getCurrentTrimHeight().get());
-                    onPruneEnd(blockchainProcessor.getCurrentPruneHeight().get());
-                    onConsistencyUpdate();
-                    onManualPopOffProgress();
-                    onAutoPopOffProgress();
+                    // Feature indicators (measurement/experimental/trim/auto-resolve
+                    // icons, trim/prune height labels, initial trim/prune/pop-off
+                    // state) — shared with the v4 toolbar-start wiring path so the
+                    // icons are configured identically regardless of which Start
+                    // button was used.
+                    configureFeatureIndicators(blockchainProcessor);
 
                     // configurationPanel.loadAppliedProperties();
 
@@ -3172,6 +3274,10 @@ public class NodeConsolePanel extends JPanel {
                 // updateTitle() removed - title management moved to NodeInfoBar
 
                 initListeners();
+                // Mark this instance as wired so the later ensureRuntimeWiring()
+                // (triggered by the RUNNING state push) does not register the
+                // same listeners a second time in this console.
+                listenerOwner = this.signum;
                 if (this.signum.getPropertyService().getBoolean(Props.EXPERIMENTAL)) {
                     // Initialize timers from the log file.
                     if (blockchainProcessor != null) {
@@ -3328,6 +3434,11 @@ public class NodeConsolePanel extends JPanel {
                 LOGGER.warn("[{}] ensureRuntimeWiring: BlockchainProcessor not available yet — will retry on next state push", profileName);
                 return;
             }
+            // v4 toolbar-start path: the feature flags (measurement/experimental/
+            // trim mode/auto-resolve) must be computed BEFORE initListeners() —
+            // otherwise trimEnabled stays false and the trim/prune listeners
+            // (and thus the bottom-panel trim height label) are never wired.
+            refreshFeatureFlags();
             initListeners();
             listenerOwner = bound;
 
@@ -3345,6 +3456,12 @@ public class NodeConsolePanel extends JPanel {
                     updateLatestBlock(lastBlock, maxPeerHeight, blockTime);
                 }
                 updatePeerCount(connectedCount, allKnownCount, blacklistedCount);
+                // v4 toolbar-start path: previously this only ran inside
+                // startSignumWithGUI(), so every bottom-panel feature icon
+                // (scissors/gear/wrench/flask) stayed hidden forever when the
+                // node was started from the NodeToolbar. Apply the same
+                // configuration here.
+                configureFeatureIndicators(processor);
             });
             LOGGER.info("[{}] Runtime listeners wired — Latest block / peer / volume labels active", profileName);
         } catch (Exception e) {
@@ -3694,6 +3811,69 @@ public class NodeConsolePanel extends JPanel {
         }
         syncProgressBar.setValue((int) prog);
         syncProgressBar.setString(String.format("%.2f %%", prog));
+
+        // Keep the checkpoint-verification indicator in sync with the latest
+        // block (pushed or popped): it flips to red if the chain was popped
+        // below the checkpoint height, back to green when above it again.
+        updateVerificationStatus();
+    }
+
+    /**
+     * Updates the PoC+ (consensus) verification indicator in the bottom panel.
+     * <p>
+     * A block's PoC+ consensus proof — that it was really mined by the holder
+     * of the scope/account — is only fully verified by the node when it is at
+     * or above the configured checkpoint height
+     * ({@code node.checkPointHeight}); below that the node trusts the
+     * checkpoint and skips the verification (fast-sync). This icon surfaces
+     * exactly that:
+     * </p>
+     * <ul>
+     *   <li><b>green pickaxe</b> — latest block height &gt;= checkpoint height (fully verified)</li>
+     *   <li><b>red pickaxe</b>   — latest block height &lt;  checkpoint height (verification skipped)</li>
+     * </ul>
+     * <p>
+     * Deliberately NOT tied to any experimental setting. Must be called on the
+     * EDT. Invoked after every block push/pop (via {@link #updateLatestBlock})
+     * and once during the initial wiring of both start paths.
+     * </p>
+     */
+    private void updateVerificationStatus() {
+        if (checkpointVerificationLabel == null || checkpointVerificationSeparator == null) {
+            return;
+        }
+        Signum ctx = getSignum();
+        Block lastBlock = ctx != null && ctx.getBlockchain() != null
+                ? ctx.getBlockchain().getLastBlock()
+                : null;
+        if (ctx == null || lastBlock == null) {
+            checkpointVerificationLabel.setVisible(false);
+            checkpointVerificationSeparator.setVisible(false);
+            return;
+        }
+        int checkpointHeight;
+        try {
+            checkpointHeight = ctx.getPropertyService().getInt(Props.NODE_CHECKPOINT_HEIGHT);
+        } catch (Exception e) {
+            LOGGER.warn("updateVerificationStatus: cannot read checkpoint height for profile '{}'", profileName, e);
+            return;
+        }
+        boolean fullyVerified = lastBlock.getHeight() >= checkpointHeight;
+        Color color = fullyVerified ? GuiColors.getPeerConnected() : GuiColors.getContrastRed();
+        // Same pickaxe glyph in both states; only the color conveys the status.
+        checkpointVerificationLabel.setIcon(
+                GuiIcons.pickaxe((int) GuiConstants.getToolBarIconSize(), color));
+        checkpointVerificationLabel.setToolTipText(fullyVerified
+                ? "PoC+ verified — the block was really mined by the scope/account holder (latest "
+                        + lastBlock.getHeight() + " >= checkpoint " + checkpointHeight + ")"
+                : "PoC+ NOT verified — below checkpoint, consensus check skipped (latest "
+                        + lastBlock.getHeight() + " < checkpoint " + checkpointHeight + ")");
+        checkpointVerificationLabel.setVisible(true);
+        checkpointVerificationSeparator.setVisible(true);
+        if (checkpointVerificationLabel.getParent() != null) {
+            checkpointVerificationLabel.getParent().revalidate();
+            checkpointVerificationLabel.getParent().repaint();
+        }
     }
 
     private int calculateMaxPeerHeight() {

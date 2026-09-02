@@ -421,20 +421,27 @@ public class NodeProfilePanel extends JPanel {
         }
     }
 
-    /** Copy from NodeConsolePanel.popOff */
+    /**
+     * Requests a manual pop-off of the last {@code count} blocks.
+     * <p>
+     * Same behavior as the original SignumGUI: the <b>manual</b> pop-off path
+     * ({@code BlockchainProcessor.popOff(int)}) on a dedicated background
+     * thread — never on the EDT, since a pop-off can take a while. The work
+     * runs inside this profile's {@code NodeLogContext} so all progress log
+     * lines ("Request adds N blocks to pop off.", "Block processing threads
+     * paused for pop-off.", "Pop-off height to X from Y", ...) are routed to
+     * this profile's Node Console. Repeated clicks while a pop-off is already
+     * queued add more blocks ("Request adds N blocks to pop off.").
+     * </p>
+     */
     public void popOff(int count) {
         Signum node = signum;
         BlockchainProcessor blockchainProcessor = node != null ? node.getBlockchainProcessor() : null;
         if (blockchainProcessor == null) {
             return;
         }
-        int height = (node != null && node.getBlockchain() != null) 
-                ? node.getBlockchain().getHeight() : 0;
-        int targetHeight = Math.max(0, height - count);
-        if (!blockchainProcessor.isSkipDbCheckOnManualPopOff()) {
-            blockchainProcessor.checkDatabaseStateRequest();
-        }
-        blockchainProcessor.popOffTo(targetHeight);
+        new Thread(() -> application.utils.logging.NodeLogContext
+                .runIn("node", profile.getName(), () -> blockchainProcessor.popOff(count))).start();
     }
 
     /** Copy from NodeConsolePanel.dbCheckAction */
