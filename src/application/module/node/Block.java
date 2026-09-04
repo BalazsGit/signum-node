@@ -588,7 +588,7 @@ public class Block {
                             "Block contains duplicate transactions: " + transaction.getStringId());
                 }
             }
-            byte[] blockAts = Convert.parseHexString(JSON.getAsString(blockData.get("blockAts")));
+            byte[] blockAts = Convert.parseHexString(JSON.getAsString(blockData.get("blockATs")));
             return new Block(
                     version,
                     timestamp,
