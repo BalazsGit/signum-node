@@ -531,7 +531,15 @@ public class NodeProfilePanel extends JPanel {
         // starts the node for this profile.
         Signum started = null;
         try {
-            started = NodeModule.getInstance().startNode(profile.getName());
+            Signum existing = NodeModule.getInstance().get(profile.getName());
+            if (existing != null && existing.getState() == Signum.State.ERROR) {
+                // ERROR is only recoverable through an explicit stop first
+                // (Signum.stop() accepts the ERROR state) — route Start through
+                // the restart path so a failed start never dead-ends the node.
+                started = NodeModule.getInstance().restartNode(profile.getName());
+            } else {
+                started = NodeModule.getInstance().startNode(profile.getName());
+            }
         } catch (Exception e) {
             LOGGER.error("Start failed for profile: {}", profile.getName(), e);
         }

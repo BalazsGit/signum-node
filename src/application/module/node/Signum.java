@@ -339,8 +339,19 @@ public final class Signum {
      * <p>
      * Requires prior call to {@link #init()}.
      * </p>
+     * <p>
+     * <b>ERROR is recoverable:</b> a node that previously failed to start
+     * (state {@code ERROR}) can be stopped — {@link #stop()} accepts the
+     * {@code ERROR} state, tears down whatever the failed start may have
+     * partially created, and moves the node to {@code STOPPED} — and can then
+     * be started again normally ({@code STOPPED -> STARTING -> ...}).
+     * Neither Stop nor Restart is restricted in the {@code ERROR} state.
+     * (Direct {@code start()} from {@code ERROR} is still rejected by design —
+     * a failed start must be acknowledged with an explicit Stop first — and the
+     * Restart action, which is Stop followed by Start, always works.)
+     * </p>
      *
-     * @throws IllegalStateException if not initialized
+     * @throws IllegalStateException if in a state that cannot transition to STARTING
      * @throws application.module.node.instance.NodeStartupException if startup fails
      */
     public synchronized void start() {
@@ -369,8 +380,24 @@ public final class Signum {
         });
     }
 
+    /**
+     * Stops the node.
+     * <p>
+     * Accepts two states:
+     * <ul>
+     *   <li>{@code RUNNING} — a normal stop;</li>
+     *   <li>{@code ERROR} — a recovery stop after a failed start: tears down
+     *       whatever the failed startup partially created (webServer /
+     *       peerManager / threadPool / DB) and returns the node to {@code STOPPED},
+     *       from which it can be started again normally. This keeps Stop (and
+     *       therefore Restart = Stop + Start) fully available in the
+     *       {@code ERROR} state.</li>
+     * </ul>
+     * In any other state this is a no-op (nothing to stop).
+     * </p>
+     */
     public void stop() {
-        if (this.state == State.RUNNING) {
+        if (this.state == State.RUNNING || this.state == State.ERROR) {
             // Same log-context binding as start() so shutdown lines reach the profile console.
             withProfileLogContext(() -> {
                 setState(State.STOPPING);

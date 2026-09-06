@@ -3144,7 +3144,15 @@ public class NodeConsolePanel extends JPanel {
             // v4: single lifecycle entry point — NodeModule creates (if missing) and
             // starts the Signum for THIS panel's own profile (never a global
             // "active" profile).
-            ctx = NodeModule.getInstance().startNode(this.profileName);
+            Signum existing = NodeModule.getInstance().get(this.profileName);
+            if (existing != null && existing.getState() == Signum.State.ERROR) {
+                // ERROR is only recoverable through an explicit stop first
+                // (Signum.stop() accepts the ERROR state) — route Start through
+                // the restart path so a failed start never dead-ends the node.
+                ctx = NodeModule.getInstance().restartNode(this.profileName);
+            } else {
+                ctx = NodeModule.getInstance().startNode(this.profileName);
+            }
         } catch (Exception e) {
             LOGGER.error("Signum startup failed for profile '{}': {}", profileName, e.getMessage(), e);
         }

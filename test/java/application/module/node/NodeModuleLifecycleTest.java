@@ -36,7 +36,8 @@ public class NodeModuleLifecycleTest {
         // Never leak a registered (or running) test node into other tests.
         Signum signum = module().get(PROFILE);
         if (signum != null) {
-            if (signum.isRunning()) {
+            Signum.State state = signum.getState();
+            if (signum.isRunning() || state == Signum.State.ERROR) {
                 try {
                     signum.stop();
                 } catch (Exception ignored) {
@@ -148,6 +149,92 @@ public class NodeModuleLifecycleTest {
                     sizeBefore, module().size());
         } finally {
             module().removeNode(PROFILE);
+        }
+    }
+
+    // =====================================================================
+    // ERROR-state recovery contract
+    // (a node that failed to start must never dead-end: Stop works from ERROR,
+    // Restart = Stop + Start therefore always works; only a direct Start from
+    // ERROR is rejected by design — the user must acknowledge the failure first)
+    // =====================================================================
+
+    @Test
+    public void stop_fromErrorState_reachesStopped() {
+        Signum signum = new Signum(new NodeProfile(PROFILE), CONF);
+        module().addNode(signum);
+        try {
+            setStateForTest(signum, Signum.State.ERROR);
+            signum.stop();
+            assertEquals("stop() from ERROR must tear down and reach STOPPED",
+                    Signum.State.STOPPED, signum.getState());
+        } finally {
+            module().removeNode(PROFILE);
+        }
+    }
+
+    @Test
+    public void start_fromErrorState_isRejectedUntilStopped() {
+        Signum signum = new Signum(new NodeProfile(PROFILE), CONF);
+        try {
+            setStateForTest(signum, Signum.State.ERROR);
+            try {
+                signum.start();
+                fail("Expected IllegalStateException for a direct start() from ERROR");
+            } catch (IllegalStateException expected) {
+                // contract: a failed start must be acknowledged with an explicit
+                // stop() before a new start can be attempted
+            }
+        } finally {
+            if (signum.isRunning()) {
+                try {
+                    signum.stop();
+                } catch (Exception ignored) {
+                    // best-effort
+                }
+            }
+        }
+    }
+
+    @Test
+    public void stop_fromCreatedState_isNoOp() {
+        Signum signum = new Signum(new NodeProfile(PROFILE), CONF);
+        signum.stop();
+        assertEquals("stop() from CREATED must be a no-op",
+                Signum.State.CREATED, signum.getState());
+    }
+
+    @Test
+    public void stop_fromStoppedState_isNoOp() {
+        Signum signum = new Signum(new NodeProfile(PROFILE), CONF);
+        try {
+            setStateForTest(signum, Signum.State.STOPPED);
+            signum.stop();
+            assertEquals("stop() from STOPPED must be a no-op",
+                    Signum.State.STOPPED, signum.getState());
+        } finally {
+            if (signum.isRunning()) {
+                try {
+                    signum.stop();
+                } catch (Exception ignored) {
+                    // best-effort
+                }
+            }
+        }
+    }
+
+    /**
+     * Test helper: forces a lifecycle state directly (the state machine's
+     * transitions to ERROR are only reachable through a real failed startup,
+     * which is environment-dependent and therefore not used here).
+     */
+    private static void setStateForTest(Signum signum, Signum.State state) {
+        try {
+            java.lang.reflect.Field field = Signum.class.getDeclaredField("state");
+            field.setAccessible(true);
+            field.set(signum, state);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to force test state " + state, e);
         }
     }
 }

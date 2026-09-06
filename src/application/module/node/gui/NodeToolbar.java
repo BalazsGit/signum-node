@@ -585,7 +585,16 @@ public class NodeToolbar extends JPanel {
             // Currently stopped/ready/error -> start (NodeModule creates the
             // Signum if it does not exist yet).
             try {
-                Signum started = NodeModule.getInstance().startNode(profile.getName());
+                Signum started;
+                if (state == Signum.State.ERROR) {
+                    // A failed start can only be recovered by an explicit stop
+                    // first (Signum.stop() accepts the ERROR state); route the
+                    // user's Start click through the restart path (stop + start)
+                    // so it never dead-ends in the ERROR state.
+                    started = NodeModule.getInstance().restartNode(profile.getName());
+                } else {
+                    started = NodeModule.getInstance().startNode(profile.getName());
+                }
                 // v4: hand the instance back to the owning panel (adopt + console attach).
                 if (onNodeStarted != null) {
                     onNodeStarted.onNodeStarted(started);
