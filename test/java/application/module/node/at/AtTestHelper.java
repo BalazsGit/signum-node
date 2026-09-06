@@ -81,7 +81,7 @@ public class AtTestHelper {
         ATStore mockAtStore = mock(ATStore.class);
 
         FluxCapacitor earlyFluxCap = QuickMocker.latestValueFluxCapacitor();
-        AtController.setAtConstants(new AtConstants(earlyFluxCap));
+        AtConstants atConstants = new AtConstants(earlyFluxCap);
 
         FluxCapacitor mockFluxCapacitor = QuickMocker.latestValueFluxCapacitor();
         // noinspection unchecked
@@ -167,7 +167,7 @@ public class AtTestHelper {
         when(mockStores.getAtStore()).thenReturn(mockAtStore);
 
         testContext = new ATProcessingContext(
-                AtController.getAtConstants(),
+                atConstants,
                 realProcessorCache,
                 mockPropertyService,
                 mockFluxCapacitor,

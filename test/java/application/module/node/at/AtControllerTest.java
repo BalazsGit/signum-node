@@ -22,9 +22,10 @@ public class AtControllerTest {
     @Test
     public void testCheckCreationBytes() throws AtException {
         AtTestHelper.clearAddedAts();
-        assertEquals(4, AtController.checkCreationBytes(AtTestHelper.HELLO_WORLD_CREATION_BYTES, Integer.MAX_VALUE, 1));
-        assertEquals(4, AtController.checkCreationBytes(AtTestHelper.ECHO_CREATION_BYTES, Integer.MAX_VALUE, 1));
-        assertEquals(5, AtController.checkCreationBytes(AtTestHelper.TIP_THANKS_CREATION_BYTES, Integer.MAX_VALUE, 1));
+        AtConstants constants = AtTestHelper.getTestContext().getAtConstants();
+        assertEquals(4, AtController.checkCreationBytes(AtTestHelper.HELLO_WORLD_CREATION_BYTES, Integer.MAX_VALUE, 1, constants));
+        assertEquals(4, AtController.checkCreationBytes(AtTestHelper.ECHO_CREATION_BYTES, Integer.MAX_VALUE, 1, constants));
+        assertEquals(5, AtController.checkCreationBytes(AtTestHelper.TIP_THANKS_CREATION_BYTES, Integer.MAX_VALUE, 1, constants));
     }
 
     @Test

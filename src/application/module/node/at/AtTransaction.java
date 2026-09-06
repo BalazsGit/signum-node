@@ -10,8 +10,6 @@ package application.module.node.at;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Collection;
-import java.util.SortedMap;
-import java.util.TreeMap;
 
 import application.module.node.Account;
 import application.module.node.Appendix;
@@ -34,7 +32,7 @@ import application.module.node.util.Convert;
 import application.module.node.util.TextUtils;
 
 public class AtTransaction {
-    private static final SortedMap<Long, SortedMap<Long, AtTransaction>> all_AT_Txs = new TreeMap<>();
+
     private final byte[] message;
     private final long amount;
     private final long assetId;
@@ -213,14 +211,6 @@ public class AtTransaction {
         }
     }
 
-    public static AtTransaction getATTransaction(Long atId, Long height) {
-        if (all_AT_Txs.containsKey(atId)) {
-            return all_AT_Txs.get(atId).get(height);
-        }
-
-        return null;
-    }
-
     public long getAmount() {
         return amount;
     }
@@ -247,15 +237,5 @@ public class AtTransaction {
 
     public byte[] getMessage() {
         return message;
-    }
-
-    public void addTransaction(long atId, Long height) {
-        if (all_AT_Txs.containsKey(atId)) {
-            all_AT_Txs.get(atId).put(height, this);
-        } else {
-            SortedMap<Long, AtTransaction> temp = new TreeMap<>();
-            temp.put(height, this);
-            all_AT_Txs.put(atId, temp);
-        }
     }
 }

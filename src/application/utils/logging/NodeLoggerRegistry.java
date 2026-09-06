@@ -1,5 +1,8 @@
 package application.utils.logging;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -75,6 +78,32 @@ public final class NodeLoggerRegistry {
 
     public static ProfileLogger get(String module, String profile) {
         return get(LogScope.of(module, profile));
+    }
+
+    /**
+     * Returns all registered {@link ProfileLogger}s of the given module (e.g. "node"),
+     * in no particular order.
+     * <p>
+     * Used by the {@link SystemLoggerJulHandler} fallback routing: log events emitted
+     * on threads without a {@link NodeLogContext} (GUI/EDT components such as
+     * {@code NodeModule}, {@code NodePanel}, {@code NodeToolbar}) still belong to the
+     * node profile consoles and must not be dropped to the System Logger only.
+     * </p>
+     *
+     * @param module the module id (e.g. "node"), never null
+     * @return the registered loggers of that module (possibly empty, never null)
+     */
+    public static Collection<ProfileLogger> loggersForModule(String module) {
+        if (module == null) {
+            return java.util.Collections.emptyList();
+        }
+        List<ProfileLogger> result = new ArrayList<>();
+        for (Map.Entry<LogScope, ProfileLogger> entry : REGISTRY.entrySet()) {
+            if (module.equals(entry.getKey().module())) {
+                result.add(entry.getValue());
+            }
+        }
+        return result;
     }
 
     /**

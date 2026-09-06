@@ -96,22 +96,11 @@ public class BlockServiceImpl implements BlockService {
                 publicKey = rewardAccount.getPublicKey();
             }
 
-            boolean result = Crypto.verify(
+            return Crypto.verify(
                     block.getBlockSignature(),
                     data2,
                     publicKey,
                     block.getVersion() >= 3);
-            // [BLOCKSIG-DEBUG] IDEIGLENES – TÖRLÉND a hibakeresés után
-            if (!result && logger.isInfoEnabled()) {
-                logger.info("[BLOCKSIG-DEBUG] VERIFY FAILED: h={} id={} genPK={} account={} rewardAccount={} rewardPK={} finalPK={} enforceCanonical={}",
-                        block.getHeight(), block.getId(),
-                        Hex.toHexString(block.getGeneratorPublicKey()),
-                        (account == null) ? "null" : String.valueOf(account.getId()),
-                        (rewardAccount == null) ? "n/a" : String.valueOf(rewardAccount.getId()),
-                        (rewardAccount == null || rewardAccount.getPublicKey() == null) ? "n/a" : Hex.toHexString(rewardAccount.getPublicKey()),
-                        Hex.toHexString(publicKey), block.getVersion() >= 3);
-            }
-            return result;
 
         } catch (RuntimeException e) {
 
@@ -169,18 +158,6 @@ public class BlockServiceImpl implements BlockService {
             } else {
                 rewardAccount = accountService.getAccount(rewardAssignment.getPrevRecipientId());
             }
-        }
-        // [BLOCKSIG-DEBUG] IDEIGLENES – TÖRLÉND a hibakeresés után
-        if (logger.isInfoEnabled() && block.getHeight() >= 59750) {
-            logger.info("[BLOCKSIG-DEBUG] getRewardAccount: h={} genAcct={} assignment={} recipId={} prevRecipId={} fromHeight={} finalAcct={} finalPK={}",
-                    block.getHeight(),
-                    String.valueOf(accountService.getAccount(block.getGeneratorPublicKey()).getId()),
-                    (rewardAssignment == null) ? "null" : "present",
-                    (rewardAssignment == null) ? "n/a" : String.valueOf(rewardAssignment.getRecipientId()),
-                    (rewardAssignment == null) ? "n/a" : String.valueOf(rewardAssignment.getPrevRecipientId()),
-                    (rewardAssignment == null) ? "n/a" : String.valueOf(rewardAssignment.getFromHeight()),
-                    (rewardAccount == null) ? "null" : String.valueOf(rewardAccount.getId()),
-                    (rewardAccount == null || rewardAccount.getPublicKey() == null) ? "null" : Hex.toHexString(rewardAccount.getPublicKey()));
         }
         return rewardAccount;
     }

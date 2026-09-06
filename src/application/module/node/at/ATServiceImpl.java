@@ -157,6 +157,10 @@ public class ATServiceImpl implements ATService {
             AT at = atContext.at;
             byte[] receivedMd5 = atContext.md5;
 
+            if (at == null) {
+                throw new AtException("AT " + Convert.toUnsignedLong(atIdLong)
+                        + " not found in database at height " + blockHeight);
+            }
             logger.debug("Running AT {}", Convert.toUnsignedLong(atIdLong));
             try {
                 at.clearLists();
@@ -207,7 +211,11 @@ public class ATServiceImpl implements ATService {
                     throw new AtException("Calculated md5 and received md5 are not matching");
                 }
             } catch (Exception e) {
-                debugLog.debug("ATs error", e);
+                // Surface the REAL cause at a level that is always visible. Previously this was
+                // only logged via the (off-by-default) AT debug logger, so the root cause was
+                // hidden behind the generic "ATs error. Block rejected" and diagnosis was impossible.
+                logger.warn("AT validation failed for block height {} (AT {}): {}",
+                        blockHeight, Convert.toUnsignedLong(atIdLong), e.toString(), e);
                 throw new AtException("ATs error. Block rejected", e);
             }
             logger.debug("Finished running AT {}", Convert.toUnsignedLong(atIdLong));
@@ -397,6 +405,16 @@ public class ATServiceImpl implements ATService {
     }
 
     private void listCode(AtMachineState state, ATProcessingContext ctx, boolean disassembly, boolean determineJumps) {
+        // Bind instance-level dependencies required for canonical serialization
+        // (FluxCapacitor feature flags gate SMART_ATS / AT_FIX_BLOCK_2 byte blocks,
+        // AccountStore backs per-asset balance lookups, ATStore backs map lookups).
+        // Without these, AtMachineState.getTransactionBytes() sees fluxCapacitor == null,
+        // drops the SMART_ATS assetId bytes, and the resulting MD5 no longer matches
+        // the block's stored AT checksum ("ATs error. Block rejected").
+        state.setFluxCapacitor(ctx.getFluxCapacitor());
+        state.setAccountStore(ctx.getAccountStore());
+        state.setAtStore(ctx.getAtStore());
+
         AtMachineProcessor machineProcessor = new AtMachineProcessor(state, ctx,
                 ctx.getPropertyService().getBoolean(Props.ENABLE_AT_DEBUG_LOG));
 
@@ -501,38 +519,18 @@ public class ATServiceImpl implements ATService {
         return processingContext;
     }
 
-    // -------------------------------------------------------------------------
-    // Convenience overloads — delegate to context-aware methods using stored ctx
-    // -------------------------------------------------------------------------
-
-    @Override
-    public AtBlock validateATs(byte[] blockATs, int blockHeight, long generatorId) throws AtException {
-        if (processingContext == null) {
-            throw new IllegalStateException("ATProcessingContext not available. Use full constructor for block processing.");
-        }
-        return validateATs(processingContext, blockATs, blockHeight, generatorId);
-    }
-
-    @Override
-    public AtBlock getCurrentBlockATs(int freePayload, int blockHeight, long generatorId, int indirectsCount) {
-        if (processingContext == null) {
-            throw new IllegalStateException("ATProcessingContext not available. Use full constructor for block processing.");
-        }
-        return getCurrentBlockATs(processingContext, freePayload, blockHeight, generatorId, indirectsCount);
-    }
-
     /**
      * Clears all pending AT state (fees, transactions, map updates) for the given block/generator.
      * <p>
-     * Delegates to the instance-scoped {@link ATPendingState}. A no-op when no processing
-     * context is available (CRUD-only construction).
+     * Delegates to the instance-scoped {@link ATPendingState} carried by the given
+     * {@link ATProcessingContext} (per-node). A no-op when the context is null.
      * </p>
      */
     @Override
-    public void clearPending(int blockHeight, long generatorId) {
-        if (processingContext == null) {
+    public void clearPending(ATProcessingContext ctx, int blockHeight, long generatorId) {
+        if (ctx == null) {
             return;
         }
-        AT.clearPending(processingContext, blockHeight, generatorId);
+        AT.clearPending(ctx, blockHeight, generatorId);
     }
 }

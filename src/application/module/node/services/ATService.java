@@ -72,39 +72,22 @@ public interface ATService {
             throws application.module.node.at.AtException;
 
     // -------------------------------------------------------------------------
-    // Convenience overloads (use stored processing context inside ATServiceImpl)
-    // Called from BlockchainProcessorImpl without explicitly building context
+    // Context access (per-node): callers pass the SAME context explicitly
     // -------------------------------------------------------------------------
 
     /**
-     * Validates ATs contained in a block, using the service's internal context.
-     *
-     * @param blockATs    the raw AT bytes from the block
-     * @param blockHeight the height of the block being processed
-     * @param generatorId the generator account ID
-     * @return an {@link AtBlock} describing fees, amounts and resulting bytes
-     * @throws application.module.node.at.AtException if validation fails
+     * Returns the {@link ATProcessingContext} this service was constructed with, so callers
+     * (e.g. {@code BlockchainProcessorImpl}) can pass the SAME per-node context explicitly
+     * to the processing methods above instead of relying on a hidden one.
      */
-    AtBlock validateATs(byte[] blockATs, int blockHeight, long generatorId)
-            throws application.module.node.at.AtException;
-
-     /**
-      * Processes ATs for a newly forged (current) block, using the service's internal context.
-      *
-      * @param freePayload the remaining payload size available in the block
-      * @param blockHeight the height of the block being forged
-      * @param generatorId the generator account ID
-      * @param indirectsCount initial indirect transactions count
-      * @return an {@link AtBlock} describing fees, amounts and resulting bytes
-      */
-     AtBlock getCurrentBlockATs(int freePayload, int blockHeight,
-             long generatorId, int indirectsCount);
+    ATProcessingContext getProcessingContext();
 
      /**
       * Clears all pending AT state (fees, transactions, map updates) for the given block/generator.
       *
+      * @param ctx         the AT processing context (carries the per-node pending state)
       * @param blockHeight the block height
       * @param generatorId the generator account ID
       */
-     void clearPending(int blockHeight, long generatorId);
+    void clearPending(ATProcessingContext ctx, int blockHeight, long generatorId);
  }

@@ -27,11 +27,17 @@ public class AtApiImpl implements AtApi {
     private FluxCapacitor fluxCapacitor;
 
     /**
-     * Default constructor. Creates internal reference to AtApiPlatformImpl singleton.
-     * TODO: Replace with constructor injection when AtApiPlatformImpl singleton is eliminated.
+     * Package-private base constructor for {@link AtApiPlatformImpl} (which extends this class).
+     * <p>
+     * The {@code platform} reference is intentionally left {@code null}: every platform-dependent
+     * method is overridden in {@link AtApiPlatformImpl} to resolve its dependencies from the
+     * injected {@link ATProcessingContext}, so the inherited {@code platform} field is never
+     * dereferenced there. This removes the JVM-wide singleton while keeping the hierarchy intact.
+     * </p>
      */
-    public AtApiImpl() {
-        this.platform = AtApiPlatformImpl.getInstance();
+    AtApiImpl() {
+        this.platform = null;
+        this.fluxCapacitor = null;
     }
 
     /**

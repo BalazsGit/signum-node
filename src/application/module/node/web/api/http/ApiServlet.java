@@ -218,9 +218,9 @@ public final class ApiServlet extends HttpServlet {
                 new GetAccountSubscriptions(parameterService, subscriptionService, aliasService, blockchain));
         map.put("getSubscriptionsToAccount", new GetSubscriptionsToAccount(parameterService, subscriptionService, blockchain));
         map.put("createATProgram", new CreateATProgram(parameterService, blockchain, apiTransactionManager, context.getAtConstants(), fluxCapacitor));
-        map.put("getAT", new GetAT(parameterService, blockchain));
+        map.put("getAT", new GetAT(parameterService, blockchain, context.getAtConstants()));
         map.put("getATDetails", new GetATDetails(parameterService));
-        map.put("getATs", new GetATs(atService, blockchain));
+        map.put("getATs", new GetATs(atService, blockchain, context.getAtConstants()));
         map.put("getATIds", new GetATIds(atService));
         map.put("getATLong", GetATLong.instance);
         map.put("getATMapValue", new GetATMapValue(atStore));

@@ -1,40 +1,17 @@
 package application.module.node.at;
 
-import application.module.node.fluxcapacitor.FluxCapacitor;
-
 import static application.module.node.at.OpCode.*;
 
 /**
- * Controller that bridges static AT API calls to the injected AtApiImpl instance.
- * Provides setter-based dependency injection during module initialization.
+ * Dispatches AT API calls to a per-context {@link AtApiImpl} instance.
+ * <p>
+ * Each call builds the {@link AtApiImpl} from the injected {@link ATProcessingContext},
+ * so there is no JVM-wide shared state — multiple node profiles can run concurrently.
+ * </p>
  */
 class AtApiController {
-    private static final AtApiImpl atApi = new AtApiImpl();
-    private static AtConstants atConstants;
 
     private AtApiController() {
-    }
-
-    /**
-     * Sets the AtConstants instance for use by AT API platform methods.
-     * Called once during initialization from AtController.
-     */
-    static void setAtConstants(AtConstants constants) {
-        atConstants = constants;
-    }
-
-    /**
-     * Sets the FluxCapacitor on the underlying AtApiImpl for feature flag evaluation.
-     * Called once during AT module initialization to eliminate Signum.getFluxCapacitor() calls.
-     *
-     * @param fluxCapacitor the flux capacitor instance
-     */
-    static void setFluxCapacitor(FluxCapacitor fluxCapacitor) {
-        atApi.setFluxCapacitor(fluxCapacitor);
-    }
-
-    static AtConstants getAtConstants() {
-        return atConstants;
     }
 
     public static long func(ATProcessingContext ctx, int funcNum, AtMachineState state) {

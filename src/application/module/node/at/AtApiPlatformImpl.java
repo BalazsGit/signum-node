@@ -35,16 +35,12 @@ import java.util.Objects;
  * Uses injected {@link ATProcessingContext} for all external dependencies,
  * eliminating static {@code Signum.getXxx()} calls.
  *
- * <p><b>Migration:</b> The singleton {@link #getInstance()} is deprecated.
- * Use constructor injection via {@link #AtApiPlatformImpl(ATProcessingContext)} instead.</p>
+ * <p><b>Usage:</b> Construct with an {@link ATProcessingContext} (per-node context);
+ * there is no JVM-wide singleton.</p>
  */
 public class AtApiPlatformImpl extends AtApiImpl {
 
     private static final Logger logger = LoggerFactory.getLogger(AtApiPlatformImpl.class);
-
-    /** @deprecated Use constructor injection with {@link ATProcessingContext} */
-    @Deprecated
-    private static final AtApiPlatformImpl instance = new AtApiPlatformImpl();
 
     private final ATProcessingContext context;
 
@@ -58,27 +54,36 @@ public class AtApiPlatformImpl extends AtApiImpl {
     }
 
     /**
-     * @deprecated Use constructor injection with {@link ATProcessingContext}
+     * Resolves the {@link AtConstants} from the injected {@link ATProcessingContext}.
+     * <p>
+     * This always resolves from the per-node context — there is no JVM-wide static registry to
+     * fall back to. A missing context (or missing constants) fails fast with an
+     * {@link IllegalStateException} instead of surfacing later as a {@code NullPointerException}
+     * on the first opcode that needs the constants (e.g. {@code ADD_MINUTES_TO_TIMESTAMP}),
+     * which historically masked the problem as the generic "ATs error. Block rejected".
+     * </p>
+     *
+     * @return the non-null AT constants for this node instance
+     * @throws IllegalStateException if the platform API was constructed without a context
      */
-    @Deprecated
-    private AtApiPlatformImpl() {
-        this.context = null;
-    }
-
-    /**
-     * @deprecated Use constructor injection with {@link ATProcessingContext}
-     * @return the legacy singleton instance
-     */
-    @Deprecated
-    public static AtApiPlatformImpl getInstance() {
-        return instance;
+    private AtConstants getAtConstants() {
+        if (context == null) {
+            throw new IllegalStateException(
+                    "AtApiPlatformImpl has no ATProcessingContext; AtConstants cannot be resolved");
+        }
+        AtConstants atConstants = context.getAtConstants();
+        if (atConstants == null) {
+            throw new IllegalStateException(
+                    "ATProcessingContext.getAtConstants() returned null; AT module not fully initialized");
+        }
+        return atConstants;
     }
 
     // ==================== Helper methods — direct context access (fail-fast) ====================
 
     /**
      * Returns the AT data store from the processing context.
-     * Throws {@link IllegalStateException} if invoked on a legacy singleton instance.
+     * Fails fast (NPE) if invoked without a processing context.
      */
     private ATStore getAtStoreBridge() {
         Objects.requireNonNull(context, "ATProcessingContext must not be null — use constructor injection");
@@ -332,7 +337,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
         int txBlockHeight = tx.getHeight();
         int blockHeight = state.getHeight();
 
-        AtConstants atConstants = AtApiController.getAtConstants();
+        AtConstants atConstants = getAtConstants();
         if (blockHeight - txBlockHeight < atConstants.blocksForRandom(blockHeight)) { // for tests - for real case 1440
             state.setWaitForNumberOfBlocks(
                     (int) atConstants.blocksForRandom(blockHeight) - (blockHeight - txBlockHeight));
@@ -910,7 +915,7 @@ public class AtApiPlatformImpl extends AtApiImpl {
     public long addMinutesToTimestamp(long val1, long val2, AtMachineState state) {
         int height = AtApiHelper.longToHeight(val1);
         int numOfTx = AtApiHelper.longToNumOfTx(val1);
-        AtConstants atConstants = AtApiController.getAtConstants();
+        AtConstants atConstants = getAtConstants();
         int addHeight = height + (int) (val2 / atConstants.averageBlockMinutes(state.getHeight()));
 
         return AtApiHelper.getLongTimestamp(addHeight, numOfTx);

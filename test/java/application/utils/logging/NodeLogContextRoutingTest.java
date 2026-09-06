@@ -89,15 +89,30 @@ class NodeLogContextRoutingTest {
     }
 
     @Test
-    @DisplayName("without NodeLogContext: SystemLogger receives, ProfileLogger does NOT (the original bug)")
-    void noContext_routesToSystemOnly() {
+    @DisplayName("without NodeLogContext: node-module loggers are still routed via fallback (console must not be empty)")
+    void noContext_nodeModuleLogger_routesToProfileViaFallback() {
         NodeLogContext.clear();
 
         SystemLoggerJulHandler.getInstance().publish(sampleRecord());
 
         assertEquals(1, systemEvents.get(), "SystemLogger must always receive the event");
+        assertEquals(1, profileEvents.get(),
+                "Node-module logs (application.module.node.*) must reach the profile console "
+                        + "even when the emitting thread (e.g. EDT) has no NodeLogContext");
+    }
+
+    @Test
+    @DisplayName("without NodeLogContext: non-node loggers still do NOT reach the node profile console")
+    void noContext_foreignLogger_notRoutedToProfile() {
+        NodeLogContext.clear();
+
+        LogRecord foreign = new LogRecord(Level.INFO, "not node module");
+        foreign.setLoggerName("application.utils.logging.SomeOther");
+        SystemLoggerJulHandler.getInstance().publish(foreign);
+
+        assertEquals(1, systemEvents.get(), "SystemLogger must always receive the event");
         assertEquals(0, profileEvents.get(),
-                "Without NodeLogContext the per-profile console gets nothing -> empty Node Console");
+                "Foreign (non application.module.node) loggers must not leak into the node console");
     }
 
     @Test

@@ -20,6 +20,7 @@ import application.module.node.peer.PeerMetric;
 import application.module.node.peer.Peers;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
+import application.module.node.at.ATProcessingContext;
 import application.module.node.services.AccountService;
 import application.module.node.services.AliasService;
 import application.module.node.services.ATService;
@@ -3618,12 +3619,13 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
         // ATs
         AtBlock atBlock;
-        atService.clearPending(block.getHeight(), block.getGeneratorId());
+        ATProcessingContext atCtx = atService.getProcessingContext();
+        atService.clearPending(atCtx, block.getHeight(), block.getGeneratorId());
         long atStartTime = 0;
         long atEndTime = 0;
         try {
             atStartTime = System.nanoTime();
-            atBlock = atService.validateATs(block.getBlockAts(), blockchain.getHeight(), block.getGeneratorId());
+            atBlock = atService.validateATs(atCtx, block.getBlockAts(), blockchain.getHeight(), block.getGeneratorId());
             atEndTime = System.nanoTime();
         } catch (AtException e) {
             throw new ConsensusMismatchException(
@@ -4234,8 +4236,9 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 // ATs for block - MUST be called while temporary balance changes are still in
                 // the DB
                 long generatorId = Account.getId(publicKey);
-                atService.clearPending(blockHeight, generatorId);
-                atBlock = atService.getCurrentBlockATs(payloadSize, blockHeight, generatorId, indirectsCount);
+                ATProcessingContext atCtx = atService.getProcessingContext();
+                atService.clearPending(atCtx, blockHeight, generatorId);
+                atBlock = atService.getCurrentBlockATs(atCtx, payloadSize, blockHeight, generatorId, indirectsCount);
             } catch (Exception e) {
                 stores.rollbackTransaction();
                 throw e;

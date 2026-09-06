@@ -92,7 +92,7 @@ public final class CreateATProgram extends CreateTransaction {
                     }
                     Attachment.AutomatedTransactionsCreation atCreationAttachment = (Attachment.AutomatedTransactionsCreation) transaction
                             .getAttachment();
-                    AtMachineState atCreation = AtMachineState.parseForValidation(atCreationAttachment.getCreationBytes(),
+                    AtMachineState atCreation = AtMachineState.parseForValidation(atConstants, atCreationAttachment.getCreationBytes(),
                             transaction.getHeight());
                     if (atCreation.getApCodeBytes().length == 0) {
                         throw new IllegalArgumentException();

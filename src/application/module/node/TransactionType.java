@@ -3761,7 +3761,7 @@ public abstract class TransactionType {
                 long totalPages;
                 int minCodePages = 1;
                 try {
-                    AtMachineState thisNewAtCreation = AtMachineState.parseForValidation(attachment.getCreationBytes(), 0);
+                    AtMachineState thisNewAtCreation = AtMachineState.parseForValidation(getContext().getAtConstants(), attachment.getCreationBytes(), 0);
                     if (thisNewAtCreation.getApCodeBytes().length == 0) {
                         // check if we have a reference for the code
                         Transaction referenceTransaction = getContext().getBlockchain()
@@ -3773,7 +3773,7 @@ public abstract class TransactionType {
                             Attachment.AutomatedTransactionsCreation atCreationAttachmentRef = (Attachment.AutomatedTransactionsCreation) referenceTransaction
                                     .getAttachment();
                             AtMachineState atCreationRef = AtMachineState.parseForValidation(
-                                    atCreationAttachmentRef.getCreationBytes(), referenceTransaction.getHeight());
+                                    getContext().getAtConstants(), atCreationAttachmentRef.getCreationBytes(), referenceTransaction.getHeight());
                             // we need a code and also compatible page sizes
                             if (atCreationRef.getApCodeBytes().length == 0
                                     || atCreationRef.getDataPages() != thisNewAtCreation.getDataPages()
@@ -3788,7 +3788,7 @@ public abstract class TransactionType {
                         }
                     }
                     totalPages = AtController.checkCreationBytes(attachment.getCreationBytes(), getContext().getBlockchain().getHeight(),
-                            minCodePages);
+                            minCodePages, getContext().getAtConstants());
                 } catch (AtException e) {
                     throw new SignumException.NotCurrentlyValidException("Invalid AT creation bytes", e);
                 }
@@ -3815,14 +3815,14 @@ public abstract class TransactionType {
                         .getAttachment();
 
                 long codeHashId = 0L;
-                AtMachineState thisNewAtCreation = AtMachineState.parseForValidation(attachment.getCreationBytes(), 0);
+                AtMachineState thisNewAtCreation = AtMachineState.parseForValidation(getContext().getAtConstants(), attachment.getCreationBytes(), 0);
                 if (thisNewAtCreation.getApCodeBytes().length == 0) {
                     Transaction referenceTransaction = getContext().getBlockchain()
                             .getTransactionByFullHash(transaction.getReferencedTransactionFullHash());
                     Attachment.AutomatedTransactionsCreation atCreationAttachmentRef = (Attachment.AutomatedTransactionsCreation) referenceTransaction
                             .getAttachment();
                     AtMachineState atCreationRef = AtMachineState.parseForValidation(
-                            atCreationAttachmentRef.getCreationBytes(), referenceTransaction.getHeight());
+                            getContext().getAtConstants(), atCreationAttachmentRef.getCreationBytes(), referenceTransaction.getHeight());
                     codeHashId = atCreationRef.getApCodeHashId();
                 }
 

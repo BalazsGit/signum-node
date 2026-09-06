@@ -15,6 +15,8 @@ import application.module.node.db.TransactionDb;
 import application.module.node.db.VersionedEntityTable;
 import application.module.node.services.AccountService;
 import application.module.node.util.Listener;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -31,23 +33,12 @@ import java.util.zip.GZIPOutputStream;
 
 public class AT extends AtMachineState {
 
+    private static final Logger logger = LoggerFactory.getLogger(AT.class);
+
     public final SignumKey dbKey;
     private final String name;
     private final String description;
     private final int nextHeight;
-
-    /**
-     * @deprecated Use the constructor that accepts {@link AtConstants} explicitly.
-     */
-    @Deprecated
-    private AT(byte[] atId, byte[] creator, String name, String description, byte[] creationBytes, int height, int currentHeight,
-            SignumKey.LongKeyFactory<AT> atDbKeyFactory) {
-        super(AtController.getAtConstants(), atId, creator, creationBytes, height);
-        this.name = name.trim();
-        this.description = description.trim();
-        dbKey = atDbKeyFactory.newKey(AtApiHelper.getLong(atId));
-        this.nextHeight = currentHeight;
-    }
 
     /**
      * Creates a new AT instance from creation bytes with explicit AtConstants.
@@ -60,27 +51,6 @@ public class AT extends AtMachineState {
         this.description = description.trim();
         dbKey = atDbKeyFactory.newKey(AtApiHelper.getLong(atId));
         this.nextHeight = currentHeight;
-    }
-
-    /**
-     * @deprecated Use the constructor that accepts {@link AtConstants} explicitly.
-     */
-    @Deprecated
-    public AT(byte[] atId, byte[] creator, String name, String description, short version,
-            int height,
-            byte[] stateBytes, int csize, int dsize, int cUserStackBytes, int cCallStackBytes,
-            int creationBlockHeight, int sleepBetween, int nextHeight,
-            boolean freezeWhenSameBalance, long minActivationAmount, byte[] apCode, long apCodeHashId,
-            SignumKey.LongKeyFactory<AT> atDbKeyFactory) {
-        super(AtController.getAtConstants(), atId, creator, version,
-                height,
-                stateBytes, csize, dsize, cUserStackBytes, cCallStackBytes,
-                creationBlockHeight, sleepBetween,
-                freezeWhenSameBalance, minActivationAmount, apCode, apCodeHashId);
-        this.name = name.trim();
-        this.description = description.trim();
-        dbKey = atDbKeyFactory.newKey(AtApiHelper.getLong(atId));
-        this.nextHeight = nextHeight;
     }
 
     /**

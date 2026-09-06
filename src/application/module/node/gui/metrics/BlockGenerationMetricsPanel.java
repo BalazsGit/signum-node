@@ -236,18 +236,13 @@ public class BlockGenerationMetricsPanel extends JPanel {
     private final Listener<Block> blockPoppedListener = this::onBlockPopped;
 
     /**
-     * Package-visible static reference to the profile-scoped AccountStore.
-     * Set during {@link #init()} and used by static inner classes
-     * ({@link MinerEntry}, {@link MinerPieToolTipGenerator}, {@link MinerPieSectionLabelGenerator})
-     * to resolve account names without a static Signum bridge.
-     *
-     * @since 4.1 P3 Bridge Cleanup
-     */
-    static volatile AccountStore accountStore;
-
-    /**
      * Profile-aware context providing access to node components.
      * Replaces static {@code Signum.getXxx()} calls.
+     * <p>
+     * The profile-scoped {@code AccountStore} needed by the static inner classes
+     * ({@link MinerEntry}, {@link MinerPieToolTipGenerator},
+     * {@link MinerPieSectionLabelGenerator}) to resolve account names is now
+     * passed from this context per-instance, guaranteeing per-node isolation.
      */
     private final MetricsPanelContext ctx;
 
@@ -305,9 +300,6 @@ public class BlockGenerationMetricsPanel extends JPanel {
      * Initializes the panel, loads initial data, and registers event listeners.
      */
     public void init() {
-        // P3: Wire the profile-scoped AccountStore for static inner classes
-        accountStore = ctx != null ? ctx.getAccountStore() : null;
-
         // A panel created while the node is NOT running owns a closed database —
         // querying it would throw on the EDT (HikariPool has been closed). Start in
         // an empty state instead; a panel (re)created while RUNNING loads its data
@@ -329,7 +321,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
                     Block lastBlock = blockchain.getLastBlock();
                     int nextHeight = (lastBlock != null ? lastBlock.getHeight() : 0) + 1;
                     for (Generator.GeneratorState state : generator.getAllGenerators()) {
-                        currentBlockDeadlines.add(new MinerEntry(state.getAccountId(), state.getDeadline(),
+                        currentBlockDeadlines.add(new MinerEntry(ctx, state.getAccountId(), state.getDeadline(),
                                 MinerEntry.Type.ACTIVE_LOCAL, nextHeight, System.currentTimeMillis(), 0));
                     }
                 }
@@ -1337,8 +1329,8 @@ public class BlockGenerationMetricsPanel extends JPanel {
         chart.setBorderVisible(false);
 
         PiePlot plot = (PiePlot) chart.getPlot();
-        plot.setToolTipGenerator(new MinerPieToolTipGenerator());
-        plot.setLabelGenerator(new MinerPieSectionLabelGenerator());
+        plot.setToolTipGenerator(new MinerPieToolTipGenerator(ctx));
+        plot.setLabelGenerator(new MinerPieSectionLabelGenerator(ctx));
         plot.setSimpleLabels(true);
         plot.setBackgroundPaint(null);
         plot.setOutlineVisible(false);
@@ -1488,7 +1480,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 Block lastBlock = blockchain != null ? blockchain.getLastBlock() : null;
                 final int nextHeight = (lastBlock != null ? lastBlock.getHeight() : 0) + 1;
                 if (state.getBlock() == nextHeight) {
-                    MinerEntry entry = new MinerEntry(state.getAccountId(), state.getDeadline(),
+                    MinerEntry entry = new MinerEntry(ctx, state.getAccountId(), state.getDeadline(),
                             MinerEntry.Type.ACTIVE_LOCAL, nextHeight, System.currentTimeMillis(), 0);
 
                     deadlineReceivedCountSinceLastBlock++;
@@ -2256,7 +2248,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 deadline = lastBlock.getTimestamp() - prevBlock.getTimestamp();
             }
 
-            data.entries.add(new MinerEntry(generatorId, BigInteger.valueOf(deadline),
+            data.entries.add(new MinerEntry(ctx, generatorId, BigInteger.valueOf(deadline),
                     isLocal ? MinerEntry.Type.WINNER_LOCAL : MinerEntry.Type.WINNER_REMOTE, lastBlock.getHeight(),
                     Convert.fromEpochTime(lastBlock.getTimestamp()).getTime(), lastBlock.getId()));
         }
@@ -2285,7 +2277,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
                     deadline = BigInteger.valueOf(Math.max(0, (long) entry.timestamp - prevEntry.timestamp));
                 }
             }
-            data.entries.add(new MinerEntry(entry.generatorId, deadline,
+            data.entries.add(new MinerEntry(ctx, entry.generatorId, deadline,
                     isLocal ? MinerEntry.Type.HISTORY_LOCAL : MinerEntry.Type.HISTORY_REMOTE, entry.height,
                     Convert.fromEpochTime(entry.timestamp).getTime(), entry.blockId));
         }
@@ -2434,7 +2426,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
             @Override
             public void mouseClicked(MouseEvent e) {
                 if (SwingUtilities.isLeftMouseButton(e) || SwingUtilities.isRightMouseButton(e)) {
-                    MinersListDialog.showDialog(parentFrame, tabIndex, recentGenerators, nodeDeadlineHistory, ctx.getBlockchain(), accountStore);
+                    MinersListDialog.showDialog(parentFrame, tabIndex, recentGenerators, nodeDeadlineHistory, ctx.getBlockchain(), ctx.getAccountStore());
                 }
             }
         });
@@ -2631,6 +2623,12 @@ public class BlockGenerationMetricsPanel extends JPanel {
     }
 
     private static class MinerPieToolTipGenerator implements PieToolTipGenerator {
+        private final MetricsPanelContext ctx;
+
+        MinerPieToolTipGenerator(MetricsPanelContext ctx) {
+            this.ctx = ctx;
+        }
+
         @Override
         public String generateToolTip(PieDataset dataset, Comparable key) {
             if (key == null) {
@@ -2663,7 +2661,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
                 double share = dataset.getValue(key).doubleValue();
 
                 String accountRS = SignumAddress.fromId(SignumID.fromLong(generatorId)).toString();
-                application.module.node.Account account = Account.getAccount(accountStore, generatorId);
+                application.module.node.Account account = Account.getAccount(ctx != null ? ctx.getAccountStore() : null, generatorId);
                 String name = (account != null && account.getName() != null && !account.getName().isEmpty())
                         ? account.getName()
                         : "N/A";
@@ -2705,6 +2703,12 @@ public class BlockGenerationMetricsPanel extends JPanel {
     }
 
     private static class MinerPieSectionLabelGenerator implements PieSectionLabelGenerator {
+        private final MetricsPanelContext ctx;
+
+        MinerPieSectionLabelGenerator(MetricsPanelContext ctx) {
+            this.ctx = ctx;
+        }
+
         @Override
         public String generateSectionLabel(PieDataset dataset, Comparable key) {
             if (dataset == null || key == null) {
@@ -2729,7 +2733,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
             } else {
                 try {
                     long generatorId = Long.parseLong(keyString);
-                    application.module.node.Account account = Account.getAccount(accountStore, generatorId);
+                    application.module.node.Account account = Account.getAccount(ctx != null ? ctx.getAccountStore() : null, generatorId);
                     String name = (account != null && account.getName() != null && !account.getName().isEmpty())
                             ? account.getName()
                             : Convert.toUnsignedLong(generatorId);
@@ -2808,10 +2812,10 @@ public class BlockGenerationMetricsPanel extends JPanel {
         final long timestamp;
         final long blockId;
 
-        MinerEntry(long accountId, BigInteger deadline, Type type, int height, long timestamp, long blockId) {
+        MinerEntry(MetricsPanelContext ctx, long accountId, BigInteger deadline, Type type, int height, long timestamp, long blockId) {
             this.accountId = accountId;
             this.accountRS = SignumAddress.fromId(SignumID.fromLong(accountId)).toString();
-            application.module.node.Account account = Account.getAccount(accountStore, accountId);
+            application.module.node.Account account = Account.getAccount(ctx != null ? ctx.getAccountStore() : null, accountId);
             this.minerName = (account != null && account.getName() != null) ? account.getName() : "";
             this.deadline = deadline;
             this.type = type;

@@ -180,23 +180,6 @@ public class AtMachineState {
     }
 
     /**
-     * Factory method for validation-only scenarios.
-     * Parses creation bytes without requiring AT ID or creator references.
-     * Internely resolves AtConstants via AtController to hide the dependency from callers.
-     *
-     * @param creationBytes raw AT creation byte array
-     * @param height        blockchain height for version resolution
-     * @return parsed AtMachineState instance
-     */
-    /**
-     * @deprecated Use {@link #parseForValidation(AtConstants, byte[], int)} instead.
-     */
-    @Deprecated
-    public static AtMachineState parseForValidation(byte[] creationBytes, int height) {
-        return new AtMachineState(AtController.getAtConstants(), null, null, creationBytes, height);
-    }
-
-    /**
      * Parses creation bytes for validation using the provided AtConstants instance.
      *
      * @param atConstants the AT configuration constants for this node instance
@@ -206,24 +189,6 @@ public class AtMachineState {
      */
     public static AtMachineState parseForValidation(AtConstants atConstants, byte[] creationBytes, int height) {
         return new AtMachineState(atConstants, null, null, creationBytes, height);
-    }
-
-    /**
-     * Factory method for AT instances with known identity.
-     * Internely resolves AtConstants via AtController to hide the dependency from callers.
-     *
-     * @param atId       raw bytes identifying the AT
-     * @param creator    raw bytes identifying the creator account
-     * @param creationBytes raw AT creation byte array
-     * @param height     blockchain height for version resolution
-     * @return parsed AtMachineState instance
-     */
-    /**
-     * @deprecated Use {@link #parse(AtConstants, byte[], byte[], byte[], int)} instead.
-     */
-    @Deprecated
-    public static AtMachineState parse(byte[] atId, byte[] creator, byte[] creationBytes, int height) {
-        return new AtMachineState(AtController.getAtConstants(), atId, creator, creationBytes, height);
     }
 
     /**

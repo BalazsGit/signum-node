@@ -14,6 +14,7 @@ import application.module.node.at.AT;
 import application.module.node.at.AtConstants;
 import application.module.node.at.ATProcessorCache;
 import application.module.node.at.ATProcessingContext;
+import application.module.node.at.ATPendingState;
 import application.module.node.at.ATServiceImpl;
 import application.module.node.at.AtController;
 import application.module.node.assetexchange.AssetExchange;
@@ -1162,7 +1163,6 @@ public final class Signum {
         this.atConstants = new AtConstants(this.fluxCapacitor);
 
         ((SqlATStore) this.stores.getAtStore()).setAtConstants(this.atConstants);
-        AtController.setAtConstants(this.atConstants);
 
         AliasStore aliasStore = this.stores.getAliasStore();
         this.subscriptionService = new SubscriptionServiceImpl(
@@ -1191,14 +1191,9 @@ public final class Signum {
                 this.fluxCapacitor, this.blockchain, this.stores.getAtStore(),
                 this.stores.getAccountStore(), this.accountService,
                 this.assetExchange, this.stores.getIndirectIncomingStore(),
-                this.stores.getAssetStore());
+                this.stores.getAssetStore(), new ATPendingState());
 
-        this.atService = new ATServiceImpl(
-                this.stores.getAtStore(), this.atConstants, this.atProcessorCache,
-                this.propertyService, this.fluxCapacitor, this.blockchain,
-                this.stores.getAccountStore(), this.accountService,
-                this.assetExchange, this.stores.getIndirectIncomingStore(),
-                this.stores.getAssetStore());
+        this.atService = new ATServiceImpl(this.stores.getAtStore(), this.atProcessingContext);
 
         NetworkParameters params = this.networkParameters;
         this.blockService = new BlockServiceImpl(

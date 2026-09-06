@@ -6,6 +6,7 @@ import application.module.node.SignumException;
 import application.module.node.Transaction;
 import application.module.node.at.AT;
 import application.module.node.at.AtApiHelper;
+import application.module.node.at.AtConstants;
 import application.module.node.at.AtMachineState;
 import application.module.node.services.ATService;
 import application.module.node.util.CollectionWithIndex;
@@ -30,12 +31,14 @@ public final class GetATs extends ApiServlet.JsonRequestHandler {
 
     private final ATService atService;
     private final Blockchain blockchain;
+    private final AtConstants atConstants;
 
-    public GetATs(ATService atService, Blockchain blockchain) {
+    public GetATs(ATService atService, Blockchain blockchain, AtConstants atConstants) {
         super(new LegacyDocTag[] { LegacyDocTag.AT, LegacyDocTag.ACCOUNTS }, MACHINE_CODE_HASH_ID_PARAMETER,
                 INCLUDE_DETAILS_PARAMETER, FIRST_INDEX_PARAMETER, LAST_INDEX_PARAMETER);
         this.atService = atService;
         this.blockchain = blockchain;
+        this.atConstants = atConstants;
     }
 
     @Override
@@ -73,7 +76,7 @@ public final class GetATs extends ApiServlet.JsonRequestHandler {
                     Attachment.AutomatedTransactionsCreation atCreationAttachment = (Attachment.AutomatedTransactionsCreation) transaction
                             .getAttachment();
 
-                    atCreation = AtMachineState.parse(at.getId(), at.getCreator(),
+                    atCreation = AtMachineState.parse(atConstants, at.getId(), at.getCreator(),
                             atCreationAttachment.getCreationBytes(), at.getCreationBlockHeight());
                 }
             }

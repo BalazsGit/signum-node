@@ -34,23 +34,6 @@ public abstract class AtController {
 
     private static final Logger logger = LoggerFactory.getLogger(AtController.class);
 
-    private static volatile AtConstants atConstants;
-
-    /**
-     * Sets the AtConstants instance for use by AtController methods.
-     * Called once during node initialization.
-     */
-    public static void setAtConstants(AtConstants constants) {
-        atConstants = constants;
-    }
-
-    /**
-     * Gets the AtConstants instance.
-     */
-    public static AtConstants getAtConstants() {
-        return atConstants;
-    }
-
     // Helper to get debug logger based on context property
     private static Logger getDebugLogger(PropertyService propertyService) {
         return propertyService.getBoolean(Props.ENABLE_AT_DEBUG_LOG) ? logger : NOPLogger.NOP_LOGGER;
@@ -70,6 +53,7 @@ public abstract class AtController {
 
         state.setFreeze(false);
 
+        final AtConstants atConstants = ctx.getAtConstants();
         long stepFee = atConstants.stepFee(state.getVersion());
         int numSteps = 0;
 
@@ -186,7 +170,7 @@ public abstract class AtController {
         state.getMachineState().pc = opc;
     }
 
-    public static int checkCreationBytes(byte[] creation, int height, int minCodePages) throws AtException {
+    public static int checkCreationBytes(byte[] creation, int height, int minCodePages, AtConstants atConstants) throws AtException {
         if (creation == null)
             throw new AtException("Creation bytes cannot be null");
 
@@ -284,6 +268,7 @@ public abstract class AtController {
 
         int costOfOneAT = getCostOfOneAT();
         int payload = 0;
+        final AtConstants atConstants = ctx.getAtConstants();
         long totalFee = 0;
         long totalAmount = 0;
 
@@ -365,6 +350,7 @@ public abstract class AtController {
         MessageDigest digest = Crypto.md5();
         byte[] md5;
         long totalAmount = 0;
+        final AtConstants atConstants = ctx.getAtConstants();
 
         for (Long atIdLong : atProcessorCache.getCurrentBlockAtIds()) {
             ATProcessorCache.ATContext atContext = atProcessorCache.getATContext(atIdLong);

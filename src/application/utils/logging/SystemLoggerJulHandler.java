@@ -102,11 +102,34 @@ public final class SystemLoggerJulHandler extends Handler {
                 if (profileLogger != null && !profileLogger.isClosed()) {
                     profileLogger.dispatch(event);
                 }
+            } else if (isNodeModuleLogger(record)) {
+                // 3. Fallback: threads without a NodeLogContext (GUI/EDT components such
+                //    as NodeModule, NodePanel, NodeToolbar, ProfileConfig) still emit
+                //    node-profile-relevant logs. Without this they would only reach the
+                //    System Logger (terminal) and be missing from the per-profile console
+                //    panel. Route them to every registered node-profile logger so the
+                //    profile console shows the complete profile-relevant log stream.
+                for (ProfileLogger profileLogger : NodeLoggerRegistry.loggersForModule("node")) {
+                    if (!profileLogger.isClosed()) {
+                        profileLogger.dispatch(event);
+                    }
+                }
             }
         } catch (Exception e) {
             // Never let logging errors crash the application
             System.err.println("[SystemLoggerJulHandler] Error: " + e.getMessage());
         }
+    }
+
+    /**
+     * True when the record originates from the node module package
+     * ({@code application.module.node.*}). Such log events belong to the node
+     * profile consoles even when the emitting thread carries no
+     * {@link NodeLogContext} (GUI/EDT threads).
+     */
+    private static boolean isNodeModuleLogger(LogRecord record) {
+        String name = record.getLoggerName();
+        return name != null && name.startsWith("application.module.node");
     }
 
     /**

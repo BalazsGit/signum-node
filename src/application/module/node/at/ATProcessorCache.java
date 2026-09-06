@@ -35,32 +35,6 @@ public final class ATProcessorCache {
 
     private static final Logger logger = LoggerFactory.getLogger(ATProcessorCache.class);
 
-    /**
-     * Transitional bridge for legacy callers still using the singleton pattern.
-     * @deprecated Use constructor injection via {@link ATProcessingContext} instead.
-     * This field will be removed once all callers are migrated (Phase 10c completion).
-     */
-    @Deprecated
-    private static volatile ATProcessorCache instance;
-
-    /**
-     * Sets the active ATProcessorCache instance for legacy bridge compatibility.
-     * @deprecated Will be removed after Phase 10c migration.
-     */
-    @Deprecated
-    public static void setInstance(ATProcessorCache cache) {
-        instance = cache;
-    }
-
-    /**
-     * Returns the currently active ATProcessorCache instance.
-     * @deprecated Use constructor injection via {@link ATProcessingContext} instead.
-     */
-    @Deprecated
-    public static ATProcessorCache getInstance() {
-        return instance;
-    }
-
     private static final int CostOfOneAT = AtConstants.AT_ID_SIZE + 16;
     private final LinkedHashMap<Long, ATContext> atMap = new LinkedHashMap<>();
     private int currentBlockHeight = Integer.MIN_VALUE;
