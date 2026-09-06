@@ -1,4 +1,5 @@
 package application.module.database.profile;
+import application.utils.config.ModuleIds;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -51,7 +52,7 @@ public class MariadbProfile {
                     // collision-safe "database.<profile>" scope. Database logs do not pass
                     // through the SystemLoggerJulHandler, so forwarding to the SystemLogger
                     // must stay enabled (unlike node loggers, which the handler already forwards).
-                    logger = application.utils.logging.NodeLoggerRegistry.getOrCreate("database", profileName);
+                    logger = application.utils.logging.NodeLoggerRegistry.getOrCreate(ModuleIds.DATABASE, profileName);
                     logger.setForwardToSystem(true);
                 }
             }

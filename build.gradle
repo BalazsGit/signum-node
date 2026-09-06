@@ -118,7 +118,43 @@ test {
             '**/AliasServiceImplTest.class',
             '**/TransactionDuplicatesCheckerImplTest.class',
             '**/UnconfirmedTransactionStoreTest.class',
-            '**/it/java/node/**'
+            '**/it/java/node/**',
+            '**/chain/**'
+}
+
+/**
+ * Integration tests requiring a LIVE mock node on localhost:6876 (see chain.ChainUtils.setupNode).
+ * Skipped automatically when no node is reachable; run explicitly with: gradlew integrationTest
+ */
+import java.net.Socket
+
+task integrationTest(type: Test) {
+    useJUnitPlatform()
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    include '**/chain/**'
+    testLogging {
+        exceptionFormat "full"
+        showStandardStreams = true
+        events "passed", "skipped", "failed"
+    }
+    jvmArgs += [
+        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+        "--add-opens=java.base/java.util=ALL-UNNAMED",
+        "--add-opens=java.base/java.io=ALL-UNNAMED",
+        "--add-opens=java.base/java.net=ALL-UNNAMED",
+        "--add-opens=java.base/jdk.internal.reflect=ALL-UNNAMED",
+        "--add-opens=java.logging/java.util.logging=ALL-UNNAMED"
+    ]
+    onlyIf {
+        try {
+            new Socket("localhost", 6876).withCloseable { it.isConnected() }
+        } catch (Exception e) {
+            logger.warn("integrationTest skipped: no mock node reachable on localhost:6876")
+            return false
+        }
+        return true
+    }
 }
 
 application {

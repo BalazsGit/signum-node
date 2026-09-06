@@ -3,6 +3,7 @@ package application.module.node.profile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import application.utils.config.ModuleIds;
 import application.utils.config.PropertiesProfileLoader;
 
 import java.io.InputStream;
@@ -142,7 +143,7 @@ public final class NodeProfileRepository {
     public static void ensureEmptyPlaceholdersIfNeeded() {
         PropertiesProfileLoader.ensureEmptyPlaceholdersForModule(
                 NodeProfile.CONF_ROOT, NodeProfile.MODULE_ID, NodeProfile.RESERVED_PROFILE_NAMES,
-                "node", "logging");
+                ModuleIds.NODE, ModuleIds.CATEGORY_LOGGING);
     }
 
     /**
@@ -153,6 +154,6 @@ public final class NodeProfileRepository {
     public static void initialize() {
         PropertiesProfileLoader.initializeModule(
                 NodeProfile.CONF_ROOT, NodeProfile.MODULE_ID, NodeProfile.RESERVED_PROFILE_NAMES,
-                "node", "logging");
+                ModuleIds.NODE, ModuleIds.CATEGORY_LOGGING);
     }
 }

@@ -135,7 +135,7 @@ class PropertiesProfileLoaderTest {
         @DisplayName("returns empty list when directory exists but has no profiles")
         void discoverProfiles_GivenEmptyDir_ReturnsEmptyList() throws Exception {
             // Arrange
-            Path dir = tempDir.resolve("empty/module/profiles");
+            Path dir = tempDir.resolve("empty/profiles");
             Files.createDirectories(dir);
 
             // Act
@@ -150,7 +150,7 @@ class PropertiesProfileLoaderTest {
         @DisplayName("returns profile names sorted alphabetically")
         void discoverProfiles_GivenMultipleProfiles_ReturnsSortedNames() throws Exception {
             // Arrange
-            Path dir = tempDir.resolve("sorted/module/profiles");
+            Path dir = tempDir.resolve("sorted/profiles");
             Files.createDirectories(dir);
             createPropertiesFile(dir, "zebra.properties");
             createPropertiesFile(dir, "alpha.properties");
@@ -168,7 +168,7 @@ class PropertiesProfileLoaderTest {
         @DisplayName("excludes reserved profile names from discovery")
         void discoverProfiles_GivenReservedNames_ExcludesThem() throws Exception {
             // Arrange
-            Path dir = tempDir.resolve("reserved/module/profiles");
+            Path dir = tempDir.resolve("reserved/profiles");
             Files.createDirectories(dir);
             createPropertiesFile(dir, "profile-default.properties");
             createPropertiesFile(dir, "logging-default.properties");
@@ -186,7 +186,7 @@ class PropertiesProfileLoaderTest {
         @DisplayName("ignores non-properties files")
         void discoverProfiles_GivenMixedFiles_OnlyReturnsProperties() throws Exception {
             // Arrange
-            Path dir = tempDir.resolve("mixed/module/profiles");
+            Path dir = tempDir.resolve("mixed/profiles");
             Files.createDirectories(dir);
             createPropertiesFile(dir, "valid.properties");
             Files.write(dir.resolve("readme.md"), "# Profiles".getBytes());
@@ -204,7 +204,7 @@ class PropertiesProfileLoaderTest {
         @DisplayName("works with null reserved names set")
         void discoverProfiles_GivenNullReserved_ReturnsAll() throws Exception {
             // Arrange
-            Path dir = tempDir.resolve("null/module/profiles");
+            Path dir = tempDir.resolve("null/profiles");
             Files.createDirectories(dir);
             createPropertiesFile(dir, "a.properties");
 
@@ -229,7 +229,7 @@ class PropertiesProfileLoaderTest {
         @DisplayName("returns zero when no profiles exist")
         void countProfiles_GivenNoProfiles_ReturnsZero() throws Exception {
             // Arrange
-            Path dir = tempDir.resolve("count/module/profiles");
+            Path dir = tempDir.resolve("count/profiles");
             Files.createDirectories(dir);
 
             // Act
@@ -244,7 +244,7 @@ class PropertiesProfileLoaderTest {
         @DisplayName("returns correct count excluding reserved names")
         void countProfiles_GivenMixed_ReturnsCorrectCount() throws Exception {
             // Arrange
-            Path dir = tempDir.resolve("count2/module/profiles");
+            Path dir = tempDir.resolve("count2/profiles");
             Files.createDirectories(dir);
             createPropertiesFile(dir, "profile-default.properties");
             createPropertiesFile(dir, "mainnet.properties");
@@ -283,7 +283,7 @@ class PropertiesProfileLoaderTest {
         @DisplayName("loads properties from valid file")
         void loadProfile_GivenValidFile_ReturnsProperties() throws Exception {
             // Arrange
-            Path dir = tempDir.resolve("load/module/profiles");
+            Path dir = tempDir.resolve("load/profiles");
             Files.createDirectories(dir);
             String content = "key1=value1\nkey2=value2\n";
             Files.write(dir.resolve("test.properties"), content.getBytes(StandardCharsets.UTF_8));
@@ -310,7 +310,7 @@ class PropertiesProfileLoaderTest {
         @DisplayName("returns empty array when no profiles exist")
         void loadAll_GivenNoProfiles_ReturnsEmptyArray() throws Exception {
             // Arrange
-            Path dir = tempDir.resolve("all/module/profiles");
+            Path dir = tempDir.resolve("all/profiles");
             Files.createDirectories(dir);
 
             // Act
@@ -327,7 +327,7 @@ class PropertiesProfileLoaderTest {
         @DisplayName("loads all profiles using factory")
         void loadAll_GivenValidProfiles_ReturnsLoadedEntities() throws Exception {
             // Arrange
-            Path dir = tempDir.resolve("all2/module/profiles");
+            Path dir = tempDir.resolve("all2/profiles");
             Files.createDirectories(dir);
             createPropertiesFile(dir, "alpha.properties", "name=Alpha\nvalue=100");
             createPropertiesFile(dir, "beta.properties", "name=Beta\nvalue=200");
@@ -349,7 +349,7 @@ class PropertiesProfileLoaderTest {
         @DisplayName("excludes reserved profiles from loadAll")
         void loadAll_GivenReservedProfiles_ExcludesThem() throws Exception {
             // Arrange
-            Path dir = tempDir.resolve("all3/module/profiles");
+            Path dir = tempDir.resolve("all3/profiles");
             Files.createDirectories(dir);
             createPropertiesFile(dir, "profile-default.properties", "x=1");
             createPropertiesFile(dir, "logging-default.properties", "y=2");
@@ -378,7 +378,7 @@ class PropertiesProfileLoaderTest {
         @DisplayName("creates file when it does not exist")
         void syncDefaultFile_GivenMissingTarget_CreatesFile() throws Exception {
             // Arrange
-            Path targetDir = tempDir.resolve("sync/module/profiles");
+            Path targetDir = tempDir.resolve("sync/profiles");
             Files.createDirectories(targetDir);
             String content = "default.key=default.value";
             ByteArrayInputStream resource = new ByteArrayInputStream(
@@ -400,7 +400,7 @@ class PropertiesProfileLoaderTest {
         @DisplayName("overwrites file when hash differs (update detected)")
         void syncDefaultFile_GivenHashDiffers_Overwrites() throws Exception {
             // Arrange
-            Path targetDir = tempDir.resolve("sync2/module/profiles");
+            Path targetDir = tempDir.resolve("sync2/profiles");
             Files.createDirectories(targetDir);
             Path file = targetDir.resolve("profile-default.properties");
             Files.write(file, "old.content=true".getBytes(StandardCharsets.UTF_8));
@@ -424,7 +424,7 @@ class PropertiesProfileLoaderTest {
         @DisplayName("does nothing when hash matches")
         void syncDefaultFile_GivenHashMatches_DoesNotOverwrite() throws Exception {
             // Arrange
-            Path targetDir = tempDir.resolve("sync3/module/profiles");
+            Path targetDir = tempDir.resolve("sync3/profiles");
             Files.createDirectories(targetDir);
             Path file = targetDir.resolve("profile-default.properties");
             String content = "unchanged=value";
@@ -465,7 +465,7 @@ class PropertiesProfileLoaderTest {
         @DisplayName("creates placeholder when no user profiles exist")
         void ensurePlaceholder_GivenNoProfiles_CreatesPlaceholder() throws Exception {
             // Arrange
-            Path dir = tempDir.resolve("placeholder/module/profiles");
+            Path dir = tempDir.resolve("placeholder/profiles");
             Files.createDirectories(dir);
 
             // Act
@@ -481,7 +481,7 @@ class PropertiesProfileLoaderTest {
         @DisplayName("does not create placeholder when user profiles exist")
         void ensurePlaceholder_GivenUserProfiles_DoesNotCreate() throws Exception {
             // Arrange
-            Path dir = tempDir.resolve("placeholder2/module/profiles");
+            Path dir = tempDir.resolve("placeholder2/profiles");
             Files.createDirectories(dir);
             createPropertiesFile(dir, "user.properties", "x=1");
 
@@ -498,7 +498,7 @@ class PropertiesProfileLoaderTest {
         @DisplayName("does not overwrite existing placeholder")
         void ensurePlaceholder_GivenExistingPlaceholder_DoesNotOverwrite() throws Exception {
             // Arrange
-            Path dir = tempDir.resolve("placeholder3/module/profiles");
+            Path dir = tempDir.resolve("placeholder3/profiles");
             Files.createDirectories(dir);
             Path existingFile = dir.resolve("empty-placeholder.properties");
             Files.write(existingFile, "existing=true".getBytes(StandardCharsets.UTF_8));
@@ -537,7 +537,7 @@ class PropertiesProfileLoaderTest {
         @DisplayName("returns existing directory when it already exists")
         void ensureDir_GivenExistingDir_ReturnsIt() throws Exception {
             // Arrange
-            Path existing = tempDir.resolve("existing/module/profiles");
+            Path existing = tempDir.resolve("existing/profiles");
             Files.createDirectories(existing);
 
             // Act
@@ -712,9 +712,9 @@ class PropertiesProfileLoaderTest {
         }
 
         @Test
-        @DisplayName("DEFAULT_CONF_ROOT is 'conf'")
-        void defaultConfRoot_HasExpectedValue() {
-            assertEquals("conf", PropertiesProfileLoader.DEFAULT_CONF_ROOT);
+        @DisplayName("DEFAULT_CONF_ROOT equals ConfigPaths.RUNTIME_CONF_ROOT (SSOT)")
+        void defaultConfRoot_UsesConfigPathsSsot() {
+            assertEquals(ConfigPaths.RUNTIME_CONF_ROOT, PropertiesProfileLoader.DEFAULT_CONF_ROOT);
         }
 
         @Test

@@ -1,4 +1,5 @@
 package application.module.node.util;
+import application.utils.config.ModuleIds;
 
 import application.module.node.TransactionApplyContext;
 import application.module.node.TransactionType;
@@ -121,7 +122,7 @@ public final class ThreadPool {
                     TransactionType.bindContext(ctx);
                 }
                 if (hasLogCtx) {
-                    application.utils.logging.NodeLogContext.set("node", profile);
+                    application.utils.logging.NodeLogContext.set(ModuleIds.NODE, profile);
                 }
                 try {
                     task.run();

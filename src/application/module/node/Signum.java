@@ -7,6 +7,7 @@ import application.module.node.props.Props;
 import application.module.node.web.server.WebServer;
 import application.module.node.instance.NodeStartupException;
 import application.module.node.profile.NodeProfile;
+import application.utils.config.ModuleIds;
 import application.utils.config.PropertiesProfileLoader;
 import application.utils.io.PathUtils;
 
@@ -301,7 +302,7 @@ public final class Signum {
         // existed are preserved; otherwise it creates + registers a fresh one. Either
         // way the ProfileLogger's forwarding to SystemLogger stays disabled (the
         // SystemLoggerJulHandler already forwards), avoiding System Console duplicates.
-        this.profileLogger = application.utils.logging.NodeLoggerRegistry.getOrCreate("node", profile.getName());
+        this.profileLogger = application.utils.logging.NodeLoggerRegistry.getOrCreate(ModuleIds.NODE, profile.getName());
     }
 
     // =========================================================================
@@ -453,7 +454,7 @@ public final class Signum {
         application.utils.logging.LogScope previousContext = application.utils.logging.NodeLogContext.current();
         boolean bound = this.profile != null;
         if (bound) {
-            application.utils.logging.NodeLogContext.set("node", this.profile.getName());
+            application.utils.logging.NodeLogContext.set(ModuleIds.NODE, this.profile.getName());
         }
         try {
             task.run();
@@ -495,7 +496,7 @@ public final class Signum {
         if (pl != null) {
             pl.close();
             if (this.profile != null) {
-                application.utils.logging.NodeLoggerRegistry.unregister("node", this.profile.getName());
+                application.utils.logging.NodeLoggerRegistry.unregister(ModuleIds.NODE, this.profile.getName());
             }
         }
         this.profileLogger = null;
@@ -862,7 +863,7 @@ public final class Signum {
         // (v4: the confFolder parameter is the node's configuration root — honoring it is what
         // makes per-node conf roots work, e.g. the JUnit mock profile under "conf/junit".)
         Path profileFile = PropertiesProfileLoader.resolveProfileFile(
-                confFolder, "node", "profiles", profileName);
+                confFolder, ModuleIds.NODE, ModuleIds.CATEGORY_PROFILES, profileName);
 
         LOGGER.info("Initializing Signum Node version {}", VERSION);
         LOGGER.info("Looking for profile '{}' at {}", profileName, profileFile.toAbsolutePath());
@@ -1027,7 +1028,7 @@ public final class Signum {
         // stop/start cycles and the console subscriber stays live across restarts.
         // (Mirrors the constructor, so the first start and any restart behave
         // identically.)
-        this.profileLogger = application.utils.logging.NodeLoggerRegistry.getOrCreate("node", profileName);
+        this.profileLogger = application.utils.logging.NodeLoggerRegistry.getOrCreate(ModuleIds.NODE, profileName);
 
         // ── Step 2.5: Create profile-scoped ShutdownManager ──
         this.shutdownManager = new ShutdownManager(this.propertyService, profileName);

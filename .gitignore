@@ -43,3 +43,14 @@ result
 
 # Scripts (local development artifacts)
 /scripts/
+
+# Test-generated node profile artifacts (GUI tests create timestamped profiles).
+# Keep only the two real defaults, which are already tracked.
+/conf/node/profiles/*
+!/conf/node/profiles/node.properties
+!/conf/node/profiles/node-default.properties
+
+# One-off Gradle/JUnit console captures (dev scratch, root level only).
+# Keep the real license file.
+/*.txt
+!/LICENSE.txt

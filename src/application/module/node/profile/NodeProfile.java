@@ -2,6 +2,7 @@ package application.module.node.profile;
 
 
 import application.utils.config.ConfigPaths;
+import application.utils.config.ModuleIds;
 import application.utils.config.PropertiesProfileEntity;
 import application.utils.config.PropertiesProfileLoader;
 
@@ -36,14 +37,14 @@ public class NodeProfile implements PropertiesProfileEntity {
 
     // ── Constants ──────────────────────────────────────────────────────
 
-    /** Runtime configuration root directory (parent of JAR location). */
-    static final String CONF_ROOT = ConfigPaths.RUNTIME_CONF_ROOT;
+    /** Runtime configuration root directory (SSOT: {@link ConfigPaths#RUNTIME_CONF_ROOT}). */
+    public static final String CONF_ROOT = ConfigPaths.RUNTIME_CONF_ROOT;
 
-    /** Module identifier for node profiles. */
-    static final String MODULE_ID = "node";
+    /** Module identifier for node profiles (SSOT: {@link ModuleIds#NODE}). */
+    public static final String MODULE_ID = ModuleIds.NODE;
 
-    /** Profile category (subdirectory under module). */
-    static final String CATEGORY = PropertiesProfileLoader.DEFAULT_CATEGORY_PROFILES;
+    /** Profile category (subdirectory under module; SSOT: {@link ModuleIds#CATEGORY_PROFILES}). */
+    public static final String CATEGORY = PropertiesProfileLoader.DEFAULT_CATEGORY_PROFILES;
 
     /** Default profile file name (follows {module}-default.properties convention). */
     static final String DEFAULT_PROFILE_FILENAME = MODULE_ID + "-default.properties";

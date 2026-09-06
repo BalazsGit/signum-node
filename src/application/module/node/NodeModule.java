@@ -1,4 +1,5 @@
 package application.module.node;
+import application.utils.config.ModuleIds;
 
 import application.api.Module;
 import application.api.ModuleContext;
@@ -59,7 +60,7 @@ public class NodeModule implements Module {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(NodeModule.class);
 
-    public static final String ID = "node";
+    public static final String ID = ModuleIds.NODE;
     public static final String DISPLAY_NAME = "Node";
 
     /** Singleton instance for static access (same pattern as Signum). */

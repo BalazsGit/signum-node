@@ -1,4 +1,5 @@
 package application.module.node.gui.configuration;
+import application.utils.config.ModuleIds;
 
 import application.module.node.Signum;
 import application.module.node.crypto.Crypto;
@@ -1688,7 +1689,7 @@ public class NodeConfigurationPanel extends JPanel {
         // TODO check this part (why don't use Signum constants and utility method for
         // this?)
         Path[] paths = {
-                PathUtils.resolvePath(confFolder).resolve("node").resolve("node-default.properties"),
+                PathUtils.resolvePath(confFolder).resolve(ModuleIds.NODE).resolve("node-default.properties"),
                 PathUtils.resolvePath("conf/node/node-default.properties"),
                 PathUtils.resolvePath("../conf/node/node-default.properties"),
                 PathUtils.resolvePath("node/node/node-default.properties")

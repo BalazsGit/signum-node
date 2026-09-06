@@ -10,6 +10,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -141,13 +142,30 @@ class BlockSignatureVerificationTest {
         return buf.array();
     }
 
-    static String verifyBC(byte[] data, byte[] sig, byte[] pk) {
+    /**
+     * Independent cross-check of signumj's EC-KCDSA (Curve25519) signature scheme.
+     * <p>
+     * Uses signumj's <b>pure-Java</b> implementation ({@code Curve25519Impl}) directly,
+     * bypassing the {@code SignumCrypto} singleton. When the singleton takes the native
+     * library path for the primary check ({@link Crypto#verify}), this exercises the Java
+     * code path — a second, independent implementation of the same algorithm (sig = v(32)||h(32),
+     * Y = v*P + h*G, h' = SHA-256(SHA-256(msg) || X(Y))).
+     * When no native library is present, it still proves the algorithm works end-to-end.
+     * </p>
+     */
+    static String verifyJavaImpl(byte[] data, byte[] sig, byte[] pk) {
         try {
-            var params = new org.bouncycastle.crypto.params.Ed25519PublicKeyParameters(pk, 0);
-            var signer = new org.bouncycastle.crypto.signers.Ed25519Signer();
-            signer.init(false, params);
-            signer.update(data, 0, data.length);
-            return signer.verifySignature(sig) ? "VALID" : "INVALID";
+            MessageDigest sha = MessageDigest.getInstance("SHA-256");
+            byte[] messageSha256 = sha.digest(data);
+            signumj.crypto.ec.Curve25519Impl javaImpl = new signumj.crypto.ec.Curve25519Impl(() -> {
+                try {
+                    return MessageDigest.getInstance("SHA-256");
+                } catch (java.security.NoSuchAlgorithmException e) {
+                    throw new IllegalStateException("SHA-256 unavailable", e);
+                }
+            });
+            boolean ok = javaImpl.verify(messageSha256, sig, pk, true);
+            return ok ? "VALID" : "INVALID";
         } catch (Exception e) {
             return "EXCEPTION: " + e.getClass().getSimpleName() + ": " + e.getMessage();
         }
@@ -174,10 +192,10 @@ class BlockSignatureVerificationTest {
 
         boolean strict = Crypto.verify(sig, d2, pk, true);
         boolean lenient = Crypto.verify(sig, d2, pk, false);
-        String bc = verifyBC(d2, sig, pk);
+        String bc = verifyJavaImpl(d2, sig, pk);
         r.append("  signumj(canonical=true)  = ").append(strict ? "VALID" : "INVALID").append("\n");
         r.append("  signumj(canonical=false) = ").append(lenient ? "VALID" : "INVALID").append("\n");
-        r.append("  bouncyCastle             = ").append(bc).append("\n");
+        r.append("  javaImpl             = ").append(bc).append("\n");
 
         // Block ID: SHA-256(full signed) → first 8 bytes LE long
         byte[] full = new byte[d2.length + sig.length];
@@ -222,7 +240,7 @@ class BlockSignatureVerificationTest {
         byte[] msg = "block signature test message".getBytes();
         byte[] sig = Crypto.sign(msg, TestConstants.TEST_SECRET_PHRASE);
         assertTrue(Crypto.verify(sig, msg, pk, true), "Round-trip MUST work");
-        assertEquals("VALID", verifyBC(msg, sig, pk), "BC round-trip MUST work");
+        assertEquals("VALID", verifyJavaImpl(msg, sig, pk), "Java-impl round-trip MUST work");
     }
 
     @Test
@@ -248,7 +266,7 @@ class BlockSignatureVerificationTest {
         byte[] pk = Crypto.getPublicKey(TestConstants.TEST_SECRET_PHRASE);
         byte[] msg = "sanity".getBytes(), sig = Crypto.sign(msg, TestConstants.TEST_SECRET_PHRASE);
         sb.append("=== SANITY ===\n  signumj=").append(Crypto.verify(sig, msg, pk, true))
-                .append(" bc=").append(verifyBC(msg, sig, pk)).append("\n");
+                .append(" javaImpl=").append(verifyJavaImpl(msg, sig, pk)).append("\n");
         Path out = tempDir.resolve("blocksig-test.txt");
         Files.writeString(out, sb.toString());
         System.out.println("Report: " + out.toAbsolutePath());

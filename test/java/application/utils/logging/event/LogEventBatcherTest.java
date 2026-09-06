@@ -332,16 +332,16 @@ class LogEventBatcherTest {
             LogEventBatcher batcher = new LogEventBatcher(consumer, 5000, 2); // large delay so timer doesn't fire
 
             batcher.enqueue(createTestEvent("msg1"));
-            assertEquals(1, batcher.pendingCount());
-
-            // Second enqueue triggers auto-flush since count >= maxBatchSize
             batcher.enqueue(createTestEvent("msg2"));
             dispatchPendingEdtEvents();
             consumer.await(5);
 
-            // Events were delivered via flush triggered by capacity
+            // Events were delivered via the EDT dispatch path (exactly-once contract).
+            // NOTE: pendingCount() assertions are deliberately avoided — the EDT may flush
+            // concurrently with the test thread, making mid-flight buffer counts racy.
             List<List<LogEvent>> batches = consumer.getCapturedBatches();
             assertTrue(batches.size() >= 1, "Auto-flush should deliver a batch");
+            assertEquals(2, consumer.getTotalEventsDelivered(), "Both events delivered exactly once");
             batcher.stop();
         }
 
@@ -353,14 +353,12 @@ class LogEventBatcherTest {
 
             batcher.enqueue(createTestEvent("msg1"));
             batcher.enqueue(createTestEvent("msg2"));
-            assertEquals(2, batcher.pendingCount());
-
-            // Third one triggers capacity flush
             batcher.enqueue(createTestEvent("msg3"));
             dispatchPendingEdtEvents();
             consumer.await(5);
 
             assertTrue(consumer.getCapturedBatches().size() >= 1, "Should auto-flush at capacity");
+            assertEquals(3, consumer.getTotalEventsDelivered(), "All 3 events delivered exactly once");
             batcher.stop();
         }
     }

@@ -1,4 +1,5 @@
 package application.module.node.gui;
+import application.utils.config.ModuleIds;
 
 import application.module.appearance.AppearanceModule;
 import application.module.node.BlockchainProcessor;
@@ -95,9 +96,9 @@ public class NodeProfilePanel extends JPanel {
         // ProfileLogger (Node Console tab) as well as the System Console. The profile is
         // known here, so we also ensure the ProfileLogger exists now; the Signum adopts
         // this same instance when the node starts, so nothing logged before then is lost.
-        application.utils.logging.NodeLoggerRegistry.getOrCreate("node", profile.getName());
+        application.utils.logging.NodeLoggerRegistry.getOrCreate(ModuleIds.NODE, profile.getName());
         application.utils.logging.LogScope previousContext = application.utils.logging.NodeLogContext.current();
-        application.utils.logging.NodeLogContext.set("node", profile.getName());
+        application.utils.logging.NodeLogContext.set(ModuleIds.NODE, profile.getName());
         LOGGER.debug("NodeProfilePanel constructor START for profile: {}", profile.getName());
         
         try {

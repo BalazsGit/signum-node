@@ -1,4 +1,5 @@
 package application.utils.logging;
+import application.utils.config.ModuleIds;
 
 import application.utils.logging.event.LogEvent;
 
@@ -109,7 +110,7 @@ public final class SystemLoggerJulHandler extends Handler {
                 //    System Logger (terminal) and be missing from the per-profile console
                 //    panel. Route them to every registered node-profile logger so the
                 //    profile console shows the complete profile-relevant log stream.
-                for (ProfileLogger profileLogger : NodeLoggerRegistry.loggersForModule("node")) {
+                for (ProfileLogger profileLogger : NodeLoggerRegistry.loggersForModule(ModuleIds.NODE)) {
                     if (!profileLogger.isClosed()) {
                         profileLogger.dispatch(event);
                     }

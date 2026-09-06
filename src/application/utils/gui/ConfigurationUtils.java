@@ -5,6 +5,7 @@ import application.module.node.Signum;
 import application.module.node.gui.configuration.LoggerProfile;
 import application.module.node.profile.NodeProfile;
 import application.utils.config.ConfigPaths;
+import application.utils.config.ModuleIds;
 import application.utils.config.PropertiesProfileLoader;
 import application.utils.io.PathUtils;
 
@@ -235,7 +236,7 @@ public class ConfigurationUtils {
      * structure.
      *
      * @param confFolder The base configuration folder.
-     * @param subFolder  The sub-folder (e.g., "node", "logging").
+     * @param subFolder  The sub-folder (e.g., "node", "logging" — use {@link ModuleIds} constants).
      * @param fileName   The name of the file.
      * @return The resolved {@link Path}.
      * @deprecated Use resolveNodeProfilePath() or resolveLoggingProfilePath() for unified path resolution.
@@ -254,7 +255,7 @@ public class ConfigurationUtils {
      */
     public static Path resolveNodeProfilePath(String profileName) {
         return PropertiesProfileLoader.resolveProfileFile(
-                ConfigPaths.RUNTIME_CONF_ROOT, "node", "profiles", profileName);
+                ConfigPaths.RUNTIME_CONF_ROOT, ModuleIds.NODE, ModuleIds.CATEGORY_PROFILES, profileName);
     }
 
     /**
@@ -266,7 +267,7 @@ public class ConfigurationUtils {
      */
     public static Path resolveLoggingProfilePath(String profileName) {
         return PropertiesProfileLoader.resolveProfileFile(
-                ConfigPaths.RUNTIME_CONF_ROOT, "node", "logging", profileName);
+                ConfigPaths.RUNTIME_CONF_ROOT, ModuleIds.NODE, ModuleIds.CATEGORY_LOGGING, profileName);
     }
 
     /**
@@ -275,7 +276,7 @@ public class ConfigurationUtils {
      */
     public static Path getNodeProfilesDir() {
         return PropertiesProfileLoader.resolveProfileDir(
-                ConfigPaths.RUNTIME_CONF_ROOT, "node", "profiles");
+                ConfigPaths.RUNTIME_CONF_ROOT, ModuleIds.NODE, ModuleIds.CATEGORY_PROFILES);
     }
 
     /**
@@ -284,7 +285,7 @@ public class ConfigurationUtils {
      */
     public static Path getNodeLoggingDir() {
         return PropertiesProfileLoader.resolveProfileDir(
-                ConfigPaths.RUNTIME_CONF_ROOT, "node", "logging");
+                ConfigPaths.RUNTIME_CONF_ROOT, ModuleIds.NODE, ModuleIds.CATEGORY_LOGGING);
     }
 
     /**
@@ -550,21 +551,21 @@ public class ConfigurationUtils {
 
         // 1. Search based on the active name using unified loader
         Path specificPath = PropertiesProfileLoader.resolveProfileFile(
-                ConfigPaths.RUNTIME_CONF_ROOT, "node", "logging", profileName);
+                ConfigPaths.RUNTIME_CONF_ROOT, ModuleIds.NODE, ModuleIds.CATEGORY_LOGGING, profileName);
         if (Files.exists(specificPath)) {
             pathToLoad = specificPath;
         } else {
             // 2. Fallback to logging.properties
             if (!Signum.LOGGING_PROPERTIES_NAME.equals(profileName)) {
                 Path fallbackPath = PropertiesProfileLoader.resolveProfileFile(
-                        ConfigPaths.RUNTIME_CONF_ROOT, "node", "logging", Signum.LOGGING_PROPERTIES_NAME);
+                        ConfigPaths.RUNTIME_CONF_ROOT, ModuleIds.NODE, ModuleIds.CATEGORY_LOGGING, Signum.LOGGING_PROPERTIES_NAME);
                 if (Files.exists(fallbackPath))
                     pathToLoad = fallbackPath;
             }
             // 3. Fallback to logging-default.properties
             if (pathToLoad == null) {
                 Path defSub = PropertiesProfileLoader.resolveProfileFile(
-                        ConfigPaths.RUNTIME_CONF_ROOT, "node", "logging", Signum.DEFAULT_LOGGING_PROPERTIES_NAME);
+                        ConfigPaths.RUNTIME_CONF_ROOT, ModuleIds.NODE, ModuleIds.CATEGORY_LOGGING, Signum.DEFAULT_LOGGING_PROPERTIES_NAME);
                 if (Files.exists(defSub)) {
                     pathToLoad = defSub;
                 }
@@ -593,7 +594,7 @@ public class ConfigurationUtils {
 
         // 1. Search based on the active name using unified loader
         Path specificPath = PropertiesProfileLoader.resolveProfileFile(
-                ConfigPaths.RUNTIME_CONF_ROOT, "node", "profiles", profileName);
+                ConfigPaths.RUNTIME_CONF_ROOT, ModuleIds.NODE, ModuleIds.CATEGORY_PROFILES, profileName);
         if (Files.exists(specificPath)) {
             try (FileInputStream is = new FileInputStream(specificPath.toFile())) {
                 effective.getProperties().load(is);
@@ -604,7 +605,7 @@ public class ConfigurationUtils {
             // 2. Fallback to "node" profile
             if (!Signum.PROPERTIES_NAME.equals(profileName)) {
                 Path fallbackPath = PropertiesProfileLoader.resolveProfileFile(
-                        ConfigPaths.RUNTIME_CONF_ROOT, "node", "profiles", Signum.PROPERTIES_NAME);
+                        ConfigPaths.RUNTIME_CONF_ROOT, ModuleIds.NODE, ModuleIds.CATEGORY_PROFILES, Signum.PROPERTIES_NAME);
                 if (Files.exists(fallbackPath)) {
                     try (FileInputStream is = new FileInputStream(fallbackPath.toFile())) {
                         effective.getProperties().load(is);

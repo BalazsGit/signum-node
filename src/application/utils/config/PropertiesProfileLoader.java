@@ -28,7 +28,8 @@ import java.util.stream.Stream;
  * <p>
  * <h3>Path Schema</h3>
  * <pre>
- *   ../conf/{module}/{category}/*.properties
+ *   {ConfigPaths.RUNTIME_CONF_ROOT}/{module}/{category}/*.properties
+ *   i.e. ./conf/{module}/{category}/*.properties
  * </pre>
  * <p>
  * <h3>Design Patterns</h3>
@@ -71,17 +72,17 @@ public final class PropertiesProfileLoader {
 
     // ── Default Constants (parameterizable) ─────────────────────────────
 
-    /** Default category for module profiles. */
-    public static final String DEFAULT_CATEGORY_PROFILES = "profiles";
+    /** Default category for module profiles (SSOT: {@link ModuleIds#CATEGORY_PROFILES}). */
+    public static final String DEFAULT_CATEGORY_PROFILES = ModuleIds.CATEGORY_PROFILES;
 
-    /** Default category for logging presets. */
-    public static final String DEFAULT_CATEGORY_LOGGING = "logging";
+    /** Default category for logging presets (SSOT: {@link ModuleIds#CATEGORY_LOGGING}). */
+    public static final String DEFAULT_CATEGORY_LOGGING = ModuleIds.CATEGORY_LOGGING;
 
     /**
-     * Standard conf root directory name.
-     * Points to parent of JAR location: {@code ../conf}
+     * Standard conf root directory (single source of truth: {@link ConfigPaths#RUNTIME_CONF_ROOT}).
+     * Points to the runtime configuration directory: {@code ./conf}
      */
-    public static final String DEFAULT_CONF_ROOT = "../conf";
+    public static final String DEFAULT_CONF_ROOT = ConfigPaths.RUNTIME_CONF_ROOT;
 
     /** Default filename suffix for module profile defaults. */
     public static final String DEFAULT_MODULE_DEFAULT_FILENAME = "profile-default.properties";

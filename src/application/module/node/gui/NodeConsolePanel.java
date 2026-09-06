@@ -1,4 +1,5 @@
 package application.module.node.gui;
+import application.utils.config.ModuleIds;
 
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLaf;
@@ -2562,7 +2563,7 @@ public class NodeConsolePanel extends JPanel {
         // complete.") would still appear here, creating the confusing
         // "fork log yes, pop-off log no" asymmetry.
         new Thread(() -> application.utils.logging.NodeLogContext
-                .runIn("node", profileName, () -> processor.popOff(count))).start();
+                .runIn(ModuleIds.NODE, profileName, () -> processor.popOff(count))).start();
     }
 
     /**
@@ -2677,7 +2678,7 @@ public class NodeConsolePanel extends JPanel {
     }
 
     private void editConf() {
-        Path nodeFolder = application.utils.io.PathUtils.resolvePath(confFolder).resolve("node");
+        Path nodeFolder = application.utils.io.PathUtils.resolvePath(confFolder).resolve(ModuleIds.NODE);
         Path path = nodeFolder.resolve(Signum.PROPERTIES_NAME);
         if (!Files.exists(path)) {
             path = nodeFolder.resolve(Signum.DEFAULT_PROPERTIES_NAME);

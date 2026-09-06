@@ -1,4 +1,5 @@
 package application.module.database.logging;
+import application.utils.config.ModuleIds;
 
 import application.utils.logging.ModuleLoggingProfile;
 import java.util.Collections;
@@ -30,7 +31,7 @@ public class DatabaseLoggingProfile extends ModuleLoggingProfile {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DatabaseLoggingProfile.class);
 
-    public static final String MODULE_ID = "database";
+    public static final String MODULE_ID = ModuleIds.DATABASE;
     public static final String DISPLAY_NAME = "Database Engine";
     public static final String DESCRIPTION = "Controls logging for database connectivity: HikariCP connection pool, JOOQ query engine, and database drivers (MariaDB, SQLite, PostgreSQL).";
 

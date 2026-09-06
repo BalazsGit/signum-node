@@ -1,4 +1,5 @@
 package application.module.appearance;
+import application.utils.config.ModuleIds;
 
 import application.api.Module;
 import application.api.ModuleContext;
@@ -109,7 +110,7 @@ public class AppearanceModule implements Module {
 
         String settingsDir = Props.SETTINGS_DIR.getDefaultValue();
         Path confPath = PathUtils.resolvePath(confFolder);
-        Path nodePath = confPath.resolve("node");
+        Path nodePath = confPath.resolve(ModuleIds.NODE);
         // Inline Signum.resolvePropertiesPath() to remove bridge dependency (v4.1 migration 2026-08-07)
         Path nodePropsFile = null;
         Path candidate = nodePath.resolve("node.properties");

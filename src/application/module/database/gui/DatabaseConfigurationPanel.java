@@ -1,4 +1,5 @@
 package application.module.database.gui;
+import application.utils.config.ModuleIds;
 
 import application.module.database.api.MariaDbApiModels.MainVersionInfo;
 import application.module.database.utils.DatabaseConfigurationUtils;
@@ -164,7 +165,7 @@ public class DatabaseConfigurationPanel extends JPanel {
 
         // Determine the currently applied profile name from metadata once at startup
         String lastProfile = ConfigurationUtils
-                .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, "database"));
+                .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, ModuleIds.DATABASE));
 
         // Format in metadata for DB is "Engine:ProfileName"
         String lastEngine = "MariaDB";

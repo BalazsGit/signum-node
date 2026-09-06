@@ -1,4 +1,5 @@
 package application.module.database;
+import application.utils.config.ModuleIds;
 
 import application.api.Module;
 import application.api.ModuleContext;
@@ -9,7 +10,7 @@ import javax.swing.JComponent;
 public class DatabaseModule implements Module {
     @Override
     public String getId() {
-        return "database";
+        return ModuleIds.DATABASE;
     }
 
     @Override
