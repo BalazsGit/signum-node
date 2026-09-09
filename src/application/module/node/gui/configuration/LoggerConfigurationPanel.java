@@ -47,6 +47,12 @@ import java.util.function.Supplier;
 import java.util.function.Consumer;
 import org.slf4j.LoggerFactory;
 
+/**
+ * @deprecated Use {@link NodeLoggingPanel} instead — a thin node-specific adapter over the generic
+ * {@code ModuleLoggingProfilePanel} core. Kept only for the remaining callsites and for migration;
+ * do not add new callers or new feature work here.
+ */
+@Deprecated
 public class LoggerConfigurationPanel extends JPanel {
 
     private static final String[] LOG_LEVELS = { "SEVERE", "WARNING", "INFO", "CONFIG", "FINE", "FINER", "FINEST",

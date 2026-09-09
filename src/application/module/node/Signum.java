@@ -1030,6 +1030,16 @@ public final class Signum {
         // identically.)
         this.profileLogger = application.utils.logging.NodeLoggerRegistry.getOrCreate(ModuleIds.NODE, profileName);
 
+        // ── Step 1.5: apply the per-node logging level (from conf/node/profiles.json) ──
+        // Defensively apply the per-node/per-module logging level assigned to this node profile.
+        // An invalid or missing assignment (e.g. the linked profile was deleted) falls back to
+        // the module's hardcoded default. Never breaks node startup.
+        try {
+            application.module.logging.NodeLoggingApplier.applyForNodeProfile(profileName, ModuleIds.NODE);
+        } catch (Throwable t) {
+            System.err.println("Failed to apply per-node logging level for profile '" + profileName + "': " + t.getMessage());
+        }
+
         // ── Step 2.5: Create profile-scoped ShutdownManager ──
         this.shutdownManager = new ShutdownManager(this.propertyService, profileName);
 

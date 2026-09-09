@@ -123,6 +123,35 @@ test {
 }
 
 /**
+ * Exclude-free test runner: lets {@code --tests '<FQCN>'} work against the full test tree.
+ * The default {@code test} task excludes several classes (see above), which makes Gradle
+ * report "No tests found for given includes … (exclude rules)" when combined with {@code --tests}.
+ * Use this task to run a specific test class without those exclusions:
+ *
+ * <pre>{@code
+ * gradlew runTest --tests 'application.module.logging.gui.LoggingPanelTest'
+ * }</pre>
+ */
+tasks.register('runTest', Test) {
+    useJUnitPlatform()
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    testLogging {
+        exceptionFormat "full"
+        showStandardStreams = true
+        events "passed", "skipped", "failed"
+    }
+    jvmArgs += [
+        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+        "--add-opens=java.base/java.util=ALL-UNNAMED",
+        "--add-opens=java.base/java.io=ALL-UNNAMED",
+        "--add-opens=java.base/java.net=ALL-UNNAMED",
+        "--add-opens=java.base/jdk.internal.reflect=ALL-UNNAMED",
+        "--add-opens=java.logging/java.util.logging=ALL-UNNAMED"
+    ]
+}
+
+/**
  * Integration tests requiring a LIVE mock node on localhost:6876 (see chain.ChainUtils.setupNode).
  * Skipped automatically when no node is reachable; run explicitly with: gradlew integrationTest
  */

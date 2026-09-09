@@ -188,6 +188,17 @@ public final class ProfileLogger extends LoggerImpl {
 
     @Override
     protected void dispatch(LogEvent event) {
+        if (event == null) {
+            return;
+        }
+        // Per-node level filter. Events routed here by the JUL bridge
+        // ({@link SystemLoggerJulHandler}) bypass {@code LoggerImpl.log()}'s min-level
+        // check, so we enforce the configured level here too. This is what makes a
+        // per-node assigned log level actually take effect on the routed stream. The
+        // separate {@link SystemLogger} (a different class) is unaffected.
+        if (event.getLevel() == null || event.getLevel().ordinal() < minLevel.ordinal()) {
+            return;
+        }
         // Stamp this logger's (module, profile) scope so downstream consumers
         // (System Console tag, color scheme, filters) see the qualified identity.
         event = withScope(event);

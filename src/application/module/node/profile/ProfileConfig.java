@@ -232,11 +232,17 @@ public class ProfileConfig {
     }
 
     /**
-     * Saves the current profile data to disk.
+     * Saves the current profile data to disk, creating the parent directory if it does not
+     * yet exist (e.g. a fresh {@code conf/node/} tree). Without this, the first write silently
+     * failed when the SSOT file's directory was not present.
      */
     public synchronized void save() throws IOException {
         if (profileData == null) {
             return;
+        }
+        Path parent = configPath.getParent();
+        if (parent != null) {
+            java.nio.file.Files.createDirectories(parent);
         }
         try (FileWriter writer = new FileWriter(configPath.toFile())) {
             gson.toJson(profileData, writer);

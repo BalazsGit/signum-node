@@ -5,7 +5,7 @@ import application.module.appearance.AppearanceModule;
 import application.module.node.BlockchainProcessor;
 import application.module.node.NodeModule;
 import application.module.node.Signum;
-import application.module.node.gui.configuration.LoggerConfigurationPanel;
+import application.module.node.gui.configuration.NodeLoggingPanel;
 import application.module.node.gui.configuration.NodeConfigurationPanel;
 import application.module.node.profile.NodeProfile;
 import application.module.node.props.PropertyService;
@@ -71,7 +71,7 @@ public class NodeProfilePanel extends JPanel {
     private final JTabbedPane innerTabbedPane;
     private final NodeConsolePanel consolePanel;
     private final NodeConfigurationPanel configurationPanel;
-    private final LoggerConfigurationPanel loggingPanel;
+    private final NodeLoggingPanel loggingPanel;
     private final NodeInfoBar infoBar;
     private final NodeToolbar toolbar;
     private final String confFolder;
@@ -180,16 +180,7 @@ public class NodeProfilePanel extends JPanel {
             LOGGER.debug("Configuration tab added successfully");
 
             LOGGER.debug("Creating LoggerConfigurationPanel for profile: {}", profile.getName());
-            loggingPanel = new LoggerConfigurationPanel(
-                    this::restartNode,
-                    this.confFolder,
-                    () -> {
-                    },
-                    null,
-                    null,
-                    () -> profile.getName(),
-                    () -> "logging"
-            );
+            loggingPanel = new NodeLoggingPanel(profile.getName(), this::restartNode);
             innerTabbedPane.addTab("Logging", loggingPanel);
             LOGGER.debug("Logging tab added successfully");
 
@@ -480,7 +471,7 @@ public class NodeProfilePanel extends JPanel {
     public NodeProfile getProfile() { return profile; }
     public NodeConsolePanel getConsolePanel() { return consolePanel; }
     public NodeConfigurationPanel getConfigurationPanel() { return configurationPanel; }
-    public LoggerConfigurationPanel getLoggingPanel() { return loggingPanel; }
+    public NodeLoggingPanel getLoggingPanel() { return loggingPanel; }
     public JTabbedPane getInnerTabbedPane() { return innerTabbedPane; }
     public NodeInfoBar getInfoBar() { return infoBar; }
     public NodeToolbar getToolbar() { return toolbar; }

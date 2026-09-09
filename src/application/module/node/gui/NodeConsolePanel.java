@@ -1164,7 +1164,7 @@ public class NodeConsolePanel extends JPanel {
                 .withShowFilterHeader(true)
                 .withShowCommandInput(false)  // Command input is managed via hamburger menu toggle
                 .withCommandPosition(ConsoleInputPosition.BOTTOM)
-                .withDefaultCommandPrefix("-node." + profileName + " ")
+                .withDefaultCommandPrefix("node." + profileName + " ")
                 .withAnimateCommandInput(true)
                 .withCommandInputVisible(false)
                 .withEnableCommandToggle(true)
