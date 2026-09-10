@@ -451,8 +451,10 @@ public class NodeProfilePanel extends JPanel {
                 int height = bp.getLastCheckHeight();
                 long totalMined = bp.getLastCheckTotalMined();
                 long totalEffective = bp.getLastCheckTotalEffectiveBalance();
+                long accountBalance = bp.getLastCheckAccountBalance();
+                long escrowBalance = bp.getLastCheckEscrowBalance();
                 SwingUtilities.invokeLater(() ->
-                        showDbCheckResultDialog(result, height, totalMined, totalEffective));
+                        showDbCheckResultDialog(result, height, totalMined, totalEffective, accountBalance, escrowBalance));
             } catch (IllegalStateException e) {
                 SwingUtilities.invokeLater(() ->
                         JOptionPane.showMessageDialog(this, e.getMessage(),
@@ -466,9 +468,12 @@ public class NodeProfilePanel extends JPanel {
         }).start();
     }
 
-    private void showDbCheckResultDialog(int result, int height, long totalMined, long totalEffective) {
+    private void showDbCheckResultDialog(int result, int height, long totalMined, long totalEffective, long accountBalance, long escrowBalance) {
         double minedSigna = totalMined / 1_000_000_000.0;
         double effectiveSigna = totalEffective / 1_000_000_000.0;
+        double accountSigna = accountBalance / 1_000_000_000.0;
+        double escrowSigna = escrowBalance / 1_000_000_000.0;
+        double diffSigna = (totalMined - totalEffective) / 1_000_000_000.0;
         boolean consistent = (result == 0);
         java.awt.Frame owner = (java.awt.Frame) javax.swing.SwingUtilities.getWindowAncestor(this);
 
@@ -482,15 +487,21 @@ public class NodeProfilePanel extends JPanel {
         title.setFont(getFont().deriveFont(java.awt.Font.BOLD, 16f));
         title.setForeground(consistent ? GuiColors.getStatusConsistent() : GuiColors.getContrastRed());
 
-        String infoHtml = "<html><body style='width:340px'>"
+        // Detailed breakdown (matches log format)
+        String detailHtml = "<html><body style='width:360px; font-family: monospace'>"
                 + "Height: <b>" + height + "</b><br>"
-                + "Total Mined: <b>" + String.format("%.8f", minedSigna) + "</b> SIGNA<br>"
-                + "Total Effective: <b>" + String.format("%.8f", effectiveSigna) + "</b> SIGNA"
+                + "Total Mined (Supply): <b>" + String.format("%.8f", minedSigna) + "</b> SIGNA<br>"
+                + "Total Effective Balance: <b>" + String.format("%.8f", effectiveSigna) + "</b> SIGNA<br>"
+                + "Difference (Mined - Effective): <b>" + String.format("%.8f", diffSigna) + "</b> SIGNA<br>"
+                + "--------------------------<br>"
+                + "Account Balances: " + String.format("%.8f", accountSigna) + " SIGNA<br>"
+                + "Escrow Balances: " + String.format("%.8f", escrowSigna) + " SIGNA<br>"
+                + "Calculated Sum (Acc + Escrow): " + String.format("%.8f", effectiveSigna) + " SIGNA"
                 + "</body></html>";
-        javax.swing.JLabel info = new javax.swing.JLabel(infoHtml, null, javax.swing.SwingConstants.CENTER);
+        javax.swing.JLabel detail = new javax.swing.JLabel(detailHtml, null, javax.swing.SwingConstants.CENTER);
 
         panel.add(title, "span, align center");
-        panel.add(info, "span, align center, gaptop 4");
+        panel.add(detail, "span, align center, gaptop 6");
         panel.add(new javax.swing.JSeparator(), "span, gaptop 12, gapbottom 12");
 
         // Action rows: [button] [help]
@@ -503,7 +514,7 @@ public class NodeProfilePanel extends JPanel {
                         + "all account and escrow balances.<br><br>"
                         + "Not available while a trim, prune, pop-off, or resolve operation is in progress."));
         panel.add(recheckBtn, "growx");
-        panel.add(recheckHelp, "push");
+        panel.add(recheckHelp, "gapleft 4");
 
         javax.swing.JButton resolveBtn = new javax.swing.JButton("Start Auto Resolve");
         resolveBtn.setEnabled(!consistent);
@@ -517,7 +528,7 @@ public class NodeProfilePanel extends JPanel {
                 "Rolls back blocks one by one until the database becomes consistent or the safe rollback "
                         + "limit is reached. Only available when the database is inconsistent."));
         panel.add(resolveBtn, "growx, gaptop 8");
-        panel.add(resolveHelp, "push");
+        panel.add(resolveHelp, "gapleft 4");
 
         BlockchainProcessor bproc = signum.getBlockchainProcessor();
         boolean skipChecked = bproc != null && bproc.isSkipDbCheckOnManualPopOff();
@@ -532,7 +543,7 @@ public class NodeProfilePanel extends JPanel {
                 "If enabled, skips the per-block consistency check during manual pop-off for faster operation.<br><br>"
                         + "<i>Session-only. Permanent: set <b>node.popOff.skipDatabaseCheck</b> in config.</i>"));
         panel.add(skipCb, "growx, gaptop 8");
-        panel.add(skipHelp, "push");
+        panel.add(skipHelp, "gapleft 4");
 
         panel.add(new javax.swing.JSeparator(), "span, gaptop 16, gapbottom 12");
 

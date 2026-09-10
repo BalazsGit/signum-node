@@ -228,6 +228,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private final AtomicLong downloadedVolume = new AtomicLong();
     private final AtomicLong lastCheckTotalMined = new AtomicLong(0);
     private final AtomicLong lastCheckTotalEffectiveBalance = new AtomicLong(0);
+    private final AtomicLong lastCheckAccountBalance = new AtomicLong(0);
+    private final AtomicLong lastCheckEscrowBalance = new AtomicLong(0);
     private final AtomicInteger lastCheckHeight = new AtomicInteger(0);
 
     private int autoPopOffLastStuckHeight = 0;
@@ -3107,6 +3109,12 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
         lastCheckTotalMined.set(totalMined);
         lastCheckTotalEffectiveBalance.set(totalEffectiveBalance);
+        lastCheckAccountBalance.set(accountService.getAllAccountsBalance());
+        long escrowSum = 0;
+        for (Escrow escrow : escrowService.getAllEscrowTransactions()) {
+            escrowSum += escrow.getAmountNQT();
+        }
+        lastCheckEscrowBalance.set(escrowSum);
         lastCheckHeight.set(blockchain.getHeight());
 
         // Update previous state for the next check
@@ -3271,6 +3279,16 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     @Override
     public long getLastCheckTotalEffectiveBalance() {
         return lastCheckTotalEffectiveBalance.get();
+    }
+
+    @Override
+    public long getLastCheckAccountBalance() {
+        return lastCheckAccountBalance.get();
+    }
+
+    @Override
+    public long getLastCheckEscrowBalance() {
+        return lastCheckEscrowBalance.get();
     }
 
     @Override

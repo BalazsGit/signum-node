@@ -291,6 +291,10 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
 
     long getLastCheckTotalEffectiveBalance();
 
+    long getLastCheckAccountBalance();
+
+    long getLastCheckEscrowBalance();
+
     int getLastCheckHeight();
 
     ConsistencyState getConsistencyState();

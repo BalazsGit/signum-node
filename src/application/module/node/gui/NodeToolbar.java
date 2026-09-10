@@ -160,6 +160,7 @@ public class NodeToolbar extends JPanel {
         detachMaintenanceStateListeners(previous);
         attachMaintenanceStateListeners(signum);
         refreshMaintenanceState();
+        updateDbCheckIconColor();
     }
 
     /**
