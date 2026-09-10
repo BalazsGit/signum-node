@@ -751,6 +751,7 @@ public class NodeToolbar extends JPanel {
         bp.addTrimListener(trimStateListener, BlockchainProcessor.Event.TRIM_END);
         bp.addPruneListener(pruneStateListener, BlockchainProcessor.Event.PRUNE_START);
         bp.addPruneListener(pruneStateListener, BlockchainProcessor.Event.PRUNE_END);
+        bp.addListener(block -> updateDbCheckIconColor(), BlockchainProcessor.Event.DATABASE_CONSISTENCY_UPDATE);
         LOGGER.debug("Maintenance state listeners attached for profile: {}", profile.getName());
     }
 
@@ -798,6 +799,25 @@ public class NodeToolbar extends JPanel {
         JPanel row = (JPanel) maintenanceLabel.getParent();
         row.revalidate();
         row.repaint();
+    }
+
+    private void updateDbCheckIconColor() {
+        SwingUtilities.invokeLater(() -> {
+            BlockchainProcessor bp = resolveProcessor(signum);
+            if (bp == null || dbCheckButton == null) return;
+            Color color;
+            switch (bp.getConsistencyState()) {
+                case CONSISTENT:
+                    color = GuiColors.getStatusConsistent();
+                    break;
+                case INCONSISTENT:
+                    color = GuiColors.getContrastRed();
+                    break;
+                default:
+                    color = GuiColors.getButtonIcon();
+            }
+            dbCheckButton.setIcon(IconFontSwing.buildIcon(FontAwesome.DATABASE, GuiConstants.getToolBarIconSize(), color));
+        });
     }
 
     /**

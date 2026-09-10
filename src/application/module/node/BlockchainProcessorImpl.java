@@ -3091,8 +3091,18 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     totalEffectiveBalance);
         } else {
             logger.info("Database is consistent at height {}", blockchain.getHeight());
-            logger.info("Total Mined (Supply)           : {}", totalMined);
-            logger.info("Total Effective Balance        : {}", totalEffectiveBalance);
+            logger.info("  Total Mined (Supply)           : {}", totalMined);
+            logger.info("  Total Effective Balance        : {}", totalEffectiveBalance);
+            logger.info("  Difference (Mined - Effective) : 0");
+            logger.info("  --------------------------------------------------");
+            logger.info("  Component - Account Balances   : {}", accountService.getAllAccountsBalance());
+            long escrowTotal = 0;
+            for (Escrow escrow : escrowService.getAllEscrowTransactions()) {
+                escrowTotal += escrow.getAmountNQT();
+            }
+            logger.info("  Component - Escrow Balances    : {}", escrowTotal);
+            logger.info("  Calculated Sum (Acc + Escrow)  : {}", totalEffectiveBalance);
+            logger.info("----------------------------------------------------");
         }
 
         lastCheckTotalMined.set(totalMined);

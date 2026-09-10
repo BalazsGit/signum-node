@@ -470,28 +470,30 @@ public class NodeProfilePanel extends JPanel {
         double minedSigna = totalMined / 1_000_000_000.0;
         double effectiveSigna = totalEffective / 1_000_000_000.0;
         boolean consistent = (result == 0);
+        java.awt.Frame owner = (java.awt.Frame) javax.swing.SwingUtilities.getWindowAncestor(this);
 
-        javax.swing.JDialog dialog = new javax.swing.JDialog(
-                (java.awt.Frame) javax.swing.SwingUtilities.getWindowAncestor(this), "Database Consistency Check", true);
-        javax.swing.JPanel panel = new javax.swing.JPanel(new java.awt.BorderLayout(10, 10));
-        panel.setBorder(javax.swing.BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        javax.swing.JDialog dialog = new javax.swing.JDialog(owner, "Database Consistency Check", true);
+        net.miginfocom.swing.MigLayout layout = new net.miginfocom.swing.MigLayout("insets 24, fillx, wrap");
+        javax.swing.JPanel panel = new javax.swing.JPanel(layout);
 
+        // Status header
         javax.swing.JLabel title = new javax.swing.JLabel(
                 consistent ? "Database is CONSISTENT" : "Database is INCONSISTENT");
-        title.setFont(java.awt.Font.decode("Dialog").deriveFont(java.awt.Font.BOLD, 14f));
-        title.setForeground(consistent ? new java.awt.Color(0, 128, 0) : new java.awt.Color(200, 0, 0));
-        javax.swing.JLabel info = new javax.swing.JLabel(
-                "<html><body style='width:320px'>Height: " + height + "<br>"
-                        + "Total Mined: " + String.format("%.8f", minedSigna) + " SIGNA<br>"
-                        + "Total Effective: " + String.format("%.8f", effectiveSigna) + " SIGNA</body></html>",
-                null, javax.swing.SwingConstants.LEFT);
-        javax.swing.JPanel topPanel = new javax.swing.JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT));
-        topPanel.add(title);
-        topPanel.add(info);
-        panel.add(topPanel, java.awt.BorderLayout.NORTH);
+        title.setFont(getFont().deriveFont(java.awt.Font.BOLD, 16f));
+        title.setForeground(consistent ? GuiColors.getStatusConsistent() : GuiColors.getContrastRed());
 
-        javax.swing.JPanel actionPanel = new javax.swing.JPanel(new net.miginfocom.swing.MigLayout("insets 0, gap 8, fillx"));
+        String infoHtml = "<html><body style='width:340px'>"
+                + "Height: <b>" + height + "</b><br>"
+                + "Total Mined: <b>" + String.format("%.8f", minedSigna) + "</b> SIGNA<br>"
+                + "Total Effective: <b>" + String.format("%.8f", effectiveSigna) + "</b> SIGNA"
+                + "</body></html>";
+        javax.swing.JLabel info = new javax.swing.JLabel(infoHtml, null, javax.swing.SwingConstants.CENTER);
 
+        panel.add(title, "span, align center");
+        panel.add(info, "span, align center, gaptop 4");
+        panel.add(new javax.swing.JSeparator(), "span, gaptop 12, gapbottom 12");
+
+        // Action rows: [button] [help]
         javax.swing.JButton recheckBtn = new javax.swing.JButton("Run Database Check");
         recheckBtn.addActionListener(e -> { dialog.dispose(); dbCheckAction(); });
         application.utils.gui.HelpButton recheckHelp = new application.utils.gui.HelpButton();
@@ -500,27 +502,25 @@ public class NodeProfilePanel extends JPanel {
                 "Performs a full database consistency check comparing the total mined supply with the sum of "
                         + "all account and escrow balances.<br><br>"
                         + "Not available while a trim, prune, pop-off, or resolve operation is in progress."));
-        actionPanel.add(recheckBtn, "growx");
-        actionPanel.add(recheckHelp);
-        actionPanel.add(new javax.swing.JSeparator(), "span, growx");
+        panel.add(recheckBtn, "growx");
+        panel.add(recheckHelp, "push");
 
         javax.swing.JButton resolveBtn = new javax.swing.JButton("Start Auto Resolve");
         resolveBtn.setEnabled(!consistent);
         resolveBtn.addActionListener(e -> {
-            BlockchainProcessor bp = signum.getBlockchainProcessor();
-            if (bp != null) { dialog.dispose(); new Thread(bp::manualResolveDatabaseConsistency).start(); }
+            BlockchainProcessor b = signum.getBlockchainProcessor();
+            if (b != null) { dialog.dispose(); new Thread(b::manualResolveDatabaseConsistency).start(); }
         });
         application.utils.gui.HelpButton resolveHelp = new application.utils.gui.HelpButton();
         resolveHelp.setToolTipText("Resolve inconsistency by popping blocks");
         resolveHelp.addActionListener(e -> showDbCheckHelpDialog(dialog, "Start Auto Resolve",
                 "Rolls back blocks one by one until the database becomes consistent or the safe rollback "
                         + "limit is reached. Only available when the database is inconsistent."));
-        actionPanel.add(resolveBtn, "growx");
-        actionPanel.add(resolveHelp);
-        actionPanel.add(new javax.swing.JSeparator(), "span, growx");
+        panel.add(resolveBtn, "growx, gaptop 8");
+        panel.add(resolveHelp, "push");
 
-        BlockchainProcessor bp = signum.getBlockchainProcessor();
-        boolean skipChecked = bp != null && bp.isSkipDbCheckOnManualPopOff();
+        BlockchainProcessor bproc = signum.getBlockchainProcessor();
+        boolean skipChecked = bproc != null && bproc.isSkipDbCheckOnManualPopOff();
         javax.swing.JCheckBox skipCb = new javax.swing.JCheckBox("Skip DB Check on Manual Pop-off", skipChecked);
         skipCb.addActionListener(e -> {
             BlockchainProcessor p = signum.getBlockchainProcessor();
@@ -531,15 +531,14 @@ public class NodeProfilePanel extends JPanel {
         skipHelp.addActionListener(e -> showDbCheckHelpDialog(dialog, "Skip DB Check on Pop-off",
                 "If enabled, skips the per-block consistency check during manual pop-off for faster operation.<br><br>"
                         + "<i>Session-only. Permanent: set <b>node.popOff.skipDatabaseCheck</b> in config.</i>"));
-        actionPanel.add(skipCb, "growx");
-        actionPanel.add(skipHelp);
-        panel.add(actionPanel, java.awt.BorderLayout.CENTER);
+        panel.add(skipCb, "growx, gaptop 8");
+        panel.add(skipHelp, "push");
 
-        javax.swing.JPanel bottomPanel = new javax.swing.JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT));
+        panel.add(new javax.swing.JSeparator(), "span, gaptop 16, gapbottom 12");
+
         javax.swing.JButton closeBtn = new javax.swing.JButton("Close");
         closeBtn.addActionListener(e -> dialog.dispose());
-        bottomPanel.add(closeBtn);
-        panel.add(bottomPanel, java.awt.BorderLayout.SOUTH);
+        panel.add(closeBtn, "span, align right");
 
         dialog.setContentPane(panel);
         dialog.pack();
@@ -549,7 +548,7 @@ public class NodeProfilePanel extends JPanel {
     }
 
     private void showDbCheckHelpDialog(java.awt.Component parent, String title, String htmlBody) {
-        String html = "<html><body style='width: 320px'><b>" + title + "</b><br><br>" + htmlBody + "</body></html>";
+        String html = "<html><body style='width: 340px'><b>" + title + "</b><br><br>" + htmlBody + "</body></html>";
         JOptionPane.showMessageDialog(parent, html, title, JOptionPane.PLAIN_MESSAGE);
     }
 
