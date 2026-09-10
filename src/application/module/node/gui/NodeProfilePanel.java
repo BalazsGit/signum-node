@@ -513,7 +513,7 @@ public class NodeProfilePanel extends JPanel {
                 "Performs a full database consistency check comparing the total mined supply with the sum of "
                         + "all account and escrow balances.<br><br>"
                         + "Not available while a trim, prune, pop-off, or resolve operation is in progress."));
-        panel.add(recheckBtn, "growx");
+        panel.add(recheckBtn, "gaptop 8");
         panel.add(recheckHelp, "gapleft 4");
 
         javax.swing.JButton resolveBtn = new javax.swing.JButton("Start Auto Resolve");
@@ -527,7 +527,7 @@ public class NodeProfilePanel extends JPanel {
         resolveHelp.addActionListener(e -> showDbCheckHelpDialog(dialog, "Start Auto Resolve",
                 "Rolls back blocks one by one until the database becomes consistent or the safe rollback "
                         + "limit is reached. Only available when the database is inconsistent."));
-        panel.add(resolveBtn, "growx, gaptop 8");
+        panel.add(resolveBtn, "gaptop 8");
         panel.add(resolveHelp, "gapleft 4");
 
         BlockchainProcessor bproc = signum.getBlockchainProcessor();
@@ -542,7 +542,7 @@ public class NodeProfilePanel extends JPanel {
         skipHelp.addActionListener(e -> showDbCheckHelpDialog(dialog, "Skip DB Check on Pop-off",
                 "If enabled, skips the per-block consistency check during manual pop-off for faster operation.<br><br>"
                         + "<i>Session-only. Permanent: set <b>node.popOff.skipDatabaseCheck</b> in config.</i>"));
-        panel.add(skipCb, "growx, gaptop 8");
+        panel.add(skipCb, "gaptop 8");
         panel.add(skipHelp, "gapleft 4");
 
         panel.add(new javax.swing.JSeparator(), "span, gaptop 16, gapbottom 12");

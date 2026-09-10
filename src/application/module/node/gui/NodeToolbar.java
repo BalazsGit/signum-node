@@ -96,6 +96,7 @@ public class NodeToolbar extends JPanel {
 
     // Sync state tracking
     private boolean isSyncStopped = false;
+    private boolean consistencyListenerAttached = false;
 
     /**
      * Spinner animation for the Start/Stop button while the node is in the
@@ -635,6 +636,11 @@ public class NodeToolbar extends JPanel {
             popOff100Button.setEnabled(true);
             dbCheckButton.setEnabled(true);
 
+            // Now that the node is running, try to attach consistency listener
+            // (setSignum may have been called before the node started)
+            attachMaintenanceStateListeners(signum);
+            updateDbCheckIconColor();
+
             // Update sync icon based on pause state
             syncButton.setIcon(IconFontSwing.buildIcon(
                     isSyncStopped ? FontAwesome.PLAY : FontAwesome.PAUSE, iconSize, GuiColors.getButtonIcon()));
@@ -744,6 +750,9 @@ public class NodeToolbar extends JPanel {
     }
 
     private void attachMaintenanceStateListeners(Signum s) {
+        if (consistencyListenerAttached) {
+            return;
+        }
         BlockchainProcessor bp = resolveProcessor(s);
         if (bp == null) {
             return;
@@ -753,18 +762,19 @@ public class NodeToolbar extends JPanel {
         bp.addPruneListener(pruneStateListener, BlockchainProcessor.Event.PRUNE_START);
         bp.addPruneListener(pruneStateListener, BlockchainProcessor.Event.PRUNE_END);
         bp.addListener(block -> updateDbCheckIconColor(), BlockchainProcessor.Event.DATABASE_CONSISTENCY_UPDATE);
+        consistencyListenerAttached = true;
         LOGGER.debug("Maintenance state listeners attached for profile: {}", profile.getName());
     }
 
     private void detachMaintenanceStateListeners(Signum s) {
         BlockchainProcessor bp = resolveProcessor(s);
-        if (bp == null) {
-            return;
+        if (bp != null) {
+            bp.removeTrimListener(trimStateListener, BlockchainProcessor.Event.TRIM_START);
+            bp.removeTrimListener(trimStateListener, BlockchainProcessor.Event.TRIM_END);
+            bp.removePruneListener(pruneStateListener, BlockchainProcessor.Event.PRUNE_START);
+            bp.removePruneListener(pruneStateListener, BlockchainProcessor.Event.PRUNE_END);
         }
-        bp.removeTrimListener(trimStateListener, BlockchainProcessor.Event.TRIM_START);
-        bp.removeTrimListener(trimStateListener, BlockchainProcessor.Event.TRIM_END);
-        bp.removePruneListener(pruneStateListener, BlockchainProcessor.Event.PRUNE_START);
-        bp.removePruneListener(pruneStateListener, BlockchainProcessor.Event.PRUNE_END);
+        consistencyListenerAttached = false;
     }
 
     /**
