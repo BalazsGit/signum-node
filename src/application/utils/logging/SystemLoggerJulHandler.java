@@ -1,5 +1,4 @@
 package application.utils.logging;
-import application.utils.config.ModuleIds;
 
 import application.utils.logging.event.LogEvent;
 
@@ -97,40 +96,27 @@ public final class SystemLoggerJulHandler extends Handler {
             // 1. Always dispatch to SystemLogger (System Console)
             SystemLogger.getInstance().dispatch(event);
 
-            // 2. Also dispatch to the per-profile ProfileLogger if a scope is active
+            // 2. Also dispatch to the per-profile ProfileLogger ONLY when the emitting
+            //    thread knows its profile (NodeLogContext is set).
+            //
+            //    A context-less event CANNOT be attributed to a specific profile, so it is
+            //    deliberately NOT forwarded to any per-profile console — it stays in the
+            //    System Console (already dispatched in step 1). Broadcasting such events to
+            //    every node profile (the old fallback) is exactly what leaked one profile's
+            //    GUI/state lines into another profile's console (e.g. 'node.profile1' lines
+            //    showing up in the 'node.node' console). Profile-aware components
+            //    (NodeModule, NodeProfilePanel, NodeToolbar, Signum, ...) set their own
+            //    NodeLogContext, so their events are routed to the correct profile here.
             if (scope != null) {
                 ProfileLogger profileLogger = NodeLoggerRegistry.get(scope);
                 if (profileLogger != null && !profileLogger.isClosed()) {
                     profileLogger.dispatch(event);
-                }
-            } else if (isNodeModuleLogger(record)) {
-                // 3. Fallback: threads without a NodeLogContext (GUI/EDT components such
-                //    as NodeModule, NodePanel, NodeToolbar, ProfileConfig) still emit
-                //    node-profile-relevant logs. Without this they would only reach the
-                //    System Logger (terminal) and be missing from the per-profile console
-                //    panel. Route them to every registered node-profile logger so the
-                //    profile console shows the complete profile-relevant log stream.
-                for (ProfileLogger profileLogger : NodeLoggerRegistry.loggersForModule(ModuleIds.NODE)) {
-                    if (!profileLogger.isClosed()) {
-                        profileLogger.dispatch(event);
-                    }
                 }
             }
         } catch (Exception e) {
             // Never let logging errors crash the application
             System.err.println("[SystemLoggerJulHandler] Error: " + e.getMessage());
         }
-    }
-
-    /**
-     * True when the record originates from the node module package
-     * ({@code application.module.node.*}). Such log events belong to the node
-     * profile consoles even when the emitting thread carries no
-     * {@link NodeLogContext} (GUI/EDT threads).
-     */
-    private static boolean isNodeModuleLogger(LogRecord record) {
-        String name = record.getLoggerName();
-        return name != null && name.startsWith("application.module.node");
     }
 
     /**

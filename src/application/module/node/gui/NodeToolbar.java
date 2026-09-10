@@ -600,9 +600,11 @@ public class NodeToolbar extends JPanel {
                     onNodeStarted.onNodeStarted(started);
                 }
             } catch (Exception e) {
-                LOGGER.error("Start failed for profile: {}", profile.getName(), e);
+                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(),
+                        () -> LOGGER.error("Start failed for profile: {}", profile.getName(), e));
             }
-            LOGGER.info("Start requested for profile: {}", profile.getName());
+            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(),
+                    () -> LOGGER.info("Start requested for profile: {}", profile.getName()));
         }
     }
 

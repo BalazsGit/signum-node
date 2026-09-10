@@ -25,7 +25,6 @@ import java.awt.Component;
 import java.awt.FlowLayout;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -389,16 +388,15 @@ public class NodeInfoBar extends JPanel {
                     others.add(p);
                 }
             }
-            Set<String> running = new HashSet<>();
-            for (Signum s : NodeModule.getInstance().getAll()) {
-                if (s != null && s.isRunning() && s.getProfileName() != null) {
-                    running.add(s.getProfileName());
-                }
-            }
+            // The "active" set is the set of profiles that have actually claimed a resource
+            // (starting up or running, not yet released). Read straight from the same ownership
+            // maps that enforce start-time conflicts, so the GUI warning always reflects what a
+            // start would actually reject (see NodeModule.getClaimingProfileNames()).
+            Set<String> running = NodeModule.getInstance().getClaimingProfileNames();
             for (ProfileConflictDetector.Conflict c : ProfileConflictDetector.detect(profile, others, running)) {
-                // A profile that is merely *configured* (not running) does not hold any
+                // A profile that is merely *configured* (has not claimed a resource) does not hold any
                 // port/database — it does not block a start. Only a conflict with a
-                // currently RUNNING profile is meaningful here (and is what the start-time
+                // profile that has actually claimed a resource is meaningful here (and is exactly
                 // rejection actually enforces), so surface those and ignore the rest.
                 if (!c.isOtherRunning()) {
                     continue;
@@ -425,7 +423,7 @@ public class NodeInfoBar extends JPanel {
      * Builds a detailed, actionable hover tooltip for a conflict.
      */
     private String buildConflictTooltip(ProfileConflictDetector.Conflict conflict) {
-        String status = conflict.isOtherRunning() ? "currently RUNNING" : "configured";
+        String status = conflict.isOtherRunning() ? "starting or running" : "configured";
         return "Konfliktus: a(z) " + fieldLabel(conflict.getField()) + " (" + conflict.getOwnValue() + ")"
                 + " a(z) '" + conflict.getOtherProfile() + "' profiléval ütközik (" + status + ")."
                 + "\n\nOldal: írd át a portot vagy az adatbázist, vagy futtasd az első profilt"

@@ -9,7 +9,10 @@ import application.utils.config.PropertiesProfileLoader;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
 /**
@@ -100,6 +103,71 @@ public final class NodeProfileRepository {
         return PropertiesProfileLoader.discoverProfiles(
                 NodeProfile.CONF_ROOT, NodeProfile.MODULE_ID, NodeProfile.CATEGORY,
                 NodeProfile.RESERVED_PROFILE_NAMES);
+    }
+
+    /**
+     * Reorders the given profiles into the canonical startup (arbitration) order.
+     * <p>
+     * Names present in {@code preferredOrder} (the user-defined tab/start order)
+     * come first — restricted to profiles that actually exist, in that order — and
+     * any remaining profiles are appended in their original discovery order. Unknown
+     * names in {@code preferredOrder} are ignored; a null/empty {@code preferredOrder}
+     * yields the pure discovery order.
+     * </p>
+     * <p>
+     * This is the <b>single source of truth</b> for the autostart order: the "first
+     * profile wins the resource" arbitration depends on a deterministic order that
+     * matches the GUI tab display (both read {@link ProfileConfig#getTabOrder()}).
+     * </p>
+     *
+     * @param profiles       the discovered profiles (any order), may be null/empty
+     * @param preferredOrder the desired order of profile names, may be null
+     * @return the same profiles in startup order, never null
+     */
+    public static NodeProfile[] inStartupOrder(NodeProfile[] profiles, List<String> preferredOrder) {
+        Map<String, NodeProfile> byName = new LinkedHashMap<>();
+        if (profiles != null) {
+            for (NodeProfile profile : profiles) {
+                if (profile != null && profile.getName() != null) {
+                    byName.putIfAbsent(profile.getName(), profile);
+                }
+            }
+        }
+        List<String> desired = new ArrayList<>(byName.size());
+        if (preferredOrder != null) {
+            for (String name : preferredOrder) {
+                if (name != null && byName.containsKey(name) && !desired.contains(name)) {
+                    desired.add(name);
+                }
+            }
+        }
+        for (String name : byName.keySet()) {
+            if (!desired.contains(name)) {
+                desired.add(name);
+            }
+        }
+        NodeProfile[] ordered = new NodeProfile[desired.size()];
+        for (int i = 0; i < desired.size(); i++) {
+            ordered[i] = byName.get(desired.get(i));
+        }
+        return ordered;
+    }
+
+    /**
+     * Reorders the given profiles using the user-defined tab/start order persisted in
+     * {@link ProfileConfig} (falls back to discovery order when none is set).
+     *
+     * @param profiles the discovered profiles (any order)
+     * @return the profiles in startup order, never null
+     */
+    public static NodeProfile[] inStartupOrder(NodeProfile[] profiles) {
+        List<String> preferred;
+        try {
+            preferred = new ProfileConfig().getTabOrder();
+        } catch (Exception e) {
+            preferred = null;
+        }
+        return inStartupOrder(profiles, preferred);
     }
 
     // ── Default File Management ────────────────────────────────────────

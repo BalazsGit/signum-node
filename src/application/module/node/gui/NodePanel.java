@@ -309,7 +309,8 @@ public class NodePanel extends JPanel  {
         profileTabbedPane.setComponentAt(selectedIndex, actualPanel);
         placeholderReplaced.put(profileName, true);
 
-        LOGGER.info("Profile panel loaded for: {}", profileName);
+        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                () -> LOGGER.info("Profile panel loaded for: {}", profileName));
     }
 
     /**
@@ -351,7 +352,8 @@ public class NodePanel extends JPanel  {
                 panel.onNodeStateChanged(oldState, newState);
             }
             updateTabIcon(profile.getName(), newState);
-            LOGGER.info("State change: {} -> {} for profile {}", oldState, newState, profile.getName());
+            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(),
+                    () -> LOGGER.info("State change: {} -> {} for profile {}", oldState, newState, profile.getName()));
         });
     }
 

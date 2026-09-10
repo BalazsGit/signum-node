@@ -196,7 +196,17 @@ class LogEventBatcherTest {
         @Test
         @DisplayName("enqueue increments pendingCount")
         void enqueue_GivenValidEvent_IncrementsPendingCount() {
-            LogEventBatcher batcher = new LogEventBatcher(events -> {}, 200, 50);
+            // start() is REQUIRED here so enqueue() takes the deterministic timer-based
+            // flush path (scheduleDelayedFlush). Without start() the batcher runs in
+            // "!started" mode, where every enqueue() posts an immediate EDT flush
+            // (scheduleEdtFlush -> SwingUtilities.invokeLater -> flushInternal). That EDT
+            // task resets pendingCount() to 0 as soon as the EventQueue runs — which
+            // happens whenever the EDT is active (e.g. under full-suite load with GUI
+            // tests), so these assertions raced and flakily read 0. With start() the only
+            // pending flush is the one-shot Timer (60_000ms), which cannot fire during
+            // this test, making the pendingCount() readings deterministic.
+            LogEventBatcher batcher = new LogEventBatcher(events -> {}, 60_000, 50);
+            batcher.start();
             assertEquals(0, batcher.pendingCount());
 
             batcher.enqueue(createTestEvent("msg1"));

@@ -16,11 +16,15 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 /**
- * The main panel of the Logging module. Contains an internal {@link JTabbedPane} with:
+ * The main panel of the Logging module. Contains an internal {@link JTabbedPane} with one
+ * tab per registered logging provider (Node, Database, …), added dynamically via
+ * {@link LoggingModuleRegistry} listeners.
+ * <p>
+ * Each module tab is itself a {@link JTabbedPane} with:
  * <ul>
- *   <li>One tab per registered logging provider (Node, Database, …), added dynamically via
- *       {@link LoggingModuleRegistry} listeners.</li>
- *   <li>An "Assignments" tab (always present) for the node-profile → module-preset table.</li>
+ *   <li>a "Logging Profiles" sub-tab ({@link ModuleLoggingProfilePanel}: profile CRUD);</li>
+ *   <li>an "Assignments" sub-tab ({@link AssignmentPanel}: the node-profile → logging-profile
+ *       associations for this module).</li>
  * </ul>
  *
  * <h3>EDT-safety</h3>
@@ -50,9 +54,6 @@ public class LoggingPanel extends JPanel {
         this.context = context;
         this.tabbedPane = new JTabbedPane();
 
-        // Assignments tab is always present (first).
-        tabbedPane.addTab("Assignments", new AssignmentPanel(context));
-
         // Wire the registry listeners for dynamic module tabs.
         this.addListener = provider -> addModuleTab(provider);
         this.removeListener = moduleId -> removeModuleTab(moduleId);
@@ -74,12 +75,27 @@ public class LoggingPanel extends JPanel {
         if (moduleTabs.containsKey(moduleId)) {
             return; // already added (idempotent)
         }
-        JComponent panel = new ModuleLoggingProfilePanel(context, provider);
+        JComponent panel = buildModuleTab(provider);
         moduleTabs.put(moduleId, panel);
         SwingUtilities.invokeLater(() -> {
             tabbedPane.addTab(provider.getProfile().getDisplayName(), panel);
             LOGGER.info("Added logging tab for module '{}' ({})", moduleId, provider.getProfile().getDisplayName());
         });
+    }
+
+    /**
+     * Builds the composite tab content for a module: an inner {@link JTabbedPane} with a
+     * "Logging Profiles" sub-tab (profile CRUD) and an "Assignments" sub-tab (the
+     * node-profile → logging-profile associations for this module).
+     *
+     * @param provider the module's logging provider
+     * @return the composite tab component
+     */
+    private JComponent buildModuleTab(ModuleLoggingProvider provider) {
+        JTabbedPane inner = new JTabbedPane();
+        inner.addTab("Logging Profiles", new ModuleLoggingProfilePanel(context, provider));
+        inner.addTab("Assignments", new AssignmentPanel(context, provider));
+        return inner;
     }
 
     private void removeModuleTab(String moduleId) {

@@ -84,10 +84,12 @@ public final class NodeLoggerRegistry {
      * Returns all registered {@link ProfileLogger}s of the given module (e.g. "node"),
      * in no particular order.
      * <p>
-     * Used by the {@link SystemLoggerJulHandler} fallback routing: log events emitted
-     * on threads without a {@link NodeLogContext} (GUI/EDT components such as
-     * {@code NodeModule}, {@code NodePanel}, {@code NodeToolbar}) still belong to the
-     * node profile consoles and must not be dropped to the System Logger only.
+     * Exposed as a public utility for introspection/tooling. The
+     * {@link SystemLoggerJulHandler} does <b>not</b> use this for routing: context-less
+     * log events are deliberately never broadcast to every profile of a module (that
+     * fan-out is what leaked one profile's lines into another profile's console).
+     * Profile-aware emitters set their {@link NodeLogContext} and are routed to a single
+     * profile via {@link #get(LogScope)}.
      * </p>
      *
      * @param module the module id (e.g. "node"), never null

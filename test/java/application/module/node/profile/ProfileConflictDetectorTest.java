@@ -225,4 +225,32 @@ class ProfileConflictDetectorTest {
         assertFalse(whenStopped.stream().anyMatch(ProfileConflictDetector.Conflict::isOtherRunning),
                 "a conflict with a stopped profile must be annotated not-running (the GUI hides these)");
     }
+
+    // ── Resource descriptors: the single source of claimable resources ─────
+
+    @Test
+    @DisplayName("RESOURCES is the single ordered source of the 4 claimable resources")
+    void resources_definedInPriorityOrder() {
+        List<ProfileConflictDetector.Resource> rs = ProfileConflictDetector.RESOURCES;
+        assertEquals(4, rs.size(), "there are exactly 4 claimable resources");
+        assertEquals(ProfileConflictDetector.ConflictField.API_PORT, rs.get(0).getField());
+        assertEquals(ProfileConflictDetector.ConflictField.P2P_PORT, rs.get(1).getField());
+        assertEquals(ProfileConflictDetector.ConflictField.WEBSOCKET_PORT, rs.get(2).getField());
+        assertEquals(ProfileConflictDetector.ConflictField.DATABASE, rs.get(3).getField());
+    }
+
+    @Test
+    @DisplayName("a resource's key is empty when it does not apply (e.g. WebSocket disabled)")
+    void resource_keyEmptyWhenNotApplicable() {
+        ProfileConflictDetector.Resource ws = ProfileConflictDetector.RESOURCES.get(2); // WEBSOCKET_PORT
+
+        NodeProfile disabled = new NodeProfile("w-disabled");
+        disabled.setProperty(Props.API_WEBSOCKET_ENABLE.getName(), "false");
+        assertEquals("", ws.key(disabled), "WS disabled -> empty key (not applicable)");
+
+        NodeProfile enabled = new NodeProfile("w-enabled");
+        enabled.setProperty(Props.API_WEBSOCKET_ENABLE.getName(), "true");
+        enabled.setProperty(Props.API_WEBSOCKET_PORT.getName(), "8500");
+        assertEquals("8500", ws.key(enabled), "WS enabled -> the port is the collision key");
+    }
 }

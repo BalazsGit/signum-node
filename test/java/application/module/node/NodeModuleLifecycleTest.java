@@ -1,10 +1,12 @@
 package application.module.node;
 
 import application.module.node.profile.NodeProfile;
+import application.module.node.profile.NodeProfileRepository;
 import org.junit.After;
 import org.junit.Test;
 
 import java.nio.file.Paths;
+import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -221,6 +223,52 @@ public class NodeModuleLifecycleTest {
                 }
             }
         }
+    }
+
+    // =====================================================================
+    // Startup (arbitration) order — the tabOrder doubles as the autostart order.
+    // The "first profile wins the resource" invariant depends on a single,
+    // deterministic order shared by the GUI tab display and NodeModule.start().
+    // =====================================================================
+
+    @Test
+    public void inStartupOrder_preferredOrderComesFirst_thenMissingAppended() {
+        NodeProfile alpha = new NodeProfile("alpha");
+        NodeProfile beta = new NodeProfile("beta");
+        NodeProfile mainnet = new NodeProfile("mainnet");
+        NodeProfile[] discovered = new NodeProfile[]{alpha, beta, mainnet};
+
+        NodeProfile[] ordered = NodeProfileRepository.inStartupOrder(discovered, List.of("mainnet", "alpha"));
+
+        assertEquals(3, ordered.length);
+        assertEquals("mainnet", ordered[0].getName());
+        assertEquals("alpha", ordered[1].getName());
+        assertEquals("beta", ordered[2].getName());
+    }
+
+    @Test
+    public void inStartupOrder_ignoresUnknownNamesInPreferredOrder() {
+        NodeProfile alpha = new NodeProfile("alpha");
+        NodeProfile beta = new NodeProfile("beta");
+        NodeProfile[] discovered = new NodeProfile[]{alpha, beta};
+
+        NodeProfile[] ordered = NodeProfileRepository.inStartupOrder(discovered, List.of("ghost", "beta"));
+
+        assertEquals(2, ordered.length);
+        assertEquals("beta", ordered[0].getName());
+        assertEquals("alpha", ordered[1].getName());
+    }
+
+    @Test
+    public void inStartupOrder_nullPreferredFallsBackToDiscoveryOrder() {
+        NodeProfile alpha = new NodeProfile("alpha");
+        NodeProfile beta = new NodeProfile("beta");
+        NodeProfile[] discovered = new NodeProfile[]{alpha, beta};
+
+        NodeProfile[] ordered = NodeProfileRepository.inStartupOrder(discovered, null);
+
+        assertEquals("alpha", ordered[0].getName());
+        assertEquals("beta", ordered[1].getName());
     }
 
     /**

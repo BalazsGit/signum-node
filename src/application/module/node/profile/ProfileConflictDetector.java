@@ -8,6 +8,8 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 /**
@@ -87,6 +89,80 @@ public final class ProfileConflictDetector {
             return field + " conflict with '" + otherProfile + "' (" + ownValue + ")";
         }
     }
+
+    /**
+     * A single exclusively-claimable resource that a node profile can hold (an API/P2P/WebSocket
+     * port, the database, ...). A {@link Resource} is the shared definition of that resource:
+     * which {@link ConflictField} it maps to, how to extract its collision key from a profile
+     * (an empty string means the resource does not apply to that profile), how to display its
+     * value, and how to phrase a user-facing "already claimed" message.
+     * <p>
+     * {@link #RESOURCES} is the <b>single place</b> where the set of claimable resources is
+     * defined. Both the start-time enforcement in {@code NodeModule} (reserve / release /
+     * conflict check) and the GUI warning ({@link #detect}) iterate it, so they can never drift
+     * apart, and adding a new claimable resource is one localized addition there.
+     * </p>
+     */
+    public static final class Resource {
+        private final ConflictField field;
+        private final Function<NodeProfile, String> key;         // collision key; "" = not applicable
+        private final Function<NodeProfile, String> display;     // human-friendly value
+        private final BiFunction<String, String, String> message; // (value, owner) -> sentence
+
+        private Resource(ConflictField field,
+                         Function<NodeProfile, String> key,
+                         Function<NodeProfile, String> display,
+                         BiFunction<String, String, String> message) {
+            this.field = field;
+            this.key = key;
+            this.display = display;
+            this.message = message;
+        }
+
+        public ConflictField getField() {
+            return field;
+        }
+
+        /** @return the collision key for {@code p}, or an empty string if the resource does not apply. */
+        public String key(NodeProfile p) {
+            return p == null ? "" : key.apply(p);
+        }
+
+        /** @return a human-friendly rendering of the resource value for {@code p}. */
+        public String display(NodeProfile p) {
+            return p == null ? "" : display.apply(p);
+        }
+
+        /** @return the user-facing "already claimed" sentence for the given value and owner. */
+        public String message(String value, String owner) {
+            return message.apply(value, owner);
+        }
+    }
+
+    /**
+     * The complete set of exclusively-claimable resources, in conflict-priority order (API, then
+     * P2P, then WebSocket, then the database). This is the single source of truth for
+     * reserve/release/conflict detection (see {@code NodeModule}) and for GUI warnings
+     * (see {@link #detect}).
+     */
+    public static final List<Resource> RESOURCES = List.of(
+            new Resource(ConflictField.API_PORT,
+                    ProfileConflictDetector::apiPort,
+                    ProfileConflictDetector::apiPort,
+                    (value, owner) -> "API.Port " + value + " is already claimed by running profile '" + owner + "'"),
+            new Resource(ConflictField.P2P_PORT,
+                    ProfileConflictDetector::p2pPort,
+                    ProfileConflictDetector::p2pPort,
+                    (value, owner) -> "P2P.Port " + value + " is already claimed by running profile '" + owner + "'"),
+            new Resource(ConflictField.WEBSOCKET_PORT,
+                    p -> wsEnabled(p) ? wsPort(p) : "",
+                    ProfileConflictDetector::wsPort,
+                    (value, owner) -> "WebSocket port " + value + " is already claimed by running profile '" + owner + "'"),
+            new Resource(ConflictField.DATABASE,
+                    ProfileConflictDetector::dbIdentity,
+                    ProfileConflictDetector::dbDisplayName,
+                    (value, owner) -> "database '" + value + "' is already used by running profile '" + owner + "'")
+    );
 
     /** Parsed representation of a profile's {@code DB.Url}. */
     private static final class DbInfo {
@@ -180,37 +256,27 @@ public final class ProfileConflictDetector {
             return Collections.emptyList();
         }
         Set<String> running = runningProfiles == null ? Collections.emptySet() : runningProfiles;
-
-        String tApi = apiPort(target);
-        String tP2p = p2pPort(target);
-        boolean tWsEnabled = wsEnabled(target);
-        String tWs = wsPort(target);
-        String tDb = dbIdentity(target);
-        String tDbDisplay = dbDisplayName(target);
+        String targetName = target.getName();
 
         List<Conflict> out = new ArrayList<>();
-        for (NodeProfile other : others) {
-            if (other == null || other == target) {
-                continue;
+        for (Resource r : RESOURCES) {
+            String tKey = r.key(target);
+            if (tKey.isEmpty()) {
+                continue; // resource does not apply to the target (e.g. WebSocket disabled, no recognizable DB)
             }
-            String on = other.getName();
-            if (on != null && on.equals(target.getName())) {
-                continue;
-            }
-            boolean otherRunning = on != null && running.contains(on);
-
-            if (tApi.equals(apiPort(other))) {
-                out.add(new Conflict(ConflictField.API_PORT, tApi, on, apiPort(other), otherRunning));
-            }
-            if (tP2p.equals(p2pPort(other))) {
-                out.add(new Conflict(ConflictField.P2P_PORT, tP2p, on, p2pPort(other), otherRunning));
-            }
-            if (tWsEnabled && wsEnabled(other) && tWs.equals(wsPort(other))) {
-                out.add(new Conflict(ConflictField.WEBSOCKET_PORT, tWs, on, wsPort(other), otherRunning));
-            }
-            if (!tDb.isEmpty() && tDb.equals(dbIdentity(other))) {
-                out.add(new Conflict(ConflictField.DATABASE, tDbDisplay, on,
-                        dbDisplayName(other), otherRunning));
+            String tDisplay = r.display(target);
+            for (NodeProfile other : others) {
+                if (other == null || other == target) {
+                    continue;
+                }
+                String on = other.getName();
+                if (on != null && on.equals(targetName)) {
+                    continue;
+                }
+                if (tKey.equals(r.key(other))) {
+                    boolean otherRunning = on != null && running.contains(on);
+                    out.add(new Conflict(r.getField(), tDisplay, on, r.display(other), otherRunning));
+                }
             }
         }
         return Collections.unmodifiableList(out);

@@ -89,16 +89,37 @@ class NodeLogContextRoutingTest {
     }
 
     @Test
-    @DisplayName("without NodeLogContext: node-module loggers are still routed via fallback (console must not be empty)")
-    void noContext_nodeModuleLogger_routesToProfileViaFallback() {
+    @DisplayName("without NodeLogContext: node-module logs reach System but are NOT broadcast to the profile console (no cross-profile leak)")
+    void noContext_nodeModuleLogger_notBroadcastToProfile() {
         NodeLogContext.clear();
 
         SystemLoggerJulHandler.getInstance().publish(sampleRecord());
 
         assertEquals(1, systemEvents.get(), "SystemLogger must always receive the event");
-        assertEquals(1, profileEvents.get(),
-                "Node-module logs (application.module.node.*) must reach the profile console "
-                        + "even when the emitting thread (e.g. EDT) has no NodeLogContext");
+        assertEquals(0, profileEvents.get(),
+                "A context-less event cannot be attributed to a specific profile, so it must "
+                        + "NOT be broadcast to the profile console (that fan-out caused the cross-profile leak)");
+    }
+
+    @Test
+    @DisplayName("without NodeLogContext + MULTIPLE node profiles: no broadcast (no cross-profile leak)")
+    void noContext_multiProfile_notRoutedToProfile() {
+        NodeLogContext.clear();
+        // Register a second node profile so the fallback routing becomes ambiguous.
+        ProfileLogger other = new ProfileLogger("node", "other");
+        other.setForwardToSystem(false);
+        NodeLoggerRegistry.register("node", "other", other);
+        try {
+            SystemLoggerJulHandler.getInstance().publish(sampleRecord());
+        } finally {
+            NodeLoggerRegistry.unregister("node", "other");
+            other.close();
+        }
+
+        assertEquals(1, systemEvents.get(), "SystemLogger must always receive the event");
+        assertEquals(0, profileEvents.get(),
+                "With several node profiles a context-less log must NOT be broadcast to any "
+                        + "profile console (that fan-out is what caused the cross-profile leak)");
     }
 
     @Test

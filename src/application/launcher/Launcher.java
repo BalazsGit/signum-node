@@ -1,6 +1,8 @@
 package application.launcher;
 
 import application.kernel.ApplicationKernel;
+import application.module.node.profile.NodeProfileRepository;
+import application.module.node.profile.ProfileConfig;
 import application.module.node.util.LoggerConfigurator;
 import application.utils.io.PathUtils;
 
@@ -40,7 +42,8 @@ public class Launcher {
     private static final Options BASE_OPTIONS = new Options()
             .addOption("c", "config", true, "Configuration folder")
             .addOption("h", "help", false, "Print help")
-            .addOption("l", "headless", false, "Run in headless mode");
+            .addOption("l", "headless", false, "Run in headless mode")
+            .addOption("o", "order", true, "Set the node start/tab order (comma-separated profile names) and exit");
 
     static {
         // 0. Pre-emptively set the LogManager before JUL is ever touched.
@@ -63,6 +66,7 @@ public class Launcher {
 
         String confFolder = "conf"; // Default
         boolean headless = false;
+        String orderArg = null;
 
         try {
             CommandLine cmd = new DefaultParser().parse(BASE_OPTIONS, args, true);
@@ -71,6 +75,9 @@ public class Launcher {
             }
             if (cmd.hasOption("l") || GraphicsEnvironment.isHeadless()) {
                 headless = true;
+            }
+            if (cmd.hasOption("o")) {
+                orderArg = cmd.getOptionValue("o");
             }
         } catch (ParseException e) {
             System.err.println("Error parsing early arguments: " + e.getMessage());
@@ -93,9 +100,58 @@ public class Launcher {
         // Print bootstrap logs to console
         initLogs.forEach(msg -> System.out.println("[Bootstrap] " + msg));
 
+        // Headless "set node order" command: define the node start/tab order and exit.
+        // In headless mode there is no GUI to drag tabs, so this is how the
+        // autostart/arbitration order is set from the command line.
+        if (orderArg != null) {
+            System.exit(applyNodeOrder(orderArg));
+        }
+
         // Kernel indítása
         ApplicationKernel kernel = new ApplicationKernel(headless, confPath);
         kernel.boot();
+    }
+
+    /**
+     * Applies (persists) the node start/tab order from a comma-separated list of
+     * profile names, validates them against the discovered profiles, and returns a
+     * process exit code (0 = success, non-zero = error).
+     * <p>
+     * The order is stored in {@code conf/node/profiles.json} — the same source the
+     * GUI tab order and the {@code NodeModule} autostart arbitration read — so it
+     * takes effect both for the GUI tab display and for the autostart order.
+     *
+     * @param csv comma-separated profile names (in the desired order)
+     * @return 0 on success, non-zero on error
+     */
+    private static int applyNodeOrder(String csv) {
+        List<String> order = new ArrayList<>();
+        for (String part : csv.split(",")) {
+            String name = part.trim();
+            if (!name.isEmpty()) {
+                order.add(name);
+            }
+        }
+        if (order.isEmpty()) {
+            System.err.println("Error: --order requires at least one profile name (comma-separated).");
+            return 2;
+        }
+        List<String> discovered = NodeProfileRepository.discoverProfileNames();
+        List<String> unknown = new ArrayList<>();
+        for (String name : order) {
+            if (!discovered.contains(name)) {
+                unknown.add(name);
+            }
+        }
+        if (!unknown.isEmpty()) {
+            System.err.println("Error: unknown profile name(s): " + unknown);
+            System.err.println("Discovered profiles: " + discovered);
+            return 2;
+        }
+        new ProfileConfig().setTabOrder(order);
+        System.out.println("Node start order set to: " + order);
+        System.out.println("(applied to both the GUI tab order and the autostart/arbitration order)");
+        return 0;
     }
 
     /**

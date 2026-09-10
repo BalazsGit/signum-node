@@ -18,12 +18,14 @@ import java.nio.file.Path;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests for {@link LoggingPanel} — the dynamic tab behavior.
  * <p>
- * Verifies that the "Assignments" tab is always present, that a tab is added/removed when a
- * provider is registered/unregistered, and that re-registration is idempotent.
+ * Verifies that one tab is added/removed when a provider is registered/unregistered, that
+ * re-registration is idempotent, and that each module tab contains a "Logging Profiles"
+ * and an "Assignments" sub-tab.
  * </p>
  *
  * <h3>EDT handling</h3>
@@ -75,14 +77,29 @@ class LoggingPanelTest {
     }
 
     @Test
-    @DisplayName("Assignments tab is always present (first tab)")
-    void assignmentsTab_alwaysPresent() throws Exception {
+    @DisplayName("No module tabs until a provider registers")
+    void noProvider_emptyTabbedPane() throws Exception {
+        LoggingPanel panel = new LoggingPanel(context);
+        SwingUtilities.invokeAndWait(() -> { });
+
+        assertEquals(0, findTabbedPane(panel).getTabCount(), "no tabs before any provider registers");
+    }
+
+    @Test
+    @DisplayName("Each module tab contains 'Logging Profiles' and 'Assignments' sub-tabs")
+    void moduleTab_containsSubTabs() throws Exception {
+        new TestProvider("alpha").register();
         LoggingPanel panel = new LoggingPanel(context);
         SwingUtilities.invokeAndWait(() -> { });
 
         JTabbedPane tabs = findTabbedPane(panel);
-        assertEquals(1, tabs.getTabCount(), "only the Assignments tab should be present initially");
-        assertEquals("Assignments", tabs.getTitleAt(0));
+        assertEquals(1, tabs.getTabCount(), "one module tab");
+        Component tab = tabs.getComponentAt(0);
+        assertTrue(tab instanceof JTabbedPane, "module tab must be a JTabbedPane");
+        JTabbedPane inner = (JTabbedPane) tab;
+        assertEquals(2, inner.getTabCount(), "two sub-tabs");
+        assertEquals("Logging Profiles", inner.getTitleAt(0));
+        assertEquals("Assignments", inner.getTitleAt(1));
     }
 
     @Test
@@ -95,8 +112,8 @@ class LoggingPanelTest {
         SwingUtilities.invokeAndWait(() -> { });
 
         JTabbedPane tabs = findTabbedPane(panel);
-        assertEquals(2, tabs.getTabCount(), "Assignments + alpha");
-        assertEquals("Test A", tabs.getTitleAt(1));
+        assertEquals(1, tabs.getTabCount(), "only the alpha tab");
+        assertEquals("Test A", tabs.getTitleAt(0));
     }
 
     @Test
@@ -104,14 +121,14 @@ class LoggingPanelTest {
     void providerRegisteredAfterPanel_tabAdded() throws Exception {
         LoggingPanel panel = new LoggingPanel(context);
         SwingUtilities.invokeAndWait(() -> { });
-        assertEquals(1, findTabbedPane(panel).getTabCount());
+        assertEquals(0, findTabbedPane(panel).getTabCount());
 
         new TestProvider("beta").register();
         SwingUtilities.invokeAndWait(() -> { });
 
         JTabbedPane tabs = findTabbedPane(panel);
-        assertEquals(2, tabs.getTabCount(), "Assignments + beta");
-        assertEquals("Test B", tabs.getTitleAt(1));
+        assertEquals(1, tabs.getTabCount(), "only the beta tab");
+        assertEquals("Test B", tabs.getTitleAt(0));
     }
 
     @Test
@@ -120,14 +137,12 @@ class LoggingPanelTest {
         new TestProvider("gamma").register();
         LoggingPanel panel = new LoggingPanel(context);
         SwingUtilities.invokeAndWait(() -> { });
-        assertEquals(2, findTabbedPane(panel).getTabCount());
+        assertEquals(1, findTabbedPane(panel).getTabCount());
 
         registry.unregister("gamma");
         SwingUtilities.invokeAndWait(() -> { });
 
-        JTabbedPane tabs = findTabbedPane(panel);
-        assertEquals(1, tabs.getTabCount(), "only Assignments remains");
-        assertEquals("Assignments", tabs.getTitleAt(0));
+        assertEquals(0, findTabbedPane(panel).getTabCount(), "the module tab is removed");
     }
 
     @Test
@@ -154,7 +169,7 @@ class LoggingPanelTest {
         SwingUtilities.invokeAndWait(() -> { });
 
         JTabbedPane tabs = findTabbedPane(panel);
-        assertEquals(3, tabs.getTabCount(), "Assignments + mod-a + mod-b");
+        assertEquals(2, tabs.getTabCount(), "mod-a + mod-b");
     }
 
     // ── Test fixtures ──────────────────────────────────────────────────

@@ -533,9 +533,11 @@ public class NodeProfilePanel extends JPanel {
                 started = NodeModule.getInstance().startNode(profile.getName());
             }
         } catch (Exception e) {
-            LOGGER.error("Start failed for profile: {}", profile.getName(), e);
+            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(),
+                    () -> LOGGER.error("Start failed for profile: {}", profile.getName(), e));
         }
-        LOGGER.info("Start requested for profile: {}", profile.getName());
+        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(),
+                () -> LOGGER.info("Start requested for profile: {}", profile.getName()));
         onNodeStarted(started);
     }
 
@@ -580,7 +582,8 @@ public class NodeProfilePanel extends JPanel {
      */
     public void refreshFromSignum(Signum.State oldState, Signum.State newState) {
         String profileName = profile.getName();
-        LOGGER.info("[{}] State change: {} -> {}", profileName, oldState, newState);
+        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(),
+                () -> LOGGER.info("[{}] State change: {} -> {}", profileName, oldState, newState));
 
         int consoleIndex = innerTabbedPane.indexOfTab("Console");
         if (consoleIndex >= 0) {

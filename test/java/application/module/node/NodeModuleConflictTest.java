@@ -127,4 +127,21 @@ class NodeModuleConflictTest {
         assertTrue(module().isP2pPortInUse(39001), "A's P2P must be reserved");
         assertTrue(module().isP2pPortInUse(39002), "B's P2P must be reserved (no conflict)");
     }
+
+    @Test
+    @DisplayName("the claiming-profile set reflects live reservations (the authoritative active set)")
+    void claimingProfiles_reflectsReservations() {
+        // Arrange
+        register(NAME_A, "48125", "49001", "jdbc:mariadb://localhost:19999/aaa");
+        register(NAME_B, "48126", "49002", "jdbc:mariadb://localhost:19999/bbb");
+
+        // Act: A starts (and reserves); B does not
+        module().startNode(NAME_A);
+
+        // Assert: A is in the claiming set (its reservation is live); B is not
+        assertTrue(module().getClaimingProfileNames().contains(NAME_A),
+                "a profile that has reserved resources must be in the claiming set");
+        assertFalse(module().getClaimingProfileNames().contains(NAME_B),
+                "a profile that never started must not be in the claiming set");
+    }
 }

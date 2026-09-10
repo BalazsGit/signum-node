@@ -7,8 +7,6 @@ import application.api.ShutdownPriority;
 import application.api.Shutdownable;
 import application.module.node.gui.NodePanel;
 import application.module.node.logging.NodeLoggingProvider;
-import application.module.node.props.Prop;
-import application.module.node.props.Props;
 import application.module.node.profile.NodeProfile;
 import application.module.node.profile.NodeProfileRepository;
 import application.module.node.profile.ProfileConflictDetector;
@@ -44,7 +42,7 @@ import java.util.concurrent.Executors;
  *   └── NodeModule (implements Module)
  *         ├── List<Signum> nodes          ← direct ownership
  *         ├── addNode() / removeNode()
- *         ├── startAll() / stopAll()
+ *         ├── stopAll()
  *         ├── get(profileName) / getAll()
  *         └── size()
  * </pre>
@@ -73,17 +71,14 @@ public class NodeModule implements Module {
     /** All managed Signum instances (thread-safe for reads). */
     private final List<Signum> nodes = new CopyOnWriteArrayList<>();
 
-    /** API (HTTP) port → owning profile name (reserved at start, released at stop). */
-    private final java.util.Map<Integer, String> httpPortOwner = new ConcurrentHashMap<>();
-
-    /** P2P port → owning profile name (reserved at start, released at stop). */
-    private final java.util.Map<Integer, String> p2pPortOwner = new ConcurrentHashMap<>();
-
-    /** WebSocket port → owning profile name (only reserved when WebSocket is enabled). */
-    private final java.util.Map<Integer, String> wsPortOwner = new ConcurrentHashMap<>();
-
-    /** Canonical database identity ({@link ProfileConflictDetector#dbIdentity}) → owning profile name. */
-    private final java.util.Map<String, String> dbOwner = new ConcurrentHashMap<>();
+    /**
+     * Resource ownership: namespaced resource key to owning profile name. A profile reserves
+     * its claimable resources (see {@link ProfileConflictDetector#RESOURCES}) at start and
+     * releases them at stop / failed start. Keys are namespaced per resource type so, e.g., an
+     * API port and a P2P port with the same number never collide. Single ownership store:
+     * reserve, release, conflict detection and the claiming-profile set all use this one map.
+     */
+    private final java.util.Map<String, String> resourceOwner = new ConcurrentHashMap<>();
 
     /**
      * Single-threaded, daemon lifecycle executor: heavy node start/stop work
@@ -175,7 +170,8 @@ public class NodeModule implements Module {
         }
 
         nodes.add(signum);
-        LOGGER.info("Registered Signum for profile '{}'", profileName);
+        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                () -> LOGGER.info("Registered Signum for profile '{}'", profileName));
     }
 
     /**
@@ -263,32 +259,7 @@ public class NodeModule implements Module {
             }
         }
         nodes.clear();
-        httpPortOwner.clear();
-        p2pPortOwner.clear();
-        wsPortOwner.clear();
-        dbOwner.clear();
-    }
-
-    /**
-     * Starts all registered Signum instances that are not yet running.
-     * <p>
-     * Starts are queued on the lifecycle executor (never blocks the caller,
-     * e.g. the EDT) and run sequentially in registry order.
-     * </p>
-     */
-    public void startAll() {
-        List<Signum> snapshot = List.copyOf(nodes);
-        for (Signum signum : snapshot) {
-            if (!signum.isRunning()) {
-                lifecycleExecutor.execute(() -> {
-                    try {
-                        signum.start();
-                    } catch (Exception e) {
-                        LOGGER.error("Error starting profile '{}'", signum.getProfileName(), e);
-                    }
-                });
-            }
-        }
+        resourceOwner.clear();
     }
 
     /**
@@ -350,7 +321,8 @@ public class NodeModule implements Module {
                 target = existing;
             } else {
                 NodeProfile profile = resolveProfile(profileName);
-                LOGGER.info("startNode('{}'): creating new Signum instance (confRoot={})", profileName, confRoot);
+                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                        () -> LOGGER.info("startNode('{}'): creating new Signum instance (confRoot={})", profileName, confRoot));
                 Signum fresh = new Signum(profile, confRoot);
                 addNode(fresh);
                 target = fresh;
@@ -378,7 +350,8 @@ public class NodeModule implements Module {
             reserveResources(target);
         }
 
-        LOGGER.info("startNode('{}'): queuing async start on lifecycle thread", profileName);
+        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                () -> LOGGER.info("startNode('{}'): queuing async start on lifecycle thread", profileName));
         lifecycleExecutor.execute(() -> {
             try {
                 // A queued duplicate (double click, restart cycle) may find the node
@@ -489,31 +462,43 @@ public class NodeModule implements Module {
     // =====================================================================
 
     /**
+     * Checks whether the given resource (identified by its field and collision key) is currently
+     * claimed by a live profile. This is the generic, extensible query behind the port helpers.
+     */
+    public boolean isResourceClaimed(ProfileConflictDetector.ConflictField field, String resourceKey) {
+        return resourceOwner.containsKey(nsKey(field, resourceKey));
+    }
+
+    /**
      * Checks if an API/HTTP port is currently claimed by any live node.
      */
     public boolean isHttpPortInUse(int port) {
-        return httpPortOwner.containsKey(port);
+        return isResourceClaimed(ProfileConflictDetector.ConflictField.API_PORT, String.valueOf(port));
     }
 
     /**
      * Checks if a P2P port is currently claimed by any live node.
      */
     public boolean isP2pPortInUse(int port) {
-        return p2pPortOwner.containsKey(port);
+        return isResourceClaimed(ProfileConflictDetector.ConflictField.P2P_PORT, String.valueOf(port));
     }
 
     /**
-     * Returns the set of API/HTTP ports currently claimed.
+     * Returns the set of profile names that currently claim at least one resource (an
+     * API/P2P/WebSocket port or the database). A profile enters this set when it reserves its
+     * resources at start (i.e. it is starting up or running) and leaves it when it releases
+     * them (stopped, or a failed start).
+     * <p>
+     * This is the authoritative "active" set for cross-profile conflict detection: it is backed
+     * by the same ownership store that enforces start-time conflicts, so a profile is considered
+     * to hold its resources exactly while its reservation is live. The GUI reads this set, so
+     * its conflict warning always reflects what a start would actually reject.
+     * </p>
+     *
+     * @return an unmodifiable set of claiming profile names (may be empty)
      */
-    public Set<Integer> getHttpPortsInUse() {
-        return Collections.unmodifiableSet(new HashSet<>(httpPortOwner.keySet()));
-    }
-
-    /**
-     * Returns the set of P2P ports currently claimed.
-     */
-    public Set<Integer> getP2pPortsInUse() {
-        return Collections.unmodifiableSet(new HashSet<>(p2pPortOwner.keySet()));
+    public Set<String> getClaimingProfileNames() {
+        return Collections.unmodifiableSet(new HashSet<>(resourceOwner.values()));
     }
 
     // =====================================================================
@@ -534,18 +519,6 @@ public class NodeModule implements Module {
     // Internal helpers
     // =====================================================================
 
-    private int resolvePort(Signum signum, Prop<Integer> portProp) {
-        if (signum.getProfile() != null) {
-            String val = signum.getProfile().getProperty(portProp.getName(), String.valueOf(portProp.getDefaultValue()));
-            try {
-                return Integer.parseInt(val);
-            } catch (NumberFormatException e) {
-                // fall through to default
-            }
-        }
-        return portProp.getDefaultValue();
-    }
-
     private void releasePorts(Signum signum) {
         releaseResources(signum);
     }
@@ -562,20 +535,15 @@ public class NodeModule implements Module {
             return;
         }
         String owner = signum.getProfileName();
-        int apiPort = resolvePort(signum, Props.API_PORT);
-        int p2pPort = resolvePort(signum, Props.P2P_PORT);
-        httpPortOwner.putIfAbsent(apiPort, owner);
-        p2pPortOwner.putIfAbsent(p2pPort, owner);
-        if (ProfileConflictDetector.wsEnabled(profile)) {
-            int wsPort = resolvePort(signum, Props.API_WEBSOCKET_PORT);
-            wsPortOwner.putIfAbsent(wsPort, owner);
+        for (ProfileConflictDetector.Resource r : ProfileConflictDetector.RESOURCES) {
+            String key = r.key(profile);
+            if (key.isEmpty()) {
+                continue; // resource does not apply (e.g. WebSocket disabled, no recognizable DB)
+            }
+            // Idempotent: putIfAbsent never overwrites a key already owned by another profile.
+            resourceOwner.putIfAbsent(nsKey(r.getField(), key), owner);
         }
-        String dbKey = ProfileConflictDetector.dbIdentity(profile);
-        if (!dbKey.isEmpty()) {
-            dbOwner.putIfAbsent(dbKey, owner);
-        }
-        LOGGER.debug("Reserved resources for profile '{}': API={}, P2P={}, DB={}",
-                owner, apiPort, p2pPort, dbKey.isEmpty() ? "(none)" : dbKey);
+        LOGGER.debug("Reserved resources for profile '{}' (owner count={})", owner, resourceOwner.size());
     }
 
     /**
@@ -588,20 +556,15 @@ public class NodeModule implements Module {
             return;
         }
         String owner = signum.getProfileName();
-        int apiPort = resolvePort(signum, Props.API_PORT);
-        int p2pPort = resolvePort(signum, Props.P2P_PORT);
-        removeOwnerIf(httpPortOwner, apiPort, owner);
-        removeOwnerIf(p2pPortOwner, p2pPort, owner);
-        if (ProfileConflictDetector.wsEnabled(profile)) {
-            int wsPort = resolvePort(signum, Props.API_WEBSOCKET_PORT);
-            removeOwnerIf(wsPortOwner, wsPort, owner);
+        for (ProfileConflictDetector.Resource r : ProfileConflictDetector.RESOURCES) {
+            String key = r.key(profile);
+            if (key.isEmpty()) {
+                continue;
+            }
+            // Only removes an entry this node actually owns (so it never frees another's).
+            removeOwnerIf(resourceOwner, nsKey(r.getField(), key), owner);
         }
-        String dbKey = ProfileConflictDetector.dbIdentity(profile);
-        if (!dbKey.isEmpty()) {
-            removeOwnerIf(dbOwner, dbKey, owner);
-        }
-        LOGGER.debug("Released resources for profile '{}': API={}, P2P={}, DB={}",
-                owner, apiPort, p2pPort, dbKey.isEmpty() ? "(none)" : dbKey);
+        LOGGER.debug("Released resources for profile '{}'", owner);
     }
 
     /**
@@ -618,36 +581,21 @@ public class NodeModule implements Module {
             return null;
         }
         String me = target.getProfileName();
-
-        int apiPort = resolvePort(target, Props.API_PORT);
-        String owner = httpPortOwner.get(apiPort);
-        if (owner != null && !owner.equals(me)) {
-            return "API.Port " + apiPort + " is already claimed by running profile '" + owner + "'";
-        }
-
-        int p2pPort = resolvePort(target, Props.P2P_PORT);
-        String ownerP2p = p2pPortOwner.get(p2pPort);
-        if (ownerP2p != null && !ownerP2p.equals(me)) {
-            return "P2P.Port " + p2pPort + " is already claimed by running profile '" + ownerP2p + "'";
-        }
-
-        if (ProfileConflictDetector.wsEnabled(profile)) {
-            int wsPort = resolvePort(target, Props.API_WEBSOCKET_PORT);
-            String ownerWs = wsPortOwner.get(wsPort);
-            if (ownerWs != null && !ownerWs.equals(me)) {
-                return "WebSocket port " + wsPort + " is already claimed by running profile '" + ownerWs + "'";
+        for (ProfileConflictDetector.Resource r : ProfileConflictDetector.RESOURCES) {
+            String key = r.key(profile);
+            if (key.isEmpty()) {
+                continue;
             }
-        }
-
-        String dbKey = ProfileConflictDetector.dbIdentity(profile);
-        if (!dbKey.isEmpty()) {
-            String ownerDb = dbOwner.get(dbKey);
-            if (ownerDb != null && !ownerDb.equals(me)) {
-                return "database '" + ProfileConflictDetector.dbDisplayName(profile)
-                        + "' is already used by running profile '" + ownerDb + "'";
+            String owner = resourceOwner.get(nsKey(r.getField(), key));
+            if (owner != null && !owner.equals(me)) {
+                return r.message(r.display(profile), owner);
             }
         }
         return null;
+    }
+
+    private static String nsKey(ProfileConflictDetector.ConflictField field, String key) {
+        return field.name() + ":" + key;
     }
 
     private static <K> void removeOwnerIf(java.util.Map<K, String> owners, K key, String expectedOwner) {
@@ -686,7 +634,11 @@ public class NodeModule implements Module {
         // NodeModule is the only composition root, so profile discovery and
         // startup happen here — never in Signum or the GUI (v4 architecture).
         try {
-            for (NodeProfile profile : NodeProfileRepository.loadAll()) {
+            // Boot autostart profiles in the canonical startup order (the user-defined
+            // tab/start order when present, else filesystem discovery order), so the
+            // first profile wins any conflicting resource — identical to the GUI tab order.
+            NodeProfile[] profiles = NodeProfileRepository.inStartupOrder(NodeProfileRepository.loadAll());
+            for (NodeProfile profile : profiles) {
                 if (profile != null && profile.isAutostart() && get(profile.getName()) == null) {
                     try {
                         startNode(profile.getName());

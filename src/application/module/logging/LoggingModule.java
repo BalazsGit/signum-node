@@ -14,7 +14,8 @@ import javax.swing.JComponent;
  * <p>
  * This module follows the standard {@link Module} lifecycle: {@code init → start → running → stop}.
  * Its UI is a {@link LoggingPanel} that contains an internal {@code JTabbedPane} with one tab
- * per registered logging provider (Node, Database, …) plus an "Assignments" tab.
+ * per registered logging provider (Node, Database, …). Each module tab contains a
+ * "Logging Profiles" and an "Assignments" sub-tab.
  * </p>
  *
  * <h3>Boot order</h3>
