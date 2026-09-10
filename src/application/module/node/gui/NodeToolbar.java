@@ -816,16 +816,15 @@ public class NodeToolbar extends JPanel {
         SwingUtilities.invokeLater(() -> {
             BlockchainProcessor bp = resolveProcessor(signum);
             if (bp == null || dbCheckButton == null) return;
+            BlockchainProcessor.ConsistencyState state = bp.getConsistencyState();
             Color color;
-            switch (bp.getConsistencyState()) {
-                case CONSISTENT:
-                    color = GuiColors.getStatusConsistent();
-                    break;
-                case INCONSISTENT:
-                    color = GuiColors.getContrastRed();
-                    break;
-                default:
-                    color = GuiColors.getButtonIcon();
+            if (state == BlockchainProcessor.ConsistencyState.CONSISTENT) {
+                color = GuiColors.getStatusConsistent();
+            } else if (state == BlockchainProcessor.ConsistencyState.INCONSISTENT) {
+                color = GuiColors.getContrastRed();
+            } else {
+                // UNDEFINED or null → default button-icon colour
+                color = GuiColors.getButtonIcon();
             }
             dbCheckButton.setIcon(IconFontSwing.buildIcon(FontAwesome.DATABASE, GuiConstants.getToolBarIconSize(), color));
         });
@@ -893,6 +892,11 @@ public class NodeToolbar extends JPanel {
 
             // Update hamburger menu button icon
             menuButton.setIcon(IconFontSwing.buildIcon(FontAwesome.BARS, iconSize, iconColor));
+
+            // Restore DB check icon color based on consistency state.
+            // Without this, appearance changes would overwrite the green/red icon
+            // with the default button-icon color, losing the consistency indicator.
+            updateDbCheckIconColor();
 
             for (Component comp : getComponents()) {
                 updateFontsRecursively(comp);

@@ -20,6 +20,7 @@ public class HelpButton extends JButton {
     }
 
     private void init() {
+        setMargin(new java.awt.Insets(0, 0, 0, 0));
         setBorderPainted(false);
         setFocusPainted(false);
         setContentAreaFilled(false);
@@ -69,6 +70,7 @@ public class HelpButton extends JButton {
     public void updateUI() {
         super.updateUI();
         // Re-apply properties that might be reset by LookAndFeel change
+        setMargin(new java.awt.Insets(0, 0, 0, 0));
         setBorderPainted(false);
         setFocusPainted(false);
         setContentAreaFilled(false);

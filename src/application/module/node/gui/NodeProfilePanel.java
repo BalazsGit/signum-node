@@ -255,6 +255,13 @@ public class NodeProfilePanel extends JPanel {
             stateListener = null;
         }
         this.signum = newSignum;
+        // Give the toolbar its own reference to the Signum facade so it can
+        // resolve the BlockchainProcessor and attach the DATABASE_CONSISTENCY_UPDATE
+        // listener. Without this the toolbar's signum field stays null and the
+        // DB-check icon never reflects the consistency state.
+        if (toolbar != null) {
+            toolbar.setSignum(newSignum);
+        }
         stateListener = new Signum.StateListener() {
             @Override
             public void onStateChanged(Signum s, Signum.State oldState, Signum.State newState) {
@@ -297,7 +304,8 @@ public class NodeProfilePanel extends JPanel {
         }
         if (toolbar != null) {
             // Stop the Start/Stop spinner animation so its Timer cannot outlive
-            // the toolbar.
+            // the toolbar, and detach all Signum-backed listeners.
+            toolbar.setSignum(null);
             toolbar.stopSpinnerAnimation();
         }
         LOGGER.info("NodeProfilePanel disposed for profile: {}", profile.getName());
@@ -478,7 +486,9 @@ public class NodeProfilePanel extends JPanel {
         java.awt.Frame owner = (java.awt.Frame) javax.swing.SwingUtilities.getWindowAncestor(this);
 
         javax.swing.JDialog dialog = new javax.swing.JDialog(owner, "Database Consistency Check", true);
-        net.miginfocom.swing.MigLayout layout = new net.miginfocom.swing.MigLayout("insets 24, fillx, wrap");
+        // NOTE: global 'wrap' removed so that button + help share a row;
+        // each logical row is terminated with an explicit 'wrap' constraint below.
+        net.miginfocom.swing.MigLayout layout = new net.miginfocom.swing.MigLayout("insets 24, fillx");
         javax.swing.JPanel panel = new javax.swing.JPanel(layout);
 
         // Status header
@@ -500,9 +510,9 @@ public class NodeProfilePanel extends JPanel {
                 + "</body></html>";
         javax.swing.JLabel detail = new javax.swing.JLabel(detailHtml, null, javax.swing.SwingConstants.CENTER);
 
-        panel.add(title, "span, align center");
-        panel.add(detail, "span, align center, gaptop 6");
-        panel.add(new javax.swing.JSeparator(), "span, gaptop 12, gapbottom 12");
+        panel.add(title, "span, align center, wrap");
+        panel.add(detail, "span, align center, gaptop 6, wrap");
+        panel.add(new javax.swing.JSeparator(), "span, gaptop 12, gapbottom 12, wrap");
 
         // Action rows: [button] [help]
         javax.swing.JButton recheckBtn = new javax.swing.JButton("Run Database Check");
@@ -514,7 +524,7 @@ public class NodeProfilePanel extends JPanel {
                         + "all account and escrow balances.<br><br>"
                         + "Not available while a trim, prune, pop-off, or resolve operation is in progress."));
         panel.add(recheckBtn, "gaptop 8");
-        panel.add(recheckHelp, "gapleft 4");
+        panel.add(recheckHelp, "gapleft 2, wrap");
 
         javax.swing.JButton resolveBtn = new javax.swing.JButton("Start Auto Resolve");
         resolveBtn.setEnabled(!consistent);
@@ -528,7 +538,7 @@ public class NodeProfilePanel extends JPanel {
                 "Rolls back blocks one by one until the database becomes consistent or the safe rollback "
                         + "limit is reached. Only available when the database is inconsistent."));
         panel.add(resolveBtn, "gaptop 8");
-        panel.add(resolveHelp, "gapleft 4");
+        panel.add(resolveHelp, "gapleft 2, wrap");
 
         BlockchainProcessor bproc = signum.getBlockchainProcessor();
         boolean skipChecked = bproc != null && bproc.isSkipDbCheckOnManualPopOff();
@@ -543,13 +553,13 @@ public class NodeProfilePanel extends JPanel {
                 "If enabled, skips the per-block consistency check during manual pop-off for faster operation.<br><br>"
                         + "<i>Session-only. Permanent: set <b>node.popOff.skipDatabaseCheck</b> in config.</i>"));
         panel.add(skipCb, "gaptop 8");
-        panel.add(skipHelp, "gapleft 4");
+        panel.add(skipHelp, "gapleft 2, wrap");
 
-        panel.add(new javax.swing.JSeparator(), "span, gaptop 16, gapbottom 12");
+        panel.add(new javax.swing.JSeparator(), "span, gaptop 16, gapbottom 12, wrap");
 
         javax.swing.JButton closeBtn = new javax.swing.JButton("Close");
         closeBtn.addActionListener(e -> dialog.dispose());
-        panel.add(closeBtn, "span, align right");
+        panel.add(closeBtn, "span, align right, wrap");
 
         dialog.setContentPane(panel);
         dialog.pack();
