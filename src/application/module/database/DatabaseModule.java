@@ -4,10 +4,14 @@ import application.utils.config.ModuleIds;
 import application.api.Module;
 import application.api.ModuleContext;
 import application.module.database.gui.DatabaseConfigurationPanel;
+import application.module.database.logging.DatabaseLoggingProvider;
 
 import javax.swing.JComponent;
 
 public class DatabaseModule implements Module {
+
+    private DatabaseLoggingProvider loggingProvider;
+
     @Override
     public String getId() {
         return ModuleIds.DATABASE;
@@ -29,14 +33,22 @@ public class DatabaseModule implements Module {
 
     @Override
     public void start() {
-        // Start necessary database services
-        // Example: startDatabaseServices();
+        // Register the logging provider so the composite logging infrastructure
+        // knows about the Database module's built-in defaults & presets. This is
+        // what makes the "Database Engine" tab appear in the Logging module GUI.
+        if (loggingProvider == null) {
+            loggingProvider = new DatabaseLoggingProvider();
+        }
+        loggingProvider.register();
     }
 
     @Override
     public void stop() {
-        // Gracefully shut down any running database-related processes
-        // Example: shutdownDatabaseProcesses();
+        // Unregister the logging provider (cleanup registration).
+        if (loggingProvider != null) {
+            loggingProvider.unregister();
+            loggingProvider = null;
+        }
     }
 
     @Override
