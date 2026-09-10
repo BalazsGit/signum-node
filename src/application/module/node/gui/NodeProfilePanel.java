@@ -439,13 +439,118 @@ public class NodeProfilePanel extends JPanel {
     /** Copy from NodeConsolePanel.dbCheckAction */
     public void dbCheckAction() {
         Signum node = signum;
-        BlockchainProcessor blockchainProcessor = node != null ? node.getBlockchainProcessor() : null;
-        if (blockchainProcessor == null) {
+        BlockchainProcessor bp = node != null ? node.getBlockchainProcessor() : null;
+        if (bp == null) {
             JOptionPane.showMessageDialog(this, "Blockchain processor not initialized.",
                     "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
-        blockchainProcessor.checkDatabaseStateRequest();
+        new Thread(() -> {
+            try {
+                int result = bp.checkDatabaseStateRequest();
+                int height = bp.getLastCheckHeight();
+                long totalMined = bp.getLastCheckTotalMined();
+                long totalEffective = bp.getLastCheckTotalEffectiveBalance();
+                SwingUtilities.invokeLater(() ->
+                        showDbCheckResultDialog(result, height, totalMined, totalEffective));
+            } catch (IllegalStateException e) {
+                SwingUtilities.invokeLater(() ->
+                        JOptionPane.showMessageDialog(this, e.getMessage(),
+                                "Database Check Unavailable", JOptionPane.INFORMATION_MESSAGE));
+            } catch (Exception ex) {
+                LOGGER.error("Error during DB check", ex);
+                SwingUtilities.invokeLater(() ->
+                        JOptionPane.showMessageDialog(this, "An error occurred during the database check.",
+                                "Error", JOptionPane.ERROR_MESSAGE));
+            }
+        }).start();
+    }
+
+    private void showDbCheckResultDialog(int result, int height, long totalMined, long totalEffective) {
+        double minedSigna = totalMined / 1_000_000_000.0;
+        double effectiveSigna = totalEffective / 1_000_000_000.0;
+        boolean consistent = (result == 0);
+
+        javax.swing.JDialog dialog = new javax.swing.JDialog(
+                (java.awt.Frame) javax.swing.SwingUtilities.getWindowAncestor(this), "Database Consistency Check", true);
+        javax.swing.JPanel panel = new javax.swing.JPanel(new java.awt.BorderLayout(10, 10));
+        panel.setBorder(javax.swing.BorderFactory.createEmptyBorder(20, 20, 20, 20));
+
+        javax.swing.JLabel title = new javax.swing.JLabel(
+                consistent ? "Database is CONSISTENT" : "Database is INCONSISTENT");
+        title.setFont(java.awt.Font.decode("Dialog").deriveFont(java.awt.Font.BOLD, 14f));
+        title.setForeground(consistent ? new java.awt.Color(0, 128, 0) : new java.awt.Color(200, 0, 0));
+        javax.swing.JLabel info = new javax.swing.JLabel(
+                "<html><body style='width:320px'>Height: " + height + "<br>"
+                        + "Total Mined: " + String.format("%.8f", minedSigna) + " SIGNA<br>"
+                        + "Total Effective: " + String.format("%.8f", effectiveSigna) + " SIGNA</body></html>",
+                null, javax.swing.SwingConstants.LEFT);
+        javax.swing.JPanel topPanel = new javax.swing.JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT));
+        topPanel.add(title);
+        topPanel.add(info);
+        panel.add(topPanel, java.awt.BorderLayout.NORTH);
+
+        javax.swing.JPanel actionPanel = new javax.swing.JPanel(new net.miginfocom.swing.MigLayout("insets 0, gap 8, fillx"));
+
+        javax.swing.JButton recheckBtn = new javax.swing.JButton("Run Database Check");
+        recheckBtn.addActionListener(e -> { dialog.dispose(); dbCheckAction(); });
+        application.utils.gui.HelpButton recheckHelp = new application.utils.gui.HelpButton();
+        recheckHelp.setToolTipText("Re-run the database consistency check");
+        recheckHelp.addActionListener(e -> showDbCheckHelpDialog(dialog, "Run Database Check",
+                "Performs a full database consistency check comparing the total mined supply with the sum of "
+                        + "all account and escrow balances.<br><br>"
+                        + "Not available while a trim, prune, pop-off, or resolve operation is in progress."));
+        actionPanel.add(recheckBtn, "growx");
+        actionPanel.add(recheckHelp);
+        actionPanel.add(new javax.swing.JSeparator(), "span, growx");
+
+        javax.swing.JButton resolveBtn = new javax.swing.JButton("Start Auto Resolve");
+        resolveBtn.setEnabled(!consistent);
+        resolveBtn.addActionListener(e -> {
+            BlockchainProcessor bp = signum.getBlockchainProcessor();
+            if (bp != null) { dialog.dispose(); new Thread(bp::manualResolveDatabaseConsistency).start(); }
+        });
+        application.utils.gui.HelpButton resolveHelp = new application.utils.gui.HelpButton();
+        resolveHelp.setToolTipText("Resolve inconsistency by popping blocks");
+        resolveHelp.addActionListener(e -> showDbCheckHelpDialog(dialog, "Start Auto Resolve",
+                "Rolls back blocks one by one until the database becomes consistent or the safe rollback "
+                        + "limit is reached. Only available when the database is inconsistent."));
+        actionPanel.add(resolveBtn, "growx");
+        actionPanel.add(resolveHelp);
+        actionPanel.add(new javax.swing.JSeparator(), "span, growx");
+
+        BlockchainProcessor bp = signum.getBlockchainProcessor();
+        boolean skipChecked = bp != null && bp.isSkipDbCheckOnManualPopOff();
+        javax.swing.JCheckBox skipCb = new javax.swing.JCheckBox("Skip DB Check on Manual Pop-off", skipChecked);
+        skipCb.addActionListener(e -> {
+            BlockchainProcessor p = signum.getBlockchainProcessor();
+            if (p != null) p.setSkipDbCheckOnManualPopOff(skipCb.isSelected());
+        });
+        application.utils.gui.HelpButton skipHelp = new application.utils.gui.HelpButton();
+        skipHelp.setToolTipText("Toggle per-block check during manual pop-off");
+        skipHelp.addActionListener(e -> showDbCheckHelpDialog(dialog, "Skip DB Check on Pop-off",
+                "If enabled, skips the per-block consistency check during manual pop-off for faster operation.<br><br>"
+                        + "<i>Session-only. Permanent: set <b>node.popOff.skipDatabaseCheck</b> in config.</i>"));
+        actionPanel.add(skipCb, "growx");
+        actionPanel.add(skipHelp);
+        panel.add(actionPanel, java.awt.BorderLayout.CENTER);
+
+        javax.swing.JPanel bottomPanel = new javax.swing.JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT));
+        javax.swing.JButton closeBtn = new javax.swing.JButton("Close");
+        closeBtn.addActionListener(e -> dialog.dispose());
+        bottomPanel.add(closeBtn);
+        panel.add(bottomPanel, java.awt.BorderLayout.SOUTH);
+
+        dialog.setContentPane(panel);
+        dialog.pack();
+        dialog.setLocationRelativeTo(this);
+        dialog.setDefaultCloseOperation(javax.swing.JDialog.DISPOSE_ON_CLOSE);
+        dialog.setVisible(true);
+    }
+
+    private void showDbCheckHelpDialog(java.awt.Component parent, String title, String htmlBody) {
+        String html = "<html><body style='width: 320px'><b>" + title + "</b><br><br>" + htmlBody + "</body></html>";
+        JOptionPane.showMessageDialog(parent, html, title, JOptionPane.PLAIN_MESSAGE);
     }
 
     private String determineConfFolder() {

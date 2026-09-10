@@ -452,6 +452,7 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(systemPanel, Props.SETTINGS_DIR, "Settings Dir");
         addProperty(systemPanel, Props.ICON_LOCATION, "Icon Location");
         addProperty(systemPanel, Props.AUTO_POP_OFF_ENABLED, "Enable Auto Pop-Off");
+        addProperty(systemPanel, Props.INITIAL_POP_OFF_ENABLED, "Enable Initial Safety Pop-Off");
         addProperty(systemPanel, Props.POP_OFF_SKIP_DB_CHECK, "Skip DB Check on Manual Pop-Off");
         addProperty(systemPanel, Props.AUTO_CONSISTENCY_RESOLVE_ENABLED, "Enable Auto DB Resolve");
         addProperty(systemPanel, Props.INDIRECT_INCOMING_SERVICE_ENABLE, "Enable Indirect Incoming Service");
@@ -3403,6 +3404,11 @@ public class NodeConfigurationPanel extends JPanel {
         helpTexts.put(Props.AUTO_POP_OFF_ENABLED.getName(),
                 "Enables automatic block pop-off when a fork is detected."
                         + "<br>Helps the node stay on the correct chain.");
+
+        helpTexts.put(Props.INITIAL_POP_OFF_ENABLED.getName(),
+                "If enabled, the node will pop off the last block on every startup as a safety measure against "
+                        + "partially committed data from an unclean shutdown. "
+                        + "Disabling this saves 1 block of re-sync but is not recommended for production nodes.");
 
         helpTexts.put(Props.POP_OFF_SKIP_DB_CHECK.getName(),
                 "If enabled, skips the database consistency check after each block is removed during a manual pop-off operation."

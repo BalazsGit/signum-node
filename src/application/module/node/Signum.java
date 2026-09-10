@@ -960,7 +960,20 @@ public final class Signum {
         } else if (command.equals(".trim")) {
             if (proc != null && chain != null) proc.scheduleTrim(chain.getLastBlock());
         } else if (command.equals(".dbcheck")) {
-            if (proc != null) proc.checkDatabaseStateRequest();
+            if (proc == null) {
+                LOGGER.warn("Blockchain processor is not initialized. Cannot run database check.");
+            } else {
+                try {
+                    int result = proc.checkDatabaseStateRequest();
+                    if (result == 0) {
+                        LOGGER.info("Database check completed: CONSISTENT.");
+                    } else {
+                        LOGGER.warn("Database check completed: INCONSISTENT. Consider running .autoresolve.");
+                    }
+                } catch (IllegalStateException e) {
+                    LOGGER.info(e.getMessage());
+                }
+            }
         } else if (command.equals(".help")) {
             LOGGER.info("Available commands:");
             LOGGER.info("  .shutdown     - Gracefully shuts down the node.");

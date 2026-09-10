@@ -784,11 +784,18 @@ public class NodeToolbar extends JPanel {
         if (active) {
             maintenanceLabel.setText(state == BlockchainProcessor.ArchivalMaintenanceState.TRIMMING
                     ? "DB maintenance: trimming..." : "DB maintenance: pruning...");
+            dbCheckButton.setEnabled(false);
+            dbCheckButton.setToolTipText(state == BlockchainProcessor.ArchivalMaintenanceState.TRIMMING
+                    ? "Unavailable during trim" : "Unavailable during prune");
         } else {
             maintenanceLabel.setText(" ");
+            if (signum != null && signum.getState() == Signum.State.RUNNING) {
+                dbCheckButton.setEnabled(true);
+                dbCheckButton.setToolTipText("Run database consistency check");
+            }
         }
-        JPanel row = (JPanel) maintenanceLabel.getParent();
         maintenanceLabel.setVisible(active);
+        JPanel row = (JPanel) maintenanceLabel.getParent();
         row.revalidate();
         row.repaint();
     }

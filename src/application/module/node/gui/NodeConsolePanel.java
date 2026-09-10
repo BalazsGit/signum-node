@@ -2328,17 +2328,23 @@ public class NodeConsolePanel extends JPanel {
             return;
         }
 
-        String statusMessage;
-        if (blockchainProcessor.getResolutionState() == BlockchainProcessor.ResolutionState.ACTIVE) {
-            statusMessage = "Auto database resolve ongoing. Database check will run after resolution is finished...";
-        } else if (blockchainProcessor.isTrimming()) {
-            statusMessage = "Trim ongoing. Database check will run after trim is finished...";
-        } else if (blockchainProcessor.getManualPopOffBlocksCount() > 0
-                || blockchainProcessor.getAutoPopOffBlocksCount() > 0) {
-            statusMessage = "Pop-off ongoing. Database check will run after pop-off is finished...";
-        } else {
-            statusMessage = "Database consistency check in progress...";
+        // Guard: if blocked, show message and return — do NOT proceed
+        if (blockchainProcessor.isTrimming() || blockchainProcessor.isPruning()) {
+            String phase = blockchainProcessor.isPruning() ? "Pruning" : "Trim";
+            showMessage(phase + " is in progress. An automatic database check will run after it completes.");
+            return;
         }
+        if (blockchainProcessor.getManualPopOffState() == BlockchainProcessor.PopOffState.ACTIVE
+                || blockchainProcessor.getAutoPopOffState() == BlockchainProcessor.PopOffState.ACTIVE) {
+            showMessage("Pop-off is in progress. Please wait for it to complete before running a manual database check.");
+            return;
+        }
+        if (blockchainProcessor.getResolutionState() == BlockchainProcessor.ResolutionState.ACTIVE) {
+            showMessage("Auto database resolve is in progress. A consistency check will run after it completes.");
+            return;
+        }
+
+        String statusMessage = "Database consistency check in progress...";
 
         waitDialog = new JDialog(parentFrame, "Database Check", true);
         JPanel panel = new JPanel();

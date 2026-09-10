@@ -3123,19 +3123,71 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     }
 
     private void initialCleanDatabase() {
-        logger.info("Initial DatabaseClean popoff 1 block...");
-        if (blockchain.getHeight() > getMinRollbackHeight()) {
-            popOff(1);
+        // Step 1: Safety pop-off (discard last block to guard against unclean shutdown)
+        if (propertyService.getBoolean(Props.INITIAL_POP_OFF_ENABLED)
+                && blockchain.getHeight() > getMinRollbackHeight()
+                && blockchain.getLastBlock().getId() != genesisBlockId) {
+            safetyPopOffLastBlock();
         }
 
-        if (Boolean.FALSE.equals(propertyService.getBoolean(Props.DB_SKIP_CHECK))) {
-            // Check database state and auto-resolve if needed on startup
-            logger.info("Initial database check...");
-            checkDatabaseStateRequest();
-            if (isAutoResolutionRequired()) {
-                logger.info("Database is inconsistent on startup.");
+        // Step 2: Consistency check + optional auto-resolve
+        if (!propertyService.getBoolean(Props.DB_SKIP_CHECK)) {
+            logger.info("Startup database consistency check...");
+            int result = checkDatabaseStateRequest();
+            if (result != 0 && isAutoResolutionRequired()) {
+                logger.info("Starting auto-resolution of database inconsistency...");
                 manualResolveDatabaseConsistency();
             }
+        }
+    }
+
+    /**
+     * Pops off the last block as a startup safety measure.
+     * <p>
+     * This is a dedicated, silent operation — it does NOT use the manual pop-off
+     * state machine, does NOT perform per-block consistency checks, and does NOT
+     * emit "restore from backup" warnings. Its sole purpose is to discard the last
+     * block (which may have been partially committed during an unclean shutdown)
+     * before the formal consistency check runs.
+     *
+     * @see #initialCleanDatabase()
+     */
+    private void safetyPopOffLastBlock() {
+        logger.info("Startup safety pop-off: removing last block at height {}...", blockchain.getHeight());
+
+        getMoreBlocksAutoPause.set(true);
+        blockImporterAutoPause.set(true);
+        getMoreBlocksLock.writeLock().lock();
+        blockImporterLock.writeLock().lock();
+        try {
+            synchronized (transactionProcessor.getUnconfirmedTransactionsSyncObj()) {
+                stores.beginTransaction();
+                try {
+                    Block block = blockchain.getLastBlock();
+                    block = popLastBlock();
+                    for (DerivedTable table : derivedTableManager.getDerivedTables()) {
+                        table.rollback(block.getHeight());
+                    }
+                    transactionProcessor.requeueAllUnconfirmedTransactions();
+                    stores.commitTransaction();
+                } catch (Exception e) {
+                    stores.rollbackTransaction();
+                    logger.error("Startup safety pop-off failed, transaction rolled back.", e);
+                } finally {
+                    dbCacheManager.flushCache();
+                    downloadCache.resetCache();
+                    atProcessorCache.reset();
+                    Block finalBlock = blockDb.findLastBlock();
+                    blockchain.setLastBlock(finalBlock);
+                    stores.endTransaction();
+                }
+            }
+            logger.info("Startup safety pop-off completed. New height: {}", blockchain.getHeight());
+        } finally {
+            getMoreBlocksAutoPause.set(false);
+            blockImporterAutoPause.set(false);
+            blockImporterLock.writeLock().unlock();
+            getMoreBlocksLock.writeLock().unlock();
         }
     }
 
@@ -3149,15 +3201,19 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
      *         indicating inconsistency.
      */
     public int checkDatabaseStateRequest() {
+        // Guard: refuse to run a manual check while another operation owns the DB
         if (isMaintenanceRunning.get()) {
             String phase = isPruning.get() ? "Pruning" : "Trim";
-            logger.info("{} is in progress. Database state check will give results after maintenance finished.", phase);
+            throw new IllegalStateException(
+                    phase + " is in progress. An automatic database check will run after it completes.");
+        }
+        if (manualPopOffState != PopOffState.IDLE || autoPopOffState != PopOffState.IDLE) {
+            throw new IllegalStateException(
+                    "Pop-off is in progress. Please wait for it to complete before running a manual database check.");
         }
         if (resolutionState == ResolutionState.ACTIVE) {
-            logger.info(
-                    "Database consistency resolution is in progress. Database state check will give results after resolution finished.");
-        } else if (manualPopOffState == PopOffState.ACTIVE || autoPopOffState == PopOffState.ACTIVE) {
-            logger.info("Pop-off is in progress. Database state check will give results after pop-off finished.");
+            throw new IllegalStateException(
+                    "Auto database resolve is in progress. A consistency check will run after it completes.");
         }
 
         // Pause other operations
@@ -3790,8 +3846,8 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                                 block = blockDb.findLastBlock();
                                 blockchain.setLastBlock(block);
                                 logger.warn("Database could be inconsistent after popping block at height {}.",
-                                        block.getHeight() + 1);
-                                logger.warn("Cacelling pop-off process to prevent database consistency.");
+                                        beforeRollbackHeight.get() - 1);
+                                logger.warn("Cancelling pop-off process to prevent database consistency.");
                                 logger.warn("Setting blockchain height back to {}.", block.getHeight());
                                 break;
                             } else {
@@ -3818,7 +3874,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     block = blockDb.findLastBlock();
                     blockchain.setLastBlock(block);
                     logger.error("Error occurred during pop-off at height {}.", block.getHeight(), e);
-                    logger.error("Cacelling pop-off process to prevent database consistency.");
+                    logger.error("Cancelling pop-off process to prevent database consistency.");
                     logger.error("Setting blockchain height back to {}.", block.getHeight());
                 } catch (Error e) {
                     manualPopOffBlocksCount.set(0);
@@ -3828,7 +3884,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                     block = blockDb.findLastBlock();
                     blockchain.setLastBlock(block);
                     logger.error("Critical error during pop-off, transaction rolled back.", e);
-                    logger.error("Cacelling pop-off process to prevent database consistency.");
+                    logger.error("Cancelling pop-off process to prevent database consistency.");
                     logger.error("Setting blockchain height back to {}.", block.getHeight());
                 } finally {
                     dbCacheManager.flushCache();
@@ -3848,7 +3904,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             block = blockDb.findLastBlock();
             blockchain.setLastBlock(block);
             logger.error("Unhandled exception during pop-off", e);
-            logger.error("Cacelling pop-off process to prevent database consistency.");
+            logger.error("Cancelling pop-off process to prevent database consistency.");
             logger.error("Setting blockchain height back to {}.", block.getHeight());
         } finally {
             logger.info("Blocks popped off: {} ", poppedBlocks);
