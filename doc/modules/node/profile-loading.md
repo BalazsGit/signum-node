@@ -331,6 +331,54 @@ graph TD
 
 ---
 
+## Profile Creation Paths (GUI Wizard + CLI)
+
+Node profiles can be created through two first-class paths, both converging on the same
+persistence SSOT (`NodeProfileRepository` → `./conf/node/profiles/{name}.properties`):
+
+### GUI Setup Wizard (multi-node onboarding)
+
+Launched from the `NodePanel` onboarding empty-state ("+"/"Create Node Profile"). The
+wizard is a headless-testable state machine (`NodeSetupWizardController`) driving the
+canonical step chain:
+
+```
+database-selection → database-installation → database-connection → node-configuration → logging-profile → summary
+```
+
+| Step | Behaviour |
+|------|-----------|
+| `database-selection` | Engine choice (SQLite / MariaDB / PostgreSQL). SQLite → both DB steps auto-skipped. |
+| `database-installation` | **Only when needed** ("ha szükséges"): embeds the existing Database-module engine panel (SSOT — version selection, **Download** with progress, extract, **Initialize**, my.ini/postgres config). An already-installed engine (`DatabaseConfigurationUtils.isDatabaseInstalled`, i.e. `database/<engine>/` non-empty) pre-selects "Skip". Blocks Next while not installed and not skipped. |
+| `database-connection` | host / port / user / password / db name (+ TCP test) — persisted into the profile via the `ProfileCreateDefaults` SSOT at finish. |
+| `node-configuration` | Suggested name (SSOT `ProfileNameSuggester`, `_NN` auto-suffix on taken names), testnet, ports (per-profile band by default or custom). |
+| `logging-profile` | Preset assignment (SSOT `LoggingAssignmentStore` → `conf/node/profiles.json`). |
+| `summary` | Read-only review + conflict pre-check (SSOT `ProfileConflictDetector`, same as runtime arbitration) + "start immediately". |
+
+Finish goes through `WizardFinish.createProfile(...)` → `NodeProfileRepository.createProfile`
+→ logging assignment → optional `NodeModule.startNode(name)` → `NodePanel.addProfileTab`.
+
+### CLI (headless)
+
+```
+signum-node profile create <name> [--network X] [--api-port N] [--p2p-port N] [--ws-port N]
+signum-node profile list | info <name> | rename <old> <new> | delete <name> [--force]
+signum-node profile run <name>
+```
+
+`profile create` uses the same `ProfileCreateDefaults` mapping (per-profile SQLite file or
+server DB + name-derived deterministic port band), so CLI and wizard produce equivalent,
+independently runnable profiles.
+
+### GUI Profile Management (tab context menu)
+
+Right-click a profile tab → **Rename…** (SSOT validation: pattern / reserved / taken,
+`ProfileNameSuggester`-based suggestion) or **Delete…** (confirmation; extra warning when
+the node is RUNNING — it is stopped first). Both delegate to the public
+`NodePanel.renameProfileTab` / `removeProfileTab` APIs (repository SSOT).
+
+---
+
 ## Related Documentation
 
 - [`implementation_plan/unified_profile_loader.md`](../../implementation_plan/unified_profile_loader.md) - Unified Profile Loader implementation plan

@@ -6,6 +6,8 @@ import application.module.node.NodeModule;
 import application.module.node.profile.NodeProfile;
 import application.module.node.profile.NodeProfileRepository;
 import application.module.node.profile.ProfileConfig;
+import application.module.node.profile.ProfileNameSuggester;
+import application.module.node.gui.wizard.NodeSetupWizardDialog;
 import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiIcons;
 import application.utils.gui.GuiUtils;
@@ -16,6 +18,7 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.BorderFactory;
 import javax.swing.Icon;
+import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
@@ -49,6 +52,8 @@ public class NodePanel extends JPanel  {
     private JTabbedPane profileTabbedPane;
     private JProgressBar progressBar;
     private JLabel statusLabel;
+    /** Shown instead of the (empty) tabbed pane when no profiles exist yet (onboarding, plan §1.3). */
+    private JPanel onboardingPanel;
 
     /** Maps profile name -> actual NodeProfilePanel (after lazy-load) */
     private final Map<String, NodeProfilePanel> loadedProfilePanels = new LinkedHashMap<>();
@@ -109,6 +114,7 @@ public class NodePanel extends JPanel  {
         GuiUtils.applyDefaultTabLayoutPolicy(profileTabbedPane);
         GuiFontManager.applyDefaultFont(profileTabbedPane);
         add(profileTabbedPane, BorderLayout.CENTER);
+        attachTabContextMenu();
 
         // Keep the selected profile's cross-profile conflict warnings current. A profile's
         // info bar computes its conflicts only when it is built / its own profile restarts,
@@ -151,6 +157,13 @@ public class NodePanel extends JPanel  {
 
         headerPanel.add(statusLabel);
         headerPanel.add(Box.createHorizontalStrut(15));
+        JButton addProfileButton = new JButton("+");
+        addProfileButton.setToolTipText("Create node profile...");
+        addProfileButton.setFocusable(false);
+        addProfileButton.setAlignmentY(CENTER_ALIGNMENT);
+        GuiFontManager.applyDefaultFont(addProfileButton);
+        addProfileButton.addActionListener(e -> openSetupWizard());
+        headerPanel.add(addProfileButton);
         headerPanel.add(Box.createHorizontalGlue());
         headerPanel.add(progressBar);
 
@@ -173,8 +186,8 @@ public class NodePanel extends JPanel  {
 
                 if (total == 0) {
                     SwingUtilities.invokeLater(() -> {
-                        updateProgress(100, "No profiles found");
-                        // No profiles - placeholder not needed since discoverProfiles handles it
+                        updateProgress(100, "No profiles configured");
+                        showOnboarding();
                     });
                     return;
                 }
@@ -616,5 +629,250 @@ public class NodePanel extends JPanel  {
         }
         LOGGER.info("NodePanel disposed: appearance listener unregistered, {} profile panel(s) disposed",
                 loadedProfilePanels.size());
+    }
+
+    // ====================================================================
+    // Setup wizard + dynamic profile tabs (plan §1.3-1.4)
+    // ====================================================================
+
+    /**
+     * Opens the modal setup wizard; on success the new profile tab is added.
+     */
+    private void openSetupWizard() {
+        java.awt.Window window = SwingUtilities.windowForComponent(this);
+        java.awt.Frame parent = window instanceof java.awt.Frame ? (java.awt.Frame) window : null;
+        NodeSetupWizardDialog dialog = new NodeSetupWizardDialog(parent, this::addProfileTab);
+        dialog.setVisible(true);
+    }
+
+    /**
+     * Shows the onboarding empty-state panel instead of the (empty) tabbed pane
+     * (plan §1.3). Called from the async loader when zero profiles are discovered.
+     */
+    private void showOnboarding() {
+        profileTabbedPane.setVisible(false);
+        if (onboardingPanel == null) {
+            onboardingPanel = new JPanel();
+            onboardingPanel.setLayout(new BoxLayout(onboardingPanel, BoxLayout.Y_AXIS));
+            onboardingPanel.setOpaque(false);
+
+            JLabel title = new JLabel("No node profiles yet");
+            title.setFont(title.getFont().deriveFont(java.awt.Font.BOLD, 22f));
+            GuiFontManager.applyDefaultFont(title);
+
+            JLabel text = new JLabel(
+                    "Create your first profile to start the node — or headlessly:  signum-node profile create <name>");
+            GuiFontManager.applyDefaultFont(text);
+
+            JButton button = new JButton("Create Node Profile");
+            button.setFocusable(false);
+            button.addActionListener(e -> openSetupWizard());
+            GuiFontManager.applyDefaultFont(button);
+
+            onboardingPanel.add(Box.createVerticalGlue());
+            onboardingPanel.add(title);
+            onboardingPanel.add(Box.createVerticalStrut(14));
+            onboardingPanel.add(text);
+            onboardingPanel.add(Box.createVerticalStrut(28));
+            onboardingPanel.add(button);
+            onboardingPanel.add(Box.createVerticalGlue());
+        }
+        onboardingPanel.setVisible(true);
+        add(onboardingPanel, BorderLayout.CENTER);
+        revalidate();
+        repaint();
+    }
+
+    /**
+     * Adds a freshly created profile as a new (placeholder) tab, restores the tabbed
+     * pane from onboarding when needed, and appends the profile to the persisted tab
+     * order (SSOT: {@code profiles.json} via {@link ProfileConfig}).
+     *
+     * @param profileName the created profile name (file already exists)
+     */
+    public void addProfileTab(String profileName) {
+        if (profileNameToTabIndex.containsKey(profileName)) {
+            return; // already visible
+        }
+        if (onboardingPanel != null && onboardingPanel.isVisible()) {
+            onboardingPanel.setVisible(false);
+            profileTabbedPane.setVisible(true);
+        }
+        createPlaceholderTab(profileName);
+        List<String> order = profileConfig.getTabOrder();
+        order = order == null ? new ArrayList<>() : new ArrayList<>(order);
+        if (!order.contains(profileName)) {
+            order.add(profileName);
+            profileConfig.setTabOrder(order);
+        }
+        profileTabbedPane.setSelectedIndex(profileTabbedPane.getTabCount() - 1);
+        statusLabel.setForeground(new Color(76, 175, 80));
+        statusLabel.setText("Profile added: " + profileName);
+        LOGGER.info("Profile tab added: {}", profileName);
+    }
+
+    /**
+     * Removes a profile tab: stops the node (if any), disposes its loaded panel,
+     * removes the tab and persists the removal (file + profiles.json via the
+     * repository SSOT). Falls back to the onboarding panel when no tabs remain.
+     */
+    public void removeProfileTab(String profileName) {
+        int index = profileNameToTabIndex.getOrDefault(profileName, -1);
+        if (index < 0) {
+            LOGGER.warn("removeProfileTab: no tab for profile '{}'", profileName);
+            return;
+        }
+        NodeModule module = NodeModule.getInstance();
+        if (module.get(profileName) != null) {
+            module.stopNode(profileName);
+        }
+        NodeProfilePanel panel = loadedProfilePanels.remove(profileName);
+        if (panel != null) {
+            panel.dispose();
+        }
+        placeholderReplaced.remove(profileName);
+        profileNameToTabIndex.remove(profileName);
+        profileTabbedPane.removeTabAt(index);
+        for (int i = index; i < profileTabbedPane.getTabCount(); i++) {
+            profileNameToTabIndex.put(profileTabbedPane.getTitleAt(i), i);
+        }
+        try {
+            NodeProfileRepository.deleteProfile(profileName);
+            LOGGER.info("Profile removed: {}", profileName);
+        } catch (Exception e) {
+            LOGGER.error("Failed to delete profile file for '{}'", profileName, e);
+        }
+        if (profileTabbedPane.getTabCount() == 0) {
+            showOnboarding();
+        }
+    }
+
+    /**
+     * Renames a profile tab: renames the profile file + updates the persisted tab order /
+     * logging association (SSOT: {@link NodeProfileRepository#renameProfile}) and re-keys
+     * the in-memory tab bookkeeping.
+     */
+    public void renameProfileTab(String oldName, String newName) {
+        int index = profileNameToTabIndex.getOrDefault(oldName, -1);
+        if (index < 0) {
+            LOGGER.warn("renameProfileTab: no tab for profile '{}'", oldName);
+            return;
+        }
+        try {
+            NodeProfileRepository.renameProfile(oldName, newName);
+        } catch (Exception e) {
+            LOGGER.error("Failed to rename profile '{}' -> '{}'", oldName, newName, e);
+            return;
+        }
+        profileTabbedPane.setTitleAt(index, newName);
+        Integer tabIndex = profileNameToTabIndex.remove(oldName);
+        if (tabIndex != null) {
+            profileNameToTabIndex.put(newName, tabIndex);
+        }
+        Boolean replaced = placeholderReplaced.remove(oldName);
+        if (replaced != null) {
+            placeholderReplaced.put(newName, replaced);
+        }
+        NodeProfilePanel panel = loadedProfilePanels.remove(oldName);
+        if (panel != null) {
+            loadedProfilePanels.put(newName, panel);
+        }
+        LOGGER.info("Profile tab renamed: {} -> {}", oldName, newName);
+    }
+
+    // ── Tab context menu (rename / delete) ──────────────────────────────
+
+    /**
+     * Attaches a right-click context menu (Rename… / Delete…) to the profile tab strip.
+     * Attached once (guarded); the target tab is resolved from the mouse position.
+     */
+    private void attachTabContextMenu() {
+        if (Boolean.TRUE.equals(profileTabbedPane.getClientProperty("contextMenuAttached"))) {
+            return;
+        }
+        profileTabbedPane.putClientProperty("contextMenuAttached", true);
+        profileTabbedPane.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (e.isPopupTrigger()) {
+                    int idx = profileTabbedPane.indexAtLocation(e.getX(), e.getY());
+                    if (idx >= 0 && idx < profileTabbedPane.getTabCount()) {
+                        showTabContextMenu(idx, e);
+                    }
+                }
+            }
+        });
+    }
+
+    private void showTabContextMenu(int tabIndex, java.awt.event.MouseEvent e) {
+        String name = profileTabbedPane.getTitleAt(tabIndex);
+        javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
+
+        javax.swing.JMenuItem rename = new javax.swing.JMenuItem("Rename…");
+        rename.addActionListener(ev -> renameProfileTabFromUi(name));
+        menu.add(rename);
+
+        menu.addSeparator();
+
+        javax.swing.JMenuItem delete = new javax.swing.JMenuItem("Delete…");
+        delete.addActionListener(ev -> deleteProfileTabFromUi(name));
+        menu.add(delete);
+
+        menu.show(profileTabbedPane, e.getX(), e.getY());
+    }
+
+    /**
+     * Rename flow: asks for the new name (suggested via the {@link ProfileNameSuggester}
+     * SSOT), validates (pattern / reserved / taken — same rules as the wizard) and then
+     * delegates to {@link #renameProfileTab(String, String)}.
+     */
+    private void renameProfileTabFromUi(String name) {
+        java.awt.Window parent = SwingUtilities.windowForComponent(this);
+        java.util.Set<String> taken = new java.util.HashSet<>(NodeProfileRepository.listProfiles());
+        String suggested = ProfileNameSuggester.nextAvailableName(name + "_copy", taken);
+        String input = (String) javax.swing.JOptionPane.showInputDialog(parent,
+                "Enter new name for profile '" + name + "':",
+                "Rename Profile", javax.swing.JOptionPane.PLAIN_MESSAGE, null, null, suggested);
+        if (input == null) {
+            return; // cancelled
+        }
+        String newName = input.trim();
+        if (newName.isEmpty() || !java.util.regex.Pattern.matches("[a-zA-Z0-9_-]{2,32}", newName)) {
+            javax.swing.JOptionPane.showMessageDialog(parent,
+                    "Profile name must be 2-32 characters: a-z, 0-9, '_' or '-'.",
+                    "Invalid name", javax.swing.JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        if (NodeProfileRepository.isReservedProfileName(newName)) {
+            javax.swing.JOptionPane.showMessageDialog(parent, "Profile name '" + newName + "' is reserved.",
+                    "Invalid name", javax.swing.JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        if (taken.contains(newName)) {
+            javax.swing.JOptionPane.showMessageDialog(parent, "A profile named '" + newName + "' already exists.",
+                    "Name taken", javax.swing.JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        renameProfileTab(name, newName);
+    }
+
+    /**
+     * Delete flow: confirmation guard (extra warning when the node is running), then
+     * delegates to {@link #removeProfileTab(String)} (stop → dispose → file + tabOrder).
+     */
+    private void deleteProfileTabFromUi(String name) {
+        java.awt.Window parent = SwingUtilities.windowForComponent(this);
+        boolean running = NodeModule.getInstance().get(name) != null;
+        StringBuilder msg = new StringBuilder("Delete profile '").append(name).append("'?");
+        if (running) {
+            msg.append("\nIts node is RUNNING — it will be stopped first.");
+        }
+        msg.append("\n\nThe profile file and its settings will be removed.");
+        int choice = javax.swing.JOptionPane.showConfirmDialog(parent, msg.toString(),
+                "Delete profile", javax.swing.JOptionPane.YES_NO_OPTION,
+                running ? javax.swing.JOptionPane.WARNING_MESSAGE : javax.swing.JOptionPane.QUESTION_MESSAGE);
+        if (choice == javax.swing.JOptionPane.YES_OPTION) {
+            removeProfileTab(name);
+        }
     }
 }

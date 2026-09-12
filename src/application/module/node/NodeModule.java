@@ -630,6 +630,17 @@ public class NodeModule implements Module {
         }
         loggingProvider.register();
 
+        // ── Single-profile mode (headless "profile run <name>") ──
+        // Start ONLY the target profile (regardless of its autostart flag), and nothing else.
+        String target = context != null ? context.getTargetProfileName() : null;
+        if (target != null && !target.isBlank()) {
+            if (get(target) == null) {
+                startNode(target);
+            }
+            LOGGER.info("profile run mode: started target profile '{}'", target);
+            return;
+        }
+
         // Multi-node boot path: boot every profile with autostart enabled.
         // NodeModule is the only composition root, so profile discovery and
         // startup happen here — never in Signum or the GUI (v4 architecture).
@@ -638,14 +649,25 @@ public class NodeModule implements Module {
             // tab/start order when present, else filesystem discovery order), so the
             // first profile wins any conflicting resource — identical to the GUI tab order.
             NodeProfile[] profiles = NodeProfileRepository.inStartupOrder(NodeProfileRepository.loadAll());
+            if (profiles.length == 0) {
+                LOGGER.warn("No node profiles configured. Create one: 'signum-node profile create <name>' (CLI) "
+                        + "or use the setup wizard in the GUI.");
+                return;
+            }
+            int started = 0;
             for (NodeProfile profile : profiles) {
                 if (profile != null && profile.isAutostart() && get(profile.getName()) == null) {
                     try {
                         startNode(profile.getName());
+                        started++;
                     } catch (Exception e) {
                         LOGGER.error("Failed to autostart profile '{}'", profile.getName(), e);
                     }
                 }
+            }
+            if (started == 0) {
+                LOGGER.warn("No autostart-enabled profiles found (discovered {} profile(s)). "
+                        + "Start one from the GUI or run: signum-node profile run <name>", profiles.length);
             }
         } catch (Exception e) {
             LOGGER.warn("Autostart profile discovery skipped: {}", e.getMessage());

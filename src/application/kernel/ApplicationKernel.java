@@ -43,10 +43,23 @@ public class ApplicationKernel {
     private final ModuleRegistry registry = new ModuleRegistry();
     private final boolean isHeadless;
     private final Path configPath;
+    private final String targetProfile;
 
     public ApplicationKernel(boolean isHeadless, Path configPath) {
+        this(isHeadless, configPath, null);
+    }
+
+    /**
+     * @param isHeadless    whether to boot without the GUI shell
+     * @param configPath    the configuration directory
+     * @param targetProfile the profile to start in single-profile mode (headless
+     *                      {@code profile run <name>}); {@code null} for the normal
+     *                      multi-profile / autostart boot
+     */
+    public ApplicationKernel(boolean isHeadless, Path configPath, String targetProfile) {
         this.isHeadless = isHeadless;
         this.configPath = configPath;
+        this.targetProfile = targetProfile;
     }
 
     /**
@@ -147,6 +160,11 @@ public class ApplicationKernel {
                 // Use the ApplicationShutdown orchestrator instead of direct System.exit
                 ApplicationShutdown.getInstance().executeShutdownSequence();
                 System.exit(0);
+            }
+
+            @Override
+            public String getTargetProfileName() {
+                return targetProfile;
             }
         };
     }

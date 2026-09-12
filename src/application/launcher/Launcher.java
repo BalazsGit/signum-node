@@ -2,6 +2,7 @@ package application.launcher;
 
 import application.kernel.ApplicationKernel;
 import application.module.node.profile.NodeProfileRepository;
+import application.module.node.profile.ProfileCli;
 import application.module.node.profile.ProfileConfig;
 import application.module.node.util.LoggerConfigurator;
 import application.utils.io.PathUtils;
@@ -67,6 +68,7 @@ public class Launcher {
         String confFolder = "conf"; // Default
         boolean headless = false;
         String orderArg = null;
+        String runTarget = null; // set when "profile run <name>" is requested
 
         try {
             CommandLine cmd = new DefaultParser().parse(BASE_OPTIONS, args, true);
@@ -78,6 +80,15 @@ public class Launcher {
             }
             if (cmd.hasOption("o")) {
                 orderArg = cmd.getOptionValue("o");
+            }
+            // ── profile subcommand (Phase 0 + Phase 3) ──
+            int profileCode = ProfileCli.tryHandleProfileCommand(cmd.getArgs());
+            if (profileCode == ProfileCli.RUN_REQUESTED) {
+                // "profile run <name>": boot the node for that profile (headless). Handled
+                // after logging init below; the node's non-daemon threads keep the JVM alive.
+                runTarget = ProfileCli.getRunTarget(cmd.getArgs());
+            } else if (profileCode != ProfileCli.NOT_A_PROFILE_COMMAND) {
+                System.exit(profileCode);
             }
         } catch (ParseException e) {
             System.err.println("Error parsing early arguments: " + e.getMessage());
@@ -105,6 +116,14 @@ public class Launcher {
         // autostart/arbitration order is set from the command line.
         if (orderArg != null) {
             System.exit(applyNodeOrder(orderArg));
+        }
+
+        // ── profile run <name> (Phase 3): boot a single profile headless ──
+        if (runTarget != null) {
+            logger.info("Starting profile '{}' (headless, profile run)...", runTarget);
+            System.out.println("Starting profile '" + runTarget + "' (headless). Ctrl+C to stop.");
+            new ApplicationKernel(true, confPath, runTarget).boot();
+            return; // JVM stays alive via the node's threads; graceful shutdown on Ctrl+C
         }
 
         // Kernel indítása

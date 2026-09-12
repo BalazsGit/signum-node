@@ -332,6 +332,28 @@ public class DatabaseConfigurationUtils {
     }
 
     /**
+     * Reports whether the given engine has at least one installed instance — i.e. its
+     * engine directory (e.g. {@code database/MariaDB}) exists and contains at least one
+     * entry (profile folder / binary files).
+     * <p>
+     * Lightweight SSOT check used by the setup wizard to decide whether the
+     * download/install step is actually required ("ha szükséges").
+     * </p>
+     */
+    public static boolean isDatabaseInstalled(DatabaseConfigurationPanel.DatabaseEngine engine) {
+        Path dir = PathUtils.resolvePath(DATABASE_BASE_DIR).resolve(engine.toString());
+        if (!Files.isDirectory(dir)) {
+            return false;
+        }
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir)) {
+            return stream.iterator().hasNext();
+        } catch (IOException e) {
+            logger.warn("Cannot inspect database directory {}: {}", dir, e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Loads the global database settings from the `settings.json` file located
      * in the `../database` directory.
      * If the file is missing or empty, it creates a default one.
