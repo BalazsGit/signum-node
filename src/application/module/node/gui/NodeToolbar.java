@@ -673,15 +673,20 @@ public class NodeToolbar extends JPanel {
             popOff100Button.setEnabled(false);
             dbCheckButton.setEnabled(false);
         } else {
-            // STOPPED / READY / IDLE / CREATED -> show PLAY icon.
+            // STOPPED / CREATED / INITIALIZED -> show PLAY icon (node is startable).
             // CREATED is a valid startable state: NodeModule.startNode() creates the
             // Signum and Signum.init() requires exactly the CREATED state, and
             // handleStartStopToggle() explicitly starts from any non-RUNNING state.
+            // Restart is ALSO enabled here (restart = no-op stop + start) so the user has
+            // an explicit "Restart / apply config" affordance after editing the profile —
+            // this is the previously greyed-out case that left a created/stopped node stuck
+            // with a config change (e.g. a port fix) that Start alone would not apply.
             stopSpinner();
             startStopButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PLAY, iconSize, GuiColors.getPeerActive()));
             startStopButton.setToolTipText("Start the node");
             startStopButton.setEnabled(true);
-            restartButton.setEnabled(false);
+            restartButton.setEnabled(true);
+            restartButton.setToolTipText("Restart the node (applies any saved configuration changes)");
             syncButton.setEnabled(false);
             popOff10Button.setEnabled(false);
             popOff100Button.setEnabled(false);

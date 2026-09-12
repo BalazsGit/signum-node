@@ -345,6 +345,18 @@ public class NodeModule implements Module {
                 return target;
             }
 
+            // ── Apply the latest on-disk configuration before the conflict check ──
+            // An existing (stopped / created / failed) instance may still hold the profile
+            // snapshot it was created with. Re-reading it from disk here lets an in-session
+            // config edit (e.g. a changed API/P2P/WS port or database) be honored both by
+            // the pre-check below and by the node's own PropertyService — so "fix the port
+            // → save → Start/Restart" finally takes effect without an app restart. A freshly
+            // created instance is already built from disk, and a transitional (STARTING /
+            // STOPPING) instance is skipped, so this is a safe no-op in both cases.
+            if (target.getState() != Signum.State.STARTING && target.getState() != Signum.State.STOPPING) {
+                target.refreshConfiguration();
+            }
+
             // ── Conflict pre-check (deterministic inside the synchronized block) ──
             // If another live profile already claims one of this profile's resources
             // (API / P2P / WebSocket port, or the same database), reject the start now

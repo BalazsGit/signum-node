@@ -7,6 +7,7 @@ import application.module.node.props.Props;
 import application.module.node.web.server.WebServer;
 import application.module.node.instance.NodeStartupException;
 import application.module.node.profile.NodeProfile;
+import application.module.node.profile.NodeProfileRepository;
 import application.utils.config.ModuleIds;
 import application.utils.config.PropertiesProfileLoader;
 import application.utils.io.PathUtils;
@@ -332,6 +333,40 @@ public final class Signum {
             }
         }
         setState(State.INITIALIZED);
+    }
+
+    /**
+     * Re-reads this profile's configuration from disk and refreshes both the in-memory
+     * {@link NodeProfile} (which drives start-time conflict detection and resource
+     * reservation) and the cached {@link PropertyService} (which drives the actual node).
+     * <p>
+     * This is what lets an in-session config edit (e.g. a changed API/P2P/WS port or
+     * database) be applied on the next (re)start: the previously cached snapshot is
+     * replaced by the current on-disk values. It is a safe no-op when the profile cannot
+     * be loaded from disk (e.g. a name-only or purely in-memory profile) — the existing
+     * profile and properties are then kept. The {@code Signum} instance itself is
+     * preserved (only its configuration snapshot is swapped), so GUI/console bindings
+     * survive the refresh across restarts.
+     * </p>
+     *
+     * @since 5.0
+     */
+    public synchronized void refreshConfiguration() {
+        NodeProfile reloaded = NodeProfileRepository.loadByName(this.profile.getName());
+        if (reloaded == null) {
+            LOGGER.debug("refreshConfiguration('{}'): no on-disk profile — keeping current config",
+                    this.profile.getName());
+            return;
+        }
+        this.profile = reloaded;
+        try {
+            this.propertyService = Signum.loadPropertiesForProfile(this.confFolder.toString(), this.profile.getName());
+        } catch (Exception e) {
+            throw new NodeStartupException(
+                    "Failed to refresh configuration for profile '" + this.profile.getName() + "' from " + this.confFolder, e);
+        }
+        LOGGER.info("refreshConfiguration('{}'): reloaded configuration from disk ({} propert(ies))",
+                this.profile.getName(), reloaded.getProperties().size());
     }
 
     /**

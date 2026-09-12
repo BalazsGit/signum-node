@@ -1,6 +1,7 @@
 package application.module.node;
 
 import application.module.node.profile.NodeProfile;
+import application.module.node.profile.NodeProfileRepository;
 import application.module.node.props.Props;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -8,7 +9,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Paths;
+import java.util.Properties;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -69,6 +72,15 @@ class NodeModuleConflictTest {
     @AfterEach
     void cleanup() {
         clean();
+        // Best-effort removal of any on-disk profile files created by the
+        // config-edit regression tests (in-memory-only profiles are a no-op here).
+        for (String name : new String[]{NAME_A, NAME_B}) {
+            try {
+                NodeProfileRepository.deleteProfile(name);
+            } catch (Exception ignored) {
+                // not present on disk — nothing to clean
+            }
+        }
     }
 
     @Test
@@ -143,5 +155,72 @@ class NodeModuleConflictTest {
                 "a profile that has reserved resources must be in the claiming set");
         assertFalse(module().getClaimingProfileNames().contains(NAME_B),
                 "a profile that never started must not be in the claiming set");
+    }
+
+    private Properties props(String api, String p2p, String db) {
+        Properties p = new Properties();
+        p.setProperty(Props.API_PORT.getName(), api);
+        p.setProperty(Props.P2P_PORT.getName(), p2p);
+        p.setProperty(Props.DB_URL.getName(), db);
+        // Disable WebSocket so the pair isolates API/P2P/DB (the shared default WS
+        // port would otherwise make every pair collide).
+        p.setProperty(Props.API_WEBSOCKET_ENABLE.getName(), "false");
+        return p;
+    }
+
+    @Test
+    @DisplayName("refreshConfiguration() re-reads the on-disk profile so an in-session config edit is picked up")
+    void refreshConfiguration_reloadsProfileFromDisk() throws Exception {
+        String name = "refresh-" + System.nanoTime();
+        try {
+            // Arrange: an on-disk profile on a "conflicting" port.
+            NodeProfileRepository.createProfile(name, props("18125", "19301", "jdbc:mariadb://localhost:19999/aaa"));
+            Signum signum = new Signum(NodeProfileRepository.loadByName(name), CONF);
+            assertEquals("18125", signum.getProfile().getProperty(Props.API_PORT.getName()),
+                    "the Signum must start with the on-disk port");
+
+            // The user edits the port on disk and saves (overwrite the file).
+            NodeProfileRepository.deleteProfile(name);
+            NodeProfileRepository.createProfile(name, props("18126", "19301", "jdbc:mariadb://localhost:19999/aaa"));
+
+            // Act
+            signum.refreshConfiguration();
+
+            // Assert: the refreshed in-memory profile reflects the on-disk edit.
+            assertEquals("18126", signum.getProfile().getProperty(Props.API_PORT.getName()),
+                    "refreshConfiguration() must re-read the edited port from disk");
+        } finally {
+            try {
+                NodeProfileRepository.deleteProfile(name);
+            } catch (Exception ignored) {
+                // best effort
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("startNode refreshes an existing instance's config from disk before the conflict check (port-fix regression)")
+    void startNode_refreshesExistingInstanceConfig() throws Exception {
+        // Arrange: A reserves API port 18125; B starts on disk sharing that port -> conflict.
+        register(NAME_A, "18125", "19401", "jdbc:mariadb://localhost:19999/aaa");
+        NodeProfileRepository.createProfile(NAME_B, props("18125", "19402", "jdbc:mariadb://localhost:19999/bbb"));
+        Signum b = new Signum(NodeProfileRepository.loadByName(NAME_B), CONF);
+        module().addNode(b);
+
+        module().startNode(NAME_A);
+        module().startNode(NAME_B);   // rejected: still on 18125
+        assertEquals("18125", b.getProfile().getProperty(Props.API_PORT.getName()));
+
+        // The user edits B's port to 18126 and saves (overwrite the on-disk file).
+        NodeProfileRepository.deleteProfile(NAME_B);
+        NodeProfileRepository.createProfile(NAME_B, props("18126", "19402", "jdbc:mariadb://localhost:19999/bbb"));
+
+        // Act: start B again.
+        module().startNode(NAME_B);
+
+        // Assert: the on-disk edit was picked up (the stale 18125 snapshot is gone), so the
+        // conflict is resolved without restarting the whole application.
+        assertEquals("18126", b.getProfile().getProperty(Props.API_PORT.getName()),
+                "startNode must re-read the profile from disk for an existing instance");
     }
 }
