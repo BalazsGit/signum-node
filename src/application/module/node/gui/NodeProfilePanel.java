@@ -1,5 +1,6 @@
 package application.module.node.gui;
 import application.utils.config.ModuleIds;
+import application.utils.config.PropertiesProfileLoader;
 
 import application.module.appearance.AppearanceModule;
 import application.module.node.BlockchainProcessor;
@@ -21,7 +22,6 @@ import java.awt.Desktop;
 import java.io.File;
 import java.net.URI;
 import java.nio.file.Path;
-import java.util.Properties;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultSingleSelectionModel;
@@ -242,7 +242,7 @@ public class NodeProfilePanel extends JPanel {
             // forever for a never-started profile (lazy-load flow: panel created with
             // a null Signum).
             if (toolbar != null) {
-                toolbar.updateButtonStates(Signum.State.STOPPED);
+                toolbar.updateButtonStates(Signum.State.STOPPED, false);
             }
             return;
         }
@@ -376,17 +376,19 @@ public class NodeProfilePanel extends JPanel {
         toolbar.updateSyncIcon(paused);
     }
 
-    /** Copy from NodeConsolePanel.editConf */
+    /**
+     * Opens this profile's properties file in the default text editor — the same
+     * file the node loads for this profile:
+     * {@code <confFolder>/node/profiles/<profile>.properties}.
+     */
     public void editConf() {
-        Path nodeFolder = application.utils.io.PathUtils.resolvePath(confFolder).resolve("node");
-        Path path = nodeFolder.resolve(Signum.PROPERTIES_NAME);
-        if (!java.nio.file.Files.exists(path)) {
-            path = nodeFolder.resolve(Signum.DEFAULT_PROPERTIES_NAME);
-        }
-        File file = path.toFile();
+        String name = profile.getName();
+        Path profileFile = PropertiesProfileLoader.resolveProfileFile(
+                confFolder, ModuleIds.NODE, ModuleIds.CATEGORY_PROFILES, name);
+        File file = profileFile.toFile();
         if (!file.exists()) {
             JOptionPane.showMessageDialog(this,
-                    "Could not find conf file: " + Signum.PROPERTIES_NAME + " or " + Signum.DEFAULT_PROPERTIES_NAME,
+                    "Could not find properties file for profile '" + name + "':\n" + profileFile,
                     "File not found", JOptionPane.ERROR_MESSAGE);
             return;
         }
@@ -574,9 +576,11 @@ public class NodeProfilePanel extends JPanel {
     }
 
     private String determineConfFolder() {
-        Properties props = profile.getProperties();
-        String network = props.getProperty("network", "mainnet");
-        return "conf/" + network;
+        // Single source of truth: the same conf root the node itself uses
+        // (NodeModule.startNode -> Signum.CONF_FOLDER). Profiles live at
+        // <confRoot>/node/profiles/<name>.properties — there is no per-network
+        // subfolder in the profile architecture.
+        return Signum.CONF_FOLDER;
     }
 
     private void restartNode() {
@@ -584,13 +588,18 @@ public class NodeProfilePanel extends JPanel {
         // (restartNode(name) = stop + start on the same Signum instance).
         // The console panel provides the user-facing progress dialog and
         // delegates the actual restart to NodeModule.
-        LOGGER.info("Restart requested for profile: {}", profile.getName());
-        if (consolePanel != null) {
-            consolePanel.restartNode();
-        }
-        if (infoBar != null) {
-            infoBar.refreshData();
-        }
+        // Run within the profile's log context so the request logs (this panel +
+        // NodeConsolePanel.restart + NodeModule.restartNode, all on the EDT) route
+        // to the per-profile logger (<node.<profile>>) instead of the <system> context.
+        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(), () -> {
+            LOGGER.info("Restart requested for profile: {}", profile.getName());
+            if (consolePanel != null) {
+                consolePanel.restartNode();
+            }
+            if (infoBar != null) {
+                infoBar.refreshData();
+            }
+        });
     }
 
     public NodeProfile getProfile() { return profile; }
@@ -619,24 +628,36 @@ public class NodeProfilePanel extends JPanel {
     public void stopNode() {
         // Single lifecycle entry point (v4): NodeModule stops this profile's node
         // asynchronously on the lifecycle thread (never blocks the EDT).
-        NodeModule.getInstance().stopNode(profile.getName());
-        LOGGER.info("Stop requested for profile: {}", profile.getName());
+        // Run within the profile's log context so the request logs (this panel +
+        // NodeModule.stopNode on the EDT) route to the per-profile logger
+        // (<node.<profile>>) instead of the <system> context.
+        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(), () -> {
+            NodeModule.getInstance().stopNode(profile.getName());
+            LOGGER.info("Stop requested for profile: {}", profile.getName());
+        });
     }
 
     public void startNode() {
         // Single lifecycle entry point (v4): NodeModule creates (if missing) and
         // starts the node for this profile.
+        // Run within the profile's log context so the request logs (this panel +
+        // NodeModule.startNode/restartNode on the EDT) route to the per-profile
+        // logger (<node.<profile>>) instead of the <system> context.
         Signum started = null;
         try {
-            Signum existing = NodeModule.getInstance().get(profile.getName());
-            if (existing != null && existing.getState() == Signum.State.ERROR) {
-                // ERROR is only recoverable through an explicit stop first
-                // (Signum.stop() accepts the ERROR state) — route Start through
-                // the restart path so a failed start never dead-ends the node.
-                started = NodeModule.getInstance().restartNode(profile.getName());
-            } else {
-                started = NodeModule.getInstance().startNode(profile.getName());
-            }
+            final Signum[] holder = new Signum[1];
+            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(), () -> {
+                Signum existing = NodeModule.getInstance().get(profile.getName());
+                if (existing != null && existing.getState() == Signum.State.ERROR) {
+                    // ERROR is only recoverable through an explicit stop first
+                    // (Signum.stop() accepts the ERROR state) — route Start through
+                    // the restart path so a failed start never dead-ends the node.
+                    holder[0] = NodeModule.getInstance().restartNode(profile.getName());
+                } else {
+                    holder[0] = NodeModule.getInstance().startNode(profile.getName());
+                }
+            });
+            started = holder[0];
         } catch (Exception e) {
             application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(),
                     () -> LOGGER.error("Start failed for profile: {}", profile.getName(), e));
@@ -709,7 +730,7 @@ public class NodeProfilePanel extends JPanel {
         }
 
         if (toolbar != null) {
-            toolbar.updateButtonStates(newState);
+            toolbar.updateButtonStates(newState, signum != null);
         }
 
         // Forward lifecycle events to the console panel so it can manage MetricsPanel

@@ -189,13 +189,24 @@ public final class WebServerImpl implements WebServer {
         if (jettyServer == null) {
             return;
         }
+        application.utils.logging.LogScope logContext = application.utils.logging.NodeLogContext.current();
         context.getThreadPool().runBeforeStart(() -> {
+            application.utils.logging.LogScope previous = application.utils.logging.NodeLogContext.current();
+            if (logContext != null) {
+                application.utils.logging.NodeLogContext.set(logContext);
+            }
             try {
                 jettyServer.start();
                 logger.info("Web Server started successfully");
             } catch (Exception e) {
                 logger.error("Failed to start API server", e);
                 throw new RuntimeException(e.toString(), e);
+            } finally {
+                if (previous != null) {
+                    application.utils.logging.NodeLogContext.set(previous);
+                } else {
+                    application.utils.logging.NodeLogContext.clear();
+                }
             }
         }, true);
     }

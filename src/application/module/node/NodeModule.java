@@ -365,7 +365,8 @@ public class NodeModule implements Module {
             // simply not started (and stays startable once the conflict is resolved).
             String conflict = findResourceConflict(target);
             if (conflict != null) {
-                LOGGER.warn("startNode('{}'): REJECTED — {}", profileName, conflict);
+                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                        () -> LOGGER.warn("startNode('{}'): REJECTED — {}", profileName, conflict));
                 target.reportStartRejected(conflict);
                 return target;
             }
@@ -395,7 +396,8 @@ public class NodeModule implements Module {
                 }
                 target.start();
             } catch (Exception e) {
-                LOGGER.error("Startup failed for profile '{}'", profileName, e);
+                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                        () -> LOGGER.error("Startup failed for profile '{}'", profileName, e));
                 // A failed start (e.g. the OS port is already bound by a non-profile
                 // process) leaves the node in ERROR, i.e. NOT running — so it must not
                 // keep holding its API/P2P/WS port or database reservation. Releasing it
@@ -428,7 +430,8 @@ public class NodeModule implements Module {
             LOGGER.debug("stopNode('{}'): not registered — no-op", profileName);
             return null;
         }
-        LOGGER.info("stopNode('{}'): queuing async stop on lifecycle thread", profileName);
+        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                () -> LOGGER.info("stopNode('{}'): queuing async stop on lifecycle thread", profileName));
         lifecycleExecutor.execute(() -> {
             try {
                 signum.stop();
@@ -459,9 +462,62 @@ public class NodeModule implements Module {
         if (profileName == null || profileName.isBlank()) {
             throw new IllegalArgumentException("Profile name must not be null or blank");
         }
-        LOGGER.info("restartNode('{}')", profileName);
-        stopNode(profileName);
-        return startNode(profileName);
+        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                () -> LOGGER.info("restartNode('{}')", profileName));
+
+        Signum target;
+        synchronized (this) {
+            Signum existing = get(profileName);
+            if (existing == null) {
+                NodeProfile profile = resolveProfile(profileName);
+                existing = new Signum(profile, PathUtils.resolvePath(Signum.CONF_FOLDER));
+                addNode(existing);
+            }
+            target = existing;
+        }
+
+        // Restart = stop then start as ONE ordered unit on the single-thread lifecycle
+        // executor, so the start runs strictly after the stop (and its resource release).
+        // The previous implementation queued an async stop and then called startNode(),
+        // whose "already RUNNING" no-op saw the still-running node and bailed before
+        // queueing a start — leaving the node STOPPED after the queued stop ran.
+        lifecycleExecutor.execute(() -> {
+            try {
+                target.stop();
+            } catch (Exception e) {
+                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                        () -> LOGGER.error("restartNode('{}'): stop failed", profileName, e));
+            } finally {
+                releaseResources(target);
+            }
+            // Apply the latest on-disk configuration (an in-session config edit is picked up).
+            target.refreshConfiguration();
+            String conflict;
+            synchronized (this) {
+                conflict = findResourceConflict(target);
+                if (conflict == null) {
+                    reserveResources(target);
+                }
+            }
+            if (conflict != null) {
+                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                        () -> LOGGER.warn("restartNode('{}'): REJECTED — {}", profileName, conflict));
+                target.reportStartRejected(conflict);
+                return;
+            }
+            ProfileLogger profileLogger = target.getProfileLogger();
+            if (profileLogger != null) {
+                profileLogger.info(String.format("→ '%s' node restarting — please wait…", profileName));
+            }
+            try {
+                target.start();
+            } catch (Exception e) {
+                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                        () -> LOGGER.error("restartNode('{}'): start failed", profileName, e));
+                releaseResources(target);
+            }
+        });
+        return target;
     }
 
     /**

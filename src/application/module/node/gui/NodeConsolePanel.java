@@ -1,5 +1,6 @@
 package application.module.node.gui;
 import application.utils.config.ModuleIds;
+import application.utils.config.PropertiesProfileLoader;
 
 import com.formdev.flatlaf.FlatDarkLaf;
 import com.formdev.flatlaf.FlatLaf;
@@ -1252,6 +1253,12 @@ public class NodeConsolePanel extends JPanel {
         openClassicButton = new JButton("Classic Wallet");
         openApiButton = new JButton("API doc");
         editConfButton = new JButton("Edit conf file");
+        // The wallets and API docs are served by the node's web server, so they only
+        // work while the node is RUNNING — start disabled; onNodeStateChanged()
+        // enables them once the node reaches the RUNNING state.
+        openPhoenixButton.setEnabled(false);
+        openClassicButton.setEnabled(false);
+        openApiButton.setEnabled(false);
         popOff10Button = new JButton("Pop off 10 blocks");
         popOff100Button = new JButton("Pop off 100 blocks");
         dbCheckButton = new JButton("Database check");
@@ -1281,7 +1288,7 @@ public class NodeConsolePanel extends JPanel {
         addInfoTooltip(syncButton,
                 "Toggles the synchronization process. 'Pause Sync' pauses the downloading and processing of new blocks. 'Resume Sync' continues the process.");
         addInfoTooltip(restartButton,
-                "Restarts the Signum node application. This is useful for applying configuration changes or reloading the application. A confirmation dialog will be shown before restarting.");
+                "Restarts only this node profile (stop + start). Applies any saved configuration changes and reloads the node.");
         addInfoTooltip(shutdownButton,
                 "Safely stops the Signum node application. This ensures all data is saved correctly and prevents potential database corruption. A confirmation dialog will be shown before shutting down.");
 
@@ -1299,21 +1306,7 @@ public class NodeConsolePanel extends JPanel {
 
         syncButton.addActionListener(e -> syncButtonAction());
         shutdownButton.addActionListener(e -> shutdownAction());
-        restartButton.addActionListener(e -> {
-            Runnable restartTask = () -> {
-                if (JOptionPane.showConfirmDialog(NodeConsolePanel.this,
-                        "This will restart the node. Are you sure?", "Restart node",
-                        JOptionPane.YES_NO_OPTION,
-                        JOptionPane.QUESTION_MESSAGE) == JOptionPane.YES_OPTION) {
-                    restart();
-                }
-            };
-            /*
-             * if (checkAllUnsavedChanges()) {
-             * restartTask.run();
-             * }
-             */
-        });
+        restartButton.addActionListener(e -> restart());
 
         if (phoenixIndex.isFile() && phoenixIndex.exists()) {
             leftButtons.add(openPhoenixButton);
@@ -2596,105 +2589,23 @@ public class NodeConsolePanel extends JPanel {
 
     // Package-private for internal use
     void restart() {
-        LOGGER.info("Restarting node...");
-
-        JDialog restartDialog = new JDialog(parentFrame, "Restarting", true);
-        JPanel panel = new JPanel();
-        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
-
-        JLabel messageLabel = new JLabel("Please wait, Signum is restarting...");
-        messageLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
-        panel.add(messageLabel);
-
-        panel.add(Box.createRigidArea(new Dimension(0, 15)));
-
-        final RotatingSvgIcon rotatingIcon = new RotatingSvgIcon(0.5);
-        rotatingIcon.setPreferredSize(new Dimension(64, 64));
-        rotatingIcon.setAlignmentX(Component.CENTER_ALIGNMENT);
-        panel.add(rotatingIcon);
-        rotatingIcon.start();
-
-        restartDialog.setContentPane(panel);
-        restartDialog.pack();
-        restartDialog.setLocationRelativeTo(this);
-        restartDialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
-
-        restartDialog.addWindowListener(new WindowAdapter() {
-            @Override
-            public void windowOpened(WindowEvent e) {
-                new Thread(() -> {
-                    saveGuiSettings();
-                    // v4 (P1.6): restart ONLY this profile's node via NodeModule —
-                    // the legacy full-application restart (Launcher.restart()) was
-                    // removed: in multi-node mode it would kill every other running
-                    // node. Signum's state machine supports in-place restart
-                    // (STOPPED -> start() -> doInitialize() -> RUNNING).
-                    Signum restarted = NodeModule.getInstance().restartNode(NodeConsolePanel.this.profileName);
-                    if (restarted == null) {
-                        LOGGER.warn("Restart: no Signum instance for profile '{}' — closing dialog", profileName);
-                        SwingUtilities.invokeLater(() -> {
-                            rotatingIcon.stop();
-                            restartDialog.setVisible(false);
-                            restartDialog.dispose();
-                        });
-                        return;
-                    }
-                    // restartNode() is asynchronous (NodeModule lifecycle thread):
-                    // keep the "Please wait" dialog open until the node reaches a
-                    // terminal state (RUNNING or ERROR). Observed via a one-shot
-                    // state listener; a 15-minute watchdog Timer is the fallback
-                    // should the push ever be missed.
-                    final Signum target = restarted;
-                    final java.util.concurrent.atomic.AtomicBoolean dialogClosed =
-                            new java.util.concurrent.atomic.AtomicBoolean(false);
-                    // Array wrapper: the lambda cannot reference itself before it
-                    // is initialized (JLS 6.1.3.8), so the watchdog removes the
-                    // listener through this indirection.
-                    final Signum.StateListener[] holder = new Signum.StateListener[1];
-                    holder[0] = (s, oldState, newState) -> {
-                        if ((newState == Signum.State.RUNNING || newState == Signum.State.ERROR)
-                                && dialogClosed.compareAndSet(false, true)) {
-                            s.removeStateListener(holder[0]);
-                            SwingUtilities.invokeLater(() -> {
-                                rotatingIcon.stop();
-                                restartDialog.setVisible(false);
-                                restartDialog.dispose();
-                            });
-                        }
-                    };
-                    target.addStateListener(holder[0]);
-                    SwingUtilities.invokeLater(() -> {
-                        javax.swing.Timer watchdog = new javax.swing.Timer(15 * 60 * 1000, ev -> {
-                            if (dialogClosed.compareAndSet(false, true)) {
-                                target.removeStateListener(holder[0]);
-                                rotatingIcon.stop();
-                                restartDialog.setVisible(false);
-                                restartDialog.dispose();
-                            }
-                        });
-                        watchdog.setRepeats(false);
-                        watchdog.start();
-                    });
-                }).start();
-            }
-        });
-
-        restartDialog.setVisible(true);
+        LOGGER.info("Restart requested for profile '{}' (async, no dialog)", profileName);
+        saveGuiSettings();
+        // Per-node restart is asynchronous (NodeModule lifecycle thread); the node's state
+        // machine drives the UI (info bar, toolbar, console). No blocking dialog is shown:
+        // the user simply sees the node transition STOPPED -> STARTING -> RUNNING.
+        NodeModule.getInstance().restartNode(profileName);
     }
 
     private void editConf() {
-        Path nodeFolder = application.utils.io.PathUtils.resolvePath(confFolder).resolve(ModuleIds.NODE);
-        Path path = nodeFolder.resolve(Signum.PROPERTIES_NAME);
-        if (!Files.exists(path)) {
-            path = nodeFolder.resolve(Signum.DEFAULT_PROPERTIES_NAME);
-        }
-
-        File file = path.toFile();
-
+        // Open this profile's properties file — the same file the node loads for
+        // this profile: <confFolder>/node/profiles/<profile>.properties
+        Path profileFile = PropertiesProfileLoader.resolveProfileFile(
+                confFolder, ModuleIds.NODE, ModuleIds.CATEGORY_PROFILES, profileName);
+        File file = profileFile.toFile();
         if (!file.exists()) {
             JOptionPane.showMessageDialog(this,
-                    "Could not find conf file: " + Signum.PROPERTIES_NAME + " or " + Signum.DEFAULT_PROPERTIES_NAME,
+                    "Could not find properties file for profile '" + profileName + "':\n" + profileFile,
                     "File not found", JOptionPane.ERROR_MESSAGE);
             return;
         }
@@ -2720,6 +2631,25 @@ public class NodeConsolePanel extends JPanel {
         } catch (Exception e) { // Catches error accessing PropertyService
             LOGGER.error("Could not access PropertyService", e);
             showMessage("Could not open web UI as could not read the configuration file.");
+        }
+    }
+
+    /**
+     * Returns whether the node serves the API documentation, based on the
+     * {@code API.DocMode} property — "off" disables the docs, any other value
+     * (default "modern") serves them.
+     */
+    private boolean apiDocsEnabledByConfig() {
+        Signum node = this.signum;
+        if (node == null) {
+            return false;
+        }
+        try {
+            PropertyService propertyService = node.getPropertyService();
+            return propertyService != null
+                    && !"off".equalsIgnoreCase(propertyService.getString(Props.API_DOC_MODE));
+        } catch (Exception e) {
+            return true;
         }
     }
 
@@ -3123,8 +3053,11 @@ public class NodeConsolePanel extends JPanel {
         }
         try {
             pl.addSubscriber(unifiedConsole.getSubscriber());
-            LOGGER.info("Attached console subscriber to ProfileLogger '{}' for profile '{}'",
-                    pl.getName(), profileName);
+            final String attachedName = pl.getName();
+            final String attachedProfile = profileName;
+            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, attachedProfile,
+                    () -> LOGGER.info("Attached console subscriber to ProfileLogger '{}' for profile '{}'",
+                            attachedName, attachedProfile));
             profileLoggerAttached = true;
         } catch (Exception e) {
             LOGGER.error("Failed to attach console subscriber to ProfileLogger for profile '{}'", profileName, e);
@@ -3446,7 +3379,8 @@ public class NodeConsolePanel extends JPanel {
             if (processor == null) {
                 // Not wired yet — do NOT mark this instance as done, so the
                 // next state push retries the wiring.
-                LOGGER.warn("[{}] ensureRuntimeWiring: BlockchainProcessor not available yet — will retry on next state push", profileName);
+                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                        () -> LOGGER.warn("[{}] ensureRuntimeWiring: BlockchainProcessor not available yet — will retry on next state push", profileName));
                 return;
             }
             // v4 toolbar-start path: the feature flags (measurement/experimental/
@@ -3478,9 +3412,11 @@ public class NodeConsolePanel extends JPanel {
                 // configuration here.
                 configureFeatureIndicators(processor);
             });
-            LOGGER.info("[{}] Runtime listeners wired — Latest block / peer / volume labels active", profileName);
+            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                    () -> LOGGER.info("[{}] Runtime listeners wired — Latest block / peer / volume labels active", profileName));
         } catch (Exception e) {
-            LOGGER.error("[{}] ensureRuntimeWiring failed", profileName, e);
+            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                    () -> LOGGER.error("[{}] ensureRuntimeWiring failed", profileName, e));
         }
     }
 
@@ -4656,6 +4592,19 @@ public class NodeConsolePanel extends JPanel {
         }
 
         SwingUtilities.invokeLater(() -> {
+            // Web UI buttons (Phoenix/Classic wallets, API docs) are only functional
+            // while the node is RUNNING — its web server serves those pages.
+            boolean webUiAvailable = newState == Signum.State.RUNNING;
+            if (openPhoenixButton != null) {
+                openPhoenixButton.setEnabled(webUiAvailable);
+            }
+            if (openClassicButton != null) {
+                openClassicButton.setEnabled(webUiAvailable);
+            }
+            if (openApiButton != null) {
+                openApiButton.setEnabled(webUiAvailable && apiDocsEnabledByConfig());
+            }
+
             // When node becomes READY/RUNNING, ensure MetricsPanel visibility matches user preference
             if (newState == Signum.State.RUNNING || newState == Signum.State.RUNNING) {
                 LOGGER.info("[MetricsPanel] Node reached {} — applying visibility preference: showMetricsPanel={}", 

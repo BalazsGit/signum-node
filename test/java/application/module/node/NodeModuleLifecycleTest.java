@@ -4,6 +4,8 @@ import application.module.node.profile.NodeProfile;
 import application.module.node.profile.NodeProfileRepository;
 import org.junit.After;
 import org.junit.Test;
+import org.mockito.InOrder;
+import org.mockito.Mockito;
 
 import java.nio.file.Paths;
 import java.util.List;
@@ -97,6 +99,31 @@ public class NodeModuleLifecycleTest {
             fail("Expected IllegalArgumentException for null profile name");
         } catch (IllegalArgumentException expected) {
             // contract (stopNode(null) is a no-op; startNode(null) rejects)
+        }
+    }
+
+    @Test
+    public void restartNode_runningNode_stopsThenStartsInOrder() throws Exception {
+        // Regression: restart used to queue an async stop and then call startNode(), whose
+        // "already RUNNING" no-op saw the still-running node and bailed BEFORE queueing a
+        // start — leaving the node STOPPED. The restart must be a true stop-then-start.
+        String name = "restart-order-" + System.nanoTime();
+        // Signum is final (cannot be subclassed); Mockito 5's inline mock maker can mock it.
+        // Only getProfileName() is stubbed so addNode/get/removeNode key correctly; getProfile()
+        // stays null, which skips the (orthogonal) resource-reservation logic in this test.
+        Signum fake = Mockito.mock(Signum.class);
+        Mockito.when(fake.getProfileName()).thenReturn(name);
+
+        module().addNode(fake);
+        try {
+            module().restartNode(name);
+            // restartNode runs stop->start asynchronously on the lifecycle executor; verify
+            // (bounded wait) that BOTH were invoked on the SAME instance, in order: stop() first.
+            InOrder inOrder = Mockito.inOrder(fake);
+            inOrder.verify(fake, Mockito.timeout(5000)).stop();
+            inOrder.verify(fake, Mockito.timeout(5000)).start();
+        } finally {
+            module().removeNode(name);
         }
     }
 

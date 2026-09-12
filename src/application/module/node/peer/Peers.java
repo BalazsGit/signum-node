@@ -127,6 +127,11 @@ public final class Peers {
     private final Stores stores;
     private final BlockchainProcessor blockchainProcessor;
 
+    // Captured log context from the profile's start path — the threadPool.runBeforeStart
+    // callback runs on a different thread (no inherited context), so we restore it here
+    // to route "Started peer networking server" to <node.<profile>>.
+    private final application.utils.logging.LogScope logContext;
+
     // Per-node peer networking server state (Jetty server + UPnP gateway)
     private Server peerServer;
     private GatewayDevice gateway;
@@ -160,6 +165,7 @@ public final class Peers {
         this.dbs = dbs;
         this.stores = stores;
         this.blockchainProcessor = blockchainProcessor;
+        this.logContext = application.utils.logging.NodeLogContext.current();
 
         myPlatform = propertyService.getString(Props.P2P_MY_PLATFORM);
         if (propertyService.getString(Props.P2P_MY_ADDRESS) != null
@@ -437,12 +443,22 @@ public final class Peers {
                 }
                 peerServer.setStopAtShutdown(true);
                 threadPool.runBeforeStart(() -> {
+                    application.utils.logging.LogScope previous = application.utils.logging.NodeLogContext.current();
+                    if (logContext != null) {
+                        application.utils.logging.NodeLogContext.set(logContext);
+                    }
                     try {
                         peerServer.start();
                         logger.info("Started peer networking server at {}:{}", host, port);
                     } catch (Exception e) {
                         logger.error("Failed to start peer networking server", e);
                         throw new RuntimeException(e.toString(), e);
+                    } finally {
+                        if (previous != null) {
+                            application.utils.logging.NodeLogContext.set(previous);
+                        } else {
+                            application.utils.logging.NodeLogContext.clear();
+                        }
                     }
                 }, true);
             } else {

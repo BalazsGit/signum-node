@@ -354,8 +354,9 @@ public final class Signum {
     public synchronized void refreshConfiguration() {
         NodeProfile reloaded = NodeProfileRepository.loadByName(this.profile.getName());
         if (reloaded == null) {
-            LOGGER.debug("refreshConfiguration('{}'): no on-disk profile — keeping current config",
-                    this.profile.getName());
+            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, this.profile.getName(),
+                    () -> LOGGER.debug("refreshConfiguration('{}'): no on-disk profile — keeping current config",
+                            this.profile.getName()));
             return;
         }
         this.profile = reloaded;
@@ -365,8 +366,9 @@ public final class Signum {
             throw new NodeStartupException(
                     "Failed to refresh configuration for profile '" + this.profile.getName() + "' from " + this.confFolder, e);
         }
-        LOGGER.info("refreshConfiguration('{}'): reloaded configuration from disk ({} propert(ies))",
-                this.profile.getName(), reloaded.getProperties().size());
+        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, this.profile.getName(),
+                () -> LOGGER.info("refreshConfiguration('{}'): reloaded configuration from disk ({} propert(ies))",
+                        this.profile.getName(), reloaded.getProperties().size()));
     }
 
     /**
@@ -900,19 +902,25 @@ public final class Signum {
         Path profileFile = PropertiesProfileLoader.resolveProfileFile(
                 confFolder, ModuleIds.NODE, ModuleIds.CATEGORY_PROFILES, profileName);
 
-        LOGGER.info("Initializing Signum Node version {}", VERSION);
-        LOGGER.info("Looking for profile '{}' at {}", profileName, profileFile.toAbsolutePath());
+        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                () -> {
+                    LOGGER.info("Initializing Signum Node version {}", VERSION);
+                    LOGGER.info("Looking for profile '{}' at {}", profileName, profileFile.toAbsolutePath());
+                });
 
         if (Files.exists(profileFile)) {
             try (Reader reader = new InputStreamReader(new FileInputStream(profileFile.toFile()),
                     StandardCharsets.UTF_8)) {
-                LOGGER.info("Loading profile '{}' from {}", profileName, profileFile.toAbsolutePath());
+                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                        () -> LOGGER.info("Loading profile '{}' from {}", profileName, profileFile.toAbsolutePath()));
                 properties.load(reader);
             } catch (IOException e) {
-                LOGGER.warn("Error loading profile '{}', using internal defaults.", profileName, e);
+                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                        () -> LOGGER.warn("Error loading profile '{}', using internal defaults.", profileName, e));
             }
         } else {
-            LOGGER.info("No profile file found for '{}'. Using internal defaults from Props.java.", profileName);
+            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                    () -> LOGGER.info("No profile file found for '{}'. Using internal defaults from Props.java.", profileName));
         }
 
         // Ensure SETTINGS_DIR is set if not in file

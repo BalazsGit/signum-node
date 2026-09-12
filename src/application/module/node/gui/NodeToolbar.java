@@ -4,6 +4,8 @@ import application.module.appearance.AppearanceModule;
 import application.module.node.BlockchainProcessor;
 import application.module.node.Signum;
 import application.module.node.profile.NodeProfile;
+import application.module.node.props.PropertyService;
+import application.module.node.props.Props;
 import application.module.node.util.Listener;
 import application.utils.gui.CustomDrawingComponent;
 import application.utils.gui.CustomDrawings;
@@ -217,9 +219,15 @@ public class NodeToolbar extends JPanel {
         syncButton.setEnabled(false);
 
         // --- Web UI buttons ---
+        // Phoenix/Classic/API docs are served by the node's own web server, so they
+        // only work while the node is RUNNING — start disabled; updateButtonStates()
+        // enables them once the node is running.
         openPhoenixButton = createIconButton(FontAwesome.FIRE, "Open Phoenix Wallet");
         openClassicButton = createIconButton(FontAwesome.WINDOW_RESTORE, "Open Classic Wallet");
         openApiButton = createIconButton(FontAwesome.BOOK, "Open API Documentation");
+        openPhoenixButton.setEnabled(false);
+        openClassicButton.setEnabled(false);
+        openApiButton.setEnabled(false);
         editConfButton = createIconButton(FontAwesome.PENCIL, "Edit node configuration file");
 
         // --- Pop-off buttons ---
@@ -615,12 +623,30 @@ public class NodeToolbar extends JPanel {
      * Call this method from NodeProfilePanel.onNodeStateChanged().
      *
      * @param state The current lifecycle state of the node
+     * @param nodeStarted Whether the node has been started at least once (a Signum exists);
+     *                    when false the Restart button stays disabled (nothing to restart yet)
      */
-    public void updateButtonStates(Signum.State state) {
+    public void updateButtonStates(Signum.State state, boolean nodeStarted) {
         boolean isRunning = (state == Signum.State.RUNNING || false);
         boolean isTransitioning = (state == Signum.State.STARTING
                 || state == Signum.State.STOPPING
                 );
+
+        // Web UI buttons (Phoenix wallet, Classic wallet, API docs): they open pages
+        // served by the node's own web server, so they are only functional while the
+        // node is RUNNING. Disabled in every other state — clicking them would only
+        // yield a "connection refused" in the browser.
+        boolean webUiAvailable = isRunning;
+        String webUiHint = "Start the node first - then you can open ";
+        openPhoenixButton.setEnabled(webUiAvailable);
+        openPhoenixButton.setToolTipText(webUiAvailable ? "Open Phoenix Wallet" : webUiHint + "the Phoenix Wallet");
+        openClassicButton.setEnabled(webUiAvailable);
+        openClassicButton.setToolTipText(webUiAvailable ? "Open Classic Wallet" : webUiHint + "the Classic Wallet");
+        boolean apiDocsAvailable = webUiAvailable && isApiDocsEnabled();
+        openApiButton.setEnabled(apiDocsAvailable);
+        openApiButton.setToolTipText(!webUiAvailable ? webUiHint + "the API Documentation"
+                : apiDocsAvailable ? "Open API Documentation"
+                : "API docs are disabled in the node configuration (API.DocMode=off)");
 
         float iconSize = GuiConstants.getToolBarIconSize();
 
@@ -677,20 +703,48 @@ public class NodeToolbar extends JPanel {
             // CREATED is a valid startable state: NodeModule.startNode() creates the
             // Signum and Signum.init() requires exactly the CREATED state, and
             // handleStartStopToggle() explicitly starts from any non-RUNNING state.
-            // Restart is ALSO enabled here (restart = no-op stop + start) so the user has
-            // an explicit "Restart / apply config" affordance after editing the profile —
-            // this is the previously greyed-out case that left a created/stopped node stuck
-            // with a config change (e.g. a port fix) that Start alone would not apply.
+            // Restart is meaningful only once the node has actually started at least once.
+            // CREATED / INITIALIZED mean "created but never started" — a restart here would
+            // be a silent no-op (the previous complaint). STOPPED / ERROR mean "was started",
+            // so restart (apply config) is valid. nodeStarted additionally guards the
+            // "no Signum at all" placeholder (adoptSignum(null) -> STOPPED with nodeStarted=false).
+            boolean canRestart = nodeStarted
+                    && state != Signum.State.CREATED
+                    && state != Signum.State.INITIALIZED;
             stopSpinner();
             startStopButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PLAY, iconSize, GuiColors.getPeerActive()));
             startStopButton.setToolTipText("Start the node");
             startStopButton.setEnabled(true);
-            restartButton.setEnabled(true);
-            restartButton.setToolTipText("Restart the node (applies any saved configuration changes)");
+            restartButton.setEnabled(canRestart);
+            restartButton.setToolTipText(canRestart
+                    ? "Restart the node (applies any saved configuration changes)"
+                    : "Start the node first — then you can restart it");
             syncButton.setEnabled(false);
             popOff10Button.setEnabled(false);
             popOff100Button.setEnabled(false);
             dbCheckButton.setEnabled(false);
+        }
+    }
+
+    /**
+     * Returns whether the (potentially running) node serves the API documentation.
+     * <p>
+     * The docs are disabled when the {@code API.DocMode} property is set to "off"
+     * (see {@code WebServerImpl}); any other value serves them.
+     */
+    private boolean isApiDocsEnabled() {
+        Signum node = this.signum;
+        if (node == null) {
+            return false;
+        }
+        try {
+            PropertyService propertyService = node.getPropertyService();
+            return propertyService != null
+                    && !"off".equalsIgnoreCase(propertyService.getString(Props.API_DOC_MODE));
+        } catch (Exception e) {
+            // PropertyService not accessible — keep the button available rather
+            // than hiding a feature that might actually work.
+            return true;
         }
     }
 
