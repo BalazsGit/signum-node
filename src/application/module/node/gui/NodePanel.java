@@ -116,13 +116,13 @@ public class NodePanel extends JPanel  {
         add(profileTabbedPane, BorderLayout.CENTER);
         attachTabContextMenu();
 
-        // Keep the selected profile's cross-profile conflict warnings current. A profile's
-        // info bar computes its conflicts only when it is built / its own profile restarts,
-        // so the set of RUNNING profiles can change afterwards (e.g. another profile
-        // auto-starts) and leave a stale or missing warning. Re-evaluating on every tab
-        // activation means switching from a running profile to a conflicting one surfaces
-        // the red warning immediately.
-        profileTabbedPane.addChangeListener(e -> refreshSelectedProfileInfoBar(profileTabbedPane));
+        // Keep every profile's cross-profile conflict warnings current in real time. A profile's
+        // info bar reads the authoritative claiming set (NodeModule resource ownership), and that
+        // set only changes when a profile reserves (start) or releases (stop / failed start /
+        // shutdown) its resources. NodeModule fires a claiming-set event on exactly those
+        // transitions; subscribing here re-evaluates every live info bar immediately — including
+        // a profile whose own tab is not open (headless autostart) — without any tab switch.
+        NodeModule.getInstance().addClaimingSetListener(NodeInfoBar::refreshAllConflicts);
 
         // (v4: per-profile push notifications are owned by NodeProfilePanel)
         
@@ -324,34 +324,6 @@ public class NodePanel extends JPanel  {
 
         application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
                 () -> LOGGER.info("Profile panel loaded for: {}", profileName));
-    }
-
-    /**
-     * Refreshes the currently selected profile's information bar so its cross-profile
-     * resource-conflict warnings (API/P2P/WebSocket port, database) reflect the profiles
-     * that are RUNNING at the moment the tab is viewed.
-     * <p>
-     * A {@link NodeInfoBar} computes its conflicts only when it is built and when its own
-     * profile restarts — it does not observe the other profiles. Since the set of running
-     * profiles can change after a panel was first shown (e.g. another profile auto-starts
-     * later), its conflict chips would otherwise go stale. Re-running the refresh on tab
-     * activation fixes that: switching from a running profile to a conflicting one now
-     * surfaces the warning at once.
-     * </p>
-     * <p>No-op when the selected tab is a placeholder (not yet lazy-loaded).
-     * Package-private static so it can be exercised directly in tests without building the
-     * full (asynchronous, heavy) {@link NodePanel}.</p>
-     *
-     * @param tabs the profile tabbed pane (null is a safe no-op)
-     */
-    static void refreshSelectedProfileInfoBar(JTabbedPane tabs) {
-        if (tabs == null) {
-            return;
-        }
-        Component selected = tabs.getSelectedComponent();
-        if (selected instanceof NodeProfilePanel panel) {
-            panel.refreshConflictWarnings();
-        }
     }
 
     // ====================================================================

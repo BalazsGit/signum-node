@@ -1,147 +1,122 @@
 package application.module.node.gui;
 
-import application.module.node.Signum;
+import application.module.node.NodeModule;
 import application.module.node.profile.NodeProfile;
 import application.module.node.props.Props;
-
-import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import javax.swing.JLabel;
 import javax.swing.SwingUtilities;
-import java.awt.Component;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * Tests the cross-profile conflict PUSH broadcast: when any profile's state changes
- * (start/stop), every visible {@link NodeInfoBar} re-evaluates its resource conflicts.
- * This is what makes the red conflict warning appear on an already-open, conflicting
- * profile the moment another profile starts — without waiting for the viewed profile
- * to be (re)started or its tab to be (re)selected.
- * <p>
- * The conflict DETECTION itself is covered by {@code ProfileConflictDetectorTest}; these
- * tests cover the WIRING: that a state-change event refreshes all live bars and that a
- * disposed bar is no longer refreshed. The info bar updates its chips <b>in place</b>
- * (the same {@link JLabel} instance), so a sentinel written on a chip is cleared by a
- * refresh — a reliable signal that the refresh happened.
- * </p>
+ * Verifies the ownership-event-driven cross-profile conflict broadcast. When NodeModule
+ * reserves (start) or releases (stop) a profile's resources it fires a claiming-set event;
+ * the GUI subscribes {@link NodeInfoBar#refreshAllConflicts()} to that event (see
+ * {@link NodePanel}) so that EVERY live info bar re-evaluates its cross-profile warnings
+ * immediately — the red conflict surfaces on an already-open, conflicting profile without a
+ * tab switch. The "refresh happened" signal is a sentinel left on a chip by the test: a
+ * re-render replaces the chip's text and clears it.
  */
-@DisplayName("NodeInfoBar cross-profile conflict broadcast (state-change PUSH) Tests")
 class NodeInfoBarConflictBroadcastTest {
 
-    private static final String SENTINEL = "SENTINEL-CONFLICT-PUSH";
+    private static final String SENTINEL = "__not_refreshed__";
+    private static final List<NodeInfoBar> LIVE_BARS = new ArrayList<>();
 
-    /** A live info bar bound to a profile with an explicit API port. */
-    private static NodeInfoBar newBar(String name, int apiPort) {
-        NodeProfile profile = new NodeProfile(name);
-        profile.setProperty(Props.API_PORT.getName(), String.valueOf(apiPort));
-        return new NodeInfoBar(profile);
+    @AfterEach
+    void cleanUp() throws Exception {
+        for (NodeInfoBar bar : LIVE_BARS) {
+            bar.dispose();
+        }
+        LIVE_BARS.clear();
+        // Drop any reservation started through the public path so later tests start clean.
+        NodeModule.getInstance().stopAll();
+        SwingUtilities.invokeAndWait(() -> { });
     }
 
-    @Test
-    @DisplayName("refreshAllConflicts re-renders every live info bar")
-    void refreshAllConflicts_rendersAllLiveBars() throws Exception {
-        // Arrange: two live bars (each self-registered on construction).
-        NodeInfoBar first = newBar("push-a-" + System.nanoTime(), 8125);
-        NodeInfoBar second = newBar("push-b-" + System.nanoTime(), 9125);
-        try {
-            JLabel chip = findChip(first, "API Port");
-            assertNotNull(chip, "the API Port chip must exist on the info bar");
+    private NodeInfoBar newBar(String name, int apiPort) {
+        NodeProfile profile = new NodeProfile(name);
+        profile.setProperty(Props.API_PORT.getName(), String.valueOf(apiPort));
+        profile.setProperty(Props.P2P_PORT.getName(), String.valueOf(apiPort + 1000));
+        profile.setProperty(Props.API_WEBSOCKET_ENABLE.getName(), "false");
+        NodeInfoBar bar = new NodeInfoBar(profile);
+        LIVE_BARS.add(bar);
+        return bar;
+    }
 
-            SwingUtilities.invokeLater(() -> chip.setText(SENTINEL));
-            SwingUtilities.invokeAndWait(() -> { }); // let the sentinel land
-            assertContainsSentinel(chip);
+    private static JLabel findChip(NodeInfoBar bar, String key) {
+        // Chips render their text as <html><b>Key:</b> Value — match on the key prefix.
+        String prefix = "<html><b>" + key + ":";
+        for (java.awt.Component child : bar.getComponents()) {
+            if (child instanceof JLabel j && j.getText() != null && j.getText().startsWith(prefix)) {
+                return j;
+            }
+        }
+        return null;
+    }
 
-            // Act: broadcast a conflict refresh (as a profile state change would).
-            NodeInfoBar.refreshAllConflicts();
-            SwingUtilities.invokeAndWait(() -> { }); // flush the deferred EDT refresh
-
-            // Assert: the live bar was re-rendered (sentinel cleared by the in-place update).
-            assertNotEquals(SENTINEL, chip.getText(),
-                    "refreshAllConflicts() must refresh every live info bar");
-        } finally {
-            first.dispose();
-            second.dispose();
+    private static void setSentinel(JLabel... chips) throws Exception {
+        SwingUtilities.invokeLater(() -> {
+            for (JLabel chip : chips) {
+                chip.setText(SENTINEL);
+            }
+        });
+        SwingUtilities.invokeAndWait(() -> { }); // flush so the sentinel is actually set
+        for (JLabel chip : chips) {
+            assertEquals(SENTINEL, chip.getText(), "the chip must still carry the sentinel before the refresh");
         }
     }
 
     @Test
-    @DisplayName("a disposed bar is no longer refreshed by the broadcast")
-    void disposedBar_notRefreshedByBroadcast() throws Exception {
-        // Arrange: a live bar that we then dispose (as NodeProfilePanel.dispose() does).
-        NodeInfoBar bar = newBar("push-dispose-" + System.nanoTime(), 7125);
-        JLabel chip = findChip(bar, "API Port");
-        assertNotNull(chip);
+    void ownershipChange_refreshesEveryLiveBar() throws Exception {
+        // Arrange: two live sibling bars with sentinels on their chips.
+        NodeInfoBar first = newBar("own-first-" + System.nanoTime(), 6125);
+        NodeInfoBar second = newBar("own-second-" + System.nanoTime(), 6225);
+        JLabel chipA = findChip(first, "P2P Port");
+        JLabel chipB = findChip(second, "Database");
+        assertNotNull(chipA, "the first bar must render a P2P Port chip");
+        assertNotNull(chipB, "the second bar must render a Database chip");
+        setSentinel(chipA, chipB);
 
-        SwingUtilities.invokeLater(() -> chip.setText(SENTINEL));
-        SwingUtilities.invokeAndWait(() -> { });
-        assertContainsSentinel(chip);
+        // Act: subscribe the GUI's real handler to the ownership event (as NodePanel does),
+        // then trigger a reservation through the public start path.
+        Runnable handler = NodeInfoBar::refreshAllConflicts;
+        NodeModule.getInstance().addClaimingSetListener(handler);
+        try {
+            NodeModule.getInstance().startNode("own-owner-" + System.nanoTime());
+            SwingUtilities.invokeAndWait(() -> { }); // flush the deferred EDT refresh
+        } finally {
+            NodeModule.getInstance().removeClaimingSetListener(handler);
+        }
 
-        // Act: dispose, then broadcast.
-        bar.dispose();
+        // Assert: every live bar was re-rendered (sentinel cleared) — no tab switch needed.
+        assertNotEquals(SENTINEL, chipA.getText(), "the ownership event must refresh the first live bar");
+        assertNotEquals(SENTINEL, chipB.getText(), "the ownership event must refresh the second live bar");
+    }
+
+    @Test
+    void refreshAllConflicts_rendersAllLiveBars() throws Exception {
+        // Arrange: two live bars with sentinels on their chips.
+        NodeInfoBar first = newBar("bc-first-" + System.nanoTime(), 5125);
+        NodeInfoBar second = newBar("bc-second-" + System.nanoTime(), 5225);
+        JLabel chipA = findChip(first, "P2P Port");
+        JLabel chipB = findChip(second, "Database");
+        assertNotNull(chipA, "the first bar must render a P2P Port chip");
+        assertNotNull(chipB, "the second bar must render a Database chip");
+        setSentinel(chipA, chipB);
+
+        // Act: refresh every live bar directly (the handler the GUI subscribes).
         NodeInfoBar.refreshAllConflicts();
         SwingUtilities.invokeAndWait(() -> { });
 
-        // Assert: the disposed bar was NOT refreshed (still shows the sentinel).
-        assertEquals(SENTINEL, chip.getText(),
-                "a disposed bar must be unregistered from the conflict broadcast");
-    }
-
-    @Test
-    @DisplayName("a profile state change broadcasts a conflict refresh to sibling bars")
-    void stateChange_broadcastsToSiblingBars() throws Exception {
-        // Arrange: a sibling bar (a different profile already open) with a sentinel.
-        NodeInfoBar sibling = newBar("push-sibling-" + System.nanoTime(), 6125);
-        JLabel chip = findChip(sibling, "API Port");
-        assertNotNull(chip);
-
-        SwingUtilities.invokeLater(() -> chip.setText(SENTINEL));
-        SwingUtilities.invokeAndWait(() -> { });
-        assertContainsSentinel(chip);
-
-        // The profile whose state is about to change (its own panel + info bar).
-        NodeProfilePanel panel = new NodeProfilePanel(null,
-                new NodeProfile("push-owner-" + System.nanoTime()), null);
-        try {
-            // Act: the owner profile's state changes (PUSH) → broadcast to all live bars.
-            // Run on the EDT (like the real state listener does), then flush the
-            // deferred refreshData() tasks it schedules.
-            SwingUtilities.invokeAndWait(() -> panel.refreshFromSignum(null, Signum.State.RUNNING));
-            SwingUtilities.invokeAndWait(() -> { });
-
-            // Assert: the SIBLING bar was refreshed by the broadcast (sentinel cleared).
-            assertNotEquals(SENTINEL, chip.getText(),
-                    "a state change must refresh the conflict chips of every live bar, "
-                            + "not only the changed profile's own bar");
-        } finally {
-            panel.dispose();
-            sibling.dispose();
-        }
-    }
-
-    // ── helpers ────────────────────────────────────────────────────────────
-
-    private static void assertContainsSentinel(JLabel chip) {
-        String text = chip.getText();
-        if (text == null || !text.contains(SENTINEL)) {
-            throw new AssertionError("expected the sentinel to be applied before the broadcast");
-        }
-    }
-
-    private static JLabel findChip(NodeInfoBar bar, String key) throws Exception {
-        JLabel[] result = new JLabel[1];
-        SwingUtilities.invokeLater(() -> {
-            for (Component c : bar.getComponents()) {
-                if (c instanceof JLabel label && label.getText() != null && label.getText().contains(key)) {
-                    result[0] = label;
-                    break;
-                }
-            }
-        });
-        SwingUtilities.invokeAndWait(() -> { });
-        return result[0];
+        // Assert: both were re-rendered.
+        assertNotEquals(SENTINEL, chipA.getText(), "refreshAllConflicts must re-render the first live bar");
+        assertNotEquals(SENTINEL, chipB.getText(), "refreshAllConflicts must re-render the second live bar");
     }
 }

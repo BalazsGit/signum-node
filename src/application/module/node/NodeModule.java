@@ -81,6 +81,16 @@ public class NodeModule implements Module {
     private final java.util.Map<String, String> resourceOwner = new ConcurrentHashMap<>();
 
     /**
+     * Listeners notified (synchronously) whenever the set of claiming profiles changes — after
+     * a profile reserves its resources at start, releases them at stop / failed start, or the
+     * ownership store is cleared on shutdown. Swing-free by design: the core exposes a plain
+     * {@link Runnable} event so it never depends on the GUI (GUI → core direction only). The
+     * single GUI subscriber (NodePanel) uses it to re-evaluate every live NodeInfoBar's
+     * cross-profile conflict chips, keeping the red warnings current without a tab switch.
+     */
+    private final java.util.List<Runnable> claimingSetListeners = new CopyOnWriteArrayList<>();
+
+    /**
      * Single-threaded, daemon lifecycle executor: heavy node start/stop work
      * ({@code Signum.start()} / {@code Signum.stop()}) runs HERE — never on the
      * caller's thread (e.g. the EDT), so the GUI stays responsive during long
@@ -260,6 +270,8 @@ public class NodeModule implements Module {
         }
         nodes.clear();
         resourceOwner.clear();
+        // Full teardown freed every reservation: notify subscribers to clear all conflict chips.
+        notifyClaimingSetChanged();
     }
 
     /**
@@ -501,6 +513,45 @@ public class NodeModule implements Module {
         return Collections.unmodifiableSet(new HashSet<>(resourceOwner.values()));
     }
 
+    /**
+     * Registers a callback invoked whenever the set of claiming profiles changes (a profile
+     * reserves at start, releases at stop / failed start, or the store is cleared on shutdown).
+     * The callback runs synchronously on the thread that caused the change and must be
+     * lightweight — the single GUI subscriber only schedules an EDT refresh.
+     *
+     * @param listener the callback to invoke (null is ignored)
+     */
+    public void addClaimingSetListener(Runnable listener) {
+        if (listener != null) {
+            claimingSetListeners.add(listener);
+        }
+    }
+
+    /**
+     * Removes a previously registered claiming-set change callback.
+     *
+     * @param listener the callback to remove (null is ignored)
+     */
+    public void removeClaimingSetListener(Runnable listener) {
+        if (listener != null) {
+            claimingSetListeners.remove(listener);
+        }
+    }
+
+    /**
+     * Notifies all registered claiming-set change callbacks. A listener that throws is isolated
+     * (logged) so it cannot prevent the remaining listeners from running.
+     */
+    private void notifyClaimingSetChanged() {
+        for (Runnable listener : claimingSetListeners) {
+            try {
+                listener.run();
+            } catch (Exception e) {
+                LOGGER.warn("Claiming-set change listener failed: {}", e.getMessage());
+            }
+        }
+    }
+
     // =====================================================================
     // PortConflictException
     // =====================================================================
@@ -544,6 +595,9 @@ public class NodeModule implements Module {
             resourceOwner.putIfAbsent(nsKey(r.getField(), key), owner);
         }
         LOGGER.debug("Reserved resources for profile '{}' (owner count={})", owner, resourceOwner.size());
+        // Ownership changed: notify subscribers (the GUI re-evaluates every live conflict chip)
+        // so the red warning surfaces on every visible bar immediately, without a tab switch.
+        notifyClaimingSetChanged();
     }
 
     /**
@@ -565,6 +619,9 @@ public class NodeModule implements Module {
             removeOwnerIf(resourceOwner, nsKey(r.getField(), key), owner);
         }
         LOGGER.debug("Released resources for profile '{}'", owner);
+        // Ownership changed: notify subscribers so the now-freed resources clear the red
+        // warnings on every visible bar.
+        notifyClaimingSetChanged();
     }
 
     /**
