@@ -1,6 +1,8 @@
 package application.module.node.gui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Paths;
@@ -164,5 +166,35 @@ class NodeConsolePanelAttachTest {
 
         assertEventuallyOccurrences(panel, m2, 1,
                 "after STOPPED the attach latch must be cleared so the restarted node's logs are delivered");
+    }
+
+    @Test
+    @DisplayName("console log feed survives a tab move (subscriber disposed by removeNotify is recreated + re-attached)")
+    void tabMove_logFeedStaysContinuous() throws InterruptedException {
+        String profileName = newProfileName();
+        NodeConsolePanel panel = new NodeConsolePanel(null, new NodeProfile(profileName));
+        Signum signum = new Signum(new NodeProfile(profileName), Paths.get("./conf"));
+        panel.setSignum(signum);
+
+        // A pre-move event must arrive (attach works).
+        String m1 = "TABMOVE_M1_" + System.nanoTime();
+        signum.getProfileLogger().info(m1);
+        assertEventuallyOccurrences(panel, m1, 1, "pre-move event must be delivered");
+
+        // Simulate a tab move: TabUtils.moveTo does removeTabAt()+insertTab(), which
+        // triggers removeNotify() on the console panel — disposing the subscriber.
+        panel.getUnifiedConsole().dispose();
+        assertNull(panel.getUnifiedConsole().getSubscriber(),
+                "precondition: the tab move's removeNotify() disposed the subscriber");
+
+        // The addNotify() recovery must recreate + re-attach the subscriber so the feed resumes.
+        panel.addNotify();
+        assertNotNull(panel.getUnifiedConsole().getSubscriber(),
+                "addNotify() must recreate the subscriber after a tab move");
+
+        // A post-move event must arrive (feed restored) — this is the user-visible fix.
+        String m2 = "TABMOVE_M2_" + System.nanoTime();
+        signum.getProfileLogger().info(m2);
+        assertEventuallyOccurrences(panel, m2, 1, "post-move event must be delivered (feed restored across the drag)");
     }
 }

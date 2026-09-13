@@ -3026,28 +3026,22 @@ public class NodeConsolePanel extends JPanel {
      * </p>
      */
     private void attachProfileLogger() {
-        ProfileLogger pl = null;
-        Signum ctx = getSignum();
-        if (ctx == null) {
-            // v4: this panel may not be the one that started the node (e.g. toolbar
-            // Start) — resolve the instance for THIS panel's profile from NodeModule.
-            ctx = NodeModule.getInstance().get(profileName);
-        }
-        if (ctx != null) {
-            try {
-                pl = ctx.getProfileLogger();
-            } catch (Exception e) {
-                LOGGER.debug("attachProfileLogger: getProfileLogger() threw for profile '{}', trying registry", profileName);
-            }
-        }
-        // v4 single-path logging: only the owning Signum's ProfileLogger is valid.
-        // (The former NodeLoggerRegistry fallback was removed — the registry is a
-        // routing table, not an ownership source.)
-        if (pl == null) {
-            LOGGER.warn("Cannot attach ProfileLogger: no ProfileLogger found for profile '{}' (node not yet started?)", profileName);
+        if (unifiedConsole == null) {
             return;
         }
-        if (unifiedConsole == null || unifiedConsole.getSubscriber() == null) {
+        ProfileLogger pl = resolveProfileLogger();
+        if (pl == null) {
+            if (unifiedConsole.getSubscriber() == null) {
+                LOGGER.warn("Cannot attach ProfileLogger: no ProfileLogger found for profile '{}' (node not yet started?)", profileName);
+            }
+            return; // node not (re)started yet — a later attach will wire it up
+        }
+        // Recreate the subscriber if it was disposed (e.g. by a tab reorder's
+        // removeNotify), so the log feed is restored instead of being permanently lost.
+        if (unifiedConsole.getSubscriber() == null) {
+            unifiedConsole.recreateSubscriber();
+        }
+        if (unifiedConsole.getSubscriber() == null) {
             LOGGER.warn("Cannot attach ProfileLogger: unified console subscriber is null for profile '{}'", profileName);
             return;
         }
@@ -3065,6 +3059,33 @@ public class NodeConsolePanel extends JPanel {
     }
 
     /**
+     * Resolves the {@link ProfileLogger} that owns this panel's profile: first via
+     * the Signum instance held by this panel, then via the {@link NodeModule}
+     * registry (v4: this panel may not be the one that started the node, e.g.
+     * toolbar Start).
+     *
+     * @return the profile's {@link ProfileLogger}, or null if the node is not (yet) started
+     */
+    private ProfileLogger resolveProfileLogger() {
+        ProfileLogger pl = null;
+        Signum ctx = getSignum();
+        if (ctx == null) {
+            ctx = NodeModule.getInstance().get(profileName);
+        }
+        if (ctx != null) {
+            try {
+                pl = ctx.getProfileLogger();
+            } catch (Exception e) {
+                LOGGER.debug("resolveProfileLogger: getProfileLogger() threw for profile '{}'", profileName);
+            }
+        }
+        // v4 single-path logging: only the owning Signum's ProfileLogger is valid.
+        // (The former NodeLoggerRegistry fallback was removed — the registry is a
+        // routing table, not an ownership source.)
+        return pl;
+    }
+
+    /**
      * Idempotently attaches this panel's subscriber to the node's ProfileLogger.
      * <p>
      * Used when the node was started by a component other than this panel
@@ -3072,7 +3093,14 @@ public class NodeConsolePanel extends JPanel {
      * </p>
      */
     public void ensureProfileLoggerAttached() {
-        if (profileLoggerAttached) {
+        if (unifiedConsole == null) {
+            return;
+        }
+        // Fast path: subscriber alive and already attached — nothing to do.
+        // (A tab reorder's removeNotify() can dispose the subscriber while the
+        // profileLoggerAttached latch stays set, so we must also require the
+        // subscriber to still exist before skipping the (re)attach.)
+        if (profileLoggerAttached && unifiedConsole.getSubscriber() != null) {
             return;
         }
         attachProfileLogger();
@@ -4555,6 +4583,32 @@ public class NodeConsolePanel extends JPanel {
         profileLogger = null;
         ── LEGACY CODE END ── */
         super.removeNotify();
+    }
+
+    /**
+     * Self-heals the console when Swing re-attaches this panel to the hierarchy.
+     * <p>
+     * {@link #removeNotify()} disposes the unified console's subscriber. A tab that
+     * is merely reordered (e.g. {@code NodePanel.rearrangeTabs()} rebuilds the
+     * tabbed pane via removeTabAt()+addTab()) would otherwise lose its log feed
+     * permanently: {@code profileLoggerAttached} stays latched, so no re-attach
+     * ever happens. When the subscriber is gone, recreate it and re-attach it to
+     * the profile logger to restore the feed.
+     * </p>
+     * <p>
+     * Idempotent: runs only when the subscriber is actually missing, and
+     * {@code ProfileLogger.addSubscriber()} ignores duplicate registrations.
+     * </p>
+     */
+    @Override
+    public void addNotify() {
+        super.addNotify();
+        // A tab reorder (removeNotify + addNotify) disposes the unified console's
+        // subscriber. Self-heal by (re)creating and re-attaching it so the log feed
+        // stays continuous across drags — regardless of the attach latch.
+        if (unifiedConsole != null && unifiedConsole.getSubscriber() == null) {
+            attachProfileLogger();
+        }
     }
 
     /**

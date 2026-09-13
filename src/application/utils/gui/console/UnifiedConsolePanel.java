@@ -81,6 +81,8 @@ public final class UnifiedConsolePanel extends JPanel {
     private JTextPane textPane;
     private JScrollPane scrollPane;
     private BaseConsoleSubscriber subscriber;
+    /** Concrete subscriber class, retained so {@link #recreateSubscriber()} can rebuild after dispose() */
+    private final Class<? extends BaseConsoleSubscriber> subscriberType;
     private ConsoleFilterHeader filterHeader;
     private ConsoleInputPanel inputPanel;
 
@@ -113,6 +115,7 @@ public final class UnifiedConsolePanel extends JPanel {
         }
 
         this.config = config;
+        this.subscriberType = subscriberType;
         initUI();
         createSubscriber(subscriberType);
     }
@@ -616,6 +619,27 @@ public final class UnifiedConsolePanel extends JPanel {
             subscriber.dispose();
             subscriber = null;
         }
+    }
+
+    /**
+     * Recreates the console subscriber after {@link #dispose()}.
+     * <p>
+     * Binds a fresh subscriber to the same text document and smart-scroll wiring.
+     * The caller is responsible for re-attaching the new subscriber to its log
+     * source (e.g. {@code ProfileLogger.addSubscriber(...)}) — {@link #dispose()}
+     * only releases this panel's own references.
+     * </p>
+     * <p>
+     * Used to self-heal the console when Swing re-attaches the panel to the
+     * hierarchy (addNotify) after a removeNotify() that disposed the subscriber.
+     * </p>
+     */
+    public void recreateSubscriber() {
+        if (subscriber != null) {
+            subscriber.dispose();
+            subscriber = null;
+        }
+        createSubscriber(subscriberType);
     }
 
     // ── Floating Scroll-to-Bottom Button ─────────────────────────────────

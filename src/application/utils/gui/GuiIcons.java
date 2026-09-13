@@ -379,6 +379,36 @@ public final class GuiIcons {
         return build(FontAwesome.MAGIC, size, GuiColors.getHelpIcon());
     }
 
+    /**
+     * Thin-line "add" (plus) icon.
+     * <p>
+     * The bundled FontAwesome 4.7 set has no thin-line plus glyph
+     * ({@code PLUS} is a heavy solid cross), so this icon is drawn
+     * programmatically with two antialiased, round-capped strokes — the same
+     * approach as {@code PickaxeIcon}. It does not depend on the global GUI
+     * font, so GUI font changes cannot alter its appearance; only its size.
+     *
+     * @return a thin-line plus {@link Icon} in the default button-icon color
+     */
+    public static Icon plus() {
+        return plus(SIZE_MEDIUM, GuiColors.getButtonIcon());
+    }
+
+    public static Icon plus(int size) {
+        return plus(size, GuiColors.getButtonIcon());
+    }
+
+    /**
+     * Thin-line "add" (plus) icon in a custom color.
+     *
+     * @param size  the icon size in pixels (square)
+     * @param color the stroke color
+     * @return a thin-line plus {@link Icon} of the requested size and color
+     */
+    public static Icon plus(int size, Color color) {
+        return new PlusIcon(size, color);
+    }
+
     // ====================================================================
     // Generic Builder - Custom icon with custom color
     // ====================================================================
@@ -474,6 +504,50 @@ public final class GuiIcons {
             int ty = y + (size + fm.getAscent() - fm.getDescent()) / 2;
             g2.drawString(text, tx, ty);
             g2.dispose();
+        }
+
+        @Override
+        public int getIconWidth() {
+            return size;
+        }
+
+        @Override
+        public int getIconHeight() {
+            return size;
+        }
+    }
+
+    /**
+     * A thin plus sign drawn with two antialiased, round-capped strokes
+     * (used by {@link #plus(int, Color)}).
+     */
+    private static final class PlusIcon implements Icon {
+
+        private final int size;
+        private final Color color;
+
+        private PlusIcon(int size, Color color) {
+            this.size = Math.max(MIN_ICON_SIZE, size);
+            this.color = color;
+        }
+
+        @Override
+        public void paintIcon(Component c, Graphics g, int x, int y) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            try {
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(color);
+                float stroke = Math.max(1.5f, size * 0.13f);
+                g2.setStroke(new BasicStroke(stroke, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                float pad = Math.max(2f, size * 0.14f);
+                float cx = x + size / 2f;
+                float cy = y + size / 2f;
+                float r = size / 2f - pad;
+                g2.draw(new java.awt.geom.Line2D.Float(cx - r, cy, cx + r, cy));
+                g2.draw(new java.awt.geom.Line2D.Float(cx, cy - r, cx, cy + r));
+            } finally {
+                g2.dispose();
+            }
         }
 
         @Override

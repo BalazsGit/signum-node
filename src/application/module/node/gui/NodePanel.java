@@ -8,9 +8,11 @@ import application.module.node.profile.NodeProfileRepository;
 import application.module.node.profile.ProfileConfig;
 import application.module.node.profile.ProfileNameSuggester;
 import application.module.node.gui.wizard.NodeSetupWizardDialog;
+import application.utils.gui.GuiColors;
 import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiIcons;
 import application.utils.gui.GuiUtils;
+import application.utils.gui.TabUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,6 +57,22 @@ public class NodePanel extends JPanel  {
     /** Shown instead of the (empty) tabbed pane when no profiles exist yet (onboarding, plan §1.3). */
     private JPanel onboardingPanel;
 
+    /** Last selected profile tab index (used to revert the never-openable "+" tab to a real profile tab). */
+    private int lastProfileTabIndex = -1;
+    /** When true, activating the "+" tab opens the setup wizard (enabled once the UI is interactive). */
+    private boolean wizardInteractionEnabled = false;
+    /**
+     * Dedicated content component of the persistent "add profile" tab (always the last tab,
+     * icon-only, never opened — its header's only job is to open the setup wizard).
+     * The tab is recognized by this component's identity; no profile tab can hold it.
+     */
+    private final JPanel addProfileTabComponent = new JPanel();
+    /**
+     * Thin-line "+" icon shown on the add-profile tab (recreated on appearance changes so it
+     * keeps tracking the global UI font size and the theme's icon color).
+     */
+    private Icon addProfileTabIcon = GuiIcons.plus(GuiIcons.sizeSmall(), GuiColors.getButtonIcon());
+
     /** Maps profile name -> actual NodeProfilePanel (after lazy-load) */
     private final Map<String, NodeProfilePanel> loadedProfilePanels = new LinkedHashMap<>();
     /** Tracks which placeholders have been replaced */
@@ -72,6 +90,9 @@ public class NodePanel extends JPanel  {
     private final Runnable appearanceListener = () -> {
         GuiFontManager.applyDefaultFont(profileTabbedPane);
         GuiFontManager.applyDefaultFont(statusLabel);
+        // Keep the add-profile tab's "+" icon in sync with the new size / theme color.
+        addProfileTabIcon = GuiIcons.plus(GuiIcons.sizeSmall(), GuiColors.getButtonIcon());
+        applyAddTabIcon();
     };
 
     /**
@@ -106,7 +127,13 @@ public class NodePanel extends JPanel  {
         this.profileTabbedPane = new JTabbedPane(SwingConstants.TOP) {
             @Override
             public void setSelectedIndex(int index) {
+                if (handlePlusTabSelection(index)) {
+                    return; // The "+" tab never opens; selection already reverted (and wizard opened).
+                }
                 super.setSelectedIndex(index);
+                if (index >= 0) {
+                    lastProfileTabIndex = index;
+                }
                 checkAndReplacePlaceholder();
             }
         };
@@ -115,6 +142,8 @@ public class NodePanel extends JPanel  {
         GuiFontManager.applyDefaultFont(profileTabbedPane);
         add(profileTabbedPane, BorderLayout.CENTER);
         attachTabContextMenu();
+        attachTabDragAndDrop();
+        attachPlusTabGuard();
 
         // Keep every profile's cross-profile conflict warnings current in real time. A profile's
         // info bar reads the authoritative claiming set (NodeModule resource ownership), and that
@@ -157,13 +186,6 @@ public class NodePanel extends JPanel  {
 
         headerPanel.add(statusLabel);
         headerPanel.add(Box.createHorizontalStrut(15));
-        JButton addProfileButton = new JButton("+");
-        addProfileButton.setToolTipText("Create node profile...");
-        addProfileButton.setFocusable(false);
-        addProfileButton.setAlignmentY(CENTER_ALIGNMENT);
-        GuiFontManager.applyDefaultFont(addProfileButton);
-        addProfileButton.addActionListener(e -> openSetupWizard());
-        headerPanel.add(addProfileButton);
         headerPanel.add(Box.createHorizontalGlue());
         headerPanel.add(progressBar);
 
@@ -240,6 +262,7 @@ public class NodePanel extends JPanel  {
                     updateProgress(100, "Ready - " + total + " profiles loaded");
                     progressBar.setIndeterminate(false);
                     statusLabel.setForeground(new Color(76, 175, 80)); // Green
+                    wizardInteractionEnabled = true; // UI interactive: the "+" tab can open the wizard
                 });
 
                 LOGGER.info("Async profile loading completed: {} profiles loaded", count);
@@ -275,8 +298,8 @@ public class NodePanel extends JPanel  {
 
         placeholderReplaced.put(profileName, false);
         profileTabbedPane.addTab(profileName, placeholder);
-        int tabIndex = profileTabbedPane.getTabCount() - 1;
-        profileNameToTabIndex.put(profileName, tabIndex);
+        // Keep the persistent "+" tab as the last tab and re-sync the name->index map.
+        ensureAddTabLast();
 
         LOGGER.debug("Created placeholder tab for profile: {}", profileName);
     }
@@ -289,6 +312,10 @@ public class NodePanel extends JPanel  {
         int selectedIndex = profileTabbedPane.getSelectedIndex();
         if (selectedIndex < 0) {
             return;
+        }
+
+        if (profileTabbedPane.getComponentAt(selectedIndex) == addProfileTabComponent) {
+            return; // The "+" tab has no profile content to lazy-load.
         }
 
         String profileName = profileTabbedPane.getTitleAt(selectedIndex);
@@ -491,67 +518,66 @@ public class NodePanel extends JPanel  {
             return;
         }
 
-        // Build current order from tabbed pane
-        List<String> currentOrder = new ArrayList<>();
+        // Build the current profile order (excluding the persistent "+" tab).
+        List<String> currentProfiles = new ArrayList<>();
         for (int i = 0; i < tabCount; i++) {
-            currentOrder.add(profileTabbedPane.getTitleAt(i));
+            if (profileTabbedPane.getComponentAt(i) != addProfileTabComponent) {
+                currentProfiles.add(profileTabbedPane.getTitleAt(i));
+            }
+        }
+        if (currentProfiles.isEmpty()) {
+            return; // Nothing to reorder (only the "+" tab, if any).
         }
 
-        // If already in desired order, skip
-        if (currentOrder.equals(desiredOrder)) {
-            LOGGER.debug("Tab order already matches desired order");
+        // Desired order = requested order (existing profiles only), then any remaining profiles.
+        List<String> orderedProfiles = new ArrayList<>();
+        for (String name : desiredOrder) {
+            if (currentProfiles.contains(name) && !orderedProfiles.contains(name)) {
+                orderedProfiles.add(name);
+            }
+        }
+        for (String name : currentProfiles) {
+            if (!orderedProfiles.contains(name)) {
+                orderedProfiles.add(name);
+            }
+        }
+
+        // Nothing to do when the current order already matches the target. Moving
+        // tabs detaches/re-attaches their components (removeNotify()/addNotify()),
+        // which disposes their console subscribers — so we must not touch the tabs
+        // at all when they are already in place.
+        if (currentProfiles.equals(orderedProfiles)) {
+            ensureAddTabLast(); // idempotent; only creates/moves the "+" tab when needed
+            LOGGER.debug("Profile tabs already in desired order {}", orderedProfiles);
             return;
         }
 
-        LOGGER.info("Rearranging tabs from {} to {}", currentOrder, desiredOrder);
+        LOGGER.info("Rearranging profile tabs to {} (keeping '+' tab last)", orderedProfiles);
 
-        // Collect all tab components and titles
-        List<Component> components = new ArrayList<>();
-        List<String> titles = new ArrayList<>();
-        for (int i = 0; i < tabCount; i++) {
-            components.add(profileTabbedPane.getComponentAt(i));
-            titles.add(profileTabbedPane.getTitleAt(i));
-            // Also collect tooltips and icons for preservation
-        }
+        // Pin the "+" tab to the end first (a dummy panel — safe to detach), so the
+        // profile tabs occupy indices 0..n-1 and target slots are unambiguous.
+        ensureAddTabLast();
 
-        // Clear all tabs
-        while (profileTabbedPane.getTabCount() > 0) {
-            profileTabbedPane.removeTabAt(0);
-        }
-
-        // Rebuild in desired order
-        Map<String, Integer> newIndexMap = new LinkedHashMap<>();
-        int index = 0;
-
-        // First add tabs in desired order
-        for (String name : desiredOrder) {
-            int origIndex = currentOrder.indexOf(name);
-            if (origIndex >= 0) {
-                profileTabbedPane.addTab(name, components.get(origIndex));
-                newIndexMap.put(name, index++);
-                // Remove from current order so we don't add it again
-                currentOrder.remove(Integer.valueOf(origIndex));
-                components.remove(Integer.valueOf(origIndex));
+        // Move each profile into its target slot with TabUtils.moveTo(): only tabs
+        // whose position actually changes are touched (minimal removeNotify churn);
+        // already-correct tabs stay untouched, and the selection follows by identity.
+        for (int target = 0; target < orderedProfiles.size(); target++) {
+            String name = orderedProfiles.get(target);
+            int current = -1;
+            for (int i = 0; i < profileTabbedPane.getTabCount(); i++) {
+                if (name.equals(profileTabbedPane.getTitleAt(i))) {
+                    current = i;
+                    break;
+                }
+            }
+            if (current >= 0 && current != target) {
+                TabUtils.moveTo(profileTabbedPane, current, target);
             }
         }
 
-        // Add any remaining tabs (shouldn't happen if desiredOrder is complete)
-        for (int i = 0; i < titles.size(); i++) {
-            String name = titles.get(i);
-            if (!newIndexMap.containsKey(name)) {
-                profileTabbedPane.addTab(name, components.get(i));
-                newIndexMap.put(name, index++);
-            }
-        }
+        rebuildProfileIndexMap();
 
-        // Update internal tracking map
-        this.profileNameToTabIndex.clear();
-        for (int i = 0; i < profileTabbedPane.getTabCount(); i++) {
-            String name = profileTabbedPane.getTitleAt(i);
-            this.profileNameToTabIndex.put(name, i);
-        }
-
-        LOGGER.debug("Tab order rearranged. New mapping: {}", newIndexMap);
+        LOGGER.debug("Tab order rearranged. New mapping: {}", profileNameToTabIndex);
     }
 
     // ====================================================================
@@ -606,6 +632,122 @@ public class NodePanel extends JPanel  {
     // ====================================================================
     // Setup wizard + dynamic profile tabs (plan §1.3-1.4)
     // ====================================================================
+
+    // ── Persistent "+" (add profile) tab — always the last tab ───────────
+
+    /**
+     * Index of the persistent "+" (add profile) tab, or -1 if it does not exist yet.
+     */
+    private int getAddTabIndex() {
+        for (int i = profileTabbedPane.getTabCount() - 1; i >= 0; i--) {
+            if (profileTabbedPane.getComponentAt(i) == addProfileTabComponent) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Index of the first profile tab (skipping the "+" tab), or -1 if there are none.
+     */
+    private int firstProfileTabIndex() {
+        for (int i = 0; i < profileTabbedPane.getTabCount(); i++) {
+            if (profileTabbedPane.getComponentAt(i) != addProfileTabComponent) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Ensures the persistent "+" (add profile) tab exists and is the last tab:
+     * creates it when missing, moves it to the end when it has drifted, and re-syncs
+     * the name→index map (which never contains the "+" tab).
+     */
+    private void ensureAddTabLast() {
+        int addIdx = getAddTabIndex();
+        if (addIdx < 0) {
+            profileTabbedPane.addTab("", addProfileTabComponent);
+        } else if (addIdx != profileTabbedPane.getTabCount() - 1) {
+            // The "+" tab is a dummy panel (no state, no subscriber) — moving it
+            // with TabUtils.moveTo only churns that one component, not the profiles.
+            TabUtils.moveTo(profileTabbedPane, addIdx, profileTabbedPane.getTabCount() - 1);
+        }
+        applyAddTabIcon();
+        // The "+" tab is now guaranteed to be the last tab.
+        profileTabbedPane.setToolTipTextAt(profileTabbedPane.getTabCount() - 1, "Create node profile...");
+        rebuildProfileIndexMap();
+    }
+
+    /**
+     * Applies the current thin-line "+" icon to the add-profile tab (no-op when the tab is absent).
+     */
+    private void applyAddTabIcon() {
+        int idx = getAddTabIndex();
+        if (idx >= 0) {
+            profileTabbedPane.setIconAt(idx, addProfileTabIcon);
+        }
+    }
+
+    /**
+     * Rebuilds the profile name → tab index map from the current tabs, excluding the "+" tab.
+     */
+    private void rebuildProfileIndexMap() {
+        profileNameToTabIndex.clear();
+        for (int i = 0; i < profileTabbedPane.getTabCount(); i++) {
+            if (profileTabbedPane.getComponentAt(i) != addProfileTabComponent) {
+                profileNameToTabIndex.put(profileTabbedPane.getTitleAt(i), i);
+            }
+        }
+    }
+
+    /**
+     * Intercepts a selection of the persistent "+" (add profile) tab. The "+" tab must never
+     * be opened: the selection is reverted to the last real profile tab and (once the UI is
+     * interactive) the setup wizard is opened.
+     *
+     * @param index the index that was about to be selected
+     * @return true if the index was the "+" tab (already handled; caller must not select it),
+     *         false otherwise
+     */
+    private boolean handlePlusTabSelection(int index) {
+        int addIdx = getAddTabIndex();
+        if (addIdx < 0 || index != addIdx) {
+            return false; // Not the "+" tab; select normally.
+        }
+        // Revert to a valid profile tab (never the "+" tab).
+        int revertTo = lastProfileTabIndex;
+        if (revertTo < 0 || revertTo >= profileTabbedPane.getTabCount() || revertTo == addIdx) {
+            revertTo = firstProfileTabIndex();
+        }
+        if (revertTo >= 0 && revertTo != index) {
+            profileTabbedPane.setSelectedIndex(revertTo);
+        }
+        if (wizardInteractionEnabled) {
+            openSetupWizard();
+        }
+        return true;
+    }
+
+    /**
+     * Safety net so the "+" tab is never left selected, even if a selection change bypasses
+     * the {@code setSelectedIndex} override (e.g. an internal {@code changeSelection} call).
+     * Only reverts the selection; the wizard is opened by the {@code setSelectedIndex}
+     * interception on user interaction, so it is not opened here (avoids double-opening).
+     */
+    private void attachPlusTabGuard() {
+        profileTabbedPane.addChangeListener(e -> {
+            int sel = profileTabbedPane.getSelectedIndex();
+            int addIdx = getAddTabIndex();
+            if (sel == addIdx && addIdx >= 0) {
+                int revertTo = (lastProfileTabIndex >= 0 && lastProfileTabIndex < profileTabbedPane.getTabCount()
+                        && lastProfileTabIndex != addIdx) ? lastProfileTabIndex : firstProfileTabIndex();
+                if (revertTo >= 0) {
+                    profileTabbedPane.setSelectedIndex(revertTo);
+                }
+            }
+        });
+    }
 
     /**
      * Opens the modal setup wizard; on success the new profile tab is added.
@@ -677,7 +819,12 @@ public class NodePanel extends JPanel  {
             order.add(profileName);
             profileConfig.setTabOrder(order);
         }
-        profileTabbedPane.setSelectedIndex(profileTabbedPane.getTabCount() - 1);
+        // Select the newly added profile tab (never the persistent "+" tab, which is last).
+        Integer tabIdx = profileNameToTabIndex.get(profileName);
+        if (tabIdx != null) {
+            profileTabbedPane.setSelectedIndex(tabIdx);
+        }
+        wizardInteractionEnabled = true; // UI is interactive: the "+" tab can now open the wizard
         statusLabel.setForeground(new Color(76, 175, 80));
         statusLabel.setText("Profile added: " + profileName);
         LOGGER.info("Profile tab added: {}", profileName);
@@ -705,17 +852,20 @@ public class NodePanel extends JPanel  {
         placeholderReplaced.remove(profileName);
         profileNameToTabIndex.remove(profileName);
         profileTabbedPane.removeTabAt(index);
-        for (int i = index; i < profileTabbedPane.getTabCount(); i++) {
-            profileNameToTabIndex.put(profileTabbedPane.getTitleAt(i), i);
-        }
+        // Keep the persistent "+" tab as the last tab and re-sync the name->index map.
+        ensureAddTabLast();
         try {
             NodeProfileRepository.deleteProfile(profileName);
             LOGGER.info("Profile removed: {}", profileName);
         } catch (Exception e) {
             LOGGER.error("Failed to delete profile file for '{}'", profileName, e);
         }
-        if (profileTabbedPane.getTabCount() == 0) {
+        // Fall back to onboarding when no profile tabs remain (the "+" tab is not a profile).
+        if (firstProfileTabIndex() < 0) {
             showOnboarding();
+        } else if (profileTabbedPane.getSelectedIndex() == getAddTabIndex()) {
+            // The removed tab was selected; Swing may have moved the selection onto the "+" tab.
+            profileTabbedPane.setSelectedIndex(firstProfileTabIndex());
         }
     }
 
@@ -766,9 +916,14 @@ public class NodePanel extends JPanel  {
         profileTabbedPane.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mouseClicked(java.awt.event.MouseEvent e) {
-                if (e.isPopupTrigger()) {
+                // NOTE: in this JDK/FlatLaf build e.isPopupTrigger() is *not* set for
+                // right-clicks, so we also accept a raw right-button click (BUTTON3).
+                boolean popup = e.isPopupTrigger()
+                        || e.getButton() == java.awt.event.MouseEvent.BUTTON3;
+                if (popup) {
                     int idx = profileTabbedPane.indexAtLocation(e.getX(), e.getY());
-                    if (idx >= 0 && idx < profileTabbedPane.getTabCount()) {
+                    if (idx >= 0 && idx < profileTabbedPane.getTabCount()
+                            && profileTabbedPane.getComponentAt(idx) != addProfileTabComponent) {
                         showTabContextMenu(idx, e);
                     }
                 }
@@ -791,6 +946,104 @@ public class NodePanel extends JPanel  {
         menu.add(delete);
 
         menu.show(profileTabbedPane, e.getX(), e.getY());
+    }
+
+    // ── Tab drag & drop (user reorder — plan §9.1) ───────────────────────
+
+    /** Drag activation threshold (px) — press/release below this stays a normal click. */
+    private static final int DRAG_THRESHOLD_PX = 4;
+
+    /**
+     * Attaches mouse-drag reordering to the profile tab strip (plan §9.1).
+     * <p>
+     * Press a profile tab, drag it over another position and release: the tab
+     * takes over that position (via {@link TabUtils#moveTo}), the new order is
+     * persisted to {@code ProfileConfig.tabOrder} (SSOT: {@code profiles.json}),
+     * and the persistent "+" tab is forced back to the end. The moved tab stays
+     * selected. Press/release without movement is left untouched, so normal
+     * click-to-select (and the right-click context menu) keep working.
+     * </p>
+     * <p>
+     * Hit-testing uses the standard {@link JTabbedPane#indexAtLocation(int, int)}
+     * API; the "+" tab is neither draggable nor a drop target.
+     * </p>
+     */
+    private void attachTabDragAndDrop() {
+        if (Boolean.TRUE.equals(profileTabbedPane.getClientProperty("dragDnDAttached"))) {
+            return;
+        }
+        profileTabbedPane.putClientProperty("dragDnDAttached", true);
+
+        int[] dragFrom = {-1};
+        java.awt.Point[] pressPoint = {null};
+
+        profileTabbedPane.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mousePressed(java.awt.event.MouseEvent e) {
+                if (!SwingUtilities.isLeftMouseButton(e)) {
+                    dragFrom[0] = -1;
+                    pressPoint[0] = null;
+                    return;
+                }
+                int idx = profileTabbedPane.indexAtLocation(e.getX(), e.getY());
+                if (idx >= 0 && profileTabbedPane.getComponentAt(idx) != addProfileTabComponent) {
+                    dragFrom[0] = idx;
+                    pressPoint[0] = e.getPoint();
+                } else {
+                    dragFrom[0] = -1;
+                    pressPoint[0] = null;
+                }
+            }
+
+            @Override
+            public void mouseReleased(java.awt.event.MouseEvent e) {
+                int from = dragFrom[0];
+                dragFrom[0] = -1;
+                pressPoint[0] = null;
+                // Drop target from the RELEASE location (mouseDragged is not delivered in
+                // this JDK/FlatLaf build, so it cannot be used to track the drag).
+                int to = (from < 0) ? -1 : profileTabbedPane.indexAtLocation(e.getX(), e.getY());
+                if (from >= 0 && to >= 0 && profileTabbedPane.getComponentAt(to) == addProfileTabComponent) {
+                    to = Math.max(0, profileTabbedPane.getTabCount() - 2); // "+" never a drop target
+                }
+                if (from < 0 || from == to || to < 0) {
+                    return; // plain click (or no valid target) — the pane selects normally
+                }
+                String movedName = profileTabbedPane.getTitleAt(from);
+                TabUtils.moveTo(profileTabbedPane, from, to);
+                // Final index of the moved tab (the "to" slot, per TabUtils.moveTo).
+                int movedIndex = to;
+                ensureAddTabLast(); // "+" back to the end + name->index map re-sync
+                persistTabOrder(); // SSOT: profiles.json
+                // Keep the moved tab active (runs after the pane's own click handler,
+                // so it wins over the selection landing on the drop position).
+                int count = profileTabbedPane.getTabCount();
+                if (movedIndex >= 0 && movedIndex < count
+                        && profileTabbedPane.getComponentAt(movedIndex) != addProfileTabComponent) {
+                    profileTabbedPane.setSelectedIndex(movedIndex);
+                }
+                LOGGER.info("Profile tab moved: '{}' from index {} to {}", movedName, from, to);
+            }
+        });
+    }
+
+    /**
+     * Persists the current tab order (profile tabs only, the "+" tab excluded) to
+     * {@code ProfileConfig.tabOrder} — the SSOT in {@code profiles.json}, which
+     * also drives the autostart order (plan §9.2).
+     */
+    private void persistTabOrder() {
+        List<String> order = new ArrayList<>();
+        for (int i = 0; i < profileTabbedPane.getTabCount(); i++) {
+            if (profileTabbedPane.getComponentAt(i) != addProfileTabComponent) {
+                order.add(profileTabbedPane.getTitleAt(i));
+            }
+        }
+        try {
+            profileConfig.setTabOrder(order);
+        } catch (Exception e) {
+            LOGGER.error("Failed to persist tab order {}", order, e);
+        }
     }
 
     /**
