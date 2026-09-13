@@ -252,6 +252,51 @@ public class NodeModuleLifecycleTest {
         }
     }
 
+    /**
+     * A user/system pause is only meaningful for a RUNNING node's blockchain sync.
+     * When the lifecycle leaves the running state (stop / start / error) the pause
+     * flag must be cleared, so a (re)started node resumes syncing and the GUI sync
+     * button returns to the PAUSE (not RESUME) icon.
+     * <p>
+     * Regression test (v5): pausing a node and then stopping + starting it left the
+     * node appearing PAUSED and the toolbar stuck on a wrong "Resume" button. The
+     * fix clears the pause inside {@code Signum.setState()} whenever the lifecycle
+     * transitions to a non-RUNNING state — this test drives that path via the real
+     * {@link Signum#init()} transition (CREATED -> INITIALIZED).
+     * </p>
+     */
+    @Test
+    public void pause_isCleared_whenLifecycleLeavesRunning() {
+        Signum signum = new Signum(new NodeProfile(PROFILE), CONF);
+        try {
+            // A freshly created node is not paused.
+            assertFalse("fresh node must not be paused",
+                    signum.getOperatingState() == Signum.OperatingState.PAUSED_USER
+                            || signum.getOperatingState() == Signum.OperatingState.PAUSED_SYSTEM);
+
+            // Simulate the user pausing the (running) node.
+            signum.pauseByUser();
+            assertEquals("pauseByUser() must set the paused state",
+                    Signum.OperatingState.PAUSED_USER, signum.getOperatingState());
+
+            // Drive the lifecycle out of the running state via a real state
+            // transition (init: CREATED -> INITIALIZED), which must clear the pause.
+            signum.init();
+
+            assertFalse("pause must be cleared once the lifecycle leaves RUNNING",
+                    signum.getOperatingState() == Signum.OperatingState.PAUSED_USER
+                            || signum.getOperatingState() == Signum.OperatingState.PAUSED_SYSTEM);
+        } finally {
+            if (signum.isRunning()) {
+                try {
+                    signum.stop();
+                } catch (Exception ignored) {
+                    // best-effort
+                }
+            }
+        }
+    }
+
     // =====================================================================
     // Startup (arbitration) order — the tabOrder doubles as the autostart order.
     // The "first profile wins the resource" invariant depends on a single,

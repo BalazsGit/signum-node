@@ -91,18 +91,142 @@ public class NodeModule implements Module {
     private final java.util.List<Runnable> claimingSetListeners = new CopyOnWriteArrayList<>();
 
     /**
-     * Single-threaded, daemon lifecycle executor: heavy node start/stop work
+     * Daemon lifecycle executor: heavy node start/stop work
      * ({@code Signum.start()} / {@code Signum.stop()}) runs HERE — never on the
      * caller's thread (e.g. the EDT), so the GUI stays responsive during long
-     * initializations. FIFO ordering also guarantees that a restart
-     * (stop → start) executes sequentially for the same profile. GUI feedback
-     * is delivered through {@code Signum} state pushes (STARTING/RUNNING/ERROR).
+     * initializations.
+     * <p>
+     * v5 (multi-node): a small daemon thread POOL so that different profiles can
+     * start/stop in PARALLEL — a profile's heavy init (Flyway, SQLite VACUUM,
+     * service startup) no longer head-of-line-blocks another profile's start.
+     * Ordering guarantees: per-profile tasks are serialized under that profile's
+     * gate lock ({@link #serialize(String, Runnable)}), so a restart (stop →
+     * start) for the SAME profile still executes sequentially in submission
+     * order, and resource reservation (first-come-first-served) still happens
+     * synchronously on the caller thread in {@code synchronized(this)} blocks.
+     * GUI feedback is delivered through {@code Signum} state pushes
+     * (STARTING/RUNNING/ERROR) plus the start-pending set (see
+     * {@link #isStartPending(String)}).
+     * </p>
      */
-    private final ExecutorService lifecycleExecutor = Executors.newSingleThreadExecutor(runnable -> {
+    private final ExecutorService lifecycleExecutor = Executors.newCachedThreadPool(runnable -> {
         Thread thread = new Thread(runnable, "signum-lifecycle");
         thread.setDaemon(true);
         return thread;
     });
+
+    /**
+     * Per-profile lifecycle gate: one FAIR {@link Semaphore}(1) per profile name.
+     * Every start/stop/restart task acquires its profile's gate BEFORE it runs
+     * ({@link #serialize(String, Runnable)}), which (a) serializes a profile's own
+     * operations (no two operations on the same profile ever run concurrently) and
+     * (b) — because the semaphore is FAIR — grants them in acquisition (submission)
+     * order, preserving the original FIFO guarantee (e.g. Start-then-Stop cannot be
+     * reordered) while still letting DIFFERENT profiles proceed in parallel.
+     */
+    private final ConcurrentHashMap<String, java.util.concurrent.Semaphore> profileGates = new ConcurrentHashMap<>();
+
+    /**
+     * Returns (creating on demand) the fair lifecycle gate for a profile.
+     */
+    private java.util.concurrent.Semaphore profileGate(String profileName) {
+        return profileGates.computeIfAbsent(profileName, k -> new java.util.concurrent.Semaphore(1, true));
+    }
+
+    /**
+     * Wraps a lifecycle task so it runs under its profile's gate (per-profile
+     * serialization, fair/FIFO order, parallel across profiles). The permit is
+     * always released, even if the task throws.
+     */
+    private Runnable serialize(String profileName, Runnable task) {
+        return () -> {
+            java.util.concurrent.Semaphore gate = profileGate(profileName);
+            gate.acquireUninterruptibly();
+            try {
+                task.run();
+            } finally {
+                gate.release();
+            }
+        };
+    }
+
+    /**
+     * Profiles whose start has been requested (reserved + queued) but whose start
+     * task has not yet finished — the "start pending" set. A profile is added when
+     * its start is queued and removed when the queued task completes (success,
+     * failure, or rejection). The GUI treats a pending profile exactly like a
+     * STARTING one: spinner icon, Start button disabled — immediately, without
+     * waiting for the (possibly queue-blocked) state push. Swing-free by design:
+     * listeners only schedule an EDT refresh.
+     */
+    private final Set<String> startPending = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Listeners notified (synchronously) whenever the start-pending set changes —
+     * a start is queued, or its task finishes / is rejected. Swing-free by design:
+     * the GUI subscriber only schedules an EDT refresh.
+     */
+    private final List<Runnable> pendingListeners = new CopyOnWriteArrayList<>();
+
+    /**
+     * True if a start has been requested for the given profile and its start task
+     * has not yet completed (queued or running). The GUI shows this as the
+     * STARTING transition state (spinner + disabled Start) immediately on the
+     * click, regardless of where the task sits in the lifecycle queue.
+     *
+     * @param profileName the profile name (null-safe: returns false)
+     * @return true while a start for the profile is pending
+     */
+    public boolean isStartPending(String profileName) {
+        return profileName != null && startPending.contains(profileName);
+    }
+
+    /**
+     * Registers a callback invoked whenever the start-pending set changes (a start
+     * is queued, or its task finishes / is rejected). Runs synchronously on the
+     * thread that caused the change and must be lightweight — the GUI subscriber
+     * only schedules an EDT refresh.
+     *
+     * @param listener the callback (null is ignored)
+     */
+    public void addPendingListener(Runnable listener) {
+        if (listener != null) {
+            pendingListeners.add(listener);
+        }
+    }
+
+    /**
+     * Removes a previously registered start-pending change callback.
+     *
+     * @param listener the callback to remove (null is a no-op)
+     */
+    public void removePendingListener(Runnable listener) {
+        pendingListeners.remove(listener);
+    }
+
+    private void notifyPendingChanged() {
+        for (Runnable listener : pendingListeners) {
+            try {
+                listener.run();
+            } catch (Exception e) {
+                LOGGER.warn("Start-pending change listener failed: {}", e.getMessage());
+            }
+        }
+    }
+
+    /** Marks the profile as start-pending (idempotent) and notifies listeners if it changed. */
+    private void markStartPending(String profileName) {
+        if (startPending.add(profileName)) {
+            notifyPendingChanged();
+        }
+    }
+
+    /** Clears the profile's start-pending mark (idempotent) and notifies listeners if it changed. */
+    private void unmarkStartPending(String profileName) {
+        if (startPending.remove(profileName)) {
+            notifyPendingChanged();
+        }
+    }
 
     // =====================================================================
     // Module fields
@@ -326,6 +450,10 @@ public class NodeModule implements Module {
             throw new IllegalArgumentException("confRoot must not be null");
         }
 
+        // ── Registry section: narrow lock around instance lookup/creation only ──
+        // The disk I/O below runs OUTSIDE the lock; the conflict check + reservation
+        // re-enter the lock as ONE atomic check-then-act section, keeping the
+        // first-come-first-served reservation order deterministic.
         Signum target;
         synchronized (this) {
             Signum existing = get(profileName);
@@ -339,31 +467,37 @@ public class NodeModule implements Module {
                 addNode(fresh);
                 target = fresh;
             }
+        }
 
-            if (target.isRunning()) {
-                LOGGER.debug("startNode('{}'): already RUNNING — no-op", profileName);
-                return target;
-            }
+        if (target.isRunning()) {
+            LOGGER.debug("startNode('{}'): already RUNNING — no-op", profileName);
+            return target;
+        }
 
-            // ── Apply the latest on-disk configuration before the conflict check ──
-            // An existing (stopped / created / failed) instance may still hold the profile
-            // snapshot it was created with. Re-reading it from disk here lets an in-session
-            // config edit (e.g. a changed API/P2P/WS port or database) be honored both by
-            // the pre-check below and by the node's own PropertyService — so "fix the port
-            // → save → Start/Restart" finally takes effect without an app restart. A freshly
-            // created instance is already built from disk, and a transitional (STARTING /
-            // STOPPING) instance is skipped, so this is a safe no-op in both cases.
-            if (target.getState() != Signum.State.STARTING && target.getState() != Signum.State.STOPPING) {
-                target.refreshConfiguration();
-            }
+        // ── Apply the latest on-disk configuration before the conflict check ──
+        // An existing (stopped / created / failed) instance may still hold the profile
+        // snapshot it was created with. Re-reading it from disk here lets an in-session
+        // config edit (e.g. a changed API/P2P/WS port or database) be honored both by
+        // the pre-check below and by the node's own PropertyService — so "fix the port
+        // → save → Start/Restart" finally takes effect without an app restart. A freshly
+        // created instance is already built from disk, and a transitional (STARTING /
+        // STOPPING) instance is skipped, so this is a safe no-op in both cases.
+        // NOTE: kept synchronous on the caller thread — GUI code (NodeConsolePanel)
+        // relies on getPropertyService() being populated immediately after startNode()
+        // returns, before the queued start task has a chance to run.
+        if (target.getState() != Signum.State.STARTING && target.getState() != Signum.State.STOPPING) {
+            target.refreshConfiguration();
+        }
 
-            // ── Conflict pre-check (deterministic inside the synchronized block) ──
-            // If another live profile already claims one of this profile's resources
-            // (API / P2P / WebSocket port, or the same database), reject the start now
-            // rather than letting it fail later at OS port-bind time. This enforces the
-            // autostart order: the profile queued first wins; a conflicting later one is
-            // simply not started (and stays startable once the conflict is resolved).
-            String conflict = findResourceConflict(target);
+        // ── Conflict pre-check + reservation (ONE atomic section inside the lock) ──
+        // If another live profile already claims one of this profile's resources
+        // (API / P2P / WebSocket port, or the same database), reject the start now
+        // rather than letting it fail later at OS port-bind time. This enforces the
+        // autostart order: the profile queued first wins; a conflicting later one is
+        // simply not started (and stays startable once the conflict is resolved).
+        String conflict;
+        synchronized (this) {
+            conflict = findResourceConflict(target);
             if (conflict != null) {
                 application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
                         () -> LOGGER.warn("startNode('{}'): REJECTED — {}", profileName, conflict));
@@ -375,13 +509,19 @@ public class NodeModule implements Module {
             reserveResources(target);
         }
 
+        // ── Start pending: the GUI shows the STARTING transition (spinner + disabled
+        //    Start button) IMMEDIATELY, even while the task waits in the lifecycle
+        //    queue — the mark is cleared when the task completes (see finally). ──
+        markStartPending(profileName);
+
         application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
                 () -> LOGGER.info("startNode('{}'): queuing async start on lifecycle thread", profileName));
-        lifecycleExecutor.execute(() -> {
+        lifecycleExecutor.execute(serialize(profileName, () -> {
             try {
                 // A queued duplicate (double click, restart cycle) may find the node
                 // already starting by the time this task executes.
-                if (target.isRunning() || target.getState() == Signum.State.STARTING) {
+                if (target.isRunning() || target.getState() == Signum.State.STARTING
+                        || target.getState() == Signum.State.STOPPING) {
                     LOGGER.debug("startNode('{}'): already starting/running — skipping", profileName);
                     return;
                 }
@@ -402,10 +542,16 @@ public class NodeModule implements Module {
                 // process) leaves the node in ERROR, i.e. NOT running — so it must not
                 // keep holding its API/P2P/WS port or database reservation. Releasing it
                 // keeps the "only running nodes conflict" invariant intact and lets
-                // another profile (or a retry) take the resources.
+                // another profile (or a retry) take the resources. releaseResources() is
+                // owner-scoped (removeOwnerIf), so a queued duplicate can never free a
+                // DIFFERENT profile's reservation.
                 releaseResources(target);
+            } finally {
+                // The queued start has completed (success / failure / skip): clear the
+                // pending mark so the GUI restores the button state from the real state.
+                unmarkStartPending(profileName);
             }
-        });
+        }));
         return target;
     }
 
@@ -432,7 +578,7 @@ public class NodeModule implements Module {
         }
         application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
                 () -> LOGGER.info("stopNode('{}'): queuing async stop on lifecycle thread", profileName));
-        lifecycleExecutor.execute(() -> {
+        lifecycleExecutor.execute(serialize(profileName, () -> {
             try {
                 signum.stop();
             } catch (Exception e) {
@@ -443,7 +589,7 @@ public class NodeModule implements Module {
                 // later restart of this profile re-reserves them cleanly.
                 releaseResources(signum);
             }
-        });
+        }));
         return signum;
     }
 
@@ -476,47 +622,58 @@ public class NodeModule implements Module {
             target = existing;
         }
 
-        // Restart = stop then start as ONE ordered unit on the single-thread lifecycle
-        // executor, so the start runs strictly after the stop (and its resource release).
+        // Restart = stop then start as ONE ordered unit under the profile gate
+        // (serialized in submission order, parallel to other profiles), so the
+        // start runs strictly after the stop (and its resource release).
         // The previous implementation queued an async stop and then called startNode(),
         // whose "already RUNNING" no-op saw the still-running node and bailed before
         // queueing a start — leaving the node STOPPED after the queued stop ran.
-        lifecycleExecutor.execute(() -> {
+        // Pending mark: the GUI shows the STARTING transition (spinner + disabled
+        // buttons) for the whole stop→start window; cleared in finally below.
+        markStartPending(profileName);
+        lifecycleExecutor.execute(serialize(profileName, () -> {
             try {
-                target.stop();
-            } catch (Exception e) {
-                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                        () -> LOGGER.error("restartNode('{}'): stop failed", profileName, e));
-            } finally {
-                releaseResources(target);
-            }
-            // Apply the latest on-disk configuration (an in-session config edit is picked up).
-            target.refreshConfiguration();
-            String conflict;
-            synchronized (this) {
-                conflict = findResourceConflict(target);
-                if (conflict == null) {
-                    reserveResources(target);
+                try {
+                    target.stop();
+                } catch (Exception e) {
+                    application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                            () -> LOGGER.error("restartNode('{}'): stop failed", profileName, e));
+                } finally {
+                    releaseResources(target);
                 }
+                // Apply the latest on-disk configuration (an in-session config edit is picked up).
+                target.refreshConfiguration();
+                String conflict;
+                synchronized (this) {
+                    conflict = findResourceConflict(target);
+                    if (conflict == null) {
+                        reserveResources(target);
+                    }
+                }
+                if (conflict != null) {
+                    application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                            () -> LOGGER.warn("restartNode('{}'): REJECTED — {}", profileName, conflict));
+                    target.reportStartRejected(conflict);
+                    return;
+                }
+                ProfileLogger profileLogger = target.getProfileLogger();
+                if (profileLogger != null) {
+                    profileLogger.info(String.format("→ '%s' node restarting — please wait…", profileName));
+                }
+                try {
+                    target.start();
+                } catch (Exception e) {
+                    application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                            () -> LOGGER.error("restartNode('{}'): start failed", profileName, e));
+                    releaseResources(target);
+                }
+            } finally {
+                // The restart (stop→start) has completed in all paths (success,
+                // failure, or rejection): clear the pending mark so the GUI restores
+                // the button state from the real state.
+                unmarkStartPending(profileName);
             }
-            if (conflict != null) {
-                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                        () -> LOGGER.warn("restartNode('{}'): REJECTED — {}", profileName, conflict));
-                target.reportStartRejected(conflict);
-                return;
-            }
-            ProfileLogger profileLogger = target.getProfileLogger();
-            if (profileLogger != null) {
-                profileLogger.info(String.format("→ '%s' node restarting — please wait…", profileName));
-            }
-            try {
-                target.start();
-            } catch (Exception e) {
-                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                        () -> LOGGER.error("restartNode('{}'): start failed", profileName, e));
-                releaseResources(target);
-            }
-        });
+        }));
         return target;
     }
 

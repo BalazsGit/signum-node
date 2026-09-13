@@ -1,17 +1,15 @@
 package application.module.node.gui;
 
-import javax.swing.BorderFactory;
-import javax.swing.ImageIcon;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.JSpinner;
-import java.awt.FlowLayout;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
 
 /**
  * Lightweight placeholder panel for lazy-loaded node profile tabs.
- * Displays a loading spinner and profile name until the actual heavy
+ * Shows a single centered "Loading ..." hint until the actual heavy
  * NodeProfilePanel is loaded on demand (when the tab becomes visible).
  */
 public class NodePlaceholderPanel extends JPanel {
@@ -30,22 +28,11 @@ public class NodePlaceholderPanel extends JPanel {
         this.profileName = profileName;
         this.onLoadCallback = onLoadCallback;
 
-        setLayout(new FlowLayout(FlowLayout.CENTER, 20, 20));
-        setBorder(BorderFactory.createEmptyBorder(40, 40, 40, 40));
+        setLayout(new GridBagLayout());
 
-        // Loading spinner
-        JSpinner spinner = new JSpinner();
-
-        // Profile name label
-        JLabel titleLabel = new JLabel("Node Profile: " + profileName);
-        titleLabel.setFont(getFont().deriveFont(java.awt.Font.BOLD, getFont().getSize() + 2));
-
-        // Description label
-        JLabel descLabel = new JLabel("Loading profile panel on demand...");
-
-        add(spinner);
-        add(titleLabel);
-        add(descLabel);
+        // A single, centered "Loading ..." hint - nothing else.
+        JLabel loadingLabel = new JLabel("Loading ...");
+        add(loadingLabel, new GridBagConstraints());
 
         // Trigger lazy loading when this component becomes visible (tab selected)
         addComponentListener(new ComponentAdapter() {

@@ -648,6 +648,34 @@ public final class Signum {
     }
 
     /**
+     * Clears any active user/system pause so the node returns to a "syncing" baseline
+     * ({@link OperatingState#SYNC_IDLE}).
+     * <p>
+     * Pause is only meaningful for a <b>RUNNING</b> node's blockchain sync. When the
+     * lifecycle leaves the running state (stop / start / error) the pause flag is stale:
+     * a (re)started node must resume syncing and the GUI sync button must return to the
+     * PAUSE (not RESUME) icon. Without this reset, pausing a node and then stopping +
+     * starting it would leave the node appearing PAUSED and {@code toggleSync()}-style
+     * resume logic would misfire (v5 fix: stale pause persisted across a stop→start
+     * cycle).
+     * </p>
+     * <p>
+     * Listeners are notified only when the state actually changed (i.e. the node was
+     * paused), so an already-unpaused node produces no redundant push.
+     * </p>
+     */
+    private void clearPauseState() {
+        OperatingState old = this.operatingState;
+        if (old == OperatingState.PAUSED_USER || old == OperatingState.PAUSED_SYSTEM) {
+            this.operatingState = OperatingState.SYNC_IDLE;
+            this.pauseReason = null;
+            for (StateListener l : stateListeners) {
+                try { l.onOperatingStateChanged(this, old, this.operatingState); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    /**
      * Returns the reason the node is currently paused, or {@code null} when not paused.
      */
     public String getPauseReason() {
@@ -680,6 +708,14 @@ public final class Signum {
     private void setState(State newState) {
         State oldState = this.state;
         this.state = newState;
+        // Pause is an attribute of a RUNNING node's blockchain sync. Whenever the
+        // lifecycle leaves the running state (stop / start / error) the pause flag is
+        // stale: clear it so a (re)started node resumes syncing and the GUI sync button
+        // returns to the PAUSE (not RESUME) icon. (v5: fix stale pause that persisted
+        // across a stop→start cycle, leaving a wrong "Resume" button on a running node.)
+        if (newState != State.RUNNING) {
+            clearPauseState();
+        }
         for (StateListener l : stateListeners) {
             try { l.onStateChanged(this, oldState, newState); }
             catch (Exception ignored) {}

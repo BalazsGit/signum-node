@@ -69,6 +69,14 @@ public class NodeInfoBar extends JPanel {
     private final Map<String, JLabel> labelMap = new HashMap<>();
 
     /**
+     * Monotonic token for the background conflict computation: only the LATEST
+     * computation's result is rendered, so a slow older read cannot overwrite a
+     * newer one (both run on the single GUI-prep thread, the token guards the
+     * EDT render step).
+     */
+    private final java.util.concurrent.atomic.AtomicLong chipToken = new java.util.concurrent.atomic.AtomicLong();
+
+    /**
      * Registry of all live info bars, used by {@link #refreshAllConflicts()}.
      * <p>
      * A profile's cross-profile resource conflicts depend on which <b>other</b> profiles
@@ -200,9 +208,36 @@ public class NodeInfoBar extends JPanel {
      * Renders the data chips (profile, network, ports, database) using canonical
      * property keys, overlaying a red warning + tooltip on any chip that conflicts
      * with another profile.
+     * <p>
+     * v5 (EDT cleanup): the cross-profile conflict computation (profile discovery,
+     * properties-file disk reads in {@link #conflictByField()}) runs on the shared
+     * GUI-prep background thread; only the label rendering happens on the EDT.
+     * A token ensures a slow older computation cannot overwrite a newer one.
+     * </p>
      */
     private void refreshChips() {
-        Map<ProfileConflictDetector.ConflictField, ProfileConflictDetector.Conflict> conflicts = conflictByField();
+        final long token = chipToken.incrementAndGet();
+        application.utils.gui.GuiExecutors.prepare().execute(() -> {
+            Map<ProfileConflictDetector.ConflictField, ProfileConflictDetector.Conflict> conflicts;
+            try {
+                conflicts = conflictByField();
+            } catch (Exception e) {
+                LOGGER.debug("Conflict computation failed for profile: {}", profile.getName(), e);
+                conflicts = new HashMap<>();
+            }
+            final Map<ProfileConflictDetector.ConflictField, ProfileConflictDetector.Conflict> finalConflicts = conflicts;
+            SwingUtilities.invokeLater(() -> {
+                if (token == chipToken.get()) {
+                    renderChips(finalConflicts);
+                }
+            });
+        });
+    }
+
+    /**
+     * EDT-only rendering of the data chips from a pre-computed conflict map.
+     */
+    private void renderChips(Map<ProfileConflictDetector.ConflictField, ProfileConflictDetector.Conflict> conflicts) {
 
         // Profile name
         updateLabel(profileNameLabel, "Profile", profile.getName(),
@@ -256,14 +291,19 @@ public class NodeInfoBar extends JPanel {
             Signum signum = NodeModule.getInstance().get(profile.getName());
 
             Signum.State state = Signum.State.CREATED;
-            String stateText = state.name();
-            Icon stateIcon = null;
-
             if (signum != null) {
                 state = signum.getState();
-                stateText = state.name();
-                stateIcon = stateIconFor(state);
             }
+
+            // v5 (multi-node): a queued/running start (start pending) renders EXACTLY
+            // like STARTING — the STARTING state push may not have arrived yet (with
+            // the parallel lifecycle pool the task may still be sitting in the queue).
+            if (NodeModule.getInstance().isStartPending(profile.getName())) {
+                state = Signum.State.STARTING;
+            }
+
+            String stateText = state.name();
+            Icon stateIcon = stateIconFor(state);
 
             updateLabel(stateLabel, "State", formatStateText(stateText), stateIcon, null);
 

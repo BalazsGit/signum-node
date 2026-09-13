@@ -153,6 +153,20 @@ public class NodePanel extends JPanel  {
         // a profile whose own tab is not open (headless autostart) — without any tab switch.
         NodeModule.getInstance().addClaimingSetListener(NodeInfoBar::refreshAllConflicts);
 
+        // v5 (multi-node): a pending start (queued, state push not yet arrived) renders
+        // the profile's tab icon like STARTING — so the pending state is visible on the
+        // tab strip immediately, consistent with the toolbar/info bar of the panel.
+        NodeModule.getInstance().addPendingListener(() -> SwingUtilities.invokeLater(() -> {
+            for (String name : new java.util.HashSet<>(loadedProfilePanels.keySet())) {
+                Signum signum = NodeModule.getInstance().get(name);
+                Signum.State state = (signum != null) ? signum.getState() : Signum.State.STOPPED;
+                if (NodeModule.getInstance().isStartPending(name)) {
+                    state = Signum.State.STARTING;
+                }
+                updateTabIcon(name, state);
+            }
+        }));
+
         // (v4: per-profile push notifications are owned by NodeProfilePanel)
         
 
@@ -326,31 +340,53 @@ public class NodePanel extends JPanel  {
 
         LOGGER.info("Lazy-loading profile panel for: {}", profileName);
 
-        // Load the profile and create the actual panel
-        NodeProfile profile = NodeProfileRepository.loadByName(profileName);
-        if (profile == null) {
-            profile = new NodeProfile(profileName);
-        }
+        // v5 (EDT cleanup): the profile load (disk I/O) AND the heavy NodeProfilePanel
+        // construction (console panel, toolbar, info bar) run on a BACKGROUND thread;
+        // only the actual tab replacement happens on the EDT. The lightweight
+        // placeholder keeps showing until the real panel is ready, so the user
+        // perceives a fast tab switch instead of a UI freeze. (The GUI-prep executor
+        // is a single daemon thread preserving submission order; all Swing access is
+        // marshalled to the EDT below.)
+        application.utils.gui.GuiExecutors.prepare().execute(() -> {
+            // Load the profile and create the actual panel (background thread)
+            NodeProfile profile = NodeProfileRepository.loadByName(profileName);
+            if (profile == null) {
+                profile = new NodeProfile(profileName);
+            }
 
-        // Wire the per-instance Signum facade from the NodeFactory registry.
-        // If the node hasn't been started yet, signum will be null - that's fine,
-        // the panel handles null signum gracefully (profile not yet started).
-        Signum signum = NodeModule.getInstance().get(profileName);
+            // Wire the per-instance Signum facade from the NodeFactory registry.
+            // If the node hasn't been started yet, signum will be null - that's fine,
+            // the panel handles null signum gracefully (profile not yet started).
+            Signum signum = NodeModule.getInstance().get(profileName);
 
-        NodeProfilePanel actualPanel = new NodeProfilePanel(null, profile, signum);
-        loadedProfilePanels.put(profileName, actualPanel);
+            NodeProfilePanel actualPanel = new NodeProfilePanel(null, profile, signum);
 
-        // Replace placeholder with actual panel
-        Component oldComponent = profileTabbedPane.getComponentAt(selectedIndex);
-        if (oldComponent instanceof NodePlaceholderPanel) {
-            ((NodePlaceholderPanel) oldComponent).markAsLoaded();
-        }
+            // Swap in the real panel on the EDT. Re-check the placeholder state and the
+            // tab index: the user may have navigated away or the tab may have been
+            // removed/renamed while the panel was being built in the background.
+            SwingUtilities.invokeLater(() -> {
+                if (Boolean.TRUE.equals(placeholderReplaced.get(profileName))) {
+                    return; // Already loaded in the meantime
+                }
+                Integer index = profileNameToTabIndex.get(profileName);
+                if (index == null || index < 0 || index >= profileTabbedPane.getTabCount()) {
+                    return; // Tab was removed in the meantime
+                }
+                loadedProfilePanels.put(profileName, actualPanel);
 
-        profileTabbedPane.setComponentAt(selectedIndex, actualPanel);
-        placeholderReplaced.put(profileName, true);
+                // Replace placeholder with actual panel
+                Component oldComponent = profileTabbedPane.getComponentAt(index);
+                if (oldComponent instanceof NodePlaceholderPanel) {
+                    ((NodePlaceholderPanel) oldComponent).markAsLoaded();
+                }
 
-        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                () -> LOGGER.info("Profile panel loaded for: {}", profileName));
+                profileTabbedPane.setComponentAt(index, actualPanel);
+                placeholderReplaced.put(profileName, true);
+
+                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
+                        () -> LOGGER.info("Profile panel loaded for: {}", profileName));
+            });
+        });
     }
 
     // ====================================================================

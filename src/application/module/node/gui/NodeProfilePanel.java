@@ -68,6 +68,15 @@ public class NodeProfilePanel extends JPanel {
      * all data is always re-read from the Signum (single source of truth).
      */
     private volatile Signum.StateListener stateListener;
+
+    /**
+     * v5 (multi-node): NodeModule start-pending broadcast subscriber. Notified when
+     * this profile's start is queued (or its task completes) — the panel then renders
+     * the toolbar (spinner + disabled buttons) and info bar exactly like the STARTING
+     * transition, immediately, without waiting for the state push. Stored in a field
+     * (not a method reference at the call site) so add/remove use the SAME instance.
+     */
+    private final Runnable pendingListener = this::refreshPendingState;
     private final JTabbedPane innerTabbedPane;
     private final NodeConsolePanel consolePanel;
     private final NodeConfigurationPanel configurationPanel;
@@ -199,6 +208,12 @@ public class NodeProfilePanel extends JPanel {
             // adopted later via the console panel's onSignumStarted callback.
             adoptSignum(this.signum);
 
+            // v5 (multi-node): react IMMEDIATELY when this profile's start becomes
+            // pending (queued) or the pending start completes — refresh the toolbar
+            // (spinner + disabled Start) and info bar from the pending set, without
+            // waiting for the (possibly still queued) STARTING state push.
+            NodeModule.getInstance().addPendingListener(pendingListener);
+
             AppearanceModule.registerAppearanceListener(() -> {
                 GuiFontManager.applyDefaultFont(innerTabbedPane);
             });
@@ -287,6 +302,31 @@ public class NodeProfilePanel extends JPanel {
     }
 
     /**
+     * v5 (multi-node): pushed by {@code NodeModule} whenever THIS profile's
+     * start-pending set membership changes — a start/restart was just queued
+     * (the task may still be sitting in the lifecycle queue) or it completed
+     * (success / failure / rejection).
+     * <p>
+     * Renders the toolbar (spinner + disabled buttons) and the info bar exactly
+     * like the STARTING transition, so the user gets IMMEDIATE feedback on the
+     * click — no waiting for the state push (which only arrives when the queued
+     * task actually begins on a pool thread). Both components read the pending
+     * set themselves; this method only triggers their refresh.
+     * </p>
+     */
+    public void refreshPendingState() {
+        SwingUtilities.invokeLater(() -> {
+            if (toolbar != null) {
+                Signum.State state = (signum != null) ? signum.getState() : Signum.State.STOPPED;
+                toolbar.updateButtonStates(state, signum != null);
+            }
+            if (infoBar != null) {
+                infoBar.refreshState();
+            }
+        });
+    }
+
+    /**
      * Unbinds this panel from the Signum instance it currently holds: the single
      * {@link Signum.StateListener} is removed so the (possibly still running) Signum
      * no longer pushes state to a dead panel. The Console tab cleans itself up via
@@ -297,6 +337,10 @@ public class NodeProfilePanel extends JPanel {
      * </p>
      */
     public void dispose() {
+        // Unsubscribe from the start-pending broadcast so a disposed panel is no
+        // longer refreshed (avoids a listener leak in the NodeModule).
+        NodeModule.getInstance().removePendingListener(pendingListener);
+
         Signum current = this.signum;
         if (current != null && stateListener != null) {
             current.removeStateListener(stateListener);

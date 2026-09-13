@@ -2,6 +2,7 @@ package application.module.node.db.sql.dialects;
 
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
+import application.module.node.util.DurationFormatter;
 import com.zaxxer.hikari.HikariConfig;
 import org.jooq.SQLDialect;
 import org.slf4j.Logger;
@@ -108,8 +109,15 @@ public class DatabaseInstanceSqlite extends DatabaseInstanceBaseImpl {
         if (propertyService.getBoolean(Props.DB_OPTIMIZE)) {
             logger.info("SQLite optimization started...");
             executeSQL("PRAGMA optimize");
-            logger.info("SQLite VACUUM started, this can take a while");
+
+            logger.info("SQLite VACUUM started (database defragmentation). "
+                    + "This can take SEVERAL MINUTES on a large database, as it rewrites the entire database file. "
+                    + "To skip it, set DB.Optimize=false.");
+            long startedAtNanos = System.nanoTime();
             executeSQL("VACUUM");
+            long elapsedMs = (System.nanoTime() - startedAtNanos) / 1_000_000L;
+            logger.info("SQLite VACUUM finished in {} (database defragmentation complete).",
+                    DurationFormatter.format(elapsedMs));
         }
 
     }

@@ -3107,6 +3107,13 @@ public class NodeConsolePanel extends JPanel {
     }
 
     public void startSignumWithGUI() {
+        // v5 (multi-node): a start is already queued/running for this profile
+        // (start pending) — skip; the GUI already shows the STARTING transition
+        // (spinner + disabled Start) via the NodeModule pending set.
+        if (NodeModule.getInstance().isStartPending(this.profileName)) {
+            LOGGER.info("Start already pending for profile '{}' — skipping startSignumWithGUI", profileName);
+            return;
+        }
         Signum ctx = null;
         try {
             // v4: single lifecycle entry point — NodeModule creates (if missing) and

@@ -73,6 +73,32 @@ class NodeInfoBarConflictBroadcastTest {
         }
     }
 
+    /**
+     * v5 (EDT cleanup): the cross-profile conflict re-render is now asynchronous —
+     * the conflict computation (a {@code NodeProfileRepository.loadAll()} disk read)
+     * runs on a background EDT-prep thread and the label render is dispatched back to
+     * the EDT. This helper waits (bounded) until the given chips have been
+     * re-rendered, i.e. the sentinel is gone, so the assertions below observe the
+     * completed async render rather than a mid-flight state.
+     */
+    private static void awaitRender(JLabel... chips) throws Exception {
+        long deadline = System.currentTimeMillis() + 5000;
+        while (System.currentTimeMillis() < deadline) {
+            final boolean[] stillSentinel = {false};
+            SwingUtilities.invokeAndWait(() -> {
+                for (JLabel chip : chips) {
+                    if (SENTINEL.equals(chip.getText())) {
+                        stillSentinel[0] = true;
+                    }
+                }
+            });
+            if (!stillSentinel[0]) {
+                return; // all chips re-rendered
+            }
+            Thread.sleep(25);
+        }
+    }
+
     @Test
     void ownershipChange_refreshesEveryLiveBar() throws Exception {
         // Arrange: two live sibling bars with sentinels on their chips.
@@ -90,7 +116,7 @@ class NodeInfoBarConflictBroadcastTest {
         NodeModule.getInstance().addClaimingSetListener(handler);
         try {
             NodeModule.getInstance().startNode("own-owner-" + System.nanoTime());
-            SwingUtilities.invokeAndWait(() -> { }); // flush the deferred EDT refresh
+            awaitRender(chipA, chipB); // wait for the async conflict re-render to complete
         } finally {
             NodeModule.getInstance().removeClaimingSetListener(handler);
         }
@@ -113,7 +139,7 @@ class NodeInfoBarConflictBroadcastTest {
 
         // Act: refresh every live bar directly (the handler the GUI subscribes).
         NodeInfoBar.refreshAllConflicts();
-        SwingUtilities.invokeAndWait(() -> { });
+        awaitRender(chipA, chipB); // wait for the async conflict re-render to complete
 
         // Assert: both were re-rendered.
         assertNotEquals(SENTINEL, chipA.getText(), "refreshAllConflicts must re-render the first live bar");

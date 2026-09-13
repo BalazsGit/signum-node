@@ -203,7 +203,7 @@ public class NodeToolbar extends JPanel {
 
         // --- Start/Stop toggle (PLAY when stopped, POWER_OFF when running) ---
         startStopButton = new JButton();
-        startStopButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PLAY, iconSize, GuiColors.getPeerActive()));
+        setIconButton(startStopButton, FontAwesome.PLAY, GuiColors.getPeerActive(), iconSize);
         startStopButton.setToolTipText("Start the node");
         startStopButton.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
         startStopButton.setOpaque(false);
@@ -246,7 +246,7 @@ public class NodeToolbar extends JPanel {
 
         // --- Hamburger menu button (right side) ---
         menuButton = new JButton();
-        menuButton.setIcon(IconFontSwing.buildIcon(FontAwesome.BARS, iconSize, iconColor));
+        setIconButton(menuButton, FontAwesome.BARS, iconColor, iconSize);
         menuButton.setToolTipText("Menu");
         menuButton.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
         menuButton.setOpaque(false);
@@ -259,12 +259,56 @@ public class NodeToolbar extends JPanel {
     private JButton createIconButton(FontAwesome iconCode, String tooltip) {
         JButton button = new JButton();
         float iconSize = GuiConstants.getToolBarIconSize();
-        button.setIcon(IconFontSwing.buildIcon(iconCode, iconSize, GuiColors.getButtonIcon()));
+        setIconButton(button, iconCode, GuiColors.getButtonIcon(), iconSize);
         button.setToolTipText(tooltip);
         button.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
         button.setOpaque(false);
         button.setContentAreaFilled(false);
         return button;
+    }
+
+    /**
+     * Sets both the normal and the hover (rollover) icons of an icon button.
+     * <p>
+     * The rollover icon highlights the button on hover — the app runs flat
+     * ({@code contentAreaFilled = false}), so without it a hovered/pressed button
+     * would give no visual feedback at all. The hover color follows the LAF's
+     * default button foreground (a visible accent in both light and dark themes).
+     * </p>
+     */
+    private static void setIconButton(JButton button, FontAwesome iconCode, Color color, float iconSize) {
+        button.setIcon(IconFontSwing.buildIcon(iconCode, iconSize, color));
+        Color hover = hoverIconColor(color);
+        if (hover != null) {
+            button.setRolloverIcon(IconFontSwing.buildIcon(iconCode, iconSize, hover));
+        }
+    }
+
+    /**
+     * Resolves the hover (rollover) icon color: the LAF's default button foreground
+     * (visible accent in light and dark themes); if that equals the base color, a
+     * brightened fallback variant; null when no hover highlight is possible.
+     */
+    private static Color hoverIconColor(Color base) {
+        try {
+            // The LAF (FlatLaf, or whatever is installed) exposes the default button
+            // foreground — a visible accent in both light and dark themes.
+            Color hover = UIManager.getColor("Button.default.foreground");
+            if (hover != null && !hover.equals(base)) {
+                return hover;
+            }
+        } catch (Throwable ignored) {
+            // UIManager unavailable — fall through to the computed fallback below.
+        }
+        if (base == null) {
+            return null;
+        }
+        // Subtly brighten the base icon color (clamped) as a universal fallback.
+        int r = Math.min(255, base.getRed() + 70);
+        int g = Math.min(255, base.getGreen() + 70);
+        int b = Math.min(255, base.getBlue() + 70);
+        Color brighter = new Color(r, g, b);
+        return brighter.equals(base) ? null : brighter;
     }
 
     /**
@@ -574,6 +618,14 @@ public class NodeToolbar extends JPanel {
      * If node is running/paused, shows confirmation and stops; otherwise starts.
      */
     private void handleStartStopToggle() {
+        // A start is already queued/running for this profile (start pending): the
+        // button is disabled by updateButtonStates() anyway — this guard covers any
+        // path that reaches here before the EDT processed the disable (fast
+        // double-click), so a duplicate start can never be queued.
+        if (NodeModule.getInstance().isStartPending(profile.getName())) {
+            LOGGER.info("Start already pending for profile: {} — ignoring toggle click", profile.getName());
+            return;
+        }
         Signum signum = NodeModule.getInstance().get(profile.getName());
         Signum.State state = (signum != null) ? signum.getState() : Signum.State.CREATED;
 
@@ -628,8 +680,14 @@ public class NodeToolbar extends JPanel {
      */
     public void updateButtonStates(Signum.State state, boolean nodeStarted) {
         boolean isRunning = (state == Signum.State.RUNNING || false);
+        // v5: a queued/running start (start pending) renders EXACTLY like the
+        // STARTING transition — spinner + disabled buttons — immediately on the
+        // click, even before the STARTING state push arrives (with the parallel
+        // lifecycle pool the task may still be sitting in the queue).
+        boolean startPending = NodeModule.getInstance().isStartPending(profile.getName());
         boolean isTransitioning = (state == Signum.State.STARTING
                 || state == Signum.State.STOPPING
+                || startPending
                 );
 
         // Web UI buttons (Phoenix wallet, Classic wallet, API docs): they open pages
@@ -650,10 +708,20 @@ public class NodeToolbar extends JPanel {
 
         float iconSize = GuiConstants.getToolBarIconSize();
 
+        // Defense-in-depth: pause is only meaningful for a RUNNING node's blockchain
+        // sync. Whenever the lifecycle is not RUNNING, the sync button is disabled and
+        // its icon must show the neutral PAUSE state (not a stale RESUME) so a
+        // (re)started node always presents the "Pause" action first. (v5: fix the
+        // "Resume" button wrongly persisting across a stop→start cycle.)
+        if (!isRunning) {
+            isSyncStopped = false;
+            setIconButton(syncButton, FontAwesome.PAUSE, GuiColors.getButtonIcon(), iconSize);
+        }
+
         if (isRunning) {
             // Show POWER_OFF icon - node is running, click to stop
             stopSpinner();
-            startStopButton.setIcon(IconFontSwing.buildIcon(FontAwesome.POWER_OFF, iconSize, GuiColors.getContrastRed()));
+            setIconButton(startStopButton, FontAwesome.POWER_OFF, GuiColors.getContrastRed(), iconSize);
             startStopButton.setToolTipText("Stop the node (shutdown)");
             startStopButton.setEnabled(true);
             restartButton.setEnabled(true);
@@ -668,12 +736,12 @@ public class NodeToolbar extends JPanel {
             updateDbCheckIconColor();
 
             // Update sync icon based on pause state
-            syncButton.setIcon(IconFontSwing.buildIcon(
-                    isSyncStopped ? FontAwesome.PLAY : FontAwesome.PAUSE, iconSize, GuiColors.getButtonIcon()));
+            setIconButton(syncButton,
+                    isSyncStopped ? FontAwesome.PLAY : FontAwesome.PAUSE, GuiColors.getButtonIcon(), iconSize);
         } else if (state == Signum.State.ERROR) {
             // Show PLAY icon - can restart after error
             stopSpinner();
-            startStopButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PLAY, iconSize, GuiColors.getPeerActive()));
+            setIconButton(startStopButton, FontAwesome.PLAY, GuiColors.getPeerActive(), iconSize);
             startStopButton.setToolTipText("Start the node");
             startStopButton.setEnabled(true);
             restartButton.setEnabled(true);
@@ -689,7 +757,8 @@ public class NodeToolbar extends JPanel {
             String tooltip = switch (state) {
                 case STARTING -> "Starting...";
                 case STOPPING -> "Stopping...";
-                default -> state.name().toLowerCase();
+                // A pending start (queued, not yet STARTING) shows the same state.
+                default -> startPending ? "Starting..." : state.name().toLowerCase();
             };
             startStopButton.setToolTipText(tooltip);
             startStopButton.setEnabled(false);
@@ -712,7 +781,7 @@ public class NodeToolbar extends JPanel {
                     && state != Signum.State.CREATED
                     && state != Signum.State.INITIALIZED;
             stopSpinner();
-            startStopButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PLAY, iconSize, GuiColors.getPeerActive()));
+            setIconButton(startStopButton, FontAwesome.PLAY, GuiColors.getPeerActive(), iconSize);
             startStopButton.setToolTipText("Start the node");
             startStopButton.setEnabled(true);
             restartButton.setEnabled(canRestart);
@@ -885,7 +954,7 @@ public class NodeToolbar extends JPanel {
                 // UNDEFINED or null → default button-icon colour
                 color = GuiColors.getButtonIcon();
             }
-            dbCheckButton.setIcon(IconFontSwing.buildIcon(FontAwesome.DATABASE, GuiConstants.getToolBarIconSize(), color));
+            setIconButton(dbCheckButton, FontAwesome.DATABASE, color, GuiConstants.getToolBarIconSize());
         });
     }
 
@@ -895,8 +964,8 @@ public class NodeToolbar extends JPanel {
     public void updateSyncIcon(boolean syncPaused) {
         this.isSyncStopped = syncPaused;
         float iconSize = GuiConstants.getToolBarIconSize();
-        syncButton.setIcon(IconFontSwing.buildIcon(
-                syncPaused ? FontAwesome.PLAY : FontAwesome.PAUSE, iconSize, GuiColors.getButtonIcon()));
+        setIconButton(syncButton,
+                syncPaused ? FontAwesome.PLAY : FontAwesome.PAUSE, GuiColors.getButtonIcon(), iconSize);
     }
 
     // ====================================================================
