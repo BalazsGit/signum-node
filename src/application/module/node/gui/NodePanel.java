@@ -23,7 +23,6 @@ import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.JProgressBar;
 import javax.swing.JTabbedPane;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
@@ -52,8 +51,6 @@ public class NodePanel extends JPanel  {
     private static final Logger LOGGER = LoggerFactory.getLogger(NodePanel.class);
 
     private JTabbedPane profileTabbedPane;
-    private JProgressBar progressBar;
-    private JLabel statusLabel;
     /** Shown instead of the (empty) tabbed pane when no profiles exist yet (onboarding, plan §1.3). */
     private JPanel onboardingPanel;
 
@@ -89,7 +86,6 @@ public class NodePanel extends JPanel  {
      */
     private final Runnable appearanceListener = () -> {
         GuiFontManager.applyDefaultFont(profileTabbedPane);
-        GuiFontManager.applyDefaultFont(statusLabel);
         // Keep the add-profile tab's "+" icon in sync with the new size / theme color.
         addProfileTabIcon = GuiIcons.plus(GuiIcons.sizeSmall(), GuiColors.getButtonIcon());
         applyAddTabIcon();
@@ -117,10 +113,6 @@ public class NodePanel extends JPanel  {
 
         setLayout(new BorderLayout());
         setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
-
-        // Create header panel with progress bar
-        JPanel headerPanel = createHeaderPanel();
-        add(headerPanel, BorderLayout.NORTH);
 
         // Create tabbed pane for profiles with application-wide tab layout policy.
         // Policy is read from GuiManager which loads from gui-settings.json at startup.
@@ -180,33 +172,6 @@ public class NodePanel extends JPanel  {
     }
 
     /**
-     * Creates the header panel containing status label and progress bar.
-     */
-    private JPanel createHeaderPanel() {
-        this.statusLabel = new JLabel("Loading profiles...");
-        GuiFontManager.applyDefaultFont(statusLabel);
-
-        this.progressBar = new JProgressBar(0, 100);
-        progressBar.setStringPainted(true);
-        progressBar.setString("");
-        progressBar.setPreferredSize(new java.awt.Dimension(200, 20));
-
-        JPanel headerPanel = new JPanel();
-        headerPanel.setLayout(new BoxLayout(headerPanel, BoxLayout.X_AXIS));
-        headerPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
-
-        statusLabel.setAlignmentY(CENTER_ALIGNMENT);
-        progressBar.setAlignmentY(CENTER_ALIGNMENT);
-
-        headerPanel.add(statusLabel);
-        headerPanel.add(Box.createHorizontalStrut(15));
-        headerPanel.add(Box.createHorizontalGlue());
-        headerPanel.add(progressBar);
-
-        return headerPanel;
-    }
-
-    /**
      * Starts the async profile loading process in a background thread.
      * Profiles are discovered, registered, initialized, and tabs are created dynamically.
      */
@@ -218,88 +183,31 @@ public class NodePanel extends JPanel  {
 
                 // Discover profiles from filesystem
                 NodeProfile[] profiles = NodeProfileRepository.loadAll();
-                int total = profiles.length;
 
-                if (total == 0) {
-                    SwingUtilities.invokeLater(() -> {
-                        updateProgress(100, "No profiles configured");
-                        showOnboarding();
-                    });
+                if (profiles.length == 0) {
+                    SwingUtilities.invokeLater(() -> showOnboarding());
                     return;
                 }
 
-                // Register profiles first
-                
-
-                int count = 0;
                 for (NodeProfile profile : profiles) {
-                    count++;
-                    int percentage = (count * 100) / total;
-
                     final String profileName = profile.getName();
-                    final int currentCount = count;
-                    SwingUtilities.invokeLater(() -> {
-                        updateProgress(percentage, "Loading: " + profileName + " (" + currentCount + "/" + total + ")");
-                        createPlaceholderTab(profileName);
-                    });
-
-                    // Small delay for smooth animation effect
-                    try {
-                        Thread.sleep(150);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
+                    SwingUtilities.invokeLater(() -> createPlaceholderTab(profileName));
                 }
-
-                // Initialize all profiles
-                SwingUtilities.invokeLater(() -> {
-                    updateProgress(90, "Initializing nodes...");
-                    progressBar.setIndeterminate(true);
-                });
-
-                
-
-                // Start autostart profiles
-                SwingUtilities.invokeLater(() -> {
-                    updateProgress(95, "Starting autostart nodes...");
-                });
-
-                
 
                 // Apply tab order from ProfileConfig (user-defined or default filesystem order)
                 final NodeProfile[] loadedProfiles = profiles;
                 SwingUtilities.invokeLater(() -> applyTabOrder(loadedProfiles));
 
-                // Final update - ready state
-                SwingUtilities.invokeLater(() -> {
-                    updateProgress(100, "Ready - " + total + " profiles loaded");
-                    progressBar.setIndeterminate(false);
-                    statusLabel.setForeground(new Color(76, 175, 80)); // Green
-                    wizardInteractionEnabled = true; // UI interactive: the "+" tab can open the wizard
-                });
+                // UI is now interactive: the "+" tab can open the wizard
+                SwingUtilities.invokeLater(() -> wizardInteractionEnabled = true);
 
-                LOGGER.info("Async profile loading completed: {} profiles loaded", count);
+                LOGGER.info("Async profile loading completed: {} profiles loaded", profiles.length);
             } catch (Exception e) {
                 LOGGER.error("Error during async profile loading", e);
-                SwingUtilities.invokeLater(() -> {
-                    updateProgress(0, "Error loading profiles");
-                    progressBar.setForeground(Color.RED);
-                    statusLabel.setForeground(Color.RED);
-                });
             }
         }, "ProfileLoader");
         loaderThread.setDaemon(true);
         loaderThread.start();
-    }
-
-    /**
-     * Updates the progress bar and status label.
-     */
-    private void updateProgress(int percentage, String message) {
-        progressBar.setValue(percentage);
-        progressBar.setString(message + " (" + percentage + "%)");
-        statusLabel.setText(message);
     }
 
     /**
@@ -861,8 +769,6 @@ public class NodePanel extends JPanel  {
             profileTabbedPane.setSelectedIndex(tabIdx);
         }
         wizardInteractionEnabled = true; // UI is interactive: the "+" tab can now open the wizard
-        statusLabel.setForeground(new Color(76, 175, 80));
-        statusLabel.setText("Profile added: " + profileName);
         LOGGER.info("Profile tab added: {}", profileName);
     }
 

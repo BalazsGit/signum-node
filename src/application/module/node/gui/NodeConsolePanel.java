@@ -1340,8 +1340,6 @@ public class NodeConsolePanel extends JPanel {
         leftButtons.add(restartButton);
         leftButtons.add(shutdownButton);
 
-        contentPanel.add(toolBar, BorderLayout.PAGE_START);
-
         bottomPanel = new JPanel(new BorderLayout());
         bottomPanel.setBorder(BorderFactory.createEmptyBorder(2, 2, 2, 2));
         contentPanel.add(bottomPanel, BorderLayout.PAGE_END);
@@ -1717,7 +1715,6 @@ public class NodeConsolePanel extends JPanel {
 
         // Use MigLayout for better dynamic resizing support
         topPanel = new JPanel(new MigLayout("insets 0, gap 0, fillx, wrap 1", "[grow]", "[]0[]0[]"));
-        topPanel.add(toolBar, "growx");
         topPanel.add(metricsPanelWrapper, "growx");
         /* ── LEGACY: commandPanelWrapper replaced by UnifiedConsolePanel.ConsoleInputPanel ──
          * Command input is now handled internally by UnifiedConsolePanel.

@@ -13,7 +13,6 @@ import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiFontManager;
-import application.utils.gui.GuiIcons;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.ResponsiveToolbarScrollPane;
 
@@ -755,20 +754,6 @@ public class NodeProfilePanel extends JPanel {
         application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(),
                 () -> LOGGER.info("[{}] State change: {} -> {}", profileName, oldState, newState));
 
-        int consoleIndex = innerTabbedPane.indexOfTab("Console");
-        if (consoleIndex >= 0) {
-            // Use name() instead of Unicode symbols to avoid square characters
-            String stateText = newState.name().toLowerCase();
-            innerTabbedPane.setTitleAt(consoleIndex,
-                    "Console" + (stateText.isEmpty() ? "" : " [" + stateText + "]"));
-            // Add tooltip with detailed state information for hover
-            innerTabbedPane.setToolTipTextAt(consoleIndex,
-                    "Node State: " + stateText + "\nProfile: " + profile.getName());
-            // Set state icon in the Console tab title so the user can see node state at a glance
-            Icon stateIcon = getStateIcon(newState);
-            innerTabbedPane.setIconAt(consoleIndex, stateIcon);
-        }
-
         if (infoBar != null) {
             infoBar.refreshState();
         }
@@ -783,23 +768,6 @@ public class NodeProfilePanel extends JPanel {
         if (consolePanel != null) {
             consolePanel.onNodeStateChanged(oldState, newState);
         }
-    }
-
-    /**
-     * Returns a FontAwesome-based icon for the given node lifecycle state.
-     * Used to display state indicators in the inner JTabbedPane tab titles.
-     */
-    private Icon getStateIcon(Signum.State state) {
-        int size = GuiIcons.sizeTiny();
-        return switch (state) {
-            case RUNNING -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.CIRCLE, size, GuiColors.getPeerActive());
-            case ERROR -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.EXCLAMATION_TRIANGLE, size, GuiColors.getContrastRed());
-            case STARTING -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.SPINNER, size, new java.awt.Color(255, 193, 7));
-            case STOPPED -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.STOP, size, GuiColors.getFaintText());
-            case CREATED -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.CIRCLE_O, size, GuiColors.getFaintText());
-            case INITIALIZED -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.CHECK_CIRCLE_O, size, new java.awt.Color(100, 149, 237));
-            case STOPPING -> GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.PAUSE, size, new java.awt.Color(103, 58, 183));
-        };
     }
 
     public void onStatusMessage(String message) {
