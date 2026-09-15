@@ -1,6 +1,7 @@
 package application.module.node.gui;
 
 import application.module.appearance.AppearanceModule;
+import application.module.node.BlockchainProcessor;
 import application.module.node.Signum;
 import application.module.node.NodeModule;
 import application.module.node.profile.NodeProfile;
@@ -27,7 +28,6 @@ import javax.swing.JTabbedPane;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Component;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -149,13 +149,10 @@ public class NodePanel extends JPanel  {
         // the profile's tab icon like STARTING — so the pending state is visible on the
         // tab strip immediately, consistent with the toolbar/info bar of the panel.
         NodeModule.getInstance().addPendingListener(() -> SwingUtilities.invokeLater(() -> {
-            for (String name : new java.util.HashSet<>(loadedProfilePanels.keySet())) {
-                Signum signum = NodeModule.getInstance().get(name);
-                Signum.State state = (signum != null) ? signum.getState() : Signum.State.STOPPED;
-                if (NodeModule.getInstance().isStartPending(name)) {
-                    state = Signum.State.STARTING;
-                }
-                updateTabIcon(name, state);
+            // Refresh EVERY profile tab (loaded or not): a pending start is state-relevant
+            // for the tab icon whether or not its panel is currently open.
+            for (String name : new java.util.HashSet<>(profileNameToTabIndex.keySet())) {
+                updateTabIcon(name);
             }
         }));
 
@@ -222,6 +219,10 @@ public class NodePanel extends JPanel  {
         profileTabbedPane.addTab(profileName, placeholder);
         // Keep the persistent "+" tab as the last tab and re-sync the name->index map.
         ensureAddTabLast();
+        // Show the initial state icon so the tab is not blank until the first change: a
+        // never-started profile resolves (via the SSOT) to the CREATED green check,
+        // matching the info bar.
+        updateTabIcon(profileName);
 
         LOGGER.debug("Created placeholder tab for profile: {}", profileName);
     }
@@ -268,6 +269,9 @@ public class NodePanel extends JPanel  {
             Signum signum = NodeModule.getInstance().get(profileName);
 
             NodeProfilePanel actualPanel = new NodeProfilePanel(null, profile, signum);
+            // Refresh this profile's tab icon from the SSOT whenever a state-relevant
+            // condition changes (pause/resume via the panel, trim/prune via the toolbar).
+            actualPanel.setTabIconRefresher(() -> updateTabIcon(profileName));
 
             // Swap in the real panel on the EDT. Re-check the placeholder state and the
             // tab index: the user may have navigated away or the tab may have been
@@ -300,18 +304,6 @@ public class NodePanel extends JPanel  {
     // ====================================================================
     // LifecycleListener implementation (push-based)
     // ====================================================================
-
-    public void onStateChanged(NodeProfile profile, Signum.State oldState, Signum.State newState) {
-        SwingUtilities.invokeLater(() -> {
-            NodeProfilePanel panel = loadedProfilePanels.get(profile.getName());
-            if (panel != null) {
-                panel.onNodeStateChanged(oldState, newState);
-            }
-            updateTabIcon(profile.getName(), newState);
-            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(),
-                    () -> LOGGER.info("State change: {} -> {} for profile {}", oldState, newState, profile.getName()));
-        });
-    }
 
     public void onStatusMessage(NodeProfile profile, String message) {
         SwingUtilities.invokeLater(() -> {
@@ -349,51 +341,49 @@ public class NodePanel extends JPanel  {
     /**
      * Updates the tab icon and tooltip based on the node state.
      * Uses O(1) name-based lookup via profileNameToTabIndex map.
-     * Icons are shown for active states (RUNNING, PAUSED, INITIALIZING, STOPPING, ERROR).
-     * Stopped/Ready/Idle profiles have no icon.
-     * Icon sizes scale dynamically with the global UI font size.
+     * The icon is resolved through the SSOT resolver (NodeStateIcon), so it is always
+     * consistent with the info bar and the toolbar. A never-started profile (no Signum
+     * registered yet) resolves as CREATED — the same green check the info bar shows.
      * Tooltip shows the current node state description on hover.
      */
-    private void updateTabIcon(String profileName, Signum.State state) {
+    private void updateTabIcon(String profileName) {
         Integer tabIndex = profileNameToTabIndex.get(profileName);
         if (tabIndex == null) {
             return; // Tab not found
         }
 
-        Icon icon;
-
-        switch (state) {
-            case RUNNING:
-                icon = GuiIcons.running(GuiIcons.sizeTiny());
-                break;
-            case STARTING:
-            case STOPPING:
-                icon = GuiIcons.initializing(GuiIcons.sizeSmall());
-                break;
-            case ERROR:
-                icon = GuiIcons.error(GuiIcons.sizeSmall());
-                break;
-            case INITIALIZED:
-                icon = GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.CHECK_CIRCLE_O, GuiIcons.sizeTiny(), new Color(100, 149, 237));
-                break;
-            case STOPPED:
-                icon = GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.STOP, GuiIcons.sizeTiny(), new Color(150, 150, 150));
-                break;
-            case CREATED:
-                icon = GuiIcons.build(jiconfont.icons.font_awesome.FontAwesome.CIRCLE_O, GuiIcons.sizeTiny(), new Color(150, 150, 150));
-                break;
-            default:
-                icon = null;
-                break;
+        // Pull the node's CURRENT combined state (lifecycle + operating + archival
+        // maintenance + start-pending) and resolve it through the SSOT resolver so the
+        // tab icon is always consistent with the info bar and the toolbar.
+        //
+        // A never-started profile has no Signum registered yet (get() → null) → treat it
+        // as CREATED, matching the info bar. A genuinely stopped node keeps its Signum in
+        // the registry with state STOPPED, so it still resolves to the shutdown icon.
+        Signum signum = NodeModule.getInstance().get(profileName);
+        Signum.State state = (signum != null) ? signum.getState() : Signum.State.CREATED;
+        Signum.OperatingState operating = (signum != null) ? signum.getOperatingState() : null;
+        BlockchainProcessor.ArchivalMaintenanceState maintenance = null;
+        if (signum != null) {
+            try {
+                BlockchainProcessor bp = signum.getBlockchainProcessor();
+                if (bp != null) {
+                    maintenance = bp.getArchivalMaintenanceState();
+                }
+            } catch (Exception ignored) {
+                // facade not ready (node not started) → no maintenance state
+            }
         }
+        boolean startPending = NodeModule.getInstance().isStartPending(profileName);
+
+        NodeStateIcon.Res res = NodeStateIcon.resolve(state, operating, maintenance, startPending);
 
         // Keep the profile name as the tab title (no Unicode suffixes)
         profileTabbedPane.setTitleAt(tabIndex, profileName);
-        profileTabbedPane.setIconAt(tabIndex, icon);
+        profileTabbedPane.setIconAt(tabIndex, res.icon());
 
-        // Set tooltip with node state information for hover display
-        String tooltip = "Profile: " + profileName + "\nNode State: " + state.name().toLowerCase();
-        profileTabbedPane.setToolTipTextAt(tabIndex, tooltip);
+        // Set tooltip with the resolved status on hover
+        profileTabbedPane.setToolTipTextAt(tabIndex,
+                "Profile: " + profileName + "\nStatus: " + res.label());
     }
 
     // ====================================================================

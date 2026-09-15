@@ -259,6 +259,29 @@ public final class GuiColors {
     }
 
     /**
+     * Transitional "work in progress" state color: node starting/stopping, or an
+     * archival maintenance phase (trim / prune). SSOT for the toolbar spinner and the
+     * node status icons across tab header, info bar and toolbar.
+     */
+    public static Color getTransition() {
+        return ColorPaletteManager.getColor("gui.state.transition");
+    }
+
+    /**
+     * Ready / initialized state color (node created, initialized, ready to start).
+     */
+    public static Color getReady() {
+        return ColorPaletteManager.getColor("gui.state.ready");
+    }
+
+    /**
+     * Paused state color (node running but blockchain sync paused).
+     */
+    public static Color getPaused() {
+        return ColorPaletteManager.getColor("gui.state.paused");
+    }
+
+    /**
      * Gets the color for unsaved UI elements.
      * This typically matches the default text color of the current Look and Feel.
      *

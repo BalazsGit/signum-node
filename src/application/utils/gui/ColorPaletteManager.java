@@ -150,6 +150,10 @@ public final class ColorPaletteManager {
         colors.put("gui.contrast.red", new Color(255, 120, 120));
         colors.put("gui.status.consistent", new Color(0, 128, 0));
         colors.put("gui.help.icon", new Color(128, 128, 128));
+        // Node status SSOT colors (shared by tab header, info bar and toolbar).
+        colors.put("gui.state.transition", new Color(255, 193, 7));
+        colors.put("gui.state.ready", new Color(100, 149, 237));
+        colors.put("gui.state.paused", new Color(103, 58, 183));
         return new ColorPalette("Default", colors);
     }
 

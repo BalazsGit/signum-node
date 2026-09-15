@@ -110,19 +110,19 @@ public final class GuiIcons {
     // Node Lifecycle State Icons
     // ====================================================================
 
-    /** Green circle icon for a running node. */
+    /** Green play icon for a running node (matches the Start/Play control). */
     public static Icon running(int size) {
-        return build(FontAwesome.CIRCLE, size, GuiColors.getPeerActive());
+        return build(FontAwesome.PLAY, size, GuiColors.getApplied());
     }
 
-    /** Yellow spinner icon for initializing state. */
+    /** Amber spinner icon for initializing state. */
     public static Icon initializing(int size) {
-        return build(FontAwesome.SPINNER, size, new Color(255, 193, 7));
+        return build(FontAwesome.SPINNER, size, GuiColors.getTransition());
     }
 
-    /** Yellow spinner icon for stopping state. */
+    /** Amber spinner icon for stopping state. */
     public static Icon stopping(int size) {
-        return build(FontAwesome.SPINNER, size, new Color(255, 193, 7));
+        return build(FontAwesome.SPINNER, size, GuiColors.getTransition());
     }
 
     /** Red warning icon for error state. */
@@ -130,9 +130,34 @@ public final class GuiIcons {
         return build(FontAwesome.EXCLAMATION_TRIANGLE, size, GuiColors.getContrastRed());
     }
 
-    /** Blue pause icon for paused state. */
+    /** Purple pause icon for a paused (sync) state. */
     public static Icon paused(int size) {
-        return build(FontAwesome.PAUSE, size, new Color(103, 58, 183));
+        return build(FontAwesome.PAUSE, size, GuiColors.getPaused());
+    }
+
+    /** Blue check icon for an initialized/ready node. */
+    public static Icon ready(int size) {
+        return build(FontAwesome.CHECK_CIRCLE_O, size, GuiColors.getReady());
+    }
+
+    /** Red shutdown icon for a stopped (shut down) node (matches the Stop/Shutdown control). */
+    public static Icon stopped(int size) {
+        return build(FontAwesome.POWER_OFF, size, GuiColors.getContrastRed());
+    }
+
+    /** Green check icon for a created (never started) node. */
+    public static Icon created(int size) {
+        return build(FontAwesome.CHECK, size, GuiColors.getApplied());
+    }
+
+    /** Cube icon for a node generating blocks. */
+    public static Icon generating(int size) {
+        return build(FontAwesome.CUBE, size, GuiColors.getPeerActive());
+    }
+
+    /** Green scissors icon for an archival maintenance phase (trim / prune). */
+    public static Icon maintenance(int size) {
+        return build(FontAwesome.SCISSORS, size, GuiColors.getApplied());
     }
 
     /** Null icon for idle/stopped states (no icon displayed). */

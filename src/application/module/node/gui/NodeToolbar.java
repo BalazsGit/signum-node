@@ -18,6 +18,8 @@ import application.utils.gui.SpinnerIcon;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 
+import com.formdev.flatlaf.FlatLaf;
+
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
@@ -27,6 +29,7 @@ import java.awt.Graphics;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.Box;
+import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -114,6 +117,13 @@ public class NodeToolbar extends JPanel {
      * events — no polling.
      */
     private JLabel maintenanceLabel;
+
+    /**
+     * SSOT tab-icon refresher (optional): invoked from {@link #updateMaintenanceStateLabel()}
+     * whenever an archival maintenance phase starts/ends, so the owning profile's tab
+     * icon reflects trim/prune. Forwarded here by the owning {@link NodeProfilePanel}.
+     */
+    private volatile Runnable maintenanceRefresher;
 
     private final Listener<BlockchainProcessor.TrimStats> trimStateListener =
             stats -> refreshMaintenanceState();
@@ -268,47 +278,62 @@ public class NodeToolbar extends JPanel {
     }
 
     /**
+     * Hover scale-up factor for toolbar icon buttons. On rollover the glyph is rendered
+     * this many times larger (1.15f → 15% bigger) instead of changing colour.
+     */
+    private static final float HOVER_ICON_SCALE = 1.15f;
+
+    /**
      * Sets both the normal and the hover (rollover) icons of an icon button.
      * <p>
-     * The rollover icon highlights the button on hover — the app runs flat
-     * ({@code contentAreaFilled = false}), so without it a hovered/pressed button
-     * would give no visual feedback at all. The hover color follows the LAF's
-     * default button foreground (a visible accent in both light and dark themes).
+     * The hover effect <b>grows</b> the glyph rather than recoloring it, and does so with
+     * no layout shift: the normal and the rollover icon both expose the SAME (larger)
+     * bounding box, so the JButton is sized once (to that box) and never resizes when the
+     * hover glyph is swapped in — the glyph simply scales up inside a constant area, so
+     * nothing below the button moves. The colour is unchanged on hover.
+     * </p>
+     * <p>
+     * A disabled icon is also provided: because the fixed-box wrapper is a plain
+     * {@code Icon} (not an {@code ImageIcon}), FlatLaf cannot auto-derive a grayed
+     * disabled icon for it, so it is derived explicitly from the direct inner glyph via
+     * {@code FlatLaf.getDisabledIcon(...)} — keeping the standard grayed "disabled" look.
      * </p>
      */
     private static void setIconButton(JButton button, FontAwesome iconCode, Color color, float iconSize) {
-        button.setIcon(IconFontSwing.buildIcon(iconCode, iconSize, color));
-        Color hover = hoverIconColor(color);
-        if (hover != null) {
-            button.setRolloverIcon(IconFontSwing.buildIcon(iconCode, iconSize, hover));
+        float box = iconSize * HOVER_ICON_SCALE;
+        Icon glyph = IconFontSwing.buildIcon(iconCode, iconSize, color);
+        button.setIcon(fixedBoxIcon(box, glyph));
+        button.setRolloverIcon(fixedBoxIcon(box, IconFontSwing.buildIcon(iconCode, box, color)));
+        // The fixed-box wrapper above is a plain Icon (not an ImageIcon), so FlatLaf cannot
+        // auto-derive a grayed disabled icon for it: getDisabledIcon(...) returns null and
+        // Swing falls back to painting the full-colour normal icon (the "wrong" disabled
+        // colour). Derive the disabled icon from the direct inner glyph (an ImageIcon)
+        // instead, so disabled buttons keep the L&F's proper grayed look.
+        if (UIManager.getLookAndFeel() instanceof FlatLaf flatLaf) {
+            Icon disabled = flatLaf.getDisabledIcon(button, glyph);
+            if (disabled != null) {
+                button.setDisabledIcon(fixedBoxIcon(box, disabled));
+            }
         }
     }
 
     /**
-     * Resolves the hover (rollover) icon color: the LAF's default button foreground
-     * (visible accent in light and dark themes); if that equals the base color, a
-     * brightened fallback variant; null when no hover highlight is possible.
+     * Wraps {@code glyph} in an icon whose bounding box is a fixed {@code boxSize}: the
+     * glyph is centered inside that box. Two such icons sharing the same boxSize have
+     * identical layout dimensions, so swapping them (normal → rollover) never resizes the
+     * button that holds them — only the glyph's apparent size changes.
      */
-    private static Color hoverIconColor(Color base) {
-        try {
-            // The LAF (FlatLaf, or whatever is installed) exposes the default button
-            // foreground — a visible accent in both light and dark themes.
-            Color hover = UIManager.getColor("Button.default.foreground");
-            if (hover != null && !hover.equals(base)) {
-                return hover;
+    private static Icon fixedBoxIcon(float boxSize, Icon glyph) {
+        int box = Math.round(boxSize);
+        return new Icon() {
+            @Override public int getIconWidth()  { return box; }
+            @Override public int getIconHeight() { return box; }
+            @Override public void paintIcon(Component c, Graphics g, int x, int y) {
+                int dx = x + (box - glyph.getIconWidth())  / 2;
+                int dy = y + (box - glyph.getIconHeight()) / 2;
+                glyph.paintIcon(c, g, dx, dy);
             }
-        } catch (Throwable ignored) {
-            // UIManager unavailable — fall through to the computed fallback below.
-        }
-        if (base == null) {
-            return null;
-        }
-        // Subtly brighten the base icon color (clamped) as a universal fallback.
-        int r = Math.min(255, base.getRed() + 70);
-        int g = Math.min(255, base.getGreen() + 70);
-        int b = Math.min(255, base.getBlue() + 70);
-        Color brighter = new Color(r, g, b);
-        return brighter.equals(base) ? null : brighter;
+        };
     }
 
     /**
@@ -828,7 +853,7 @@ public class NodeToolbar extends JPanel {
     private void startSpinner() {
         if (spinnerIcon == null) {
             int size = Math.max(12, (int) Math.ceil(GuiConstants.getToolBarIconSize()));
-            spinnerIcon = new SpinnerIcon(size, new Color(255, 193, 7));
+            spinnerIcon = new SpinnerIcon(size, GuiColors.getTransition());
         }
         if (spinnerTimer == null) {
             spinnerTimer = new Timer(50, e -> {
@@ -837,7 +862,18 @@ public class NodeToolbar extends JPanel {
             });
         }
         spinnerTimer.start();
-        startStopButton.setIcon(spinnerIcon);
+        // Keep the button's fixed (hover) bounding box so the transition spinner does
+        // not resize the button and shift the layout.
+        Icon spinner = fixedBoxIcon(
+                GuiConstants.getToolBarIconSize() * HOVER_ICON_SCALE, spinnerIcon);
+        // The Start/Stop button is DISABLED while the node is starting/stopping, so
+        // Swing paints its disabledIcon (and its rolloverIcon on hover) — which still
+        // holds the stale grayed PLAY/POWER_OFF left by the last setIconButton() call.
+        // Set all three to the animated spinner so it stays visible (and rotating) in
+        // every state, not only the enabled one.
+        startStopButton.setIcon(spinner);
+        startStopButton.setRolloverIcon(spinner);
+        startStopButton.setDisabledIcon(spinner);
     }
 
     /** Stops the spinner animation without changing the current button icon. */
@@ -914,6 +950,15 @@ public class NodeToolbar extends JPanel {
         SwingUtilities.invokeLater(this::updateMaintenanceStateLabel);
     }
 
+    /**
+     * Registers the SSOT tab-icon refresher (called by the owning {@link NodeProfilePanel}).
+     *
+     * @param refresher callback invoked (EDT-safe) whenever a maintenance phase changes
+     */
+    public void setMaintenanceRefresher(Runnable refresher) {
+        this.maintenanceRefresher = refresher;
+    }
+
     private void updateMaintenanceStateLabel() {
         BlockchainProcessor.ArchivalMaintenanceState state = null;
         BlockchainProcessor bp = resolveProcessor(signum);
@@ -938,6 +983,12 @@ public class NodeToolbar extends JPanel {
         JPanel row = (JPanel) maintenanceLabel.getParent();
         row.revalidate();
         row.repaint();
+
+        // A maintenance phase is state-relevant for the tab icon → re-render from the SSOT.
+        Runnable refresher = this.maintenanceRefresher;
+        if (refresher != null) {
+            SwingUtilities.invokeLater(refresher);
+        }
     }
 
     private void updateDbCheckIconColor() {
@@ -1004,22 +1055,23 @@ public class NodeToolbar extends JPanel {
             float iconSize = GuiConstants.getToolBarIconSize();
             Color iconColor = GuiColors.getButtonIcon();
 
-            // Update all icon-only buttons
-            restartButton.setIcon(IconFontSwing.buildIcon(FontAwesome.REFRESH, iconSize, iconColor));
-            openPhoenixButton.setIcon(IconFontSwing.buildIcon(FontAwesome.FIRE, iconSize, iconColor));
-            openClassicButton.setIcon(IconFontSwing.buildIcon(FontAwesome.WINDOW_RESTORE, iconSize, iconColor));
-            openApiButton.setIcon(IconFontSwing.buildIcon(FontAwesome.BOOK, iconSize, iconColor));
-            editConfButton.setIcon(IconFontSwing.buildIcon(FontAwesome.PENCIL, iconSize, iconColor));
-            popOff10Button.setIcon(IconFontSwing.buildIcon(FontAwesome.STEP_BACKWARD, iconSize, iconColor));
-            popOff100Button.setIcon(IconFontSwing.buildIcon(FontAwesome.BACKWARD, iconSize, iconColor));
-            dbCheckButton.setIcon(IconFontSwing.buildIcon(FontAwesome.DATABASE, iconSize, iconColor));
+            // Update all icon-only buttons (via setIconButton so the hover scale-up and
+            // the fixed bounding box are preserved after an appearance/font change).
+            setIconButton(restartButton, FontAwesome.REFRESH, iconColor, iconSize);
+            setIconButton(openPhoenixButton, FontAwesome.FIRE, iconColor, iconSize);
+            setIconButton(openClassicButton, FontAwesome.WINDOW_RESTORE, iconColor, iconSize);
+            setIconButton(openApiButton, FontAwesome.BOOK, iconColor, iconSize);
+            setIconButton(editConfButton, FontAwesome.PENCIL, iconColor, iconSize);
+            setIconButton(popOff10Button, FontAwesome.STEP_BACKWARD, iconColor, iconSize);
+            setIconButton(popOff100Button, FontAwesome.BACKWARD, iconColor, iconSize);
+            setIconButton(dbCheckButton, FontAwesome.DATABASE, iconColor, iconSize);
 
             // Update sync button (respect current pause state)
-            syncButton.setIcon(IconFontSwing.buildIcon(
-                    isSyncStopped ? FontAwesome.PLAY : FontAwesome.PAUSE, iconSize, iconColor));
+            setIconButton(syncButton,
+                    isSyncStopped ? FontAwesome.PLAY : FontAwesome.PAUSE, iconColor, iconSize);
 
             // Update hamburger menu button icon
-            menuButton.setIcon(IconFontSwing.buildIcon(FontAwesome.BARS, iconSize, iconColor));
+            setIconButton(menuButton, FontAwesome.BARS, iconColor, iconSize);
 
             // Restore DB check icon color based on consistency state.
             // Without this, appearance changes would overwrite the green/red icon

@@ -1,6 +1,7 @@
 package application.module.node.gui;
 
 import application.module.appearance.AppearanceModule;
+import application.module.node.BlockchainProcessor;
 import application.module.node.NodeModule;
 import application.module.node.Signum;
 import application.module.node.profile.NodeProfile;
@@ -289,105 +290,37 @@ public class NodeInfoBar extends JPanel {
     public void refreshState() {
         SwingUtilities.invokeLater(() -> {
             Signum signum = NodeModule.getInstance().get(profile.getName());
-
-            Signum.State state = Signum.State.CREATED;
+            Signum.State state = (signum != null) ? signum.getState() : Signum.State.CREATED;
+            Signum.OperatingState operating = (signum != null) ? signum.getOperatingState() : null;
+            BlockchainProcessor.ArchivalMaintenanceState maintenance = null;
             if (signum != null) {
-                state = signum.getState();
+                try {
+                    BlockchainProcessor bp = signum.getBlockchainProcessor();
+                    if (bp != null) {
+                        maintenance = bp.getArchivalMaintenanceState();
+                    }
+                } catch (Exception ignored) {
+                    // facade not ready (node not started) → no maintenance state
+                }
             }
+            boolean startPending = NodeModule.getInstance().isStartPending(profile.getName());
 
-            // v5 (multi-node): a queued/running start (start pending) renders EXACTLY
-            // like STARTING — the STARTING state push may not have arrived yet (with
-            // the parallel lifecycle pool the task may still be sitting in the queue).
-            if (NodeModule.getInstance().isStartPending(profile.getName())) {
-                state = Signum.State.STARTING;
-            }
+            // SSOT: resolve the combined node state to one icon + one label, so the info
+            // bar always matches the tab header and the toolbar.
+            NodeStateIcon.Res res = NodeStateIcon.resolve(state, operating, maintenance, startPending);
 
-            String stateText = state.name();
-            Icon stateIcon = stateIconFor(state);
+            // State chip (label + icon)
+            updateLabel(stateLabel, "State", res.label(), res.icon(), null);
 
-            updateLabel(stateLabel, "State", formatStateText(stateText), stateIcon, null);
-
-            // Update the status icon next to profile name with detailed tooltip
-            updateStatusIcon(state, stateText);
+            // Status icon next to the profile name (same SSOT icon + label).
+            statusIconLabel.setIcon(res.icon());
+            statusIconLabel.setToolTipText(res.label());
 
             // Re-sync the data chips so conflict indicators reflect the latest
             // running set (a node starting/stopping can change whether a conflict
             // is "currently running" or merely "configured").
             refreshChips();
         });
-    }
-
-    /**
-     * Gets the appropriate icon for a lifecycle state (for state chip).
-     */
-    private Icon stateIconFor(Signum.State state) {
-        return switch (state) {
-            case RUNNING -> GuiIcons.running(GuiIcons.sizeTiny());
-            case ERROR -> GuiIcons.error(GuiIcons.sizeTiny());
-            case STARTING, STOPPING -> GuiIcons.initializing(GuiIcons.sizeTiny());
-            default -> null;
-        };
-    }
-
-    /**
-     * Updates the status icon next to the profile name with a detailed tooltip.
-     * Each lifecycle state has a dedicated FontAwesome icon and descriptive tooltip.
-     * Icon size scales dynamically with the current font size via GuiIcons.sizeSmall().
-     */
-    private void updateStatusIcon(Signum.State state, String stateDescription) {
-        int size = GuiIcons.sizeSmall();
-        Icon icon = null;
-        String tooltip = null;
-
-        switch (state) {
-            case CREATED -> {
-                icon = GuiIcons.build(FontAwesome.CIRCLE_O, size, GuiColors.getFaintText());
-                tooltip = "CREATED: Node exists but not initialized yet";
-            }
-            case STARTING -> {
-                icon = GuiIcons.build(FontAwesome.SPINNER, size, new Color(255, 193, 7));
-                tooltip = "STARTING: Loading configuration and preparing resources...";
-            }
-            case INITIALIZED -> {
-                icon = GuiIcons.build(FontAwesome.CHECK_CIRCLE_O, size, new Color(100, 149, 237));
-                tooltip = "INITIALIZED: Ready to start. Click Start to begin.";
-            }
-            case RUNNING -> {
-                icon = GuiIcons.build(FontAwesome.CIRCLE, size, GuiColors.getPeerActive());
-                tooltip = "RUNNING: Node is actively running, P2P active, serving API";
-            }
-            case STOPPING -> {
-                icon = GuiIcons.build(FontAwesome.SPINNER, size, new Color(255, 193, 7));
-                tooltip = "STOPPING: Graceful shutdown in progress...";
-            }
-            case STOPPED -> {
-                icon = GuiIcons.build(FontAwesome.STOP, size, GuiColors.getFaintText());
-                tooltip = "STOPPED: Node cleanly stopped. Can be restarted.";
-            }
-            case ERROR -> {
-                icon = GuiIcons.build(FontAwesome.EXCLAMATION_TRIANGLE, size, GuiColors.getContrastRed());
-                tooltip = "ERROR: Node failed. Reset or restart required.";
-            }
-        }
-
-        statusIconLabel.setIcon(icon);
-        statusIconLabel.setToolTipText(tooltip);
-    }
-
-    /**
-     * Formats the state text for display (human-readable).
-     */
-    private String formatStateText(String state) {
-        return switch (state) {
-            case "RUNNING" -> "Running";
-            case "STOPPED" -> "Stopped";
-            case "CREATED" -> "Created";
-            case "INITIALIZED" -> "Ready";
-            case "ERROR" -> "Error";
-            case "STARTING" -> "Starting";
-            case "STOPPING" -> "Stopping";
-            default -> state;
-        };
     }
 
     /**

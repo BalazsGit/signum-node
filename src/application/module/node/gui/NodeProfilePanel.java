@@ -76,6 +76,14 @@ public class NodeProfilePanel extends JPanel {
      * (not a method reference at the call site) so add/remove use the SAME instance.
      */
     private final Runnable pendingListener = this::refreshPendingState;
+
+    /**
+     * SSOT tab-icon refresher: (re)renders the owning tab's status icon from the
+     * combined node state (lifecycle + operating + maintenance). Registered by
+     * {@link NodePanel} right after construction; invoked on operating-state
+     * (pause/resume) and maintenance (trim/prune) changes.
+     */
+    private volatile Runnable tabIconRefresher;
     private final JTabbedPane innerTabbedPane;
     private final NodeConsolePanel consolePanel;
     private final NodeConfigurationPanel configurationPanel;
@@ -284,13 +292,11 @@ public class NodeProfilePanel extends JPanel {
 
             @Override
             public void onOperatingStateChanged(Signum s, Signum.OperatingState oldState, Signum.OperatingState newState) {
-                boolean paused = newState == Signum.OperatingState.PAUSED_USER
-                        || newState == Signum.OperatingState.PAUSED_SYSTEM;
-                SwingUtilities.invokeLater(() -> {
-                    if (toolbar != null) {
-                        toolbar.updateSyncIcon(paused);
-                    }
-                });
+                // Unified: a pause/resume refreshes the SAME visual set as a lifecycle
+                // change (info bar + toolbar + tab icon) via the single refreshVisuals()
+                // point, so the tab header stays consistent. The console is intentionally
+                // untouched — it reacts only to real lifecycle transitions.
+                SwingUtilities.invokeLater(() -> refreshVisuals());
             }
         };
         newSignum.addStateListener(stateListener);
@@ -340,6 +346,10 @@ public class NodeProfilePanel extends JPanel {
         // longer refreshed (avoids a listener leak in the NodeModule).
         NodeModule.getInstance().removePendingListener(pendingListener);
 
+        // Drop the SSOT tab-icon refresher so a disposed panel no longer triggers
+        // tab updates (the toolbar's forwarded copy is cleared by setSignum(null)).
+        this.tabIconRefresher = null;
+
         Signum current = this.signum;
         if (current != null && stateListener != null) {
             current.removeStateListener(stateListener);
@@ -349,6 +359,7 @@ public class NodeProfilePanel extends JPanel {
             // Stop the Start/Stop spinner animation so its Timer cannot outlive
             // the toolbar, and detach all Signum-backed listeners.
             toolbar.setSignum(null);
+            toolbar.setMaintenanceRefresher(null);
             toolbar.stopSpinnerAnimation();
         }
         LOGGER.info("NodeProfilePanel disposed for profile: {}", profile.getName());
@@ -717,6 +728,33 @@ public class NodeProfilePanel extends JPanel {
      * — and attaches the console subscriber so the profile console receives the
      * node's logs (replayed from the ProfileLogger buffer if attached late).
      */
+    /**
+     * Registers the SSOT tab-icon refresher (called by {@link NodePanel}).
+     * <p>
+     * The same callback is also forwarded to the toolbar so that an archival
+     * maintenance phase (trim/prune) — which only the toolbar observes — triggers a
+     * tab-icon refresh.
+     *
+     * @param refresher the callback that re-renders the tab icon from the SSOT
+     */
+    public void setTabIconRefresher(Runnable refresher) {
+        this.tabIconRefresher = refresher;
+        if (toolbar != null) {
+            toolbar.setMaintenanceRefresher(refresher);
+        }
+    }
+
+    /**
+     * (EDT-safe) Re-renders the owning tab's status icon from the SSOT, if a
+     * refresher has been registered by {@link NodePanel}.
+     */
+    private void refreshTabIcon() {
+        Runnable refresher = tabIconRefresher;
+        if (refresher != null) {
+            SwingUtilities.invokeLater(refresher);
+        }
+    }
+
     private void onNodeStarted(Signum signum) {
         if (signum == null) {
             return;
@@ -754,20 +792,49 @@ public class NodeProfilePanel extends JPanel {
         application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(),
                 () -> LOGGER.info("[{}] State change: {} -> {}", profileName, oldState, newState));
 
-        if (infoBar != null) {
-            infoBar.refreshState();
-        }
-
-        if (toolbar != null) {
-            toolbar.updateButtonStates(newState, signum != null);
-        }
+        // Single visual refresh point (info bar + toolbar + tab icon), shared with the
+        // operating-state path so the tab header always matches the panel.
+        refreshVisuals();
 
         // Forward lifecycle events to the console panel so it can manage MetricsPanel
         // visibility in sync with the node state. When the node reaches READY/RUNNING,
         // Signum.getPropertyService() is available and the MetricsPanel can initialize.
+        // (Lifecycle only — a pure pause/resume change refreshes the visuals directly
+        // via refreshVisuals() and must not re-trigger lifecycle side effects.)
         if (consolePanel != null) {
             consolePanel.onNodeStateChanged(oldState, newState);
         }
+    }
+
+    /**
+     * Single visual-refresh point (EDT): re-renders every state-visible widget of this
+     * profile straight from the Signum (single source of truth) — the info bar, the
+     * toolbar buttons, the operating (pause) sync icon and the tab header icon. It is
+     * invoked on BOTH lifecycle changes ({@link #refreshFromSignum}) and operating
+     * changes ({@link Signum.StateListener#onOperatingStateChanged}) so all four
+     * surfaces always agree. It never touches the console.
+     */
+    private void refreshVisuals() {
+        Signum s = this.signum;
+        if (infoBar != null) {
+            infoBar.refreshState();
+        }
+        if (toolbar != null) {
+            Signum.State state = (s != null) ? s.getState() : Signum.State.CREATED;
+            toolbar.updateButtonStates(state, s != null);
+            toolbar.updateSyncIcon(isPaused());
+        }
+        refreshTabIcon();
+    }
+
+    /** True when the node is currently in a paused operating state (PAUSED_USER/PAUSED_SYSTEM). */
+    private boolean isPaused() {
+        Signum s = this.signum;
+        if (s == null) {
+            return false;
+        }
+        Signum.OperatingState op = s.getOperatingState();
+        return op == Signum.OperatingState.PAUSED_USER || op == Signum.OperatingState.PAUSED_SYSTEM;
     }
 
     public void onStatusMessage(String message) {

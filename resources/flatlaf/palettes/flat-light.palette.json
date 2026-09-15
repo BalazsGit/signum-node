@@ -51,5 +51,8 @@
   "sync.at.count.per.block": "#C2185B",
   "sync.upload.speed": "#C62828",
   "sync.download.speed": "#2E7D32",
-  "gui.contrast.red": "#D32F2F"
+  "gui.contrast.red": "#D32F2F",
+  "gui.state.transition": "#FFC107",
+  "gui.state.ready": "#6495ED",
+  "gui.state.paused": "#673AB7"
 }
