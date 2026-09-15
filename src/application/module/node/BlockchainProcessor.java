@@ -429,6 +429,18 @@ public interface BlockchainProcessor extends Observable<Block, BlockchainProcess
         }
     }
 
+    class StateInconsistencyException extends BlockNotAcceptedException {
+
+        public StateInconsistencyException(String message) {
+            super(message);
+        }
+
+        @Override
+        public boolean isStateRelated() {
+            return true;
+        }
+    }
+
     class TransactionNotAcceptedException extends BlockNotAcceptedException {
 
         private final transient Transaction transaction;

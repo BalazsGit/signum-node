@@ -3750,7 +3750,17 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         blockApplyTimeNanos = (System.nanoTime() - start);
 
         start = System.nanoTime();
-        subscriptionService.applyConfirmed(block, blockchain.getHeight());
+        try {
+            subscriptionService.applyConfirmed(block, blockchain.getHeight());
+        } catch (IllegalStateException e) {
+            // The subscription service detected missing local account state (e.g. the
+            // sender account is absent from the local database). Surface it as a
+            // state-related rejection so the import loop triggers the designed
+            // aggressive recovery (rollback + re-sync) instead of a generic
+            // uncaught-exception path.
+            throw new StateInconsistencyException("Local state inconsistency during subscription apply at height "
+                    + block.getHeight() + ": " + e.getMessage());
+        }
         subscriptionTimeNanos += (System.nanoTime() - start);
 
         start = System.nanoTime();

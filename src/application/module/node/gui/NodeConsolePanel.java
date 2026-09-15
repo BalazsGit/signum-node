@@ -3409,10 +3409,13 @@ public class NodeConsolePanel extends JPanel {
         try {
             BlockchainProcessor processor = bound.getBlockchainProcessor();
             if (processor == null) {
-                // Not wired yet — do NOT mark this instance as done, so the
-                // next state push retries the wiring.
+                // Invariant violation: Signum.start() creates the BlockchainProcessor
+                // inside doInitialize() BEFORE pushing RUNNING, so by the time wiring
+                // runs the processor must exist. A null here is a genuine bug, not a
+                // transient startup state — surface it as an error. Do NOT mark this
+                // instance as wired.
                 application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                        () -> LOGGER.warn("[{}] ensureRuntimeWiring: BlockchainProcessor not available yet — will retry on next state push", profileName));
+                        () -> LOGGER.error("[{}] ensureRuntimeWiring: invariant violation — BlockchainProcessor is null in state RUNNING", profileName));
                 return;
             }
             // v4 toolbar-start path: the feature flags (measurement/experimental/
@@ -4631,14 +4634,21 @@ public class NodeConsolePanel extends JPanel {
     public void onNodeStateChanged(Signum.State oldState, Signum.State newState) {
         LOGGER.debug("[MetricsPanel] Lifecycle state change: {} -> {}", oldState, newState);
 
-        // If the node reached a live state (possibly started by the toolbar or
-        // another panel), make sure this console is attached to its ProfileLogger.
+        // Log capture must start EARLY (STARTING) so the profile console shows the
+        // boot output from the very first moment — possibly started by the toolbar
+        // or another panel.
         if (newState == Signum.State.STARTING || newState == Signum.State.RUNNING) {
             ensureProfileLoggerAttached();
-            // v4 lazy-start: the node may have been started from the toolbar —
-            // register this console's runtime listeners (Latest block, peer
-            // counts, net volume) and perform the initial label refresh.
-            // Idempotent per Signum instance.
+        }
+
+        // v4 lazy-start: runtime listener wiring (Latest block, peer counts, net
+        // volume) happens EXACTLY ONCE, at the RUNNING transition. The
+        // Signum.start() invariant guarantees the BlockchainProcessor exists by
+        // then (created inside doInitialize() before setState(RUNNING)), so
+        // attempting the wiring on STARTING and "retrying on next state push"
+        // was unnecessary — the state machine is the single source of truth
+        // for readiness. Idempotent per Signum instance.
+        if (newState == Signum.State.RUNNING) {
             SwingUtilities.invokeLater(this::ensureRuntimeWiring);
         }
 

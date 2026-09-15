@@ -36,9 +36,15 @@ public class SubscriptionServiceImpl implements SubscriptionService {
 
     private final TransactionDb transactionDb;
 
-    private static final List<Transaction> paymentTransactions = new ArrayList<>();
-    private static final List<Subscription> appliedSubscriptions = new ArrayList<>();
-    private static final Set<Long> removeSubscriptions = new HashSet<>();
+    // Per-profile working state — MUST stay instance-scoped. Each profile owns its
+    // own SubscriptionServiceImpl (created in Signum.initServicesAndHooks), so
+    // concurrent profiles must never share these collections. When these were
+    // `static`, profile B's applyUnconfirmed() wiped profile A's pending list and
+    // A's applyConfirmed() then applied B's subscriptions against A's accounts
+    // (NPE in AccountService / cross-profile transaction writes).
+    private final List<Transaction> paymentTransactions = new ArrayList<>();
+    private final List<Subscription> appliedSubscriptions = new ArrayList<>();
+    private final Set<Long> removeSubscriptions = new HashSet<>();
 
     public SubscriptionServiceImpl(SubscriptionStore subscriptionStore, TransactionDb transactionDb,
             Blockchain blockchain, FluxCapacitor fluxCapacitor, AliasService aliasService,
@@ -223,6 +229,15 @@ public class SubscriptionServiceImpl implements SubscriptionService {
 
     private void apply(Block block, int blockchainHeight, Subscription subscription) {
         Account sender = getSender(subscription);
+        if (sender == null) {
+            // Local state inconsistency: the subscription's sender account is missing
+            // from the local database. Fail loudly with context — the processor maps
+            // this to a state-related rejection so the designed recovery path
+            // (rollback + re-sync) runs instead of an opaque NPE deep in AccountService.
+            throw new IllegalStateException("Subscription sender account missing in local state: subscriptionId="
+                    + subscription.getId() + ", senderId=" + subscription.getSenderId()
+                    + ", blockHeight=" + block.getHeight());
+        }
         Account recipient = getRecipient(subscription);
 
         long totalAmountNQT = Convert.safeAdd(subscription.getAmountNQT(), getFee(block.getHeight()));
