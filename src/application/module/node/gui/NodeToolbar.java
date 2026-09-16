@@ -13,12 +13,11 @@ import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiIcons;
+import application.utils.gui.HoverScaleIcon;
 import application.utils.gui.SpinnerIcon;
 
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
-
-import com.formdev.flatlaf.FlatLaf;
 
 import java.awt.Color;
 import java.awt.Component;
@@ -37,7 +36,6 @@ import javax.swing.JPanel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
-import javax.swing.UIManager;
 import net.miginfocom.swing.MigLayout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -278,62 +276,20 @@ public class NodeToolbar extends JPanel {
     }
 
     /**
-     * Hover scale-up factor for toolbar icon buttons. On rollover the glyph is rendered
-     * this many times larger (1.15f → 15% bigger) instead of changing colour.
-     */
-    private static final float HOVER_ICON_SCALE = 1.15f;
-
-    /**
      * Sets both the normal and the hover (rollover) icons of an icon button.
      * <p>
-     * The hover effect <b>grows</b> the glyph rather than recoloring it, and does so with
-     * no layout shift: the normal and the rollover icon both expose the SAME (larger)
-     * bounding box, so the JButton is sized once (to that box) and never resizes when the
-     * hover glyph is swapped in — the glyph simply scales up inside a constant area, so
-     * nothing below the button moves. The colour is unchanged on hover.
-     * </p>
-     * <p>
-     * A disabled icon is also provided: because the fixed-box wrapper is a plain
-     * {@code Icon} (not an {@code ImageIcon}), FlatLaf cannot auto-derive a grayed
-     * disabled icon for it, so it is derived explicitly from the direct inner glyph via
-     * {@code FlatLaf.getDisabledIcon(...)} — keeping the standard grayed "disabled" look.
+     * The hover effect <b>grows</b> the glyph by {@link HoverScaleIcon#DEFAULT_SCALE}
+     * (15%) rather than recoloring it, with no layout shift: the normal and the
+     * rollover icon both expose the SAME (larger) bounding box, so the JButton is
+     * sized once (to that box) and never resizes when the hover glyph is swapped
+     * in — the glyph simply scales up inside a constant area, so nothing below the
+     * button moves. The colour is unchanged on hover.
      * </p>
      */
     private static void setIconButton(JButton button, FontAwesome iconCode, Color color, float iconSize) {
-        float box = iconSize * HOVER_ICON_SCALE;
-        Icon glyph = IconFontSwing.buildIcon(iconCode, iconSize, color);
-        button.setIcon(fixedBoxIcon(box, glyph));
-        button.setRolloverIcon(fixedBoxIcon(box, IconFontSwing.buildIcon(iconCode, box, color)));
-        // The fixed-box wrapper above is a plain Icon (not an ImageIcon), so FlatLaf cannot
-        // auto-derive a grayed disabled icon for it: getDisabledIcon(...) returns null and
-        // Swing falls back to painting the full-colour normal icon (the "wrong" disabled
-        // colour). Derive the disabled icon from the direct inner glyph (an ImageIcon)
-        // instead, so disabled buttons keep the L&F's proper grayed look.
-        if (UIManager.getLookAndFeel() instanceof FlatLaf flatLaf) {
-            Icon disabled = flatLaf.getDisabledIcon(button, glyph);
-            if (disabled != null) {
-                button.setDisabledIcon(fixedBoxIcon(box, disabled));
-            }
-        }
-    }
-
-    /**
-     * Wraps {@code glyph} in an icon whose bounding box is a fixed {@code boxSize}: the
-     * glyph is centered inside that box. Two such icons sharing the same boxSize have
-     * identical layout dimensions, so swapping them (normal → rollover) never resizes the
-     * button that holds them — only the glyph's apparent size changes.
-     */
-    private static Icon fixedBoxIcon(float boxSize, Icon glyph) {
-        int box = Math.round(boxSize);
-        return new Icon() {
-            @Override public int getIconWidth()  { return box; }
-            @Override public int getIconHeight() { return box; }
-            @Override public void paintIcon(Component c, Graphics g, int x, int y) {
-                int dx = x + (box - glyph.getIconWidth())  / 2;
-                int dy = y + (box - glyph.getIconHeight()) / 2;
-                glyph.paintIcon(c, g, dx, dy);
-            }
-        };
+        HoverScaleIcon.install(button,
+                IconFontSwing.buildIcon(iconCode, iconSize, color),
+                IconFontSwing.buildIcon(iconCode, iconSize * HoverScaleIcon.DEFAULT_SCALE, color));
     }
 
     /**
@@ -864,8 +820,8 @@ public class NodeToolbar extends JPanel {
         spinnerTimer.start();
         // Keep the button's fixed (hover) bounding box so the transition spinner does
         // not resize the button and shift the layout.
-        Icon spinner = fixedBoxIcon(
-                GuiConstants.getToolBarIconSize() * HOVER_ICON_SCALE, spinnerIcon);
+        Icon spinner = HoverScaleIcon.box(
+                GuiConstants.getToolBarIconSize() * HoverScaleIcon.DEFAULT_SCALE, spinnerIcon);
         // The Start/Stop button is DISABLED while the node is starting/stopping, so
         // Swing paints its disabledIcon (and its rolloverIcon on hover) — which still
         // holds the stale grayed PLAY/POWER_OFF left by the last setIconButton() call.

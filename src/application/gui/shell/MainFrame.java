@@ -2,16 +2,21 @@ package application.gui.shell;
 
 import application.gui.glassPanel.GlassPanelManager;
 import application.kernel.ApplicationShutdown;
+import application.utils.gui.GuiColors;
+import application.utils.gui.GuiConstants;
+import application.utils.gui.GuiIcons;
+import application.utils.gui.HoverScaleIcon;
+
+import jiconfont.icons.font_awesome.FontAwesome;
 
 import javax.swing.BorderFactory;
+import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.JToolBar;
 import java.awt.BorderLayout;
-import java.awt.Dimension;
-import java.awt.FlowLayout;
-import java.awt.Font;
+import java.awt.Color;
 
 /**
  * Main application frame containing the toolbar and tabbed module area.
@@ -45,33 +50,46 @@ public class MainFrame extends JFrame {
 
     /**
      * Creates the main application toolbar containing global action buttons.
+     * <p>
+     * The shutdown icon is pinned to the right (east) side of the toolbar;
+     * the left/center area stays free for future global actions.
+     * </p>
      */
     private JToolBar createMainToolbar() {
         JToolBar toolbar = new JToolBar("");
         toolbar.setRollover(true);
         toolbar.setFloatable(false);
-        toolbar.setLayout(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        toolbar.setLayout(new BorderLayout());
         toolbar.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
 
-        // Shutdown button
-        JButton shutdownButton = createShutdownButton();
-        toolbar.add(shutdownButton);
+        // Shutdown icon, positioned on the right side of the toolbar
+        toolbar.add(createShutdownButton(), BorderLayout.EAST);
 
         return toolbar;
     }
 
     /**
-     * Creates the Shutdown button with proper styling and confirmation dialog.
+     * Creates the red shutdown icon button (color palette POWER_OFF glyph).
+     * <p>
+     * On mouse rollover the glyph grows by {@link HoverScaleIcon#DEFAULT_SCALE}
+     * (15%) inside the same fixed bounding box — no layout shift — using the
+     * shared hover-scale behaviour of the node toolbar icon buttons.
+     * </p>
      */
     private JButton createShutdownButton() {
-        JButton button = new JButton("Shutdown");
-        button.setToolTipText("Gracefully shut down all components and exit the application");
+        JButton button = new JButton();
 
-        // Make the font slightly bold for visibility
-        Font currentFont = button.getFont();
-        if (currentFont != null) {
-            button.setFont(currentFont.deriveFont(currentFont.getStyle() | Font.BOLD));
-        }
+        float iconSize = GuiConstants.getToolBarIconSize();
+        Color red = GuiColors.getContrastRed();
+        Icon glyph = GuiIcons.build(FontAwesome.POWER_OFF, Math.round(iconSize), red);
+        Icon hoveredGlyph = GuiIcons.build(FontAwesome.POWER_OFF,
+                Math.round(iconSize * HoverScaleIcon.DEFAULT_SCALE), red);
+        HoverScaleIcon.install(button, glyph, hoveredGlyph);
+
+        button.setToolTipText("Gracefully shut down all components and exit the application");
+        button.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
+        button.setOpaque(false);
+        button.setContentAreaFilled(false);
 
         button.addActionListener(e -> confirmAndShutdown());
 
