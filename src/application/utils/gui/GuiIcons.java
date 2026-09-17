@@ -434,6 +434,57 @@ public final class GuiIcons {
         return new PlusIcon(size, color);
     }
 
+    /**
+     * Thin-line "chevron up" icon, drawn programmatically (custom icon).
+     * <p>
+     * Like {@code PlusIcon} it does not depend on the global GUI font, so GUI
+     * font changes cannot alter its appearance; only its size.
+     *
+     * @return a chevron-up {@link Icon} in the default button-icon color
+     */
+    public static Icon chevronUp() {
+        return chevronUp(SIZE_MEDIUM, GuiColors.getButtonIcon());
+    }
+
+    public static Icon chevronUp(int size) {
+        return chevronUp(size, GuiColors.getButtonIcon());
+    }
+
+    /**
+     * Thin-line "chevron up" icon in a custom color.
+     *
+     * @param size  the icon size in pixels (square)
+     * @param color the stroke color
+     * @return a chevron-up {@link Icon} of the requested size and color
+     */
+    public static Icon chevronUp(int size, Color color) {
+        return new ChevronIcon(size, color, true);
+    }
+
+    /**
+     * Thin-line "chevron down" icon, drawn programmatically (custom icon).
+     *
+     * @return a chevron-down {@link Icon} in the default button-icon color
+     */
+    public static Icon chevronDown() {
+        return chevronDown(SIZE_MEDIUM, GuiColors.getButtonIcon());
+    }
+
+    public static Icon chevronDown(int size) {
+        return chevronDown(size, GuiColors.getButtonIcon());
+    }
+
+    /**
+     * Thin-line "chevron down" icon in a custom color.
+     *
+     * @param size  the icon size in pixels (square)
+     * @param color the stroke color
+     * @return a chevron-down {@link Icon} of the requested size and color
+     */
+    public static Icon chevronDown(int size, Color color) {
+        return new ChevronIcon(size, color, false);
+    }
+
     // ====================================================================
     // Generic Builder - Custom icon with custom color
     // ====================================================================
@@ -570,6 +621,61 @@ public final class GuiIcons {
                 float r = size / 2f - pad;
                 g2.draw(new java.awt.geom.Line2D.Float(cx - r, cy, cx + r, cy));
                 g2.draw(new java.awt.geom.Line2D.Float(cx, cy - r, cx, cy + r));
+            } finally {
+                g2.dispose();
+            }
+        }
+
+        @Override
+        public int getIconWidth() {
+            return size;
+        }
+
+        @Override
+        public int getIconHeight() {
+            return size;
+        }
+    }
+
+    /**
+     * A thin chevron (up or down) drawn with antialiased, round-capped strokes
+     * (used by {@link #chevronUp(int, Color)} / {@link #chevronDown(int, Color)}).
+     */
+    private static final class ChevronIcon implements Icon {
+
+        private final int size;
+        private final Color color;
+        private final boolean up;
+
+        private ChevronIcon(int size, Color color, boolean up) {
+            this.size = Math.max(MIN_ICON_SIZE, size);
+            this.color = color;
+            this.up = up;
+        }
+
+        @Override
+        public void paintIcon(Component c, Graphics g, int x, int y) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            try {
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g2.setColor(color);
+                float stroke = Math.max(1.5f, size * 0.12f);
+                g2.setStroke(new BasicStroke(stroke, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                float cx = x + size / 2f;
+                float cy = y + size / 2f;
+                float span = Math.max(3f, size * 0.25f);
+                float dy = span / 2f;
+                java.awt.geom.Path2D.Double path = new java.awt.geom.Path2D.Double();
+                if (up) {
+                    path.moveTo(cx - span, cy + dy);
+                    path.lineTo(cx, cy - dy);
+                    path.lineTo(cx + span, cy + dy);
+                } else {
+                    path.moveTo(cx - span, cy - dy);
+                    path.lineTo(cx, cy + dy);
+                    path.lineTo(cx + span, cy - dy);
+                }
+                g2.draw(path);
             } finally {
                 g2.dispose();
             }

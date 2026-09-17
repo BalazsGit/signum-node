@@ -11,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import javax.swing.SwingUtilities;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.DefaultStyledDocument;
 import javax.swing.text.StyledDocument;
@@ -208,6 +209,106 @@ class ProfileConsoleSubscriberTest {
             }
 
             subscriber.dispose();
+        }
+    }
+
+    // ------------------------ Runtime filter rebuild ------------------------
+
+    @Nested
+    @DisplayName("Runtime filter rebuild")
+    class FilterRebuildTests {
+
+        private LogEvent eventAt(LogLevel level, String message) {
+            return new LogEvent.Builder()
+                    .timestamp(System.currentTimeMillis())
+                    .level(level)
+                    .loggerName("test.logger")
+                    .message(message)
+                    .threadName("test")
+                    .build();
+        }
+
+        /** Pumps the EDT so pending invokeLater work (batch append, rebuild) runs. */
+        private static void pumpEdt() {
+            try {
+                SwingUtilities.invokeAndWait(() -> { });
+            } catch (Exception e) {
+                throw new AssertionError("EDT pump failed", e);
+            }
+        }
+
+        private String docText() throws BadLocationException {
+            return document.getText(0, document.getLength());
+        }
+
+        @Test
+        @DisplayName("setFilter hides already rendered lines of filtered levels")
+        void setFilter_GivenRenderedLines_HidesFilteredLevels() throws BadLocationException {
+            ProfileConsoleSubscriber subscriber = new ProfileConsoleSubscriber("test", document);
+            try {
+                subscriber.onLogEvent(eventAt(LogLevel.INFO, "info line alpha"));
+                subscriber.onLogEvent(eventAt(LogLevel.ERROR, "error line beta"));
+                subscriber.onLogEvent(eventAt(LogLevel.WARN, "warn line gamma"));
+                subscriber.flush();
+                pumpEdt();
+
+                String all = docText();
+                assertTrue(all.contains("info line alpha"));
+                assertTrue(all.contains("error line beta"));
+                assertTrue(all.contains("warn line gamma"));
+
+                // Only ERROR visible — INFO/WARN lines must disappear
+                subscriber.setFilter(e -> e.getLevel() == LogLevel.ERROR);
+                pumpEdt();
+
+                String filtered = docText();
+                assertFalse(filtered.contains("info line alpha"),
+                        "INFO lines must disappear when INFO is filtered out");
+                assertFalse(filtered.contains("warn line gamma"),
+                        "WARN lines must disappear when WARN is filtered out");
+                assertTrue(filtered.contains("error line beta"));
+
+                // Filter removed — all lines must come back
+                subscriber.setFilter(null);
+                pumpEdt();
+
+                String restored = docText();
+                assertTrue(restored.contains("info line alpha"),
+                        "INFO lines must reappear when the filter is removed");
+                assertTrue(restored.contains("warn line gamma"));
+                assertTrue(restored.contains("error line beta"));
+            } finally {
+                subscriber.dispose();
+            }
+        }
+
+        @Test
+        @DisplayName("events hidden by the filter are kept in history and reappear on relaxation")
+        void setFilter_GivenHiddenEvents_RestoresThemWhenRelaxed() throws BadLocationException {
+            ProfileConsoleSubscriber subscriber = new ProfileConsoleSubscriber("test", document);
+            try {
+                // Filter set from the start: the INFO event is hidden at arrival
+                subscriber.setFilter(e -> e.getLevel() == LogLevel.ERROR);
+                subscriber.onLogEvent(eventAt(LogLevel.INFO, "hidden info line"));
+                subscriber.onLogEvent(eventAt(LogLevel.ERROR, "visible error line"));
+                subscriber.flush();
+                pumpEdt();
+
+                String onlyError = docText();
+                assertFalse(onlyError.contains("hidden info line"));
+                assertTrue(onlyError.contains("visible error line"));
+
+                // Relax the filter: the previously hidden INFO line reappears
+                subscriber.setFilter(null);
+                pumpEdt();
+
+                String restored = docText();
+                assertTrue(restored.contains("hidden info line"),
+                        "events hidden by the old filter must reappear when it is relaxed");
+                assertTrue(restored.contains("visible error line"));
+            } finally {
+                subscriber.dispose();
+            }
         }
     }
 

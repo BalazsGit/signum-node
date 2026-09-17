@@ -154,6 +154,9 @@ public final class ColorPaletteManager {
         colors.put("gui.state.transition", new Color(255, 193, 7));
         colors.put("gui.state.ready", new Color(100, 149, 237));
         colors.put("gui.state.paused", new Color(103, 58, 183));
+        // Console "find" highlight overlay colors (semi-transparent, light palette).
+        colors.put("gui.search.match", new Color(91, 141, 239, 96));
+        colors.put("gui.search.active.match", new Color(255, 167, 38, 220));
         return new ColorPalette("Default", colors);
     }
 

@@ -21,6 +21,8 @@ import javax.swing.JTextPane;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.border.EmptyBorder;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.text.StyledDocument;
 
 import application.module.node.gui.ConsoleFilterHeader;
@@ -86,6 +88,37 @@ public final class UnifiedConsolePanel extends JPanel {
     private ConsoleFilterHeader filterHeader;
     private ConsoleInputPanel inputPanel;
 
+    /** Live "find in console" highlighter (search field + chevron navigation) */
+    private SearchHighlighter searchHighlighter;
+
+    /** Debounced timer that re-runs the active search after new content is appended */
+    private javax.swing.Timer searchRehighlightTimer;
+
+    /** Document length when the highlight was last (re-)applied; distinguishes
+     *  content changes from attribute-only (highlight) changes */
+    private int lastRehighlightedLength = 0;
+
+    /**
+     * Whether the active match of the current query has already been the
+     * target of a navigation request (Enter or chevron). Reset on every
+     * search text change, so the first Enter after a change scrolls to the
+     * first (already active) match while later Enters advance.
+     */
+    private boolean searchAnchorConsumed = false;
+
+    /** Timer driving the animated scroll to the active search match (EDT) */
+    private javax.swing.Timer searchScrollTimer;
+
+    /** Scrollbar value expected from the running search scroll animation;
+     *  any other adjustment event means the user scrolled (cancel animation) */
+    private int searchScrollExpectedValue = -1;
+
+    /** Animation tick interval (ms) for the scroll-to-match animation */
+    private static final int SEARCH_SCROLL_TICK_MS = 16;
+
+    /** Animated scroll speed (px/s) for the scroll-to-match animation */
+    private static final int SEARCH_SCROLL_SPEED_PX_PER_SEC = 3000;
+
     /** Wrapper panel for header region (filterHeader + optional top command input) */
     private JPanel headerRegion;
 
@@ -144,7 +177,7 @@ public final class UnifiedConsolePanel extends JPanel {
 
             // Filter header at NORTH of header region
             if (config.isShowFilterHeader()) {
-                filterHeader = new ConsoleFilterHeader(this::onFilterChanged);
+                filterHeader = createFilterHeader();
                 headerRegion.add(filterHeader, BorderLayout.NORTH);
             }
 
@@ -157,7 +190,7 @@ public final class UnifiedConsolePanel extends JPanel {
             add(headerRegion, BorderLayout.NORTH);
         } else if (config.isShowFilterHeader()) {
             // Only filter header, no wrapper needed
-            filterHeader = new ConsoleFilterHeader(this::onFilterChanged);
+            filterHeader = createFilterHeader();
             add(filterHeader, BorderLayout.NORTH);
         }
 
@@ -167,9 +200,27 @@ public final class UnifiedConsolePanel extends JPanel {
         textPane.setEditable(false);
         textPane.setCaretPosition(0);
 
+        // Live "find in console" highlighting (search header chevrons + field)
+        searchHighlighter = new SearchHighlighter(textPane);
+        if (filterHeader != null) {
+            filterHeader.setSearchTextListener(this::onSearchTextChanged);
+            filterHeader.setSearchNavigationListener(this::onSearchNavigated);
+            filterHeader.setSearchEnterListener(this::onSearchEnter);
+        }
+        installSearchRehighlightListener();
+
         scrollPane = new JScrollPane(textPane);
         scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+
+        // User scroll cancels a running scroll-to-match animation (same
+        // cancellation rule as SmartScrollController's animated bottom scroll).
+        scrollPane.getVerticalScrollBar().addAdjustmentListener(e -> {
+            if (searchScrollTimer != null && searchScrollTimer.isRunning()
+                    && e.getValue() != searchScrollExpectedValue) {
+                stopSearchScrollAnimation();
+            }
+        });
 
         // Wrap console area in a JLayeredPane so the floating scroll-to-bottom button
         // can overlay the text output without interfering with scrolling or selection.
@@ -322,13 +373,242 @@ public final class UnifiedConsolePanel extends JPanel {
     // ── Filter Callback ─────────────────────────────────────────────────
 
     /**
+     * Creates the filter header honouring the per-section visibility flags
+     * (Profile / Module can be disabled, e.g. in the single-profile node console).
+     */
+    private ConsoleFilterHeader createFilterHeader() {
+        return new ConsoleFilterHeader(
+                this::onFilterChanged,
+                config.isShowProfileFilter(),
+                config.isShowModuleFilter());
+    }
+
+    /**
      * Called by ConsoleFilterHeader when filter controls change.
      * Propagates the combined filter to the active subscriber.
+     * <p>
+     * The subscriber rebuilds the already-rendered lines from its retained
+     * event history, so unchecking a level removes those lines and re-checking
+     * restores them. Each rendered line carries its level as a document
+     * attribute ({@link BaseConsoleSubscriber#LEVEL_ATTRIBUTE}).
+     * </p>
      */
     private void onFilterChanged(LogFilter combinedFilter) {
         if (subscriber != null) {
             subscriber.setFilter(combinedFilter);
         }
+        // setFilter() rebuilt (or scheduled a rebuild of) the document — re-run
+        // the live search so the highlights and the "current/total" indicator
+        // land on the rebuilt content. The invokeLater ordering guarantees it
+        // runs after the EDT rebuild. NOTE: this must NOT be guarded by
+        // matchCount() > 0 — a previous rebuild may have reduced the count to
+        // zero while the query is still active, and the search must be
+        // re-executed when the matching lines come back. reapply() is a
+        // no-op when there is no active (non-blank) query, and
+        // refreshMatchIndicator() keeps the label hidden for an empty field.
+        if (searchHighlighter != null) {
+            SwingUtilities.invokeLater(() -> {
+                searchHighlighter.reapply();
+                lastRehighlightedLength = textPane.getDocument().getLength();
+                refreshMatchIndicator();
+            });
+        }
+    }
+
+    // ── Live Search (highlight + chevron navigation) ─────────────────────
+
+    /**
+     * Called by the filter header after every search-field change.
+     * Highlights all matches in the console (or clears the highlight).
+     */
+    private void onSearchTextChanged(String text) {
+        if (searchHighlighter == null) {
+            return;
+        }
+        searchAnchorConsumed = false;
+        searchHighlighter.applySearch(text);
+        lastRehighlightedLength = textPane.getDocument().getLength();
+        refreshMatchIndicator();
+    }
+
+    /**
+     * Called by the filter header chevron buttons:
+     * {@code true} = next match, {@code false} = previous match.
+     */
+    private void onSearchNavigated(Boolean next) {
+        if (searchHighlighter == null) {
+            return;
+        }
+        if (Boolean.TRUE.equals(next)) {
+            searchHighlighter.navigateNext();
+        } else {
+            searchHighlighter.navigatePrevious();
+        }
+        searchAnchorConsumed = true;
+        refreshMatchIndicator();
+        animateScrollToActiveMatch();
+    }
+
+    /**
+     * Called by the filter header when the user presses Enter in the search
+     * field. The first Enter after a query change scrolls to the first
+     * (already active) match; each further Enter advances to the next match.
+     * <p>
+     * Package-private so the (same-package) tests can exercise the
+     * Enter-handling semantics without dispatching synthetic key events
+     * (the reduced JDK does not deliver dispatched {@code KeyEvent}s).
+     * </p>
+     */
+    void onSearchEnter() {
+        if (searchHighlighter == null || searchHighlighter.matchCount() == 0) {
+            return;
+        }
+        if (searchAnchorConsumed) {
+            searchHighlighter.navigateNext();
+            refreshMatchIndicator();
+        } else {
+            searchAnchorConsumed = true;
+        }
+        animateScrollToActiveMatch();
+    }
+
+    /**
+     * Installs a document listener that re-runs the active search (debounced)
+     * when the console content actually changes (new lines appended, trimmed).
+     * Attribute-only changes (our own highlighting) do NOT trigger a re-run.
+     */
+    private void installSearchRehighlightListener() {
+        searchRehighlightTimer = new javax.swing.Timer(250, e -> rehighlightIfActive());
+        searchRehighlightTimer.setRepeats(false);
+        DocumentListener listener = new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                checkSearchRehighlight();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                checkSearchRehighlight();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                checkSearchRehighlight();
+            }
+        };
+        textPane.getDocument().addDocumentListener(listener);
+    }
+
+    /** Schedules a debounced re-highlight when the document length changed. */
+    private void checkSearchRehighlight() {
+        if (searchHighlighter == null || searchHighlighter.matchCount() == 0) {
+            return;
+        }
+        int length = textPane.getDocument().getLength();
+        if (length == lastRehighlightedLength) {
+            return; // attribute-only change (our own highlighting) — skip
+        }
+        if (searchRehighlightTimer != null) {
+            searchRehighlightTimer.restart();
+        }
+    }
+
+    /** Re-applies the active search after the debounce delay. */
+    private void rehighlightIfActive() {
+        if (searchHighlighter == null || searchHighlighter.matchCount() == 0) {
+            return;
+        }
+        searchHighlighter.reapply();
+        lastRehighlightedLength = textPane.getDocument().getLength();
+        refreshMatchIndicator();
+    }
+
+    /**
+     * Refreshes the "current/total" match counter in the filter header from
+     * the live highlighter state (e.g. {@code "1/23"}). Hidden while the
+     * search field is empty.
+     */
+    private void refreshMatchIndicator() {
+        if (filterHeader == null || searchHighlighter == null) {
+            return;
+        }
+        String query = filterHeader.getSearchText();
+        if (query == null || query.isEmpty()) {
+            filterHeader.setSearchMatchIndicatorText("");
+            return;
+        }
+        int total = searchHighlighter.matchCount();
+        int active = searchHighlighter.matchCount() == 0 ? 0 : searchHighlighter.currentIndex() + 1;
+        filterHeader.setSearchMatchIndicatorText(active + "/" + total);
+    }
+
+    /**
+     * Smoothly scrolls the console so the active (strong) search match is
+     * visible (placed in the upper third of the viewport). Driven by an EDT
+     * timer at a fixed pixel speed — the same feel as
+     * {@code SmartScrollController#scrollToBottomAnimated()}.
+     * <p>
+     * No-op when there is no active match or it is already visible.
+     * The animation is cancelled by a user scroll (see the scrollbar
+     * adjustment listener installed in {@link #initUI()}).
+     * </p>
+     */
+    private void animateScrollToActiveMatch() {
+        if (searchHighlighter == null) {
+            return;
+        }
+        int[] range = searchHighlighter.currentMatchRange();
+        if (range == null) {
+            return;
+        }
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(this::animateScrollToActiveMatch);
+            return;
+        }
+        // NOTE: reduced JDK has no JTextComponent#viewForPosition — modelToView
+        // returns the same on-screen bounds directly.
+        java.awt.Rectangle bounds;
+        try {
+            bounds = textPane.modelToView(range[0]);
+        } catch (javax.swing.text.BadLocationException e) {
+            return;
+        }
+        if (bounds == null) {
+            return;
+        }
+        int matchY = bounds.y;
+        int matchHeight = Math.max(1, bounds.height);
+        javax.swing.JScrollBar bar = scrollPane.getVerticalScrollBar();
+        int visibleBottom = bar.getValue() + bar.getVisibleAmount();
+        if (matchY + matchHeight >= bar.getValue() && matchY <= visibleBottom) {
+            return; // already visible — no scroll needed
+        }
+        final int targetValue = Math.max(bar.getMinimum(), Math.min(
+                matchY - bar.getVisibleAmount() / 3,
+                bar.getMaximum() - bar.getVisibleAmount()));
+        final int step = Math.max(1, SEARCH_SCROLL_SPEED_PX_PER_SEC * SEARCH_SCROLL_TICK_MS / 1000);
+        final boolean down = targetValue > bar.getValue();
+        stopSearchScrollAnimation();
+        searchScrollTimer = new javax.swing.Timer(SEARCH_SCROLL_TICK_MS, e -> {
+            javax.swing.JScrollBar b = scrollPane.getVerticalScrollBar();
+            int current = b.getValue();
+            int next = down ? Math.min(current + step, targetValue) : Math.max(current - step, targetValue);
+            searchScrollExpectedValue = next;
+            b.setValue(next);
+            if (next == targetValue) {
+                stopSearchScrollAnimation();
+            }
+        });
+        searchScrollTimer.setRepeats(true);
+        searchScrollTimer.start();
+    }
+
+    /** Stops a running scroll-to-match animation (safe when none is running). */
+    private void stopSearchScrollAnimation() {
+        if (searchScrollTimer != null && searchScrollTimer.isRunning()) {
+            searchScrollTimer.stop();
+        }
+        searchScrollExpectedValue = -1;
     }
 
     // ── Public API (getter accessors for composed components) ────────────
@@ -605,6 +885,12 @@ public final class UnifiedConsolePanel extends JPanel {
         if (filterHeader != null) {
             filterHeader.applyComponentOrientation(getComponentOrientation());
         }
+        // Re-color active search highlights for the new (light/dark) palette
+        if (searchHighlighter != null && searchHighlighter.matchCount() > 0) {
+            searchHighlighter.reapply();
+            lastRehighlightedLength = textPane.getDocument().getLength();
+            refreshMatchIndicator();
+        }
     }
 
     /**
@@ -612,6 +898,13 @@ public final class UnifiedConsolePanel extends JPanel {
      * Disposes the subscriber, detaches scroll controller, stops fade animations, and clears references.
      */
     public void dispose() {
+        if (searchRehighlightTimer != null && searchRehighlightTimer.isRunning()) {
+            searchRehighlightTimer.stop();
+        }
+        stopSearchScrollAnimation();
+        if (searchHighlighter != null) {
+            searchHighlighter.clear();
+        }
         if (scrollToBottomButton != null) {
             scrollToBottomButton.stopFadeAnimation();
         }
@@ -678,9 +971,9 @@ public final class UnifiedConsolePanel extends JPanel {
             addMouseListener(new MouseAdapter() {
                 @Override
                 public void mouseClicked(MouseEvent e) {
-                    // Scroll to bottom and resume following
+                    // Scroll to bottom at a fixed speed and resume following
                     if (subscriber != null && subscriber.getScrollController() != null) {
-                        subscriber.getScrollController().scrollToBottom();
+                        subscriber.getScrollController().scrollToBottomAnimated();
                     }
                 }
 

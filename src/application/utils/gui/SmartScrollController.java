@@ -53,6 +53,12 @@ public final class SmartScrollController {
     /** How many contentAppended calls between summary log messages */
     private static final int SUMMARY_INTERVAL = 100;
 
+    /** Animation tick interval (milliseconds) for the animated scroll-to-bottom */
+    private static final int ANIMATION_TICK_MS = 16;
+
+    /** Default animated scroll speed in pixels per second */
+    public static final int DEFAULT_ANIMATED_SPEED_PX_PER_SEC = 3000;
+
     // ── State ────────────────────────────────────────────────────────────
 
     private JScrollPane scrollPane;
@@ -73,6 +79,12 @@ public final class SmartScrollController {
     
     /** Push-based listeners notified on state changes (no polling) */
     private final List<Consumer<Boolean>> stateChangeListeners = new ArrayList<>();
+
+    /** Timer driving the animated scroll-to-bottom (EDT) */
+    private javax.swing.Timer scrollAnimationTimer;
+
+    /** Animated scroll speed in pixels per second */
+    private int animatedSpeedPxPerSec = DEFAULT_ANIMATED_SPEED_PX_PER_SEC;
 
     // ── Performance counters (low-overhead, no allocation) ────────────────
 
@@ -172,6 +184,7 @@ public final class SmartScrollController {
 
     /** Removes the listener and clears the scroll-pane reference. */
     public void detach() {
+        stopScrollAnimation();
         if (scrollPane != null && adjustmentListener != null) {
             JScrollBar bar = scrollPane.getVerticalScrollBar();
             if (bar != null) {
@@ -322,6 +335,10 @@ public final class SmartScrollController {
             return;
         }
 
+        // Any non-suppressed adjustment is user (or external) intent:
+        // cancel a running animated scroll-to-bottom.
+        stopScrollAnimation();
+
         JScrollBar bar = (JScrollBar) evt.getSource();
         double ratio = getScrollRatio(bar);
 
@@ -360,6 +377,7 @@ public final class SmartScrollController {
             SwingUtilities.invokeLater(this::scrollToBottom);
             return;
         }
+        stopScrollAnimation();
         JScrollPane pane = this.scrollPane;
         if (pane == null) {
             return;
@@ -372,6 +390,115 @@ public final class SmartScrollController {
         following = true;
         hasNewContentBelow = false;
         // Push event: button should be hidden after scrolling to bottom
+        fireStateChanged(false);
+    }
+
+    // ── Animated scroll-to-bottom ────────────────────────────────────────
+
+    /**
+     * Sets the speed of the animated scroll-to-bottom.
+     *
+     * @param pxPerSec the scroll speed in pixels per second (must be positive)
+     */
+    public void setAnimatedSpeed(int pxPerSec) {
+        if (pxPerSec <= 0) {
+            throw new IllegalArgumentException("pxPerSec must be positive, got: " + pxPerSec);
+        }
+        this.animatedSpeedPxPerSec = pxPerSec;
+    }
+
+    /**
+     * @return the current animated scroll speed in pixels per second
+     */
+    public int getAnimatedSpeed() {
+        return animatedSpeedPxPerSec;
+    }
+
+    /**
+     * Scrolls to the bottom at a fixed speed instead of jumping there.
+     * <p>
+     * The vertical scrollbar value is advanced in small steps (driven by an
+     * EDT {@link javax.swing.Timer}) until it reaches the maximum, then follow
+     * mode is resumed and the "new content below" flag is cleared.
+     * </p>
+     * <p>
+     * The animation is cancelled by:
+     * <ul>
+     *   <li>a user scrollbar interaction (any non-suppressed adjustment event),</li>
+     *   <li>an explicit {@link #scrollToBottom()} (instant jump),</li>
+     *   <li>{@link #detach()} / disposal.</li>
+     * </ul>
+     * </p>
+     * <p>
+     * Safe to call from any thread; the animation always runs on the EDT.
+     * </p>
+     */
+    public void scrollToBottomAnimated() {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(this::scrollToBottomAnimated);
+            return;
+        }
+        JScrollBar bar = currentScrollBar();
+        if (bar == null || bar.getValue() >= bar.getMaximum()) {
+            // Nothing to animate: already at the bottom (or not attached)
+            finalizeBottomState();
+            return;
+        }
+        final int step = Math.max(1, animatedSpeedPxPerSec * ANIMATION_TICK_MS / 1000);
+        stopScrollAnimation();
+        scrollAnimationTimer = new javax.swing.Timer(ANIMATION_TICK_MS, e -> {
+            JScrollBar b = currentScrollBar();
+            if (b == null) {
+                stopScrollAnimation();
+                finalizeBottomState();
+                return;
+            }
+            int next = Math.min(b.getValue() + step, b.getMaximum());
+            // Suppress adjustment events so the programmatic steps are not
+            // misinterpreted as user scroll intent
+            boolean wasSuppressing = isSuppressingEvents;
+            try {
+                isSuppressingEvents = true;
+                b.setValue(next);
+            } finally {
+                isSuppressingEvents = wasSuppressing;
+            }
+            if (next >= b.getMaximum()) {
+                stopScrollAnimation();
+                finalizeBottomState();
+            }
+        });
+        scrollAnimationTimer.setRepeats(true);
+        scrollAnimationTimer.start();
+    }
+
+    /**
+     * Stops any running animated scroll-to-bottom without changing the
+     * follow/new-content state.
+     */
+    public void stopScrollAnimation() {
+        if (scrollAnimationTimer != null && scrollAnimationTimer.isRunning()) {
+            scrollAnimationTimer.stop();
+        }
+    }
+
+    /**
+     * @return true if an animated scroll-to-bottom is currently running
+     */
+    public boolean isScrollAnimating() {
+        return scrollAnimationTimer != null && scrollAnimationTimer.isRunning();
+    }
+
+    /** @return the attached vertical scrollbar, or null when detached */
+    private JScrollBar currentScrollBar() {
+        JScrollPane pane = this.scrollPane;
+        return pane != null ? pane.getVerticalScrollBar() : null;
+    }
+
+    /** Restores follow mode and hides the floating scroll-to-bottom button. */
+    private void finalizeBottomState() {
+        following = true;
+        hasNewContentBelow = false;
         fireStateChanged(false);
     }
 

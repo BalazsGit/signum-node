@@ -334,4 +334,28 @@ public final class GuiColors {
     public static Color getHelpIcon() {
         return ColorPaletteManager.getColor("gui.help.icon");
     }
+
+    /**
+     * Gets the background color used to mark (non-active) search matches in the
+     * console "find" feature.
+     * <p>
+     * A semi-transparent overlay so the underlying (level-colored) console text
+     * remains visible.
+     * </p>
+     *
+     * @return The color for regular search match highlights.
+     */
+    public static Color getSearchMatch() {
+        return ColorPaletteManager.getColor("gui.search.match");
+    }
+
+    /**
+     * Gets the background color used to mark the active (navigated) search match
+     * in the console "find" feature.
+     *
+     * @return The color for the active search match highlight.
+     */
+    public static Color getSearchActiveMatch() {
+        return ColorPaletteManager.getColor("gui.search.active.match");
+    }
 }

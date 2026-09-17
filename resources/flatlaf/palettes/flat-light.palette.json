@@ -54,5 +54,7 @@
   "gui.contrast.red": "#D32F2F",
   "gui.state.transition": "#FFC107",
   "gui.state.ready": "#6495ED",
-  "gui.state.paused": "#673AB7"
+  "gui.state.paused": "#673AB7",
+  "gui.search.match": "#605B8DEF",
+  "gui.search.active.match": "#DCFFA726"
 }

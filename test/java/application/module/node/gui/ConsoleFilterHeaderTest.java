@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.HashSet;
@@ -12,6 +13,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+
+import javax.swing.JButton;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -72,21 +75,35 @@ class ConsoleFilterHeaderTest {
         @Test
         void constructor_DefaultState_hasExpectedLevelsSelected() {
             Set<LogLevel> levels = header.getSelectedLevels();
-            assertFalse(levels.contains(LogLevel.TRACE), "TRACE should be unchecked by default");
-            assertFalse(levels.contains(LogLevel.DEBUG), "DEBUG should be unchecked by default");
+            assertTrue(levels.contains(LogLevel.TRACE), "TRACE should be checked by default");
+            assertTrue(levels.contains(LogLevel.DEBUG), "DEBUG should be checked by default");
             assertTrue(levels.contains(LogLevel.INFO), "INFO should be checked by default");
             assertTrue(levels.contains(LogLevel.WARN), "WARN should be checked by default");
             assertTrue(levels.contains(LogLevel.ERROR), "ERROR should be checked by default");
         }
 
         @Test
-        void constructor_DefaultState_searchIsIncludeMode() {
-            assertTrue(header.isSearchIncludeMode());
+        void constructor_DefaultState_allLevelsSelected_meansNoFilter() {
+            // With all 5 levels selected there is nothing to filter
+            assertNull(header.getCurrentFilter());
         }
 
         @Test
-        void constructor_DefaultState_searchIsNotRegexMode() {
-            assertFalse(header.isSearchRegexMode());
+        void constructor_SearchDoesNotFilter_textChangeKeepsFilterNull() {
+            // Search is a live highlight — it must not produce a filter
+            assertNull(header.getCurrentFilter());
+            header.setSearchText("error");
+            assertNull(header.getCurrentFilter(), "Search text must not create a filter");
+        }
+
+        @Test
+        void constructor_SearchTextChange_firesSearchListener() {
+            AtomicReference<String> received = new AtomicReference<>("sentinel");
+            header.setSearchTextListener(received::set);
+
+            header.setSearchText("keyword");
+
+            assertEquals("keyword", received.get());
         }
 
         @Test
@@ -104,12 +121,6 @@ class ConsoleFilterHeaderTest {
         @Test
         void constructor_DefaultState_searchTextIsEmpty() {
             assertEquals("", header.getSearchText());
-        }
-
-        @Test
-        void constructor_DefaultState_currentFilterIsNotNull() {
-            // Default has INFO+WARN+ERROR checked, so there should be a level filter
-            assertNotNull(header.getCurrentFilter());
         }
     }
 
@@ -165,6 +176,31 @@ class ConsoleFilterHeaderTest {
             header.setSelectedLevels(Set.of(LogLevel.ERROR));
 
             assertTrue(callbackCount > before, "Callback should be called");
+        }
+
+        @Test
+        void setSelectedLevels_FourOfFive_producesFilterExcludingTheUnselected() {
+            // Regression: with 4 of 5 levels selected the old code produced NO
+            // filter at all, so the unselected level was still visible.
+            Set<LogLevel> allButInfo = new HashSet<>();
+            allButInfo.add(LogLevel.TRACE);
+            allButInfo.add(LogLevel.DEBUG);
+            allButInfo.add(LogLevel.WARN);
+            allButInfo.add(LogLevel.ERROR);
+
+            header.setSelectedLevels(allButInfo);
+            LogFilter filter = header.getCurrentFilter();
+            assertNotNull(filter, "4-of-5 selection must produce a level filter");
+
+            // INFO events must be blocked, WARN events must pass
+            LogEvent infoEvent = LogEvent.fromText("info message");
+            assertFalse(filter.matches(infoEvent), "INFO should be excluded when unselected");
+
+            LogEvent warnEvent = new LogEvent.Builder()
+                    .level(LogLevel.WARN)
+                    .message("warn message")
+                    .build();
+            assertTrue(filter.matches(warnEvent), "WARN should pass when selected");
         }
     }
 
@@ -247,18 +283,20 @@ class ConsoleFilterHeaderTest {
         }
     }
 
-    // ── Search ───────────────────────────────────────────────────────────
+    // ── Search (live highlight, not a filter) ────────────────────────────
 
     @Nested
     @DisplayName("Search")
     class SearchTests {
 
         @Test
-        void setSearchText_ValidText_triggersCallback() {
+        void setSearchText_ValidText_doesNotTriggerFilterCallback() {
+            // Search is a live highlight — changing the text must NOT change
+            // the combined filter (no extra callback for unchanged filter state).
             int before = callbackCount;
             header.setSearchText("error");
 
-            assertTrue(callbackCount > before, "Callback should be called");
+            assertEquals(before, callbackCount, "Search text must not trigger the filter callback");
         }
 
         @Test
@@ -268,27 +306,60 @@ class ConsoleFilterHeaderTest {
         }
 
         @Test
-        void setSearchIncludeMode_true_setsInclude() {
-            header.setSearchIncludeMode(true);
-            assertTrue(header.isSearchIncludeMode());
+        void setSearchText_Cleared_firesSearchListenerWithEmpty() {
+            AtomicReference<String> received = new AtomicReference<>("sentinel");
+            header.setSearchTextListener(received::set);
+
+            header.setSearchText("abc");
+            header.setSearchText("");
+
+            assertEquals("", received.get(), "Clearing the search must notify with empty text");
         }
 
         @Test
-        void setSearchIncludeMode_false_setsExclude() {
-            header.setSearchIncludeMode(false);
-            assertFalse(header.isSearchIncludeMode());
+        void chevronButtons_fireNavigationListener() {
+            AtomicReference<Boolean> received = new AtomicReference<>(null);
+            header.setSearchNavigationListener(received::set);
+
+            // Click the "Next match" chevron (down) button
+            JButton nextButton = findButtonByTooltip(header, "Next match");
+            assertNotNull(nextButton, "Next match button should exist");
+            nextButton.doClick();
+            assertEquals(Boolean.TRUE, received.get(), "Next chevron should fire with true");
+
+            // Click the "Previous match" chevron (up) button
+            JButton prevButton = findButtonByTooltip(header, "Previous match");
+            assertNotNull(prevButton, "Previous match button should exist");
+            prevButton.doClick();
+            assertEquals(Boolean.FALSE, received.get(), "Previous chevron should fire with false");
+        }
+
+        // NOTE: the Enter-key-to-listener wiring cannot be verified in this
+        // environment: the reduced JDK does not deliver dispatched (synthetic)
+        // KeyEvents to key listeners or key bindings (probed explicitly). The
+        // production wiring is a plain KeyAdapter on the search field, and the
+        // listener contract itself is covered by UnifiedConsolePanelSearchIndicatorTest.
+
+        @Test
+        void searchMatchIndicator_InitiallyHidden() {
+            assertEquals("", header.getSearchMatchIndicatorText(),
+                    "the match counter must be hidden before any search");
         }
 
         @Test
-        void setSearchRegexMode_true_setsRegex() {
-            header.setSearchRegexMode(true);
-            assertTrue(header.isSearchRegexMode());
+        void setSearchMatchIndicatorText_NonEmpty_showsText() {
+            header.setSearchMatchIndicatorText("1/23");
+            assertEquals("1/23", header.getSearchMatchIndicatorText());
         }
 
         @Test
-        void setSearchRegexMode_false_setsContains() {
-            header.setSearchRegexMode(false);
-            assertFalse(header.isSearchRegexMode());
+        void setSearchMatchIndicatorText_NullOrEmpty_hidesLabel() {
+            header.setSearchMatchIndicatorText("2/5");
+            header.setSearchMatchIndicatorText(null);
+            assertEquals("", header.getSearchMatchIndicatorText(), "null text must hide the label");
+            header.setSearchMatchIndicatorText("3/9");
+            header.setSearchMatchIndicatorText("");
+            assertEquals("", header.getSearchMatchIndicatorText(), "empty text must hide the label");
         }
     }
 
@@ -325,18 +396,23 @@ class ConsoleFilterHeaderTest {
         }
 
         @Test
-        void rebuildFilter_LevelAndSearch_producesCompositeFilter() {
+        void rebuildFilter_SearchText_doesNotAffectFilter() {
+            // Search is a live highlight, not part of the combined filter
             header.setSelectedLevels(Set.of(LogLevel.ERROR));
+            LogFilter filterBefore = header.getCurrentFilter();
+
             header.setSearchText("connection");
 
-            LogFilter filter = header.getCurrentFilter();
-            assertNotNull(filter);
-            assertTrue(filter instanceof CompositeFilter);
+            LogFilter filterAfter = header.getCurrentFilter();
+            assertNotNull(filterAfter);
+            assertSame(filterBefore, filterAfter, "Search text must not change the filter");
+            assertFalse(filterAfter instanceof CompositeFilter,
+                "Search must not add a composite filter component");
         }
 
         @Test
         void rebuildFilter_NoActiveFilters_returnsNull() {
-            // Select all 5 levels (no level filter needed), no module, no search
+            // All 5 levels selected (no level filter needed), no module, no search
             Set<LogLevel> allLevels = new HashSet<>();
             allLevels.add(LogLevel.TRACE);
             allLevels.add(LogLevel.DEBUG);
@@ -351,12 +427,6 @@ class ConsoleFilterHeaderTest {
 
             LogFilter filter = header.getCurrentFilter();
             assertNull(filter, "No active filters should produce null");
-        }
-
-        @Test
-        void rebuildFilter_InvalidRegex_doesNotThrow() {
-            header.setSearchRegexMode(true);
-            assertDoesNotThrow(() -> header.setSearchText("[invalid(regex"));
         }
     }
 
@@ -386,25 +456,58 @@ class ConsoleFilterHeaderTest {
             header.resetToDefaults();
 
             Set<LogLevel> levels = header.getSelectedLevels();
-            assertFalse(levels.contains(LogLevel.TRACE));
-            assertFalse(levels.contains(LogLevel.DEBUG));
+            assertTrue(levels.contains(LogLevel.TRACE));
+            assertTrue(levels.contains(LogLevel.DEBUG));
             assertTrue(levels.contains(LogLevel.INFO));
             assertTrue(levels.contains(LogLevel.WARN));
             assertTrue(levels.contains(LogLevel.ERROR));
         }
+    }
+
+    // ── Hidden Sections (node console: no profile/module) ────────────────
+
+    @Nested
+    @DisplayName("Hidden Sections")
+    class HiddenSectionTests {
 
         @Test
-        void resetToDefaults_restoresIncludeMode() {
-            header.setSearchIncludeMode(false);
-            header.resetToDefaults();
-            assertTrue(header.isSearchIncludeMode());
+        void constructor_hiddenProfileAndModule_apiIsSafe() {
+            ConsoleFilterHeader nodeHeader = new ConsoleFilterHeader(mockCallback, false, false);
+            try {
+                // API must remain callable (no NPE) even though sections are hidden
+                assertEquals("", nodeHeader.getProfileText());
+                assertDoesNotThrow(() -> nodeHeader.setProfileText("mainnet"));
+                assertDoesNotThrow(() -> nodeHeader.setProfiles("mainnet", "testnet"));
+                assertEquals("", nodeHeader.getModuleText());
+                assertDoesNotThrow(() -> nodeHeader.setModuleText("node"));
+                assertDoesNotThrow(nodeHeader::resetToDefaults);
+            } finally {
+                nodeHeader.removeAll();
+            }
         }
 
         @Test
-        void resetToDefaults_restoresTextMode() {
-            header.setSearchRegexMode(true);
-            header.resetToDefaults();
-            assertFalse(header.isSearchRegexMode());
+        void constructor_hiddenSections_allLevelsSelected_filterIsNull() {
+            ConsoleFilterHeader nodeHeader = new ConsoleFilterHeader(mockCallback, false, false);
+            try {
+                assertNull(nodeHeader.getCurrentFilter(),
+                    "All levels selected + no profile/module sections = no filter");
+            } finally {
+                nodeHeader.removeAll();
+            }
+        }
+
+        @Test
+        void constructor_hiddenSections_levelFilterStillWorks() {
+            ConsoleFilterHeader nodeHeader = new ConsoleFilterHeader(mockCallback, false, false);
+            try {
+                nodeHeader.setSelectedLevels(Set.of(LogLevel.ERROR));
+                LogFilter filter = nodeHeader.getCurrentFilter();
+                assertNotNull(filter);
+                assertFalse(filter.matches(LogEvent.fromText("info msg")));
+            } finally {
+                nodeHeader.removeAll();
+            }
         }
     }
 
@@ -452,6 +555,29 @@ class ConsoleFilterHeaderTest {
     }
 
     // ── Test Helpers ─────────────────────────────────────────────────────
+
+    /**
+     * Finds a JButton inside the component tree by its tooltip text.
+     */
+    private static JButton findButtonByTooltip(java.awt.Container root, String tooltip) {
+        java.util.Deque<java.awt.Component> queue = new java.util.ArrayDeque<>();
+        queue.add(root);
+        while (!queue.isEmpty()) {
+            java.awt.Component c = queue.poll();
+            if (c instanceof JButton) {
+                JButton button = (JButton) c;
+                if (tooltip.equals(button.getToolTipText())) {
+                    return button;
+                }
+            }
+            if (c instanceof java.awt.Container) {
+                for (java.awt.Component child : ((java.awt.Container) c).getComponents()) {
+                    queue.add(child);
+                }
+            }
+        }
+        return null;
+    }
 
     private static LogEvent createErrorEvent() {
         return new LogEvent.Builder()

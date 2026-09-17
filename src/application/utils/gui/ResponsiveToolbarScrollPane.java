@@ -70,8 +70,12 @@ public class ResponsiveToolbarScrollPane extends JScrollPane {
         setVerticalScrollBarPolicy(VERTICAL_SCROLLBAR_NEVER);
         getHorizontalScrollBar().setUnitIncrement(16);
 
-        // Prevent vertical expansion beyond preferred height
-        final int initialMaxHeight = 64;
+        // Prevent vertical expansion beyond preferred height.
+        // The cap is at least the wrapped content's preferred height (so taller
+        // content — e.g. a titled filter row — is never clipped), but no less
+        // than the historical 64px toolbar height.
+        int initialMaxHeight = Math.max(64,
+                view.getPreferredSize().height + contentInsets.top + contentInsets.bottom);
         setMaximumSize(new Dimension(Integer.MAX_VALUE, initialMaxHeight));
 
         JScrollBar hBar = getHorizontalScrollBar();

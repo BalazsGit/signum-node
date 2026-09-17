@@ -1163,6 +1163,8 @@ public class NodeConsolePanel extends JPanel {
         unifiedConsole = new UnifiedConsolePanel(
             ConsolePanelConfiguration.profileConsole(profileName)
                 .withShowFilterHeader(true)
+                .withShowProfileFilter(false)  // Single-profile node console: profile filter not useful
+                .withShowModuleFilter(false)   // Single-profile node console: module filter not useful
                 .withShowCommandInput(false)  // Command input is managed via hamburger menu toggle
                 .withCommandPosition(ConsoleInputPosition.BOTTOM)
                 .withDefaultCommandPrefix("node." + profileName + " ")

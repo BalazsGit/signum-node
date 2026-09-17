@@ -29,6 +29,8 @@ public final class ConsolePanelConfiguration {
     // ── Properties ───────────────────────────────────────────────────────
 
     private boolean showFilterHeader = true;
+    private boolean showProfileFilter = true;
+    private boolean showModuleFilter = true;
     private boolean showCommandInput = false;
     private ConsoleInputPosition commandPosition = ConsoleInputPosition.BOTTOM;
     private String profileName;                // null = system console
@@ -87,6 +89,18 @@ public final class ConsolePanelConfiguration {
     /** Shows or hides the filter header toolbar. */
     public ConsolePanelConfiguration withShowFilterHeader(boolean value) {
         this.showFilterHeader = value;
+        return this;
+    }
+
+    /** Shows or hides the Profile section of the filter header (default: shown). */
+    public ConsolePanelConfiguration withShowProfileFilter(boolean value) {
+        this.showProfileFilter = value;
+        return this;
+    }
+
+    /** Shows or hides the Module section of the filter header (default: shown). */
+    public ConsolePanelConfiguration withShowModuleFilter(boolean value) {
+        this.showModuleFilter = value;
         return this;
     }
 
@@ -178,6 +192,16 @@ public final class ConsolePanelConfiguration {
         return showFilterHeader;
     }
 
+    /** @return true if the Profile section of the filter header should be shown */
+    public boolean isShowProfileFilter() {
+        return showProfileFilter;
+    }
+
+    /** @return true if the Module section of the filter header should be shown */
+    public boolean isShowModuleFilter() {
+        return showModuleFilter;
+    }
+
     /** @return true if the command input panel should be shown */
     public boolean isShowCommandInput() {
         return showCommandInput;
@@ -250,6 +274,8 @@ public final class ConsolePanelConfiguration {
                 "title='" + title + '\'' +
                 ", profileName='" + profileName + '\'' +
                 ", showFilterHeader=" + showFilterHeader +
+                ", showProfileFilter=" + showProfileFilter +
+                ", showModuleFilter=" + showModuleFilter +
                 ", showCommandInput=" + showCommandInput +
                 ", commandPosition=" + commandPosition +
                 ", animateCommandInput=" + animateCommandInput +
