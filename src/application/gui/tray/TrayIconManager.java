@@ -41,8 +41,12 @@ public class TrayIconManager  {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(TrayIconManager.class);
 
-    /** Default icon path relative to classpath */
-    private static final String DEFAULT_ICON_PATH = "/images/logo.png";
+    /** Tray icon resource candidates, in priority order (classpath-relative). */
+    private static final String[] ICON_PATHS = {
+            "/images/logo.png",
+            "/images/signum_overlay_logo.png",
+            "/images/signum_testnet_logo.png"
+    };
 
     /** Default tooltip text */
     private static final String DEFAULT_TOOLTIP = "Signum Node";
@@ -173,17 +177,22 @@ public class TrayIconManager  {
     }
 
     private Image loadIconImage() {
-        try {
-            java.io.InputStream stream = TrayIconManager.class.getResourceAsStream(DEFAULT_ICON_PATH);
-            if (stream != null) {
-                return Toolkit.getDefaultToolkit().createImage(stream.readAllBytes());
+        for (String path : ICON_PATHS) {
+            try {
+                java.io.InputStream stream = TrayIconManager.class.getResourceAsStream(path);
+                if (stream != null) {
+                    LOGGER.debug("Tray icon loaded from {}", path);
+                    return Toolkit.getDefaultToolkit().createImage(stream.readAllBytes());
+                }
+            } catch (Exception e) {
+                LOGGER.debug("Failed to load tray icon from {}", path, e);
             }
-        } catch (Exception e) {
-            LOGGER.debug("Failed to load custom icon, using fallback", e);
         }
 
-        // Fallback: use default 16x16 color icon
-        return new javax.swing.ImageIcon(TrayIconManager.class.getResource(DEFAULT_ICON_PATH)).getImage();
+        // Last resort: a generated image, so the tray icon always has *something*
+        // to render instead of failing the whole initialization.
+        LOGGER.warn("No tray icon resource found - using generated fallback image");
+        return new java.awt.image.BufferedImage(16, 16, java.awt.image.BufferedImage.TYPE_INT_ARGB);
     }
 
     private void buildPopupMenu() {

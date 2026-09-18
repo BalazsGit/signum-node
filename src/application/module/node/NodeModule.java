@@ -10,6 +10,8 @@ import application.module.node.logging.NodeLoggingProvider;
 import application.module.node.profile.NodeProfile;
 import application.module.node.profile.NodeProfileRepository;
 import application.module.node.profile.ProfileConflictDetector;
+import application.module.node.props.PropertyService;
+import application.module.node.props.Props;
 import application.utils.io.PathUtils;
 import application.utils.logging.ProfileLogger;
 import javax.swing.JComponent;
@@ -17,6 +19,8 @@ import javax.swing.JFrame;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.awt.Desktop;
+import java.net.URI;
 import java.nio.file.Path;
 import java.util.Collection;
 import java.util.Collections;
@@ -1033,6 +1037,40 @@ public class NodeModule implements Module {
         }
         return panel;
     }
+
+    /**
+     * Opens the given web-UI path (e.g. {@code "/phoenix"} or {@code "/classic"})
+     * in the default browser, using the first node that exposes a
+     * {@code PropertyService} (i.e. a started node).
+     * <p>
+     * Used by the system tray menu, where there is no per-profile context:
+     * the wallet link simply targets the first available node's API port.
+     * </p>
+     *
+     * @param path the web-UI path to open (must start with '/')
+     */
+    public void openWebUi(String path) {
+        for (Signum node : getAll()) {
+            if (node == null) {
+                continue;
+            }
+            PropertyService propertyService = node.getPropertyService();
+            if (propertyService == null) {
+                continue;
+            }
+            try {
+                int port = propertyService.getInt(Props.API_PORT);
+                boolean ssl = propertyService.getBoolean(Props.API_SSL);
+                String address = (ssl ? "https://" : "http://") + "localhost:" + port + path;
+                Desktop.getDesktop().browse(new URI(address));
+                return;
+            } catch (Exception e) {
+                LOGGER.warn("Could not open web UI '{}': {}", path, e.getMessage());
+            }
+        }
+        LOGGER.warn("No node with an available PropertyService to open web UI '{}'", path);
+    }
+
 
     // =====================================================================
     // Shutdownable contract overrides
