@@ -3691,9 +3691,27 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
         subscriptionService.clearRemovals();
         transactionService.startNewBlock();
         for (Transaction transaction : block.getTransactions()) {
-            if (!transactionService.applyUnconfirmed(transaction)) {
+            TransactionService.ApplyResult applyResult = transactionService.applyUnconfirmed(transaction);
+            if (!applyResult.isApplied()) {
+                String reason;
+                switch (applyResult.getReason()) {
+                    case MISSING_SENDER_ACCOUNT:
+                        reason = "sender account " + SignumID.fromLong(transaction.getSenderId()).getID()
+                                + " not found in local database";
+                        break;
+                    case DUPLICATE_COMMITMENT_REMOVAL:
+                        reason = "duplicate commitment removal for sender "
+                                + SignumID.fromLong(transaction.getSenderId()).getID() + " in this block";
+                        break;
+                    case REJECTED:
+                    default:
+                        reason = "sender unconfirmed balance " + applyResult.getUnconfirmedBalanceNqt()
+                                + " NQT is less than required " + applyResult.getRequiredAmountNqt()
+                                + " NQT (insufficient balance or rejected attachment)";
+                        break;
+                }
                 throw new TransactionNotAcceptedException(
-                        "Transaction not accepted: " + transaction.getStringId(), transaction);
+                        "Transaction not accepted: " + transaction.getStringId() + " - " + reason, transaction);
             }
         }
         txApplyTimeNanos = (System.nanoTime() - start);
@@ -4293,7 +4311,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         slotFee = feeQuant;
                     }
                     if (transaction.getFeeNqt() >= slotFee) {
-                        if (transactionService.applyUnconfirmed(transaction)) {
+                        if (transactionService.applyUnconfirmed(transaction).isApplied()) {
                             try {
                                 transactionService.validate(transaction);
                                 payloadSize -= transaction.getSize();

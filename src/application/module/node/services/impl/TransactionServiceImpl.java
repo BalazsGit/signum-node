@@ -48,15 +48,27 @@ public class TransactionServiceImpl implements TransactionService {
     }
 
     @Override
-    public boolean applyUnconfirmed(Transaction transaction) {
+    public ApplyResult applyUnconfirmed(Transaction transaction) {
         if (transaction.getType() == TransactionType.SignaMining.COMMITMENT_REMOVE) {
             // we only accept one removal per account per block
             if (accountCommitmentRemovals.get(transaction.getSenderId()) != null)
-                return false;
+                return new ApplyResult(ApplyResult.Reason.DUPLICATE_COMMITMENT_REMOVAL, 0L,
+                        transaction.getType().calculateTotalAmountNQT(transaction));
             accountCommitmentRemovals.put(transaction.getSenderId(), transaction);
         }
         Account senderAccount = accountService.getAccount(transaction.getSenderId());
-        return senderAccount != null && transaction.getType().applyUnconfirmed(transaction, senderAccount);
+        if (senderAccount == null) {
+            return new ApplyResult(ApplyResult.Reason.MISSING_SENDER_ACCOUNT, 0L,
+                    transaction.getType().calculateTotalAmountNQT(transaction));
+        }
+        boolean applied = transaction.getType().applyUnconfirmed(transaction, senderAccount);
+        if (applied) {
+            return new ApplyResult(ApplyResult.Reason.APPLIED, 0L, 0L);
+        }
+        // After a failed apply the unconfirmed balance is restored (or untouched),
+        // so it still reflects the sender's balance before this transaction.
+        return new ApplyResult(ApplyResult.Reason.REJECTED, senderAccount.getUnconfirmedBalanceNqt(),
+                transaction.getType().calculateTotalAmountNQT(transaction));
     }
 
     @Override
