@@ -1,5 +1,6 @@
 package application.gui.shell;
 
+import application.kernel.ApplicationShutdown;
 import application.module.node.gui.animations.RotatingSvgIcon;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -11,6 +12,7 @@ import java.awt.GraphicsEnvironment;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for {@link ShutdownProgressDialog}.
@@ -180,6 +182,34 @@ class ShutdownProgressDialogTest {
                 dialog.setVisible(true);
                 dialog.dispose();
             });
+        }
+    }
+
+    // ====================================================================
+    // Duplicate trigger guard
+    // ====================================================================
+
+    @Nested
+    @DisplayName("Duplicate trigger guard")
+    class DuplicateTriggerTests {
+
+        @Test
+        @DisplayName("a trigger while the shutdown sequence already started is a no-op (headless-safe)")
+        void showAndExecuteShutdown_ignoredWhenAlreadyInitiated() throws Exception {
+            try (org.mockito.MockedStatic<ApplicationShutdown> sh =
+                         org.mockito.Mockito.mockStatic(ApplicationShutdown.class)) {
+                ApplicationShutdown shutdown = mock(ApplicationShutdown.class);
+                when(shutdown.isShutdownInitiated()).thenReturn(true);
+                sh.when(ApplicationShutdown::getInstance).thenReturn(shutdown);
+
+                assertDoesNotThrow(() -> ShutdownProgressDialog.showAndExecuteShutdown(null));
+
+                // Give a (mistakenly) started sequence thread a moment, then prove
+                // it never ran. If the guard were missing, this path would even
+                // reach System.exit and kill the test JVM.
+                Thread.sleep(300);
+                verify(shutdown, never()).executeShutdownSequence();
+            }
         }
     }
 }

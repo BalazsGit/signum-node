@@ -14,8 +14,8 @@ import static application.module.node.web.api.http.common.Parameters.UNSIGNED_TR
 import static application.module.node.web.api.http.common.ResultFields.FULL_HASH_RESPONSE;
 import static org.junit.Assert.assertEquals;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.powermock.api.mockito.PowerMockito.mock;
 
 public class CalculateFullHashTest {
 

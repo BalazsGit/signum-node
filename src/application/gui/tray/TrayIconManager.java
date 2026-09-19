@@ -1,5 +1,8 @@
 package application.gui.tray;
 
+import application.AppInfo;
+import application.module.node.NodeModule;
+import application.module.node.Signum;
 import application.module.node.profile.NodeProfile;
 
 import java.awt.Image;
@@ -9,35 +12,49 @@ import java.awt.SystemTray;
 import java.awt.TrayIcon;
 import java.awt.TrayIcon.MessageType;
 import java.awt.Toolkit;
-import java.awt.event.ActionListener;
-import java.io.File;
+import java.awt.image.BufferedImage;
+import java.io.InputStream;
 
-import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import application.module.node.NodeModule;
-import application.module.node.Signum;
 
 /**
  * Manages the application SystemTray icon with lifecycle integration.
  * <p>
- * This is a singleton that registers as a {@link LifecycleListener} to reactively
- * update the tray icon tooltip and behavior when node profiles change state.
- * <p>
- * Follows the Observer pattern: receives push notifications from
- * {@link NodeLifecycleManager} instead of polling for state changes.
+ * This is a singleton that keeps the tray icon tooltip in sync with the node
+ * state via push-based lifecycle callbacks (see the {@code onState...}
+ * methods below).
  *
- * <h3>Features</h3>
+ * <h3>Behavior</h3>
  * <ul>
  *   <li>Singleton tray icon managed application-wide</li>
- *   <li>Context menu with profile switching, wallet links, shutdown</li>
+ *   <li><b>Right-click</b> on the icon opens a small native context menu at
+ *       the pointer location (exactly where the icon was clicked), offering
+ *       exactly two actions:
+ *       <pre>
+ *       Show application
+ *       Shutdown application
+ *       </pre>
+ *       The menu is the platform popup ({@link TrayIcon#setPopupMenu}), so
+ *       it closes automatically on an outside click, on item selection, or
+ *       on Escape. Left-click is deliberately inert (no action listener).</li>
+ *   <li>"Show application" restores the main frame; "Shutdown application"
+ *       goes through the same confirm + rotating-popup shutdown path as the
+ *       toolbar button (both are plain callback hooks set by the host)</li>
  *   <li>Tooltip reflects operating substate (SYNCING / SYNC_IDLE / PAUSED)</li>
  *   <li>Graceful degradation when SystemTray is not supported</li>
  * </ul>
+ *
+ * <h3>Why a native AWT popup?</h3>
+ * With only plain-text items, the platform popup is the simplest reliable
+ * option: Windows shows it on right-click at the click position and dismisses
+ * it on click-away with no extra plumbing. If the tray menu ever grows icons
+ * or submenus again, a Swing {@code JPopupMenu} shown at the pointer location
+ * can be reintroduced.
  */
-public class TrayIconManager  {
+public class TrayIconManager {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(TrayIconManager.class);
 
@@ -48,8 +65,14 @@ public class TrayIconManager  {
             "/images/signum_testnet_logo.png"
     };
 
-    /** Default tooltip text */
-    private static final String DEFAULT_TOOLTIP = "Signum Node";
+    /** Default tooltip text (the full platform name, from the app-level SSOT). */
+    private static final String DEFAULT_TOOLTIP = AppInfo.PLATFORM_NAME;
+
+    /** Label of the menu item that restores the main application window. */
+    static final String SHOW_APPLICATION_LABEL = "Show application";
+
+    /** Label of the menu item that starts the application shutdown sequence. */
+    static final String SHUTDOWN_APPLICATION_LABEL = "Shutdown application";
 
     // Singleton instance
     private static volatile TrayIconManager instance;
@@ -60,31 +83,23 @@ public class TrayIconManager  {
     // Tray state
     private final boolean traySupported;
     private volatile TrayIcon trayIcon;
-    private final PopupMenu popupMenu;
 
-    // Callback hooks provided by the host application
+    // Callback hooks provided by the host application (resolved at click time)
     private Runnable onShowWindow;
     private Runnable onShutdown;
-    private ActionListener onPhoenixWallet;
-    private ActionListener onClassicWallet;
 
     /**
-     * Private constructor. Use {@link #getInstance(NodeLifecycleManager)} to obtain an instance.
+     * Private constructor. Use {@link #getInstance(NodeModule)} to obtain an instance.
      */
     private TrayIconManager(NodeModule nodeModule) {
         this.nodeModule = nodeModule;
         this.traySupported = SystemTray.isSupported();
-        this.popupMenu = new PopupMenu();
-
-        if (traySupported) {
-            buildPopupMenu();
-        }
     }
 
     /**
      * Gets or creates the singleton instance.
      *
-     * @param lifecycleManager the lifecycle manager to observe
+     * @param nodeModule the node module (used to resolve node states for the tooltip)
      * @return the singleton TrayIconManager
      */
     public static synchronized TrayIconManager getInstance(NodeModule nodeModule) {
@@ -109,7 +124,7 @@ public class TrayIconManager  {
     // ====================================================================
 
     /**
-     * Initializes the tray icon and registers as a lifecycle listener.
+     * Initializes the tray icon.
      * Must be called on the AWT EventQueue (use {@link SwingUtilities#invokeLater(Runnable)}).
      */
     public void initialize() {
@@ -121,10 +136,9 @@ public class TrayIconManager  {
         try {
             trayIcon = createTrayIcon();
             SystemTray.getSystemTray().add(trayIcon);
-            
 
-            trayIcon.displayMessage("Signum Running",
-                    "Signum is running in background, use this icon to interact with it.",
+            trayIcon.displayMessage(AppInfo.NAME + " Running",
+                    AppInfo.NAME + " is running in the background, use this icon to interact with it.",
                     MessageType.INFO);
 
             LOGGER.info("TrayIcon initialized successfully");
@@ -137,24 +151,14 @@ public class TrayIconManager  {
     // Callback setters
     // ====================================================================
 
-    /** Sets the action performed when "Show window" is selected from tray menu. */
+    /** Sets the action performed when "Show application" is selected from the tray menu. */
     public void setShowWindowAction(Runnable onShowWindow) {
         this.onShowWindow = onShowWindow;
     }
 
-    /** Sets the action performed when "Shutdown node" is selected from tray menu. */
+    /** Sets the action performed when "Shutdown application" is selected from the tray menu. */
     public void setShutdownAction(Runnable onShutdown) {
         this.onShutdown = onShutdown;
-    }
-
-    /** Sets the action performed when "Phoenix Wallet" is selected from tray menu. */
-    public void setPhoenixWalletAction(ActionListener onPhoenixWallet) {
-        this.onPhoenixWallet = onPhoenixWallet;
-    }
-
-    /** Sets the action performed when "Classic Wallet" is selected from tray menu. */
-    public void setClassicWalletAction(ActionListener onClassicWallet) {
-        this.onClassicWallet = onClassicWallet;
     }
 
     // ====================================================================
@@ -163,23 +167,51 @@ public class TrayIconManager  {
 
     private TrayIcon createTrayIcon() {
         Image image = loadIconImage();
-        TrayIcon icon = new TrayIcon(image, DEFAULT_TOOLTIP, popupMenu);
+        TrayIcon icon = new TrayIcon(image, DEFAULT_TOOLTIP);
         icon.setImage(icon.getImage().getScaledInstance(
                 icon.getSize().width, -1, Image.SCALE_SMOOTH));
 
-        // Double-click opens Phoenix wallet if available
-        File phoenixIndex = new File("html/ui/phoenix/index.html");
-        if (phoenixIndex.isFile() && phoenixIndex.exists() && onPhoenixWallet != null) {
-            icon.addActionListener(e -> onPhoenixWallet.actionPerformed(null));
-        }
-
+        // The platform shows this popup on right-click, at the pointer
+        // location, and dismisses it automatically on click-away. Left-click
+        // is intentionally not handled (no action listener).
+        icon.setPopupMenu(buildPopupMenu());
         return icon;
+    }
+
+    /**
+     * Builds the tray context menu shown on right-click: the two plain items
+     * "Show application" and "Shutdown application". The callback hooks are
+     * resolved at click time, so the host may wire them after the menu was
+     * built. Package-private so tests can inspect the menu without a real
+     * system tray.
+     */
+    PopupMenu buildPopupMenu() {
+        PopupMenu menu = new PopupMenu();
+        MenuItem showItem = new MenuItem(SHOW_APPLICATION_LABEL);
+        showItem.addActionListener(e -> runOnEdt(onShowWindow));
+        MenuItem shutdownItem = new MenuItem(SHUTDOWN_APPLICATION_LABEL);
+        shutdownItem.addActionListener(e -> runOnEdt(onShutdown));
+        menu.add(showItem);
+        menu.add(shutdownItem);
+        return menu;
+    }
+
+    /** Runs the callback (if any) on the EDT. */
+    private void runOnEdt(Runnable action) {
+        if (action == null) {
+            return;
+        }
+        if (SwingUtilities.isEventDispatchThread()) {
+            action.run();
+        } else {
+            SwingUtilities.invokeLater(action);
+        }
     }
 
     private Image loadIconImage() {
         for (String path : ICON_PATHS) {
             try {
-                java.io.InputStream stream = TrayIconManager.class.getResourceAsStream(path);
+                InputStream stream = TrayIconManager.class.getResourceAsStream(path);
                 if (stream != null) {
                     LOGGER.debug("Tray icon loaded from {}", path);
                     return Toolkit.getDefaultToolkit().createImage(stream.readAllBytes());
@@ -192,44 +224,11 @@ public class TrayIconManager  {
         // Last resort: a generated image, so the tray icon always has *something*
         // to render instead of failing the whole initialization.
         LOGGER.warn("No tray icon resource found - using generated fallback image");
-        return new java.awt.image.BufferedImage(16, 16, java.awt.image.BufferedImage.TYPE_INT_ARGB);
-    }
-
-    private void buildPopupMenu() {
-        MenuItem phoenixItem = new MenuItem("Phoenix Wallet");
-        MenuItem classicItem = new MenuItem("Classic Wallet");
-        MenuItem showItem = new MenuItem("Show window");
-        MenuItem shutdownItem = new MenuItem("Shutdown node");
-
-        phoenixItem.addActionListener(e -> {
-            if (onPhoenixWallet != null) {
-                SwingUtilities.invokeLater(() -> onPhoenixWallet.actionPerformed(null));
-            }
-        });
-        classicItem.addActionListener(e -> {
-            if (onClassicWallet != null) {
-                SwingUtilities.invokeLater(() -> onClassicWallet.actionPerformed(null));
-            }
-        });
-        showItem.addActionListener(e -> {
-            if (onShowWindow != null) {
-                SwingUtilities.invokeLater(onShowWindow);
-            }
-        });
-        shutdownItem.addActionListener(e -> {
-            if (onShutdown != null) {
-                SwingUtilities.invokeLater(onShutdown);
-            }
-        });
-
-        popupMenu.add(phoenixItem);
-        popupMenu.add(classicItem);
-        popupMenu.add(showItem);
-        popupMenu.add(shutdownItem);
+        return new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
     }
 
     // ====================================================================
-    // LifecycleListener implementation (Observer pattern)
+    // Lifecycle callbacks (Observer pattern, push-based)
     // ====================================================================
 
     public void onStateChanged(NodeProfile profile, Signum.State oldState, Signum.State newState) {
@@ -256,7 +255,7 @@ public class TrayIconManager  {
         SwingUtilities.invokeLater(() -> {
             if (trayIcon != null) {
                 trayIcon.displayMessage(
-                        "Signum Error: " + profile.getName(),
+                        AppInfo.NAME + " Error: " + profile.getName(),
                         errorMessage,
                         MessageType.ERROR);
             }
@@ -319,7 +318,7 @@ public class TrayIconManager  {
     // ====================================================================
 
     /**
-     * Removes the tray icon and unregisters as a lifecycle listener.
+     * Removes the tray icon.
      * Call during application shutdown.
      */
     public void dispose() {
@@ -331,7 +330,7 @@ public class TrayIconManager  {
                 LOGGER.warn("Error removing tray icon", e);
             }
         }
-        
+
         trayIcon = null;
     }
 

@@ -3,7 +3,7 @@ package it.java.node;
 import com.google.gson.JsonObject;
 import it.common.AbstractIT;
 import it.common.BlockMessageBuilder;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 public class ProcessASingleBlockTest extends AbstractIT {
 

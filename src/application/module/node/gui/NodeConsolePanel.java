@@ -126,11 +126,12 @@ import application.utils.gui.console.UnifiedConsolePanel;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
+import application.AppInfo;
 import application.module.node.NodeModule;
 
 @SuppressWarnings("serial")
 public class NodeConsolePanel extends JPanel {
-    private static final String FAILED_TO_START_MESSAGE = "Signum caught exception while starting";
+    private static final String FAILED_TO_START_MESSAGE = AppInfo.NAME + " caught exception while starting";
     /** Parent frame reference (used for dialogs and window ancestor lookup) */
     private final JFrame parentFrame;
     /** Current node profile name for hierarchical GUI settings storage */
@@ -149,7 +150,7 @@ public class NodeConsolePanel extends JPanel {
     /** True once this panel's subscriber is attached to the node's ProfileLogger. */
     private volatile boolean profileLoggerAttached = false;
 
-    private static final String UNEXPECTED_EXIT_MESSAGE = "Signum Quit unexpectedly! Exit code ";
+    private static final String UNEXPECTED_EXIT_MESSAGE = AppInfo.NAME + " Quit unexpectedly! Exit code ";
 
     public static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("HH:mm:ss yyyy-MM-dd");
 
@@ -1094,7 +1095,7 @@ public class NodeConsolePanel extends JPanel {
     public NodeConsolePanel(JFrame parentFrame, NodeProfile profile) {
         this.parentFrame = parentFrame;
         this.profileName = profile.getName();
-        this.programName = "Signum Node [" + profile.getName() + "]";
+        this.programName = AppInfo.NAME + " Node [" + profile.getName() + "]";
         this.version = Signum.VERSION.toString();
         this.iconLocation = Props.ICON_LOCATION.getDefaultValue();
         this.confFolder = Signum.CONF_FOLDER;
@@ -1959,7 +1960,8 @@ public class NodeConsolePanel extends JPanel {
                          * }
                          */
                     } else {
-                        trayIcon.displayMessage("Signum GUI closed", "Note that Signum is still running",
+                        trayIcon.displayMessage(AppInfo.NAME + " GUI closed",
+                                "Note that " + AppInfo.NAME + " is still running",
                                 MessageType.INFO);
                         setVisible(false);
                     }
@@ -2015,7 +2017,7 @@ public class NodeConsolePanel extends JPanel {
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
 
-        JLabel messageLabel = new JLabel("Please wait, Signum is shutting down...");
+        JLabel messageLabel = new JLabel("Please wait, " + AppInfo.NAME + " is shutting down...");
         messageLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
         panel.add(messageLabel);
 
@@ -2233,7 +2235,8 @@ public class NodeConsolePanel extends JPanel {
                 parentFrame.setIconImage(ImageIO.read(getClass().getResourceAsStream(iconLocation)));
             }
             TrayIcon newTrayIcon = new TrayIcon(
-                    Toolkit.getDefaultToolkit().createImage(NodePanel.class.getResource(iconLocation)), "Signum Node",
+                    Toolkit.getDefaultToolkit().createImage(NodePanel.class.getResource(iconLocation)),
+                    AppInfo.NAME + " Node",
                     popupMenu);
             newTrayIcon.setImage(
                     newTrayIcon.getImage().getScaledInstance(newTrayIcon.getSize().width, -1, Image.SCALE_SMOOTH));
@@ -2244,8 +2247,9 @@ public class NodeConsolePanel extends JPanel {
             SystemTray systemTray = SystemTray.getSystemTray();
             systemTray.add(newTrayIcon);
 
-            newTrayIcon.displayMessage("Signum Running",
-                    "Signum is running on background, use this icon to interact with it.", MessageType.INFO);
+            newTrayIcon.displayMessage(AppInfo.NAME + " Running",
+                    AppInfo.NAME + " is running in the background, use this icon to interact with it.",
+                    MessageType.INFO);
 
             return newTrayIcon;
         } catch (Exception e) {
@@ -4217,7 +4221,7 @@ public class NodeConsolePanel extends JPanel {
     private void showMessage(String message) {
         SwingUtilities.invokeLater(() -> {
             System.err.println("Showing message: " + message);
-            JOptionPane.showMessageDialog(this, message, "Signum Message", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, message, AppInfo.NAME + " Message", JOptionPane.ERROR_MESSAGE);
         });
     }
 

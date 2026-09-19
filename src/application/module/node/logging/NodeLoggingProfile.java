@@ -1,4 +1,5 @@
 package application.module.node.logging;
+import application.AppInfo;
 import application.utils.config.ModuleIds;
 
 import application.utils.logging.ModuleLoggingProfile;
@@ -33,7 +34,7 @@ public class NodeLoggingProfile extends ModuleLoggingProfile {
     private static final Logger LOGGER = LoggerFactory.getLogger(NodeLoggingProfile.class);
 
     public static final String MODULE_ID = ModuleIds.NODE;
-    public static final String DISPLAY_NAME = "Signum Node";
+    public static final String DISPLAY_NAME = AppInfo.NAME + " Node";
     public static final String DESCRIPTION = "Controls logging for the core Signum node: blockchain, peers, HTTP API, console, and file handlers.";
 
     // Supported preset names (exposed for UI binding)

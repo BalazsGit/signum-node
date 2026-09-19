@@ -203,7 +203,9 @@ public class ShutdownProgressDialog extends JDialog {
     public static void showAndExecuteShutdown(Window owner) {
         ApplicationShutdown shutdown = ApplicationShutdown.getInstance();
         if (shutdown.isShutdownInitiated()) {
-            LOGGER.debug("Shutdown already initiated - ignoring duplicate trigger");
+            // WARN (not DEBUG): a duplicate trigger must be visible in the log,
+            // including in headless mode where there is no UI feedback.
+            LOGGER.warn("Shutdown already in progress - ignoring duplicate shutdown request");
             return;
         }
         if (!DIALOG_ACTIVE.compareAndSet(false, true)) {

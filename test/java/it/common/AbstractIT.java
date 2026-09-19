@@ -1,28 +1,24 @@
 package it.common;
 
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
-
 import application.module.node.NodeModule;
 import application.module.node.Signum;
 import application.module.node.peer.Peers;
 import application.module.node.peer.ProcessBlock;
 import com.google.gson.JsonObject;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PowerMockIgnore;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.mockito.MockedStatic;
+
+import static org.mockito.Mockito.mockStatic;
 
 // TODO: Remove this and add javadoc and rename type
 @SuppressWarnings({
         "checkstyle:MissingJavadocTypeCheck",
         "checkstyle:AbbreviationAsWordInNameCheck" })
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(Peers.class)
-@PowerMockIgnore("javax.net.ssl.*")
 public abstract class AbstractIT {
+
+    private MockedStatic<Peers> peersStatic;
 
     private ProcessBlock processBlock;
 
@@ -30,9 +26,11 @@ public abstract class AbstractIT {
 
     // TODO: Remove suppression and add javadoc
     @SuppressWarnings("checkstyle:MissingJavadocMethodCheck")
-    @Before
+    @BeforeEach
     public void setUp() {
-        mockStatic(Peers.class);
+        // Keep the Peers statics inert while the node starts (same semantics as
+        // the former PowerMock setup).
+        peersStatic = mockStatic(Peers.class);
         // v4 (P0.1): NodeModule is the sole lifecycle entry point — the legacy
         // Signum.init(CaselessProperties) static was removed (its properties
         // argument was never applied to the node anyway).
@@ -41,9 +39,10 @@ public abstract class AbstractIT {
         processBlock = new ProcessBlock(signum.getBlockchain(), signum.getBlockchainProcessor());
     }
 
-    @After
+    @AfterEach
     public void shutdown() {
         NodeModule.getInstance().stopAll();
+        peersStatic.close();
     }
 
     public void processBlock(JsonObject jsonFirstBlock) {

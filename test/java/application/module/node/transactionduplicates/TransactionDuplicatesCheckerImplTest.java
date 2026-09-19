@@ -14,38 +14,45 @@ import application.module.node.common.QuickMocker;
 import application.module.node.common.TestConstants;
 import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.runner.RunWith;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.doReturn;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
+import static org.mockito.Mockito.mockStatic;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(Signum.class)
 public class TransactionDuplicatesCheckerImplTest {
 
-    private TransactionDuplicatesCheckerImpl t = new TransactionDuplicatesCheckerImpl();
+    private TransactionDuplicatesCheckerImpl t;
     private FluxCapacitor fluxCapacitor;
+    private MockedStatic<Signum> signumStatic;
 
-    @Before
+    @BeforeEach
     public void setUp() {
-        mockStatic(Signum.class);
+        // The checker's code path may still reach Signum statics; mocking the class
+        // with un-stubbed defaults keeps the test hermetic (same semantics as the
+        // former PowerMock setup).
+        signumStatic = mockStatic(Signum.class);
 
         fluxCapacitor = QuickMocker.fluxCapacitorEnabledFunctionalities(FluxValues.PRE_POC2);
 
         doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT), anyInt());
 
         t = new TransactionDuplicatesCheckerImpl();
+    }
+
+    @AfterEach
+    public void tearDown() {
+        signumStatic.close();
     }
 
     @DisplayName("First transaction is never a duplicate when checking for any duplicate")

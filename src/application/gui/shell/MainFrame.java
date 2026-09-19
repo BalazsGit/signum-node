@@ -1,12 +1,16 @@
 package application.gui.shell;
 
+import application.AppInfo;
 import application.gui.glassPanel.GlassPanelManager;
+import application.kernel.ApplicationShutdown;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiIcons;
 import application.utils.gui.HoverScaleIcon;
 
 import jiconfont.icons.font_awesome.FontAwesome;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.swing.BorderFactory;
 import javax.swing.Icon;
@@ -41,10 +45,12 @@ public class MainFrame extends JFrame {
      * the tray icon; when not set, the application asks for confirmation and
      * exits gracefully.
      */
+    private static final Logger LOGGER = LoggerFactory.getLogger(MainFrame.class);
+
     private Runnable windowCloseHandler;
 
     public MainFrame() {
-        setTitle("Signum Platform");
+        setTitle(AppInfo.PLATFORM_NAME);
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         setSize(1200, 800);
         setLocationRelativeTo(null);
@@ -189,6 +195,11 @@ public class MainFrame extends JFrame {
      * </p>
      */
     public void confirmAndShutdown() {
+        // While the shutdown sequence runs, do not offer (or start) another one.
+        if (ApplicationShutdown.getInstance().isShutdownInitiated()) {
+            LOGGER.warn("Shutdown already in progress - ignoring duplicate shutdown request");
+            return;
+        }
         int result = JOptionPane.showConfirmDialog(
                 this,
                 "Are you sure you want to shut down the entire application?\n" +
@@ -218,7 +229,7 @@ public class MainFrame extends JFrame {
         setDimmed(true);
 
         // Show shutdown progress feedback on the title bar
-        this.setTitle("Signum Platform - Shutting down...");
+        this.setTitle(AppInfo.PLATFORM_NAME + " - Shutting down...");
 
         // Popup + background shutdown sequence + JVM exit
         ShutdownProgressDialog.showAndExecuteShutdown(this);

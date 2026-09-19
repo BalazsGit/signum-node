@@ -1071,6 +1071,33 @@ public class NodeModule implements Module {
         LOGGER.warn("No node with an available PropertyService to open web UI '{}'", path);
     }
 
+    /**
+     * Focuses the configuration panel of the given profile inside the Node
+     * module GUI: adds the profile's tab if it does not exist yet and
+     * selects it ({@link NodePanel#addProfileTab(String)} is idempotent and
+     * performs the selection itself).
+     * <p>
+     * Intended for out-of-GUI entry points such as the system tray menu,
+     * where the caller is responsible for making the main window visible
+     * first (e.g. via the tray "Show application" action). This is a safe
+     * no-op (debug log) when the module GUI has not been created yet
+     * (headless start / window never shown).
+     * </p>
+     *
+     * @param profileName the profile whose configuration panel to focus (never null/blank)
+     */
+    public void openProfileConfiguration(String profileName) {
+        if (profileName == null || profileName.isBlank()) {
+            throw new IllegalArgumentException("Profile name must not be null or blank");
+        }
+        NodePanel panel = gui;
+        if (panel == null) {
+            LOGGER.debug("openProfileConfiguration('{}'): no NodePanel yet - nothing to focus", profileName);
+            return;
+        }
+        panel.addProfileTab(profileName);
+    }
+
 
     // =====================================================================
     // Shutdownable contract overrides

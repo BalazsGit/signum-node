@@ -161,7 +161,7 @@ public class ApplicationKernel {
 
                 // 6.1 Wire the system tray icon (when supported): the X button
                 //     then merely hides the window, and the app stays reachable
-                //     from the tray (Show window / Shutdown node / wallets).
+                //     from the tray (Show application / Shutdown application).
                 wireTrayIcon(shell, nodeModule);
             });
         }
@@ -185,8 +185,8 @@ public class ApplicationKernel {
     /**
      * Wires the system tray icon to the main shell (must run on the EDT).
      * <p>
-     * When the tray is available: "Show window" restores the main frame,
-     * "Shutdown node" goes through the same confirm + rotating-popup shutdown
+     * When the tray is available: "Show application" restores the main frame,
+     * "Shutdown application" goes through the same confirm + rotating-popup shutdown
      * path as the toolbar button, and closing the main window (X) hides it
      * into the tray. Without tray support the X keeps its default
      * confirm-and-exit behavior.
@@ -212,8 +212,6 @@ public class ApplicationKernel {
             shell.toFront();
         });
         tray.setShutdownAction(shell::confirmAndShutdown);
-        tray.setPhoenixWalletAction(e -> nodeModule.openWebUi("/phoenix"));
-        tray.setClassicWalletAction(e -> nodeModule.openWebUi("/classic"));
         tray.initialize();
 
         // X close = minimize to tray (the app keeps running in the background)

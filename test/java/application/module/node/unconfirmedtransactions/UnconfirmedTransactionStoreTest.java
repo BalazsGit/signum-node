@@ -17,31 +17,28 @@ import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.peer.Peer;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
+import application.module.node.services.AccountService;
 import application.module.node.services.TimeService;
 import application.module.node.services.impl.TimeServiceImpl;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.runner.RunWith;
+import org.junit.jupiter.api.Test;
 import org.mockito.Answers;
-import org.powermock.core.classloader.annotations.PrepareForTest;
-import org.powermock.modules.junit4.PowerMockRunner;
+import org.mockito.MockedStatic;
 
 import java.util.List;
 
 import static application.module.node.Attachment.ORDINARY_PAYMENT;
 import static application.module.node.Constants.FEE_QUANT_SIP3;
-import static org.junit.Assert.assertTrue;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
-import static org.powermock.api.mockito.PowerMockito.mock;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
 
-@RunWith(PowerMockRunner.class)
-@PrepareForTest(Signum.class)
 public class UnconfirmedTransactionStoreTest {
 
     private BlockchainImpl mockBlockChain;
@@ -53,10 +50,13 @@ public class UnconfirmedTransactionStoreTest {
     private TimeService timeService = new TimeServiceImpl();
     private UnconfirmedTransactionStore t;
     private FluxCapacitor fluxCapacitor;
+    private MockedStatic<Signum> signumStatic;
 
-    @Before
+    @BeforeEach
     public void setUp() {
-        mockStatic(Signum.class);
+        // Mock the Signum statics with un-stubbed defaults so the store stays
+        // hermetic (same semantics as the former PowerMock setup).
+        signumStatic = mockStatic(Signum.class);
 
         final PropertyService mockPropertyService = mock(PropertyService.class);
         when(mockPropertyService.getInt(eq(Props.P2P_MAX_UNCONFIRMED_TRANSACTIONS))).thenReturn(8192);
@@ -66,6 +66,9 @@ public class UnconfirmedTransactionStoreTest {
                 .thenReturn(175000);
 
         mockBlockChain = mock(BlockchainImpl.class);
+        final Block mockLastBlock = mock(Block.class);
+        when(mockLastBlock.getHeight()).thenReturn(20);
+        when(mockBlockChain.getLastBlock()).thenReturn(mockLastBlock);
 
         accountStoreMock = mock(AccountStore.class);
         accountTableMock = mock(VersionedBatchEntityTable.class);
@@ -86,8 +89,23 @@ public class UnconfirmedTransactionStoreTest {
         doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT), anyInt());
         doReturn(Constants.FEE_QUANT_SIP3).when(fluxCapacitor).getValue(eq(FluxValues.FEE_QUANT));
 
+        // Transaction.sign()/getBytes() and transaction type validation resolve the
+        // TransactionApplyContext from the current thread (production binds it on the
+        // import threads via ThreadPool); bind an equivalent test context here.
+        TransactionType.bindContext(new TransactionApplyContext(
+                mockBlockChain, fluxCapacitor, mock(AccountService.class),
+                null, null, null, null, null, null, null, null, null, null));
+
         t = new UnconfirmedTransactionStoreImpl(timeService, mockPropertyService, accountStoreMock, transactionDbMock,
                 null);
+        t.setFluxCapacitor(fluxCapacitor);
+        t.setBlockchain(mockBlockChain);
+    }
+
+    @AfterEach
+    public void tearDown() {
+        signumStatic.close();
+        TransactionType.clearContext();
     }
 
     @DisplayName("When we add Unconfirmed Transactions to the store, they can be retrieved")
@@ -209,7 +227,7 @@ public class UnconfirmedTransactionStoreTest {
     }
 
     @DisplayName("The unconfirmed transaction gets denied in case the account is unknown")
-    @Test(expected = NotCurrentlyValidException.class)
+    @Test
     public void unconfirmedTransactionGetsDeniedForUnknownAccount() throws ValidationException {
         when(mockBlockChain.getHeight()).thenReturn(20);
 
@@ -217,11 +235,11 @@ public class UnconfirmedTransactionStoreTest {
                 timeService.getEpochTime() + 50000, (short) 500, ORDINARY_PAYMENT)
                 .id(1).senderId(124L).build();
         transaction.sign(TestConstants.TEST_SECRET_PHRASE);
-        t.put(transaction, null);
+        assertThrows(NotCurrentlyValidException.class, () -> t.put(transaction, null));
     }
 
     @DisplayName("The unconfirmed transaction gets denied in case the account does not have enough unconfirmed balance")
-    @Test(expected = NotCurrentlyValidException.class)
+    @Test
     public void unconfirmedTransactionGetsDeniedForNotEnoughUnconfirmedBalance() throws ValidationException {
         when(mockBlockChain.getHeight()).thenReturn(20);
 
@@ -230,12 +248,8 @@ public class UnconfirmedTransactionStoreTest {
                 .id(1).senderId(123L).build();
         transaction.sign(TestConstants.TEST_SECRET_PHRASE);
 
-        try {
-            t.put(transaction, null);
-        } catch (NotCurrentlyValidException ex) {
-            assertTrue(t.getAll().isEmpty());
-            throw ex;
-        }
+        assertThrows(NotCurrentlyValidException.class, () -> t.put(transaction, null));
+        assertTrue(t.getAll().isEmpty());
     }
 
     @DisplayName("When adding the same unconfirmed transaction, nothing changes")

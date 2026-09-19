@@ -272,7 +272,7 @@ public class ApplicationShutdown {
     public ShutdownResult executeShutdownSequence() {
         // Idempotent guard - only one thread enters the shutdown logic
         if (!shutdownInitiated.compareAndSet(false, true)) {
-            LOGGER.warn("Shutdown already initiated. Returning existing result.");
+            LOGGER.warn("Shutdown already in progress. Returning existing result.");
             return lastResult;
         }
 

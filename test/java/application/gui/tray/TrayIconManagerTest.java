@@ -16,9 +16,10 @@ import static org.mockito.Mockito.*;
 /**
  * Unit tests for {@link TrayIconManager}.
  * <p>
- * Tests verify singleton behavior, constructor injection, listener
- * callbacks, and graceful degradation when SystemTray is not supported.
- * Actual AWT operations are avoided since tests run headless.
+ * Tests verify singleton behavior, constructor injection, the tray context
+ * menu structure and its callbacks, listener callbacks, and graceful
+ * degradation when SystemTray is not supported.
+ * Actual AWT tray operations are avoided since tests run headless.
  *
  * @since 4.0
  */
@@ -93,6 +94,77 @@ class TrayIconManagerTest {
             // We just verify the method returns a consistent boolean.
             boolean supported = manager.isTraySupported();
             assertEquals(supported, manager.isTraySupported());
+        }
+    }
+
+    // ====================================================================
+    // Tray context menu (right-click popup)
+    // ====================================================================
+
+    @Nested
+    @DisplayName("Tray context menu")
+    class TrayMenuTests {
+
+        @Test
+        @DisplayName("the right-click menu offers exactly Show application and Shutdown application")
+        void menu_containsOnlyShowAndShutdown() {
+            TrayIconManager manager = TrayIconManager.getInstance(nodeModule);
+
+            java.awt.PopupMenu menu = manager.buildPopupMenu();
+
+            assertEquals(2, menu.getItemCount());
+            assertEquals(TrayIconManager.SHOW_APPLICATION_LABEL, menu.getItem(0).getLabel());
+            assertEquals(TrayIconManager.SHUTDOWN_APPLICATION_LABEL, menu.getItem(1).getLabel());
+        }
+
+        @Test
+        @DisplayName("clicking Show application fires the show-window callback")
+        void showItem_firesShowWindowCallback() {
+            TrayIconManager manager = TrayIconManager.getInstance(nodeModule);
+            Runnable showWindow = mock(Runnable.class);
+            manager.setShowWindowAction(showWindow);
+
+            clickItem(manager.buildPopupMenu(), TrayIconManager.SHOW_APPLICATION_LABEL);
+
+            verify(showWindow, timeout(2000)).run();
+        }
+
+        @Test
+        @DisplayName("clicking Shutdown application fires the shutdown callback")
+        void shutdownItem_firesShutdownCallback() {
+            TrayIconManager manager = TrayIconManager.getInstance(nodeModule);
+            Runnable shutdown = mock(Runnable.class);
+            manager.setShutdownAction(shutdown);
+
+            clickItem(manager.buildPopupMenu(), TrayIconManager.SHUTDOWN_APPLICATION_LABEL);
+
+            verify(shutdown, timeout(2000)).run();
+        }
+
+        @Test
+        @DisplayName("the callback is resolved at click time (menu may be built before the hooks are wired)")
+        void menuItem_resolvesCallbackAtClickTime() {
+            TrayIconManager manager = TrayIconManager.getInstance(nodeModule);
+            java.awt.PopupMenu menu = manager.buildPopupMenu(); // built before any callback is wired
+            Runnable showWindow = mock(Runnable.class);
+            manager.setShowWindowAction(showWindow);
+
+            clickItem(menu, TrayIconManager.SHOW_APPLICATION_LABEL);
+
+            verify(showWindow, timeout(2000)).run();
+        }
+
+        @Test
+        @DisplayName("menu items without wired callbacks are inert (no throw)")
+        void menuItems_noCallback_doesNotThrow() {
+            TrayIconManager manager = TrayIconManager.getInstance(nodeModule);
+
+            java.awt.PopupMenu menu = manager.buildPopupMenu();
+
+            assertDoesNotThrow(() -> {
+                clickItem(menu, TrayIconManager.SHOW_APPLICATION_LABEL);
+                clickItem(menu, TrayIconManager.SHUTDOWN_APPLICATION_LABEL);
+            });
         }
     }
 
@@ -252,5 +324,19 @@ class TrayIconManagerTest {
         NodeProfile profile = mock(NodeProfile.class);
         when(profile.getName()).thenReturn(name);
         return profile;
+    }
+
+    /** Simulates selecting the menu item with the given label (fires its action listeners). */
+    private static void clickItem(java.awt.PopupMenu menu, String label) {
+        for (int i = 0; i < menu.getItemCount(); i++) {
+            java.awt.MenuItem item = menu.getItem(i);
+            if (label.equals(item.getLabel())) {
+                for (java.awt.event.ActionListener listener : item.getActionListeners()) {
+                    listener.actionPerformed(null);
+                }
+                return;
+            }
+        }
+        throw new AssertionError("Menu item not found: " + label);
     }
 }

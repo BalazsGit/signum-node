@@ -1,5 +1,5 @@
 # NodeJS we're using
-ARG NODE_VERSION=20
+ARG NODE_VERSION=24
 
 FROM node:${NODE_VERSION}-alpine AS builder
 
@@ -17,11 +17,11 @@ RUN  apk update && apk upgrade \
     wget \
     curl \
     gcompat \
-    openjdk21-jdk \
+    openjdk25-jdk \
     binutils \
   && rm -rf /var/cache/apk/*
 
-ENV JAVA_HOME="/usr/lib/jvm/java-21-openjdk"
+ENV JAVA_HOME="/usr/lib/jvm/java-25-openjdk"
 
 WORKDIR /signum-node
 
@@ -37,9 +37,7 @@ RUN sed -i 's/download = true/download = false/g' /signum-node/build.gradle
 RUN chmod +x /signum-node/gradlew \
   && /signum-node/gradlew clean dist jdeps \
     --no-daemon \
-    -Pjdeps.recursive=true \
-    -Pjdeps.ignore.missing.deps=true \
-    -Pjdeps.print.module.deps=true
+    -Dfile.encoding=utf-8
 
 # Unpack the build to /signum
 RUN unzip -o build/distributions/signum-node.zip -d /signum
@@ -80,7 +78,7 @@ RUN mkdir -p /requirements \
   && ldd /jre/bin/java | awk 'NF == 4 { system("cp --parents " $3 " /requirements") }'
 
 # Prepare final image
-FROM alpine:3.23
+FROM alpine:3.24
 LABEL name="Signum Node"
 LABEL description="This is the official Signum Node image"
 LABEL credits="gittrekt,damccull,ohager"
