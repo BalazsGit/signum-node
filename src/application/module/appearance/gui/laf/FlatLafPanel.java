@@ -812,7 +812,11 @@ public class FlatLafPanel
     }
 
     private boolean supportsFlatLafWindowDecorations() {
-        return FlatLaf.supportsNativeWindowDecorations() || SystemInfo.isLinux;
+        // FlatLaf 3.7.2: on Linux also require that the LaF supports window decorations
+        // (e.g. disabled on Linux with Project Wakefield/JBR and -Dawt.toolkit.name=WLToolkit,
+        // see issue #1107 and JBR-10322)
+        return FlatLaf.supportsNativeWindowDecorations() ||
+                (SystemInfo.isLinux && new FlatLightLaf().getSupportsWindowDecorations());
     }
 
     private void initComponents() {
