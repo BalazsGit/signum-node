@@ -13,28 +13,28 @@ import application.module.node.util.CollectionWithIndex;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Collection;
 
 import static application.module.node.web.api.http.common.Parameters.*;
 import static application.module.node.web.api.http.common.ResultFields.TRADES_RESPONSE;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class GetTradesTest extends AbstractUnitTest {
+class GetTradesTest extends AbstractUnitTest {
 
     private GetTrades t;
 
     private ParameterService mockParameterService;
     private AssetExchange mockAssetExchange;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         mockParameterService = mock(ParameterService.class);
         mockAssetExchange = mock(AssetExchange.class);

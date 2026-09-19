@@ -8,19 +8,18 @@ import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.services.TimeService;
 import application.module.node.util.Convert;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.JUnit4;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 
-@RunWith(JUnit4.class)
-public class MockGeneratorTest {
+class MockGeneratorTest {
     private Generator generator;
 
     private static final byte[] exampleGenSig = Convert
@@ -28,7 +27,7 @@ public class MockGeneratorTest {
     private static final long exampleBaseTarget = 70312;
     private static final int exampleHeight = 500000;
 
-    @Before
+    @BeforeEach
     public void setUpGeneratorTest() {
         Blockchain blockchain = mock(Blockchain.class);
         Block block = mock(Block.class);

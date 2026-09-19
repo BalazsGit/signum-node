@@ -12,19 +12,19 @@ import application.module.node.db.SignumKey;
 import application.module.node.db.SignumKey.LongKeyFactory;
 import application.module.node.db.sql.EntitySqlTable;
 import application.module.node.db.store.AssetStore;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.Collection;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
-public class AssetServiceImplTest extends AbstractUnitTest {
+class AssetServiceImplTest extends AbstractUnitTest {
 
     private AssetServiceImpl t;
 
@@ -36,7 +36,7 @@ public class AssetServiceImplTest extends AbstractUnitTest {
     private EntitySqlTable assetTableMock;
     private LongKeyFactory assetDbKeyFactoryMock;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         blockchainMock = mock(Blockchain.class);
         assetAccountServiceMock = mock(AssetAccountServiceImpl.class);

@@ -5,23 +5,23 @@ import application.module.node.Blockchain;
 import application.module.node.common.QuickMocker;
 import application.module.node.util.JSON;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class GetCumulativeDifficultyTest {
+class GetCumulativeDifficultyTest {
 
     private GetCumulativeDifficulty t;
 
     private Blockchain mockBlockchain;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         mockBlockchain = mock(Blockchain.class);
 

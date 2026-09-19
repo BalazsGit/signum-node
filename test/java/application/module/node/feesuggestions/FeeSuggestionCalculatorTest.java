@@ -11,8 +11,8 @@ import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.unconfirmedtransactions.UnconfirmedTransactionStore;
 import application.module.node.util.Listener;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
@@ -25,7 +25,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class FeeSuggestionCalculatorTest extends AbstractUnitTest {
+class FeeSuggestionCalculatorTest extends AbstractUnitTest {
 
     private FeeSuggestionCalculator t;
 
@@ -35,7 +35,7 @@ public class FeeSuggestionCalculatorTest extends AbstractUnitTest {
 
     private ArgumentCaptor<Listener<Block>> listenerArgumentCaptor;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         blockchainProcessorMock = mock(BlockchainProcessor.class);
         unconfirmedTransactionStoreMock = mock(UnconfirmedTransactionStore.class);

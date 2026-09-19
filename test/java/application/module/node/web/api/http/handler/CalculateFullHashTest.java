@@ -2,8 +2,8 @@ package application.module.node.web.api.http.handler;
 
 import application.module.node.util.JSON;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -12,16 +12,16 @@ import static application.module.node.web.api.http.common.JSONResponses.MISSING_
 import static application.module.node.web.api.http.common.Parameters.SIGNATURE_HASH_PARAMETER;
 import static application.module.node.web.api.http.common.Parameters.UNSIGNED_TRANSACTION_BYTES_PARAMETER;
 import static application.module.node.web.api.http.common.ResultFields.FULL_HASH_RESPONSE;
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class CalculateFullHashTest {
+class CalculateFullHashTest {
 
     private CalculateFullHash t;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         t = new CalculateFullHash();
     }

@@ -12,27 +12,27 @@ import application.module.node.util.CollectionWithIndex;
 import application.module.node.util.JSON;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import jakarta.servlet.http.HttpServletRequest;
 
 import static application.module.node.web.api.http.common.ResultFields.*;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class GetAliasesTest extends AbstractUnitTest {
+class GetAliasesTest extends AbstractUnitTest {
 
     private GetAliases t;
 
     private ParameterService mockParameterService;
     private AliasService mockAliasService;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         mockParameterService = mock(ParameterService.class);
         mockAliasService = mock(AliasService.class);

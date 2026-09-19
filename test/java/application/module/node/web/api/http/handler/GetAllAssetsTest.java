@@ -11,8 +11,8 @@ import application.module.node.util.CollectionWithIndex;
 import application.module.node.util.JSON;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Collection;
@@ -20,8 +20,8 @@ import java.util.Collection;
 import static application.module.node.web.api.http.common.Parameters.FIRST_INDEX_PARAMETER;
 import static application.module.node.web.api.http.common.Parameters.LAST_INDEX_PARAMETER;
 import static application.module.node.web.api.http.common.ResultFields.*;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -33,7 +33,7 @@ class GetAllAssetsTest extends AbstractUnitTest {
     private AssetExchange assetExchange;
     private AccountService accountService;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         assetExchange = mock(AssetExchange.class);
         accountService = mock(AccountService.class);

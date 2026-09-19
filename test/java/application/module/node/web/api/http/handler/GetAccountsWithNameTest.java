@@ -7,28 +7,28 @@ import application.module.node.common.QuickMocker;
 import application.module.node.services.AccountService;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Collection;
 
 import static application.module.node.web.api.http.common.Parameters.ACCOUNTS_RESPONSE;
 import static application.module.node.web.api.http.common.Parameters.NAME_PARAMETER;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 ;
 
-public class GetAccountsWithNameTest extends AbstractUnitTest {
+class GetAccountsWithNameTest extends AbstractUnitTest {
 
     private AccountService accountService;
 
     private GetAccountsWithName t;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         accountService = mock(AccountService.class);
 

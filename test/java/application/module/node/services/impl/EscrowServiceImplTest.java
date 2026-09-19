@@ -12,18 +12,18 @@ import application.module.node.db.store.EscrowStore;
 import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.services.AccountService;
 import application.module.node.services.AliasService;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collection;
 import java.util.List;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class EscrowServiceImplTest {
+class EscrowServiceImplTest {
 
     private EscrowServiceImpl t;
 
@@ -38,7 +38,7 @@ public class EscrowServiceImplTest {
     private TransactionDb transactionDbMock;
     private FluxCapacitor fluxCapacitorMock;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         mockEscrowStore = mock(EscrowStore.class);
         mockEscrowTable = mock(VersionedEntityTable.class);

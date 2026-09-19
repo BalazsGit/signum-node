@@ -13,8 +13,8 @@ import application.module.node.services.ParameterService;
 import application.module.node.util.JSON;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Arrays;
@@ -23,23 +23,23 @@ import java.util.Collection;
 import static application.module.node.web.api.http.common.Parameters.ACCOUNT_PARAMETER;
 import static application.module.node.web.api.http.common.Parameters.ESCROWS_RESPONSE;
 import static application.module.node.web.api.http.common.ResultFields.*;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 ;
 
-public class GetAccountEscrowTransactionsTest extends AbstractUnitTest {
+class GetAccountEscrowTransactionsTest extends AbstractUnitTest {
 
     private ParameterService parameterServiceMock;
     private EscrowService escrowServiceMock;
 
     private GetAccountEscrowTransactions t;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         parameterServiceMock = mock(ParameterService.class);
         escrowServiceMock = mock(EscrowService.class);

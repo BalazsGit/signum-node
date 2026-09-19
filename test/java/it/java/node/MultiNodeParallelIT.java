@@ -1,16 +1,16 @@
 package it.java.node;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotSame;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-import org.junit.After;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import application.module.node.NodeModule;
 import application.module.node.Signum;
@@ -32,7 +32,7 @@ import application.module.node.Signum;
  * therefore does not interfere with the shared {@code ./conf} state.
  * </p>
  */
-public class MultiNodeParallelIT {
+class MultiNodeParallelIT {
 
     private static final String ALPHA = "parallel-it-alpha-" + System.nanoTime();
     private static final String BETA = "parallel-it-beta-" + System.nanoTime();
@@ -42,10 +42,10 @@ public class MultiNodeParallelIT {
     private static final int BETA_HTTP_PORT = 18126;
     private static final int BETA_P2P_PORT = 18124;
 
-    @org.junit.Rule
-    public TemporaryFolder confRoot = new TemporaryFolder();
+    @TempDir
+    Path confRoot;
 
-    @After
+    @AfterEach
     public void teardown() {
         // Never leak running nodes into other tests (v4: NodeModule is the sole lifecycle root).
         NodeModule.getInstance().stopAll();
@@ -71,29 +71,29 @@ public class MultiNodeParallelIT {
 
     @Test
     public void twoProfiles_differentPorts_bothRunning_independently() throws Exception {
-        Path root = confRoot.getRoot().toPath();
+        Path root = confRoot;
         writeProfile(root, ALPHA, ALPHA_HTTP_PORT, ALPHA_P2P_PORT);
         writeProfile(root, BETA, BETA_HTTP_PORT, BETA_P2P_PORT);
 
         NodeModule module = NodeModule.getInstance();
         Signum alpha = module.startNode(ALPHA, root);
         try {
-            assertTrue("alpha must be RUNNING, was " + alpha.getState(),
-                    alpha.getState() == Signum.State.RUNNING);
+            assertTrue(alpha.getState() == Signum.State.RUNNING,
+                    "alpha must be RUNNING, was " + alpha.getState());
 
             // ── The actual mission: start the SECOND node while the first runs ──
             Signum beta = module.startNode(BETA, root);
             try {
-                assertNotSame("each profile must own its own Signum instance", alpha, beta);
-                assertTrue("beta must be RUNNING while alpha runs, was " + beta.getState(),
-                        beta.getState() == Signum.State.RUNNING);
-                assertTrue("alpha must stay RUNNING after beta started, was " + alpha.getState(),
-                        alpha.getState() == Signum.State.RUNNING);
+                assertNotSame(alpha, beta, "each profile must own its own Signum instance");
+                assertTrue(beta.getState() == Signum.State.RUNNING,
+                        "beta must be RUNNING while alpha runs, was " + beta.getState());
+                assertTrue(alpha.getState() == Signum.State.RUNNING,
+                        "alpha must stay RUNNING after beta started, was " + alpha.getState());
 
                 // ── Stop A: B is untouched ──
                 module.stopNode(ALPHA);
-                assertEquals("stopping alpha must not affect beta",
-                        Signum.State.RUNNING, beta.getState());
+                assertEquals(Signum.State.RUNNING, beta.getState(),
+                        "stopping alpha must not affect beta");
             } finally {
                 module.stopNode(BETA);
             }

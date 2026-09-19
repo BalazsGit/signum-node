@@ -8,17 +8,20 @@ import application.module.node.db.SignumKey.LongKeyFactory;
 import application.module.node.db.VersionedBatchEntityTable;
 import application.module.node.db.store.AccountStore;
 import application.module.node.db.store.AssetTransferStore;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collection;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
-public class AccountServiceImplTest {
+class AccountServiceImplTest {
 
     private AccountStore accountStoreMock;
     private VersionedBatchEntityTable<Account> accountTableMock;
@@ -28,7 +31,7 @@ public class AccountServiceImplTest {
 
     private AccountServiceImpl t;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         accountStoreMock = mock(AccountStore.class);
         accountTableMock = mock(VersionedBatchEntityTable.class);
@@ -120,7 +123,7 @@ public class AccountServiceImplTest {
         assertNull(t.getAccount(publicKey));
     }
 
-    @Test(expected = RuntimeException.class)
+    @Test
     public void getAccount_withPublicKey_duplicateKeyForAccount() {
         byte[] publicKey = new byte[1];
         publicKey[0] = (byte) 1;
@@ -135,7 +138,7 @@ public class AccountServiceImplTest {
 
         when(mockAccount.getPublicKey()).thenReturn(otherPublicKey);
 
-        t.getAccount(publicKey);
+        assertThrows(RuntimeException.class, () -> t.getAccount(publicKey));
     }
 
     @Test

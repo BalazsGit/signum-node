@@ -84,14 +84,9 @@ dependencies {
 
     testImplementation("org.junit.platform:junit-platform-engine:6.1.3")
     testImplementation("org.junit.platform:junit-platform-launcher:6.1.3")
-    testImplementation("org.junit.jupiter:junit-jupiter-api:6.1.3")
-    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:6.1.3")
-    testRuntimeOnly("org.junit.vintage:junit-vintage-engine:6.1.3")
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
 
     testImplementation 'org.apache.httpcomponents:httpclient:4.5.14'
-    // JUnit 4 is still used directly by many legacy test classes (run through the
-    // JUnit Vintage engine); previously it only arrived transitively via PowerMock.
-    testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.mockito:mockito-core:5.23.0'
     testImplementation 'org.mockito:mockito-junit-jupiter:5.23.0'
 }

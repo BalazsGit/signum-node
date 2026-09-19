@@ -6,8 +6,8 @@ import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.util.JSON;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -15,15 +15,15 @@ import static application.module.node.web.api.http.common.Parameters.API_KEY_PAR
 import static application.module.node.web.api.http.common.ResultFields.DONE_RESPONSE;
 import static application.module.node.web.api.http.common.ResultFields.ERROR_RESPONSE;
 import static application.module.node.web.api.http.common.ResultFields.ERROR_CODE_RESPONSE;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 
 import java.util.ArrayList;
 
-public class ClearUnconfirmedTransactionsTest {
+class ClearUnconfirmedTransactionsTest {
 
     private ClearUnconfirmedTransactions t;
 
@@ -32,7 +32,7 @@ public class ClearUnconfirmedTransactionsTest {
 
     private static final String KEY = "abc";
 
-    @Before
+    @BeforeEach
     public void init() {
         transactionProcessorMock = mock(TransactionProcessor.class);
         propertyService = mock(PropertyService.class);

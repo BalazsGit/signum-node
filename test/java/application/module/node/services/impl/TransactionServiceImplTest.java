@@ -7,12 +7,12 @@ import application.module.node.TransactionType;
 import application.module.node.common.AbstractUnitTest;
 import application.module.node.services.AccountService;
 import application.module.node.services.TransactionService;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -20,7 +20,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class TransactionServiceImplTest extends AbstractUnitTest {
+class TransactionServiceImplTest extends AbstractUnitTest {
 
     private static final long SENDER_ID = 12345L;
     private static final long REQUIRED_AMOUNT_NQT = 1001000000L;
@@ -32,7 +32,7 @@ public class TransactionServiceImplTest extends AbstractUnitTest {
     private Transaction transaction;
     private TransactionType transactionType;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         accountService = mock(AccountService.class);
         Blockchain blockchain = mock(Blockchain.class);

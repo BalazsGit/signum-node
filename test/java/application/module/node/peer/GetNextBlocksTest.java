@@ -9,27 +9,26 @@ import application.module.node.props.Props;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.JUnit4;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
 
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-@RunWith(JUnit4.class)
-public class GetNextBlocksTest {
+class GetNextBlocksTest {
     private GetNextBlocks getNextBlocks;
     private Blockchain mockBlockchain;
     private PropertyService mockPropertyService;
     private Peer mockPeer;
 
-    @Before
+    @BeforeEach
     public void setUpGetNextBlocksTest() {
         mockBlockchain = mock(Blockchain.class);
         mockPropertyService = mock(PropertyService.class);

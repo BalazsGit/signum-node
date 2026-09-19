@@ -1,21 +1,18 @@
 package application.module.node.deeplink;
 
 import com.google.zxing.WriterException;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.JUnit4;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.awt.image.BufferedImage;
 import java.io.UnsupportedEncodingException;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
-@RunWith(JUnit4.class)
-public class DeeplinkGeneratorTest {
+class DeeplinkGeneratorTest {
     private DeeplinkGenerator deeplinkGenerator;
 
-    @Before
+    @BeforeEach
     public void setUpDeeplinkGeneratorTest() {
         deeplinkGenerator = new DeeplinkGenerator();
     }

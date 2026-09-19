@@ -12,15 +12,15 @@ import application.module.node.services.AccountService;
 import application.module.node.services.ParameterService;
 import application.module.node.util.JSON;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import jakarta.servlet.http.HttpServletRequest;
 
 import static application.module.node.web.api.http.common.Parameters.ASSET_PARAMETER;
 import static application.module.node.web.api.http.common.ResultFields.*;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -35,7 +35,7 @@ class GetAssetTest extends AbstractUnitTest {
     private FluxCapacitor fluxCapacitor;
     private Blockchain blockchain;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         parameterServiceMock = mock(ParameterService.class);
         mockAssetExchange = mock(AssetExchange.class);

@@ -14,23 +14,23 @@ import application.module.node.util.CollectionWithIndex;
 import application.module.node.util.JSON;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Collection;
 
 import static application.module.node.web.api.http.common.Parameters.*;
 import static application.module.node.web.api.http.common.ResultFields.*;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 ;
 
-public class GetAssetTransfersTest extends AbstractUnitTest {
+class GetAssetTransfersTest extends AbstractUnitTest {
 
     private GetAssetTransfers t;
 
@@ -38,7 +38,7 @@ public class GetAssetTransfersTest extends AbstractUnitTest {
     private AccountService mockAccountService;
     private AssetExchange mockAssetExchange;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         mockParameterService = mock(ParameterService.class);
         mockAccountService = mock(AccountService.class);

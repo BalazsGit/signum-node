@@ -17,8 +17,8 @@ import application.module.node.util.CollectionWithIndex;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -30,8 +30,8 @@ import java.util.Collection;
 
 import static application.module.node.web.api.http.common.Parameters.*;
 import static application.module.node.web.api.http.common.ResultFields.BLOCKS_RESPONSE;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -47,7 +47,7 @@ class GetAccountBlocksTest extends AbstractUnitTest {
     private ParameterService parameterServiceMock;
     private BlockService blockServiceMock;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         blockchainMock = mock(Blockchain.class);
         parameterServiceMock = mock(ParameterService.class);

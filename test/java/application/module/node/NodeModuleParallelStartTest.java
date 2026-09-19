@@ -1,6 +1,6 @@
 package application.module.node;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import java.util.ArrayList;
@@ -10,9 +10,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * v5 (multi-node) tests for the PARALLEL lifecycle executor + per-profile
@@ -38,7 +38,7 @@ import static org.junit.Assert.assertTrue;
  * (orthogonal to the concurrency contract under test here).
  * </p>
  */
-public class NodeModuleParallelStartTest {
+class NodeModuleParallelStartTest {
 
     private NodeModule module() {
         return NodeModule.getInstance();
@@ -75,12 +75,12 @@ public class NodeModuleParallelStartTest {
         try {
             module().startNode(name);
             // Contract: pending is set SYNCHRONOUSLY by startNode, before the task runs.
-            assertTrue("start must be pending immediately after startNode() returns",
-                    module().isStartPending(name));
+            assertTrue(module().isStartPending(name),
+                    "start must be pending immediately after startNode() returns");
 
             awaitNotPending(name, 10000);
-            assertFalse("pending mark must be cleared once the start task completed",
-                    module().isStartPending(name));
+            assertFalse(module().isStartPending(name),
+                    "pending mark must be cleared once the start task completed");
         } finally {
             module().removeNode(name);
         }
@@ -95,12 +95,12 @@ public class NodeModuleParallelStartTest {
         module().addNode(fake);
         try {
             module().startNode(name);
-            assertTrue("start must be pending right after startNode() returns",
-                    module().isStartPending(name));
+            assertTrue(module().isStartPending(name),
+                    "start must be pending right after startNode() returns");
 
             awaitNotPending(name, 10000);
-            assertFalse("pending mark must be cleared even when start() throws",
-                    module().isStartPending(name));
+            assertFalse(module().isStartPending(name),
+                    "pending mark must be cleared even when start() throws");
         } finally {
             module().removeNode(name);
         }
@@ -134,9 +134,9 @@ public class NodeModuleParallelStartTest {
                 Thread.sleep(25);
             }
 
-            assertEquals("both start tasks must run", 4, events.size());
-            assertEquals("starts for the same profile must be strictly serialized in order",
-                    List.of("enter", "exit", "enter", "exit"), events);
+            assertEquals(4, events.size(), "both start tasks must run");
+            assertEquals(List.of("enter", "exit", "enter", "exit"), events,
+                    "starts for the same profile must be strictly serialized in order");
         } finally {
             module().removeNode(name);
         }
@@ -186,10 +186,10 @@ public class NodeModuleParallelStartTest {
             awaitNotPending(a, 10000);
             awaitNotPending(b, 10000);
 
-            assertTrue("both profiles' start tasks must have entered (overlap window)", overlapped);
-            assertTrue("different profiles must start in PARALLEL (max concurrent starts="
-                            + maxActive.get() + ", expected >= 2)",
-                    maxActive.get() >= 2);
+            assertTrue(overlapped, "both profiles' start tasks must have entered (overlap window)");
+            assertTrue(maxActive.get() >= 2,
+                    "different profiles must start in PARALLEL (max concurrent starts="
+                            + maxActive.get() + ", expected >= 2)");
         } finally {
             module().removeNode(a);
             module().removeNode(b);
@@ -216,8 +216,9 @@ public class NodeModuleParallelStartTest {
             // should fire another. Allow the task to complete.
             awaitNotPending(name, 10000);
             Thread.sleep(100);
-            assertTrue("pending listener must be notified when the pending set changes "
-                    + "(got " + notifications.get() + ")", notifications.get() >= 1);
+            assertTrue(notifications.get() >= 1,
+                    "pending listener must be notified when the pending set changes "
+                            + "(got " + notifications.get() + ")");
         } finally {
             module().removePendingListener(listener);
             module().removeNode(name);

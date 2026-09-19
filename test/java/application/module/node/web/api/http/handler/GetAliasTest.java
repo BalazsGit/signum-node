@@ -8,26 +8,26 @@ import application.module.node.services.ParameterService;
 import application.module.node.util.JSON;
 import application.module.node.web.api.http.common.ParameterException;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import jakarta.servlet.http.HttpServletRequest;
 
 import static application.module.node.web.api.http.common.ResultFields.*;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class GetAliasTest {
+class GetAliasTest {
 
     private GetAlias t;
 
     private ParameterService mockParameterService;
     private AliasService mockAliasService;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         mockParameterService = mock(ParameterService.class);
         mockAliasService = mock(AliasService.class);

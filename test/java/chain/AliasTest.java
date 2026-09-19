@@ -1,17 +1,15 @@
 package chain;
 
 import static chain.ChainUtils.*;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Random;
 
-import org.junit.BeforeClass;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.JUnit4;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
 import signumj.entity.SignumAddress;
 import signumj.entity.SignumID;
@@ -22,13 +20,12 @@ import signumj.entity.response.TLD;
 import signumj.entity.response.TransactionBroadcast;
 import signumj.service.TransactionBuilder;
 
-@RunWith(JUnit4.class)
-public class AliasTest {
+class AliasTest {
     Random r = new Random();
     
-    @BeforeClass
+    @BeforeAll
     public static void setUpTest() {
-        assertTrue("Mock node did not responded in time", setupNode());
+        assertTrue(setupNode(), "Mock node did not responded in time");
     }
 
     @Test

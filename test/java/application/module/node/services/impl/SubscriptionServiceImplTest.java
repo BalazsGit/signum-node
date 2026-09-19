@@ -19,14 +19,14 @@ import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.AccountService;
 import application.module.node.services.AliasService;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collection;
 import java.util.List;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -34,7 +34,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-public class SubscriptionServiceImplTest extends AbstractUnitTest {
+class SubscriptionServiceImplTest extends AbstractUnitTest {
 
     private SubscriptionServiceImpl t;
 
@@ -48,7 +48,7 @@ public class SubscriptionServiceImplTest extends AbstractUnitTest {
     private AliasStore aliasStore;
     private AccountService accountService;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         mockSubscriptionStore = mock(SubscriptionStore.class);
         mockSubscriptionTable = mock(VersionedEntityTable.class);

@@ -4,24 +4,24 @@ import application.module.node.Trade;
 import application.module.node.common.AbstractUnitTest;
 import application.module.node.db.sql.EntitySqlTable;
 import application.module.node.db.store.TradeStore;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collection;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class TradeServiceImplTest extends AbstractUnitTest {
+class TradeServiceImplTest extends AbstractUnitTest {
 
     private TradeServiceImpl t;
 
     private TradeStore mockTradeStore;
     private EntitySqlTable<Trade> mockTradeTable;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         mockTradeStore = mock(TradeStore.class);
         mockTradeTable = mock(EntitySqlTable.class);

@@ -4,10 +4,8 @@ import application.module.node.*;
 import application.module.node.db.store.IndirectIncomingStore;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.JUnit4;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -16,16 +14,15 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
-@RunWith(JUnit4.class)
-public class IndirectIncomingServiceImplTest {
+class IndirectIncomingServiceImplTest {
     private final AtomicReference<Consumer<List<IndirectIncoming>>> addIndirectIncomingsRunnable = new AtomicReference<>();
     private IndirectIncomingServiceImpl indirectIncomingService;
 
-    @Before
+    @BeforeEach
     public void setUpIndirectIncomingServiceImplTest() {
         PropertyService propertyService = mock(PropertyService.class);
         IndirectIncomingStore indirectIncomingStore = mock(IndirectIncomingStore.class);

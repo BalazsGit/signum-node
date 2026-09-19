@@ -7,27 +7,27 @@ import application.module.node.common.QuickMocker;
 import application.module.node.common.QuickMocker.MockParam;
 import application.module.node.util.JSON;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import jakarta.servlet.http.HttpServletRequest;
 
 import static application.module.node.web.api.http.common.JSONResponses.UNKNOWN_ORDER;
 import static application.module.node.web.api.http.common.Parameters.ORDER_PARAMETER;
 import static application.module.node.web.api.http.common.ResultFields.ORDER_RESPONSE;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class GetBidOrderTest {
+class GetBidOrderTest {
 
     private GetBidOrder t;
 
     private AssetExchange mockAssetExchange;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         mockAssetExchange = mock(AssetExchange.class);
 

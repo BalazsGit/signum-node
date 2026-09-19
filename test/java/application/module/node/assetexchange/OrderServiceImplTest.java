@@ -8,17 +8,17 @@ import application.module.node.db.SignumKey.LongKeyFactory;
 import application.module.node.db.VersionedEntityTable;
 import application.module.node.db.store.OrderStore;
 import application.module.node.services.AccountService;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collection;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class OrderServiceImplTest {
+class OrderServiceImplTest {
 
     private OrderServiceImpl t;
 
@@ -32,8 +32,8 @@ public class OrderServiceImplTest {
     private AccountService accountServiceMock;
     private TradeServiceImpl tradeServiceMock;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    void setUp() {
         blockchainMock = mock(Blockchain.class);
         orderStoreMock = mock(OrderStore.class);
         mockAskOrderTable = mock(VersionedEntityTable.class);
@@ -53,7 +53,7 @@ public class OrderServiceImplTest {
     }
 
     @Test
-    public void getAskOrder() {
+    void getAskOrder() {
         final SignumKey mockAskKey = mock(SignumKey.class);
         final Ask mockAsk = mock(Ask.class);
 
@@ -66,7 +66,7 @@ public class OrderServiceImplTest {
     }
 
     @Test
-    public void getBidOrder() {
+    void getBidOrder() {
         final SignumKey mockBidKey = mock(SignumKey.class);
         final Bid mockBid = mock(Bid.class);
 
@@ -79,7 +79,7 @@ public class OrderServiceImplTest {
     }
 
     @Test
-    public void getAllAskOrders() {
+    void getAllAskOrders() {
         final int from = 1;
         final int to = 5;
 
@@ -91,7 +91,7 @@ public class OrderServiceImplTest {
     }
 
     @Test
-    public void getAllBidOrders() {
+    void getAllBidOrders() {
         final int from = 1;
         final int to = 5;
 
@@ -103,7 +103,7 @@ public class OrderServiceImplTest {
     }
 
     @Test
-    public void getSortedBidOrders() {
+    void getSortedBidOrders() {
         final long assetId = 123l;
         final int from = 1;
         final int to = 5;
@@ -116,7 +116,7 @@ public class OrderServiceImplTest {
     }
 
     @Test
-    public void getAskOrdersByAccount() {
+    void getAskOrdersByAccount() {
         final long accountId = 123l;
         final int from = 1;
         final int to = 5;
@@ -129,7 +129,7 @@ public class OrderServiceImplTest {
     }
 
     @Test
-    public void getAskOrdersByAccountAsset() {
+    void getAskOrdersByAccountAsset() {
         final long accountId = 123l;
         final long assetId = 456l;
         final int from = 1;
@@ -144,7 +144,7 @@ public class OrderServiceImplTest {
     }
 
     @Test
-    public void getSortedAskOrders() {
+    void getSortedAskOrders() {
         final long assetId = 456l;
         final int from = 1;
         final int to = 5;
@@ -157,21 +157,21 @@ public class OrderServiceImplTest {
     }
 
     @Test
-    public void getBidCount() {
+    void getBidCount() {
         when(mockBidOrderTable.getCount()).thenReturn(5);
 
         assertEquals(5, t.getBidCount());
     }
 
     @Test
-    public void getAskCount() {
+    void getAskCount() {
         when(mockAskOrderTable.getCount()).thenReturn(5);
 
         assertEquals(5, t.getAskCount());
     }
 
     @Test
-    public void getBidOrdersByAccount() {
+    void getBidOrdersByAccount() {
         final long accountId = 456l;
         final int from = 1;
         final int to = 5;
@@ -184,7 +184,7 @@ public class OrderServiceImplTest {
     }
 
     @Test
-    public void getBidOrdersByAccountAsset() {
+    void getBidOrdersByAccountAsset() {
         final long accountId = 123L;
         final long assetId = 456l;
         final int from = 1;

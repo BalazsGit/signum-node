@@ -3,20 +3,17 @@ package application.module.node.deeplink;
 import application.module.node.common.TestConstants;
 import application.module.node.feesuggestions.FeeSuggestionType;
 import com.google.zxing.WriterException;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.JUnit4;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.awt.image.BufferedImage;
 
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-@RunWith(JUnit4.class)
-public class DeeplinkQRCodeGeneratorTest {
+class DeeplinkQRCodeGeneratorTest {
     private DeeplinkQRCodeGenerator deeplinkQRCodeGenerator;
 
-    @Before
+    @BeforeEach
     public void setUpDeeplinkQrCodeGeneratorTest() {
         deeplinkQRCodeGenerator = new DeeplinkQRCodeGenerator();
     }

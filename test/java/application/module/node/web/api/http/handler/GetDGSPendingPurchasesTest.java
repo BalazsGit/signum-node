@@ -8,8 +8,8 @@ import application.module.node.common.QuickMocker.MockParam;
 import application.module.node.services.DGSGoodsStoreService;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Collection;
@@ -17,21 +17,21 @@ import java.util.Collection;
 import static application.module.node.web.api.http.common.JSONResponses.MISSING_SELLER;
 import static application.module.node.web.api.http.common.Parameters.*;
 import static application.module.node.web.api.http.common.ResultFields.PURCHASES_RESPONSE;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 ;
 
-public class GetDGSPendingPurchasesTest extends AbstractUnitTest {
+class GetDGSPendingPurchasesTest extends AbstractUnitTest {
 
     private GetDGSPendingPurchases t;
 
     private DGSGoodsStoreService mockDGSGoodStoreService;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         mockDGSGoodStoreService = mock(DGSGoodsStoreService.class);
 

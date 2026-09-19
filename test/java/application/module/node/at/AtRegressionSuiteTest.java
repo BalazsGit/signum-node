@@ -8,9 +8,9 @@ import application.module.node.db.VersionedEntityTable;
 import application.module.node.db.store.ATStore;
 import application.module.node.services.AccountService;
 import application.module.node.util.Convert;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.InvocationTargetException;
@@ -18,14 +18,16 @@ import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.atLeast;
@@ -67,7 +69,7 @@ import static java.util.List.of;
  *       account exactly once (T14); the AT state row is persisted with consistent heights (T15).</li>
  * </ul>
  */
-public class AtRegressionSuiteTest {
+class AtRegressionSuiteTest {
 
     /**
      * Known-good blockATs (3 ATs: id 1, 2, 3 + their MD5 checksums, 24 bytes per AT).
@@ -82,12 +84,12 @@ public class AtRegressionSuiteTest {
     private static final int TEST_HEIGHT = Integer.MAX_VALUE;
     private static final long TEST_GENERATOR = 0L;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         AtTestHelper.setupMocks();
     }
 
-    @After
+    @AfterEach
     public void tearDown() {
         AtTestHelper.closeStatics();
     }
@@ -105,10 +107,10 @@ public class AtRegressionSuiteTest {
         AtBlock forged = service.getCurrentBlockATs(ctx, Integer.MAX_VALUE, TEST_HEIGHT, TEST_GENERATOR, 0);
         assertNotNull(forged);
         byte[] forgedBytes = forged.getBytesForBlock();
-        assertNotNull("forged blockATs bytes must not be null", forgedBytes);
-        assertEquals("each AT costs 24 bytes in blockATs", 72, forgedBytes.length);
-        assertEquals("forging must reproduce the canonical blockATs vector",
-                GOOD_BLOCK_ATS_HEX, Convert.toHexString(forgedBytes));
+        assertNotNull(forgedBytes, "forged blockATs bytes must not be null");
+        assertEquals(72, forgedBytes.length, "each AT costs 24 bytes in blockATs");
+        assertEquals(GOOD_BLOCK_ATS_HEX, Convert.toHexString(forgedBytes),
+                "forging must reproduce the canonical blockATs vector");
 
         // Validation path, as seen by a peer node: fresh AT instances loaded from its own DB
         // (the mock store hands out one instance per AT, so re-create them to avoid state
@@ -120,10 +122,10 @@ public class AtRegressionSuiteTest {
 
         // ... must be accepted by the validation path with identical fee/amount totals.
         AtBlock validated = service.validateATs(ctx, forgedBytes, TEST_HEIGHT, TEST_GENERATOR);
-        assertEquals("forging and validation must agree on total fees",
-                forged.getTotalFees(), validated.getTotalFees());
-        assertEquals("forging and validation must agree on total amounts",
-                forged.getTotalAmount(), validated.getTotalAmount());
+        assertEquals(forged.getTotalFees(), validated.getTotalFees(),
+                "forging and validation must agree on total fees");
+        assertEquals(forged.getTotalAmount(), validated.getTotalAmount(),
+                "forging and validation must agree on total amounts");
     }
 
     @Test
@@ -153,8 +155,8 @@ public class AtRegressionSuiteTest {
 
         // V3 (SMART_ATS-era) ATs must reproduce the same canonical bytes ...
         AtBlock forged = service.getCurrentBlockATs(ctx, Integer.MAX_VALUE, TEST_HEIGHT, TEST_GENERATOR, 0);
-        assertEquals("V3 forging must reproduce the known-good blockATs (canonical serialization)",
-                GOOD_BLOCK_ATS_HEX, Convert.toHexString(forged.getBytesForBlock()));
+        assertEquals(GOOD_BLOCK_ATS_HEX, Convert.toHexString(forged.getBytesForBlock()),
+                "V3 forging must reproduce the known-good blockATs (canonical serialization)");
 
         // Validation path, as seen by a peer node: fresh AT instances loaded from its own DB
         // (re-create them to avoid the forging run's state carry-over).
@@ -186,9 +188,9 @@ public class AtRegressionSuiteTest {
             service.validateATs(ctx, tampered, TEST_HEIGHT, TEST_GENERATOR);
             fail("expected AtException for tampered MD5");
         } catch (AtException e) {
-            assertNotNull("the checksum error must be preserved as the cause", e.getCause());
-            assertTrue("expected the MD5-mismatch cause, got: " + e.getCause(),
-                    e.getCause().getMessage().contains("Calculated md5 and received md5 are not matching"));
+            assertNotNull(e.getCause(), "the checksum error must be preserved as the cause");
+            assertTrue(e.getCause().getMessage().contains("Calculated md5 and received md5 are not matching"),
+                    "expected the MD5-mismatch cause, got: " + e.getCause());
         }
     }
 
@@ -205,8 +207,8 @@ public class AtRegressionSuiteTest {
             service.getATsFromBlock(duplicated);
             fail("expected AtException for duplicate AT id");
         } catch (AtException e) {
-            assertTrue("expected duplicate-AT message, got: " + e.getMessage(),
-                    e.getMessage().contains("AT included in block multiple times"));
+            assertTrue(e.getMessage().contains("AT included in block multiple times"),
+                    "expected duplicate-AT message, got: " + e.getMessage());
         }
     }
 
@@ -220,8 +222,8 @@ public class AtRegressionSuiteTest {
             service.getATsFromBlock(truncated);
             fail("expected AtException for non-multiple-of-24 length");
         } catch (AtException e) {
-            assertTrue("expected length message, got: " + e.getMessage(),
-                    e.getMessage().contains("multiple of cost of one AT"));
+            assertTrue(e.getMessage().contains("multiple of cost of one AT"),
+                    "expected length message, got: " + e.getMessage());
         }
     }
 
@@ -250,8 +252,8 @@ public class AtRegressionSuiteTest {
             service.validateATs(ctx, block, TEST_HEIGHT, TEST_GENERATOR);
             fail("expected AtException for an AT id that does not exist in the DB");
         } catch (AtException e) {
-            assertTrue("expected the not-found rejection, got: " + e.getMessage(),
-                    e.getMessage().contains("not found in database"));
+            assertTrue(e.getMessage().contains("not found in database"),
+                    "expected the not-found rejection, got: " + e.getMessage());
         }
     }
 
@@ -278,9 +280,9 @@ public class AtRegressionSuiteTest {
             service.validateATs(ctx, block, TEST_HEIGHT, TEST_GENERATOR);
             fail("expected AtException for an AT with insufficient balance");
         } catch (AtException e) {
-            assertNotNull("the balance error must be preserved as the cause", e.getCause());
-            assertTrue("expected insufficient-balance cause, got: " + e.getCause(),
-                    e.getCause().getMessage().contains("AT has insufficient balance to run"));
+            assertNotNull(e.getCause(), "the balance error must be preserved as the cause");
+            assertTrue(e.getCause().getMessage().contains("AT has insufficient balance to run"),
+                    "expected insufficient-balance cause, got: " + e.getCause());
         }
     }
 
@@ -306,9 +308,9 @@ public class AtRegressionSuiteTest {
             service.validateATs(ctx, forged.getBytesForBlock(), TEST_HEIGHT, TEST_GENERATOR);
             fail("expected AtException for a frozen AT (unchanged balance)");
         } catch (AtException e) {
-            assertNotNull("the freeze error must be preserved as the cause", e.getCause());
-            assertTrue("expected freeze cause, got: " + e.getCause(),
-                    e.getCause().getMessage().contains("AT should be frozen due to unchanged balance"));
+            assertNotNull(e.getCause(), "the freeze error must be preserved as the cause");
+            assertTrue(e.getCause().getMessage().contains("AT should be frozen due to unchanged balance"),
+                    "expected freeze cause, got: " + e.getCause());
         }
     }
 
@@ -332,9 +334,9 @@ public class AtRegressionSuiteTest {
             service.validateATs(ctx, block, belowNextHeight, TEST_GENERATOR);
             fail("expected AtException for an AT that is not allowed to run again yet");
         } catch (AtException e) {
-            assertNotNull("the sleep-gate error must be preserved as the cause", e.getCause());
-            assertTrue("expected nextHeight cause, got: " + e.getCause(),
-                    e.getCause().getMessage().contains("AT not allowed to run again yet"));
+            assertNotNull(e.getCause(), "the sleep-gate error must be preserved as the cause");
+            assertTrue(e.getCause().getMessage().contains("AT not allowed to run again yet"),
+                    "expected nextHeight cause, got: " + e.getCause());
         }
     }
 
@@ -355,10 +357,10 @@ public class AtRegressionSuiteTest {
         ATServiceImpl service = new ATServiceImpl(ctx.getAtStore(), ctx);
 
         AtBlock atBlock = service.validateATs(ctx, null, TEST_HEIGHT, TEST_GENERATOR);
-        assertNotNull("a null blockATs payload must still yield an (empty) AtBlock", atBlock);
+        assertNotNull(atBlock, "a null blockATs payload must still yield an (empty) AtBlock");
         assertEquals(0, atBlock.getTotalFees());
         assertEquals(0, atBlock.getTotalAmount());
-        assertNull("an empty AT block carries no blockATs bytes", atBlock.getBytesForBlock());
+        assertNull(atBlock.getBytesForBlock(), "an empty AT block carries no blockATs bytes");
     }
 
     /**
@@ -371,7 +373,7 @@ public class AtRegressionSuiteTest {
         ATServiceImpl service = new ATServiceImpl(ctx.getAtStore(), ctx);
 
         AtBlock atBlock = service.validateATs(ctx, new byte[0], TEST_HEIGHT, TEST_GENERATOR);
-        assertNotNull("an empty blockATs payload must still yield an (empty) AtBlock", atBlock);
+        assertNotNull(atBlock, "an empty blockATs payload must still yield an (empty) AtBlock");
         assertEquals(0, atBlock.getTotalFees());
         assertEquals(0, atBlock.getTotalAmount());
     }
@@ -389,15 +391,15 @@ public class AtRegressionSuiteTest {
 
         AtBlock forged = service.getCurrentBlockATs(ctx, Integer.MAX_VALUE, TEST_HEIGHT, TEST_GENERATOR, 0);
         assertNotNull(forged.getBytesForBlock());
-        assertEquals("one AT costs exactly 24 bytes", 24, forged.getBytesForBlock().length);
+        assertEquals(24, forged.getBytesForBlock().length, "one AT costs exactly 24 bytes");
 
         // Validation path, as seen by a peer node: fresh AT instance.
         AtTestHelper.clearAddedAts();
         AtTestHelper.addHelloWorldAT();
         AtBlock validated = service.validateATs(ctx, forged.getBytesForBlock(), TEST_HEIGHT, TEST_GENERATOR);
         assertNotNull(validated);
-        assertEquals("forging and validation must agree on total fees",
-                forged.getTotalFees(), validated.getTotalFees());
+        assertEquals(forged.getTotalFees(), validated.getTotalFees(),
+                "forging and validation must agree on total fees");
     }
 
     /**
@@ -414,14 +416,12 @@ public class AtRegressionSuiteTest {
         // Exact multiples (distinct AT ids) must parse to the right number of entries.
         byte[] one = new byte[24];
         one[0] = 1; // AT#1
-        assertEquals("a 24-byte (1 AT) payload must parse to 1 entry",
-                1, service.getATsFromBlock(one).size());
+        assertEquals(1, service.getATsFromBlock(one).size(), "a 24-byte (1 AT) payload must parse to 1 entry");
 
         byte[] two = new byte[48];
         two[0] = 1;  // AT#1
         two[24] = 2; // AT#2
-        assertEquals("a 48-byte (2 AT) payload must parse to 2 entries",
-                2, service.getATsFromBlock(two).size());
+        assertEquals(2, service.getATsFromBlock(two).size(), "a 48-byte (2 AT) payload must parse to 2 entries");
 
         // One byte short of the multiple must be rejected.
         for (int badLen : new int[]{23, 47}) {
@@ -429,8 +429,8 @@ public class AtRegressionSuiteTest {
                 service.getATsFromBlock(new byte[badLen]);
                 fail("expected AtException for a " + badLen + "-byte (non-multiple) payload");
             } catch (AtException e) {
-                assertTrue("expected length message, got: " + e.getMessage(),
-                        e.getMessage().contains("multiple of cost of one AT"));
+                assertTrue(e.getMessage().contains("multiple of cost of one AT"),
+                        "expected length message, got: " + e.getMessage());
             }
         }
     }
@@ -440,11 +440,11 @@ public class AtRegressionSuiteTest {
         // Regression of the 2026-09-04 NPE: AtConstants must always resolve from the injected
         // context — the JVM-wide static registry that previously backed this path has been removed.
         ATProcessingContext ctx = AtTestHelper.getTestContext();
-        assertNotNull("the test context must carry AtConstants", ctx.getAtConstants());
+        assertNotNull(ctx.getAtConstants(), "the test context must carry AtConstants");
 
         AtApiPlatformImpl platform = new AtApiPlatformImpl(ctx);
         AtConstants resolved = invokePrivateGetAtConstants(platform);
-        assertNotNull("AtConstants must resolve from the context, not the static registry", resolved);
+        assertNotNull(resolved, "AtConstants must resolve from the context, not the static registry");
         if (ctx.getAtConstants() != resolved) {
             fail("expected the exact AtConstants instance from the context");
         }
@@ -458,10 +458,10 @@ public class AtRegressionSuiteTest {
             fail("expected IllegalStateException (fail-fast)");
         } catch (InvocationTargetException e) {
             assertNotNull(e.getCause());
-            assertTrue("expected IllegalStateException, got: " + e.getCause(),
-                    e.getCause() instanceof IllegalStateException);
-            assertFalse("a raw NPE must NOT be the failure mode (regression of the 59763 bug)",
-                    e.getCause() instanceof NullPointerException);
+            assertTrue(e.getCause() instanceof IllegalStateException,
+                    "expected IllegalStateException, got: " + e.getCause());
+            assertFalse(e.getCause() instanceof NullPointerException,
+                    "a raw NPE must NOT be the failure mode (regression of the 59763 bug)");
         }
     }
 
@@ -512,7 +512,7 @@ public class AtRegressionSuiteTest {
         assertNull(ps.getPendingFees(5, 42L));
         assertNull(ps.getPendingTransactions(5, 42L));
         assertEquals(1, ps.getAndClearMapUpdates(5, 42L).size());
-        assertTrue("map updates must be cleared after retrieval", ps.getAndClearMapUpdates(5, 42L).isEmpty());
+        assertTrue(ps.getAndClearMapUpdates(5, 42L).isEmpty(), "map updates must be cleared after retrieval");
 
         // clearPending (rollback path): everything for the key is dropped.
         ps.addPendingFee(2L, 20L, 7, 42L);
@@ -529,10 +529,10 @@ public class AtRegressionSuiteTest {
         ps.addPendingTransaction(new AtTransaction(TransactionType.ColoredCoins.ASSET_TRANSFER,
                 new byte[8], recipient, 5L, null), 9, 7L);
 
-        assertTrue("same (height, generator, recipient) must be flagged as a conflict",
-                ps.findPendingTransaction(recipient, 9, 7L));
-        assertFalse("a different generator must not conflict",
-                ps.findPendingTransaction(recipient, 9, 8L));
+        assertTrue(ps.findPendingTransaction(recipient, 9, 7L),
+                "same (height, generator, recipient) must be flagged as a conflict");
+        assertFalse(ps.findPendingTransaction(recipient, 9, 8L),
+                "a different generator must not conflict");
     }
     @Test
     public void atStateBytes_roundTripThroughCompression() {
@@ -543,8 +543,8 @@ public class AtRegressionSuiteTest {
         byte[] packed = AT.compressState(original);
         assertNotNull(packed);
         byte[] restored = AT.decompressState(packed);
-        assertNotNull("decompressed state must not be null", restored);
-        assertArrayEquals("at_state bytes must round-trip losslessly (DB consistency)", original, restored);
+        assertNotNull(restored, "decompressed state must not be null");
+        assertArrayEquals(original, restored, "at_state bytes must round-trip losslessly (DB consistency)");
 
         assertNull(AT.compressState(null));
         assertNull(AT.compressState(new byte[0]));
@@ -567,14 +567,14 @@ public class AtRegressionSuiteTest {
         // on the fee burn being accounted exactly: totalFees must equal the sum of the
         // pending fees that HandleATBlockTransactionsListener will later subtract.
         LinkedHashMap<Long, Long> pendingFees = ctx.getPendingState().getPendingFees(TEST_HEIGHT, TEST_GENERATOR);
-        assertNotNull("pending fees must be recorded for the block/generator", pendingFees);
+        assertNotNull(pendingFees, "pending fees must be recorded for the block/generator");
         assertEquals(3, pendingFees.size());
         long sum = 0L;
         for (Long fee : pendingFees.values()) {
             sum += fee;
         }
-        assertEquals("sum(pendingFees) must equal atBlock.getTotalFees()",
-                atBlock.getTotalFees(), sum);
+        assertEquals(atBlock.getTotalFees(), sum,
+                "sum(pendingFees) must equal atBlock.getTotalFees()");
     }
 
     @Test
@@ -604,7 +604,7 @@ public class AtRegressionSuiteTest {
 
         listener.notify(block);
         verify(accountService, times(1)).addToBalanceAndUnconfirmedBalanceNQT(atAccount, -fee);
-        assertNull("the pending fee must be consumed (exactly-once)", pendingState.getPendingFees(height, generator));
+        assertNull(pendingState.getPendingFees(height, generator), "the pending fee must be consumed (exactly-once)");
 
         // A second apply (e.g. after a re-sync/rollback of the same height) must be a no-op.
         listener.notify(block);
@@ -622,8 +622,8 @@ public class AtRegressionSuiteTest {
         ATStore atStore = mock(ATStore.class);
         ATProcessingContext ctx = mock(ATProcessingContext.class);
         ATServiceImpl service = new ATServiceImpl(atStore, ctx);
-        assertSame("the atService must operate on the injected context (shared ATPendingState)",
-                ctx, service.getProcessingContext());
+        assertSame(ctx, service.getProcessingContext(),
+                "the atService must operate on the injected context (shared ATPendingState)");
     }
 
     @Test
@@ -660,7 +660,7 @@ public class AtRegressionSuiteTest {
         listener.notify(block);
 
         verify(accountService, times(1)).addToBalanceAndUnconfirmedBalanceNQT(atAccount, -fee);
-        assertNull("the fee must be consumed exactly once", sharedState.getPendingFees(height, generator));
+        assertNull(sharedState.getPendingFees(height, generator), "the fee must be consumed exactly once");
     }
 
     @Test
@@ -682,10 +682,10 @@ public class AtRegressionSuiteTest {
         verify(atStateTable, atLeast(6)).insert(captor.capture());
 
         for (AT.ATState state : captor.getAllValues()) {
-            assertTrue("at_state rows must belong to the three test ATs",
-                    state.getATId() == 1L || state.getATId() == 2L || state.getATId() == 3L);
-            assertNotNull("at_state bytes must not be null (DB consistency)", state.getState());
-            assertTrue("next_height must not move backwards", state.getNextHeight() >= state.getPrevHeight());
+            assertTrue(state.getATId() == 1L || state.getATId() == 2L || state.getATId() == 3L,
+                    "at_state rows must belong to the three test ATs");
+            assertNotNull(state.getState(), "at_state bytes must not be null (DB consistency)");
+            assertTrue(state.getNextHeight() >= state.getPrevHeight(), "next_height must not move backwards");
         }
     }
 }

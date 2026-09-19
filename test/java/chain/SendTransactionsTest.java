@@ -10,12 +10,12 @@ import static chain.ChainUtils.crypto;
 import static chain.ChainUtils.forgeBlock;
 import static chain.ChainUtils.nodeService;
 import static chain.ChainUtils.setupNode;
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -24,10 +24,8 @@ import java.util.Random;
 import java.util.Set;
 
 import org.bouncycastle.util.encoders.Hex;
-import org.junit.BeforeClass;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.JUnit4;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
 import signumj.crypto.SignumCrypto;
 import signumj.entity.SignumAddress;
@@ -39,12 +37,11 @@ import signumj.entity.response.TransactionBroadcast;
 import signumj.response.appendix.PlaintextMessageAppendix;
 import signumj.service.TransactionBuilder;
 
-@RunWith(JUnit4.class)
-public class SendTransactionsTest {
+class SendTransactionsTest {
 
-    @BeforeClass
+    @BeforeAll
     public static void setUpTest() {
-        assertTrue("Mock node did not responded in time", setupNode());
+        assertTrue(setupNode(), "Mock node did not responded in time");
     }
 
     @Test

@@ -3,25 +3,25 @@ package application.module.node.services.impl;
 import application.module.node.at.AT;
 import application.module.node.at.ATServiceImpl;
 import application.module.node.db.store.ATStore;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
 
 import java.util.Collection;
 import java.util.List;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class ATServiceImplTest {
+class ATServiceImplTest {
 
     private ATServiceImpl t;
 
     private ATStore mockATStore;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         mockATStore = mock(ATStore.class);
 

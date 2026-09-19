@@ -9,8 +9,8 @@ import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.services.BlockService;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -18,9 +18,10 @@ import jakarta.servlet.http.HttpServletRequest;
 
 import static application.module.node.web.api.http.common.JSONResponses.*;
 import static application.module.node.web.api.http.common.Parameters.*;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -36,12 +37,12 @@ class GetBlockTest {
     private BlockService blockServiceMock;
     private PropertyService propertyServiceMock;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         blockchainMock = mock(Blockchain.class);
         blockServiceMock = mock(BlockService.class);
         propertyServiceMock = mock(PropertyService.class);
-        doReturn((int) Constants.ONE_SIGNA).when(propertyServiceMock).getInt(eq(Props.ONE_COIN_NQT));
+        lenient().doReturn((int) Constants.ONE_SIGNA).when(propertyServiceMock).getInt(eq(Props.ONE_COIN_NQT));
     }
 
     @Test

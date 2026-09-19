@@ -10,28 +10,28 @@ import application.module.node.services.AccountService;
 import application.module.node.services.ParameterService;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Collection;
 
 import static application.module.node.web.api.http.common.Parameters.ACCOUNTS_RESPONSE;
 import static application.module.node.web.api.http.common.Parameters.ACCOUNT_PARAMETER;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class GetAccountsWithRewardRecipientTest extends AbstractUnitTest {
+class GetAccountsWithRewardRecipientTest extends AbstractUnitTest {
 
     private ParameterService parameterService;
     private AccountService accountService;
 
     private GetAccountsWithRewardRecipient t;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         parameterService = mock(ParameterService.class);
         accountService = mock(AccountService.class);

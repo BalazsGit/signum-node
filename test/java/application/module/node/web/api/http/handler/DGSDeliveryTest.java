@@ -9,8 +9,8 @@ import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.AccountService;
 import application.module.node.services.ParameterService;
 import application.module.node.web.api.http.common.APITransactionManager;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -22,8 +22,8 @@ import static application.module.node.TransactionType.DigitalGoods.DELIVERY;
 import static application.module.node.common.TestConstants.TEST_SECRET_PHRASE;
 import static application.module.node.web.api.http.common.JSONResponses.*;
 import static application.module.node.web.api.http.common.Parameters.*;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -40,7 +40,7 @@ class DGSDeliveryTest extends AbstractTransactionTest {
     private AccountService accountServiceMock;
     private APITransactionManager apiTransactionManagerMock;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         parameterServiceMock = mock(ParameterService.class);
         blockchainMock = mock(Blockchain.class);

@@ -11,27 +11,29 @@ import application.module.node.util.CollectionWithIndex;
 import application.module.node.util.JSON;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Collection;
 
 import static application.module.node.web.api.http.common.Parameters.*;
 import static application.module.node.web.api.http.common.ResultFields.*;
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 ;
 
-public class GetAllTradesTest extends AbstractUnitTest {
+class GetAllTradesTest extends AbstractUnitTest {
 
     private GetAllTrades t;
 
     private AssetExchange mockAssetExchange;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         mockAssetExchange = mock(AssetExchange.class);
 

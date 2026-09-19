@@ -1,11 +1,13 @@
 package application.module.node.entity;
 
 import application.module.node.Version;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-public class VersionTest {
+class VersionTest {
     @Test
     public void testVersionParse() {
         String[] validVersions = {

@@ -6,22 +6,22 @@ import application.module.node.DigitalGoodsStore.Purchase;
 import application.module.node.common.AbstractUnitTest;
 import application.module.node.services.AccountService;
 import application.module.node.services.DGSGoodsStoreService;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collection;
 
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
-public class ExpiredPurchaseListenerTest extends AbstractUnitTest {
+class ExpiredPurchaseListenerTest extends AbstractUnitTest {
 
     private AccountService accountServiceMock;
     private DGSGoodsStoreService dgsGoodsStoreServiceMock;
 
     private DGSGoodsStoreServiceImpl.ExpiredPurchaseListener t;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         accountServiceMock = mock(AccountService.class);
         dgsGoodsStoreServiceMock = mock(DGSGoodsStoreService.class);

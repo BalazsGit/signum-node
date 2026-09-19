@@ -7,8 +7,8 @@ import application.module.node.common.QuickMocker.MockParam;
 import application.module.node.crypto.EncryptedData;
 import application.module.node.services.ParameterService;
 import application.module.node.util.JSON;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -17,19 +17,19 @@ import static application.module.node.common.TestConstants.TEST_SECRET_PHRASE;
 import static application.module.node.web.api.http.common.JSONResponses.INCORRECT_ACCOUNT;
 import static application.module.node.web.api.http.common.Parameters.*;
 import static application.module.node.web.api.http.common.ResultFields.DECRYPTED_MESSAGE_RESPONSE;
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class DecryptFromTest {
+class DecryptFromTest {
 
     private DecryptFrom t;
 
     private ParameterService mockParameterService;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         mockParameterService = mock(ParameterService.class);
 

@@ -4,8 +4,8 @@ import application.module.node.common.QuickMocker;
 import application.module.node.common.QuickMocker.MockParam;
 import application.module.node.util.JSON;
 import com.google.gson.JsonObject;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -15,14 +15,14 @@ import static application.module.node.web.api.http.common.Parameters.PUBLIC_KEY_
 import static application.module.node.web.api.http.common.Parameters.SECRET_PHRASE_PARAMETER;
 import static application.module.node.web.api.http.common.ResultFields.ACCOUNT_RESPONSE;
 import static application.module.node.web.api.http.common.ResultFields.PUBLIC_KEY_RESPONSE;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-public class GetAccountIdTest {
+class GetAccountIdTest {
 
     private GetAccountId t;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         t = new GetAccountId();
     }

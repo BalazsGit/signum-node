@@ -3,25 +3,25 @@ package application.module.node.assetexchange;
 import application.module.node.AssetTransfer;
 import application.module.node.db.sql.EntitySqlTable;
 import application.module.node.db.store.AssetTransferStore;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collection;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-public class AssetTransferServiceImplTest {
+class AssetTransferServiceImplTest {
 
     private AssetTransferServiceImpl t;
 
     private AssetTransferStore mockAssetTransferStore;
     private EntitySqlTable<AssetTransfer> mockAssetTransferTable;
 
-    @Before
-    public void setUp() {
+    @BeforeEach
+    void setUp() {
         mockAssetTransferStore = mock(AssetTransferStore.class);
         mockAssetTransferTable = mock(EntitySqlTable.class);
 
@@ -31,7 +31,7 @@ public class AssetTransferServiceImplTest {
     }
 
     @Test
-    public void getAssetTransfers() {
+    void getAssetTransfers() {
         final long assetId = 123L;
         final int from = 1;
         final int to = 4;
@@ -45,7 +45,7 @@ public class AssetTransferServiceImplTest {
     }
 
     @Test
-    public void getAccountAssetTransfers() {
+    void getAccountAssetTransfers() {
         final long accountId = 12L;
         final long assetId = 123L;
         final int from = 1;
@@ -60,14 +60,14 @@ public class AssetTransferServiceImplTest {
     }
 
     @Test
-    public void getTransferCount() {
+    void getTransferCount() {
         when(mockAssetTransferStore.getTransferCount(eq(123L))).thenReturn(5);
 
         assertEquals(5, t.getTransferCount(123L));
     }
 
     @Test
-    public void getAssetTransferCount() {
+    void getAssetTransferCount() {
         when(mockAssetTransferTable.getCount()).thenReturn(5);
 
         assertEquals(5, t.getAssetTransferCount());

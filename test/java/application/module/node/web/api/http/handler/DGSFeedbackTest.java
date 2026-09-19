@@ -9,8 +9,8 @@ import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.services.AccountService;
 import application.module.node.services.ParameterService;
 import application.module.node.web.api.http.common.APITransactionManager;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -20,8 +20,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import static application.module.node.TransactionType.DigitalGoods.FEEDBACK;
 import static application.module.node.web.api.http.common.JSONResponses.GOODS_NOT_DELIVERED;
 import static application.module.node.web.api.http.common.JSONResponses.INCORRECT_PURCHASE;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -38,7 +38,7 @@ class DGSFeedbackTest extends AbstractTransactionTest {
     private Blockchain blockchainMock;
     private APITransactionManager apiTransactionManagerMock;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         parameterServiceMock = mock(ParameterService.class);
         accountServiceMock = mock(AccountService.class);

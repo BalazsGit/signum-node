@@ -11,17 +11,21 @@ import application.module.node.services.AliasService;
 import application.module.node.services.DGSGoodsStoreService;
 import application.module.node.services.EscrowService;
 import application.module.node.services.SubscriptionService;
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 /**
  * Unit tests for {@link TransactionApplyContext}.
  * Validates constructor injection, immutability, and null safety.
  */
-public class TransactionApplyContextTest {
+class TransactionApplyContextTest {
 
     private Blockchain blockchainMock;
     private FluxCapacitor fluxCapacitorMock;
@@ -38,7 +42,7 @@ public class TransactionApplyContextTest {
 
     private TransactionApplyContext context;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         blockchainMock = mock(Blockchain.class);
         fluxCapacitorMock = mock(FluxCapacitor.class);

@@ -2,20 +2,20 @@ package application.module.node;
 
 import application.module.node.profile.NodeProfile;
 import application.module.node.profile.NodeProfileRepository;
-import org.junit.After;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.mockito.Mockito;
 
 import java.nio.file.Paths;
 import java.util.List;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
-import static org.junit.Assert.assertSame;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Lifecycle contract tests for the {@link NodeModule} registry/factory API (v4 architecture).
@@ -26,7 +26,7 @@ import static org.junit.Assert.fail;
  * covered by the integration test matrix).
  * </p>
  */
-public class NodeModuleLifecycleTest {
+class NodeModuleLifecycleTest {
 
     private static final String PROFILE = "lifecycle-test-" + System.nanoTime();
     private static final java.nio.file.Path CONF = Paths.get("./conf");
@@ -35,7 +35,7 @@ public class NodeModuleLifecycleTest {
         return NodeModule.getInstance();
     }
 
-    @After
+    @AfterEach
     public void cleanup() {
         // Never leak a registered (or running) test node into other tests.
         Signum signum = module().get(PROFILE);
@@ -54,7 +54,7 @@ public class NodeModuleLifecycleTest {
 
     @Test
     public void getInstance_returnsSingleton() {
-        assertSame("NodeModule must be a singleton", NodeModule.getInstance(), NodeModule.getInstance());
+        assertSame(NodeModule.getInstance(), NodeModule.getInstance(), "NodeModule must be a singleton");
     }
 
     @Test
@@ -132,14 +132,14 @@ public class NodeModuleLifecycleTest {
         Signum signum = new Signum(new NodeProfile(PROFILE), CONF);
         module().addNode(signum);
         try {
-            assertSame("get(profile) must return the registered instance", signum, module().get(PROFILE));
-            assertTrue("hasProfile must be true after addNode", module().hasProfile(PROFILE));
-            assertTrue("getAll must contain the registered instance", module().getAll().contains(signum));
+            assertSame(signum, module().get(PROFILE), "get(profile) must return the registered instance");
+            assertTrue(module().hasProfile(PROFILE), "hasProfile must be true after addNode");
+            assertTrue(module().getAll().contains(signum), "getAll must contain the registered instance");
         } finally {
             module().removeNode(PROFILE);
         }
-        assertNull("get(profile) must be null after removeNode", module().get(PROFILE));
-        assertFalse("hasProfile must be false after removeNode", module().hasProfile(PROFILE));
+        assertNull(module().get(PROFILE), "get(profile) must be null after removeNode");
+        assertFalse(module().hasProfile(PROFILE), "hasProfile must be false after removeNode");
     }
 
     @Test
@@ -149,10 +149,9 @@ public class NodeModuleLifecycleTest {
         try {
             Signum second = new Signum(new NodeProfile(PROFILE), CONF);
             module().addNode(second);
-            assertSame("re-adding the same profile must replace the registered instance",
-                    second, module().get(PROFILE));
-            assertEquals("size must not grow when replacing the same profile",
-                    1, module().getAll().stream().filter(s -> PROFILE.equals(s.getProfileName())).count());
+            assertSame(second, module().get(PROFILE), "re-adding the same profile must replace the registered instance");
+            assertEquals(1, module().getAll().stream().filter(s -> PROFILE.equals(s.getProfileName())).count(),
+                    "size must not grow when replacing the same profile");
         } finally {
             module().removeNode(PROFILE);
         }
@@ -169,13 +168,13 @@ public class NodeModuleLifecycleTest {
         try {
             try {
                 Signum result = module().startNode(PROFILE);
-                assertSame("startNode must reuse the registered instance", signum, result);
+                assertSame(signum, result, "startNode must reuse the registered instance");
             } catch (Exception expected) {
                 // startup may fail in a headless test environment — acceptable —
                 // the contract under test is instance reuse, not node startup.
             }
-            assertEquals("startNode must not create a duplicate instance for the same profile",
-                    sizeBefore, module().size());
+            assertEquals(sizeBefore, module().size(),
+                    "startNode must not create a duplicate instance for the same profile");
         } finally {
             module().removeNode(PROFILE);
         }
@@ -195,8 +194,8 @@ public class NodeModuleLifecycleTest {
         try {
             setStateForTest(signum, Signum.State.ERROR);
             signum.stop();
-            assertEquals("stop() from ERROR must tear down and reach STOPPED",
-                    Signum.State.STOPPED, signum.getState());
+            assertEquals(Signum.State.STOPPED, signum.getState(),
+                    "stop() from ERROR must tear down and reach STOPPED");
         } finally {
             module().removeNode(PROFILE);
         }
@@ -229,8 +228,7 @@ public class NodeModuleLifecycleTest {
     public void stop_fromCreatedState_isNoOp() {
         Signum signum = new Signum(new NodeProfile(PROFILE), CONF);
         signum.stop();
-        assertEquals("stop() from CREATED must be a no-op",
-                Signum.State.CREATED, signum.getState());
+        assertEquals(Signum.State.CREATED, signum.getState(), "stop() from CREATED must be a no-op");
     }
 
     @Test
@@ -239,8 +237,7 @@ public class NodeModuleLifecycleTest {
         try {
             setStateForTest(signum, Signum.State.STOPPED);
             signum.stop();
-            assertEquals("stop() from STOPPED must be a no-op",
-                    Signum.State.STOPPED, signum.getState());
+            assertEquals(Signum.State.STOPPED, signum.getState(), "stop() from STOPPED must be a no-op");
         } finally {
             if (signum.isRunning()) {
                 try {
@@ -270,22 +267,22 @@ public class NodeModuleLifecycleTest {
         Signum signum = new Signum(new NodeProfile(PROFILE), CONF);
         try {
             // A freshly created node is not paused.
-            assertFalse("fresh node must not be paused",
-                    signum.getOperatingState() == Signum.OperatingState.PAUSED_USER
-                            || signum.getOperatingState() == Signum.OperatingState.PAUSED_SYSTEM);
+            assertFalse(signum.getOperatingState() == Signum.OperatingState.PAUSED_USER
+                            || signum.getOperatingState() == Signum.OperatingState.PAUSED_SYSTEM,
+                    "fresh node must not be paused");
 
             // Simulate the user pausing the (running) node.
             signum.pauseByUser();
-            assertEquals("pauseByUser() must set the paused state",
-                    Signum.OperatingState.PAUSED_USER, signum.getOperatingState());
+            assertEquals(Signum.OperatingState.PAUSED_USER, signum.getOperatingState(),
+                    "pauseByUser() must set the paused state");
 
             // Drive the lifecycle out of the running state via a real state
             // transition (init: CREATED -> INITIALIZED), which must clear the pause.
             signum.init();
 
-            assertFalse("pause must be cleared once the lifecycle leaves RUNNING",
-                    signum.getOperatingState() == Signum.OperatingState.PAUSED_USER
-                            || signum.getOperatingState() == Signum.OperatingState.PAUSED_SYSTEM);
+            assertFalse(signum.getOperatingState() == Signum.OperatingState.PAUSED_USER
+                            || signum.getOperatingState() == Signum.OperatingState.PAUSED_SYSTEM,
+                    "pause must be cleared once the lifecycle leaves RUNNING");
         } finally {
             if (signum.isRunning()) {
                 try {

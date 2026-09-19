@@ -1,17 +1,15 @@
 package application.module.node.at;
 
 import application.module.node.util.Convert;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.JUnit4;
+import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
 import java.nio.BufferOverflowException;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
-@RunWith(JUnit4.class)
-public class AtApiHelperTest {
+class AtApiHelperTest {
     @Test
     public void testGetLong() {
         assertEquals(0x0000000000000000L, AtApiHelper.getLong(new byte[8]));
@@ -25,16 +23,17 @@ public class AtApiHelperTest {
         assertEquals(0xefcdab8967452301L, AtApiHelper.getLong(Convert.parseHexString("0123456789abcdef")));
     }
 
-    @Test(expected = NullPointerException.class)
+    @Test
     public void testGetLong_null() {
         // noinspection ConstantConditions,ResultOfMethodCallIgnored
-        AtApiHelper.getLong(null);
+        assertThrows(NullPointerException.class, () -> AtApiHelper.getLong(null));
     }
 
-    @Test(expected = BufferOverflowException.class)
+    @Test
     public void testGetLong_overflow() {
         // noinspection ResultOfMethodCallIgnored
-        AtApiHelper.getLong(Convert.parseHexString("0123456789abcdef0123456789abcdef"));
+        assertThrows(BufferOverflowException.class,
+                () -> AtApiHelper.getLong(Convert.parseHexString("0123456789abcdef0123456789abcdef")));
     }
 
     @Test
@@ -73,10 +72,10 @@ public class AtApiHelperTest {
                 .getByteArray(new BigInteger("efcdab8967452301efcdab8967452301efcdab8967452301efcdab8967452301", 16))));
     }
 
-    @Test(expected = NullPointerException.class)
+    @Test
     public void testGetByteArray_null() {
         // noinspection ConstantConditions
-        AtApiHelper.getByteArray(null);
+        assertThrows(NullPointerException.class, () -> AtApiHelper.getByteArray(null));
     }
 
     @Test

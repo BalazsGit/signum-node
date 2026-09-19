@@ -16,18 +16,18 @@ import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.props.PropertyService;
 
-import org.junit.Before;
-import org.junit.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.Collection;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
-public class AliasServiceImplTest extends AbstractUnitTest {
+class AliasServiceImplTest extends AbstractUnitTest {
 
     private AliasStore aliasStoreMock;
     private Stores storesMock;
@@ -41,7 +41,7 @@ public class AliasServiceImplTest extends AbstractUnitTest {
 
     private AliasServiceImpl t;
 
-    @Before
+    @BeforeEach
     public void setUp() {
         aliasStoreMock = mock(AliasStore.class);
         storesMock = mock(Stores.class);

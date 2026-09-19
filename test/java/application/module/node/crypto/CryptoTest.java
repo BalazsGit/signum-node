@@ -4,18 +4,15 @@ import application.module.node.common.TestConstants;
 import application.module.node.util.Convert;
 import signumj.crypto.SignumCrypto;
 
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.JUnit4;
+import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@RunWith(JUnit4.class)
-public class CryptoTest {
+class CryptoTest {
 
     private byte[] stringToBytes(String string) {
         return string.getBytes(StandardCharsets.UTF_8);

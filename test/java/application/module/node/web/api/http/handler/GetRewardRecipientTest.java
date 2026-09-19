@@ -1,8 +1,8 @@
 package application.module.node.web.api.http.handler;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-public class GetRewardRecipientTest {
+class GetRewardRecipientTest {
 
     @Test
     public void processRequest() {

@@ -1,18 +1,16 @@
 package chain;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.HashMap;
 import java.util.Random;
 
 import org.apache.commons.codec.binary.Hex;
-import org.junit.BeforeClass;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.JUnit4;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
 import signumj.entity.SignumAddress;
 import signumj.entity.SignumID;
@@ -25,17 +23,16 @@ import signumj.service.TransactionBuilder;
 
 import static chain.ChainUtils.*;
 
-@RunWith(JUnit4.class)
-public class AssetTest {
+class AssetTest {
     
     static String name = "TST";
     static String description = "TST token description";
     static SignumValue quantity = SignumValue.fromNQT(1000);
     static int decimals = 3;
 
-    @BeforeClass
+    @BeforeAll
     public static void setUpTest() {
-        assertTrue("Mock node did not responded in time", setupNode());
+        assertTrue(setupNode(), "Mock node did not responded in time");
     }
 
     @Test
@@ -65,7 +62,7 @@ public class AssetTest {
                 found = true;
             }
         }
-        assertTrue("Asset not found on the issuer account", found);
+        assertTrue(found, "Asset not found on the issuer account");
     }
 
     @Test
@@ -235,7 +232,7 @@ public class AssetTest {
                 found = true;
             }
         }
-        assertTrue("Asset not found on the receiver account", found);
+        assertTrue(found, "Asset not found on the receiver account");
     }
     
     @Test
@@ -271,7 +268,7 @@ public class AssetTest {
                 found = true;
             }
         }
-        assertTrue("Asset not found on the receiver account", found);
+        assertTrue(found, "Asset not found on the receiver account");
         
         // set account 2 as a treasury
         tb = new TransactionBuilder(TransactionBuilder.ADD_ASSET_TREASURY,
@@ -368,8 +365,8 @@ public class AssetTest {
                 found2 = true;
             }
         }
-        assertTrue("Asset 1 not found on the receiver account", found1);
-        assertTrue("Asset 2 not found on the receiver account", found2);
+        assertTrue(found1, "Asset 1 not found on the receiver account");
+        assertTrue(found2, "Asset 2 not found on the receiver account");
     }
 
     @Test
