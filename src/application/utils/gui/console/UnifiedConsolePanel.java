@@ -721,6 +721,14 @@ public final class UnifiedConsolePanel extends JPanel {
     }
 
     /**
+     * Returns the command input panel, or {@code null} if it has not been
+     * created yet (lazy initialization on first show / TOP position config).
+     */
+    public ConsoleInputPanel getCommandInputPanel() {
+        return inputPanel;
+    }
+
+    /**
      * Returns whether command input is enabled in configuration.
      */
     public boolean isCommandInputEnabled() {
@@ -771,9 +779,20 @@ public final class UnifiedConsolePanel extends JPanel {
 
         this.runtimeCommandPosition = position;
 
-        if (config.isAnimateCommandInput()) {
+        // An interrupted or earlier position change may have left a pending collapse
+        // callback behind — cancel it so it cannot reposition (or force-show) the
+        // panel after a superseding state change (e.g. a quick double toggle).
+        inputPanel.setOnCollapsedListener(null);
+
+        // The show/hide state is the single source of truth here: a position change
+        // must PRESERVE the current visibility, never force the panel open.
+        if (isCommandInputVisible() && config.isAnimateCommandInput()) {
+            // Visible: animated collapse at the old slot, reposition, expand at the new slot
             animatePositionChange(position);
         } else {
+            // Hidden (or animation disabled): move the zero-height panel to the new
+            // slot silently — no animation, no forced show. A collapse animation that
+            // is still in flight simply continues to zero height at the new slot.
             instantPositionChange(position);
         }
     }
@@ -798,22 +817,30 @@ public final class UnifiedConsolePanel extends JPanel {
      * The collapse-to-reposition transition is triggered via the {@code onCollapsedListener} callback.
      */
     private void animatePositionChange(final ConsoleInputPosition newPosition) {
-        // Wire callback: after collapse finishes, reposition then expand
+        // Preserve the visibility that was in effect when the change started:
+        // the panel must end up exactly as visible as it was before the move.
+        final boolean restoreVisibility = inputPanel.isExpanded();
+        // Wire callback: after collapse finishes, reposition then restore visibility
         inputPanel.setOnCollapsedListener(() -> {
-            // Remove from old position and add to new position while collapsed (zero height)
-            remove(inputPanel);
-            if (newPosition == ConsoleInputPosition.BOTTOM) {
-                add(inputPanel, BorderLayout.SOUTH);
-            } else {
-                ensureHeaderRegion();
-                headerRegion.add(inputPanel, BorderLayout.CENTER);
+            try {
+                // Remove from old position and add to new position while collapsed (zero height)
+                remove(inputPanel);
+                if (newPosition == ConsoleInputPosition.BOTTOM) {
+                    add(inputPanel, BorderLayout.SOUTH);
+                } else {
+                    ensureHeaderRegion();
+                    headerRegion.add(inputPanel, BorderLayout.CENTER);
+                }
+                revalidate();
+                repaint();
+                // Restore visibility at the new position
+                if (restoreVisibility) {
+                    inputPanel.show(true);
+                }
+            } finally {
+                // Clear callback after use (defensive: must never leak, even on error)
+                inputPanel.setOnCollapsedListener(null);
             }
-            revalidate();
-            repaint();
-            // Expand at new position
-            inputPanel.show(true);
-            // Clear callback after use
-            inputPanel.setOnCollapsedListener(null);
         });
         // Start collapse animation at current position
         inputPanel.hide(true);

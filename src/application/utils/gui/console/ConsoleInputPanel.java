@@ -224,6 +224,20 @@ public final class ConsoleInputPanel extends JPanel {
         this.onCollapsedListener = listener;
     }
 
+    /**
+     * Fires the pending collapse-completion callback exactly once, clearing it
+     * BEFORE invocation so re-entrant show/hide calls cannot observe a stale
+     * listener. No-op when no listener is pending.
+     */
+    private void fireCollapsedListener() {
+        Runnable listener = onCollapsedListener;
+        if (listener == null) {
+            return;
+        }
+        onCollapsedListener = null;
+        listener.run();
+    }
+
     // ── Visibility with Animation Support ────────────────────────────────
 
     /**
@@ -292,6 +306,10 @@ public final class ConsoleInputPanel extends JPanel {
 
     private void instantShow() {
         stopAnimation();
+        // An explicit show supersedes any pending position-change callback: the
+        // collapse it was waiting for will never complete, so drop it to avoid a
+        // stale reposition/force-show at a later collapse.
+        onCollapsedListener = null;
         expanded = true;
         setVisible(true);
         setPreferredSize(null);            // Natural size
@@ -309,10 +327,18 @@ public final class ConsoleInputPanel extends JPanel {
         setMaximumSize(new Dimension(Integer.MAX_VALUE, 0));
         setBorder(new EmptyBorder(0, 0, 0, 0));
         revalidateAndRepaintParents();
+        // The collapsed state was reached (instantly) — callers waiting for the
+        // callback (e.g. a position change) must be notified so they are never
+        // left dangling.
+        fireCollapsedListener();
     }
 
     private void animateExpand() {
         stopAnimation();
+        // An explicit show supersedes any pending position-change callback: the
+        // collapse it was waiting for will never complete, so drop it to avoid a
+        // stale reposition/force-show at a later collapse.
+        onCollapsedListener = null;
         expanded = true;
         setVisible(true);
 
@@ -392,9 +418,7 @@ public final class ConsoleInputPanel extends JPanel {
                 setBorder(new EmptyBorder(0, 0, 0, 0));
                 revalidateAndRepaintParents();
                 // Notify listener so caller can reposition before expand
-                if (onCollapsedListener != null) {
-                    onCollapsedListener.run();
-                }
+                fireCollapsedListener();
             }
         });
         animationTimer.start();

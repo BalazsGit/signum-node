@@ -222,77 +222,6 @@ public class NodeConsolePanel extends JPanel {
     }
 
     /**
-     * Log the layout/component tree state for diagnostics.
-     */
-    private void logLayoutDiagnostics(String tag) {
-        try {
-            StringBuilder sb = new StringBuilder();
-            sb.append("[LayoutDiag] ").append(tag).append(" - ");
-            JFrame f = (JFrame) SwingUtilities.getWindowAncestor(this);
-            if (f != null) {
-                sb.append("Frame=size=").append(f.getSize()).append(", rootPaneSize=")
-                        .append(f.getRootPane() != null ? f.getRootPane().getSize() : "null").append("; ");
-            }
-            sb.append("commandPanelWrapper: isShowing=").append(commandPanelWrapper.isShowing())
-                    .append(", isVisible=").append(commandPanelWrapper.isVisible())
-                    .append(", height=").append(commandPanelWrapper.getHeight())
-                    .append(", pref=").append(commandPanelWrapper.getPreferredSize())
-                    .append(", max=").append(commandPanelWrapper.getMaximumSize()).append("; ");
-
-            Component p = commandPanelWrapper.getParent();
-            int depth = 0;
-            while (p != null && depth < 10) {
-                sb.append("[parent-").append(depth).append(":")
-                        .append(p.getClass().getSimpleName()).append(" size=").append(p.getSize())
-                        .append(", pref=")
-                        .append(p instanceof JComponent ? ((JComponent) p).getPreferredSize() : "n/a")
-                        .append(", isShowing=").append(p.isShowing())
-                        .append(", isVisible=").append(p.isVisible());
-                if (p instanceof JComponent) {
-                    sb.append(", isValidateRoot=").append(((JComponent) p).isValidateRoot());
-                }
-                // If this is the immediate parent (likely bottomPanel), dump its children and layout info
-                if (depth == 0 && p instanceof Container) {
-                    Container c = (Container) p;
-                    LayoutManager lm = c.getLayout();
-                    sb.append(", layout=").append(lm != null ? lm.getClass().getSimpleName() : "null");
-                    Component[] kids = c.getComponents();
-                    sb.append(", childrenCount=").append(kids.length).append("[");
-                    for (int i = 0; i < kids.length; i++) {
-                        Component k = kids[i];
-                        sb.append("#").append(i).append(":" + k.getClass().getSimpleName())
-                                .append(" bounds=").append(k.getBounds())
-                                .append(" pref=")
-                                .append(k instanceof JComponent ? ((JComponent) k).getPreferredSize() : "n/a")
-                                .append(" visible=").append(k.isVisible());
-                        if (i < kids.length - 1) sb.append(", ");
-                    }
-                    sb.append("]");
-                    // If BorderLayout, attempt to resolve which component is in NORTH/CENTER/SOUTH
-                    if (lm instanceof BorderLayout) {
-                        BorderLayout bl = (BorderLayout) lm;
-                        Component north = bl.getLayoutComponent(c, BorderLayout.NORTH);
-                        Component center = bl.getLayoutComponent(c, BorderLayout.CENTER);
-                        Component south = bl.getLayoutComponent(c, BorderLayout.SOUTH);
-                        sb.append(" northComp=")
-                                .append(north != null ? north.getClass().getSimpleName() + north.getBounds() : "null");
-                        sb.append(" centerComp=")
-                                .append(center != null ? center.getClass().getSimpleName() + center.getBounds() : "null");
-                        sb.append(" southComp=")
-                                .append(south != null ? south.getClass().getSimpleName() + south.getBounds() : "null");
-                    }
-                }
-                sb.append("] ");
-                p = p.getParent();
-                depth++;
-            }
-            LOGGER.info(sb.toString());
-        } catch (Exception e) {
-            LOGGER.warn("Error while logging layout diagnostics", e);
-        }
-    }
-
-    /**
      * A general method to update the entire GUI after a Look and Feel or theme
      * change.
      * This method handles:
@@ -356,9 +285,6 @@ public class NodeConsolePanel extends JPanel {
             menuPanel.setBorder(UIManager.getBorder("PopupMenu.border"));
         }
         // popup wrapper is managed by MenuPopupController
-        if (commandPanel != null) {
-            SwingUtilities.updateComponentTreeUI(commandPanel);
-        }
     }
 
     /**
@@ -486,14 +412,10 @@ public class NodeConsolePanel extends JPanel {
     private volatile Signum listenerOwner;
     private JPanel metricsPanelWrapper;
     private Timer metricsPanelAnimator;
-    private static final int COMMAND_PANEL_ANIMATION_DURATION = 250;
-
     private CustomDrawingComponent popOffToggle;
     private JButton menuButton;
     private JButton globeButton;
     private JLabel measurementLabel;
-    private JPanel commandPanel;
-    private JTextField commandField;
     private JPanel contentPanel;   // Content BorderLayout inside CardLayout (holds toolbar, console, bottomPanel)
     private JPanel consoleWrapper;
     private JPanel bottomPanel;
@@ -512,8 +434,6 @@ public class NodeConsolePanel extends JPanel {
     private JCheckBox autostartItem;
     private JCheckBox skipDbCheckItem;
     private JLabel experimentalLabel;
-    private JPanel commandPanelWrapper;
-    private Timer commandPanelAnimator;
     private JPanel menuPanel;
     /** Controller that handles popup display, animation and auto-close behavior */
     private application.utils.gui.MenuPopupController menuPopupController;
@@ -811,233 +731,6 @@ public class NodeConsolePanel extends JPanel {
             });
             popOffAnimator.start();
         }
-    }
-
-    /**
-     * @deprecated Replaced by UnifiedConsolePanel.setShowCommandInput(boolean).
-     * Retained for backward compatibility (null-safe when commandPanel is null).
-     */
-    @Deprecated
-    private void toggleCommandPanel() {
-        showCommandInput = !showCommandInput;
-        showCommandItem.setSelected(showCommandInput);
-
-        LOGGER.info("[CommandPanel] Toggling Command Input panel: {}", showCommandInput ? "OPEN" : "CLOSE");
-
-        if (showCommandInput) {
-            if (switchToConsoleAction != null) {
-                LOGGER.info("[CommandPanel] Switching to Console tab before showing command panel");
-                switchToConsoleAction.run();
-            }
-            showCommandPanelInline();
-        } else {
-            hideCommandPanelInline();
-        }
-
-        LOGGER.info("[ScrollDebug] toggleCommandPanel: about to invokeLater scroll to bottom");
-        SwingUtilities.invokeLater(() -> {
-            if (textScrollPane != null) {
-                JScrollBar vertical = textScrollPane.getVerticalScrollBar();
-                if (vertical != null) {
-                    int maxVal = vertical.getMaximum();
-                    int currentBefore = vertical.getValue();
-                    LOGGER.info("[ScrollDebug] toggleCommandPanel: setting scrollbar from {} to {}", currentBefore, maxVal);
-                    vertical.setValue(maxVal);
-                } else {
-                    LOGGER.info("[ScrollDebug] toggleCommandPanel: vertical scrollbar is null");
-                }
-            } else {
-                LOGGER.info("[ScrollDebug] toggleCommandPanel: textScrollPane is null");
-            }
-        });
-    }
-
-    /**
-     * @deprecated Replaced by UnifiedConsolePanel command input panel.
-     * Null-safe: returns immediately when commandPanel/commandPanelWrapper are null.
-     */
-    @Deprecated
-    private void showCommandPanelInline() {
-        showCommandPanelInline(commandPanelAtBottom ? BottomPanelPosition.BOTTOM : BottomPanelPosition.TOP);
-    }
-
-    /**
-     * @deprecated Replaced by UnifiedConsolePanel command input panel.
-     * Null-safe: returns immediately when components are null.
-     */
-    @Deprecated
-    private void showCommandPanelInline(BottomPanelPosition position) {
-        if (commandPanel == null || commandPanelWrapper == null || contentPanel == null || bottomPanel == null) {
-            LOGGER.warn("Command panel or wrapper is not initialized");
-            return;
-        }
-
-        if (commandPanel.getParent() != commandPanelWrapper) {
-            if (commandPanel.getParent() instanceof java.awt.Container) {
-                ((java.awt.Container) commandPanel.getParent()).remove(commandPanel);
-            }
-            commandPanelWrapper.removeAll();
-            commandPanelWrapper.add(commandPanel, BorderLayout.CENTER);
-        }
-
-        if (position == BottomPanelPosition.BOTTOM) {
-            if (commandPanelWrapper.getParent() != bottomPanel) {
-                if (commandPanelWrapper.getParent() instanceof java.awt.Container) {
-                    ((java.awt.Container) commandPanelWrapper.getParent()).remove(commandPanelWrapper);
-                }
-                bottomPanel.add(commandPanelWrapper, BorderLayout.NORTH);
-            }
-        } else {
-            if (commandPanelWrapper.getParent() != topPanel) {
-                if (commandPanelWrapper.getParent() instanceof java.awt.Container) {
-                    ((java.awt.Container) commandPanelWrapper.getParent()).remove(commandPanelWrapper);
-                }
-                // "h 0:" allows MigLayout to resize this component's row from height 0 upward,
-                // enabling smooth expand/collapse animations (without it the row locks at natural size)
-                topPanel.add(commandPanelWrapper, "growx, h 0:");
-            }
-        }
-
-        commandPanel.setVisible(true);
-        commandPanelWrapper.setVisible(true);
-        if (position == BottomPanelPosition.BOTTOM) {
-            bottomPanel.revalidate();
-            bottomPanel.repaint();
-        } else {
-            topPanel.revalidate();
-            topPanel.repaint();
-        }
-        contentPanel.revalidate();
-        contentPanel.repaint();
-        // Use invokeLater to ensure layout is fully computed before animation starts
-        // This is especially important for MigLayout (topPanel) where the initial
-        // preferredSize calculation may not be ready immediately after revalidate()
-        SwingUtilities.invokeLater(() -> animateCommandPanelOpen(position));
-    }
-
-    /**
-     * @deprecated Replaced by UnifiedConsolePanel command input panel.
-     * Null-safe: returns immediately when commandPanelWrapper is null.
-     */
-    @Deprecated
-    private void hideCommandPanelInline() {
-        if (commandPanelWrapper == null) {
-            return;
-        }
-        animateCommandPanelClose();
-    }
-
-    /**
-     * @deprecated Replaced by UnifiedConsolePanel ConsoleInputPanel animation.
-     * Null-safe: no-op when commandPanel is null.
-     */
-    @Deprecated
-    private void animateCommandPanelOpen(BottomPanelPosition position) {
-        if (commandPanelAnimator != null && commandPanelAnimator.isRunning()) {
-            commandPanelAnimator.stop();
-        }
-
-        int targetHeight = commandPanel.getPreferredSize().height;
-        commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), 0));
-        commandPanelWrapper.revalidate();
-
-        commandPanelAnimator = new Timer(10, null);
-        long start = System.currentTimeMillis();
-        commandPanelAnimator.addActionListener(e -> {
-            float progress = Math.min(1.0f, (System.currentTimeMillis() - start) / (float) COMMAND_PANEL_ANIMATION_DURATION);
-            progress = 1 - (float) Math.pow(1 - progress, 3);
-            int height = (int) (targetHeight * progress);
-            commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), height));
-            // Update maximumSize as well so MigLayout knows the row can grow during animation
-            commandPanelWrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, height));
-            // Also revalidate parent container for MigLayout compatibility
-            // MigLayout does not automatically respond to preferredSize changes of children
-            Component parent = commandPanelWrapper.getParent();
-            if (parent != null) {
-                parent.revalidate();
-                parent.repaint();
-            }
-            commandPanelWrapper.revalidate();
-            commandPanelWrapper.repaint();
-            if (progress >= 1f) {
-                commandPanelAnimator.stop();
-                commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), targetHeight));
-                commandPanelWrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, targetHeight));
-                if (parent != null) {
-                    parent.revalidate();
-                    parent.repaint();
-                }
-                commandPanelWrapper.revalidate();
-                commandPanelWrapper.repaint();
-            }
-        });
-        commandPanelAnimator.start();
-    }
-
-    /**
-     * @deprecated Replaced by UnifiedConsolePanel ConsoleInputPanel animation.
-     * Null-safe: no-op when commandPanel is null.
-     */
-    @Deprecated
-    private void animateCommandPanelClose() {
-        if (commandPanelAnimator != null && commandPanelAnimator.isRunning()) {
-            commandPanelAnimator.stop();
-        }
-
-        int startHeight = commandPanelWrapper.getHeight();
-        // Capture parent reference for MigLayout compatibility
-        Component parent = commandPanelWrapper.getParent();
-        commandPanelAnimator = new Timer(10, null);
-        long start = System.currentTimeMillis();
-        commandPanelAnimator.addActionListener(e -> {
-            float progress = Math.min(1.0f, (System.currentTimeMillis() - start) / (float) COMMAND_PANEL_ANIMATION_DURATION);
-            progress = 1 - (float) Math.pow(1 - progress, 3);
-            int height = (int) (startHeight * (1 - progress));
-            commandPanelWrapper.setPreferredSize(new Dimension(commandPanelWrapper.getWidth(), Math.max(0, height)));
-            // Also revalidate parent container for MigLayout compatibility
-            if (parent != null) {
-                parent.revalidate();
-                parent.repaint();
-            }
-            commandPanelWrapper.revalidate();
-            commandPanelWrapper.repaint();
-            if (progress >= 1f) {
-                commandPanelAnimator.stop();
-                commandPanelWrapper.removeAll();
-                commandPanelWrapper.setPreferredSize(new Dimension(0, 0));
-                commandPanelWrapper.setMaximumSize(new Dimension(Integer.MAX_VALUE, 0));
-                commandPanelWrapper.setVisible(false);
-                // Final revalidate of parent for MigLayout compatibility
-                if (parent != null) {
-                    parent.revalidate();
-                    parent.repaint();
-                }
-                commandPanelWrapper.revalidate();
-                commandPanelWrapper.repaint();
-            }
-        });
-        commandPanelAnimator.start();
-    }
-
-    /**
-     * @deprecated Replaced by UnifiedConsolePanel configuration.
-     * Kept for backward compatibility with legacy menu checkbox.
-     */
-    @Deprecated
-    private void setCommandPanelAtBottom(boolean bottom) {
-        this.commandPanelAtBottom = bottom;
-        if (commandPositionBottomItem != null) {
-            commandPositionBottomItem.setSelected(bottom);
-        }
-        if (showCommandInput) {
-            hideCommandPanelInline();
-            showCommandPanelInline(bottom ? BottomPanelPosition.BOTTOM : BottomPanelPosition.TOP);
-        }
-    }
-
-    private enum BottomPanelPosition {
-        TOP,
-        BOTTOM
     }
 
     /**
@@ -1347,71 +1040,6 @@ public class NodeConsolePanel extends JPanel {
         bottomPanel.setBorder(BorderFactory.createEmptyBorder(2, 2, 2, 2));
         contentPanel.add(bottomPanel, BorderLayout.PAGE_END);
 
-        /* ── LEGACY: Command Input Panel replaced by UnifiedConsolePanel.ConsoleInputPanel ──
-         * The unified console now handles command input internally via its built-in ConsoleInputPanel.
-         * Hamburger menu toggle calls unifiedConsole.setShowCommandInput(true/false) with animation.
-         * These fields remain declared (but null) for backward compatibility with legacy methods.
-         */
-
-        /* ── LEGACY CODE COMMENTED OUT (preserved for reference) ──
-        commandPanel = new JPanel(new BorderLayout(0, 0));
-        commandPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 5, 0));
-        JComponent legacyCommandLabel = new JComponent() {
-            @Override protected void paintComponent(Graphics g) {
-                super.paintComponent(g);
-                CustomDrawings.COMMAND_SYMBOL.draw((Graphics2D) g, getWidth(), getHeight(), GuiColors.getButtonIcon());
-            }
-            @Override public Dimension getPreferredSize() {
-                int size = Math.round(GuiConstants.getToolBarIconSize());
-                return new Dimension(size, size);
-            }
-        };
-        legacyCommandLabel.setToolTipText("Command Input");
-        commandField = new JTextField();
-        commandField.setToolTipText("Enter node command (e.g. .help, .pause, .resume)");
-        JButton legacySendButton = new JButton("Send");
-        ActionListener legacySendAction = e -> {
-            String cmd = commandField.getText().trim();
-            if (!cmd.isEmpty()) {
-                LOGGER.info("Executing command: " + cmd);
-                executeCommand(cmd);
-                commandField.setText("");
-            }
-        };
-        commandField.addActionListener(legacySendAction);
-        legacySendButton.addActionListener(legacySendAction);
-        JButton legacyHelpButton = new HelpButton();
-        legacyHelpButton.setToolTipText("Command Help");
-        legacyHelpButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        String legacyCommandHelpText = "<html><b>Available Commands:</b><br>" +
-                "<ul>" +
-                "<li><b>.help</b> - Displays available commands in the log.</li>" +
-                "<li><b>.pause</b> - Pauses blockchain synchronization.</li>" +
-                "<li><b>.resume</b> - Resumes blockchain synchronization.</li>" +
-                "<li><b>.restart</b> - Restarts the node application.</li>" +
-                "<li><b>.shutdown</b> - Gracefully shuts down the node.</li>" +
-                "<li><b>.autoresolve</b> - Triggers manual database consistency resolution.</li>" +
-                "<li><b>.trim</b> - Schedules a database trim.</li>" +
-                "<li><b>.dbcheck</b> - Performs a database consistency check.</li>" +
-                "<li><b>.popoff <n></b> - Pops off the last n blocks (e.g., .popoff 10).</li>" +
-                "</ul>" +
-                "Enter a command in the text field and click 'Send' or press Enter.</html>";
-        legacyHelpButton.addActionListener(e -> {
-            JOptionPane.showMessageDialog(NodeConsolePanel.this, legacyCommandHelpText, "Command Usage",
-                    JOptionPane.INFORMATION_MESSAGE);
-        });
-        JPanel legacyButtonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
-        legacyButtonPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
-        legacyButtonPanel.add(legacySendButton);
-        legacyButtonPanel.add(legacyHelpButton);
-        commandPanel.add(legacyCommandLabel, BorderLayout.WEST);
-        commandPanel.add(commandField, BorderLayout.CENTER);
-        commandPanel.add(legacyButtonPanel, BorderLayout.EAST);
-        commandPanelWrapper = new JPanel(new BorderLayout());
-        commandPanelWrapper.setVisible(false);
-        commandPanelWrapper.setPreferredSize(new Dimension(0, 0));
-        commandPanelWrapper.setMinimumSize(new Dimension(0, 0));
-        ── LEGACY CODE END ── */
         syncProgressBar = new JProgressBar(0, 100);
         syncProgressBar.setStringPainted(true);
         syncProgressBar.setFont(UIManager.getFont("Label.font"));
@@ -1719,11 +1347,6 @@ public class NodeConsolePanel extends JPanel {
         // Use MigLayout for better dynamic resizing support
         topPanel = new JPanel(new MigLayout("insets 0, gap 0, fillx, wrap 1", "[grow]", "[]0[]0[]"));
         topPanel.add(metricsPanelWrapper, "growx");
-        /* ── LEGACY: commandPanelWrapper replaced by UnifiedConsolePanel.ConsoleInputPanel ──
-         * Command input is now handled internally by UnifiedConsolePanel.
-         * This line commented out because commandPanelWrapper is null after legacy code removal.
-         */
-        // topPanel.add(commandPanelWrapper, "growx");
 
         // Use MigLayout for infoPanel to allow precise vertical alignment
         infoPanel = new JPanel(
@@ -2069,7 +1692,6 @@ public class NodeConsolePanel extends JPanel {
                             LOGGER.warn("Error stopping metricsPanel animator", t);
                         }
                     }
-                    hideCommandPanelInline();
                     if (menuPopupController != null && menuPopupController.isOpen()) {
                         try {
                             menuPopupController.hide();
@@ -3200,10 +2822,13 @@ public class NodeConsolePanel extends JPanel {
                     if (showCommandItem != null) {
                         showCommandItem.setSelected(showCommandInput);
                     }
-                    if (showCommandInput) {
-                        commandPanelWrapper.add(commandPanel, BorderLayout.CENTER);
-                    } else {
-                        commandPanelWrapper.setPreferredSize(new Dimension(0, 0));
+                    // Re-apply the freshly loaded command-input state to the unified console
+                    // (the second loadGuiSettings() may have created the settings file with
+                    // defaults after initConsoleUI()). Position first, then visibility.
+                    if (unifiedConsole != null) {
+                        unifiedConsole.setCommandPosition(commandPanelAtBottom
+                                ? ConsoleInputPosition.BOTTOM : ConsoleInputPosition.TOP);
+                        unifiedConsole.setShowCommandInput(showCommandInput);
                     }
 
                     if (showMetricsItem != null) {
@@ -3339,14 +2964,16 @@ public class NodeConsolePanel extends JPanel {
             metricsPanelWrapper.setMinimumSize(new Dimension(0, 0));
         }
 
-        // Apply Command Panel visibility (legacy code paths are null-safe / deprecated)
-        if (showCommandInput) {
-            showCommandPanelInline();
-        } else {
-            hideCommandPanelInline();
+        // Apply persisted command-input position + visibility to the unified console.
+        // Position FIRST: when the input is shown lazily, it is created in the
+        // effective position slot.
+        if (unifiedConsole != null) {
+            unifiedConsole.setCommandPosition(commandPanelAtBottom
+                    ? ConsoleInputPosition.BOTTOM : ConsoleInputPosition.TOP);
+            unifiedConsole.setShowCommandInput(showCommandInput);
         }
 
-        // Revalidate the full content hierarchy (toolbar -> metricsPanelWrapper -> bottomPanel/commandPanelWrapper)
+        // Revalidate the full content hierarchy (toolbar -> metricsPanelWrapper -> bottomPanel)
         // toolBar.revalidate() alone is insufficient because isValidateRoot barriers prevent layout propagation
         // to bottomPanel. We must explicitly revalidate contentPanel which contains all three regions.
         toolBar.revalidate();
