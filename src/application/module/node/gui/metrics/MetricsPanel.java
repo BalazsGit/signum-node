@@ -97,6 +97,11 @@ public class MetricsPanel extends JTabbedPane {
     }
 
     private void initPanels(JFrame parentFrame) {
+        // A few pixels of top margin (transparent, no colored line) so the
+        // metrics section's top row does not touch the rows above it
+        // (toolbar / info bar).
+        setBorder(BorderFactory.createEmptyBorder(4, 0, 0, 0));
+
         // Create dedicated single thread executors for each panel.
         // This ensures that heavy load on one panel (e.g. PeerMetrics) does not block
         // updates on other panels (e.g. Sync), providing better UI responsiveness.

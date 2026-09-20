@@ -14,6 +14,7 @@ import java.util.Properties;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -202,6 +203,41 @@ class NodeProfileRepositoryCrudTest {
             assertTrue(names.contains("aaa"));
             assertTrue(names.contains("bbb"));
             assertFalse(names.contains("node-default"));
+        }
+    }
+
+    @Nested
+    @DisplayName("checkProfileName")
+    class CheckProfileNameTests {
+
+        @Test
+        @DisplayName("returns null for a valid, available name")
+        void check_ValidName_ReturnsNull() {
+            assertNull(NodeProfileRepository.checkProfileName("mainnet", List.of("other")));
+            assertNull(NodeProfileRepository.checkProfileName("mainnet", null));
+        }
+
+        @Test
+        @DisplayName("returns an error for a taken name")
+        void check_TakenName_ReturnsError() {
+            String error = NodeProfileRepository.checkProfileName("mainnet", List.of("mainnet"));
+            assertNotNull(error);
+            assertTrue(error.contains("already exists"));
+        }
+
+        @Test
+        @DisplayName("returns an error for a reserved name regardless of the taken set")
+        void check_ReservedName_ReturnsError() {
+            assertNotNull(NodeProfileRepository.checkProfileName("node-default", null));
+            assertNotNull(NodeProfileRepository.checkProfileName("logging-default", List.of()));
+        }
+
+        @Test
+        @DisplayName("returns an error for a blank, invalid, or null name")
+        void check_BlankOrInvalid_ReturnsError() {
+            assertNotNull(NodeProfileRepository.checkProfileName("  ", null));
+            assertNotNull(NodeProfileRepository.checkProfileName("bad name!", null));
+            assertNotNull(NodeProfileRepository.checkProfileName(null, null));
         }
     }
 }

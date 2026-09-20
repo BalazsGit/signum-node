@@ -209,6 +209,28 @@ public final class LoggingAssignmentStore {
     }
 
     /**
+     * Re-keys a renamed node profile's logging assignment: the assignment under
+     * {@code oldName} (canonical presets, or a legacy fallback migrated to the
+     * canonical store) is moved to {@code newName}. No-op when the old profile has
+     * no assignment.
+     *
+     * @param oldName the profile name before the rename
+     * @param newName the profile name after the rename
+     */
+    public void renameAssignment(String oldName, String newName) {
+        if (oldName == null || oldName.isBlank() || newName == null || newName.isBlank()) {
+            return;
+        }
+        Map<String, String> assignment = new LinkedHashMap<>(getAssignment(oldName));
+        if (assignment.isEmpty()) {
+            return;
+        }
+        setAssignment(newName, assignment);
+        clearAssignment(oldName);
+        LOGGER.info("Re-keyed logging assignment for renamed profile '{}' -> '{}'", oldName, newName);
+    }
+
+    /**
      * Checks whether the canonical store has an explicit assignment for the profile.
      *
      * @param nodeProfileName Node profile name

@@ -2,6 +2,7 @@ package application.module.node.profile;
 
 import application.module.node.props.Props;
 
+import java.nio.file.Path;
 import java.util.Properties;
 
 /**
@@ -24,9 +25,27 @@ public final class ProfileCreateDefaults {
         throw new UnsupportedOperationException("Utility class");
     }
 
+    /**
+     * Per-profile SQLite data directory (SSOT): {@code ./database/SQLite/<name>} (CWD-relative,
+     * the same base {@link #sqliteDbUrl} is derived from).
+     */
+    public static Path sqliteDataDir(String profileName) {
+        return Path.of("database", "SQLite", profileName);
+    }
+
     /** Per-profile SQLite JDBC URL (SSOT): {@code ./database/SQLite/<name>/signum.sqlite.db}. */
     public static String sqliteDbUrl(String profileName) {
         return "jdbc:sqlite:file:./database/SQLite/" + profileName + "/signum.sqlite.db";
+    }
+
+    /**
+     * Whether the given DB URL is the per-profile default SQLite URL for the named profile
+     * (SSOT: {@link #sqliteDbUrl}) — the signal that the database lives in the profile's own
+     * data directory (and belongs to it). A server-DB or manually set URL belongs elsewhere
+     * and must never be renamed/deleted by profile operations.
+     */
+    public static boolean isPerProfileSqliteUrl(String profileName, String dbUrl) {
+        return profileName != null && dbUrl != null && sqliteDbUrl(profileName).equals(dbUrl);
     }
 
     /** Maps the network selection to {@code node.network} ({@code mainnet}/{@code testnet}). */

@@ -1,9 +1,15 @@
 package application.module.node.gui.configuration;
 import application.utils.config.ModuleIds;
 
+import application.module.node.NodeModule;
 import application.module.node.Signum;
 import application.module.node.crypto.Crypto;
+import application.module.node.gui.NodePanel;
 import application.module.node.profile.NodeProfile;
+import application.module.node.profile.NodeProfileRepository;
+import application.module.node.profile.ProfileDiffCalculator;
+import application.module.node.profile.ProfileNameSuggester;
+import application.module.node.profile.ProfileRuntimeService;
 import application.module.database.gui.DatabaseConfigurationPanel;
 import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.node.Constants;
@@ -14,9 +20,11 @@ import jiconfont.icons.font_awesome.FontAwesome;
 import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
+import application.utils.gui.GuiIcons;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
 import application.utils.gui.ResponsiveToolbarScrollPane;
+import application.utils.gui.SearchMatchLabel;
 import application.utils.io.PathUtils;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
@@ -24,12 +32,17 @@ import net.miginfocom.swing.MigLayout;
 import com.google.gson.*;
 
 import java.awt.event.ActionListener;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.swing.border.TitledBorder;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.Highlighter;
+import javax.swing.text.JTextComponent;
 import javax.swing.text.SimpleAttributeSet;
 import javax.swing.text.StyleConstants;
 import java.awt.*;
-import java.awt.event.HierarchyEvent;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.Reader;
@@ -54,6 +67,36 @@ public class NodeConfigurationPanel extends JPanel {
     private static final Logger LOGGER = LoggerFactory.getLogger(NodeConfigurationPanel.class);
     private final Map<String, Supplier<String>> valueSuppliers = new HashMap<>();
     private final Map<String, JComponent> propertyComponents = new HashMap<>();
+
+    /**
+     * The value search highlight currently shown on each value component
+     * (at most one per row; replaced on every search update).
+     */
+    private final Map<JTextComponent, Object> searchValueHighlights = new IdentityHashMap<>();
+
+    /**
+     * Painters for value search highlights — the palette's SSOT search
+     * colors (the same ones the console "find" feature uses): the soft
+     * match color for every match, the active color for the match being
+     * navigated to.
+     */
+    private static final Highlighter.HighlightPainter SEARCH_MATCH_PAINTER = new Highlighter.HighlightPainter() {
+        @Override
+        public void paint(Graphics g, int x, int y, Shape bounds, JTextComponent c) {
+            Rectangle r = bounds.getBounds();
+            g.setColor(GuiColors.getSearchMatch());
+            g.fillRect(r.x, r.y, r.width, r.height);
+        }
+    };
+
+    private static final Highlighter.HighlightPainter SEARCH_MATCH_PAINTER_ACTIVE = new Highlighter.HighlightPainter() {
+        @Override
+        public void paint(Graphics g, int x, int y, Shape bounds, JTextComponent c) {
+            Rectangle r = bounds.getBounds();
+            g.setColor(GuiColors.getSearchActiveMatch());
+            g.fillRect(r.x, r.y, r.width, r.height);
+        }
+    };
 
     private static final String KEY_PROFILE_LINKS = "profileLinks";
     private static final String KEY_DATABASE = "database";
@@ -89,23 +132,38 @@ public class NodeConfigurationPanel extends JPanel {
      */
     private Signum signum;
     private Path propertiesFile;
-    private JComboBox<String> profileComboBox;
     private final java.util.List<PropertyRow> allPropertyRows = new ArrayList<>();
-    private JPanel searchResultsPanel;
+    /** Live search (console-style): the rows matching the current query. */
+    private final List<PropertyRow> searchMatches = new ArrayList<>();
+    private int searchActiveIndex = -1;
+    private JTextField searchField;
+    private JLabel searchMatchIndicator;
+    private JButton searchPrevButton;
+    private JButton searchNextButton;
+    /**
+     * Content container: the "TABS" card holds the tabbed configuration, the
+     * "SEARCH" card a flat list of the matching rows from ALL tabs. While a
+     * search is active the tabs are hidden and the matches are listed flat
+     * (with live highlighting); clearing the search field brings the tabbed
+     * view back.
+     */
     private CardLayout contentCardLayout;
+    private JPanel contentContainer;
+    private JPanel searchResultsPanel;
+    /** True while the "SEARCH" card is up (row parts are living in the results list). */
+    private boolean searchViewActive = false;
+    /** The match set the flat results list currently displays (skips no-op rebuilds). */
+    private List<PropertyRow> lastListedMatches;
     private JTabbedPane categoryTabbedPane;
-    private JButton saveProfileBtn;
-    private JButton applyProfileBtn;
+    private JButton saveApplyBtn;
+    private boolean overallDirty = false;
     private JButton renameProfileBtn;
     private JButton deleteProfileBtn;
-    private JButton newProfileBtn;
     private JButton copyProfileDataBtn;
+    private JButton cloneProfileBtn;
     private JButton reloadProfileBtn;
     private JButton resetToDefaultsBtn;
-    private JButton refreshProfilesBtn;
-    private JPanel contentContainer;
     private String runningProfileName;
-    private String activeProfileName;
     private String loadedProfileName;
     private int currentAddingTabIndex = -1;
     private int linkedProfilesTabIndex = -1;
@@ -147,7 +205,6 @@ public class NodeConfigurationPanel extends JPanel {
                 ? profileName
                 : Signum.PROPERTIES_NAME;
         this.runningProfileName = resolvedProfileName;
-        this.activeProfileName = this.runningProfileName;
         this.loadedProfileName = this.runningProfileName;
 
         // Use the unified profile loader to resolve the properties file path
@@ -166,13 +223,13 @@ public class NodeConfigurationPanel extends JPanel {
         // Populated on demand in addProperty methods to avoid compilation errors with
         // Props class
 
-        this.renameProfileBtn = new JButton("Rename Profile");
-        this.deleteProfileBtn = new JButton("Delete Profile");
+        this.renameProfileBtn = new JButton();
+        this.deleteProfileBtn = new JButton();
         this.categoryTabbedPane = new JTabbedPane();
         // Initialize buttons early to avoid NullPointerException in listeners during UI
-        // construction
-        this.saveProfileBtn = new JButton("Save Profile As");
-        this.applyProfileBtn = new JButton("Apply Profile");
+        // construction. The toolbar is icon-only: the tooltip is the single source of
+        // information about each action (F0 of the profile-actions refactor plan).
+        this.saveApplyBtn = new JButton();
         
         LOGGER.debug("NodeConfigurationPanel - calling loadAppliedProperties()");
         loadAppliedProperties();
@@ -210,73 +267,63 @@ public class NodeConfigurationPanel extends JPanel {
         JPanel profilePanel = new JPanel(new MigLayout("insets 0, gap 5"));
         profilePanel.setBorder(BorderFactory.createEmptyBorder()); // Remove internal padding, rely on scroll pane's
                                                                    // padding
-        profilePanel.add(new JLabel("Copy Data From:"));
+        saveApplyBtn.setToolTipText(
+                "<html>Save &amp; Apply<br><br>Saves all unsaved changes to the current profile, then asks<br>"
+                        + "whether to restart the node so the new configuration takes effect.</html>");
+        saveApplyBtn.setEnabled(false);
+        saveApplyBtn.addActionListener(e -> saveAndApply());
+        profilePanel.add(saveApplyBtn);
 
-        profileComboBox = new JComboBox<>();
-        profileComboBox.setEditable(false);
-        profileComboBox.setPrototypeDisplayValue("XXXXXXXXXXXXXXXXXXXX");
-        ConfigurationUtils.fixComponentSize(profileComboBox);
-        profilePanel.add(profileComboBox);
-
-        profileComboBox.setRenderer(
-                ConfigurationUtils.createProfileComboBoxRenderer(() -> runningProfileName, () -> activeProfileName));
-
-        newProfileBtn = new JButton("New Default Profile");
-        newProfileBtn.setToolTipText("Create a new profile initialized with application defaults");
-        newProfileBtn.addActionListener(e -> createNewProfile());
-        profilePanel.add(newProfileBtn);
-
-        saveProfileBtn.setToolTipText("Save Configuration Profile");
-        saveProfileBtn.addActionListener(e -> saveProfile());
-        profilePanel.add(saveProfileBtn);
-
-        applyProfileBtn.setToolTipText("Apply selected profile to the node");
-        applyProfileBtn.addActionListener(e -> applyProfile());
-        profilePanel.add(applyProfileBtn);
-
-        renameProfileBtn.setToolTipText("Rename selected profile");
-        renameProfileBtn.addActionListener(e -> renameProfile((String) profileComboBox.getSelectedItem()));
+        renameProfileBtn.setToolTipText(
+                "<html>Rename Profile<br><br>Renames this profile (including its data paths).<br>"
+                        + "If the node is running it will be stopped during the rename<br>"
+                        + "and returned to its previous state (running / paused / stopped).</html>");
+        renameProfileBtn.addActionListener(e -> renameProfile(loadedProfileName));
         profilePanel.add(renameProfileBtn);
 
-        deleteProfileBtn.setToolTipText("Delete selected profile");
-        deleteProfileBtn.addActionListener(e -> deleteProfile((String) profileComboBox.getSelectedItem()));
+        deleteProfileBtn.setToolTipText(
+                "<html>Delete Profile<br><br>Permanently deletes this profile, its settings<br>"
+                        + "(optionally its database files) and closes its tab.<br>"
+                        + "If the node is running it will be stopped (and not restarted).</html>");
+        deleteProfileBtn.addActionListener(e -> deleteProfile(loadedProfileName));
         profilePanel.add(deleteProfileBtn);
 
-        resetToDefaultsBtn = new JButton("Reset to Defaults");
-        resetToDefaultsBtn.setToolTipText("Reset current profile settings to application defaults (without saving)");
+        resetToDefaultsBtn = new JButton();
+        resetToDefaultsBtn.setToolTipText(
+                "<html>Reset to Defaults<br><br>Resets all fields in the editor to the application default values.<br>"
+                        + "Nothing is saved — use Save &amp; Apply to persist the reset settings.</html>");
         resetToDefaultsBtn.addActionListener(e -> resetToDefaults());
         profilePanel.add(resetToDefaultsBtn);
 
-        copyProfileDataBtn = new JButton("Copy Profile Data");
-        copyProfileDataBtn.setToolTipText("Copy the selected profile's data into the editor as a starting state (unsaved changes are discarded)");
+        copyProfileDataBtn = new JButton();
+        copyProfileDataBtn.setToolTipText(
+                "<html>Copy Configuration<br><br>Copies another profile's configuration into this editor.<br>"
+                        + "Unsaved changes in the editor are discarded (with confirmation).</html>");
         copyProfileDataBtn.addActionListener(e -> copyProfileData());
         copyProfileDataBtn.setIcon(
                 IconFontSwing.buildIcon(FontAwesome.CLIPBOARD, GuiConstants.getHelpIconSize(), GuiColors.getButtonIcon()));
         ConfigurationUtils.fixComponentSize(copyProfileDataBtn);
         profilePanel.add(copyProfileDataBtn);
 
-        reloadProfileBtn = new JButton("Reload Profile");
-        reloadProfileBtn.setToolTipText("Reload the current profile file from disk (e.g. after external edits)");
+        cloneProfileBtn = new JButton();
+        cloneProfileBtn.setToolTipText(
+                "<html>Clone Configuration<br><br>Creates a new profile from the current (unsaved, editor) "
+                        + "effective state: only the values that differ from the default are copied.<br>"
+                        + "The new profile is not started; the source profile is left untouched.</html>");
+        cloneProfileBtn.addActionListener(e -> cloneProfile());
+        cloneProfileBtn.setIcon(
+                IconFontSwing.buildIcon(FontAwesome.FILES_O, GuiConstants.getHelpIconSize(), GuiColors.getButtonIcon()));
+        ConfigurationUtils.fixComponentSize(cloneProfileBtn);
+        profilePanel.add(cloneProfileBtn);
+
+        reloadProfileBtn = new JButton();
+        reloadProfileBtn.setToolTipText(
+                "<html>Reload Profile<br><br>Re-reads the current profile file from disk (e.g. after external edits).<br>"
+                        + "Unsaved changes in the editor are discarded.</html>");
         reloadProfileBtn.addActionListener(e -> reloadProfile());
         profilePanel.add(reloadProfileBtn);
 
-        refreshProfilesBtn = new JButton("Refresh Profiles");
-        refreshProfilesBtn.setToolTipText("Refresh the list of available profiles from the disk");
-        refreshProfilesBtn.addActionListener(e -> refreshProfileList());
-        profilePanel.add(refreshProfilesBtn);
-
         updateProfileButtonsUI();
-
-        profileComboBox.addActionListener(e -> {
-            if (isProgrammaticChange)
-                return;
-            String selected = (String) profileComboBox.getSelectedItem();
-            if (selected != null) {
-                loadProfile(selected);
-            }
-            updateProfileComboBoxColor();
-            updateProfileButtonStates();
-        });
 
         JButton helpBtn = new HelpButton();
         helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
@@ -293,45 +340,78 @@ public class NodeConfigurationPanel extends JPanel {
         // GuiUtils.addHorizontalScrollPadding(profileScrollPane, profilePanel, new
         // Insets(5, 10, 5, 5)); // Handled by ResponsiveToolbarScrollPane
 
-        refreshProfileList();
+        // --- Search panel: an exact mirror of the console's buildSearchPanel —
+        // a compact, left-aligned "Search" titled box (16-column field, match
+        // counter, chevron buttons) instead of a full-width bar ---
+        JPanel searchPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        searchPanel.setOpaque(false);
+        searchPanel.setBorder(new TitledBorder("Search"));
+        searchField = new JTextField(16);
+        searchField.setToolTipText("Text to find in the configuration (live highlighting)");
+        searchPanel.add(searchField);
 
-        addHierarchyListener(e -> {
-            if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0 && isShowing()) {
-                refreshProfileList();
-            }
-        });
+        // Match counter: "current/total" (e.g. "1/23") while a search is
+        // active; hidden when there is no active query (mirrors the console).
+        searchMatchIndicator = new JLabel("", JLabel.LEFT);
+        searchMatchIndicator.setToolTipText("Current match / total matches");
+        searchMatchIndicator.setVisible(false);
+        searchPanel.add(searchMatchIndicator);
 
-        // --- Search Panel ---
-        JPanel searchPanel = new JPanel(new MigLayout("insets 5 10 5 5, fillx", "[][grow]", "[]"));
-        searchPanel.add(new JLabel("Search Configuration:"));
-        JTextField searchField = new JTextField();
-        searchField.putClientProperty("JTextField.placeholderText", "Type to filter properties...");
-        ConfigurationUtils.styleInputComponent(searchField);
-        searchPanel.add(searchField, "growx");
+        int searchIconSize = GuiIcons.sizeSmall();
+        searchPrevButton = new JButton(GuiIcons.chevronUp(searchIconSize));
+        searchPrevButton.setToolTipText("Previous match");
+        searchPrevButton.setFocusable(false);
+        searchPrevButton.setBorder(new EmptyBorder(2, 2, 2, 2));
+        searchPrevButton.setContentAreaFilled(false);
+        searchPrevButton.addActionListener(e -> navigateSearch(false));
+        searchPanel.add(searchPrevButton);
+
+        searchNextButton = new JButton(GuiIcons.chevronDown(searchIconSize));
+        searchNextButton.setToolTipText("Next match");
+        searchNextButton.setFocusable(false);
+        searchNextButton.setBorder(new EmptyBorder(2, 2, 2, 2));
+        searchNextButton.setContentAreaFilled(false);
+        searchNextButton.addActionListener(e -> navigateSearch(true));
+        searchPanel.add(searchNextButton);
 
         searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             public void insertUpdate(javax.swing.event.DocumentEvent e) {
-                filterProperties(searchField.getText());
+                applySearch(searchField.getText(), true);
             }
 
             public void removeUpdate(javax.swing.event.DocumentEvent e) {
-                filterProperties(searchField.getText());
+                applySearch(searchField.getText(), true);
             }
 
             public void changedUpdate(javax.swing.event.DocumentEvent e) {
-                filterProperties(searchField.getText());
+                applySearch(searchField.getText(), true);
+            }
+        });
+        // Enter: jump to / advance the active match (same as the console).
+        searchField.addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyPressed(KeyEvent e) {
+                if (e.getKeyCode() == KeyEvent.VK_ENTER) {
+                    navigateSearch(true);
+                }
             }
         });
 
+        JPanel searchRow = new JPanel(new BorderLayout());
+        searchRow.add(searchPanel, BorderLayout.WEST);
         JPanel northPanel = new JPanel(new BorderLayout());
         northPanel.add(profileScrollPane, BorderLayout.NORTH);
-        northPanel.add(searchPanel, BorderLayout.SOUTH);
+        northPanel.add(searchRow, BorderLayout.SOUTH);
         bodyPanel.add(northPanel, BorderLayout.NORTH);
 
         // No border around the tabbed pane itself
 
         // Clear list before rebuilding UI (in case of re-init)
         allPropertyRows.clear();
+        searchMatches.clear();
+        searchActiveIndex = -1;
+        searchViewActive = false;
+        lastListedMatches = null;
 
         LOGGER.debug("initUI - START");
         
@@ -632,17 +712,17 @@ public class NodeConfigurationPanel extends JPanel {
         categoryTabbedPane.addTab("Linked Profiles", createScrollPane(linkedPanel));
         LOGGER.debug("initUI - Linked Profiles tab done");
 
-        // --- Content Container (CardLayout for Tabs vs Search Results) ---
-        LOGGER.debug("initUI - Building content container");
+        // --- Content: the category tabs (search highlights matches in place) ---
+        LOGGER.debug("initUI - Adding category tabs");
+        // --- Content Container (CardLayout: tabbed settings vs flat search
+        //     results). While a search is active the tabbed pane is hidden and
+        //     the matching rows (from every tab) are listed flat; clearing the
+        //     search field restores the tabbed view. ---
         contentCardLayout = new CardLayout();
         contentContainer = new JPanel(contentCardLayout);
-
         contentContainer.add(categoryTabbedPane, "TABS");
-
         searchResultsPanel = new JPanel(new MigLayout("fillx, insets 10, gap 5", "[][grow]", ""));
-        JScrollPane searchScrollPane = createScrollPane(searchResultsPanel);
-        contentContainer.add(searchScrollPane, "SEARCH");
-
+        contentContainer.add(createScrollPane(searchResultsPanel), "SEARCH");
         bodyPanel.add(contentContainer, BorderLayout.CENTER);
         add(bodyPanel, BorderLayout.CENTER);
 
@@ -682,10 +762,8 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void updateProfileButtonsUI() {
-        if (profileComboBox != null)
-            ConfigurationUtils.fixComponentSize(profileComboBox);
-        ConfigurationUtils.configureProfileToolbar(newProfileBtn, saveProfileBtn, applyProfileBtn, renameProfileBtn,
-                deleteProfileBtn, reloadProfileBtn, refreshProfilesBtn, resetToDefaultsBtn);
+        ConfigurationUtils.configureProfileToolbar(null, saveApplyBtn, null, renameProfileBtn,
+                deleteProfileBtn, reloadProfileBtn, null, resetToDefaultsBtn);
     }
 
     private void refreshUIColors() {
@@ -694,82 +772,456 @@ public class NodeConfigurationPanel extends JPanel {
         }
     }
 
-    private void filterProperties(String text) {
-        boolean isSearch = text != null && !text.trim().isEmpty();
+    /**
+     * Recomputes the live match set for the given query and updates the UI.
+     * While a query is active the tabbed pane is hidden and every matching
+     * row (from every tab) is listed flat in the search-results card with its
+     * matching substring highlighted; an empty query brings the tabbed view
+     * back. When {@code scrollToActive} is true the first match is also
+     * brought into view (search-box input); a refresh caused by the user
+     * editing a value must NOT yank the scroll around, so it passes false.
+     */
+    private void applySearch(String text, boolean scrollToActive) {
+        clearSearchHighlights();
+        searchMatches.clear();
+        searchActiveIndex = -1;
 
-        if (isSearch) {
-            searchResultsPanel.removeAll();
-            String lowerText = text.toLowerCase();
-
+        String query = text == null ? "" : text.trim();
+        if (!query.isEmpty()) {
+            String lowerQuery = query.toLowerCase(Locale.ROOT);
             for (PropertyRow row : allPropertyRows) {
-                if (row.prop.getName().toLowerCase().contains(lowerText) ||
-                        row.labelText.toLowerCase().contains(lowerText)) {
-
-                    searchResultsPanel.add(row.label, "align label");
-                    searchResultsPanel.add(row.input, "split 2, growx, height pref!");
-                    if (row.extra != null) {
-                        searchResultsPanel.add(row.extra, row.extraConstraints);
-                    }
-                    searchResultsPanel.add(row.help, "wrap");
-                    searchResultsPanel.add(row.separator, "span, growx, wrap, gaptop 2, gapbottom 2");
+                if (isRowSearchMatch(row, lowerQuery)) {
+                    searchMatches.add(row);
                 }
+            }
+            if (!searchMatches.isEmpty()) {
+                searchActiveIndex = 0;
+            }
+        }
+
+        if (query.isEmpty()) {
+            if (searchViewActive) {
+                restoreAllRows();
+                contentCardLayout.show(contentContainer, "TABS");
+                searchViewActive = false;
+            }
+            lastListedMatches = null;
+        } else if (!sameMatchSet(searchMatches, lastListedMatches)) {
+            // (Re)build the flat results list: return the rows currently in it
+            // to their category panels, then move the matching rows into it.
+            // When the match set is unchanged (e.g. the user keeps typing in a
+            // value) nothing is moved, so focus and scroll stay put.
+            restoreAllRows();
+            searchResultsPanel.removeAll();
+            for (PropertyRow row : searchMatches) {
+                searchResultsPanel.add(row.label, row.labelConstraints);
+                searchResultsPanel.add(row.input, row.inputConstraints);
+                if (row.extra != null) {
+                    searchResultsPanel.add(row.extra, row.extraConstraints);
+                }
+                searchResultsPanel.add(row.help, row.helpConstraints);
+                searchResultsPanel.add(row.separator, row.separatorConstraints);
             }
             contentCardLayout.show(contentContainer, "SEARCH");
-        } else {
-            // Clear original parents first to ensure correct ordering and no leftovers like
-            // pushy labels at the top
-            Set<JPanel> parents = allPropertyRows.stream()
-                    .map(row -> row.originalParent)
-                    .collect(Collectors.toSet());
-            parents.forEach(JPanel::removeAll);
+            searchViewActive = true;
+            lastListedMatches = new ArrayList<>(searchMatches);
+        }
 
-            // Restore components to their original panels in order
-            for (PropertyRow row : allPropertyRows) {
-                row.originalParent.add(row.label, row.labelConstraints);
-                row.originalParent.add(row.input, row.inputConstraints);
-                if (row.extra != null) {
-                    row.originalParent.add(row.extra, row.extraConstraints);
-                }
-                row.originalParent.add(row.help, row.helpConstraints);
-                row.originalParent.add(row.separator, row.separatorConstraints);
-            }
-
-            // Re-add vertical fillers
-            parents.forEach(p -> p.add(new JLabel(), "pushy"));
-
-            contentCardLayout.show(contentContainer, "TABS");
+        for (int i = 0; i < searchMatches.size(); i++) {
+            paintSearchMatch(searchMatches.get(i), query, i == searchActiveIndex);
+        }
+        updateSearchMatchIndicator(formatSearchIndicator());
+        if (scrollToActive && searchActiveIndex >= 0) {
+            showActiveSearchMatch();
         }
         revalidate();
         repaint();
     }
 
-    private void refreshProfileList() {
-        boolean wasProgrammatic = isProgrammaticChange;
-        try {
-            isProgrammaticChange = true;
-            String currentSelection = (String) profileComboBox.getSelectedItem();
-            profileComboBox.removeAllItems();
-
-            String lastProfile = ConfigurationUtils
-                    .loadAppliedProfile(ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER));
-            this.activeProfileName = lastProfile != null ? lastProfile.trim() : "node";
-
-            // Load all .properties profiles from unified profiles directory
-            ConfigurationUtils.fetchProfileNames(ConfigurationUtils.getNodeProfilesDir(), null)
-                    .forEach(profileComboBox::addItem);
-
-            if (currentSelection != null) {
-                profileComboBox.setSelectedItem(currentSelection);
-            } else if (this.activeProfileName != null) {
-                profileComboBox.setSelectedItem(this.activeProfileName);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        } finally {
-            isProgrammaticChange = wasProgrammatic;
+    /** True when both lists hold the same rows (identity, in order) — i.e. the flat results list does not need a rebuild. */
+    private boolean sameMatchSet(List<PropertyRow> a, List<PropertyRow> b) {
+        if (b == null || a.size() != b.size()) {
+            return false;
         }
-        updateProfileComboBoxColor();
-        updateProfileButtonStates();
+        for (int i = 0; i < a.size(); i++) {
+            if (a.get(i) != b.get(i)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Returns every row that currently sits in the flat search-results list to
+     * its category panel. Section headers and the other (untracked) children
+     * of the category panels are never touched, so the tabbed view is restored
+     * exactly as it was.
+     */
+    private void restoreAllRows() {
+        for (PropertyRow row : allPropertyRows) {
+            if (row.label != null && row.label.getParent() == searchResultsPanel) {
+                restoreRow(row);
+            }
+        }
+    }
+
+    /**
+     * Re-inserts one row's parts into its category panel, contiguously at the
+     * earliest saved child position and in their original relative order
+     * (sorted by saved index). Inserting at the saved positions re-occupies
+     * exactly the slots the parts originally held, so the surrounding layout
+     * (headers, other rows, the bottom filler) is left untouched.
+     */
+    private void restoreRow(PropertyRow row) {
+        JPanel parent = row.originalParent;
+        Component[] parts = { row.label, row.input, row.extra, row.help, row.separator };
+        Object[] constraints = { row.labelConstraints, row.inputConstraints, row.extraConstraints,
+                row.helpConstraints, row.separatorConstraints };
+        int[] indices = { row.labelIndex, row.inputIndex, row.extraIndex, row.helpIndex,
+                row.separatorIndex };
+        // Insertion-sort the (part, constraint, index) triples by saved index;
+        // null parts sort to the end.
+        for (int i = 1; i < parts.length; i++) {
+            Component part = parts[i];
+            Object constraint = constraints[i];
+            int index = indices[i];
+            int j = i - 1;
+            while (j >= 0 && (parts[j] == null || index < indices[j])) {
+                parts[j + 1] = parts[j];
+                constraints[j + 1] = constraints[j];
+                indices[j + 1] = indices[j];
+                j--;
+            }
+            parts[j + 1] = part;
+            constraints[j + 1] = constraint;
+            indices[j + 1] = index;
+        }
+        int pos = -1;
+        for (int i = 0; i < parts.length; i++) {
+            if (parts[i] != null) {
+                pos = indices[i];
+                break;
+            }
+        }
+        if (pos < 0) {
+            return;
+        }
+        for (int i = 0; i < parts.length; i++) {
+            if (parts[i] == null) {
+                continue;
+            }
+            parent.add(parts[i], constraints[i], Math.min(pos, parent.getComponentCount()));
+            pos++;
+        }
+    }
+
+    /**
+     * Re-applies the active search after the user edits a value: the match
+     * set depends on the value text, so a value edit can add or remove
+     * matches and the counter/highlights must follow — without navigating
+     * (the user is typing inside the row, so tabs/scroll stay put).
+     */
+    private void refreshSearchFromValueEdit() {
+        if (searchField != null) {
+            applySearch(searchField.getText(), false);
+        }
+    }
+
+    /**
+     * Registers a property row for the live search and — when the row has a
+     * searchable value text component — keeps the match set in sync while
+     * the user edits the value (e.g. a query that matched the old text must
+     * stop matching once it is edited away).
+     */
+    private void addPropertyRow(PropertyRow row) {
+        allPropertyRows.add(row);
+        // Save the parts' child indices so the row can be re-inserted at its
+        // original position when the search view is dismissed. (The reduced
+        // JDK has no Container.indexOfComponent — use getComponentZOrder.)
+        row.labelIndex = row.originalParent.getComponentZOrder(row.label);
+        row.inputIndex = row.originalParent.getComponentZOrder(row.input);
+        if (row.extra != null) {
+            row.extraIndex = row.originalParent.getComponentZOrder(row.extra);
+        }
+        row.helpIndex = row.originalParent.getComponentZOrder(row.help);
+        row.separatorIndex = row.originalParent.getComponentZOrder(row.separator);
+        JTextComponent value = rowValueTextComponent(row);
+        if (value != null) {
+            value.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+                public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                    refreshSearchFromValueEdit();
+                }
+
+                public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                    refreshSearchFromValueEdit();
+                }
+
+                public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                    refreshSearchFromValueEdit();
+                }
+            });
+        }
+    }
+
+    /**
+     * @return true when the query is in the row's visible text: the label or
+     *         the value displayed in the row's input component. Hidden data
+     *         (the internal property key, non-text inputs such as check
+     *         boxes) is deliberately NOT searched — only what the user can
+     *         see can be a match, the same way the console only matches
+     *         visible log text.
+     */
+    private boolean isRowSearchMatch(PropertyRow row, String lowerQuery) {
+        if (row.labelText.toLowerCase(Locale.ROOT).contains(lowerQuery)) {
+            return true;
+        }
+        JTextComponent valueText = rowValueTextComponent(row);
+        return valueText != null && valueText.getText().toLowerCase(Locale.ROOT).contains(lowerQuery);
+    }
+
+    /**
+     * Highlights the exact matching part of one row: the query's occurrence
+     * in the label text and/or in the value text (a row is a match when at
+     * least one of them contains the query — nothing more is highlighted).
+     * The active match uses the strong palette color, the others the soft
+     * one (the same SSOT colors as the console "find").
+     */
+    private void paintSearchMatch(PropertyRow row, String query, boolean active) {
+        Color color = active ? GuiColors.getSearchActiveMatch() : GuiColors.getSearchMatch();
+        Highlighter.HighlightPainter painter =
+                active ? SEARCH_MATCH_PAINTER_ACTIVE : SEARCH_MATCH_PAINTER;
+        if (row.label instanceof SearchMatchLabel searchLabel) {
+            int idx = row.labelText.toLowerCase(Locale.ROOT).indexOf(query.toLowerCase(Locale.ROOT));
+            if (idx >= 0) {
+                searchLabel.setHighlightRange(idx, query.length());
+                searchLabel.setHighlightColor(color);
+            }
+        }
+        highlightValueMatch(row, query, painter);
+    }
+
+    /**
+     * Moves the active (strong) highlight to the next/previous match
+     * (wrapping) and scrolls it into view — the console's chevron behavior.
+     */
+    private void navigateSearch(boolean next) {
+        if (searchMatches.isEmpty()) {
+            return;
+        }
+        String query = searchField.getText() == null ? "" : searchField.getText().trim();
+        if (query.isEmpty()) {
+            return;
+        }
+        int count = searchMatches.size();
+        int oldIndex = searchActiveIndex;
+        searchActiveIndex = next
+                ? (searchActiveIndex + 1) % count
+                : (searchActiveIndex - 1 + count) % count;
+        if (oldIndex >= 0 && oldIndex < count && oldIndex != searchActiveIndex) {
+            paintSearchMatch(searchMatches.get(oldIndex), query, false);
+        }
+        paintSearchMatch(searchMatches.get(searchActiveIndex), query, true);
+        updateSearchMatchIndicator(formatSearchIndicator());
+        showActiveSearchMatch();
+    }
+
+    /** @return the "current/total" indicator text (e.g. "1/23"), or "" when nothing matches */
+    private String formatSearchIndicator() {
+        return searchMatches.isEmpty() ? "" : (searchActiveIndex + 1) + "/" + searchMatches.size();
+    }
+
+    /**
+     * Updates the match counter next to the search field (sized to its text,
+     * mirroring {@code ConsoleFilterHeader#setSearchMatchIndicatorText}); an
+     * empty text hides the counter.
+     */
+    private void updateSearchMatchIndicator(String text) {
+        if (text == null || text.isEmpty()) {
+            searchMatchIndicator.setText("");
+            searchMatchIndicator.setVisible(false);
+            return;
+        }
+        FontMetrics fm = searchMatchIndicator.getFontMetrics(searchMatchIndicator.getFont());
+        Dimension size = new Dimension(fm.stringWidth(text) + 4, fm.getHeight());
+        searchMatchIndicator.setMinimumSize(size);
+        searchMatchIndicator.setPreferredSize(size);
+        searchMatchIndicator.setMaximumSize(size);
+        searchMatchIndicator.setText(text);
+        searchMatchIndicator.setVisible(true);
+    }
+
+    /**
+     * Brings the active match into view. The flat results list has a single
+     * viewport, so the row is scrolled there (the reveal is retried for a few
+     * event ticks because after a card switch the results viewport gets its
+     * size only on the next layout pass), and — when the row matches by
+     * value — the highlighted occurrence is made visible inside the value
+     * component.
+     */
+    private void showActiveSearchMatch() {
+        if (searchActiveIndex < 0 || searchActiveIndex >= searchMatches.size()) {
+            return;
+        }
+        PropertyRow row = searchMatches.get(searchActiveIndex);
+        if (row.label == null) {
+            return;
+        }
+        SwingUtilities.invokeLater(() -> revealActiveMatch(row, 10));
+    }
+
+    /**
+     * Scrolls the given row into view in the enclosing viewport (the flat
+     * results list's) and reveals its value highlight. Retries while the
+     * viewport is not showing or has no size yet (a card switch is laid out
+     * on the next validate event). The view position is computed and clamped
+     * explicitly — the same arithmetic as {@code JViewport#scrollRectToVisible},
+     * but without relying on its implementation silently doing nothing for an
+     * unsized/invalid viewport.
+     */
+    private void revealActiveMatch(PropertyRow row, int attemptsLeft) {
+        JComponent rowComponent = row.label;
+        JViewport viewport = null;
+        for (Container c = rowComponent.getParent(); c != null; c = c.getParent()) {
+            if (c instanceof JViewport) {
+                viewport = (JViewport) c;
+                break;
+            }
+        }
+        if (viewport == null) {
+            return;
+        }
+        if (!viewport.isShowing() || viewport.getExtentSize().height <= 0) {
+            if (attemptsLeft > 0) {
+                SwingUtilities.invokeLater(() -> revealActiveMatch(row, attemptsLeft - 1));
+            }
+            return;
+        }
+        // The row's bounds converted into the viewport's view coordinates.
+        Rectangle bounds = rowComponent.getBounds();
+        Container c = rowComponent;
+        while (c != null && c != viewport) {
+            Container parent = c.getParent();
+            if (parent == null) {
+                return;
+            }
+            bounds.translate(c.getX(), c.getY());
+            c = parent;
+        }
+        Point position = viewport.getViewPosition();
+        Dimension extent = viewport.getExtentSize();
+        int targetY = position.y;
+        if (bounds.y < position.y) {
+            targetY = bounds.y;
+        } else if (bounds.y + bounds.height > position.y + extent.height) {
+            targetY = bounds.y + bounds.height - extent.height;
+        }
+        int maxY = Math.max(0, viewport.getViewSize().height - extent.height);
+        targetY = Math.max(0, Math.min(maxY, targetY));
+        viewport.setViewPosition(new Point(position.x, targetY));
+        revealValueMatch(row);
+    }
+
+    /**
+     * Makes the active row's value highlight visible. When the row matches
+     * by value (not by label) the highlighted occurrence can sit outside the
+     * value component's own visible window (a long text field, a list row
+     * below the fold) — in that case the component is scrolled to the
+     * occurrence. Moving the caret there does not take focus and selects
+     * nothing; it only makes the highlighted band visible.
+     */
+    private void revealValueMatch(PropertyRow row) {
+        String query = searchField.getText() == null ? "" : searchField.getText().trim();
+        if (query.isEmpty()) {
+            return;
+        }
+        if (row.labelText.toLowerCase(Locale.ROOT).contains(query.toLowerCase(Locale.ROOT))) {
+            return; // the label band is already visible
+        }
+        JTextComponent value = rowValueTextComponent(row);
+        if (value == null) {
+            return;
+        }
+        int idx = value.getText().toLowerCase(Locale.ROOT).indexOf(query.toLowerCase(Locale.ROOT));
+        if (idx >= 0) {
+            value.setCaretPosition(idx);
+        }
+    }
+
+    /** Removes every search highlight (label bands and value marks) from all rows. */
+    private void clearSearchHighlights() {
+        for (PropertyRow row : allPropertyRows) {
+            if (row.label instanceof SearchMatchLabel searchLabel) {
+                searchLabel.clearHighlight();
+                row.label.setText(isRowDirty(row) ? row.labelText + " *" : row.labelText);
+            }
+        }
+        clearValueHighlights();
+    }
+
+    /**
+     * The text component holding the row's editable value, if any: plain
+     * text/password fields and text areas directly, the editor field of an
+     * editable combo box, or the text area of a scrollable list property.
+     * Returns {@code null} for rows whose value is not highlightable text
+     * (check boxes, non-editable combos, compound panels).
+     */
+    private JTextComponent rowValueTextComponent(PropertyRow row) {
+        JComponent input = row.input;
+        if (input instanceof JTextComponent textComponent) {
+            return textComponent;
+        }
+        if (input instanceof JComboBox<?> comboBox) {
+            // Only an EDITABLE combo actually shows its editor text field; a
+            // non-editable one renders its selection without it, so there is
+            // no visible text to match or highlight there.
+            if (comboBox.isEditable()
+                    && comboBox.getEditor().getEditorComponent() instanceof JTextComponent textComponent) {
+                return textComponent;
+            }
+            return null;
+        }
+        if (input instanceof JScrollPane scrollPane) {
+            if (scrollPane.getViewport().getView() instanceof JTextComponent textComponent) {
+                return textComponent;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * (Re)highlights the first occurrence of the query inside the row's
+     * value text component with the given painter (soft for a plain match,
+     * strong for the active match). At most one highlight per component —
+     * the previous one is replaced.
+     */
+    private void highlightValueMatch(PropertyRow row, String query, Highlighter.HighlightPainter painter) {
+        JTextComponent target = rowValueTextComponent(row);
+        if (target == null) {
+            return;
+        }
+        Object previous = searchValueHighlights.remove(target);
+        if (previous != null) {
+            target.getHighlighter().removeHighlight(previous);
+        }
+        String value = target.getText();
+        int idx = value.toLowerCase(Locale.ROOT).indexOf(query.toLowerCase(Locale.ROOT));
+        if (idx < 0) {
+            return;
+        }
+        try {
+            searchValueHighlights.put(target,
+                    target.getHighlighter().addHighlight(idx, idx + query.length(), painter));
+        } catch (BadLocationException e) {
+            // range outside the document bounds — nothing to highlight
+        }
+    }
+
+    /** Removes all search-match highlights added to value components. */
+    private void clearValueHighlights() {
+        for (Map.Entry<JTextComponent, Object> entry : searchValueHighlights.entrySet()) {
+            entry.getKey().getHighlighter().removeHighlight(entry.getValue());
+        }
+        searchValueHighlights.clear();
     }
 
     public String getLoadedProfileName() {
@@ -896,180 +1348,91 @@ public class NodeConfigurationPanel extends JPanel {
         }
     }
 
-    private void updateProfileComboBoxColor() {
-        ConfigurationUtils.updateProfileComboBoxColor(profileComboBox, runningProfileName, activeProfileName);
-    }
-
-    private boolean saveProfile() {
-        String currentProfile = (String) profileComboBox.getSelectedItem();
-        String suggestedName = currentProfile != null ? currentProfile : "";
-
-        JTextField nameField = new JTextField(suggestedName);
-        JLabel errorLabel = new JLabel("Saving as system profile is not allowed.");
-        errorLabel.setForeground(GuiColors.getContrastRed());
-        errorLabel.setVisible(false);
-
-        JPanel panel = new JPanel(new MigLayout("wrap 1, fillx, insets 0", "[grow]", "[]5[]5[]"));
-        panel.add(new JLabel("Enter profile name:"));
-        panel.add(nameField, "growx");
-        panel.add(errorLabel, "hidemode 3");
-
-        String report = getUnsavedChangesReport();
-        if (report != null) {
-            JLabel reportLabel = new JLabel(report);
-            JScrollPane scroll = new JScrollPane(reportLabel);
-            scroll.setPreferredSize(new Dimension(500, 200));
-            scroll.setBorder(BorderFactory.createTitledBorder("Changes to be saved"));
-            panel.add(scroll, "growx, gaptop 10");
-        }
-
-        JButton saveBtn = new JButton("Save");
-        JButton discardBtn = new JButton("Discard");
-        JButton cancelBtn = new JButton("Cancel");
-        Object[] options = { saveBtn, discardBtn, cancelBtn };
-
-        JOptionPane pane = new JOptionPane(panel, JOptionPane.PLAIN_MESSAGE, JOptionPane.YES_NO_CANCEL_OPTION, null,
-                options, saveBtn);
-        JDialog dialog = pane.createDialog(this, "Save Profile As");
-
-        saveBtn.addActionListener(e -> {
-            pane.setValue(saveBtn);
-            dialog.setVisible(false);
-        });
-        discardBtn.addActionListener(e -> {
-            pane.setValue(discardBtn);
-            dialog.setVisible(false);
-        });
-        cancelBtn.addActionListener(e -> {
-            pane.setValue(cancelBtn);
-            dialog.setVisible(false);
-        });
-
-        nameField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-            private void validate() {
-                String text = nameField.getText().trim();
-                boolean isReserved = "node-default".equalsIgnoreCase(text);
-                errorLabel.setVisible(isReserved);
-                saveBtn.setEnabled(!isReserved && !text.isEmpty());
-            }
-
-            public void insertUpdate(javax.swing.event.DocumentEvent e) {
-                validate();
-            }
-
-            public void removeUpdate(javax.swing.event.DocumentEvent e) {
-                validate();
-            }
-
-            public void changedUpdate(javax.swing.event.DocumentEvent e) {
-                validate();
-            }
-        });
-
+    /**
+     * Saves the currently loaded profile: writes the effective UI values to
+     * the profile file (preserving its original format) and refreshes the saved
+     * state, dirty markers and colors.
+     *
+     * @return {@code true} on success, {@code false} on failure
+     */
+    private boolean doSaveCurrentProfile() {
         try {
-            while (true) {
-                pane.setValue(JOptionPane.UNINITIALIZED_VALUE);
-                dialog.setVisible(true);
-                Object value = pane.getValue();
+            Properties propsToSave = getPropertiesFromUI();
+            ConfigurationUtils.savePropertiesPreservingFormat(propertiesFile, propsToSave,
+                    propertyComponents.keySet());
 
-                if (value == saveBtn) {
-                    String name = nameField.getText().trim();
-                    try {
-                        Path targetFile = ConfigurationUtils.resolveNodeProfilePath(name);
-                        if (Files.exists(targetFile)) {
-                            int choice = JOptionPane.showConfirmDialog(this,
-                                    "Profile '" + name + "' already exists. Do you want to overwrite it?",
-                                    "Override profile settings",
-                                    JOptionPane.YES_NO_OPTION,
-                                    JOptionPane.WARNING_MESSAGE);
-                            if (choice != JOptionPane.YES_OPTION) {
-                                continue;
-                            }
-                        }
-
-                        Properties propsToSave = getPropertiesFromUI();
-                        ConfigurationUtils.savePropertiesPreservingFormat(targetFile, propsToSave,
-                                propertyComponents.keySet());
-
-                        isProgrammaticChange = true;
-                        try {
-                            this.loadedProfileName = name;
-                            this.savedProfile = new NodeProfile(name);
-                            this.savedProfile.setProperties(propsToSave);
-                            this.propertiesFile = targetFile;
-
-                            refreshProfileList();
-                            profileComboBox.setSelectedItem(name);
-                        } finally {
-                            isProgrammaticChange = false;
-                        }
-                        saveProfileLinks(name);
-                        updateProfileComboBoxColor();
-                        updateProfileComboBoxColor();
-
-                        updateDirtyStatus();
-                        refreshUIColors();
-                        JOptionPane.showMessageDialog(this,
-                                "Profile '" + name
-                                        + "' saved successfully. A restart is required for changes to take effect.",
-                                "Success", JOptionPane.INFORMATION_MESSAGE);
-                        return true;
-                    } catch (Exception e) {
-                        JOptionPane.showMessageDialog(this, "Error saving profile: " + e.getMessage(), "Error",
-                                JOptionPane.ERROR_MESSAGE);
-                        e.printStackTrace();
-                    }
-                } else if (value == discardBtn) {
-                    isProgrammaticChange = true;
-                    updateUIFromProperties(savedProfile.getProperties());
-                    updateDirtyStatus();
-                    isProgrammaticChange = false;
-                    return false;
-                } else {
-                    return false;
-                }
+            isProgrammaticChange = true;
+            try {
+                this.savedProfile = new NodeProfile(loadedProfileName);
+                this.savedProfile.setProperties(propsToSave);
+            } finally {
+                isProgrammaticChange = false;
             }
-        } finally {
-            dialog.dispose();
+            saveProfileLinks(loadedProfileName);
+            updateDirtyStatus();
+            refreshUIColors();
+            return true;
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this, "Error saving profile: " + e.getMessage(), "Error",
+                    JOptionPane.ERROR_MESSAGE);
+            e.printStackTrace();
+            return false;
         }
     }
 
-    private void loadProfile(String profileName) {
-        if (profileName == null || profileName.trim().isEmpty()
-                || profileName.equals(loadedProfileName)) {
+    /**
+     * Save &amp; Apply toolbar action. Reviews the unsaved changes in a dialog
+     * (the profile name cannot be changed here - the currently loaded profile
+     * is always the target), saves them, and then asks whether to restart the
+     * node so the new configuration takes effect immediately.
+     */
+    private void saveAndApply() {
+        String name = loadedProfileName;
+        if (name == null) {
+            return;
+        }
+        if ((Signum.NODE_SUBFOLDER + "-default").equals(name)) {
+            JOptionPane.showMessageDialog(this, "The system default profile template cannot be modified.",
+                    "Action Not Allowed", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
-        checkUnsavedChangesAndProceed(
-                () -> {
-                    Path targetFile = ConfigurationUtils.resolveNodeProfilePath(profileName);
-                    if (Files.exists(targetFile)) {
-                        Properties loaded = new Properties();
-                        try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
-                            isProgrammaticChange = true;
-                            loaded.load(in);
-                            savedProfile = new NodeProfile(profileName);
-                            savedProfile.setProperties(loaded);
-                            updateUIFromProperties(loaded);
-                            this.propertiesFile = targetFile;
-                            this.loadedProfileName = profileName;
-                            loadProfileLinks(profileName);
-                            updateDirtyStatus();
-                            isProgrammaticChange = false;
-                            updateProfileComboBoxColor();
-                        } catch (Exception e) {
-                            JOptionPane.showMessageDialog(this, "Error loading profile file: " + e.getMessage(),
-                                    "Error",
-                                    JOptionPane.ERROR_MESSAGE);
-                            // Revert to headless if loading fails
-                            isProgrammaticChange = true;
-                            profileComboBox.setSelectedItem(Signum.NODE_SUBFOLDER);
-                            loadProfile(Signum.NODE_SUBFOLDER + "-default");
-                            isProgrammaticChange = false;
-                        }
-                    }
-                },
-                () -> profileComboBox.setSelectedItem(loadedProfileName));
+        String report = getUnsavedChangesReport();
+        if (report == null) {
+            return; // no unsaved changes (the button is disabled in this state)
+        }
+
+        if (!ProfileSaveApplyDialog.show(this, name, report)) {
+            return;
+        }
+        if (!doSaveCurrentProfile()) {
+            return;
+        }
+
+        // The saved profile is always this node's own profile, so applying it
+        // means restarting this node.
+        int choice = JOptionPane.showConfirmDialog(this,
+                "Changes will take effect after restart. Would you like to apply the saved changes? It will restart the node.",
+                "Apply Changes", JOptionPane.YES_NO_OPTION, JOptionPane.INFORMATION_MESSAGE);
+        if (choice == JOptionPane.YES_OPTION) {
+            applySavedChanges();
+        } else {
+            JOptionPane.showMessageDialog(this, "Profile '" + name + "' saved successfully.",
+                    "Success", JOptionPane.INFORMATION_MESSAGE);
+        }
+    }
+
+    /**
+     * Marks the currently loaded profile as applied and restarts the node
+     * service so the freshly saved configuration takes effect immediately.
+     */
+    private void applySavedChanges() {
+        ConfigurationUtils.updateAppliedProfile(
+                ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER),
+                loadedProfileName);
+        if (restartAction != null) {
+            restartAction.run();
+        }
     }
 
     public boolean checkUnsavedChangesAndProceed(Runnable onProceed, Runnable onCancel) {
@@ -1085,13 +1448,13 @@ public class NodeConfigurationPanel extends JPanel {
                 report,
                 "What would you like to do?"
         };
-        Object[] options = { "Save Profile As", "Discard", "Cancel" };
+        Object[] options = { "Save", "Discard", "Cancel" };
         int result = JOptionPane.showOptionDialog(this, message, "Unsaved Changes",
                 JOptionPane.YES_NO_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE,
                 null, options, options[0]);
 
         if (result == JOptionPane.YES_OPTION) {
-            if (saveProfile()) {
+            if (doSaveCurrentProfile()) {
                 if (onProceed != null)
                     onProceed.run();
                 return true;
@@ -1150,40 +1513,125 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     /**
-     * Copies the data of the profile currently selected in the "Copy Data From"
-     * dropdown into the editor, as a starting state for modification. Unsaved
-     * changes in the editor are discarded (with confirmation).
+     * Copy toolbar action: opens the "Copy Configuration" dialog and copies
+     * the selected profile's configuration into this editor. The editor keeps
+     * belonging to the <b>current</b> profile (its name and saved state do not
+     * change), so the copied values show up as unsaved changes that can be
+     * adjusted and saved with Save &amp; Apply. Unsaved changes in the editor
+     * are discarded (with confirmation).
      */
     private void copyProfileData() {
-        if (loadedProfileName != null) {
-            if (hasUnsavedChanges()) {
-                String message = "You have unsaved changes. Are you sure you want to copy from the selected profile and discard these changes?";
-                Object[] options = { "Discard and Copy", "Cancel" };
-                int result = JOptionPane.showOptionDialog(this, message, "Copy Profile Data",
-                        JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE,
-                        null, options, options[1]);
-                if (result != JOptionPane.YES_OPTION) {
-                    return;
-                }
-            }
+        String selected = loadedProfileName;
+        if (selected == null) {
+            return;
+        }
+        List<String> profiles = ConfigurationUtils.fetchProfileNames(
+                ConfigurationUtils.getNodeProfilesDir(), null);
+        String source = ProfileCopyDialog.show(this, profiles, selected);
+        if (source == null || source.trim().isEmpty()) {
+            return;
+        }
+        if ((Signum.NODE_SUBFOLDER + "-default").equals(source)) {
+            JOptionPane.showMessageDialog(this,
+                    "The system default profile template cannot be copied. Pick a different profile.",
+                    "Action Not Allowed", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
 
-            Path targetFile = ConfigurationUtils.resolveNodeProfilePath(loadedProfileName);
-            if (Files.exists(targetFile)) {
-                Properties loaded = new Properties();
-                try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
-                    isProgrammaticChange = true;
-                    loaded.load(in);
-                    savedProfile = new NodeProfile(loadedProfileName);
-                    savedProfile.setProperties(loaded);
-                    updateUIFromProperties(loaded);
-                    updateDirtyStatus();
-                    updateProfileComboBoxColor();
-                    isProgrammaticChange = false;
-                } catch (Exception e) {
-                    JOptionPane.showMessageDialog(this, "Error copying profile data: " + e.getMessage(), "Error",
-                            JOptionPane.ERROR_MESSAGE);
-                }
+        if (hasUnsavedChanges()) {
+            String message = "You have unsaved changes. Are you sure you want to copy from the selected profile and discard these changes?";
+            Object[] options = { "Discard and Copy", "Cancel" };
+            int result = JOptionPane.showOptionDialog(this, message, "Copy Profile Data",
+                    JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE,
+                    null, options, options[1]);
+            if (result != JOptionPane.YES_OPTION) {
+                return;
             }
+        }
+
+        Path sourceFile = ConfigurationUtils.resolveNodeProfilePath(source);
+        Properties loaded = new Properties();
+        if (Files.exists(sourceFile)) {
+            try (FileInputStream in = new FileInputStream(sourceFile.toFile())) {
+                loaded.load(in);
+            } catch (Exception e) {
+                JOptionPane.showMessageDialog(this, "Error copying profile data: " + e.getMessage(), "Error",
+                        JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+        }
+
+        // The editor keeps belonging to the current profile: only the values
+        // (and the linked profiles) are copied over, so the copied values show
+        // up as unsaved changes relative to the current profile's saved state.
+        isProgrammaticChange = true;
+        try {
+            updateUIFromProperties(loaded);
+        } finally {
+            isProgrammaticChange = false;
+        }
+        loadProfileLinks(source);
+        updateDirtyStatus();
+    }
+
+    /**
+     * Clone toolbar action: opens the "Clone Configuration" dialog and creates a
+     * <b>new</b> profile from the current (unsaved, editor) effective state.
+     * <p>
+     * Only the values that differ from the application default are copied
+     * (minimal-override file, consistent with the profile design). Create-only
+     * semantics: the clone is not started, the source profile's editor state is
+     * left untouched (unsaved changes are preserved), and the clone keeps the
+     * source's ports and database settings as-is.
+     */
+    private void cloneProfile() {
+        String source = loadedProfileName;
+        if (source == null || source.trim().isEmpty()) {
+            return;
+        }
+
+        // Diff against the default from the current (unsaved, editor) effective
+        // state. getPropertiesFromUI() already holds the minimal overrides, so
+        // it doubles as the effective state for the SSOT diff computation.
+        Properties effective = getPropertiesFromUI();
+        List<ProfileDiffCalculator.ProfileDiffEntry> diff = ProfileDiffCalculator
+                .diffAgainstDefault(effective, defaultValues);
+
+        // Human-readable names from the property labels of this editor.
+        Map<String, String> keyToLabel = new HashMap<>();
+        for (PropertyRow row : allPropertyRows) {
+            keyToLabel.putIfAbsent(row.prop.getName(), row.labelText);
+        }
+        List<ProfileDiffCalculator.ProfileDiffEntry> labeled = new ArrayList<>(diff.size());
+        for (ProfileDiffCalculator.ProfileDiffEntry entry : diff) {
+            String label = keyToLabel.get(entry.getKey());
+            labeled.add(label != null && !label.isEmpty() && !label.equals(entry.getKey())
+                    ? new ProfileDiffCalculator.ProfileDiffEntry(entry.getKey(), entry.getValue(), label)
+                    : entry);
+        }
+
+        Set<String> taken = new HashSet<>(NodeProfileRepository.listProfiles());
+        String suggested = ProfileNameSuggester.nextAvailableName(source + "_clone", taken);
+        String newName = ProfileCloneDialog.show(this, source, labeled, suggested, taken);
+        if (newName == null) {
+            return; // cancelled
+        }
+
+        try {
+            // Creation chain (SSOT: ProfileRuntimeService): profile file from the
+            // minimal-override payload + logging-association clone.
+            String created = ProfileRuntimeService.cloneProfile(source, newName,
+                    ProfileDiffCalculator.toProperties(labeled));
+            // Tab registration: adds the new profile tab and selects it
+            // (idempotent; safe no-op when the Node GUI has not been created).
+            NodeModule.getInstance().openProfileConfiguration(created);
+            JOptionPane.showMessageDialog(this,
+                    "Profile '" + created + "' was created as a clone of '" + source + "'.",
+                    "Clone Configuration", JOptionPane.INFORMATION_MESSAGE);
+        } catch (IllegalArgumentException | IOException e) {
+            LOGGER.error("Failed to clone profile '{}' -> '{}'", source, newName, e);
+            JOptionPane.showMessageDialog(this, "Error cloning profile: " + e.getMessage(), "Error",
+                    JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -1215,7 +1663,6 @@ public class NodeConfigurationPanel extends JPanel {
                     savedProfile.setProperties(loaded);
                     updateUIFromProperties(loaded);
                     updateDirtyStatus();
-                    updateProfileComboBoxColor();
                     isProgrammaticChange = false;
                 } catch (Exception e) {
                     JOptionPane.showMessageDialog(this, "Error reloading profile: " + e.getMessage(), "Error",
@@ -1223,64 +1670,6 @@ public class NodeConfigurationPanel extends JPanel {
                 }
             }
         }
-    }
-
-    private void createNewProfile() {
-        checkUnsavedChangesAndProceed(() -> {
-            String name = (String) JOptionPane.showInputDialog(this, "Enter new profile name:", "New Profile",
-                    JOptionPane.PLAIN_MESSAGE, null, null, "");
-            if (name == null || name.trim().isEmpty()
-                    || (Signum.NODE_SUBFOLDER + "-default").equalsIgnoreCase(name.trim()))
-                return;
-
-            Path targetFile = ConfigurationUtils.resolveNodeProfilePath(name);
-            if (Files.exists(targetFile)) {
-                JOptionPane.showMessageDialog(this, "Profile '" + name + "' already exists.", "Error",
-                        JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-
-            isProgrammaticChange = true;
-
-            try {
-                for (Map.Entry<String, JComponent> entry : propertyComponents.entrySet()) {
-                    String key = entry.getKey();
-                    JComponent comp = entry.getValue();
-                    String defaultValue = defaultValues.get(key);
-
-                    if (comp instanceof JCheckBox) {
-                        ((JCheckBox) comp).setSelected(Boolean.parseBoolean(defaultValue));
-                    } else if (comp instanceof JComboBox) {
-                        ((JComboBox<?>) comp).setSelectedItem(defaultValue);
-                    } else if (comp instanceof javax.swing.text.JTextComponent) {
-                        ((javax.swing.text.JTextComponent) comp).setText(defaultValue);
-                    } else if (comp instanceof JScrollPane
-                            && ((JScrollPane) comp).getViewport().getView() instanceof JTextArea) {
-                        ((JTextArea) ((JScrollPane) comp).getViewport().getView())
-                                .setText(defaultValue.replace(";", "\n"));
-                    }
-                }
-
-                Properties propsToSave = getPropertiesFromUI();
-                ConfigurationUtils.savePropertiesPreservingFormat(targetFile, propsToSave, propertyComponents.keySet());
-
-                this.loadedProfileName = name; // Update early to prevent redundant load prompts during refresh
-                refreshProfileList();
-                profileComboBox.setSelectedItem(name);
-                this.savedProfile = new NodeProfile(name);
-                this.savedProfile.setProperties(propsToSave);
-                this.propertiesFile = targetFile;
-                loadProfileLinks(name);
-                updateDirtyStatus();
-                updateUIFromProperties(propsToSave);
-                updateProfileComboBoxColor();
-            } catch (IOException e) {
-                JOptionPane.showMessageDialog(this, "Error creating profile: " + e.getMessage(), "Error",
-                        JOptionPane.ERROR_MESSAGE);
-            } finally {
-                isProgrammaticChange = false;
-            }
-        }, null);
     }
 
     private void resetToDefaults() {
@@ -1300,104 +1689,192 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void updateProfileButtonStates() {
-        String selected = (String) profileComboBox.getSelectedItem();
+        String selected = loadedProfileName;
         boolean isReadOnly = Signum.NODE_SUBFOLDER.equals(selected)
                 || (Signum.NODE_SUBFOLDER + "-default").equals(selected);
         resetToDefaultsBtn.setEnabled(true); // Always enable reset to defaults
+        saveApplyBtn.setEnabled(overallDirty);
         renameProfileBtn.setEnabled(!isReadOnly);
         deleteProfileBtn.setEnabled(!isReadOnly);
+        cloneProfileBtn.setEnabled(!isReadOnly);
     }
 
+    /**
+     * Renames the selected profile — <b>state-preserving, runtime, no full app restart</b> (D3):
+     * pre-guard for unsaved changes (Save / Discard / Cancel), node-state capture, then the
+     * rename chain (stop → file + metadata + data-path operations → GUI rebuild → state
+     * restoration) via {@link ProfileRuntimeService#renameProfile}.
+     */
     public void renameProfile(String oldProfileName) {
         if (oldProfileName == null || oldProfileName.trim().isEmpty()) {
             JOptionPane.showMessageDialog(this, "No profile selected to rename.", "Rename Profile",
                     JOptionPane.WARNING_MESSAGE);
             return;
         }
+        if ((Signum.NODE_SUBFOLDER + "-default").equals(oldProfileName)) {
+            JOptionPane.showMessageDialog(this, "The system default profile cannot be renamed.",
+                    "Action Not Allowed", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        checkUnsavedChangesAndProceed(() -> startRename(oldProfileName), null);
+    }
 
-        String newProfileName = (String) JOptionPane.showInputDialog(
-                this,
-                "Enter new name for profile '" + oldProfileName + "':",
-                "Rename Profile",
-                JOptionPane.PLAIN_MESSAGE,
-                null,
-                null,
-                oldProfileName);
+    /**
+     * Continues the rename after the unsaved-changes pre-guard (EDT): captures the node's
+     * pre-rename state (D3), shows the rename dialog, then runs the blocking rename chain
+     * (stop → meta → GUI rebuild → state restoration) on a background thread — the EDT stays
+     * responsive with a wait cursor and disabled profile-action buttons.
+     */
+    private void startRename(String oldProfileName) {
+        // State capture (D3): the node's pre-rename state drives the post-rename restoration.
+        Signum signum = NodeModule.getInstance().get(oldProfileName);
+        boolean nodeRunning = signum != null
+                && (signum.getState() == Signum.State.RUNNING || signum.getState() == Signum.State.STARTING);
+        boolean nodeUserPaused = nodeRunning
+                && signum.getOperatingState() == Signum.OperatingState.PAUSED_USER;
 
-        if (newProfileName == null || newProfileName.trim().isEmpty() || newProfileName.equals(oldProfileName)
-                || (Signum.NODE_SUBFOLDER + "-default").equalsIgnoreCase(newProfileName.trim())) {
-            return; // User cancelled or entered the same name
+        Set<String> taken = new HashSet<>(NodeProfileRepository.listProfiles());
+        taken.remove(oldProfileName); // the current name is the (no-op) starting point
+        String newName = ProfileRenameDialog.show(this, oldProfileName, nodeRunning, nodeUserPaused,
+                oldProfileName, taken);
+        if (newName == null || newName.equals(oldProfileName)) {
+            return; // cancelled or unchanged
         }
 
-        try {
-            Path oldFile = ConfigurationUtils.resolveNodeProfilePath(oldProfileName);
-            Path newFile = ConfigurationUtils.resolveNodeProfilePath(newProfileName);
+        // The node GUI (tab owner) — captured on the EDT before the background work starts.
+        NodePanel gui = (NodePanel) NodeModule.getInstance().getUI();
+        final boolean[] guiRebuilt = { false };
 
-            if (ConfigurationUtils.confirmAndRenameProfile(this, oldFile, newFile, oldProfileName, newProfileName)) {
-                refreshProfileList();
-                profileComboBox.setSelectedItem(newProfileName);
-                if (oldProfileName.equals(activeProfileName)) {
-                    ConfigurationUtils.updateAppliedProfile(
-                            ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER),
-                            newProfileName);
-                    this.activeProfileName = newProfileName;
-                }
-                if (oldProfileName.equals(loadedProfileName)) {
-                    this.loadedProfileName = newProfileName;
-                    this.propertiesFile = newFile;
-                }
-                updateProfileComboBoxColor();
-                updateDirtyStatus();
-
-                JOptionPane.showMessageDialog(this,
-                        "Profile '" + oldProfileName + "' renamed to '" + newProfileName + "' successfully.", "Success",
-                        JOptionPane.INFORMATION_MESSAGE);
-            } else {
-                JOptionPane.showMessageDialog(this, "Profile '" + oldProfileName + "' not found.", "Error",
-                        JOptionPane.ERROR_MESSAGE);
+        setProfileActionButtonsEnabled(false);
+        Cursor previousCursor = getCursor();
+        setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+        application.utils.gui.GuiExecutors.prepare().execute(() -> {
+            try {
+                // The blocking rename chain (stop → meta → rebuild → state restoration).
+                ProfileRuntimeService.renameProfile(oldProfileName, newName, () -> SwingUtilities
+                        .invokeLater(() -> {
+                            // GUI reinitialization: the tab's profile panel rebuilds under the new name.
+                            if (gui != null) {
+                                gui.renameProfileTab(oldProfileName, newName, true);
+                                guiRebuilt[0] = true;
+                            }
+                        }));
+            } catch (Exception e) {
+                LOGGER.error("Failed to rename profile '{}' -> '{}'", oldProfileName, newName, e);
+                SwingUtilities.invokeLater(() -> {
+                    setCursor(previousCursor);
+                    setProfileActionButtonsEnabled(true);
+                    updateProfileButtonStates();
+                    JOptionPane.showMessageDialog(this,
+                            "Error renaming profile: " + e.getMessage(), "Error",
+                            JOptionPane.ERROR_MESSAGE);
+                });
+                return;
             }
+            SwingUtilities.invokeLater(() -> {
+                setCursor(previousCursor);
+                setProfileActionButtonsEnabled(true);
+                updateProfileButtonStates();
+                // When the tab was not rebuilt (no node GUI), this panel stays visible —
+                // repoint it at the renamed profile file. (When the tab was rebuilt, this
+                // (old) panel is already replaced by the fresh one, which loads from disk.)
+                if (!guiRebuilt[0]) {
+                    this.propertiesFile = ConfigurationUtils.resolveNodeProfilePath(newName);
+                    this.loadedProfileName = newName;
+                    this.savedProfile = new NodeProfile(newName);
+                }
+                JOptionPane.showMessageDialog(this,
+                        "Profile '" + oldProfileName + "' was renamed to '" + newName + "'.",
+                        "Rename Profile", JOptionPane.INFORMATION_MESSAGE);
+            });
+        });
+    }
 
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(this, "Error renaming profile: " + e.getMessage(), "Error",
-                    JOptionPane.ERROR_MESSAGE);
-            e.printStackTrace();
+    /**
+     * Enables/disables all profile-action toolbar buttons (used while a blocking profile
+     * operation runs in the background).
+     */
+    private void setProfileActionButtonsEnabled(boolean enabled) {
+        for (JButton button : new JButton[] { saveApplyBtn, renameProfileBtn,
+                deleteProfileBtn, resetToDefaultsBtn, copyProfileDataBtn, cloneProfileBtn,
+                reloadProfileBtn }) {
+            if (button != null) {
+                button.setEnabled(enabled);
+            }
         }
     }
 
+    /**
+     * Deletes the given profile (Delete toolbar action): confirms in the delete dialog
+     * (running-node warning + optional SQLite data deletion), then runs the blocking delete
+     * chain (stop → registry teardown → file + metadata → optional data) on a background
+     * thread — the EDT stays responsive with a wait cursor and disabled profile-action
+     * buttons. The profile tab is removed afterwards (and this panel disposed with it).
+     */
     private void deleteProfile(String profileName) {
         if (profileName == null || profileName.trim().isEmpty()) {
             return;
         }
-        if ((Signum.NODE_SUBFOLDER + "-default").equals(profileName)) {
+        String name = profileName.trim();
+        if ((Signum.NODE_SUBFOLDER + "-default").equals(name)) {
             JOptionPane.showMessageDialog(this, "The system profiles cannot be deleted.", "Action Not Allowed",
                     JOptionPane.WARNING_MESSAGE);
             return;
         }
 
-        int choice = JOptionPane.showConfirmDialog(this,
-                "Are you sure you want to delete profile '" + profileName + "'?",
-                "Confirm Deletion",
-                JOptionPane.YES_NO_OPTION,
-                JOptionPane.WARNING_MESSAGE);
-        if (choice != JOptionPane.YES_OPTION) {
-            return;
-        }
+        // State capture (drives the dialog's state text + the data-deletion checkbox).
+        Signum signum = NodeModule.getInstance().get(name);
+        boolean nodeRunning = signum != null
+                && (signum.getState() == Signum.State.RUNNING || signum.getState() == Signum.State.STARTING);
+        boolean sqliteConfigured = ProfileRuntimeService.usesPerProfileSqliteDatabase(name);
 
-        try {
-            Path file = ConfigurationUtils.resolveNodeProfilePath(profileName);
-            if (Files.exists(file)) {
-                Files.delete(file);
-                refreshProfileList();
-                profileComboBox.setSelectedItem(Signum.NODE_SUBFOLDER);
-                loadProfile(Signum.NODE_SUBFOLDER);
-                JOptionPane.showMessageDialog(this, "Profile '" + profileName + "' deleted successfully.",
-                        "Success", JOptionPane.INFORMATION_MESSAGE);
-            }
-        } catch (Exception e) {
-            JOptionPane.showMessageDialog(this, "Error deleting profile: " + e.getMessage(), "Error",
-                    JOptionPane.ERROR_MESSAGE);
-            e.printStackTrace();
+        ProfileDeleteDialog.Confirmation confirmation = ProfileDeleteDialog.show(this, name, nodeRunning,
+                sqliteConfigured);
+        if (confirmation == null) {
+            return; // cancelled
         }
+        boolean deleteData = confirmation.deleteData();
+
+        // The node GUI (tab owner) — captured on the EDT before the background work starts.
+        NodePanel gui = (NodePanel) NodeModule.getInstance().getUI();
+        // The dialog window outlives this panel: its tab (and the panel) is removed after
+        // the delete, so the result dialogs are owned by the window, not by 'this'.
+        final Window owner = SwingUtilities.windowForComponent(this);
+
+        setProfileActionButtonsEnabled(false);
+        Cursor previousCursor = getCursor();
+        setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+        application.utils.gui.GuiExecutors.prepare().execute(() -> {
+            try {
+                // The blocking delete chain (stop → registry teardown → file + metadata → data).
+                ProfileRuntimeService.deleteProfile(name, deleteData);
+            } catch (Exception e) {
+                LOGGER.error("Failed to delete profile '{}'", name, e);
+                SwingUtilities.invokeLater(() -> {
+                    setCursor(previousCursor);
+                    setProfileActionButtonsEnabled(true);
+                    updateProfileButtonStates();
+                    JOptionPane.showMessageDialog(owner,
+                            "Error deleting profile: " + e.getMessage(), "Error",
+                            JOptionPane.ERROR_MESSAGE);
+                });
+                return;
+            }
+            SwingUtilities.invokeLater(() -> {
+                // GUI cleanup: the tab is removed (and this panel disposed). The profile file
+                // is already gone from the chain — removeProfileTab's repository call is a
+                // tolerated no-op then.
+                if (gui != null) {
+                    gui.removeProfileTab(name);
+                }
+                setCursor(previousCursor);
+                if (owner != null) {
+                    JOptionPane.showMessageDialog(owner,
+                            "Profile '" + name + "' deleted successfully.", "Success",
+                            JOptionPane.INFORMATION_MESSAGE);
+                }
+            });
+        });
     }
 
     private void showProfileHelp() {
@@ -1406,27 +1883,21 @@ public class NodeConfigurationPanel extends JPanel {
                 "<p>Profiles allow you to maintain multiple sets of node configurations. Use the toolbar buttons to perform the following actions:</p>"
                 +
                 "<ul>" +
-                "<li><b>New Default Profile</b>: Creates a new configuration profile initialized with application defaults.</li>"
-                +
-                "<li><b>Save Profile As</b>: Saves the current settings from all tabs into the selected or a new profile.</li>"
-                +
-                "<li><b>Apply Profile</b>: Activates the selected profile. You can choose to apply it for the next startup or restart the node service immediately to apply changes.</li>"
+                "<li><b>Save &amp; Apply</b>: Saves all unsaved changes to the current profile (reviewing them in a dialog first), then asks whether to restart the node so the changes take effect immediately.</li>"
                 +
                 "<li><b>Rename Profile</b>: Changes the name of the currently selected configuration profile.</li>"
                 +
-                "<li><b>Delete Profile</b>: Permanently removes the selected configuration profile from the disk.</li>"
+                "<li><b>Delete Profile</b>: Permanently deletes the selected profile — its node is stopped (if running, and not restarted), the profile settings are removed (optionally its SQLite database data) and its tab is closed.</li>"
                 +
                 "<li><b>Reset to Defaults</b>: Resets all current settings to their application default values without saving.</li>"
                 +
-                "<li><b>Copy Profile Data</b>: Copies the selected profile's data into the editor as a starting state for modification, discarding any unsaved changes in the UI.</li>"
+                "<li><b>Copy Configuration</b>: Opens a dialog to select a profile and copies its configuration into the editor of the current profile. The copied values become unsaved changes you can adjust before saving.</li>"
                 +
                 "<li><b>Reload Profile</b>: Reloads the current profile file from disk (e.g. after external edits), discarding any unsaved changes in the UI.</li>"
                 +
-                "<li><b>Refresh Profiles</b>: Synchronizes the profile list with the files currently available on disk.</li>"
-                +
                 "</ul>" +
-                "<p>Dropdown colors: <b>green</b> = the profile currently running (active) on the node; " +
-                "<b>yellow</b> = the profile whose data is currently copied into the editor.</p>" +
+                "<p>New profiles are created from the <b>\"+\" tab</b> (last tab): launch the setup wizard, " +
+                "or create an empty default profile (zero overrides — every setting uses the application default).</p>" +
                 "<p>Profiles are stored as \".properties\" files within the node sub-directory of the configuration folder.</p>"
                 +
                 "</body></html>";
@@ -1545,11 +2016,18 @@ public class NodeConfigurationPanel extends JPanel {
                     categoryTabbedPane.setTitleAt(i, title.substring(0, title.length() - 2));
             }
         }
-        saveProfileBtn.setText(overallDirty ? "Save Profile As *" : "Save Profile As");
+        // Icon-only toolbar: the dirty marker moves from the button label to the
+        // tooltip (the category tab titles keep their "*" marker). The Save &
+        // Apply action is only usable when there is something to save.
+        saveApplyBtn.setToolTipText(overallDirty
+                ? "Save & Apply — you have unsaved changes"
+                : "Save & Apply");
+        saveApplyBtn.setEnabled(overallDirty);
+        this.overallDirty = overallDirty;
 
-        ConfigurationUtils.fixComponentSize(saveProfileBtn);
-        if (saveProfileBtn.getParent() != null) {
-            saveProfileBtn.getParent().revalidate();
+        ConfigurationUtils.fixComponentSize(saveApplyBtn);
+        if (saveApplyBtn.getParent() != null) {
+            saveApplyBtn.getParent().revalidate();
         }
     }
 
@@ -1560,35 +2038,6 @@ public class NodeConfigurationPanel extends JPanel {
                 (autoStopDbCheck.isEnabled() && savedDbAutoStop != autoStopDbCheck.isSelected());
     }
 
-    private void applyProfile() {
-        String selected = (String) profileComboBox.getSelectedItem();
-        if (selected == null)
-            return;
-
-        if (!checkUnsavedChangesAndProceed(null, null)) {
-            return;
-        }
-
-        String message = "Apply profile '" + selected + "'?";
-        Object[] options = { "Apply and Restart", "Apply for Next Startup", "Cancel" };
-        int choice = JOptionPane.showOptionDialog(this,
-                message,
-                "Apply Profile",
-                JOptionPane.YES_NO_CANCEL_OPTION,
-                JOptionPane.QUESTION_MESSAGE,
-                null, options, options[0]);
-
-        if (choice == 0 || choice == 1) {
-            ConfigurationUtils.updateAppliedProfile(
-                    ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER),
-                    selected);
-            this.activeProfileName = selected;
-            updateProfileComboBoxColor();
-            if (choice == 0 && restartAction != null) {
-                restartAction.run();
-            }
-        }
-    }
 
     private Path getProfileMetadataPath() {
         return PathUtils.resolvePath(confFolder).resolve(Signum.NODE_SUBFOLDER).resolve("profile.json");
@@ -1836,7 +2285,7 @@ public class NodeConfigurationPanel extends JPanel {
     private void addProperty(JPanel panel, Prop<?> prop, String labelText, String[] options, boolean editable) {
         // Label
         PropertyRow row = new PropertyRow(prop, labelText, panel, currentAddingTabIndex);
-        JLabel label = new JLabel(labelText);
+        JLabel label = new SearchMatchLabel(labelText);
         row.label = label;
         row.labelConstraints = "align label";
         panel.add(label, row.labelConstraints);
@@ -1948,13 +2397,9 @@ public class NodeConfigurationPanel extends JPanel {
         }
 
         updateColor(inputComponent, prop.getName(), getSafeDefault(prop));
-        if (inputComponent instanceof JCheckBox) {
-            row.inputConstraints = "split 2, height pref!";
-            panel.add(inputComponent, row.inputConstraints);
-        } else {
-            row.inputConstraints = "split 2, growx, height pref!";
-            panel.add(inputComponent, row.inputConstraints);
-        }
+        row.inputConstraints = inputComponent instanceof JCheckBox
+                ? "split 2, height pref!" : "split 2, growx, height pref!";
+        panel.add(inputComponent, row.inputConstraints);
         propertyComponents.put(prop.getName(), inputComponent);
 
         // Help Button
@@ -1966,15 +2411,15 @@ public class NodeConfigurationPanel extends JPanel {
         showHelp(prop, labelText));
 
         row.input = inputComponent;
+
         row.help = helpBtn;
         row.helpConstraints = "wrap";
+        panel.add(helpBtn, row.helpConstraints);
         row.separator = new JSeparator();
         row.separatorConstraints = "span, growx, wrap, gaptop 2, gapbottom 2";
-
-        panel.add(helpBtn, row.helpConstraints);
         panel.add(row.separator, row.separatorConstraints);
 
-        allPropertyRows.add(row);
+        addPropertyRow(row);
     }
 
     private void parseJdbcUrl(String url, JComboBox<DatabaseConfigurationPanel.DatabaseEngine> engineCombo,
@@ -2026,7 +2471,7 @@ public class NodeConfigurationPanel extends JPanel {
 
     private void addJdbcUrlProperty(JPanel panel, Prop<String> prop, String labelText) {
         PropertyRow row = new PropertyRow(prop, labelText, panel, currentAddingTabIndex);
-        JLabel label = new JLabel(labelText);
+        JLabel label = new SearchMatchLabel(labelText);
         row.label = label;
         row.labelConstraints = "align label, aligny top";
         panel.add(label, row.labelConstraints);
@@ -2163,14 +2608,14 @@ public class NodeConfigurationPanel extends JPanel {
         row.separator = new JSeparator();
         row.separatorConstraints = "span, growx, wrap, gaptop 2, gapbottom 2";
         panel.add(row.separator, row.separatorConstraints);
-        allPropertyRows.add(row);
+        addPropertyRow(row);
         updateColor(wrapper, prop.getName(), defaultValues.get(prop.getName()));
     }
 
     private void addPasswordProperty(JPanel panel, Prop<String> prop, String labelText) {
         // Label
         PropertyRow row = new PropertyRow(prop, labelText, panel, currentAddingTabIndex);
-        JLabel label = new JLabel(labelText);
+        JLabel label = new SearchMatchLabel(labelText);
         row.label = label;
         row.labelConstraints = "align label";
         panel.add(label, row.labelConstraints);
@@ -2248,7 +2693,7 @@ public class NodeConfigurationPanel extends JPanel {
         propertyComponents.put(prop.getName(), passwordField);
 
         row.input = passwordField;
-        allPropertyRows.add(row);
+        addPropertyRow(row);
     }
 
     private void addLinkedProfileRow(JPanel panel, String labelText, JComboBox<String> combo) {
@@ -2389,7 +2834,7 @@ public class NodeConfigurationPanel extends JPanel {
 
     private void addListProperty(JPanel panel, Prop<?> prop, String labelText) {
         PropertyRow row = new PropertyRow(prop, labelText, panel, currentAddingTabIndex);
-        JLabel label = new JLabel(labelText);
+        JLabel label = new SearchMatchLabel(labelText);
         row.label = label;
         row.labelConstraints = "align label, aligny top";
         panel.add(label, row.labelConstraints);
@@ -2467,14 +2912,13 @@ public class NodeConfigurationPanel extends JPanel {
             btnContainer.add(convertBtn);
             wrapper.add(btnContainer, BorderLayout.SOUTH);
 
-            row.inputConstraints = "split 2, growx, hmin 80";
-            panel.add(wrapper, row.inputConstraints);
+            panel.add(wrapper, "split 2, growx, hmin 80");
             propertyComponents.put(prop.getName(), wrapper); // Store wrapper for visibility handling
         } else {
-            row.inputConstraints = "split 2, growx, hmin 80";
-            panel.add(scrollPane, row.inputConstraints);
+            panel.add(scrollPane, "split 2, growx, hmin 80");
             propertyComponents.put(prop.getName(), scrollPane);
         }
+        row.inputConstraints = "split 2, growx, hmin 80";
 
         // Help Button
         JButton helpBtn = new HelpButton();
@@ -2489,7 +2933,7 @@ public class NodeConfigurationPanel extends JPanel {
         panel.add(row.separator, row.separatorConstraints);
 
         row.input = propertyComponents.get(prop.getName());
-        allPropertyRows.add(row);
+        addPropertyRow(row);
 
         valueSuppliers.put(prop.getName(), () -> normalizeListValue(textArea.getText(), "\n"));
     }
@@ -3713,7 +4157,10 @@ public class NodeConfigurationPanel extends JPanel {
     private static class PropertyRow {
         final Prop<?> prop;
         final String labelText;
+        /** The category panel this row's parts live in (they move to the flat
+            search-results list while a search is active and come back on clear). */
         final JPanel originalParent;
+        /** Index of the category tab this row belongs to (-1 when untracked). */
         final int tabIndex;
 
         JLabel label;
@@ -3722,7 +4169,7 @@ public class NodeConfigurationPanel extends JPanel {
         JComponent input;
         String inputConstraints;
 
-        JComponent extra; // Checkbox, MagicWand, etc.
+        JComponent extra; // e.g. the "Show Password" checkbox of a password row
         String extraConstraints;
 
         JButton help;
@@ -3730,6 +4177,14 @@ public class NodeConfigurationPanel extends JPanel {
 
         JSeparator separator;
         String separatorConstraints;
+
+        // Child indices inside originalParent (saved by addPropertyRow) so the
+        // row can be re-inserted contiguously at its original position.
+        int labelIndex = -1;
+        int inputIndex = -1;
+        int extraIndex = -1;
+        int helpIndex = -1;
+        int separatorIndex = -1;
 
         PropertyRow(Prop<?> prop, String labelText, JPanel originalParent, int tabIndex) {
             this.prop = prop;

@@ -3,6 +3,7 @@ package application.module.node.profile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import application.module.logging.LoggingAssignmentStore;
 import application.utils.config.ModuleIds;
 import application.utils.config.PropertiesProfileLoader;
 
@@ -98,6 +99,34 @@ public final class NodeProfileRepository {
      */
     public static boolean isReservedProfileName(String profileName) {
         return profileName != null && NodeProfile.RESERVED_PROFILE_NAMES.contains(profileName);
+    }
+
+    /**
+     * Validates a candidate profile name against the SSOT rules
+     * (blank / character pattern / reserved — the same rules
+     * {@link #createProfile} and {@link #renameProfile} enforce) plus its
+     * availability in the given set of taken names.
+     * <p>
+     * Single source of truth for GUI live validation (e.g. the clone dialog's
+     * name field): returns a human-readable error message, or {@code null}
+     * when the name is valid and not taken.
+     * </p>
+     *
+     * @param name        the candidate name (may be null)
+     * @param takenNames  names that are already used (reserved names are always
+     *                    rejected regardless of this set); null is treated as empty
+     * @return an error message, or {@code null} when the name is valid and available
+     */
+    public static String checkProfileName(String name, java.util.Collection<String> takenNames) {
+        try {
+            validateName(name);
+        } catch (IllegalArgumentException e) {
+            return e.getMessage();
+        }
+        if (takenNames != null && takenNames.contains(name)) {
+            return "Profile '" + name + "' already exists";
+        }
+        return null;
     }
 
     /**
@@ -410,6 +439,8 @@ public final class NodeProfileRepository {
                 config.setLoggingProfile(newName, logging);
             }
             config.setLoggingProfile(oldName, null);
+            // Canonical logging assignment (per-module presets, SSOT: LoggingAssignmentStore)
+            new LoggingAssignmentStore(confRoot).renameAssignment(oldName, newName);
         } catch (Exception e) {
             LOGGER.warn("Failed to update profiles.json after rename '{}' -> '{}'", oldName, newName, e);
         }
@@ -425,6 +456,13 @@ public final class NodeProfileRepository {
                 config.setTabOrder(newOrder);
             }
             config.setLoggingProfile(name, null);
+            // Canonical logging assignment (per-module presets, SSOT: LoggingAssignmentStore) —
+            // the same store renameProfile() re-keys; without this a deleted profile would
+            // leave orphaned presets behind in profiles.json.
+            LoggingAssignmentStore store = new LoggingAssignmentStore(confRoot);
+            if (store.isManaged(name)) {
+                store.clearAssignment(name);
+            }
         } catch (Exception e) {
             LOGGER.warn("Failed to update profiles.json after delete '{}'", name, e);
         }

@@ -8,12 +8,16 @@ import application.module.node.profile.NodeProfile;
 import application.module.node.profile.NodeProfileRepository;
 import application.module.node.profile.ProfileConfig;
 import application.module.node.profile.ProfileNameSuggester;
+import application.module.node.profile.ProfileRuntimeService;
 import application.module.node.gui.wizard.NodeSetupWizardDialog;
 import application.utils.gui.GuiColors;
+import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiIcons;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.TabUtils;
+import jiconfont.icons.font_awesome.FontAwesome;
+import jiconfont.swing.IconFontSwing;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,16 +58,27 @@ public class NodePanel extends JPanel  {
     /** Shown instead of the (empty) tabbed pane when no profiles exist yet (onboarding, plan §1.3). */
     private JPanel onboardingPanel;
 
-    /** Last selected profile tab index (used to revert the never-openable "+" tab to a real profile tab). */
+    /** Last selected profile tab index (used to return to a real profile tab from the "+" tab). */
     private int lastProfileTabIndex = -1;
-    /** When true, activating the "+" tab opens the setup wizard (enabled once the UI is interactive). */
+    /** When true, the "+" tab selector actions are enabled (enabled once the UI is interactive). */
     private boolean wizardInteractionEnabled = false;
     /**
-     * Dedicated content component of the persistent "add profile" tab (always the last tab,
-     * icon-only, never opened — its header's only job is to open the setup wizard).
-     * The tab is recognized by this component's identity; no profile tab can hold it.
+     * The "+" selector's action buttons (created in {@link #buildAddProfileSelector};
+     * kept as fields so the enabled state and the appearance can be updated).
      */
-    private final JPanel addProfileTabComponent = new JPanel();
+    private JButton addTabWizardBtn;
+    private JButton addTabEmptyProfileBtn;
+    private JButton addTabCancelBtn;
+    /** The "+" selector's bold title label (re-derived on appearance changes). */
+    private JLabel addTabTitle;
+    /**
+     * Dedicated content component of the persistent "add profile" tab (always the last tab,
+     * icon-only header). Opens a compact selector panel with two action cards —
+     * <b>Launch Setup Wizard</b> and <b>New Empty Default Profile</b> — plus a Cancel
+     * button (F5/D4). The tab is recognized by this component's identity;
+     * no profile tab can hold it.
+     */
+    private final JPanel addProfileTabComponent = buildAddProfileSelector();
     /**
      * Thin-line "+" icon shown on the add-profile tab (recreated on appearance changes so it
      * keeps tracking the global UI font size and the theme's icon color).
@@ -89,6 +104,8 @@ public class NodePanel extends JPanel  {
         // Keep the add-profile tab's "+" icon in sync with the new size / theme color.
         addProfileTabIcon = GuiIcons.plus(GuiIcons.sizeSmall(), GuiColors.getButtonIcon());
         applyAddTabIcon();
+        // Keep the "+" selector panel (fonts + card icons) in sync with the new theme.
+        applyAddTabSelectorAppearance();
     };
 
     /**
@@ -119,11 +136,9 @@ public class NodePanel extends JPanel  {
         this.profileTabbedPane = new JTabbedPane(SwingConstants.TOP) {
             @Override
             public void setSelectedIndex(int index) {
-                if (handlePlusTabSelection(index)) {
-                    return; // The "+" tab never opens; selection already reverted (and wizard opened).
-                }
                 super.setSelectedIndex(index);
-                if (index >= 0) {
+                // Track the last PROFILE tab (never the openable "+" tab).
+                if (index >= 0 && profileTabbedPane.getComponentAt(index) != addProfileTabComponent) {
                     lastProfileTabIndex = index;
                 }
                 checkAndReplacePlaceholder();
@@ -135,7 +150,6 @@ public class NodePanel extends JPanel  {
         add(profileTabbedPane, BorderLayout.CENTER);
         attachTabContextMenu();
         attachTabDragAndDrop();
-        attachPlusTabGuard();
 
         // Keep every profile's cross-profile conflict warnings current in real time. A profile's
         // info bar reads the authoritative claiming set (NodeModule resource ownership), and that
@@ -195,7 +209,7 @@ public class NodePanel extends JPanel  {
                 final NodeProfile[] loadedProfiles = profiles;
                 SwingUtilities.invokeLater(() -> applyTabOrder(loadedProfiles));
 
-                // UI is now interactive: the "+" tab can open the wizard
+                // UI is now interactive: the "+" tab selector actions can be used
                 SwingUtilities.invokeLater(() -> wizardInteractionEnabled = true);
 
                 LOGGER.info("Async profile loading completed: {} profiles loaded", profiles.length);
@@ -609,7 +623,8 @@ public class NodePanel extends JPanel  {
         }
         applyAddTabIcon();
         // The "+" tab is now guaranteed to be the last tab.
-        profileTabbedPane.setToolTipTextAt(profileTabbedPane.getTabCount() - 1, "Create node profile...");
+        profileTabbedPane.setToolTipTextAt(profileTabbedPane.getTabCount() - 1,
+                "Create a new node profile (setup wizard or empty default profile)");
         rebuildProfileIndexMap();
     }
 
@@ -636,54 +651,6 @@ public class NodePanel extends JPanel  {
     }
 
     /**
-     * Intercepts a selection of the persistent "+" (add profile) tab. The "+" tab must never
-     * be opened: the selection is reverted to the last real profile tab and (once the UI is
-     * interactive) the setup wizard is opened.
-     *
-     * @param index the index that was about to be selected
-     * @return true if the index was the "+" tab (already handled; caller must not select it),
-     *         false otherwise
-     */
-    private boolean handlePlusTabSelection(int index) {
-        int addIdx = getAddTabIndex();
-        if (addIdx < 0 || index != addIdx) {
-            return false; // Not the "+" tab; select normally.
-        }
-        // Revert to a valid profile tab (never the "+" tab).
-        int revertTo = lastProfileTabIndex;
-        if (revertTo < 0 || revertTo >= profileTabbedPane.getTabCount() || revertTo == addIdx) {
-            revertTo = firstProfileTabIndex();
-        }
-        if (revertTo >= 0 && revertTo != index) {
-            profileTabbedPane.setSelectedIndex(revertTo);
-        }
-        if (wizardInteractionEnabled) {
-            openSetupWizard();
-        }
-        return true;
-    }
-
-    /**
-     * Safety net so the "+" tab is never left selected, even if a selection change bypasses
-     * the {@code setSelectedIndex} override (e.g. an internal {@code changeSelection} call).
-     * Only reverts the selection; the wizard is opened by the {@code setSelectedIndex}
-     * interception on user interaction, so it is not opened here (avoids double-opening).
-     */
-    private void attachPlusTabGuard() {
-        profileTabbedPane.addChangeListener(e -> {
-            int sel = profileTabbedPane.getSelectedIndex();
-            int addIdx = getAddTabIndex();
-            if (sel == addIdx && addIdx >= 0) {
-                int revertTo = (lastProfileTabIndex >= 0 && lastProfileTabIndex < profileTabbedPane.getTabCount()
-                        && lastProfileTabIndex != addIdx) ? lastProfileTabIndex : firstProfileTabIndex();
-                if (revertTo >= 0) {
-                    profileTabbedPane.setSelectedIndex(revertTo);
-                }
-            }
-        });
-    }
-
-    /**
      * Opens the modal setup wizard; on success the new profile tab is added.
      */
     private void openSetupWizard() {
@@ -691,6 +658,149 @@ public class NodePanel extends JPanel  {
         java.awt.Frame parent = window instanceof java.awt.Frame ? (java.awt.Frame) window : null;
         NodeSetupWizardDialog dialog = new NodeSetupWizardDialog(parent, this::addProfileTab);
         dialog.setVisible(true);
+    }
+
+    // ── "+" tab selector (F5/D4: Setup Wizard / New Empty Default Profile) ──
+
+    /**
+     * Builds the compact selector panel shown in the persistent "+" (add profile) tab:
+     * two action cards (<b>Launch Setup Wizard</b> / <b>New Empty Default Profile</b>)
+     * and a <b>Cancel</b> button that returns to the last profile tab.
+     * <p>
+     * The panel is deliberately stateless (no subscribers), so moving the "+" tab
+     * with {@code TabUtils.moveTo} stays cheap (no profile content churn).
+     * </p>
+     */
+    private JPanel buildAddProfileSelector() {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setOpaque(false);
+
+        addTabTitle = new JLabel("Create Node Profile");
+        GuiFontManager.applyDefaultFont(addTabTitle);
+        addTabTitle.setFont(addTabTitle.getFont().deriveFont(java.awt.Font.BOLD, 16f));
+        addTabTitle.setAlignmentX(java.awt.Component.CENTER_ALIGNMENT);
+
+        JLabel text = new JLabel("Choose how to create a new profile:");
+        GuiFontManager.applyDefaultFont(text);
+        text.setAlignmentX(java.awt.Component.CENTER_ALIGNMENT);
+
+        addTabWizardBtn = new JButton("Launch Setup Wizard");
+        addTabWizardBtn.setToolTipText(
+                "Open the setup wizard: pick network, database engine and ports for the new profile.");
+        addTabWizardBtn.setFocusable(false);
+        addTabWizardBtn.addActionListener(e -> openSetupWizard());
+        GuiFontManager.applyDefaultFont(addTabWizardBtn);
+        addTabWizardBtn.setAlignmentX(java.awt.Component.CENTER_ALIGNMENT);
+
+        addTabEmptyProfileBtn = new JButton("New Empty Default Profile");
+        addTabEmptyProfileBtn.setToolTipText(
+                "Create a profile with zero overrides: every setting uses the application default.");
+        addTabEmptyProfileBtn.setFocusable(false);
+        addTabEmptyProfileBtn.addActionListener(e -> openEmptyDefaultProfile());
+        GuiFontManager.applyDefaultFont(addTabEmptyProfileBtn);
+        addTabEmptyProfileBtn.setAlignmentX(java.awt.Component.CENTER_ALIGNMENT);
+
+        addTabCancelBtn = new JButton("Cancel");
+        addTabCancelBtn.setToolTipText("Close this panel (return to the previous profile tab)");
+        addTabCancelBtn.setFocusable(false);
+        addTabCancelBtn.addActionListener(e -> revertFromAddTab());
+        GuiFontManager.applyDefaultFont(addTabCancelBtn);
+        addTabCancelBtn.setAlignmentX(java.awt.Component.CENTER_ALIGNMENT);
+
+        int cardWidth = 300;
+        addTabWizardBtn.setPreferredSize(
+                new java.awt.Dimension(cardWidth, addTabWizardBtn.getPreferredSize().height));
+        addTabEmptyProfileBtn.setPreferredSize(
+                new java.awt.Dimension(cardWidth, addTabEmptyProfileBtn.getPreferredSize().height));
+
+        applyAddTabSelectorAppearance();
+        updateAddTabSelectorEnabled();
+
+        panel.add(Box.createVerticalGlue());
+        panel.add(addTabTitle);
+        panel.add(Box.createVerticalStrut(8));
+        panel.add(text);
+        panel.add(Box.createVerticalStrut(24));
+        panel.add(addTabWizardBtn);
+        panel.add(Box.createVerticalStrut(12));
+        panel.add(addTabEmptyProfileBtn);
+        panel.add(Box.createVerticalStrut(24));
+        panel.add(addTabCancelBtn);
+        panel.add(Box.createVerticalGlue());
+        return panel;
+    }
+
+    /**
+     * (Re)applies the current font/icon theme to the "+" selector panel — called on
+     * appearance changes (see {@link #appearanceListener}) and at build time.
+     */
+    private void applyAddTabSelectorAppearance() {
+        GuiFontManager.applyFontToTree(addProfileTabComponent,
+                javax.swing.UIManager.getFont("Label.font"));
+        // The title keeps its derived BOLD size across theme changes.
+        addTabTitle.setFont(addTabTitle.getFont().deriveFont(java.awt.Font.BOLD, 16f));
+        float iconSize = GuiConstants.getHelpIconSize();
+        java.awt.Color iconColor = GuiColors.getButtonIcon();
+        addTabWizardBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.MAGIC, iconSize, iconColor));
+        addTabEmptyProfileBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.FILE_O, iconSize, iconColor));
+    }
+
+    /**
+     * Enables the "+" selector action cards once the UI is interactive
+     * (see {@link #wizardInteractionEnabled}); the tab itself opens in any case.
+     */
+    private void updateAddTabSelectorEnabled() {
+        if (addTabWizardBtn != null) {
+            addTabWizardBtn.setEnabled(wizardInteractionEnabled);
+            addTabEmptyProfileBtn.setEnabled(wizardInteractionEnabled);
+            addTabCancelBtn.setEnabled(wizardInteractionEnabled);
+        }
+    }
+
+    /**
+     * Returns the selection from the "+" tab to the last real profile tab (the
+     * Cancel card's action; also used as a fallback when no profile tab exists).
+     */
+    private void revertFromAddTab() {
+        if (lastProfileTabIndex >= 0 && lastProfileTabIndex < profileTabbedPane.getTabCount()
+                && profileTabbedPane.getComponentAt(lastProfileTabIndex) != addProfileTabComponent) {
+            profileTabbedPane.setSelectedIndex(lastProfileTabIndex);
+        } else {
+            int first = firstProfileTabIndex();
+            if (first >= 0) {
+                profileTabbedPane.setSelectedIndex(first);
+            }
+        }
+    }
+
+    /**
+     * The <b>New Empty Default Profile</b> action card: asks for the name (prefilled
+     * via the {@link ProfileNameSuggester} SSOT) and creates a truly empty,
+     * zero-override profile with the default logging preset
+     * (SSOT: {@link ProfileRuntimeService#createEmptyProfile}).
+     * {@link #addProfileTab} registers the new tab and selects it, leaving the "+" tab.
+     */
+    private void openEmptyDefaultProfile() {
+        java.awt.Window parent = SwingUtilities.windowForComponent(this);
+        java.util.Set<String> taken = new java.util.HashSet<>(NodeProfileRepository.listProfiles());
+        String suggested = ProfileNameSuggester.nextAvailableName("node", taken);
+        String input = (String) javax.swing.JOptionPane.showInputDialog(parent,
+                "Enter the new profile name:", "New Empty Default Profile",
+                javax.swing.JOptionPane.PLAIN_MESSAGE, null, null, suggested);
+        String name = input == null ? "" : input.trim();
+        if (name.isEmpty()) {
+            return; // cancelled
+        }
+        try {
+            ProfileRuntimeService.createEmptyProfile(name);
+            addProfileTab(name); // tab + persisted order + selection (leaves the "+" tab)
+        } catch (IllegalArgumentException | java.io.IOException e) {
+            LOGGER.warn("Failed to create empty default profile '{}': {}", name, e.getMessage());
+            javax.swing.JOptionPane.showMessageDialog(parent,
+                    "Error creating profile: " + e.getMessage(),
+                    "New Empty Default Profile", javax.swing.JOptionPane.ERROR_MESSAGE);
+        }
     }
 
     /**
@@ -758,7 +868,8 @@ public class NodePanel extends JPanel  {
         if (tabIdx != null) {
             profileTabbedPane.setSelectedIndex(tabIdx);
         }
-        wizardInteractionEnabled = true; // UI is interactive: the "+" tab can now open the wizard
+        wizardInteractionEnabled = true; // UI is interactive: the "+" tab selector actions can be used
+        updateAddTabSelectorEnabled();
         LOGGER.info("Profile tab added: {}", profileName);
     }
 
@@ -789,6 +900,10 @@ public class NodePanel extends JPanel  {
         try {
             NodeProfileRepository.deleteProfile(profileName);
             LOGGER.info("Profile removed: {}", profileName);
+        } catch (IllegalArgumentException e) {
+            // The profile file is already gone (e.g. removed by the runtime delete chain,
+            // SSOT: ProfileRuntimeService.deleteProfile) — the tab cleanup still applies.
+            LOGGER.debug("Profile file already deleted for '{}': {}", profileName, e.getMessage());
         } catch (Exception e) {
             LOGGER.error("Failed to delete profile file for '{}'", profileName, e);
         }
@@ -804,34 +919,74 @@ public class NodePanel extends JPanel  {
     /**
      * Renames a profile tab: renames the profile file + updates the persisted tab order /
      * logging association (SSOT: {@link NodeProfileRepository#renameProfile}) and re-keys
-     * the in-memory tab bookkeeping.
+     * the in-memory tab bookkeeping. The loaded profile panel (if any) is kept as-is.
      */
     public void renameProfileTab(String oldName, String newName) {
+        renameProfileTab(oldName, newName, false);
+    }
+
+    /**
+     * Renames a profile tab. With {@code rebuildPanel == true} (the "rebuild" mode of the
+     * runtime rename chain, F3):
+     * <ul>
+     *   <li>the rename is assumed to be <b>already persisted</b> by the caller
+     *       (SSOT: {@link application.module.node.profile.ProfileRuntimeService#renameProfile}
+     *       — file move + tab order + logging association), so no repository call is made here;</li>
+     *   <li>the loaded {@link NodeProfilePanel} is <b>disposed</b> and a placeholder is put back,
+     *       so the tab lazy-loads a FRESH panel under the new name — all internal state
+     *       (info bar, toolbar, console, configuration panel, logger-registry key) starts
+     *       consistent with the new name.</li>
+     * </ul>
+     * With {@code rebuildPanel == false} (the tab context menu) the repository rename runs here
+     * and any loaded panel is kept.
+     */
+    public void renameProfileTab(String oldName, String newName, boolean rebuildPanel) {
         int index = profileNameToTabIndex.getOrDefault(oldName, -1);
         if (index < 0) {
             LOGGER.warn("renameProfileTab: no tab for profile '{}'", oldName);
             return;
         }
-        try {
-            NodeProfileRepository.renameProfile(oldName, newName);
-        } catch (Exception e) {
-            LOGGER.error("Failed to rename profile '{}' -> '{}'", oldName, newName, e);
-            return;
+        if (!rebuildPanel) {
+            try {
+                NodeProfileRepository.renameProfile(oldName, newName);
+            } catch (Exception e) {
+                LOGGER.error("Failed to rename profile '{}' -> '{}'", oldName, newName, e);
+                return;
+            }
         }
         profileTabbedPane.setTitleAt(index, newName);
         Integer tabIndex = profileNameToTabIndex.remove(oldName);
         if (tabIndex != null) {
             profileNameToTabIndex.put(newName, tabIndex);
         }
-        Boolean replaced = placeholderReplaced.remove(oldName);
-        if (replaced != null) {
-            placeholderReplaced.put(newName, replaced);
+        if (rebuildPanel) {
+            // The loaded panel's internal state is keyed by the OLD name — dispose it and
+            // reset the placeholder so the tab lazy-loads a fresh NodeProfilePanel.
+            NodeProfilePanel panel = loadedProfilePanels.remove(oldName);
+            if (panel != null) {
+                panel.dispose();
+            }
+            placeholderReplaced.remove(oldName);
+            placeholderReplaced.put(newName, false);
+            profileTabbedPane.setComponentAt(index, new NodePlaceholderPanel(newName, () -> {
+                SwingUtilities.invokeLater(this::checkAndReplacePlaceholder);
+            }));
+            updateTabIcon(newName);
+            if (index == profileTabbedPane.getSelectedIndex()) {
+                checkAndReplacePlaceholder();
+            }
+            LOGGER.info("Profile tab renamed and rebuilt: {} -> {}", oldName, newName);
+        } else {
+            Boolean replaced = placeholderReplaced.remove(oldName);
+            if (replaced != null) {
+                placeholderReplaced.put(newName, replaced);
+            }
+            NodeProfilePanel panel = loadedProfilePanels.remove(oldName);
+            if (panel != null) {
+                loadedProfilePanels.put(newName, panel);
+            }
+            LOGGER.info("Profile tab renamed: {} -> {}", oldName, newName);
         }
-        NodeProfilePanel panel = loadedProfilePanels.remove(oldName);
-        if (panel != null) {
-            loadedProfilePanels.put(newName, panel);
-        }
-        LOGGER.info("Profile tab renamed: {} -> {}", oldName, newName);
     }
 
     // ── Tab context menu (rename / delete) ──────────────────────────────
