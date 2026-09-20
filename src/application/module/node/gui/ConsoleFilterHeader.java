@@ -4,6 +4,7 @@ import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.FontMetrics;
+import java.awt.Insets;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.util.ArrayList;
@@ -19,6 +20,7 @@ import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.JTextField;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.TitledBorder;
@@ -26,7 +28,6 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.text.JTextComponent;
 
-import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiIcons;
 import application.utils.gui.ResponsiveToolbarScrollPane;
 import application.utils.logging.event.CompositeFilter;
@@ -171,7 +172,13 @@ public final class ConsoleFilterHeader extends JPanel {
         // Wrap in the same responsive toolbar scroll pane the button rows use:
         // when the window is narrowed, a horizontal scrollbar appears and the
         // row height adjusts dynamically (no content overlap, no wrapping).
-        add(new ResponsiveToolbarScrollPane(mainPanel, GuiConstants.TOOLBAR_INSETS, false), BorderLayout.CENTER);
+        // The thin 4px empty border lives on the WRAPPER (not on the search
+        // box): it clears the row above and the possibly appearing horizontal
+        // scrollbar below. Inner top/bottom insets are 0 so the wrapper's
+        // border alone defines the vertical spacing.
+        JScrollPane filterScroll = new ResponsiveToolbarScrollPane(mainPanel, new Insets(0, 10, 0, 5), false);
+        filterScroll.setBorder(new EmptyBorder(4, 0, 4, 0));
+        add(filterScroll, BorderLayout.CENTER);
     }
 
     private JPanel buildLevelPanel() {
@@ -246,6 +253,9 @@ public final class ConsoleFilterHeader extends JPanel {
     private JPanel buildSearchPanel() {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         panel.setOpaque(false);
+        // No extra EmptyBorder here: the 4px vertical spacing belongs to the
+        // scroll wrapper (initUI), so it also clears the wrapper's horizontal
+        // scrollbar when it appears.
         panel.setBorder(new TitledBorder("Search"));
 
         // Live "find in console" input — plain text only, no extra settings.

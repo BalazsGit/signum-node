@@ -8,6 +8,7 @@ import application.module.node.profile.NodeProfile;
 import application.module.node.profile.NodeProfileRepository;
 import application.module.node.profile.ProfileConflictDetector;
 import application.utils.gui.GuiColors;
+import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiIcons;
 
@@ -20,9 +21,12 @@ import javax.swing.BorderFactory;
 import javax.swing.Icon;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JSeparator;
+import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -104,8 +108,11 @@ public class NodeInfoBar extends JPanel {
      * Initializes the info bar layout and components.
      */
     private void initialize() {
-        setLayout(new FlowLayout(FlowLayout.LEFT, CHIP_GAP, 5));
-        setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
+        // No vertical padding inside the bar: like the other toolbar rows the
+        // chips sit flush so that when the wrapper's horizontal scrollbar
+        // appears (narrow window) it is placed directly below the info chips.
+        setLayout(new FlowLayout(FlowLayout.LEFT, CHIP_GAP, 0));
+        setBorder(BorderFactory.createEmptyBorder(0, 4, 0, 4));
         setOpaque(true);
 
         // Create info chips
@@ -132,15 +139,25 @@ public class NodeInfoBar extends JPanel {
         websocketPortLabel = createInfoChip("WebSocket", "--",
                 GuiIcons.build(FontAwesome.BOLT, GuiIcons.sizeTiny(), GuiColors.getButtonIcon()));
 
-        // Add chips to panel
+        // Add chips to the bar with a thin vertical separator between the
+        // individual data items, so each value (network, state, ports, database,
+        // ...) is visually distinct. The status icon stays attached to the
+        // profile name chip, so there is no separator between those two.
         add(profileNameLabel);
         add(statusIconLabel);
+        add(createChipSeparator());
         add(networkLabel);
+        add(createChipSeparator());
         add(stateLabel);
+        add(createChipSeparator());
         add(apiPortLabel);
+        add(createChipSeparator());
         add(p2pPortLabel);
+        add(createChipSeparator());
         add(databaseEngineLabel);
+        add(createChipSeparator());
         add(databasePortLabel);
+        add(createChipSeparator());
         add(websocketPortLabel);
 
         // Register for appearance updates
@@ -174,6 +191,18 @@ public class NodeInfoBar extends JPanel {
         label.setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
         labelMap.put(key.toLowerCase(), label);
         return label;
+    }
+
+    /**
+     * Creates a thin vertical separator between two info chips. Uses the exact
+     * same style as the console bottom info row: the standard (2 x 20) size and
+     * the L&F default separator color, so the dividers are clearly visible
+     * between the chips.
+     */
+    private JSeparator createChipSeparator() {
+        JSeparator separator = new JSeparator(SwingConstants.VERTICAL);
+        separator.setPreferredSize(GuiConstants.VERTICAL_SEPARATOR_SIZE);
+        return separator;
     }
 
     /**
@@ -434,6 +463,8 @@ public class NodeInfoBar extends JPanel {
         for (Component component : getComponents()) {
             if (component instanceof JLabel label) {
                 GuiFontManager.applyDefaultFont(label);
+            } else if (component instanceof JSeparator separator) {
+                separator.setForeground(GuiColors.getSeparator());
             }
         }
         // Rebuild status icon with current font size after style refresh

@@ -1319,10 +1319,9 @@ public class NodeConsolePanel extends JPanel {
         skipDbRow.add(skipDbHelp);
         menuPanel.add(skipDbRow, "growx");
 
-        menuPanel.add(new JSeparator(), "growx");
-
-        // Configuration item removed from hamburger menu - configuration is now accessible
-        // through the NodeProfilePanel's dedicated Configuration tab
+        // Configuration item removed from hamburger menu (along with its trailing
+        // separator) - configuration is now accessible through the NodeProfilePanel's
+        // dedicated Configuration tab
 
         // menuPanelWrapper is managed by MenuPopupController now
 

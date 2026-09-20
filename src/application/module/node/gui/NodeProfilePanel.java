@@ -143,9 +143,11 @@ public class NodeProfilePanel extends JPanel {
             // panel can adopt it (single state listener) and attach the console.
             toolbar.setOnNodeStarted(this::onNodeStarted);
 
-            // Wrap infoBar in a responsive scroll pane so info chips are accessible when window is narrow
+            // Wrap infoBar in a responsive scroll pane so info chips are accessible when window is narrow.
+            // Zero vertical content insets (like the console filter header): the chips
+            // sit flush so the horizontal scrollbar appears directly below them.
             ResponsiveToolbarScrollPane infoBarScrollPane = new ResponsiveToolbarScrollPane(infoBar,
-                    new java.awt.Insets(2, 4, 0, 4));
+                    new java.awt.Insets(0, 4, 0, 4));
             infoBarScrollPane.setBorder(BorderFactory.createCompoundBorder(
                     BorderFactory.createMatteBorder(0, 0, 1, 0, GuiColors.getSeparator()),
                     BorderFactory.createEmptyBorder(0, 0, 2, 0)

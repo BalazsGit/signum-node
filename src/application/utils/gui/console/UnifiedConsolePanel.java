@@ -167,13 +167,18 @@ public final class UnifiedConsolePanel extends JPanel {
      * </pre>
      */
     private void initUI() {
-        setLayout(new BorderLayout(5, 5));
-        setBorder(new EmptyBorder(5, 5, 5, 5));
+        setLayout(new BorderLayout(5, 0));
+        // Same EmptyBorder as the search panels (ConsoleFilterHeader / NodeConfigurationPanel):
+        // thin 4px above and below, no side insets, so the distances are identical everywhere.
+        // The layout's vertical gap is 0 on purpose: only the search panel's own
+        // EmptyBorder(4, 0, 4, 0) creates the spacing between the filter header and the
+        // console body; the horizontal gap keeps the body's left/right margins.
+        setBorder(new EmptyBorder(4, 0, 4, 0));
 
         // Header region: contains filterHeader + optional TOP-position command input
         if (config.isShowFilterHeader() ||
             (config.isShowCommandInput() && config.getCommandPosition() == ConsoleInputPosition.TOP)) {
-            headerRegion = new JPanel(new BorderLayout(0, 2));
+            headerRegion = new JPanel(new BorderLayout(0, 0));
 
             // Filter header at NORTH of header region
             if (config.isShowFilterHeader()) {
@@ -694,7 +699,7 @@ public final class UnifiedConsolePanel extends JPanel {
             return;
         }
         // Create new header region
-        headerRegion = new JPanel(new BorderLayout(0, 2));
+        headerRegion = new JPanel(new BorderLayout(0, 0));
 
         // If filterHeader exists and is a direct child of this panel, move it into headerRegion
         if (filterHeader != null && filterHeader.getParent() == this) {

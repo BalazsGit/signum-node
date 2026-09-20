@@ -226,6 +226,13 @@ public class NodeConfigurationPanel extends JPanel {
         this.renameProfileBtn = new JButton();
         this.deleteProfileBtn = new JButton();
         this.categoryTabbedPane = new JTabbedPane();
+        // Same scroll-type tab layout as every other tabbed pane in the app
+        // (GuiManager policy from gui-settings.json, SCROLL by default).
+        GuiUtils.applyDefaultTabLayoutPolicy(categoryTabbedPane);
+        // No border around the tabbed pane itself: the only vertical spacing
+        // between the search panel above and the tab area must be the search
+        // panel's own EmptyBorder (the L&F default border would add more).
+        this.categoryTabbedPane.setBorder(BorderFactory.createEmptyBorder());
         // Initialize buttons early to avoid NullPointerException in listeners during UI
         // construction. The toolbar is icon-only: the tooltip is the single source of
         // information about each action (F0 of the profile-actions refactor plan).
@@ -331,7 +338,7 @@ public class NodeConfigurationPanel extends JPanel {
         helpBtn.addActionListener(e -> showProfileHelp());
         profilePanel.add(helpBtn); // Add help button
 
-        JScrollPane profileScrollPane = new ResponsiveToolbarScrollPane(profilePanel, new Insets(5, 10, 5, 5));
+        JScrollPane profileScrollPane = new ResponsiveToolbarScrollPane(profilePanel, new Insets(5, 10, 0, 5));
         profileScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
         profileScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
         profileScrollPane.setBorder(BorderFactory.createEmptyBorder());
@@ -345,6 +352,9 @@ public class NodeConfigurationPanel extends JPanel {
         // counter, chevron buttons) instead of a full-width bar ---
         JPanel searchPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         searchPanel.setOpaque(false);
+        // No extra EmptyBorder here: the 4px vertical spacing belongs to the
+        // scroll wrapper below (like the console filter header), so it also
+        // clears the wrapper's horizontal scrollbar when it appears.
         searchPanel.setBorder(new TitledBorder("Search"));
         searchField = new JTextField(16);
         searchField.setToolTipText("Text to find in the configuration (live highlighting)");
@@ -397,8 +407,17 @@ public class NodeConfigurationPanel extends JPanel {
             }
         });
 
+        // The border panel holds the search box wrapped in the same responsive
+        // toolbar scroll wrapper the profile row and the console filter header
+        // use: when the window is narrowed a horizontal scrollbar appears
+        // instead of clipping. The thin 4px empty border lives on the WRAPPER
+        // (not the box): it clears the row above and the possibly appearing
+        // scrollbar below. Inner top/bottom insets are 0 so the wrapper's
+        // border alone defines the vertical spacing.
         JPanel searchRow = new JPanel(new BorderLayout());
-        searchRow.add(searchPanel, BorderLayout.WEST);
+        JScrollPane searchScroll = new ResponsiveToolbarScrollPane(searchPanel, new Insets(0, 10, 0, 5), false);
+        searchScroll.setBorder(new EmptyBorder(4, 0, 4, 0));
+        searchRow.add(searchScroll, BorderLayout.WEST);
         JPanel northPanel = new JPanel(new BorderLayout());
         northPanel.add(profileScrollPane, BorderLayout.NORTH);
         northPanel.add(searchRow, BorderLayout.SOUTH);
@@ -724,7 +743,6 @@ public class NodeConfigurationPanel extends JPanel {
         searchResultsPanel = new JPanel(new MigLayout("fillx, insets 10, gap 5", "[][grow]", ""));
         contentContainer.add(createScrollPane(searchResultsPanel), "SEARCH");
         bodyPanel.add(contentContainer, BorderLayout.CENTER);
-        add(bodyPanel, BorderLayout.CENTER);
 
         // --- Bottom Panel with Buttons and File Path ---
         JPanel bottomPanel = new JPanel(new BorderLayout(10, 0));
@@ -741,6 +759,14 @@ public class NodeConfigurationPanel extends JPanel {
         JPanel bottomContainer = new JPanel(new BorderLayout());
         bottomContainer.add(new JSeparator(SwingConstants.HORIZONTAL), BorderLayout.NORTH);
         bottomContainer.add(bottomPanel, BorderLayout.CENTER);
+
+        // No panel-wide horizontal scroll wrapper here: the individual rows
+        // (profile button row, search row) each have their own responsive
+        // scroll wrapper and show their own scrollbar right below themselves
+        // when the window narrows. Wrapping the whole body would steal the
+        // compression from those rows (so their scrollbars never appeared) and
+        // added an unwanted scrollbar at the very bottom of the panel.
+        add(bodyPanel, BorderLayout.CENTER);
         add(bottomContainer, BorderLayout.SOUTH);
         
         LOGGER.debug("initUI - COMPLETED ({} tabs)", categoryTabbedPane.getTabCount());
