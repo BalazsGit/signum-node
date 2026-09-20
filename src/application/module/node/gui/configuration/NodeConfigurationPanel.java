@@ -407,17 +407,18 @@ public class NodeConfigurationPanel extends JPanel {
             }
         });
 
-        // The border panel holds the search box wrapped in the same responsive
-        // toolbar scroll wrapper the profile row and the console filter header
-        // use: when the window is narrowed a horizontal scrollbar appears
-        // instead of clipping. The thin 4px empty border lives on the WRAPPER
-        // (not the box): it clears the row above and the possibly appearing
-        // scrollbar below. Inner top/bottom insets are 0 so the wrapper's
-        // border alone defines the vertical spacing.
+        // The search box is wrapped in the same responsive toolbar scroll
+        // wrapper the profile row and the console filter header use, and added
+        // as CENTER (like the console): it receives the row's full available
+        // width, so when the window narrows past the box's content width a
+        // horizontal scrollbar appears below it. (A WEST placement would keep
+        // the wrapper's preferred width and clip the overflow instead.) The
+        // thin 4px empty border lives on the WRAPPER (not the box): it clears
+        // the row above and the possibly appearing scrollbar below.
         JPanel searchRow = new JPanel(new BorderLayout());
         JScrollPane searchScroll = new ResponsiveToolbarScrollPane(searchPanel, new Insets(0, 10, 0, 5), false);
         searchScroll.setBorder(new EmptyBorder(4, 0, 4, 0));
-        searchRow.add(searchScroll, BorderLayout.WEST);
+        searchRow.add(searchScroll, BorderLayout.CENTER);
         JPanel northPanel = new JPanel(new BorderLayout());
         northPanel.add(profileScrollPane, BorderLayout.NORTH);
         northPanel.add(searchRow, BorderLayout.SOUTH);
