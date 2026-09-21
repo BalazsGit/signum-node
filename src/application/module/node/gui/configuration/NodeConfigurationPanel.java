@@ -357,7 +357,7 @@ public class NodeConfigurationPanel extends JPanel {
         // clears the wrapper's horizontal scrollbar when it appears.
         searchPanel.setBorder(new TitledBorder("Search"));
         searchField = new JTextField(16);
-        searchField.setToolTipText("Text to find in the configuration (live highlighting)");
+        searchField.setToolTipText("Text to find in the configuration — property names, property keys, or values (live highlighting)");
         searchPanel.add(searchField);
 
         // Match counter: "current/total" (e.g. "1/23") while a search is
@@ -416,7 +416,16 @@ public class NodeConfigurationPanel extends JPanel {
         // thin 4px empty border lives on the WRAPPER (not the box): it clears
         // the row above and the possibly appearing scrollbar below.
         JPanel searchRow = new JPanel(new BorderLayout());
-        JScrollPane searchScroll = new ResponsiveToolbarScrollPane(searchPanel, new Insets(0, 10, 0, 5), false);
+        // A transparent left-flow wrapper between the scroll pane and the
+        // titled box: the scroll pane's viewport stretches its own
+        // (BorderLayout) content wrapper to the row's full width, so without
+        // this the titled box — and its border — would span the entire
+        // window. The wrapper absorbs the stretch and keeps the border
+        // hugging the box's content.
+        JPanel searchPanelWrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        searchPanelWrap.setOpaque(false);
+        searchPanelWrap.add(searchPanel);
+        JScrollPane searchScroll = new ResponsiveToolbarScrollPane(searchPanelWrap, new Insets(0, 10, 0, 5), false);
         searchScroll.setBorder(new EmptyBorder(4, 0, 4, 0));
         searchRow.add(searchScroll, BorderLayout.CENTER);
         JPanel northPanel = new JPanel(new BorderLayout());
@@ -477,6 +486,9 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(dbPanel, Props.DB_SQLITE_CACHE_SIZE, "SQLite Cache Size");
         addProperty(dbPanel, Props.DB_INSERT_BATCH_MAX_SIZE, "DB Insert Batch Size");
         addProperty(dbPanel, Props.DB_SKIP_CHECK, "Skip DB Check on Start");
+        addProperty(dbPanel, Props.DB_CONNECTION_RETRY_ENABLED, "DB Connection Retry");
+        addProperty(dbPanel, Props.DB_CONNECTION_RETRY_MAX_ATTEMPTS, "DB Connection Retry Max Attempts");
+        addProperty(dbPanel, Props.DB_CONNECTION_RETRY_INTERVAL_MS, "DB Connection Retry Interval (ms)");
         addProperty(dbPanel, Props.NODE_BLOCK_CACHE_MB, "Block Cache (MB)");
         finalizeCategoryPanel(dbPanel);
         categoryTabbedPane.addTab("Database", createScrollPane(dbPanel));
@@ -542,6 +554,7 @@ public class NodeConfigurationPanel extends JPanel {
         JPanel systemPanel = createCategoryPanel();
         addProperty(systemPanel, Props.APPLICATION, "Application Name");
         addProperty(systemPanel, Props.VERSION, "Node Version");
+        addProperty(systemPanel, Props.NODE_AUTOSTART, "Auto-Start on App Launch");
         addProperty(systemPanel, Props.NETWORK_NAME, "Network Name");
         addProperty(systemPanel, Props.CPU_NUM_CORES, "CPU Cores Limit");
         addProperty(systemPanel, Props.BLOCK_PROCESS_THREAD_DELAY, "Thread Delay (ms)");
@@ -991,10 +1004,10 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     /**
-     * @return true when the query is in the row's visible text: the label or
-     *         the value displayed in the row's input component. Hidden data
-     *         (the internal property key, non-text inputs such as check
-     *         boxes) is deliberately NOT searched — only what the user can
+     * @return true when the query is in the row's visible text: the label
+     *         name, the label's property key line, or the value displayed in
+     *         the row's input component. Non-text inputs (such as check
+     *         boxes) are deliberately NOT searched — only what the user can
      *         see can be a match, the same way the console only matches
      *         visible log text.
      */
@@ -1002,13 +1015,23 @@ public class NodeConfigurationPanel extends JPanel {
         if (row.labelText.toLowerCase(Locale.ROOT).contains(lowerQuery)) {
             return true;
         }
+        String keyText = rowLabelKeyText(row);
+        if (keyText != null && keyText.toLowerCase(Locale.ROOT).contains(lowerQuery)) {
+            return true;
+        }
         JTextComponent valueText = rowValueTextComponent(row);
         return valueText != null && valueText.getText().toLowerCase(Locale.ROOT).contains(lowerQuery);
     }
 
+    /** @return the row's property key line (the label's second line) text, or null when the row has none */
+    private String rowLabelKeyText(PropertyRow row) {
+        return row.label instanceof SearchMatchLabel searchLabel ? searchLabel.getKeyText() : null;
+    }
+
     /**
      * Highlights the exact matching part of one row: the query's occurrence
-     * in the label text and/or in the value text (a row is a match when at
+     * in the label name, or in the label's property key line when the name
+     * does not match, and/or in the value text (a row is a match when at
      * least one of them contains the query — nothing more is highlighted).
      * The active match uses the strong palette color, the others the soft
      * one (the same SSOT colors as the console "find").
@@ -1018,9 +1041,16 @@ public class NodeConfigurationPanel extends JPanel {
         Highlighter.HighlightPainter painter =
                 active ? SEARCH_MATCH_PAINTER_ACTIVE : SEARCH_MATCH_PAINTER;
         if (row.label instanceof SearchMatchLabel searchLabel) {
-            int idx = row.labelText.toLowerCase(Locale.ROOT).indexOf(query.toLowerCase(Locale.ROOT));
-            if (idx >= 0) {
-                searchLabel.setHighlightRange(idx, query.length());
+            String lowerQuery = query.toLowerCase(Locale.ROOT);
+            int nameIdx = row.labelText.toLowerCase(Locale.ROOT).indexOf(lowerQuery);
+            String keyText = searchLabel.getKeyText();
+            int keyIdx = keyText == null ? -1 : keyText.toLowerCase(Locale.ROOT).indexOf(lowerQuery);
+            if (nameIdx >= 0) {
+                // The name line takes priority: it is the prominent line.
+                searchLabel.setHighlightRange(nameIdx, query.length());
+                searchLabel.setHighlightColor(color);
+            } else if (keyIdx >= 0) {
+                searchLabel.setKeyHighlightRange(keyIdx, query.length());
                 searchLabel.setHighlightColor(color);
             }
         }
@@ -1164,6 +1194,10 @@ public class NodeConfigurationPanel extends JPanel {
         if (row.labelText.toLowerCase(Locale.ROOT).contains(query.toLowerCase(Locale.ROOT))) {
             return; // the label band is already visible
         }
+        String keyText = rowLabelKeyText(row);
+        if (keyText != null && keyText.toLowerCase(Locale.ROOT).contains(query.toLowerCase(Locale.ROOT))) {
+            return; // the key-line band is already visible
+        }
         JTextComponent value = rowValueTextComponent(row);
         if (value == null) {
             return;
@@ -1174,11 +1208,12 @@ public class NodeConfigurationPanel extends JPanel {
         }
     }
 
-    /** Removes every search highlight (label bands and value marks) from all rows. */
+    /** Removes every search highlight (label bands, key-line bands and value marks) from all rows. */
     private void clearSearchHighlights() {
         for (PropertyRow row : allPropertyRows) {
             if (row.label instanceof SearchMatchLabel searchLabel) {
                 searchLabel.clearHighlight();
+                searchLabel.clearKeyHighlight();
                 row.label.setText(isRowDirty(row) ? row.labelText + " *" : row.labelText);
             }
         }
@@ -2310,9 +2345,11 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void addProperty(JPanel panel, Prop<?> prop, String labelText, String[] options, boolean editable) {
-        // Label
+        // Label — with the exact property key rendered below the name
+        // (unified key style, see SearchMatchLabel#setKeyText).
         PropertyRow row = new PropertyRow(prop, labelText, panel, currentAddingTabIndex);
-        JLabel label = new SearchMatchLabel(labelText);
+        SearchMatchLabel label = new SearchMatchLabel(labelText);
+        label.setKeyText(prop.getName());
         row.label = label;
         row.labelConstraints = "align label";
         panel.add(label, row.labelConstraints);
@@ -2497,8 +2534,11 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void addJdbcUrlProperty(JPanel panel, Prop<String> prop, String labelText) {
+        // Label — with the exact property key rendered below the name
+        // (unified key style, see SearchMatchLabel#setKeyText).
         PropertyRow row = new PropertyRow(prop, labelText, panel, currentAddingTabIndex);
-        JLabel label = new SearchMatchLabel(labelText);
+        SearchMatchLabel label = new SearchMatchLabel(labelText);
+        label.setKeyText(prop.getName());
         row.label = label;
         row.labelConstraints = "align label, aligny top";
         panel.add(label, row.labelConstraints);
@@ -2640,9 +2680,11 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void addPasswordProperty(JPanel panel, Prop<String> prop, String labelText) {
-        // Label
+        // Label — with the exact property key rendered below the name
+        // (unified key style, see SearchMatchLabel#setKeyText).
         PropertyRow row = new PropertyRow(prop, labelText, panel, currentAddingTabIndex);
-        JLabel label = new SearchMatchLabel(labelText);
+        SearchMatchLabel label = new SearchMatchLabel(labelText);
+        label.setKeyText(prop.getName());
         row.label = label;
         row.labelConstraints = "align label";
         panel.add(label, row.labelConstraints);
@@ -2860,8 +2902,11 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void addListProperty(JPanel panel, Prop<?> prop, String labelText) {
+        // Label — with the exact property key rendered below the name
+        // (unified key style, see SearchMatchLabel#setKeyText).
         PropertyRow row = new PropertyRow(prop, labelText, panel, currentAddingTabIndex);
-        JLabel label = new SearchMatchLabel(labelText);
+        SearchMatchLabel label = new SearchMatchLabel(labelText);
+        label.setKeyText(prop.getName());
         row.label = label;
         row.labelConstraints = "align label, aligny top";
         panel.add(label, row.labelConstraints);
@@ -3407,7 +3452,7 @@ public class NodeConfigurationPanel extends JPanel {
         String description = helpTexts.getOrDefault(prop.getName(), "No detailed description available.");
         String message = "<html><body style='width: 300px'>" +
                 "<h2>" + labelText + "</h2>" +
-                "<p><b>Property Key:</b> <code>" + prop.getName() + "</code></p>" +
+                "<p><b>Property Key:</b> <b>" + prop.getName() + "</b></p>" +
                 "<p><b>Default Value:</b> " + prop.getDefaultValue() + "</p>" +
                 "<hr>" +
                 "<p>" + description.replace("\n", "<br>") + "</p>" +
@@ -3630,6 +3675,16 @@ public class NodeConfigurationPanel extends JPanel {
                 "If enabled, skips the database integrity check on startup."
                         + "<br><b>Warning:</b> This can speed up startup but is risky. Use only if you are sure the database is consistent.");
 
+        helpTexts.put(Props.DB_CONNECTION_RETRY_ENABLED.getName(),
+                "When the database is unavailable at startup, retry the connection (with a delay) instead of failing immediately."
+                        + "<br>Useful for portable/embedded database setups where the DB engine may still be coming up.");
+
+        helpTexts.put(Props.DB_CONNECTION_RETRY_MAX_ATTEMPTS.getName(),
+                "The maximum number of database connection attempts during startup (only used when connection retry is enabled).");
+
+        helpTexts.put(Props.DB_CONNECTION_RETRY_INTERVAL_MS.getName(),
+                "The delay between database connection attempts at startup, in milliseconds (only used when connection retry is enabled).");
+
         helpTexts.put(Props.DB_INSERT_BATCH_MAX_SIZE.getName(),
                 "The maximum number of rows to insert in a single database batch operation."
                         + "<br>A larger batch size can improve performance during sync but may use more memory.");
@@ -3837,6 +3892,10 @@ public class NodeConfigurationPanel extends JPanel {
                 "The name of the application (e.g. BRS). Used for peer identification.");
         helpTexts.put(Props.VERSION.getName(),
                 "The version of the node software. Used for peer identification and protocol compatibility.");
+
+        helpTexts.put(Props.NODE_AUTOSTART.getName(),
+                "When enabled, this node profile starts automatically when the application launches."
+                        + "<br>Read by the boot autostart arbitration (NodeModule) at startup.");
 
         helpTexts.put(Props.NETWORK_NAME.getName(),
                 "The name of the network this node is connected to (e.g., Signum, Testnet).");

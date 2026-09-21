@@ -5,7 +5,9 @@ import javax.swing.*;
 
 import application.module.database.gui.DatabaseConfigurationPanel;
 import application.module.database.utils.DatabaseConfigurationUtils;
+import application.module.node.props.Props;
 import application.utils.gui.ConfigurationUtils;
+import application.utils.gui.SearchMatchLabel;
 
 import java.awt.*;
 import java.util.regex.Matcher;
@@ -46,8 +48,10 @@ public class JdbcManualConfigurationPanel extends JPanel {
         portLabel = new JLabel("Port:");
         dbNameLabel = new JLabel("Database:");
         suffixLabel = new JLabel("Suffix:");
-        userLabel = new JLabel("Username:");
-        passLabel = new JLabel("Password:");
+        // The user/password rows are the exact Props.DB_USERNAME /
+        // Props.DB_PASSWORD properties — show their keys in the unified style.
+        userLabel = SearchMatchLabel.withKeyText("Username:", Props.DB_USERNAME.getName());
+        passLabel = SearchMatchLabel.withKeyText("Password:", Props.DB_PASSWORD.getName());
 
         ConfigurationUtils.styleInputComponent(hostCombo);
         ConfigurationUtils.fixComponentSize(hostCombo);

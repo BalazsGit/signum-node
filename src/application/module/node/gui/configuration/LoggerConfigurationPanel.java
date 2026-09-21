@@ -1723,7 +1723,7 @@ public class LoggerConfigurationPanel extends JPanel {
         String description = helpTexts.getOrDefault(propertyKey, "No detailed description available.");
         String message = "<html><body style='width: 300px'>" +
                 "<h2>" + labelText + "</h2>" +
-                "<p><b>Property Key:</b> <code>" + propertyKey + "</code></p>" +
+                "<p><b>Property Key:</b> <b>" + propertyKey + "</b></p>" +
                 "<hr>" +
                 "<p>" + description.replace("\n", "<br>") + "</p>" +
                 "</body></html>";
