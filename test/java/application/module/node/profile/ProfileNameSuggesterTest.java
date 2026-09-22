@@ -63,6 +63,60 @@ class ProfileNameSuggesterTest {
     }
 
     @Test
+    @DisplayName("nextCloneName: non-clone source -> <source>_clone")
+    void nextCloneName_NonCloneSource() {
+        assertEquals("node_clone",
+                ProfileNameSuggester.nextCloneName("node", Set.of("node")));
+    }
+
+    @Test
+    @DisplayName("nextCloneName: <source>_clone taken -> <source>_clone_01 (fallback scheme)")
+    void nextCloneName_NonCloneSourceBaseTaken() {
+        assertEquals("node_clone_01",
+                ProfileNameSuggester.nextCloneName("node", Set.of("node", "node_clone")));
+    }
+
+    @Test
+    @DisplayName("nextCloneName: bare _clone source -> _clone2 (bare counts as #1)")
+    void nextCloneName_BareCloneSource() {
+        assertEquals("node_clone2",
+                ProfileNameSuggester.nextCloneName("node_clone", Set.of("node", "node_clone")));
+    }
+
+    @Test
+    @DisplayName("nextCloneName: continues the _cloneNN sequence from the highest taken number")
+    void nextCloneName_ContinuesNumberedSequence() {
+        assertEquals("node_clone4",
+                ProfileNameSuggester.nextCloneName("node_clone2",
+                        Set.of("node", "node_clone", "node_clone2", "node_clone3")));
+    }
+
+    @Test
+    @DisplayName("nextCloneName: discovers the max across all scheme-conforming names (gaps kept)")
+    void nextCloneName_UsesMaxNotCount() {
+        // bare _clone = #1, node_clone2 = #2, node_clone5 = #5 -> next is #6 (no gap filling)
+        assertEquals("node_clone6",
+                ProfileNameSuggester.nextCloneName("node_clone5",
+                        Set.of("node_clone", "node_clone2", "node_clone5")));
+    }
+
+    @Test
+    @DisplayName("nextCloneName: unrelated profiles with other prefixes are ignored")
+    void nextCloneName_IgnoresOtherPrefixes() {
+        assertEquals("node_clone2",
+                ProfileNameSuggester.nextCloneName("node_clone",
+                        Set.of("node_clone", "other_clone9", "node_clone_other")));
+    }
+
+    @Test
+    @DisplayName("nextCloneName: increments past already-taken candidates")
+    void nextCloneName_SkipsTakenCandidates() {
+        assertEquals("node_clone6",
+                ProfileNameSuggester.nextCloneName("node_clone",
+                        Set.of("node_clone", "node_clone2", "node_clone3", "node_clone4", "node_clone5")));
+    }
+
+    @Test
     @DisplayName("deriveProfilePorts returns 3 distinct, valid, name-stable ports (A1)")
     void deriveProfilePorts_DistinctValidAndStable() {
         int[] a = ProfileNameSuggester.deriveProfilePorts("alpha");

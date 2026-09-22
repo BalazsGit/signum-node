@@ -160,8 +160,6 @@ public final class ProfileRuntimeService {
 
     // ── Rename ──────────────────────────────────────────────────────────
 
-    /** How long the rename chain waits for a full node stop before aborting. */
-    private static final long STOP_TIMEOUT_SECONDS = 30;
     /** How long the rename chain waits for the restarted node to reach RUNNING (pause re-apply). */
     private static final long RUNNING_TIMEOUT_SECONDS = 60;
 
@@ -170,7 +168,7 @@ public final class ProfileRuntimeService {
      * {@link #renameProfile(String, String, String, Runnable)}.
      *
      * @throws IllegalArgumentException if a name is blank/invalid/reserved, or the new name is taken
-     * @throws IOException              if the node does not stop in time, or on persistence failure
+     * @throws IOException              if the stop wait is interrupted, or on persistence failure
      */
     public static void renameProfile(String oldProfileName, String newProfileName, Runnable onMetaRenamed)
             throws IOException {
@@ -185,8 +183,9 @@ public final class ProfileRuntimeService {
      *       stopped/failed node stays stopped, D3) and {@code wasUserPaused}
      *       (operating state {@code PAUSED_USER}).</li>
      *   <li><b>Stop</b> (only when running/starting) + <b>wait for the full stop</b> — this is
-     *       the guarantee for the SQLite data-dir move below; a stop that does not finish in
-     *       time aborts the rename (nothing is renamed yet). The instance registered under the
+     *       the guarantee for the SQLite data-dir move below; the chain blocks here until the
+     *       stop completes (a node stop may take a while), so nothing is renamed before it
+     *       does. The instance registered under the
  *       old name is then <b>torn down</b> via {@code NodeModule.removeNode()} (port release +
  *       {@code Signum.dispose()}): its context no longer exists and the restart in step 5
  *       runs under the new name.</li>
@@ -214,7 +213,7 @@ public final class ProfileRuntimeService {
      * @param newProfileName the new profile name (validated; must differ from the old name)
      * @param onMetaRenamed  called after the meta operations succeed (null is allowed)
      * @throws IllegalArgumentException if a name is blank/invalid/reserved, or the new name is taken
-     * @throws IOException              if the node does not stop in time, or on persistence failure
+     * @throws IOException              if the stop wait is interrupted, or on persistence failure
      */
     static void renameProfile(String confRoot, String oldProfileName, String newProfileName,
             Runnable onMetaRenamed) throws IOException {
@@ -276,8 +275,14 @@ public final class ProfileRuntimeService {
     /**
      * Stops the given node and blocks until it is fully STOPPED (a terminal ERROR also releases
      * the wait — a node that errored out holds no open database).
+     * <p>
+     * The wait is <b>unbounded and event-driven</b>: it is released only by the node's own
+     * STOPPED/ERROR state push (state listener). How long a stop takes depends on the node
+     * itself (shutdown processing, database checkpoint, ...), so the GUI callers warn the user
+     * that the operation may take a while.
+     * </p>
      *
-     * @throws IOException if the node does not stop within {@link #STOP_TIMEOUT_SECONDS} seconds
+     * @throws IOException if the stop wait is interrupted
      */
     private static void stopAndWait(NodeModule module, Signum signum, String profileName) throws IOException {
         CountDownLatch stopped = new CountDownLatch(1);
@@ -286,13 +291,16 @@ public final class ProfileRuntimeService {
                 stopped.countDown();
             }
         };
-        signum.addStateListener(waiter);
         try {
-            module.stopNode(profileName);
-            if (!stopped.await(STOP_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                throw new IOException("The node did not stop within " + STOP_TIMEOUT_SECONDS
-                        + " seconds — rename aborted (nothing was renamed)");
+            Signum.State current = signum.getState();
+            if (current == Signum.State.STOPPED || current == Signum.State.ERROR) {
+                return; // already terminal — nothing to wait for (the removal below is a no-op)
             }
+            signum.addStateListener(waiter);
+            module.stopNode(profileName);
+            // Unbounded wait: released by the STOPPED/ERROR state push only (no timeout —
+            // a slow stop simply keeps the caller blocked until the event arrives).
+            stopped.await();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("Interrupted while waiting for the node to stop", e);
@@ -444,7 +452,7 @@ public final class ProfileRuntimeService {
      * @param profileName the profile to delete
      * @param deleteData  whether the profile's per-profile SQLite data directory is deleted too
      * @throws IllegalArgumentException if the profile name is blank, reserved, or unknown
-     * @throws IOException              if the node does not stop in time, or on persistence failure
+     * @throws IOException              if the stop wait is interrupted, or on persistence failure
      */
     public static void deleteProfile(String profileName, boolean deleteData) throws IOException {
         deleteProfile(NodeProfile.CONF_ROOT, profileName, deleteData);
@@ -481,7 +489,7 @@ public final class ProfileRuntimeService {
      * @param profileName the profile to delete
      * @param deleteData  whether the profile's per-profile SQLite data directory is deleted too
      * @throws IllegalArgumentException if the profile name is blank, reserved, or unknown
-     * @throws IOException              if the node does not stop in time, or on persistence failure
+     * @throws IOException              if the stop wait is interrupted, or on persistence failure
      */
     static void deleteProfile(String confRoot, String profileName, boolean deleteData) throws IOException {
         Objects.requireNonNull(confRoot, "confRoot");

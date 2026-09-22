@@ -540,9 +540,16 @@ public final class UnifiedConsolePanel extends JPanel {
         String query = filterHeader.getSearchText();
         if (query == null || query.isEmpty()) {
             filterHeader.setSearchMatchIndicatorText("");
+            // No active query = nothing to navigate to — hide the chevrons
+            // that a previous (now cleared) search may have shown.
+            filterHeader.setSearchChevronsVisible(false);
             return;
         }
         int total = searchHighlighter.matchCount();
+        // The chevron buttons are only useful while there is at least one
+        // match to navigate to — hide them while the current search produces
+        // none (the counter itself keeps reporting "0/0").
+        filterHeader.setSearchChevronsVisible(total > 0);
         int active = searchHighlighter.matchCount() == 0 ? 0 : searchHighlighter.currentIndex() + 1;
         filterHeader.setSearchMatchIndicatorText(active + "/" + total);
     }

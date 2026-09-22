@@ -2,6 +2,7 @@ package application.module.node.gui.configuration;
 
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
+import application.utils.gui.GuiFontManager;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
@@ -70,7 +71,10 @@ public final class ProfileCopyDialog {
 
         JPanel content = new JPanel(new MigLayout("insets 15, wrap 1, fillx", "[grow]", "[]"));
         content.add(new JLabel(IconFontSwing.buildIcon(FontAwesome.CLIPBOARD, 32, GuiColors.getButtonIcon())));
-        content.add(new JLabel("<html><h2>Copy Configuration</h2></html>"));
+        // Plain bold title (app font + bold) instead of an <h2> HTML heading.
+        JLabel titleLabel = new JLabel("Copy Configuration");
+        titleLabel.setFont(GuiFontManager.getBoldDefaultFont());
+        content.add(titleLabel);
         content.add(new JLabel("Select the profile whose configuration you want to copy into the editor:"));
         content.add(combo, "growx, gaptop 5");
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
@@ -80,6 +84,8 @@ public final class ProfileCopyDialog {
 
         JDialog dialog = new JDialog(owner, "Copy Configuration",
                 Dialog.ModalityType.APPLICATION_MODAL);
+        // Every dialog text uses the application's current font (family + size).
+        GuiFontManager.applyFontToTree(dialog, UIManager.getFont("Label.font"));
         dialog.getContentPane().add(content);
         dialog.pack();
         dialog.setLocationRelativeTo(owner);

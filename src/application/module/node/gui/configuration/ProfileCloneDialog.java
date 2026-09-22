@@ -4,6 +4,7 @@ import application.module.node.profile.NodeProfileRepository;
 import application.module.node.profile.ProfileDiffCalculator;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
+import application.utils.gui.GuiFontManager;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
@@ -52,11 +53,8 @@ public final class ProfileCloneDialog {
         final List<ProfileDiffCalculator.ProfileDiffEntry> entries =
                 diffEntries != null ? diffEntries : List.of();
 
-        // ── Source profile (read-only) ──
-        JTextField sourceField = new JTextField(sourceProfileName == null ? "" : sourceProfileName);
-        sourceField.setEditable(false);
-        sourceField.setFocusable(false);
-        sourceField.setBackground(new JTextField().getBackground());
+        // ── Source profile (display only — the name is not editable, so a plain label, not a text field) ──
+        JLabel sourceField = new JLabel(sourceProfileName == null ? "" : sourceProfileName);
 
         // ── Diff area: values that differ from the default ──
         JTextArea diffArea = new JTextArea();
@@ -67,7 +65,9 @@ public final class ProfileCloneDialog {
             diffArea.setFont(new JLabel().getFont());
             diffArea.setText("The configuration matches the default — the clone will be an empty profile.");
         } else {
-            diffArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+            // App font (family + size) — no hardcoded 12pt monospace, which
+            // rendered smaller than the rest of the UI.
+            diffArea.setFont(UIManager.getFont("TextArea.font"));
             StringBuilder sb = new StringBuilder();
             for (ProfileDiffCalculator.ProfileDiffEntry entry : entries) {
                 if (sb.length() > 0) {
@@ -125,16 +125,22 @@ public final class ProfileCloneDialog {
 
         JPanel content = new JPanel(new MigLayout("insets 15, wrap 1, fillx", "[grow]", "[]"));
         content.add(new JLabel(IconFontSwing.buildIcon(FontAwesome.FILES_O, 32, GuiColors.getButtonIcon())));
-        content.add(new JLabel("<html><h2>Clone Configuration</h2></html>"));
+        // Plain bold title (app font + bold) instead of an <h2> HTML heading.
+        JLabel titleLabel = new JLabel("Clone Configuration");
+        titleLabel.setFont(GuiFontManager.getBoldDefaultFont());
+        content.add(titleLabel);
         content.add(new JLabel("Source profile:"));
         content.add(sourceField, "growx");
-        content.add(diffScroll, "growx, gaptop 10, wpref 480, hpref 200");
+        content.add(diffScroll, "growx, gaptop 10");
         content.add(new JLabel("New profile name:"), "gaptop 10");
         content.add(nameField, "growx");
         content.add(errorLabel, "growx");
+        // Plain info text at the app font size (no <small> tag, which rendered
+        // at 0.83x the base size).
         content.add(new JLabel(
-                "<html><small>The cloned profile keeps the source's ports and database settings as-is.<br>"
-                        + "Starting both profiles at the same time may be rejected by the resource-conflict protection.</small></html>"),
+                "The cloned profile keeps the source's ports and database settings as-is. "
+                        + "Starting both profiles at the same time may be rejected by the "
+                        + "resource-conflict protection."),
                 "gaptop 10");
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         buttons.add(cloneBtn);
@@ -143,6 +149,8 @@ public final class ProfileCloneDialog {
 
         JDialog dialog = new JDialog(owner, "Clone Configuration",
                 Dialog.ModalityType.APPLICATION_MODAL);
+        // Every dialog text uses the application's current font (family + size).
+        GuiFontManager.applyFontToTree(dialog, UIManager.getFont("Label.font"));
         dialog.getContentPane().add(content);
         dialog.pack();
         dialog.setLocationRelativeTo(owner);

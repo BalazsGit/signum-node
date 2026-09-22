@@ -2,6 +2,7 @@ package application.module.node.gui.configuration;
 
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
+import application.utils.gui.GuiFontManager;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
@@ -39,10 +40,8 @@ public final class ProfileSaveApplyDialog {
         final Window owner = SwingUtilities.windowForComponent(parent);
         final AtomicBoolean confirmed = new AtomicBoolean(false);
 
-        JTextField nameField = new JTextField(profileName == null ? "" : profileName);
-        nameField.setEditable(false);
-        nameField.setFocusable(false);
-        nameField.setBackground(new JTextField().getBackground());
+        // ── Profile name (display only — the name is not editable, so a plain label, not a text field) ──
+        JLabel nameField = new JLabel(profileName == null ? "" : profileName);
 
         JButton saveBtn = new JButton("Save",
                 IconFontSwing.buildIcon(FontAwesome.FLOPPY_O, GuiConstants.getHelpIconSize(),
@@ -51,7 +50,12 @@ public final class ProfileSaveApplyDialog {
 
         JPanel content = new JPanel(new MigLayout("insets 15, wrap 1, fillx", "[grow]", "[]"));
         content.add(new JLabel(IconFontSwing.buildIcon(FontAwesome.FLOPPY_O, 32, GuiColors.getButtonIcon())));
-        content.add(new JLabel("<html><h2>Save Changes</h2></html>"));
+        // Plain bold title (app font + bold) instead of an <h2> HTML heading:
+        // HTML element tags render at relative sizes (h2 = 1.5x), which made the
+        // dialog text look smaller/larger than the rest of the app.
+        JLabel titleLabel = new JLabel("Save Changes");
+        titleLabel.setFont(GuiFontManager.getBoldDefaultFont());
+        content.add(titleLabel);
         content.add(new JLabel("Profile:"));
         content.add(nameField, "growx");
         if (changesReport != null && !changesReport.isEmpty()) {
@@ -60,7 +64,10 @@ public final class ProfileSaveApplyDialog {
             JScrollPane scroll = new JScrollPane(reportLabel);
             scroll.setPreferredSize(new Dimension(480, 220));
             scroll.setBorder(BorderFactory.createTitledBorder("Changes to be saved"));
-            content.add(scroll, "growx, gaptop 10, wpref 480, hpref 220");
+            // NOTE: only "growx" as constraint — this MigLayout version (11.4.2)
+            // rejects size keywords like "wpref"/"prefw" (IllegalArgumentException),
+            // which previously killed the whole Save & Apply action silently.
+            content.add(scroll, "growx, gaptop 10");
         }
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         buttons.add(saveBtn);
@@ -69,6 +76,9 @@ public final class ProfileSaveApplyDialog {
 
         JDialog dialog = new JDialog(owner, "Save Configuration",
                 Dialog.ModalityType.APPLICATION_MODAL);
+        // Every dialog text uses the application's current font (family + size),
+        // including the HTML report label (its base font follows the component font).
+        GuiFontManager.applyFontToTree(dialog, UIManager.getFont("Label.font"));
         dialog.getContentPane().add(content);
         dialog.pack();
         dialog.setLocationRelativeTo(owner);

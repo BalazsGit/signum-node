@@ -67,6 +67,67 @@ public final class ProfileNameSuggester {
         }
     }
 
+    /**
+     * Suggests the next clone name for a profile being cloned.
+     * <p>
+     * If the source name already follows the {@code _clone} scheme — i.e. it ends with
+     * {@code _clone} (the first clone, counted as {@code #1}) or {@code _cloneNN} — the
+     * suggestion continues that sequence: all existing names of the form
+     * {@code <prefix>_cloneNN} (including the source itself, since it is an existing
+     * profile) are discovered, and the next free {@code <prefix>_clone(maxNN+1)} is
+     * returned. Example: with {@code node_clone} and {@code node_clone2} taken, the
+     * suggestion for either source is {@code node_clone3}.
+     * </p>
+     * <p>
+     * Otherwise (source does not end with the clone scheme) this falls back to the
+     * generic {@link #nextAvailableName(String, Set)} behavior with
+     * {@code source + "_clone"} as the base ({@code X} → {@code X_clone} → {@code X_clone_01} ...).
+     * </p>
+     *
+     * @param sourceName the profile name being cloned
+     * @param taken      existing profile names (reserved names are always treated as taken)
+     * @return a unique, non-reserved clone name
+     */
+    public static String nextCloneName(String sourceName, Set<String> taken) {
+        Set<String> takenSet = taken != null ? taken : new HashSet<>();
+        if (sourceName == null || sourceName.isEmpty()) {
+            return nextAvailableName("_clone", takenSet);
+        }
+        java.util.regex.Matcher m = CLONE_SOURCE_PATTERN.matcher(sourceName);
+        if (!m.matches()) {
+            return nextAvailableName(sourceName + "_clone", takenSet);
+        }
+        String base = m.group(1); // e.g. "node_clone"
+        java.util.regex.Pattern numbered =
+                java.util.regex.Pattern.compile("^" + java.util.regex.Pattern.quote(base) + "(\\d*)$");
+        int max = 0;
+        for (String name : takenSet) {
+            java.util.regex.Matcher nm = numbered.matcher(name);
+            if (nm.matches()) {
+                String digits = nm.group(1);
+                // A bare "_clone" (no digits) is the first clone → counts as #1.
+                int num = digits.isEmpty() ? 1 : Integer.parseInt(digits);
+                if (num > max) {
+                    max = num;
+                }
+            }
+        }
+        for (int n = max + 1; ; n++) {
+            String candidate = base + n;
+            if (isFree(candidate, takenSet)) {
+                return candidate;
+            }
+        }
+    }
+
+    /**
+     * Matches a source name that already follows the clone scheme:
+     * {@code <prefix>_clone} or {@code <prefix>_cloneNN}. Group 1 is the
+     * scheme prefix including {@code _clone} (e.g. {@code node_clone}).
+     */
+    private static final java.util.regex.Pattern CLONE_SOURCE_PATTERN =
+            java.util.regex.Pattern.compile("(.+_clone)\\d*$");
+
     private static boolean isFree(String name, Set<String> taken) {
         return !NodeProfileRepository.isReservedProfileName(name) && !taken.contains(name);
     }

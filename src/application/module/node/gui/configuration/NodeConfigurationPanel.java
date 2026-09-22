@@ -17,14 +17,15 @@ import application.module.node.props.Prop;
 import application.module.node.props.Props;
 import application.module.node.util.Convert;
 import jiconfont.icons.font_awesome.FontAwesome;
+import application.utils.gui.CheckboxGroupPanel;
 import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
-import application.utils.gui.GuiIcons;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
 import application.utils.gui.ResponsiveToolbarScrollPane;
 import application.utils.gui.SearchMatchLabel;
+import application.utils.gui.SearchMatchPanel;
 import application.utils.io.PathUtils;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
@@ -32,17 +33,17 @@ import net.miginfocom.swing.MigLayout;
 import com.google.gson.*;
 
 import java.awt.event.ActionListener;
-import java.awt.event.KeyAdapter;
-import java.awt.event.KeyEvent;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
-import javax.swing.border.TitledBorder;
 import javax.swing.text.BadLocationException;
+import javax.swing.text.Document;
+import javax.swing.text.Element;
 import javax.swing.text.Highlighter;
 import javax.swing.text.JTextComponent;
 import javax.swing.text.SimpleAttributeSet;
 import javax.swing.text.StyleConstants;
 import java.awt.*;
+import java.awt.geom.Rectangle2D;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.Reader;
@@ -75,28 +76,162 @@ public class NodeConfigurationPanel extends JPanel {
     private final Map<JTextComponent, Object> searchValueHighlights = new IdentityHashMap<>();
 
     /**
+     * The original renderer of every non-editable combo box whose renderer
+     * was swapped for a {@link ComboSearchHighlightRenderer} while a search
+     * match band is shown on its selected value (restored on clear).
+     */
+    private final Map<JComboBox<?>, ListCellRenderer<?>> originalComboRenderers = new IdentityHashMap<>();
+
+    /**
      * Painters for value search highlights — the palette's SSOT search
      * colors (the same ones the console "find" feature uses): the soft
      * match color for every match, the active color for the match being
-     * navigated to.
+     * navigated to. Each paints the EXACT matching character range derived
+     * from the document offsets ({@link #paintValueMatchRange}) — the
+     * {@code bounds} rectangle the highlighter passes in is the component's
+     * ENTIRE content area, which filling would only suit a single-line field.
      */
-    private static final Highlighter.HighlightPainter SEARCH_MATCH_PAINTER = new Highlighter.HighlightPainter() {
-        @Override
-        public void paint(Graphics g, int x, int y, Shape bounds, JTextComponent c) {
-            Rectangle r = bounds.getBounds();
-            g.setColor(GuiColors.getSearchMatch());
-            g.fillRect(r.x, r.y, r.width, r.height);
-        }
-    };
+    static final Highlighter.HighlightPainter SEARCH_MATCH_PAINTER =
+            searchValueMatchPainter(GuiColors.getSearchMatch());
 
-    private static final Highlighter.HighlightPainter SEARCH_MATCH_PAINTER_ACTIVE = new Highlighter.HighlightPainter() {
-        @Override
-        public void paint(Graphics g, int x, int y, Shape bounds, JTextComponent c) {
-            Rectangle r = bounds.getBounds();
-            g.setColor(GuiColors.getSearchActiveMatch());
-            g.fillRect(r.x, r.y, r.width, r.height);
+    static final Highlighter.HighlightPainter SEARCH_MATCH_PAINTER_ACTIVE =
+            searchValueMatchPainter(GuiColors.getSearchActiveMatch());
+
+    /**
+     * Creates a value-match painter carrying the given band color. The actual
+     * painting is done by {@link #paintValueMatchRange}.
+     */
+    static Highlighter.HighlightPainter searchValueMatchPainter(Color color) {
+        return (g, start, end, bounds, component) -> paintValueMatchRange(g, start, end, component, color);
+    }
+
+    /**
+     * Paints the value search-match band for the document range
+     * {@code [start, end)}.
+     * <p>
+     * The Swing highlighter hands this painter the component's whole content
+     * bounds (in this JDK build the match offsets arrive as separate
+     * {@code int} parameters), so filling those bounds would paint the entire
+     * text box for multi-line value components. Instead the match's own
+     * rectangles are computed line by line from the document positions
+     * ({@link JTextComponent#modelToView2D(int)}), so only the actually
+     * matching text receives the band — the same policy as the console's
+     * {@code SearchHighlighter}.
+     * </p>
+     */
+    static void paintValueMatchRange(Graphics g, int start, int end, JTextComponent component, Color color) {
+        if (component == null || start < 0) {
+            return;
         }
-    };
+        Document document = component.getDocument();
+        end = Math.min(end, document.getLength());
+        if (end <= start) {
+            return;
+        }
+        Element root = document.getDefaultRootElement();
+        int firstLine = root.getElementIndex(start);
+        int lastLine = root.getElementIndex(Math.max(start, end - 1));
+        Graphics2D gg = (Graphics2D) g.create();
+        gg.setColor(color);
+        for (int line = firstLine; line <= lastLine; line++) {
+            Element lineElement = root.getElement(line);
+            int lineStart = lineElement.getStartOffset();
+            int lineEnd = lineElement.getEndOffset();
+            int rangeStart = Math.max(start, lineStart);
+            int rangeEnd = Math.min(end, lineEnd);
+            if (rangeEnd <= rangeStart) {
+                continue;
+            }
+            Rectangle2D rangeShape = viewOf(component, rangeStart);
+            if (rangeShape == null) {
+                continue;
+            }
+            int x1 = (int) rangeShape.getX();
+            int y = (int) rangeShape.getY();
+            int height = Math.max(1, (int) rangeShape.getHeight());
+            int x2;
+            if (line < lastLine) {
+                // A fully covered line of a multi-line range: the band spans
+                // the full line width.
+                x2 = component.getWidth();
+            } else {
+                // The view position of the range's end: the next character's
+                // start for a mid-line match, or the end of the line's text
+                // when the match ends at the line end (the position of the
+                // line separator still resolves to that line in the view).
+                Rectangle2D endShape = viewOf(component, rangeEnd);
+                x2 = endShape == null ? x1 : (int) endShape.getX();
+            }
+            if (x2 > x1) {
+                gg.fillRect(x1, y, x2 - x1, height);
+            }
+        }
+        gg.dispose();
+    }
+
+    /**
+     * {@link JTextComponent#modelToView2D(int)} for the given offset, or
+     * {@code null} when the offset is out of bounds (the document can change
+     * concurrently on the EDT).
+     */
+    private static Rectangle2D viewOf(JTextComponent component, int offset) {
+        try {
+            return component.modelToView2D(offset);
+        } catch (BadLocationException e) {
+            return null;
+        }
+    }
+
+    /**
+     * The list-cell renderer that shows the search-match band behind the
+     * selected value of a non-editable combo box (a non-editable combo has
+     * no text component a document highlight could live in, so its value is
+     * rendered by this band-painting label instead of the LAF's plain
+     * renderer).
+     * <p>
+     * The renderer stays NON-opaque: the combo's own (opaque) background is
+     * painted by the LAF underneath it, and the {@link SearchMatchLabel}
+     * band is painted below the text. The band is anchored to a query: on
+     * every (re)render its range is re-resolved in the item's own text, so
+     * the band shows on the selected value and — while the popup is open —
+     * on every popup item containing the query, and on nothing else.
+     * </p>
+     */
+    static final class ComboSearchHighlightRenderer extends SearchMatchLabel
+            implements ListCellRenderer<Object> {
+        /** The query the band is anchored to (empty = no band). */
+        private String bandQuery;
+        /** The band color for the anchored query. */
+        private Color bandColor;
+
+        /** Anchors the band to the given query and color (an empty query clears it). */
+        void setBand(String query, Color color) {
+            this.bandQuery = query == null ? "" : query;
+            this.bandColor = color;
+        }
+
+        @Override
+        public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                boolean isSelected, boolean cellHasFocus) {
+            String text = value == null ? "" : value.toString();
+            setText(text);
+            setForeground(isSelected ? list.getSelectionForeground() : list.getForeground());
+            setFont(list.getFont());
+            // The reduced JDK's JList has no cell-renderer border accessor:
+            // use the plain empty border (the LAF's default).
+            setBorder(BorderFactory.createEmptyBorder());
+            if (!bandQuery.isEmpty()) {
+                int idx = text.toLowerCase(Locale.ROOT).indexOf(bandQuery.toLowerCase(Locale.ROOT));
+                if (idx >= 0) {
+                    setHighlightRange(idx, bandQuery.length());
+                    setHighlightColor(bandColor);
+                } else {
+                    clearHighlight();
+                }
+            }
+            return this;
+        }
+    }
 
     private static final String KEY_PROFILE_LINKS = "profileLinks";
     private static final String KEY_DATABASE = "database";
@@ -136,10 +271,31 @@ public class NodeConfigurationPanel extends JPanel {
     /** Live search (console-style): the rows matching the current query. */
     private final List<PropertyRow> searchMatches = new ArrayList<>();
     private int searchActiveIndex = -1;
-    private JTextField searchField;
-    private JLabel searchMatchIndicator;
-    private JButton searchPrevButton;
-    private JButton searchNextButton;
+    /**
+     * Unified search box (field, match counter, chevron buttons) shared with
+     * the console's filter header — the "Search" titled box of the search row.
+     */
+    private SearchMatchPanel searchMatchPanel;
+    /**
+     * The "Show values" titled box holding the value-status visibility
+     * checkboxes (the shared CheckboxGroupPanel, like the console header's
+     * "Level" box). While all of its checkboxes are selected the group
+     * filters nothing (tabbed view); any unchecked box switches to the flat
+     * results view listing only the still-selected states.
+     */
+    private CheckboxGroupPanel statusPanel;
+    /**
+     * Value-status visibility checkboxes of the search panel (moved here from
+     * the bottom legend row, which listed them as plain color boxes). Each
+     * one is colored with its value-level state color and is selected by
+     * default. While all three are selected everything is visible (tabbed
+     * view); when any of them is not selected, the rows of the deselected
+     * state(s) are neither listed nor displayed (flat results view, combined
+     * with the search text when it is not empty).
+     */
+    private JCheckBox showUnsavedBox;
+    private JCheckBox showSavedBox;
+    private JCheckBox showAppliedBox;
     /**
      * Content container: the "TABS" card holds the tabbed configuration, the
      * "SEARCH" card a flat list of the matching rows from ALL tabs. While a
@@ -267,6 +423,21 @@ public class NodeConfigurationPanel extends JPanel {
         LOGGER.debug("NodeConfigurationPanel constructor returned (UI will be built asynchronously)");
     }
 
+    /**
+     * Runs a profile toolbar action with a defensive guard: a failure (e.g. an
+     * error while constructing its dialog) is logged and surfaced in an error
+     * dialog instead of dying inside the button listener as a silent no-op.
+     */
+    private void runProfileAction(String actionName, Runnable action) {
+        try {
+            action.run();
+        } catch (Exception ex) {
+            LOGGER.error("{} failed for profile '{}'", actionName, loadedProfileName, ex);
+            JOptionPane.showMessageDialog(this, actionName + " failed: " + ex.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
     private void initUI() {
         JPanel bodyPanel = new JPanel(new BorderLayout());
 
@@ -278,35 +449,37 @@ public class NodeConfigurationPanel extends JPanel {
                 "<html>Save &amp; Apply<br><br>Saves all unsaved changes to the current profile, then asks<br>"
                         + "whether to restart the node so the new configuration takes effect.</html>");
         saveApplyBtn.setEnabled(false);
-        saveApplyBtn.addActionListener(e -> saveAndApply());
+        saveApplyBtn.addActionListener(e -> runProfileAction("Save & Apply", this::saveAndApply));
         profilePanel.add(saveApplyBtn);
 
         renameProfileBtn.setToolTipText(
                 "<html>Rename Profile<br><br>Renames this profile (including its data paths).<br>"
                         + "If the node is running it will be stopped during the rename<br>"
                         + "and returned to its previous state (running / paused / stopped).</html>");
-        renameProfileBtn.addActionListener(e -> renameProfile(loadedProfileName));
+        renameProfileBtn.addActionListener(e -> runProfileAction("Rename Profile",
+                () -> renameProfile(loadedProfileName)));
         profilePanel.add(renameProfileBtn);
 
         deleteProfileBtn.setToolTipText(
                 "<html>Delete Profile<br><br>Permanently deletes this profile, its settings<br>"
                         + "(optionally its database files) and closes its tab.<br>"
                         + "If the node is running it will be stopped (and not restarted).</html>");
-        deleteProfileBtn.addActionListener(e -> deleteProfile(loadedProfileName));
+        deleteProfileBtn.addActionListener(e -> runProfileAction("Delete Profile",
+                () -> deleteProfile(loadedProfileName)));
         profilePanel.add(deleteProfileBtn);
 
         resetToDefaultsBtn = new JButton();
         resetToDefaultsBtn.setToolTipText(
                 "<html>Reset to Defaults<br><br>Resets all fields in the editor to the application default values.<br>"
                         + "Nothing is saved — use Save &amp; Apply to persist the reset settings.</html>");
-        resetToDefaultsBtn.addActionListener(e -> resetToDefaults());
+        resetToDefaultsBtn.addActionListener(e -> runProfileAction("Reset to Defaults", this::resetToDefaults));
         profilePanel.add(resetToDefaultsBtn);
 
         copyProfileDataBtn = new JButton();
         copyProfileDataBtn.setToolTipText(
                 "<html>Copy Configuration<br><br>Copies another profile's configuration into this editor.<br>"
                         + "Unsaved changes in the editor are discarded (with confirmation).</html>");
-        copyProfileDataBtn.addActionListener(e -> copyProfileData());
+        copyProfileDataBtn.addActionListener(e -> runProfileAction("Copy Configuration", this::copyProfileData));
         copyProfileDataBtn.setIcon(
                 IconFontSwing.buildIcon(FontAwesome.CLIPBOARD, GuiConstants.getHelpIconSize(), GuiColors.getButtonIcon()));
         ConfigurationUtils.fixComponentSize(copyProfileDataBtn);
@@ -317,7 +490,7 @@ public class NodeConfigurationPanel extends JPanel {
                 "<html>Clone Configuration<br><br>Creates a new profile from the current (unsaved, editor) "
                         + "effective state: only the values that differ from the default are copied.<br>"
                         + "The new profile is not started; the source profile is left untouched.</html>");
-        cloneProfileBtn.addActionListener(e -> cloneProfile());
+        cloneProfileBtn.addActionListener(e -> runProfileAction("Clone Configuration", this::cloneProfile));
         cloneProfileBtn.setIcon(
                 IconFontSwing.buildIcon(FontAwesome.FILES_O, GuiConstants.getHelpIconSize(), GuiColors.getButtonIcon()));
         ConfigurationUtils.fixComponentSize(cloneProfileBtn);
@@ -327,7 +500,7 @@ public class NodeConfigurationPanel extends JPanel {
         reloadProfileBtn.setToolTipText(
                 "<html>Reload Profile<br><br>Re-reads the current profile file from disk (e.g. after external edits).<br>"
                         + "Unsaved changes in the editor are discarded.</html>");
-        reloadProfileBtn.addActionListener(e -> reloadProfile());
+        reloadProfileBtn.addActionListener(e -> runProfileAction("Reload Profile", this::reloadProfile));
         profilePanel.add(reloadProfileBtn);
 
         updateProfileButtonsUI();
@@ -347,65 +520,48 @@ public class NodeConfigurationPanel extends JPanel {
         // GuiUtils.addHorizontalScrollPadding(profileScrollPane, profilePanel, new
         // Insets(5, 10, 5, 5)); // Handled by ResponsiveToolbarScrollPane
 
-        // --- Search panel: an exact mirror of the console's buildSearchPanel —
-        // a compact, left-aligned "Search" titled box (16-column field, match
-        // counter, chevron buttons) instead of a full-width bar ---
-        JPanel searchPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        searchPanel.setOpaque(false);
-        // No extra EmptyBorder here: the 4px vertical spacing belongs to the
-        // scroll wrapper below (like the console filter header), so it also
-        // clears the wrapper's horizontal scrollbar when it appears.
-        searchPanel.setBorder(new TitledBorder("Search"));
-        searchField = new JTextField(16);
-        searchField.setToolTipText("Text to find in the configuration — property names, property keys, or values (live highlighting)");
-        searchPanel.add(searchField);
-
-        // Match counter: "current/total" (e.g. "1/23") while a search is
-        // active; hidden when there is no active query (mirrors the console).
-        searchMatchIndicator = new JLabel("", JLabel.LEFT);
-        searchMatchIndicator.setToolTipText("Current match / total matches");
-        searchMatchIndicator.setVisible(false);
-        searchPanel.add(searchMatchIndicator);
-
-        int searchIconSize = GuiIcons.sizeSmall();
-        searchPrevButton = new JButton(GuiIcons.chevronUp(searchIconSize));
-        searchPrevButton.setToolTipText("Previous match");
-        searchPrevButton.setFocusable(false);
-        searchPrevButton.setBorder(new EmptyBorder(2, 2, 2, 2));
-        searchPrevButton.setContentAreaFilled(false);
-        searchPrevButton.addActionListener(e -> navigateSearch(false));
-        searchPanel.add(searchPrevButton);
-
-        searchNextButton = new JButton(GuiIcons.chevronDown(searchIconSize));
-        searchNextButton.setToolTipText("Next match");
-        searchNextButton.setFocusable(false);
-        searchNextButton.setBorder(new EmptyBorder(2, 2, 2, 2));
-        searchNextButton.setContentAreaFilled(false);
-        searchNextButton.addActionListener(e -> navigateSearch(true));
-        searchPanel.add(searchNextButton);
-
-        searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-            public void insertUpdate(javax.swing.event.DocumentEvent e) {
-                applySearch(searchField.getText(), true);
-            }
-
-            public void removeUpdate(javax.swing.event.DocumentEvent e) {
-                applySearch(searchField.getText(), true);
-            }
-
-            public void changedUpdate(javax.swing.event.DocumentEvent e) {
-                applySearch(searchField.getText(), true);
-            }
-        });
+        // --- Search panel: the unified SearchMatchPanel shared with the
+        // console's filter header — a compact, left-aligned "Search" titled
+        // box (16-column field, match counter, chevron buttons) instead of a
+        // full-width bar. The match counter and the chevrons start hidden;
+        // updateSearchMatchIndicator drives them from the live match state.
+        searchMatchPanel = new SearchMatchPanel(
+                "Text to find in the configuration — property names, property keys, or values (live highlighting)");
+        searchMatchPanel.setSearchTextListener(text -> applySearch(text, true));
+        searchMatchPanel.setSearchNavigationListener(this::navigateSearch);
         // Enter: jump to / advance the active match (same as the console).
-        searchField.addKeyListener(new KeyAdapter() {
-            @Override
-            public void keyPressed(KeyEvent e) {
-                if (e.getKeyCode() == KeyEvent.VK_ENTER) {
-                    navigateSearch(true);
-                }
-            }
-        });
+        searchMatchPanel.setEnterListener(() -> navigateSearch(true));
+
+        // Value-status visibility checkboxes in their own compact titled box
+        // (the shared CheckboxGroupPanel, like the console filter header's
+        // "Level" box), placed BEFORE the "Search" box: moved here from the
+        // bottom legend row, which listed them as plain color boxes plus the
+        // help button. Each is colored with its value-level state color and
+        // selected by default (everything visible, tabbed view). Unchecking
+        // any of them lists only the rows whose state is still selected
+        // (flat results view, combined with the search text when it is not
+        // empty). They are a pure visibility FILTER, not a search: with an
+        // empty search text the search itself (highlighting, match counter,
+        // chevrons) stays off.
+        statusPanel = new CheckboxGroupPanel("Show values");
+        statusPanel.setChangeListener(button -> applySearch(searchMatchPanel.getSearchText(), true));
+
+        showUnsavedBox = statusPanel.addCheckbox("Unsaved values", GuiColors.getUnsaved(), true);
+        showUnsavedBox.setToolTipText(
+                "Show / hide the values that have unsaved changes. Combined with the search text when it is not empty.");
+
+        showSavedBox = statusPanel.addCheckbox("Saved values", GuiColors.getSaved(), true);
+        showSavedBox.setToolTipText(
+                "Show / hide the values that are saved in the profile but differ from the running node.");
+
+        showAppliedBox = statusPanel.addCheckbox("Applied values", GuiColors.getApplied(), true);
+        showAppliedBox.setToolTipText(
+                "Show / hide the values that match exactly what the running node is using.");
+
+        JButton colorHelpBtn = new HelpButton();
+        colorHelpBtn.setToolTipText("Detailed Color Legend");
+        colorHelpBtn.addActionListener(e -> showColorLegendHelp());
+        statusPanel.add(colorHelpBtn);
 
         // The search box is wrapped in the same responsive toolbar scroll
         // wrapper the profile row and the console filter header use, and added
@@ -422,9 +578,13 @@ public class NodeConfigurationPanel extends JPanel {
         // this the titled box — and its border — would span the entire
         // window. The wrapper absorbs the stretch and keeps the border
         // hugging the box's content.
-        JPanel searchPanelWrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        JPanel searchPanelWrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         searchPanelWrap.setOpaque(false);
-        searchPanelWrap.add(searchPanel);
+        // The two compact titled boxes sit side by side (like the console
+        // filter header's search + filter boxes): the value-status filter
+        // box first, the search box second.
+        searchPanelWrap.add(statusPanel);
+        searchPanelWrap.add(searchMatchPanel);
         JScrollPane searchScroll = new ResponsiveToolbarScrollPane(searchPanelWrap, new Insets(0, 10, 0, 5), false);
         searchScroll.setBorder(new EmptyBorder(4, 0, 4, 0));
         searchRow.add(searchScroll, BorderLayout.CENTER);
@@ -762,9 +922,6 @@ public class NodeConfigurationPanel extends JPanel {
         JPanel bottomPanel = new JPanel(new BorderLayout(10, 0));
         bottomPanel.setBorder(new EmptyBorder(5, 10, 5, 5));
 
-        // Legend
-        bottomPanel.add(createLegendPanel(), BorderLayout.NORTH);
-
         // File path field
         JLabel pathLabel = new JLabel("Configuration File: " + propertiesFile.toAbsolutePath().toString());
         pathLabel.setForeground(GuiColors.getFaintText());
@@ -814,10 +971,15 @@ public class NodeConfigurationPanel extends JPanel {
 
     /**
      * Recomputes the live match set for the given query and updates the UI.
-     * While a query is active the tabbed pane is hidden and every matching
-     * row (from every tab) is listed flat in the search-results card with its
-     * matching substring highlighted; an empty query brings the tabbed view
-     * back. When {@code scrollToActive} is true the first match is also
+     * While a query is active (or a value-status visibility checkbox is not
+     * selected) the tabbed pane is hidden and every matching row (from every
+     * tab) is listed flat in the search-results card with its matching
+     * substring highlighted; an empty query together with all three
+     * visibility checkboxes selected brings the tabbed view back. With a
+     * non-empty query the search UI (highlighting, match counter, chevron
+     * navigation) is active; in the filter-only case (query empty, a status
+     * checkbox off) the flat list is a plain filtered view — the search UI
+     * stays off. When {@code scrollToActive} is true the first match is also
      * brought into view (search-box input); a refresh caused by the user
      * editing a value must NOT yank the scroll around, so it passes false.
      */
@@ -827,19 +989,32 @@ public class NodeConfigurationPanel extends JPanel {
         searchActiveIndex = -1;
 
         String query = text == null ? "" : text.trim();
-        if (!query.isEmpty()) {
+        // The search-panel visibility checkboxes act as a value-status
+        // filter: while all three are selected every row is visible (tabbed
+        // view); when any of them is off only the rows whose state is still
+        // selected are listed (when that filter is inactive the state is
+        // irrelevant). The query keeps only the text matches (when it is
+        // empty everything passes).
+        boolean statusFilterActive = !statusPanel.isAllSelected();
+        boolean filterActive = !query.isEmpty() || statusFilterActive;
+        if (filterActive) {
             String lowerQuery = query.toLowerCase(Locale.ROOT);
             for (PropertyRow row : allPropertyRows) {
-                if (isRowSearchMatch(row, lowerQuery)) {
+                if ((query.isEmpty() || isRowSearchMatch(row, lowerQuery))
+                        && (!statusFilterActive || isRowStatusVisible(row))) {
                     searchMatches.add(row);
                 }
             }
-            if (!searchMatches.isEmpty()) {
+            // The active-match index belongs to the search itself: in the
+            // filter-only case (no search text) the flat list is merely a
+            // filtered view, so there is no match to navigate to and the
+            // chevrons plus the "current/total" counter stay off.
+            if (!query.isEmpty() && !searchMatches.isEmpty()) {
                 searchActiveIndex = 0;
             }
         }
 
-        if (query.isEmpty()) {
+        if (!filterActive) {
             if (searchViewActive) {
                 restoreAllRows();
                 contentCardLayout.show(contentContainer, "TABS");
@@ -867,10 +1042,18 @@ public class NodeConfigurationPanel extends JPanel {
             lastListedMatches = new ArrayList<>(searchMatches);
         }
 
-        for (int i = 0; i < searchMatches.size(); i++) {
-            paintSearchMatch(searchMatches.get(i), query, i == searchActiveIndex);
+        // Text matches get their exact occurrence highlighted; with the
+        // unsaved-changes filter alone (no search text) there are no match
+        // ranges to paint — every listed row already carries its
+        // "(unsaved changes)" label hint.
+        if (!query.isEmpty()) {
+            for (int i = 0; i < searchMatches.size(); i++) {
+                paintSearchMatch(searchMatches.get(i), query, i == searchActiveIndex);
+            }
         }
-        updateSearchMatchIndicator(formatSearchIndicator());
+        // Filter-only results (no search text) carry no match counter and no
+        // chevron navigation — that is search UI, not filter UI.
+        updateSearchMatchIndicator(!query.isEmpty() ? formatSearchIndicator() : "");
         if (scrollToActive && searchActiveIndex >= 0) {
             showActiveSearchMatch();
         }
@@ -962,8 +1145,8 @@ public class NodeConfigurationPanel extends JPanel {
      * (the user is typing inside the row, so tabs/scroll stay put).
      */
     private void refreshSearchFromValueEdit() {
-        if (searchField != null) {
-            applySearch(searchField.getText(), false);
+        if (searchMatchPanel != null) {
+            applySearch(searchMatchPanel.getSearchText(), false);
         }
     }
 
@@ -1001,17 +1184,27 @@ public class NodeConfigurationPanel extends JPanel {
                 }
             });
         }
+        // A non-editable select has no document: its selected value (and
+        // therefore the match set) changes on item selection instead.
+        if (row.input instanceof JComboBox<?> comboBox && !comboBox.isEditable()) {
+            comboBox.addItemListener(e -> {
+                if (!isProgrammaticChange) {
+                    refreshSearchFromValueEdit();
+                }
+            });
+        }
     }
 
     /**
      * @return true when the query is in the row's visible text: the label
-     *         name, the label's property key line, or the value displayed in
-     *         the row's input component. Non-text inputs (such as check
-     *         boxes) are deliberately NOT searched — only what the user can
-     *         see can be a match, the same way the console only matches
-     *         visible log text.
+     *         name, the label's property key line, the value displayed in
+     *         the row's input component, or — for a non-editable select —
+     *         the value currently selected in it. Non-text inputs without a
+     *         displayed value (such as check boxes) are deliberately NOT
+     *         searched — only what the user can see can be a match, the
+     *         same way the console only matches visible log text.
      */
-    private boolean isRowSearchMatch(PropertyRow row, String lowerQuery) {
+    static boolean isRowSearchMatch(PropertyRow row, String lowerQuery) {
         if (row.labelText.toLowerCase(Locale.ROOT).contains(lowerQuery)) {
             return true;
         }
@@ -1020,19 +1213,37 @@ public class NodeConfigurationPanel extends JPanel {
             return true;
         }
         JTextComponent valueText = rowValueTextComponent(row);
-        return valueText != null && valueText.getText().toLowerCase(Locale.ROOT).contains(lowerQuery);
+        if (valueText != null && valueText.getText().toLowerCase(Locale.ROOT).contains(lowerQuery)) {
+            return true;
+        }
+        String comboValue = rowComboSelectedText(row);
+        return comboValue != null && comboValue.toLowerCase(Locale.ROOT).contains(lowerQuery);
+    }
+
+    /** @return the selected item of the row's NON-editable combo box as text,
+     *         or {@code null} when the row has no such combo or nothing is
+     *         selected. Editable combos are already covered by their editor
+     *         text field ({@link #rowValueTextComponent}).
+     */
+    private static String rowComboSelectedText(PropertyRow row) {
+        if (row.input instanceof JComboBox<?> comboBox && !comboBox.isEditable()) {
+            Object selected = comboBox.getSelectedItem();
+            return selected == null ? null : selected.toString();
+        }
+        return null;
     }
 
     /** @return the row's property key line (the label's second line) text, or null when the row has none */
-    private String rowLabelKeyText(PropertyRow row) {
+    private static String rowLabelKeyText(PropertyRow row) {
         return row.label instanceof SearchMatchLabel searchLabel ? searchLabel.getKeyText() : null;
     }
 
     /**
      * Highlights the exact matching part of one row: the query's occurrence
      * in the label name, or in the label's property key line when the name
-     * does not match, and/or in the value text (a row is a match when at
-     * least one of them contains the query — nothing more is highlighted).
+     * does not match, and/or in the value text or the selected value of a
+     * non-editable select (a row is a match when at least one of them
+     * contains the query — nothing more is highlighted).
      * The active match uses the strong palette color, the others the soft
      * one (the same SSOT colors as the console "find").
      */
@@ -1055,18 +1266,19 @@ public class NodeConfigurationPanel extends JPanel {
             }
         }
         highlightValueMatch(row, query, painter);
+        highlightComboValueMatch(row, query, color);
     }
 
     /**
      * Moves the active (strong) highlight to the next/previous match
      * (wrapping) and scrolls it into view — the console's chevron behavior.
+     * Only a real (non-empty) search supports navigation; the filter-only
+     * flat list is not a search, so an empty query is a no-op (the chevrons
+     * are hidden in that mode anyway).
      */
     private void navigateSearch(boolean next) {
-        if (searchMatches.isEmpty()) {
-            return;
-        }
-        String query = searchField.getText() == null ? "" : searchField.getText().trim();
-        if (query.isEmpty()) {
+        String query = searchMatchPanel.getSearchText().trim();
+        if (query.isEmpty() || searchMatches.isEmpty()) {
             return;
         }
         int count = searchMatches.size();
@@ -1074,10 +1286,12 @@ public class NodeConfigurationPanel extends JPanel {
         searchActiveIndex = next
                 ? (searchActiveIndex + 1) % count
                 : (searchActiveIndex - 1 + count) % count;
-        if (oldIndex >= 0 && oldIndex < count && oldIndex != searchActiveIndex) {
-            paintSearchMatch(searchMatches.get(oldIndex), query, false);
+        if (!query.isEmpty()) {
+            if (oldIndex >= 0 && oldIndex < count && oldIndex != searchActiveIndex) {
+                paintSearchMatch(searchMatches.get(oldIndex), query, false);
+            }
+            paintSearchMatch(searchMatches.get(searchActiveIndex), query, true);
         }
-        paintSearchMatch(searchMatches.get(searchActiveIndex), query, true);
         updateSearchMatchIndicator(formatSearchIndicator());
         showActiveSearchMatch();
     }
@@ -1090,21 +1304,16 @@ public class NodeConfigurationPanel extends JPanel {
     /**
      * Updates the match counter next to the search field (sized to its text,
      * mirroring {@code ConsoleFilterHeader#setSearchMatchIndicatorText}); an
-     * empty text hides the counter.
+     * empty text hides the counter. The chevron buttons share the indicator's
+     * visibility: with no match there is nothing to navigate to, so both are
+     * hidden until the search produces a match again.
      */
     private void updateSearchMatchIndicator(String text) {
-        if (text == null || text.isEmpty()) {
-            searchMatchIndicator.setText("");
-            searchMatchIndicator.setVisible(false);
-            return;
-        }
-        FontMetrics fm = searchMatchIndicator.getFontMetrics(searchMatchIndicator.getFont());
-        Dimension size = new Dimension(fm.stringWidth(text) + 4, fm.getHeight());
-        searchMatchIndicator.setMinimumSize(size);
-        searchMatchIndicator.setPreferredSize(size);
-        searchMatchIndicator.setMaximumSize(size);
-        searchMatchIndicator.setText(text);
-        searchMatchIndicator.setVisible(true);
+        boolean hasMatches = text != null && !text.isEmpty();
+        // The chevrons are only useful while a search has matches (same rule
+        // as the console filter header) — hidden while filter-only or idle.
+        searchMatchPanel.setChevronsVisible(hasMatches);
+        searchMatchPanel.setMatchIndicatorText(text);
     }
 
     /**
@@ -1187,7 +1396,7 @@ public class NodeConfigurationPanel extends JPanel {
      * nothing; it only makes the highlighted band visible.
      */
     private void revealValueMatch(PropertyRow row) {
-        String query = searchField.getText() == null ? "" : searchField.getText().trim();
+        String query = searchMatchPanel.getSearchText().trim();
         if (query.isEmpty()) {
             return;
         }
@@ -1208,7 +1417,7 @@ public class NodeConfigurationPanel extends JPanel {
         }
     }
 
-    /** Removes every search highlight (label bands, key-line bands and value marks) from all rows. */
+    /** Removes every search highlight (label bands, key-line bands, value marks and combo bands) from all rows. */
     private void clearSearchHighlights() {
         for (PropertyRow row : allPropertyRows) {
             if (row.label instanceof SearchMatchLabel searchLabel) {
@@ -1218,16 +1427,18 @@ public class NodeConfigurationPanel extends JPanel {
             }
         }
         clearValueHighlights();
+        clearComboHighlights();
     }
 
     /**
      * The text component holding the row's editable value, if any: plain
      * text/password fields and text areas directly, the editor field of an
      * editable combo box, or the text area of a scrollable list property.
-     * Returns {@code null} for rows whose value is not highlightable text
-     * (check boxes, non-editable combos, compound panels).
+     * Returns {@code null} for rows whose value is not editable text
+     * (check boxes, non-editable combos — the selected value of the latter
+     * is matched via {@link #rowComboSelectedText} — and compound panels).
      */
-    private JTextComponent rowValueTextComponent(PropertyRow row) {
+    private static JTextComponent rowValueTextComponent(PropertyRow row) {
         JComponent input = row.input;
         if (input instanceof JTextComponent textComponent) {
             return textComponent;
@@ -1276,6 +1487,51 @@ public class NodeConfigurationPanel extends JPanel {
         } catch (BadLocationException e) {
             // range outside the document bounds — nothing to highlight
         }
+    }
+
+    /**
+     * Shows the search-match band behind the selected value of the row's
+     * non-editable combo box (a non-editable combo has no text component a
+     * document highlight could live in, so its renderer is swapped for a
+     * {@link ComboSearchHighlightRenderer} that paints the band). Only
+     * called when the query matches the selected value; the original
+     * renderer is remembered and restored by {@link #clearComboHighlights()}.
+     */
+    private void highlightComboValueMatch(PropertyRow row, String query, Color color) {
+        if (!(row.input instanceof JComboBox<?> comboBox) || comboBox.isEditable()) {
+            return;
+        }
+        String value = rowComboSelectedText(row);
+        if (value == null) {
+            return;
+        }
+        int idx = value.toLowerCase(Locale.ROOT).indexOf(query.toLowerCase(Locale.ROOT));
+        if (idx < 0) {
+            return;
+        }
+        if (!originalComboRenderers.containsKey(comboBox)) {
+            originalComboRenderers.put(comboBox, comboBox.getRenderer());
+        }
+        ComboSearchHighlightRenderer renderer = new ComboSearchHighlightRenderer();
+        renderer.setBand(query, color);
+        comboBox.setRenderer(renderer);
+        comboBox.repaint();
+    }
+
+    /** Restores the original renderer of every combo box that carries a search band. */
+    private void clearComboHighlights() {
+        for (Map.Entry<JComboBox<?>, ListCellRenderer<?>> entry : originalComboRenderers.entrySet()) {
+            JComboBox<?> comboBox = entry.getKey();
+            if (comboBox.getRenderer() instanceof ComboSearchHighlightRenderer) {
+                // The captured wildcard of JComboBox<?> does not line up with
+                // setRenderer's bound — the renderer is re-erased at runtime.
+                @SuppressWarnings({"unchecked", "rawtypes"})
+                ListCellRenderer<Object> original = (ListCellRenderer) entry.getValue();
+                comboBox.setRenderer(original);
+                comboBox.repaint();
+            }
+        }
+        originalComboRenderers.clear();
     }
 
     /** Removes all search-match highlights added to value components. */
@@ -1587,16 +1843,14 @@ public class NodeConfigurationPanel extends JPanel {
         if (selected == null) {
             return;
         }
+        // Reserved profiles (node-default) are never listed: they cannot be
+        // copied (SSOT: NodeProfileRepository#isReservedProfileName).
         List<String> profiles = ConfigurationUtils.fetchProfileNames(
-                ConfigurationUtils.getNodeProfilesDir(), null);
+                ConfigurationUtils.getNodeProfilesDir(), null).stream()
+                        .filter(name -> !NodeProfileRepository.isReservedProfileName(name))
+                        .collect(Collectors.toList());
         String source = ProfileCopyDialog.show(this, profiles, selected);
         if (source == null || source.trim().isEmpty()) {
-            return;
-        }
-        if ((Signum.NODE_SUBFOLDER + "-default").equals(source)) {
-            JOptionPane.showMessageDialog(this,
-                    "The system default profile template cannot be copied. Pick a different profile.",
-                    "Action Not Allowed", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
@@ -1652,29 +1906,41 @@ public class NodeConfigurationPanel extends JPanel {
             return;
         }
 
-        // Diff against the default from the current (unsaved, editor) effective
-        // state. getPropertiesFromUI() already holds the minimal overrides, so
-        // it doubles as the effective state for the SSOT diff computation.
-        Properties effective = getPropertiesFromUI();
-        List<ProfileDiffCalculator.ProfileDiffEntry> diff = ProfileDiffCalculator
-                .diffAgainstDefault(effective, defaultValues);
+        String newName;
+        List<ProfileDiffCalculator.ProfileDiffEntry> labeled;
+        try {
+            // Diff against the default from the current (unsaved, editor) effective
+            // state. getPropertiesFromUI() already holds the minimal overrides, so
+            // it doubles as the effective state for the SSOT diff computation.
+            Properties effective = getPropertiesFromUI();
+            List<ProfileDiffCalculator.ProfileDiffEntry> diff = ProfileDiffCalculator
+                    .diffAgainstDefault(effective, defaultValues);
 
-        // Human-readable names from the property labels of this editor.
-        Map<String, String> keyToLabel = new HashMap<>();
-        for (PropertyRow row : allPropertyRows) {
-            keyToLabel.putIfAbsent(row.prop.getName(), row.labelText);
-        }
-        List<ProfileDiffCalculator.ProfileDiffEntry> labeled = new ArrayList<>(diff.size());
-        for (ProfileDiffCalculator.ProfileDiffEntry entry : diff) {
-            String label = keyToLabel.get(entry.getKey());
-            labeled.add(label != null && !label.isEmpty() && !label.equals(entry.getKey())
-                    ? new ProfileDiffCalculator.ProfileDiffEntry(entry.getKey(), entry.getValue(), label)
-                    : entry);
-        }
+            // Human-readable names from the property labels of this editor.
+            Map<String, String> keyToLabel = new HashMap<>();
+            for (PropertyRow row : allPropertyRows) {
+                keyToLabel.putIfAbsent(row.prop.getName(), row.labelText);
+            }
+            labeled = new ArrayList<>(diff.size());
+            for (ProfileDiffCalculator.ProfileDiffEntry entry : diff) {
+                String label = keyToLabel.get(entry.getKey());
+                labeled.add(label != null && !label.isEmpty() && !label.equals(entry.getKey())
+                        ? new ProfileDiffCalculator.ProfileDiffEntry(entry.getKey(), entry.getValue(), label)
+                        : entry);
+            }
 
-        Set<String> taken = new HashSet<>(NodeProfileRepository.listProfiles());
-        String suggested = ProfileNameSuggester.nextAvailableName(source + "_clone", taken);
-        String newName = ProfileCloneDialog.show(this, source, labeled, suggested, taken);
+            Set<String> taken = new HashSet<>(NodeProfileRepository.listProfiles());
+            String suggested = ProfileNameSuggester.nextCloneName(source, taken);
+            newName = ProfileCloneDialog.show(this, source, labeled, suggested, taken);
+        } catch (Exception e) {
+            // Never leave the user with a silent no-op: any failure while
+            // preparing the dialog (or the dialog itself) is surfaced and
+            // logged explicitly instead of dying inside the button listener.
+            LOGGER.error("Failed to open the clone dialog for profile '{}'", source, e);
+            JOptionPane.showMessageDialog(this, "Error opening the clone dialog: " + e.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
         if (newName == null) {
             return; // cancelled
         }
@@ -2090,6 +2356,15 @@ public class NodeConfigurationPanel extends JPanel {
         ConfigurationUtils.fixComponentSize(saveApplyBtn);
         if (saveApplyBtn.getParent() != null) {
             saveApplyBtn.getParent().revalidate();
+        }
+
+        // The value-status visibility filter of the search panel depends on
+        // the value states: when the flat results view is up, re-apply the
+        // current search so the listed rows follow saves/reloads/copies. The
+        // sameMatchSet guard keeps this a no-op when the set did not change,
+        // so focus and scroll position stay put.
+        if (searchViewActive && searchMatchPanel != null) {
+            applySearch(searchMatchPanel.getSearchText(), false);
         }
     }
 
@@ -3016,7 +3291,7 @@ public class NodeConfigurationPanel extends JPanel {
         // --- Header with help text ---
         String helpText = "<html><body style='width: 650px;'>"
                 + "<b>PK Checks Manager</b><br>"
-                + "<p>This tool helps manage the <b><code>node.pkChecks</code></b> account freeze list. This is a security feature used to prevent specific accounts from sending transactions when the <code>PK_FREEZE</code> network feature is active.</p>"
+                + "<p>This tool helps manage the <b>node.pkChecks</b> account freeze list. This is a security feature used to prevent specific accounts from sending transactions when the PK_FREEZE network feature is active.</p>"
                 + "<b>How to Use:</b><ul>"
                 + "<li><b>Analysis:</b> The text area below analyzes the current configuration, showing the decoded Account ID and RS Address for each 16-character hex entry.</li>"
                 + "<li><b>Convert & Add:</b><ol>"
@@ -3166,10 +3441,142 @@ public class NodeConfigurationPanel extends JPanel {
         return def == null ? "" : String.valueOf(def);
     }
 
+    /**
+     * The three value-level states that drive the row color coding and the
+     * search-panel visibility checkboxes.
+     */
+    private enum ValueStatus {
+        UNSAVED(GuiColors.getUnsaved()), SAVED(GuiColors.getSaved()), APPLIED(GuiColors.getApplied());
+
+        private final Color color;
+
+        ValueStatus(Color color) {
+            this.color = color;
+        }
+
+        public Color color() {
+            return color;
+        }
+    }
+
+    /**
+     * Resolves the value-level state of a configuration value against the
+     * saved (profile-on-disk) and applied (running-node) values:
+     * {@link ValueStatus#APPLIED} (green) when it equals the applied value,
+     * {@link ValueStatus#SAVED} (yellow) when it equals the saved value,
+     * otherwise {@link ValueStatus#UNSAVED} (normal text color). Boolean
+     * properties compare parsed booleans, all other values compare as trimmed
+     * strings — the exact rules the color coding uses.
+     */
+    private static ValueStatus valueStatus(boolean isCheckbox, String value, String saved, String applied) {
+        if (isCheckbox) {
+            boolean savedBool = parseValueBool(saved);
+            boolean appliedBool = parseValueBool(applied);
+            boolean valBool = parseValueBool(value);
+            if (valBool == appliedBool) {
+                return ValueStatus.APPLIED;
+            }
+            if (valBool == savedBool) {
+                return ValueStatus.SAVED;
+            }
+            return ValueStatus.UNSAVED;
+        }
+        String v = value == null ? "" : value.trim();
+        String a = applied == null ? "" : applied.trim();
+        String s = saved == null ? "" : saved.trim();
+        if (v.equals(a)) {
+            return ValueStatus.APPLIED;
+        }
+        if (v.equals(s)) {
+            return ValueStatus.SAVED;
+        }
+        return ValueStatus.UNSAVED;
+    }
+
+    /** @return true when the value parses as a boolean "on" state */
+    private static boolean parseValueBool(String s) {
+        return "true".equalsIgnoreCase(s) || "yes".equalsIgnoreCase(s)
+                || "1".equals(s) || "on".equalsIgnoreCase(s);
+    }
+
+    /**
+     * Resolves the value-level state ({@link ValueStatus}) of the given row's
+     * component, mirroring the value resolution and comparison that
+     * {@link #updateColor} performs for the color coding — so the search-panel
+     * visibility checkboxes and the row colors can never disagree.
+     */
+    private ValueStatus rowStatus(PropertyRow row) {
+        if (row == null || row.prop == null || row.input == null) {
+            return ValueStatus.UNSAVED;
+        }
+        JComponent comp = row.input;
+        String key = row.prop.getName();
+        String defaultValue = defaultValues.get(key);
+
+        JComponent target = comp;
+        if (comp instanceof JScrollPane && ((JScrollPane) comp).getViewport().getView() instanceof JTextArea) {
+            target = (JComponent) ((JScrollPane) comp).getViewport().getView();
+        } else if (comp instanceof JPanel && Props.NODE_PK_CHECKS.getName().equals(key)) {
+            for (Component inner : ((JPanel) comp).getComponents()) {
+                if (inner instanceof JScrollPane) {
+                    Component view = ((JScrollPane) inner).getViewport().getView();
+                    if (view instanceof JTextArea) {
+                        target = (JComponent) view;
+                        break;
+                    }
+                }
+            }
+        }
+
+        String value = "";
+        if (comp instanceof JPanel && Props.DB_URL.getName().equals(key)) {
+            Supplier<String> supplier = valueSuppliers.get(key);
+            String supplierVal = supplier != null ? supplier.get() : "";
+            value = supplierVal != null ? supplierVal.trim() : "";
+        } else if (comp instanceof JCheckBox) {
+            value = String.valueOf(((JCheckBox) comp).isSelected());
+        } else if (comp instanceof JComboBox) {
+            Object item = ((JComboBox<?>) comp).getSelectedItem();
+            value = item == null ? "" : item.toString();
+        } else if (target instanceof javax.swing.text.JTextComponent) {
+            value = ((javax.swing.text.JTextComponent) target).getText();
+            if (target instanceof JTextArea) {
+                value = normalizeListValue(value, "\n");
+            } else {
+                value = value.trim();
+            }
+        }
+        String savedValue = savedProfile.getProperty(key, defaultValue);
+        String applied = appliedProfile.getProperty(key, defaultValue);
+        if (savedValue == null)
+            savedValue = "";
+        if (applied == null)
+            applied = "";
+        savedValue = savedValue.trim();
+        applied = applied.trim();
+        if (target instanceof JTextArea) {
+            savedValue = normalizeListValue(savedValue, ";");
+            applied = normalizeListValue(applied, ";");
+        }
+        return valueStatus(comp instanceof JCheckBox, value, savedValue, applied);
+    }
+
+    /** @return true when the row's value state is still selected by its search-panel checkbox */
+    private boolean isRowStatusVisible(PropertyRow row) {
+        switch (rowStatus(row)) {
+            case UNSAVED:
+                return showUnsavedBox.isSelected();
+            case SAVED:
+                return showSavedBox.isSelected();
+            case APPLIED:
+            default:
+                return showAppliedBox.isSelected();
+        }
+    }
+
     private void updateColor(JComponent comp, String propName, String defaultValue) {
         String value = "";
         JComponent target = comp;
-        Color color = GuiColors.getUnsaved();
 
         // Unwrap wrappers for lists and special components
         if (comp instanceof JScrollPane && ((JScrollPane) comp).getViewport().getView() instanceof JTextArea) {
@@ -3206,19 +3613,6 @@ public class NodeConfigurationPanel extends JPanel {
 
         if (comp instanceof JCheckBox) {
             value = String.valueOf(((JCheckBox) comp).isSelected());
-            boolean savedBool = "true".equalsIgnoreCase(savedValue) || "yes".equalsIgnoreCase(savedValue)
-                    || "1".equals(savedValue)
-                    || "on".equalsIgnoreCase(savedValue);
-            boolean appliedBool = "true".equalsIgnoreCase(applied) || "yes".equalsIgnoreCase(applied)
-                    || "1".equals(applied) || "on".equalsIgnoreCase(applied);
-            boolean valBool = "true".equalsIgnoreCase(value);
-
-            if (valBool == appliedBool)
-                color = GuiColors.getApplied();
-            else if (valBool == savedBool)
-                color = GuiColors.getSaved();
-            else
-                color = GuiColors.getUnsaved();
         } else if (comp instanceof JComboBox) {
             Object item = ((JComboBox<?>) comp).getSelectedItem();
             value = item == null ? "" : item.toString();
@@ -3238,13 +3632,7 @@ public class NodeConfigurationPanel extends JPanel {
             }
         }
 
-        if (!(comp instanceof JCheckBox)) {
-            if (value.trim().equals(applied)) {
-                color = GuiColors.getApplied();
-            } else if (value.trim().equals(savedValue)) {
-                color = GuiColors.getSaved();
-            }
-        }
+        Color color = valueStatus(comp instanceof JCheckBox, value, savedValue, applied).color();
 
         // Detailed sub-component coloring and asterisk logic for JDBC URL panel
         if (comp instanceof JPanel && Props.DB_URL.getName().equals(propName)) {
@@ -3401,22 +3789,6 @@ public class NodeConfigurationPanel extends JPanel {
         return parts;
     }
 
-    private JPanel createLegendPanel() {
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 15, 0));
-        panel.setBorder(new EmptyBorder(0, 0, 5, 0));
-
-        panel.add(createLegendItem(GuiColors.getUnsaved(), "Unsaved values"));
-        panel.add(createLegendItem(GuiColors.getSaved(), "Saved values"));
-        panel.add(createLegendItem(GuiColors.getApplied(), "Applied values"));
-
-        JButton helpBtn = new HelpButton();
-        helpBtn.setToolTipText("Detailed Color Legend");
-        helpBtn.addActionListener(e -> showColorLegendHelp());
-        panel.add(helpBtn);
-
-        return panel;
-    }
-
     private void showColorLegendHelp() {
         String msg = "<html><body style='width: 350px'>" +
                 "<h3>Color Coding Legend</h3>" +
@@ -3439,20 +3811,11 @@ public class NodeConfigurationPanel extends JPanel {
         JOptionPane.showMessageDialog(this, msg, "Color Legend", JOptionPane.INFORMATION_MESSAGE);
     }
 
-    private JPanel createLegendItem(Color color, String text) {
-        JPanel item = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
-        JLabel colorBox = new JLabel("\u25A0");
-        colorBox.setForeground(color);
-        item.add(colorBox);
-        item.add(new JLabel(text));
-        return item;
-    }
-
     private void showHelp(Prop<?> prop, String labelText) {
         String description = helpTexts.getOrDefault(prop.getName(), "No detailed description available.");
         String message = "<html><body style='width: 300px'>" +
                 "<h2>" + labelText + "</h2>" +
-                "<p><b>Property Key:</b> <b>" + prop.getName() + "</b></p>" +
+                "<p><b>Property Key:</b> " + prop.getName() + "</p>" +
                 "<p><b>Default Value:</b> " + prop.getDefaultValue() + "</p>" +
                 "<hr>" +
                 "<p>" + description.replace("\n", "<br>") + "</p>" +
@@ -3505,29 +3868,29 @@ public class NodeConfigurationPanel extends JPanel {
                 "The interface IP or hostname to bind to."
                         + "<br><br><b>Examples:</b>"
                         + "<ul>"
-                        + "<li><code>0.0.0.0</code>: Listen on all IPv4 interfaces.</li>"
-                        + "<li><code>::</code>: Listen on all IPv6 interfaces.</li>"
-                        + "<li><code>127.0.0.1</code>: Listen on local IPv4 loopback only.</li>"
-                        + "<li><code>::1</code>: Listen on local IPv6 loopback only.</li>"
-                        + "<li><code>localhost</code>: Listen on local loopback (resolves to IP).</li>"
+                        + "<li>0.0.0.0: Listen on all IPv4 interfaces.</li>"
+                        + "<li>::: Listen on all IPv6 interfaces.</li>"
+                        + "<li>127.0.0.1: Listen on local IPv4 loopback only.</li>"
+                        + "<li>::1: Listen on local IPv6 loopback only.</li>"
+                        + "<li>localhost: Listen on local loopback (resolves to IP).</li>"
                         + "</ul>");
 
         helpTexts.put(Props.API_ALLOWED.getName(),
                 "List of allowed IP addresses, hostnames, or subnets to access the API."
-                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
+                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (;)."
                         + "<br>The configuration is stored as a single semicolon-separated list in the configuration file."
                         + "<br><br><b>Examples:</b>"
                         + "<ul>"
-                        + "<li><code>*</code>: Allows all IP addresses. <b>Warning:</b> Use with caution on public nodes.</li>"
-                        + "<li><code>127.0.0.1</code>: A specific IPv4 address.</li>"
-                        + "<li><code>localhost</code>: The local machine.</li>"
-                        + "<li><code>[::1]</code>: The IPv6 loopback address.</li>"
-                        + "<li><code>192.168.1.0/24</code>: An IPv4 subnet in CIDR notation.</li>"
+                        + "<li>*: Allows all IP addresses. <b>Warning:</b> Use with caution on public nodes.</li>"
+                        + "<li>127.0.0.1: A specific IPv4 address.</li>"
+                        + "<li>localhost: The local machine.</li>"
+                        + "<li>[::1]: The IPv6 loopback address.</li>"
+                        + "<li>192.168.1.0/24: An IPv4 subnet in CIDR notation.</li>"
                         + "</ul>");
 
         helpTexts.put(Props.API_ADMIN_KEY_LIST.getName(),
                 "List of passwords (API Keys) required to authorize administrative API operations."
-                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
+                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (;)."
                         + "<br>These keys are required for the following sensitive actions:"
                         + "<ul>"
                         + "<li><b>Full Reset</b>: Resets the node and forces a resync.</li>"
@@ -3543,31 +3906,31 @@ public class NodeConfigurationPanel extends JPanel {
                         + "<br><br><b>To enable SSL, you have two options:</b>"
                         + "<br><br><b>1. Manual Keystore (e.g., JKS or PKCS12):</b>"
                         + "<ul>"
-                        + "<li>Set this property to <code>true</code>.</li>"
-                        + "<li>Set <code>SSL KeyStore Path</code> to the path of your keystore file.</li>"
-                        + "<li>Set <code>SSL KeyStore Password</code> to the password for your keystore.</li>"
+                        + "<li>Set this property to true.</li>"
+                        + "<li>Set SSL KeyStore Path to the path of your keystore file.</li>"
+                        + "<li>Set SSL KeyStore Password to the password for your keystore.</li>"
                         + "</ul>"
                         + "<b>2. Automatic Conversion from Let's Encrypt (PEM):</b>"
                         + "<ul>"
-                        + "<li>Set this property to <code>true</code>.</li>"
-                        + "<li>Set <code>SSL LetsEncrypt Path</code> to the directory containing your <code>privkey.pem</code> and <code>fullchain.pem</code> files (e.g., <code>/etc/letsencrypt/live/your.domain.com</code>).</li>"
-                        + "<li>Set <code>SSL KeyStore Path</code> to the desired location for the auto-generated PKCS12 keystore file (e.g., <code>conf/keystore.p12</code>).</li>"
-                        + "<li>Set <code>SSL KeyStore Password</code> to a password for the new keystore. The node will create and manage this file.</li>"
+                        + "<li>Set this property to true.</li>"
+                        + "<li>Set SSL LetsEncrypt Path to the directory containing your privkey.pem and fullchain.pem files (e.g., /etc/letsencrypt/live/your.domain.com).</li>"
+                        + "<li>Set SSL KeyStore Path to the desired location for the auto-generated PKCS12 keystore file (e.g., conf/keystore.p12).</li>"
+                        + "<li>Set SSL KeyStore Password to a password for the new keystore. The node will create and manage this file.</li>"
                         + "</ul>"
-                        + "After enabling, the API will be accessible via <code>https://</code> on the configured API port.");
+                        + "After enabling, the API will be accessible via https:// on the configured API port.");
 
         helpTexts.put(Props.API_DOC_MODE.getName(),
                 "Controls the built-in API documentation."
                         + "<br><br><b>Available Modes:</b>"
                         + "<ul>"
-                        + "<li><code>modern</code>: Enables the new, interactive Swagger UI documentation. Recommended for better experience.</li>"
-                        + "<li><code>legacy</code>: Enables the old, servlet-based documentation. Use this if you have compatibility issues with the modern UI.</li>"
-                        + "<li><code>off</code>: Disables the API documentation completely.</li>"
+                        + "<li>modern: Enables the new, interactive Swagger UI documentation. Recommended for better experience.</li>"
+                        + "<li>legacy: Enables the old, servlet-based documentation. Use this if you have compatibility issues with the modern UI.</li>"
+                        + "<li>off: Disables the API documentation completely.</li>"
                         + "</ul>");
 
         helpTexts.put(Props.API_UI_DIR.getName(),
                 "Specifies the local directory containing the static web files (HTML, JS, CSS) for the node's user interface (e.g., Phoenix Wallet)."
-                        + "<br>These files are served at the root URL (e.g. <code>http://localhost:8125/</code>)."
+                        + "<br>These files are served at the root URL (e.g. http://localhost:8125/)."
                         + "<br>If left empty, no UI will be served from the root path.");
 
         helpTexts.put(Props.API_WEBSOCKET_ENABLE.getName(),
@@ -3609,20 +3972,20 @@ public class NodeConfigurationPanel extends JPanel {
                         + "</ul>"
                         + "<b>Configuration Options:</b>"
                         + "<ul>"
-                        + "<li><code>*</code>: <b>Wildcard</b>. Allows access from <b>any</b> website. Recommended for public nodes.</li>"
-                        + "<li><b>Specific Origin</b>: e.g., <code>https://wallet.signum.network</code>. Restricts access to a specific domain.</li>"
-                        + "<li><b>List</b>: Multiple origins can be specified. In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>).</li>"
+                        + "<li>*: <b>Wildcard</b>. Allows access from <b>any</b> website. Recommended for public nodes.</li>"
+                        + "<li><b>Specific Origin</b>: e.g., https://wallet.signum.network. Restricts access to a specific domain.</li>"
+                        + "<li><b>List</b>: Multiple origins can be specified. In this field, you can list entries on new lines, or on a single line separated by semicolons (;).</li>"
                         + "</ul>"
-                        + "The configuration is stored as a single semicolon-separated list in the <code>node.properties</code> file.");
+                        + "The configuration is stored as a single semicolon-separated list in the node.properties file.");
 
         helpTexts.put(Props.API_ACCEPT_SURPLUS_PARAMS.getName(),
                 "Controls how the API server handles requests containing unexpected or surplus parameters."
-                        + "<br><br><b>If <code>false</code> (default and recommended):</b>"
+                        + "<br><br><b>If false (default and recommended):</b>"
                         + "<br>The server strictly validates all parameters. If a request includes a parameter not defined for that API call, the request is rejected with an 'incorrect parameter' error. This is the most secure setting."
-                        + "<br><br><b>If <code>true</code>:</b>"
+                        + "<br><br><b>If true:</b>"
                         + "<br>The server will ignore any unknown parameters and process the request using only the recognized ones."
                         + "<br>This may be required for compatibility with older or poorly-written clients that send extra data."
-                        + "<br><br><b>Security Note:</b> It is recommended to keep this disabled (<code>false</code>) unless explicitly needed.");
+                        + "<br><br><b>Security Note:</b> It is recommended to keep this disabled (false) unless explicitly needed.");
 
         helpTexts.put(Props.API_SERVER_ENFORCE_POST.getName(),
                 "Controls whether the API server enforces the use of HTTP POST method for sensitive or state-changing requests."
@@ -3633,8 +3996,8 @@ public class NodeConfigurationPanel extends JPanel {
                         + "</ul>"
                         + "<b>Configuration:</b>"
                         + "<ul>"
-                        + "<li><code>true</code> (Recommended): Enforces POST for state-changing API calls. GET requests for these calls will be rejected.</li>"
-                        + "<li><code>false</code>: Allows both GET and POST. <b>Warning:</b> Less secure. Use only for testing or legacy compatibility.</li>"
+                        + "<li>true (Recommended): Enforces POST for state-changing API calls. GET requests for these calls will be rejected.</li>"
+                        + "<li>false: Allows both GET and POST. <b>Warning:</b> Less secure. Use only for testing or legacy compatibility.</li>"
                         + "</ul>");
 
         helpTexts.put(Props.API_SERVER_IDLE_TIMEOUT.getName(),
@@ -3661,9 +4024,9 @@ public class NodeConfigurationPanel extends JPanel {
         // Database
         helpTexts.put(Props.DB_URL.getName(),
                 "The JDBC connection URL. Examples:"
-                        + "<br>SQLite: <code>jdbc:sqlite:file:../database/SQLite/sqlite/signum.sqlite.db</code>"
-                        + "<br>MariaDB: <code>jdbc:mariadb://localhost:3306/signum</code>"
-                        + "<br>Postgres: <code>jdbc:postgresql://localhost:5432/signum</code>");
+                        + "<br>SQLite: jdbc:sqlite:file:../database/SQLite/sqlite/signum.sqlite.db"
+                        + "<br>MariaDB: jdbc:mariadb://localhost:3306/signum"
+                        + "<br>Postgres: jdbc:postgresql://localhost:5432/signum");
 
         helpTexts.put(Props.DB_USERNAME.getName(),
                 "The username for the database connection. Required for MariaDB and PostgreSQL.");
@@ -3721,10 +4084,10 @@ public class NodeConfigurationPanel extends JPanel {
                 "Memory allocated for SQLite cache."
                         + "<br><br><b>Positive Value (N):</b> Sets the number of pages."
                         + "<br>Total Cache Size = N * Page Size (default 4096 bytes)."
-                        + "<br><i>Example:</i> <code>32768</code> pages * 4KB = ~128 MB."
+                        + "<br><i>Example:</i> 32768 pages * 4KB = ~128 MB."
                         + "<br><br><b>Negative Value (-N):</b> Sets the memory usage in KiB."
                         + "<br>Total Cache Size = abs(N) * 1024 bytes."
-                        + "<br><i>Example:</i> <code>-131072</code> (KiB) = 128 MB."
+                        + "<br><i>Example:</i> -131072 (KiB) = 128 MB."
                         + "<br><br><b>Recommendation:</b> Use negative values for a definitive RAM limit.");
 
         helpTexts.put(Props.NODE_BLOCK_CACHE_MB.getName(),
@@ -3740,11 +4103,11 @@ public class NodeConfigurationPanel extends JPanel {
                 "The interface IP or hostname for P2P communication."
                         + "<br><br><b>Examples:</b>"
                         + "<ul>"
-                        + "<li><code>0.0.0.0</code>: Listen on all IPv4 interfaces.</li>"
-                        + "<li><code>::</code>: Listen on all IPv6 interfaces.</li>"
-                        + "<li><code>127.0.0.1</code>: Listen on local IPv4 loopback only.</li>"
-                        + "<li><code>::1</code>: Listen on local IPv6 loopback only.</li>"
-                        + "<li><code>localhost</code>: Listen on local loopback (resolves to IP).</li>"
+                        + "<li>0.0.0.0: Listen on all IPv4 interfaces.</li>"
+                        + "<li>::: Listen on all IPv6 interfaces.</li>"
+                        + "<li>127.0.0.1: Listen on local IPv4 loopback only.</li>"
+                        + "<li>::1: Listen on local IPv6 loopback only.</li>"
+                        + "<li>localhost: Listen on local loopback (resolves to IP).</li>"
                         + "</ul>");
 
         helpTexts.put(Props.P2P_UPNP.getName(),
@@ -3767,13 +4130,13 @@ public class NodeConfigurationPanel extends JPanel {
 
         helpTexts.put(Props.P2P_BOOTSTRAP_PEERS.getName(),
                 "A list of initial peers to connect to when the node starts."
-                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
+                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (;)."
                         + "<br>The configuration is stored as a single semicolon-separated list in the configuration file."
                         + "<br>This helps the node to quickly find other peers and join the network.");
 
         helpTexts.put(Props.P2P_REBROADCAST_TO.getName(),
                 "A list of peers to which this node will always rebroadcast transactions."
-                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
+                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (;)."
                         + "<br>The configuration is stored as a single semicolon-separated list in the configuration file."
                         + "<br>Useful for ensuring transactions reach specific nodes (e.g., pools or exchanges).");
 
@@ -3783,7 +4146,7 @@ public class NodeConfigurationPanel extends JPanel {
 
         helpTexts.put(Props.P2P_BLACKLISTED_PEERS.getName(),
                 "A list of peer addresses that are permanently banned from connecting to your node."
-                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
+                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (;)."
                         + "<br>The configuration is stored as a single semicolon-separated list in the configuration file.");
 
         helpTexts.put(Props.P2P_MAX_CONNECTIONS.getName(),
@@ -3871,16 +4234,16 @@ public class NodeConfigurationPanel extends JPanel {
 
         helpTexts.put(Props.SOLO_MINING_PASSPHRASES.getName(),
                 "A list of secret phrases for accounts that are solo mining on this node."
-                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
+                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (;)."
                         + "<br>The configuration is stored as a single semicolon-separated list in the configuration file."
                         + "<br>This allows miners to use the 'submitNonce' API without sending their secret phrase over the network."
                         + "<br><b>Security Warning:</b> Do not use on public-facing nodes or nodes accessible by others, as it stores secret phrases in the configuration file.");
 
         helpTexts.put(Props.REWARD_RECIPIENT_PASSPHRASES.getName(),
                 "A list of passphrases for reward recipient accounts, used in pool mining."
-                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
+                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (;)."
                         + "<br>The configuration is stored as a single semicolon-separated list in the configuration file."
-                        + "<br>Format: <code>miner_account_id:reward_recipient_secret_phrase</code>"
+                        + "<br>Format: miner_account_id:reward_recipient_secret_phrase"
                         + "<br>This allows the node to automatically claim mining rewards on behalf of the pool miners.");
 
         helpTexts.put(Props.ALLOW_OTHER_SOLO_MINERS.getName(),
@@ -3968,13 +4331,13 @@ public class NodeConfigurationPanel extends JPanel {
         helpTexts.put(Props.NODE_PK_CHECKS.getName(),
                 "<b>Public Key Checks (Account Freeze List)</b>"
                         + "<br>This setting allows freezing specific accounts by preventing their public keys from being verified or used."
-                        + "<br>This is a security measure used in conjunction with the <code>PK_FREEZE</code> network constant."
+                        + "<br>This is a security measure used in conjunction with the PK_FREEZE network constant."
                         + "<br><br><b>Format:</b>"
                         + "<br>The list contains 16-character hexadecimal strings. Each string represents an Account ID encoded in Little Endian byte order."
                         + "<br><br><b>How to use:</b>"
                         + "<br>Use the <b>Magic Wand</b> icon next to this field to open the conversion tool. You can enter Account IDs or RS Addresses, and the tool will generate the correct hex code for this list."
                         + "<br><br><b>Effect:</b>"
-                        + "<br>If an account ID is in this list and <code>PK_FREEZE</code> is active, the account cannot send transactions.");
+                        + "<br>If an account ID is in this list and PK_FREEZE is active, the account cannot send transactions.");
 
         helpTexts.put(Props.ENABLE_AT_DEBUG_LOG.getName(),
                 "Enables debug logging for Automated Transactions (ATs).");
@@ -4025,7 +4388,7 @@ public class NodeConfigurationPanel extends JPanel {
 
         helpTexts.put(Props.NODE_DEBUG_TRACE_ACCOUNTS.getName(),
                 "A list of account IDs to trace in debug logs."
-                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
+                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (;)."
                         + "<br>The configuration is stored as a single semicolon-separated list in the configuration file.");
 
         helpTexts.put(Props.NODE_DEBUG_TRACE_LOG.getName(),
@@ -4076,7 +4439,7 @@ public class NodeConfigurationPanel extends JPanel {
 
         helpTexts.put(Props.JETTY_API_DOS_FILTER_IP_WHITELIST.getName(),
                 "DoS Filter: A list of IPs that are exempt from rate limiting."
-                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
+                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (;)."
                         + "<br>The configuration is stored as a single semicolon-separated list in the configuration file.");
 
         helpTexts.put(Props.JETTY_API_DOS_FILTER_MANAGED_ATTR.getName(),
@@ -4123,7 +4486,7 @@ public class NodeConfigurationPanel extends JPanel {
 
         helpTexts.put(Props.JETTY_P2P_DOS_FILTER_IP_WHITELIST.getName(),
                 "DoS Filter: A list of IPs that are exempt from rate limiting."
-                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (<code>;</code>)."
+                        + "<br>In this field, you can list entries on new lines, or on a single line separated by semicolons (;)."
                         + "<br>The configuration is stored as a single semicolon-separated list in the configuration file.");
 
         helpTexts.put(Props.JETTY_P2P_DOS_FILTER_MANAGED_ATTR.getName(),
@@ -4240,7 +4603,7 @@ public class NodeConfigurationPanel extends JPanel {
                 "The block height for the next development fork." + networkWarning);
     }
 
-    private static class PropertyRow {
+    static class PropertyRow {
         final Prop<?> prop;
         final String labelText;
         /** The category panel this row's parts live in (they move to the flat

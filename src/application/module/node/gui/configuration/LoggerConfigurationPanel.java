@@ -1723,7 +1723,7 @@ public class LoggerConfigurationPanel extends JPanel {
         String description = helpTexts.getOrDefault(propertyKey, "No detailed description available.");
         String message = "<html><body style='width: 300px'>" +
                 "<h2>" + labelText + "</h2>" +
-                "<p><b>Property Key:</b> <b>" + propertyKey + "</b></p>" +
+                "<p><b>Property Key:</b> " + propertyKey + "</p>" +
                 "<hr>" +
                 "<p>" + description.replace("\n", "<br>") + "</p>" +
                 "</body></html>";
@@ -1779,22 +1779,22 @@ public class LoggerConfigurationPanel extends JPanel {
                 "Defines the location and naming pattern for the log files."
                         + "<br><br><b>Special Placeholders:</b>"
                         + "<ul>"
-                        + "<li><code>%h</code>: User's home directory.</li>"
-                        + "<li><code>%t</code>: System's temporary directory.</li>"
-                        + "<li><code>%u</code>: A unique number to resolve naming conflicts.</li>"
-                        + "<li><code>%g</code>: The generation number for rotating logs.</li>"
-                        + "<li><code>/</code>: The platform-specific path separator.</li>"
+                        + "<li>%h: User's home directory.</li>"
+                        + "<li>%t: System's temporary directory.</li>"
+                        + "<li>%u: A unique number to resolve naming conflicts.</li>"
+                        + "<li>%g: The generation number for rotating logs.</li>"
+                        + "<li>/: The platform-specific path separator.</li>"
                         + "</ul>"
-                        + "<b>Example:</b> <code>logs/signum%u.log</code> will create log files like <code>signum0.log</code>, <code>signum1.log</code>, etc., inside a 'logs' subdirectory.");
+                        + "<b>Example:</b> logs/signum%u.log will create log files like signum0.log, signum1.log, etc., inside a 'logs' subdirectory.");
         helpTexts.put("java.util.logging.FileHandler.limit",
                 "The approximate maximum size of a single log file in bytes."
                         + "<br><br>When a log file reaches this limit, it will be closed, and a new file will be opened for subsequent messages."
                         + "<br>This works in conjunction with 'File Count' to manage log rotation."
-                        + "<br><br><b>Note:</b> Set to <code>0</code> for no size limit (a single, ever-growing log file).");
+                        + "<br><br><b>Note:</b> Set to 0 for no size limit (a single, ever-growing log file).");
         helpTexts.put("java.util.logging.FileHandler.count",
                 "The number of log files to use in the rotation sequence."
-                        + "<br><br>Once this many files have been created, the logger will start overwriting the oldest file (e.g., <code>...log.0</code>)."
-                        + "<br>For example, if 'File Count' is <code>5</code>, the logs will be named <code>...log.0, ...log.1, ...log.2, ...log.3, ...log.4</code>.");
+                        + "<br><br>Once this many files have been created, the logger will start overwriting the oldest file (e.g., ...log.0)."
+                        + "<br>For example, if 'File Count' is 5, the logs will be named ...log.0, ...log.1, ...log.2, ...log.3, ...log.4.");
     }
 
     private void addSectionHeader(JPanel panel, String title, boolean isFirst) {

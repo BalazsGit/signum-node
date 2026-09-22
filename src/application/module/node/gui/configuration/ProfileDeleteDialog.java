@@ -2,6 +2,7 @@ package application.module.node.gui.configuration;
 
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
+import application.utils.gui.GuiFontManager;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
@@ -50,25 +51,19 @@ public final class ProfileDeleteDialog {
         final String stateText;
         if (nodeRunning) {
             stateText = "<html>The node is <b>running</b> — it will be <b>stopped</b> before the profile "
-                    + "is deleted and <b>will not be started again</b>.</html>";
+                    + "is deleted and <b>will not be started again</b>. "
+                    + "Stopping the node may take a while; please wait.</html>";
         } else {
             stateText = "<html>The node is <b>not running</b>.</html>";
         }
 
-        // ── Permanent-action warning (profile names are validated to [a-zA-Z0-9_-] — HTML-safe) ──
+        // ── Permanent-action warning — short and to the point ──
         JLabel warningLabel = new JLabel(
-                "<html><b>This action is permanent.</b> The profile '<b>" + profileName + "</b>' will be "
-                        + (sqliteConfigured
-                                ? "deleted — optionally together with its database data — "
-                                : "deleted — ")
-                        + "and its tab closed.</html>");
+                "<html><b>This action is permanent.</b> The node profile will be deleted.</html>");
         warningLabel.setForeground(GuiColors.getContrastRed());
 
-        // ── Profile name (read-only) ──
-        JTextField nameField = new JTextField(profileName == null ? "" : profileName);
-        nameField.setEditable(false);
-        nameField.setFocusable(false);
-        nameField.setBackground(new JTextField().getBackground());
+        // ── Profile name (display only — the name is not editable, so a plain label, not a text field) ──
+        JLabel nameField = new JLabel(profileName == null ? "" : profileName);
 
         // ── Optional data deletion (only for per-profile SQLite databases) ──
         final JCheckBox deleteDataCheck = new JCheckBox(
@@ -82,9 +77,17 @@ public final class ProfileDeleteDialog {
 
         JPanel content = new JPanel(new MigLayout("insets 15, wrap 1, fillx", "[grow]", "[]"));
         content.add(new JLabel(IconFontSwing.buildIcon(FontAwesome.TRASH, 32, GuiColors.getContrastRed())));
-        content.add(new JLabel("<html><h2>Delete Profile</h2></html>"));
+        // Plain bold title (app font + bold) instead of an <h2> HTML heading:
+        // HTML element tags render at relative sizes (h2 = 1.5x, small = 0.83x)
+        // which made the dialog text look smaller than the rest of the app.
+        JLabel titleLabel = new JLabel("Delete Profile");
+        titleLabel.setFont(GuiFontManager.getBoldDefaultFont());
+        content.add(titleLabel);
         content.add(new JLabel(stateText), "growx");
-        content.add(warningLabel, "growx gaptop 10");
+        // MigLayout 11.4.2 requires comma-separated cell constraints (a space
+        // like "growx gaptop 10" throws IllegalArgumentException and previously
+        // killed the whole Delete action silently).
+        content.add(warningLabel, "growx, gaptop 10");
         content.add(new JLabel("Profile:"), "gaptop 10");
         content.add(nameField, "growx");
         if (sqliteConfigured) {
@@ -97,6 +100,9 @@ public final class ProfileDeleteDialog {
 
         JDialog dialog = new JDialog(owner, "Delete Profile",
                 Dialog.ModalityType.APPLICATION_MODAL);
+        // Every dialog text uses the application's current font (family + size),
+        // including the HTML labels (their base font follows the component font).
+        GuiFontManager.applyFontToTree(dialog, UIManager.getFont("Label.font"));
         dialog.getContentPane().add(content);
         dialog.pack();
         dialog.setLocationRelativeTo(owner);

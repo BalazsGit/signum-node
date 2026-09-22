@@ -179,16 +179,16 @@ class ProfileRuntimeServiceTest {
     }
 
     @Test
-    @DisplayName("the name suggester avoids the taken clone name")
+    @DisplayName("the name suggester continues the _cloneNN sequence for a clone-scheme source")
     void suggester_AvoidsTakenCloneName() {
         // Arrange
         Set<String> taken = Set.of("mainnet", "mainnet_clone");
 
         // Act
-        String suggested = ProfileNameSuggester.nextAvailableName("mainnet_clone", taken);
+        String suggested = ProfileNameSuggester.nextCloneName("mainnet_clone", taken);
 
-        // Assert
-        assertEquals("mainnet_clone_01", suggested);
+        // Assert — bare "_clone" counts as #1, so the next free one is #2
+        assertEquals("mainnet_clone2", suggested);
     }
 
     // ── renameProfile ───────────────────────────────────────────────────

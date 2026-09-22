@@ -1047,7 +1047,7 @@ public class AppearancePanel extends JPanel {
                 +
                 "<li><b>Refresh Profiles</b>: Synchronizes the profile list with the settings file on disk.</li>" +
                 "</ul>" +
-                "<p>Profiles are stored in the <code>gui-settings.json</code> file in your settings directory.</p>" +
+                "<p>Profiles are stored in the gui-settings.json file in your settings directory.</p>" +
                 "</body></html>";
 
         JOptionPane.showMessageDialog(this, message, "About Look and Feel Profiles", JOptionPane.INFORMATION_MESSAGE);

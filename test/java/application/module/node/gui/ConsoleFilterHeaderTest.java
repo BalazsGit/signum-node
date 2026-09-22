@@ -15,6 +15,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import javax.swing.JButton;
+import javax.swing.JFrame;
+import javax.swing.SwingUtilities;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -360,6 +362,48 @@ class ConsoleFilterHeaderTest {
             header.setSearchMatchIndicatorText("3/9");
             header.setSearchMatchIndicatorText("");
             assertEquals("", header.getSearchMatchIndicatorText(), "empty text must hide the label");
+        }
+
+        @Test
+        void chevrons_OnlyVisibleWhileSearchHasMatches() throws Exception {
+            // JComponent#isVisible() also requires the component to be
+            // displayable, so the header must live in a shown frame (the same
+            // pattern NodeConfigurationPanelUnsavedFilterTest uses).
+            final AtomicReference<JFrame> ownerRef = new AtomicReference<>();
+            SwingUtilities.invokeAndWait(() -> {
+                JFrame owner = new JFrame("chevron-visibility-test-owner");
+                owner.add(header);
+                owner.setSize(500, 200);
+                owner.setVisible(true);
+                ownerRef.set(owner);
+            });
+            try {
+                JButton next = findButtonByTooltip(header, "Next match");
+                JButton prev = findButtonByTooltip(header, "Previous match");
+                assertNotNull(next, "Next match button should exist");
+                assertNotNull(prev, "Previous match button should exist");
+
+                // Before any search there is nothing to navigate to: both
+                // chevrons must start hidden.
+                assertFalse(next.isVisible(), "before any search the next chevron must be hidden");
+                assertFalse(prev.isVisible(), "before any search the previous chevron must be hidden");
+
+                header.setSearchChevronsVisible(true);
+                assertTrue(next.isVisible(), "with matches the next chevron must be visible");
+                assertTrue(prev.isVisible(), "with matches the previous chevron must be visible");
+
+                header.setSearchChevronsVisible(false);
+                assertFalse(next.isVisible(), "without matches the next chevron must be hidden");
+                assertFalse(prev.isVisible(), "without matches the previous chevron must be hidden");
+            } finally {
+                SwingUtilities.invokeAndWait(() -> {
+                    JFrame owner = ownerRef.get();
+                    if (owner != null) {
+                        owner.setVisible(false);
+                        owner.dispose();
+                    }
+                });
+            }
         }
     }
 

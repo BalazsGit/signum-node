@@ -1,12 +1,8 @@
 package application.module.node.gui;
 
 import java.awt.BorderLayout;
-import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.FontMetrics;
 import java.awt.Insets;
-import java.awt.event.KeyAdapter;
-import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -15,7 +11,6 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 import javax.swing.AbstractButton;
-import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
@@ -28,8 +23,9 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.text.JTextComponent;
 
-import application.utils.gui.GuiIcons;
+import application.utils.gui.CheckboxGroupPanel;
 import application.utils.gui.ResponsiveToolbarScrollPane;
+import application.utils.gui.SearchMatchPanel;
 import application.utils.logging.event.CompositeFilter;
 import application.utils.logging.event.LevelFilter;
 import application.utils.logging.event.LogFilter;
@@ -77,14 +73,12 @@ public final class ConsoleFilterHeader extends JPanel {
 
     private JComboBox<String> profileCombo;
     private JTextField moduleField;
-    private JTextField searchField;
-
-    /** Chevron button: previous search match (navigates up) */
-    private JButton searchPrevButton;
-    /** Chevron button: next search match (navigates down) */
-    private JButton searchNextButton;
-    /** Match counter shown next to the search field (e.g. "1/23"); hidden while no search is active */
-    private JLabel searchMatchLabel;
+    /**
+     * Unified search box (field, match counter, chevron buttons) — shared
+     * with the node configuration panel's search. The header only wires its
+     * own listeners and delegates the public search API to the component.
+     */
+    private SearchMatchPanel searchPanel;
     /**
      * Fired (on the EDT) when the user presses Enter in the search field.
      * Convention (implemented by the owning console panel): the first Enter
@@ -181,10 +175,11 @@ public final class ConsoleFilterHeader extends JPanel {
         add(filterScroll, BorderLayout.CENTER);
     }
 
-    private JPanel buildLevelPanel() {
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        panel.setOpaque(false);
-        panel.setBorder(new TitledBorder("Level"));
+    private CheckboxGroupPanel buildLevelPanel() {
+        // Shared titled checkbox-group box (like the node configuration's
+        // "Show values" box): unchecking a level rebuilds the combined filter.
+        CheckboxGroupPanel panel = new CheckboxGroupPanel("Level");
+        panel.setChangeListener(button -> rebuildFilter());
 
         panel.add(new JLabel("Show: "));
 
@@ -205,11 +200,9 @@ public final class ConsoleFilterHeader extends JPanel {
         return panel;
     }
 
-    private JCheckBox addLevelCheckbox(JPanel panel, String text, LogLevel level) {
-        JCheckBox cb = new JCheckBox(text);
+    private JCheckBox addLevelCheckbox(CheckboxGroupPanel panel, String text, LogLevel level) {
+        JCheckBox cb = panel.addCheckbox(text);
         cb.putClientProperty("LogLevel", level);
-        cb.addActionListener(e -> rebuildFilter());
-        panel.add(cb);
         return cb;
     }
 
@@ -250,62 +243,16 @@ public final class ConsoleFilterHeader extends JPanel {
         return panel;
     }
 
-    private JPanel buildSearchPanel() {
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
-        panel.setOpaque(false);
-        // No extra EmptyBorder here: the 4px vertical spacing belongs to the
-        // scroll wrapper (initUI), so it also clears the wrapper's horizontal
-        // scrollbar when it appears.
-        panel.setBorder(new TitledBorder("Search"));
-
-        // Live "find in console" input — plain text only, no extra settings.
-        // Fires on every keystroke via the DocumentListener below.
-        searchField = new JTextField(16);
-        searchField.setToolTipText("Text to find in the console (live highlighting)");
-        searchField.getDocument().addDocumentListener(new DocListener(this::fireSearchTextChanged));
-        // Enter key: jump to / advance the active match (the owning panel
-        // interprets the first Enter as "scroll to the first match").
-        searchField.addKeyListener(new KeyAdapter() {
-            @Override
-            public void keyPressed(KeyEvent e) {
-                if (e.getKeyCode() == KeyEvent.VK_ENTER) {
-                    fireSearchEnter();
-                }
-            }
-        });
-
-        int iconSize = GuiIcons.sizeSmall();
-
-        // Chevron UP: previous match
-        searchPrevButton = new JButton(GuiIcons.chevronUp(iconSize));
-        searchPrevButton.setToolTipText("Previous match");
-        searchPrevButton.setFocusable(false);
-        searchPrevButton.setBorder(new EmptyBorder(2, 2, 2, 2));
-        searchPrevButton.setContentAreaFilled(false);
-        searchPrevButton.addActionListener(e -> fireSearchNavigation(false));
-
-        // Chevron DOWN: next match
-        searchNextButton = new JButton(GuiIcons.chevronDown(iconSize));
-        searchNextButton.setToolTipText("Next match");
-        searchNextButton.setFocusable(false);
-        searchNextButton.setBorder(new EmptyBorder(2, 2, 2, 2));
-        searchNextButton.setContentAreaFilled(false);
-        searchNextButton.addActionListener(e -> fireSearchNavigation(true));
-
-        // Match counter: "current/total" (e.g. "1/23") while a search is
-        // active. Sized to fit the current text (see
-        // setSearchMatchIndicatorText) so it hugs both the search field and
-        // the chevron buttons; hidden when there is no active query.
-        // NOTE: reduced JDK has no java.awt.SwingConstants — use JLabel.LEFT instead.
-        searchMatchLabel = new JLabel("", JLabel.LEFT);
-        searchMatchLabel.setToolTipText("Current match / total matches");
-        searchMatchLabel.setVisible(false);
-
-        panel.add(searchField);
-        panel.add(searchMatchLabel);
-        panel.add(searchPrevButton);
-        panel.add(searchNextButton);
-        return panel;
+    private SearchMatchPanel buildSearchPanel() {
+        // Unified search box shared with the node configuration panel: a
+        // compact, left-aligned "Search" titled box (16-column field, match
+        // counter, chevron buttons). The header is only a listener forwarder
+        // and a delegator of the public search API.
+        searchPanel = new SearchMatchPanel("Text to find in the console (live highlighting)");
+        searchPanel.setSearchTextListener(text -> fireSearchTextChanged());
+        searchPanel.setSearchNavigationListener(this::fireSearchNavigation);
+        searchPanel.setEnterListener(this::fireSearchEnter);
+        return searchPanel;
     }
 
     // ── Filter Building ──────────────────────────────────────────────────
@@ -475,30 +422,28 @@ public final class ConsoleFilterHeader extends JPanel {
      * @param text the indicator text (null or empty hides the label)
      */
     public void setSearchMatchIndicatorText(String text) {
-        if (searchMatchLabel == null) {
-            return;
-        }
-        if (text == null || text.isEmpty()) {
-            searchMatchLabel.setText("");
-            searchMatchLabel.setVisible(false);
-        } else {
-            // Size the label to the current text (small fixed width would
-            // leave a visible gap between the number and the chevrons for
-            // short values like "1/25"). The chevrons shift by at most one
-            // character width when the digit count changes (e.g. 9 -> 10).
-            FontMetrics fm = searchMatchLabel.getFontMetrics(searchMatchLabel.getFont());
-            Dimension matchSize = new Dimension(fm.stringWidth(text) + 4, fm.getHeight());
-            searchMatchLabel.setMinimumSize(matchSize);
-            searchMatchLabel.setPreferredSize(matchSize);
-            searchMatchLabel.setMaximumSize(matchSize);
-            searchMatchLabel.setText(text);
-            searchMatchLabel.setVisible(true);
+        if (searchPanel != null) {
+            searchPanel.setMatchIndicatorText(text);
         }
     }
 
     /** @return the current match indicator text (empty while the label is hidden) */
     public String getSearchMatchIndicatorText() {
-        return searchMatchLabel == null ? "" : searchMatchLabel.getText();
+        return searchPanel == null ? "" : searchPanel.getMatchIndicatorText();
+    }
+
+    /**
+     * Shows or hides the search navigation chevron buttons (previous/next
+     * match). They are only useful while the current search has at least one
+     * match, so the owning console panel drives this from the match count.
+     * Must be called on the Swing EDT.
+     *
+     * @param visible true while the search has matches
+     */
+    public void setSearchChevronsVisible(boolean visible) {
+        if (searchPanel != null) {
+            searchPanel.setChevronsVisible(visible);
+        }
     }
 
     /** Fires the search text listener with the current field text. EDT-only. */
@@ -580,7 +525,11 @@ public final class ConsoleFilterHeader extends JPanel {
         if (moduleField != null) {
             moduleField.setText("");
         }
-        searchField.setText("");
+        // Direct field access (no listener fire): resetToDefaults is a
+        // programmatic reset, not a user keystroke.
+        if (searchPanel != null) {
+            searchPanel.getSearchField().setText("");
+        }
 
         rebuildFilter();
     }
@@ -677,15 +626,16 @@ public final class ConsoleFilterHeader extends JPanel {
      * Returns the current search text.
      */
     public String getSearchText() {
-        return searchField.getText();
+        return searchPanel == null ? "" : searchPanel.getSearchText();
     }
 
     /**
-     * Sets the search text (fires the live search listener if the text changes).
+     * Sets the search text (fires the live search listener).
      */
     public void setSearchText(String text) {
-        searchField.setText(text != null ? text : "");
-        fireSearchTextChanged();
+        if (searchPanel != null) {
+            searchPanel.setSearchText(text);
+        }
     }
 
     @Override

@@ -11,10 +11,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import javax.swing.JButton;
+import javax.swing.JFrame;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
 import java.util.EnumSet;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -221,6 +223,53 @@ class UnifiedConsolePanelSearchIndicatorTest {
             SwingUtilities.invokeAndWait(() -> { });
         } catch (Exception e) {
             throw new AssertionError("EDT pump failed", e);
+        }
+    }
+
+    @Test
+    @DisplayName("chevrons are visible only while the search has matches")
+    void chevrons_FollowMatchCount() throws Exception {
+        seedConsole("nothing to see\n");
+        ConsoleFilterHeader h = header();
+
+        h.setSearchText("error");
+        assertChevronVisibility(false);
+
+        h.setSearchText("see");
+        assertChevronVisibility(true);
+
+        h.setSearchText("");
+        assertChevronVisibility(false);
+    }
+
+    /**
+     * Shows the panel in a frame (JComponent#isVisible() also requires a
+     * displayable tree) and asserts both chevron buttons' visibility.
+     */
+    private void assertChevronVisibility(boolean expected) throws Exception {
+        final AtomicReference<JFrame> ownerRef = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() -> {
+            JFrame owner = new JFrame("chevron-visibility-test-owner");
+            owner.add(panel);
+            owner.setSize(600, 400);
+            owner.setVisible(true);
+            ownerRef.set(owner);
+        });
+        try {
+            JButton next = findButtonByTooltip(panel, "Next match");
+            JButton prev = findButtonByTooltip(panel, "Previous match");
+            assertNotNull(next, "Next match chevron must exist");
+            assertNotNull(prev, "Previous match chevron must exist");
+            assertEquals(expected, next.isVisible(), "next chevron visibility must follow the match count");
+            assertEquals(expected, prev.isVisible(), "previous chevron visibility must follow the match count");
+        } finally {
+            SwingUtilities.invokeAndWait(() -> {
+                JFrame owner = ownerRef.get();
+                if (owner != null) {
+                    owner.setVisible(false);
+                    owner.dispose();
+                }
+            });
         }
     }
 

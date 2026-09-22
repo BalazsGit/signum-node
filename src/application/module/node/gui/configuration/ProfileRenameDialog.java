@@ -3,6 +3,7 @@ package application.module.node.gui.configuration;
 import application.module.node.profile.NodeProfileRepository;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
+import application.utils.gui.GuiFontManager;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
@@ -48,21 +49,19 @@ public final class ProfileRenameDialog {
         final Window owner = SwingUtilities.windowForComponent(parent);
         final String[] confirmedName = { null };
 
-        // ── Current profile (read-only) ──
-        JTextField currentField = new JTextField(currentProfileName == null ? "" : currentProfileName);
-        currentField.setEditable(false);
-        currentField.setFocusable(false);
-        currentField.setBackground(new JTextField().getBackground());
+        // ── Current profile (display only — the name is not editable, so a plain label, not a text field) ──
+        JLabel currentField = new JLabel(currentProfileName == null ? "" : currentProfileName);
 
         // ── Node-state text (D3: state-preserving rename) ──
         final String stateText;
         if (nodeRunning && nodeUserPaused) {
             stateText = "<html>The node is <b>running (paused by you)</b> — it will be <b>stopped</b> "
                     + "for the duration of the rename and started again when it finishes, "
-                    + "<b>then paused as before</b>.</html>";
+                    + "<b>then paused as before</b>. This may take a while; please wait.</html>";
         } else if (nodeRunning) {
             stateText = "<html>The node is <b>running</b> — it will be <b>stopped</b> "
-                    + "for the duration of the rename and started again when it finishes.</html>";
+                    + "for the duration of the rename and started again when it finishes. "
+                    + "This may take a while; please wait.</html>";
         } else {
             stateText = "<html>The node is <b>not running</b> — it will stay stopped.</html>";
         }
@@ -108,16 +107,21 @@ public final class ProfileRenameDialog {
 
         JPanel content = new JPanel(new MigLayout("insets 15, wrap 1, fillx", "[grow]", "[]"));
         content.add(new JLabel(IconFontSwing.buildIcon(FontAwesome.PENCIL_SQUARE_O, 32, GuiColors.getButtonIcon())));
-        content.add(new JLabel("<html><h2>Rename Profile</h2></html>"));
+        // Plain bold title (app font + bold) instead of an <h2> HTML heading.
+        JLabel titleLabel = new JLabel("Rename Profile");
+        titleLabel.setFont(GuiFontManager.getBoldDefaultFont());
+        content.add(titleLabel);
         content.add(new JLabel(stateText), "growx");
         content.add(new JLabel("Current profile:"), "gaptop 10");
         content.add(currentField, "growx");
         content.add(new JLabel("New profile name:"), "gaptop 10");
         content.add(nameField, "growx");
         content.add(errorLabel, "growx");
+        // Plain info text at the app font size (no <small> tag, which rendered
+        // at 0.83x the base size).
         content.add(new JLabel(
-                "<html><small>The rename includes the profile's data paths: a per-profile SQLite database<br>"
-                        + "is moved to the new name when the profile uses one.</small></html>"),
+                "The rename includes the profile's data paths: a per-profile SQLite database "
+                        + "is moved to the new name when the profile uses one."),
                 "gaptop 10");
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         buttons.add(renameBtn);
@@ -126,6 +130,9 @@ public final class ProfileRenameDialog {
 
         JDialog dialog = new JDialog(owner, "Rename Profile",
                 Dialog.ModalityType.APPLICATION_MODAL);
+        // Every dialog text uses the application's current font (family + size),
+        // including the HTML state label (its base font follows the component font).
+        GuiFontManager.applyFontToTree(dialog, UIManager.getFont("Label.font"));
         dialog.getContentPane().add(content);
         dialog.pack();
         dialog.setLocationRelativeTo(owner);
