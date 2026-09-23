@@ -246,6 +246,11 @@ public class ApplicationKernel {
             public String getTargetProfileName() {
                 return targetProfile;
             }
+
+            @Override
+            public boolean isHeadless() {
+                return isHeadless;
+            }
         };
     }
 }

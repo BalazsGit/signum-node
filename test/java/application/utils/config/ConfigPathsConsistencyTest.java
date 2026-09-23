@@ -1,5 +1,6 @@
 package application.utils.config;
 
+import application.module.browser.BrowserModule;
 import application.module.database.logging.DatabaseLoggingProfile;
 import application.module.database.DatabaseModule;
 import application.module.node.NodeModule;
@@ -60,6 +61,12 @@ class ConfigPathsConsistencyTest {
         void databaseModuleId_usesSsot() {
             assertEquals(ModuleIds.DATABASE, new DatabaseModule().getId());
         }
+
+        @Test
+        @DisplayName("BrowserModule.ID equals ModuleIds.BROWSER")
+        void browserModuleId_usesSsot() {
+            assertEquals(ModuleIds.BROWSER, BrowserModule.ID);
+        }
     }
 
     @Nested
@@ -117,6 +124,7 @@ class ConfigPathsConsistencyTest {
         void ssotLiterals_keepCanonicalValues() {
             assertEquals("node", ModuleIds.NODE);
             assertEquals("database", ModuleIds.DATABASE);
+            assertEquals("browser", ModuleIds.BROWSER);
             assertEquals("profiles", ModuleIds.CATEGORY_PROFILES);
             assertEquals("logging", ModuleIds.CATEGORY_LOGGING);
             assertEquals("./conf", ConfigPaths.RUNTIME_CONF_ROOT);

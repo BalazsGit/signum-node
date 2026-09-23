@@ -34,6 +34,9 @@ public final class ModuleIds {
     /** Database module identifier (conf path segment + logging scope + module registry ID). */
     public static final String DATABASE = "database";
 
+    /** Browser module identifier (conf path segment + logging scope + module registry ID). */
+    public static final String BROWSER = "browser";
+
     /**
      * Module profile category (path segment: {@code {conf}/{module}/profiles/}).
      * Kept in sync with {@link PropertiesProfileLoader#DEFAULT_CATEGORY_PROFILES}.

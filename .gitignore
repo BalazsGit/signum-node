@@ -54,3 +54,18 @@ result
 # Keep the real license file.
 /*.txt
 !/LICENSE.txt
+
+# Runtime artifacts (created at first run / by the app at runtime; not part of the build).
+# Tracked defaults under conf/ and settings/ remain tracked; only runtime-generated files are ignored.
+/database/
+/measurement/
+/debug/
+/settings/gui-settings.json
+/conf/node/profile.json
+
+# IDE / agent scratch
+/.qoder/
+
+# Browser module (web3-browser plan, F0/F1): JCEF native distribution + browser runtime state
+/jcef/
+/conf/browser/

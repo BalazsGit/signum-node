@@ -3,3 +3,4 @@ application.module.logging.LoggingModule
 application.module.system.SystemConsoleModule
 application.module.node.NodeModule
 application.module.database.DatabaseModule
+application.module.browser.BrowserModule

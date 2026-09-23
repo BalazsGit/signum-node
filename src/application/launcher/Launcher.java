@@ -53,6 +53,10 @@ public class Launcher {
         if (System.getProperty("java.util.logging.manager") == null) {
             System.setProperty("java.util.logging.manager", "application.module.node.util.SignumLogManager");
         }
+        // Note (JCEF/browser module): no early setup is needed here. The engine
+        // installs its own native library loader (SystemBootstrap) during
+        // initialization, before the first org.cef.* use — see
+        // application.module.browser.core.JcefNativeLoader.
     }
 
     /**

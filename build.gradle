@@ -91,6 +91,146 @@ dependencies {
     testImplementation 'org.mockito:mockito-junit-jupiter:5.23.0'
 }
 
+// ── JCEF (browser module) ──────────────────────────────────────────────────────────────
+// Pinned JCEF distribution (gradle.properties; provenance: implementation plan Appendix A).
+// Two artifacts per platform:
+//   jcef-api            : pure Java API (org.cef.*) + transitive JOGL/gluegen (JNA) ->
+//                         shadow-safe, ends up in the fat jar like any other dependency
+//   jcef-natives-<key>  : the full native CEF distribution (libcef, subprocesses, locales).
+//                         NEVER placed on the classpath: the `extractJcef` task unpacks it
+//                         into the dedicated, git-ignored jcef/<os>-<arch>/ directory and
+//                         the engine runs from there (plan D1/D2). Cross-build with
+//                         -Pjcef.os=windows|linux|macosx and -Pjcef.arch=amd64|arm64.
+def jcefVersion = project.property('jcef.version')
+def jcefOsName = System.getProperty('os.name').toLowerCase()
+def jcefOs = project.findProperty('jcef.os') ?:
+        (jcefOsName.startsWith('windows') ? 'windows' : jcefOsName.startsWith('mac') ? 'macosx' : 'linux')
+def jcefArchName = System.getProperty('os.arch').toLowerCase()
+def jcefArch = project.findProperty('jcef.arch') ?:
+        (jcefArchName.contains('aarch64') || jcefArchName.contains('arm64') ? 'arm64' : 'amd64')
+def jcefKey = "${jcefOs}-${jcefArch}"
+def jcefRoot = file('jcef')
+
+configurations {
+    // Build-only configuration: consumed by extractJcef, must not leak onto the app classpath.
+    jcefNatives
+}
+
+dependencies {
+    implementation "me.friwi:jcef-api:${jcefVersion}"
+    jcefNatives "me.friwi:jcef-natives-${jcefKey}:${jcefVersion}"
+}
+
+/**
+ * Compares the SHA-256 of a resolved JCEF artifact against its pin in gradle.properties.
+ * The API pin is always enforced; a missing natives pin for the current platform warns
+ * (add the reported hash after first verification on that platform).
+ */
+def sha256Of = { File f ->
+    def digest = java.security.MessageDigest.getInstance('SHA-256')
+    f.newInputStream().withCloseable { input ->
+        def buffer = new byte[8192]
+        int n
+        while ((n = input.read(buffer)) > 0) {
+            digest.update(buffer, 0, n)
+        }
+    }
+    digest.digest().collect { String.format('%02x', it) }.join()
+}
+
+def verifyJcefArtifact = { String label, String pinKey, File file ->
+    def actual = sha256Of(file)
+    def pin = (providers.gradleProperty(pinKey).orNull ?: '').trim()
+    if (pin.isEmpty()) {
+        if (label == 'jcef-api') {
+            throw new GradleException("JCEF jcef-api: no SHA-256 pin. Add to gradle.properties:\n  ${pinKey}=${actual}")
+        }
+        logger.warn("JCEF ${label}: no SHA-256 pin yet (${pinKey} is empty). Add after first verification: ${pinKey}=${actual}")
+        return
+    }
+    if (actual != pin.toLowerCase()) {
+        throw new GradleException("JCEF ${label}: SHA-256 MISMATCH!\n  pinned:  ${pin}\n  actual:  ${actual}\n  artifact: ${file}")
+    }
+    logger.lifecycle("JCEF ${label}: SHA-256 OK")
+}
+
+tasks.register('verifyJcefChecksums') {
+    group = 'verification'
+    description = 'Verifies the SHA-256 of the JCEF artifacts (API + platform natives) against the pins in gradle.properties'
+    def apiFile = project.provider {
+        configurations.compileClasspath.files.find { it.name.startsWith('jcef-api-') && it.name.endsWith('.jar') }
+    }
+    def nativesFile = project.provider { configurations.jcefNatives.singleFile }
+    inputs.files(apiFile, nativesFile)
+    doLast {
+        verifyJcefArtifact('jcef-api', 'jcef.sha256.api', apiFile.get())
+        verifyJcefArtifact("jcef-natives-${jcefKey}", "jcef.sha256.${jcefKey}", nativesFile.get())
+    }
+}
+
+/**
+ * Unpacks the platform natives artifact into jcef/<os>-<arch>/ (the dedicated directory
+ * the CEF engine runs from, plan D1/D2).
+ *
+ * Artifact layout (verified F0, CEF 146.0.10): the natives JAR does not contain the
+ * distribution directly — it wraps it as a single embedded *.tar.gz entry (plus
+ * META-INF and a me/ marker package). The tar root IS the distribution root:
+ * libcef(.dll/.so/.dylib), the CEF subprocess (jcef_helper.exe on Windows), locales/,
+ * pak/snapshot files and build_meta.json.
+ *
+ * Extraction is two-step:
+ *   1. pull the embedded tar.gz out of the jar (into build/jcef/),
+ *   2. extract it with the system `tar` (bsdtar on Windows/macOS, GNU tar on Linux —
+ *      Ant's untar cannot parse this GNU-format archive).
+ * Idempotent: re-runs are no-ops while the VERSION file matches the pinned version.
+ */
+tasks.register('extractJcef') {
+    dependsOn verifyJcefChecksums
+    def outDir = new File(jcefRoot, jcefKey)
+    def versionFile = new File(outDir, 'VERSION')
+    def tarFile = layout.buildDirectory.file("jcef/${jcefKey}/dist.tar.gz").get().asFile
+    inputs.files(configurations.jcefNatives)
+    outputs.dir(outDir)
+    doLast {
+        if (versionFile.exists() && versionFile.text.trim() == jcefVersion) {
+            logger.lifecycle("JCEF ${jcefKey} already extracted (${jcefVersion}) - skipping")
+            return
+        }
+        def jarFile = configurations.jcefNatives.singleFile
+        java.util.zip.ZipFile zf = new java.util.zip.ZipFile(jarFile)
+        try {
+            def entry = zf.entries().find { it.name.endsWith('.tar.gz') }
+            if (entry == null) {
+                throw new GradleException("JCEF natives jar contains no embedded .tar.gz: ${jarFile}")
+            }
+            tarFile.parentFile.mkdirs()
+            zf.getInputStream(entry).with { input ->
+                tarFile.withOutputStream { output -> input.transferTo(output) }
+            }
+        } finally {
+            zf.close()
+        }
+        logger.lifecycle("JCEF ${jcefKey}: extracted embedded tar.gz (${(tarFile.length() / 1024 / 1024).round(1)} MB)")
+        delete outDir
+        outDir.mkdirs()
+        def process = new ProcessBuilder('tar', '-xzf', tarFile.absolutePath, '-C', outDir.absolutePath)
+                .redirectError(ProcessBuilder.Redirect.INHERIT)
+                .start()
+        def code = process.waitFor()
+        if (code != 0) {
+            throw new GradleException("System 'tar' failed (exit ${code}) while extracting ${tarFile}. " +
+                    'A tar tool is required (bundled with Windows 10+/macOS as bsdtar; GNU tar on Linux).')
+        }
+        versionFile.text = jcefVersion
+        logger.lifecycle("JCEF ${jcefKey}: distribution ready at ${outDir}")
+    }
+}
+
+// `run` needs the native distribution in place (first run downloads ~150 MB, then offline).
+tasks.named('run') {
+    dependsOn extractJcef
+}
+
 test {
     useJUnitPlatform()
     testLogging {
@@ -252,6 +392,9 @@ tasks.register('dist', Zip) {
     from "LICENSE.txt"
     from "README.md"
     from("src") { into "src" }
+    // JCEF native distribution (plan D1/D2): jcef/<os>-<arch>/ next to the fat jar.
+    dependsOn extractJcef
+    from(jcefRoot) { into 'jcef' }
     archiveFileName = "${baseNodeFileName}.zip"
     // Gradle 9 normalizes archive entry timestamps to a fixed 1980 epoch (reproducible
     // archives by default). Stamp them with the local build time instead, so the zip
@@ -264,7 +407,7 @@ def appName = "SignumNode"
 tasks.register('jpackageWin', Exec) {
     group = 'distribution'
     description = 'Builds a Windows EXE using jpackage'
-    dependsOn shadowJar, 'unzipWindowsJDK'
+    dependsOn shadowJar, 'unzipWindowsJDK', stageJcefData
 
     def rawVersion = details.lastTag ?: "1.0.0"
     def version = rawVersion.replaceAll("[^0-9.]", "")
@@ -305,6 +448,9 @@ tasks.register('jpackageWin', Exec) {
         '--name', appName,
         '--main-jar', "${baseNodeFileName}-all.jar",
         '--main-class', application.mainClass.get(),
+        // JCEF native distribution (plan D1/D2): bundled as plain app data so that
+        // JcefPathResolver finds <app-image>/jcef/<os>-<arch>/ at runtime.
+        '--data-dir', "$buildDir/jpackage-data",
         '--app-version', version,
         '--icon', "${projectDir}/resources/images/signum_overlay_logo.ico"
     ]
@@ -406,6 +552,14 @@ tasks.register('unzipWindowsJDK', Copy) {
     }
 }
 
+tasks.register('stageJcefData', Copy) {
+    description = 'Stages the jcef/ native distribution into build/jpackage-data for jpackage --data-dir'
+    dependsOn extractJcef
+    from jcefRoot
+    into layout.buildDirectory.dir('jpackage-data')
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
 tasks.register('zipWinExe', Zip) {
     dependsOn jpackageWin
     dependsOn unzipWindowsJDK
@@ -432,6 +586,9 @@ tasks.register('zipWinExe', Zip) {
     from "README.md"
     from("src") { into "src" }
     into('jre') { from "build/distributions/jre" }
+    // JCEF native distribution (plan D1/D2): jcef/<os>-<arch>/ next to the app-image.
+    dependsOn extractJcef
+    from(jcefRoot) { into 'jcef' }
 
     archiveFileName = "${baseNodeFileName}-win_x64.zip"
     destinationDirectory = file("$buildDir/distributions")
