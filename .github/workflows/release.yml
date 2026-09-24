@@ -39,7 +39,7 @@ jobs:
           java-version: '25'
 
       - name: Build artifacts
-        run: ./gradlew unzipWindowsJDK shadowJar jpackageWin zipWinExe release
+        run: ./gradlew unzipWindowsJDK shadowJar jpackageWin jpackageWinSlim zipWinExe zipWinExeSlim release
 
       - name: Create GitHub Release Draft
         uses: softprops/action-gh-release@v2
@@ -55,10 +55,18 @@ jobs:
           file_rename: true
           file_name: signum-node-${{ env.VERSION }}.zip
 
-      - name: Upload - signum-node-win_x64.zip
+      - name: Upload - signum-node-win_x64-with-browser.zip
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          files: ./build/distributions/signum-node-win_x64.zip
+          files: ./build/distributions/signum-node-win_x64-with-browser.zip
           file_rename: true
-          file_name: signum-node-${{ env.VERSION }}-win_x64.zip
+          file_name: signum-node-${{ env.VERSION }}-win_x64-with-browser.zip
+
+      - name: Upload - signum-node-win_x64-slim.zip
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: ./build/distributions/signum-node-win_x64-slim.zip
+          file_rename: true
+          file_name: signum-node-${{ env.VERSION }}-win_x64-slim.zip

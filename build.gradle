@@ -111,6 +111,24 @@ def jcefArch = project.findProperty('jcef.arch') ?:
 def jcefKey = "${jcefOs}-${jcefArch}"
 def jcefRoot = file('jcef')
 
+// Runtime JCEF auto-install (JcefProvisioner): the version + SHA-256 pins from
+// gradle.properties are stamped into a resource so the app can download and
+// verify the pinned natives artifact itself (Maven Central). Single source of
+// truth stays gradle.properties.
+processResources {
+    filesMatching('jcef-release.properties') {
+        expand(
+                jcefVersion: jcefVersion,
+                jcefSha256WindowsAmd64: (project.findProperty('jcef.sha256.windows-amd64') ?: ''),
+                jcefSha256WindowsArm64: (project.findProperty('jcef.sha256.windows-arm64') ?: ''),
+                jcefSha256LinuxAmd64: (project.findProperty('jcef.sha256.linux-amd64') ?: ''),
+                jcefSha256LinuxArm64: (project.findProperty('jcef.sha256.linux-arm64') ?: ''),
+                jcefSha256MacosxAmd64: (project.findProperty('jcef.sha256.macosx-amd64') ?: ''),
+                jcefSha256MacosxArm64: (project.findProperty('jcef.sha256.macosx-arm64') ?: '')
+        )
+    }
+}
+
 configurations {
     // Build-only configuration: consumed by extractJcef, must not leak onto the app classpath.
     jcefNatives
@@ -404,59 +422,67 @@ tasks.register('dist', Zip) {
 
 def appName = "SignumNode"
 
-tasks.register('jpackageWin', Exec) {
-    group = 'distribution'
-    description = 'Builds a Windows EXE using jpackage'
-    dependsOn shadowJar, 'unzipWindowsJDK', stageJcefData
+// Plan D18: the Windows release is built in two variants from one build —
+// `with-browser` (the JCEF native distribution embedded via jpackage
+// --data-dir) and `slim` (no JCEF: the browser tab's one-time install dialog
+// downloads it on demand via JcefProvisioner).
+def registerJpackageWinTask = { String taskName, String outputRelDir, boolean bundleJcef ->
+    tasks.register(taskName, Exec) {
+        group = 'distribution'
+        description = "Builds a Windows app-image using jpackage (${bundleJcef ? 'with bundled JCEF' : 'slim — JCEF on demand'})"
+        dependsOn shadowJar, 'unzipWindowsJDK'
+        if (bundleJcef) {
+            dependsOn stageJcefData
+        }
 
-    def rawVersion = details.lastTag ?: "1.0.0"
-    def version = rawVersion.replaceAll("[^0-9.]", "")
-    if (!version.contains(".")) version = "${version}.0"
-    def parts = version.tokenize('.').collect { it as int }
-    while (parts.size() < 2) parts << 0
-    while (parts.size() > 4) parts = parts[0..3]
-    if (parts[0] > 255) parts[0] = 1
-    version = parts.join('.')
+        def rawVersion = details.lastTag ?: "1.0.0"
+        def version = rawVersion.replaceAll("[^0-9.]", "")
+        if (!version.contains(".")) version = "${version}.0"
+        def parts = version.tokenize('.').collect { it as int }
+        while (parts.size() < 2) parts << 0
+        while (parts.size() > 4) parts = parts[0..3]
+        if (parts[0] > 255) parts[0] = 1
+        version = parts.join('.')
 
-    project.ext.jpackageVersion = version
+        project.ext.jpackageVersion = version
 
-    def outputDir = "$buildDir/jpackage"
-    def exePath = file("$outputDir/${appName}.exe")
+        def outputDir = "$buildDir/$outputRelDir"
 
-    inputs.file("$buildDir/libs/${baseNodeFileName}-all.jar")
-    outputs.dir(outputDir)
+        inputs.file("$buildDir/libs/${baseNodeFileName}-all.jar")
+        outputs.dir(outputDir)
 
-    doFirst {
-        println "==> Running jpackage with:"
-        println "  outputDir: ${outputDir}"
-        println "  version:   ${version}"
-        // jpackage fails if the app-image directory is left over from a previous build;
-        // the task re-runs whenever the shadow jar changes, so always start from a clean dir.
-        delete(outputDir)
-        mkdir(outputDir)
-    }
+        doFirst {
+            println "==> Running jpackage with:"
+            println "  outputDir: ${outputDir}"
+            println "  version:   ${version}"
+            // jpackage fails if the app-image directory is left over from a previous build;
+            // the task re-runs whenever the shadow jar changes, so always start from a clean dir.
+            delete(outputDir)
+            mkdir(outputDir)
+        }
 
-    commandLine = [
-        "${System.getenv('JAVA_HOME')}/bin/jpackage",
-        '--type', 'app-image',
-        // Bundle exactly the same Zulu 25 JRE that is shipped in the zip's
-        // 'jre/' folder, so the app-image runtime and the standalone JRE are
-        // always consistent (independent of the local JAVA_HOME).
-        '--runtime-image', "$buildDir/distributions/jre",
-        '--input', "$buildDir/libs",
-        '--dest', outputDir,
-        '--name', appName,
-        '--main-jar', "${baseNodeFileName}-all.jar",
-        '--main-class', application.mainClass.get(),
-        // JCEF native distribution (plan D1/D2): bundled as plain app data so that
-        // JcefPathResolver finds <app-image>/jcef/<os>-<arch>/ at runtime.
-        '--data-dir', "$buildDir/jpackage-data",
-        '--app-version', version,
-        '--icon', "${projectDir}/resources/images/signum_overlay_logo.ico"
-    ]
-
-        //def exeName = "${appName}-${version}.exe"
-        //def exePath2 = file("$outputDir/${exeName}")
+        def command = [
+            "${System.getenv('JAVA_HOME')}/bin/jpackage",
+            '--type', 'app-image',
+            // Bundle exactly the same Zulu 25 JRE that is shipped in the zip's
+            // 'jre/' folder, so the app-image runtime and the standalone JRE are
+            // always consistent (independent of the local JAVA_HOME).
+            '--runtime-image', "$buildDir/distributions/jre",
+            '--input', "$buildDir/libs",
+            '--dest', outputDir,
+            '--name', appName,
+            '--main-jar', "${baseNodeFileName}-all.jar",
+            '--main-class', application.mainClass.get(),
+            '--app-version', version,
+            '--icon', "${projectDir}/resources/images/signum_overlay_logo.ico"
+        ]
+        if (bundleJcef) {
+            // JCEF native distribution (plan D1/D2): bundled as plain app data so that
+            // JcefPathResolver finds <app-image>/jcef/<os>-<arch>/ at runtime.
+            command << '--data-dir'
+            command << "$buildDir/jpackage-data"
+        }
+        commandLine = command
 
         doLast {
             println "==> jpackage output listing:"
@@ -464,7 +490,10 @@ tasks.register('jpackageWin', Exec) {
                 println "  - ${it}"
             }
         }
+    }
 }
+registerJpackageWinTask('jpackageWin', 'jpackage', true)
+registerJpackageWinTask('jpackageWinSlim', 'jpackage-slim', false)
 
 import de.undercouch.gradle.tasks.download.Download
 
@@ -560,50 +589,62 @@ tasks.register('stageJcefData', Copy) {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
-tasks.register('zipWinExe', Zip) {
-    dependsOn jpackageWin
-    dependsOn unzipWindowsJDK
+def registerZipWinTask = { String taskName, String jpackageTaskName, String appImageRelDir, boolean bundleJcef ->
+    tasks.register(taskName, Zip) {
+        group = 'distribution'
+        description = "Packages the Windows release zip (${bundleJcef ? 'with bundled JCEF' : 'slim — no JCEF'})"
+        dependsOn jpackageTaskName
+        dependsOn unzipWindowsJDK
 
-    def appImageDir = "${project.buildDir}/jpackage/${appName}"
+        def appImageDir = "${project.buildDir}/${appImageRelDir}/${appName}"
 
-    from(appImageDir) {
-        include "**/*"
+        from(appImageDir) {
+            include "**/*"
+        }
+
+        doFirst {
+            // Ensure an empty file exists to be copied as node.properties and logging.properties
+            def emptyFile = file("$buildDir/empty.properties")
+            emptyFile.parentFile.mkdirs()
+            emptyFile.write('')
+        }
+
+        from(file("$buildDir/empty.properties")) { into "conf/node"; rename { "node.properties" } }
+        from(file("$buildDir/empty.properties")) { into "conf/node/logging"; rename { "logging.properties" } }
+        from("resources/conf/node/profiles") { into "conf/node/profiles" } // Copy default node profile from resources
+        from("resources/conf/node/logging") { into "conf/node/logging" } // Copy default node logging config from resources
+        into('html') { from "html" }
+        from "LICENSE.txt"
+        from "README.md"
+        from("src") { into "src" }
+        into('jre') { from "build/distributions/jre" }
+        if (bundleJcef) {
+            // JCEF native distribution (plan D1/D2): jcef/<os>-<arch>/ next to the app-image.
+            // The slim variant deliberately omits it: the browser tab's install dialog
+            // downloads the OS-specific artifact at runtime, and the pinned
+            // jcef-release.properties stays inside the fat jar for that purpose.
+            dependsOn extractJcef
+            from(jcefRoot) { into 'jcef' }
+        }
+
+        archiveFileName = "${baseNodeFileName}-win_x64${bundleJcef ? '-with-browser' : '-slim'}.zip"
+        destinationDirectory = file("$buildDir/distributions")
+        // Same as `dist`: show the local build time on the archive entries instead of the
+        // fixed 1980 reproducible epoch that Gradle 9 uses by default.
+        reproducibleFileTimestamp = archiveBuildTimestamp
     }
-
-    doFirst {
-        // Ensure an empty file exists to be copied as node.properties and logging.properties
-        def emptyFile = file("$buildDir/empty.properties")
-        emptyFile.parentFile.mkdirs()
-        emptyFile.write('')
-    }
-
-    from(file("$buildDir/empty.properties")) { into "conf/node"; rename { "node.properties" } }
-    from(file("$buildDir/empty.properties")) { into "conf/node/logging"; rename { "logging.properties" } }
-    from("resources/conf/node/profiles") { into "conf/node/profiles" } // Copy default node profile from resources
-    from("resources/conf/node/logging") { into "conf/node/logging" } // Copy default node logging config from resources
-    into('html') { from "html" }
-    from "LICENSE.txt"
-    from "README.md"
-    from("src") { into "src" }
-    into('jre') { from "build/distributions/jre" }
-    // JCEF native distribution (plan D1/D2): jcef/<os>-<arch>/ next to the app-image.
-    dependsOn extractJcef
-    from(jcefRoot) { into 'jcef' }
-
-    archiveFileName = "${baseNodeFileName}-win_x64.zip"
-    destinationDirectory = file("$buildDir/distributions")
-    // Same as `dist`: show the local build time on the archive entries instead of the
-    // fixed 1980 reproducible epoch that Gradle 9 uses by default.
-    reproducibleFileTimestamp = archiveBuildTimestamp
 }
+registerZipWinTask('zipWinExe', 'jpackageWin', 'jpackage', true)
+registerZipWinTask('zipWinExeSlim', 'jpackageWinSlim', 'jpackage-slim', false)
 
 import org.gradle.crypto.checksum.Checksum
 
 tasks.register('release', Checksum) {
-    dependsOn test, dist, zipWinExe
+    dependsOn test, dist, zipWinExe, zipWinExeSlim
     files = files([
         "build/distributions/${baseNodeFileName}.zip",
-        "build/distributions/${baseNodeFileName}-win_x64.zip",
+        "build/distributions/${baseNodeFileName}-win_x64-with-browser.zip",
+        "build/distributions/${baseNodeFileName}-win_x64-slim.zip",
     ])
 }
 dist.mustRunAfter(buildOpenApi)

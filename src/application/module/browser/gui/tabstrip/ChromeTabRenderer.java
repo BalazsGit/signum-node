@@ -2,6 +2,7 @@ package application.module.browser.gui.tabstrip;
 
 import application.module.browser.gui.animation.TabAnimation;
 import application.module.browser.model.tab.BrowserTab;
+import application.utils.gui.GuiConstants;
 import application.utils.i18n.I18n;
 
 import java.awt.BasicStroke;
@@ -40,13 +41,33 @@ import javax.swing.UIManager;
  */
 final class ChromeTabRenderer extends JComponent implements ListCellRenderer<BrowserTab> {
 
-    static final int HEIGHT = 36;
+    /**
+     * The tab strip's height, derived from the app's UI font (Appearance
+     * settings) with a 36 px floor — a larger UI font yields taller tabs.
+     */
+    static final int HEIGHT = tabHeight();
     /** Hit area of the close button at the cell's right edge (px). */
     static final int CLOSE_ZONE = 26;
     private static final int PADDING_X = 10;
-    private static final int ICON_SIZE = 16;
+    /** Favicon/placeholder size follows the app's toolbar icon size (Appearance). */
+    private static final int ICON_SIZE = Math.max(14, (int) Math.round(GuiConstants.getToolBarIconSize()));
     private static final int ICON_GAP = 6;
-    private static final float TITLE_FONT_SIZE = 12f;
+    /** The tab title font follows the app's UI label font (Appearance settings). */
+    private static final Font TITLE_FONT = labelFont();
+    /** Inset of the rounded tab shape inside its cell (the visible gap). */
+    private static final int TAB_INSET_X = 2;
+    private static final int TAB_INSET_TOP = 3;
+    private static final int TAB_RADIUS = 10;
+
+    private static int tabHeight() {
+        float size = labelFont().getSize2D();
+        return Math.max(36, (int) Math.round(size * 2.9f));
+    }
+
+    private static Font labelFont() {
+        Font font = UIManager.getFont("Label.font");
+        return font != null ? font : new Font(Font.SANS_SERIF, Font.PLAIN, 12);
+    }
 
     private final TabAnimation animation;
     private final Map<String, Image> iconCache = new HashMap<>();
@@ -123,18 +144,21 @@ final class ChromeTabRenderer extends JComponent implements ListCellRenderer<Bro
         // T3: the dragged tab leaves an empty slot.
         if (cellIndex == dragSourceIndex) {
             g2.setColor(bgDragSource);
-            g2.fillRect(0, 0, w, h);
+            g2.fillRoundRect(TAB_INSET_X, TAB_INSET_TOP, w - 2 * TAB_INSET_X, h - TAB_INSET_TOP,
+                    TAB_RADIUS, TAB_RADIUS);
             g2.dispose();
             return;
         }
 
-        // Background (A2 hover + active state).
+        // Background (A2 hover + active state) — an inset, rounded tab shape so
+        // the tabs read as separate pills with a visible gap between them.
         Color bg = selected ? bgActive : (hover ? bgHover : bgInactive);
         g2.setColor(bg);
-        g2.fillRect(0, 0, w, h);
+        g2.fillRoundRect(TAB_INSET_X, TAB_INSET_TOP, w - 2 * TAB_INSET_X, h - TAB_INSET_TOP,
+                TAB_RADIUS, TAB_RADIUS);
         if (selected) {
             g2.setColor(accent);
-            g2.fillRect(0, 0, w, 2);
+            g2.fillRect(TAB_INSET_X + 3, TAB_INSET_TOP, w - 2 * TAB_INSET_X - 6, 3);
         }
         if (cellIndex == dragTargetIndex && dragSourceIndex >= 0) {
             g2.setColor(accent);
@@ -154,8 +178,8 @@ final class ChromeTabRenderer extends JComponent implements ListCellRenderer<Bro
             }
         }
 
-        // Title (muted while loading).
-        g2.setFont(getFont().deriveFont(Font.PLAIN, TITLE_FONT_SIZE));
+        // Title (muted while loading) — the app's UI label font (Appearance).
+        g2.setFont(TITLE_FONT);
         g2.setColor(tab.isLoading() ? mutedColor : textColor);
         FontMetrics fm = g2.getFontMetrics();
         int textX = iconX + ICON_SIZE + ICON_GAP;
@@ -182,7 +206,8 @@ final class ChromeTabRenderer extends JComponent implements ListCellRenderer<Bro
         if (move >= 0f) {
             g2.setComposite(java.awt.AlphaComposite.getInstance(java.awt.AlphaComposite.SRC_OVER, 0.25f * (1f - move)));
             g2.setColor(Color.WHITE);
-            g2.fillRect(0, 0, w, h);
+            g2.fillRoundRect(TAB_INSET_X, TAB_INSET_TOP, w - 2 * TAB_INSET_X, h - TAB_INSET_TOP,
+                    TAB_RADIUS, TAB_RADIUS);
         }
         g2.dispose();
     }
@@ -212,7 +237,7 @@ final class ChromeTabRenderer extends JComponent implements ListCellRenderer<Bro
         g2.setColor(Color.getHSBColor(hue / 360f, 0.35f, 0.45f));
         g2.fillRoundRect(x, y, ICON_SIZE, ICON_SIZE, 5, 5);
         g2.setColor(Color.WHITE);
-        g2.setFont(getFont().deriveFont(Font.BOLD, 10f));
+        g2.setFont(TITLE_FONT.deriveFont(Font.BOLD, ICON_SIZE * 0.62f));
         FontMetrics fm = g2.getFontMetrics();
         g2.drawString(letter,
                 x + (ICON_SIZE - fm.stringWidth(letter)) / 2,

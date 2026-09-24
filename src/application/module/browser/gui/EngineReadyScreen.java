@@ -25,6 +25,7 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
 import javax.swing.Timer;
+import javax.swing.UIManager;
 
 /**
  * A8: the animated "preparing" screen shown while the CEF engine boots
@@ -41,13 +42,14 @@ public final class EngineReadyScreen extends JPanel {
     private static final String CARD_ERROR = "error";
     private static final String CARD_IDLE = "idle";
 
-    private static final Color TILE_BG = new Color(0x1F, 0x24, 0x2B);
-    private static final Color TILE_BORDER = new Color(0x2A, 0x30, 0x38);
+    private static final Color FALLBACK_TILE_BG = new Color(0x1F, 0x24, 0x2B);
+    private static final Color FALLBACK_TILE_BORDER = new Color(0x2A, 0x30, 0x38);
 
     private final CardLayout cards = new CardLayout();
     private final JPanel cardHost = new JPanel(cards);
     private final LogoPanel logo;
     private final JLabel reasonLabel = new JLabel("", SwingConstants.CENTER);
+    private final JLabel hintLabel;
 
     public EngineReadyScreen() {
         super(new BorderLayout());
@@ -74,7 +76,8 @@ public final class EngineReadyScreen extends JPanel {
         errorTop.add(centerLabel(I18n.get("browser.engine.failed.title")));
         errorTop.add(reasonLabel);
         errorCard.add(errorTop, BorderLayout.CENTER);
-        errorCard.add(centerLabel(I18n.get("browser.engine.failed.hint")), BorderLayout.SOUTH);
+        hintLabel = centerLabel(I18n.get("browser.engine.failed.hint"));
+        errorCard.add(hintLabel, BorderLayout.SOUTH);
         cardHost.add(errorCard, CARD_ERROR);
 
         cardHost.add(centerLabel(I18n.get("browser.engine.idle")), CARD_IDLE);
@@ -95,8 +98,17 @@ public final class EngineReadyScreen extends JPanel {
     }
 
     public void showError(String reason) {
+        showError(reason, I18n.get("browser.engine.failed.hint"));
+    }
+
+    /**
+     * Shows the error card with a custom hint (e.g. the JCEF-install hint when
+     * the failure kind is {@code MISSING_JCEF}).
+     */
+    public void showError(String reason, String hint) {
         logo.stop();
         reasonLabel.setText(I18n.get("browser.engine.failed.reason", reason));
+        hintLabel.setText(hint);
         cards.show(cardHost, CARD_ERROR);
     }
 
@@ -153,6 +165,18 @@ public final class EngineReadyScreen extends JPanel {
             timer.stop();
         }
 
+        /** Theme-derived tile background (a darkened panel color in light themes). */
+        private static Color tileBg() {
+            Color c = UIManager.getColor("Panel.background");
+            return c != null ? c.darker() : FALLBACK_TILE_BG;
+        }
+
+        /** Theme-derived tile border. */
+        private static Color tileBorder() {
+            Color c = UIManager.getColor("Separator.foreground");
+            return c != null ? c : FALLBACK_TILE_BORDER;
+        }
+
         @Override
         protected void paintComponent(Graphics g) {
             super.paintComponent(g);
@@ -160,9 +184,9 @@ public final class EngineReadyScreen extends JPanel {
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             int w = getWidth();
             int h = getHeight();
-            g2.setColor(TILE_BG);
+            g2.setColor(tileBg());
             g2.fillRoundRect(0, 0, w - 1, h - 1, 20, 20);
-            g2.setColor(TILE_BORDER);
+            g2.setColor(tileBorder());
             g2.drawRoundRect(0, 0, w - 1, h - 1, 20, 20);
 
             if (image != null) {

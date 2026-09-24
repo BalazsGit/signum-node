@@ -4,7 +4,9 @@ import application.module.browser.config.BrowserSettings;
 import application.module.browser.config.BrowserSettingsRepository;
 import application.module.browser.core.BrowserEngine;
 import application.module.browser.core.BrowserEngineState;
+import application.module.browser.core.JcefProvisioner;
 import application.module.browser.engine.WebBrowserRegistry;
+import application.module.browser.gui.dialogs.JcefSetupDialog;
 import application.module.browser.gui.toolbar.NavigationToolbar;
 import application.module.browser.model.session.SessionSnapshot;
 import application.module.browser.model.session.SessionStore;
@@ -13,10 +15,12 @@ import application.module.browser.model.tab.TabController;
 import application.module.browser.model.tab.TabEvent;
 import application.module.browser.model.tab.TabSource;
 import application.module.browser.gui.tabstrip.ChromeTabBar;
+import application.utils.i18n.I18n;
 
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.event.ActionEvent;
+import java.awt.event.HierarchyEvent;
 import java.nio.file.Path;
 import javax.swing.AbstractAction;
 import javax.swing.JComponent;
@@ -68,6 +72,8 @@ public final class BrowserPanel extends JPanel {
     private final JPanel cardHost = new JPanel(cards);
     private volatile boolean initialTabsRestored;
     private Timer sessionSaveTimer;
+    /** True once the JCEF setup dialog has been offered in this session. */
+    private boolean jcefDialogOffered;
 
     public BrowserPanel(BrowserEngine engine, Path browserConfDir) {
         super(new BorderLayout());
@@ -93,6 +99,17 @@ public final class BrowserPanel extends JPanel {
         // Engine and CEF callbacks arrive off the EDT (plan §4.2) -> pump.
         controller.addListener(event -> SwingUtilities.invokeLater(() -> onTabEvent(event)));
         engine.addStateListener(state -> SwingUtilities.invokeLater(() -> onEngineState(state)));
+        // The JCEF setup dialog belongs to the moment the user actually opens the
+        // browser tab, not to app boot: the engine may already be FAILED while the
+        // panel is still hidden, and a popup at boot (with no visible window to
+        // center it on) was both noise and an L&F-timing crash risk.
+        addHierarchyListener(e -> {
+            if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0 && isShowing()
+                    && engine.getState() == BrowserEngineState.FAILED
+                    && engine.getFailureKind() == BrowserEngine.FailureKind.MISSING_JCEF) {
+                offerJcefDialogIfVisible();
+            }
+        });
 
         installKeyBindings();
         onEngineState(engine.getState());
@@ -159,8 +176,16 @@ public final class BrowserPanel extends JPanel {
                 cards.show(cardHost, CARD_CONTENT);
             }
             case FAILED -> {
-                readyScreen.showError(engine.getFailureReason());
+                boolean missingJcef = engine.getFailureKind() == BrowserEngine.FailureKind.MISSING_JCEF;
+                readyScreen.showError(engine.getFailureReason(), missingJcef
+                        ? I18n.get("browser.engine.failed.hint.jcef")
+                        : I18n.get("browser.engine.failed.hint"));
                 cards.show(cardHost, CARD_ENGINE);
+                // F2.1: the one-shot JCEF setup dialog (install + retry) — offered
+                // only while this tab is actually visible (see the method).
+                if (missingJcef) {
+                    offerJcefDialogIfVisible();
+                }
             }
             case SHUTTING_DOWN, SHUT_DOWN -> {
                 sessionStore.save(controller.snapshot()); // persist before teardown
@@ -199,6 +224,21 @@ public final class BrowserPanel extends JPanel {
                 }
             }
         }
+    }
+
+    /**
+     * F2.1: offers the one-shot JCEF setup dialog, but only while the browser
+     * tab is actually visible and it has not been offered yet (user request:
+     * the install popup appears when the user clicks the browser tab, not at
+     * boot). Until then the failed engine screen carries the install hint.
+     */
+    private void offerJcefDialogIfVisible() {
+        if (jcefDialogOffered || !isShowing() || !JcefProvisioner.isSupported()) {
+            return;
+        }
+        jcefDialogOffered = true;
+        JcefSetupDialog.show(SwingUtilities.getWindowAncestor(this),
+                () -> engine.init(confDir));
     }
 
     // ------------------------------------------------------------------

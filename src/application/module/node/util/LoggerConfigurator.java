@@ -83,6 +83,11 @@ public final class LoggerConfigurator {
                 }
                 logs.add("INFO: Logging configuration resolved for profile: " + Signum.LOGGING_PROPERTIES_NAME);
 
+                // FileHandler cannot create missing parent directories (a
+                // "logs/signum0.log" pattern dies with NoSuchFileException on a
+                // fresh install) — create the target directory up front.
+                ensureFileHandlerDirectory(mappedProperties);
+
                 ByteArrayOutputStream outStream = new ByteArrayOutputStream();
                 mappedProperties.store(outStream, LOGGING_PROPERTIES_COMMENT);
                 ByteArrayInputStream inStream = new ByteArrayInputStream(outStream.toByteArray());
@@ -100,6 +105,33 @@ public final class LoggerConfigurator {
 
         logs.add("INFO: logging enabled");
         return logs;
+    }
+
+    /**
+     * Creates the parent directory of the configured {@code FileHandler} log
+     * pattern (if any). The pattern may contain the {@code %u}/{@code %t}
+     * suffixes, which are dropped; a relative pattern is resolved against the
+     * application root (e.g. {@code logs/signum%u.log} → {@code <root>/logs/}).
+     * Failure is non-fatal: the FileHandler reports its own error.
+     */
+    static void ensureFileHandlerDirectory(Properties loggingProperties) {
+        String pattern = loggingProperties.getProperty("java.util.logging.FileHandler.pattern");
+        if (pattern == null || pattern.isBlank()) {
+            return;
+        }
+        try {
+            String file = pattern.strip();
+            int suffix = file.indexOf('%'); // cut the %u/%t rotation suffix
+            if (suffix >= 0) {
+                file = file.substring(0, suffix);
+            }
+            Path dir = application.utils.io.PathUtils.resolvePath(file).getParent();
+            if (dir != null) {
+                java.nio.file.Files.createDirectories(dir);
+            }
+        } catch (Exception e) {
+            // non-fatal — the FileHandler surfaces the real problem if any
+        }
     }
 
     /**

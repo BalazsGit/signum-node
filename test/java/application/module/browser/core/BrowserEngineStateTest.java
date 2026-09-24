@@ -94,6 +94,8 @@ class BrowserEngineStateTest {
 
         assertTrue(engine.getFailureReason().contains("JCEF native distribution not found"),
                 "unexpected failure reason: " + engine.getFailureReason());
+        assertEquals(BrowserEngine.FailureKind.MISSING_JCEF, engine.getFailureKind(),
+                "the missing-distribution failure must be typed MISSING_JCEF (drives the auto-install dialog)");
         assertTrue(seen.contains(BrowserEngineState.INITIALIZING));
         assertEquals(BrowserEngineState.FAILED, seen.get(seen.size() - 1));
     }

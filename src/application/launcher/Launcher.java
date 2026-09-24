@@ -101,6 +101,14 @@ public class Launcher {
 
         Path confPath = PathUtils.resolvePath(confFolder);
 
+        // Install the GUI log bridge as EARLY as possible (before the JCEF
+        // bootstrap and the logging reconfiguration). The SystemLogger keeps a
+        // bounded ring buffer, so the startup lines logged before the GUI (and
+        // before the logging configuration) are replayed to the System Console
+        // when the tab attaches. Idempotent; SignumLogManager re-installs the
+        // bridge after readConfiguration() resets the root logger's handlers.
+        application.utils.logging.SystemLoggerJulHandler.install();
+
         // ── JCEF process bootstrap (must precede ALL application logic) ──
         // JCEF renderer/utility/GPU processes re-run this main() with an extra
         // CEF --type= switch; the subprocess must not initialize logging, the
@@ -110,7 +118,9 @@ public class Launcher {
         // first CEF subprocess launches.
         JcefProcessBootstrap.bootstrap(args, confPath, headless);
 
-        // Logging inicializálás (Ez maradhat a Launcher-ben mint infra)
+        // Logging inicializálás (Ez maradhat a Launcher-ben mint infra).
+        // (The SystemLoggerJulHandler bridge was already installed above; the
+        // reconfiguration re-applies it internally via SignumLogManager.)
         List<String> initLogs = new ArrayList<>();
         try {
             initLogs = LoggerConfigurator.init(confFolder);
@@ -118,12 +128,11 @@ public class Launcher {
             System.err.println("Failed to initialize LoggerConfigurator: " + e.getMessage());
         }
 
-        // Install the JUL handler that bridges SLF4J → SystemLogger + per-node ProfileLogger
-        application.utils.logging.SystemLoggerJulHandler.install();
-
         logger = LoggerFactory.getLogger(Launcher.class);
-        // Print bootstrap logs to console
-        initLogs.forEach(msg -> System.out.println("[Bootstrap] " + msg));
+        // Print bootstrap logs to console AND the System Console (through the
+        // log bridge installed above), so the GUI shows the same lines as the
+        // terminal.
+        initLogs.forEach(msg -> logger.info("[Bootstrap] {}", msg));
 
         // Headless "set node order" command: define the node start/tab order and exit.
         // In headless mode there is no GUI to drag tabs, so this is how the

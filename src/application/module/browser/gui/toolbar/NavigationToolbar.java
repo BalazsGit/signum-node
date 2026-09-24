@@ -8,6 +8,7 @@ import application.module.browser.model.tab.BrowserTab;
 import application.module.browser.model.tab.TabController;
 import application.module.browser.model.tab.TabEvent;
 import application.module.browser.util.UrlUtils;
+import application.utils.gui.GuiConstants;
 import application.utils.i18n.I18n;
 
 import java.awt.AlphaComposite;
@@ -16,7 +17,6 @@ import java.awt.Color;
 import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.Font;
 import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -34,7 +34,6 @@ import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.UIManager;
-import javax.swing.plaf.basic.BasicButtonUI;
 
 /**
  * The navigation toolbar of the browser main tab (F2): back/forward/reload-
@@ -238,14 +237,19 @@ public final class NavigationToolbar extends JPanel {
         return controller.getActiveTab().map(BrowserTab::getId).orElse(null);
     }
 
+    /**
+     * A compact toolbar button in the application's native L&F style (the
+     * glyphs are font-based, sized by the UI font — no custom painting).
+     */
     private static JButton flatNavButton(String text, String tooltip) {
         JButton button = new JButton(text);
-        button.setUI(new BasicButtonUI());
-        button.setContentAreaFilled(false);
-        button.setFocusPainted(false);
-        button.setBorderPainted(false);
-        button.setMargin(new java.awt.Insets(0, 4, 0, 4));
-        button.setPreferredSize(new Dimension(28, 28));
+        // The glyph follows the app's toolbar icon size (Appearance settings) —
+        // the same convention as the other modules' FontAwesome icons — instead
+        // of the raw (smaller) button font.
+        button.setFont(button.getFont().deriveFont(GuiConstants.getToolBarIconSize()));
+        button.setFocusable(false);
+        button.setMargin(new java.awt.Insets(0, 6, 0, 6));
+        button.setPreferredSize(new Dimension(30, 30));
         button.setToolTipText(tooltip);
         return button;
     }
@@ -262,7 +266,7 @@ public final class NavigationToolbar extends JPanel {
         FadingLabel(String text, float opacity) {
             super(text);
             setOpaque(false);
-            setFont(getFont().deriveFont(Font.PLAIN, 11f));
+            // the UI's default label font (app-consistent)
             setForeground(faint());
             alpha = (int) (opacity * 255);
         }

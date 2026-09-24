@@ -2,6 +2,8 @@ package application.module.browser.gui.toolbar;
 
 import application.module.browser.engine.security.SslStatus;
 import application.module.browser.util.UrlUtils;
+import application.utils.gui.GuiColors;
+import application.utils.gui.GuiConstants;
 import application.utils.i18n.I18n;
 
 import java.awt.Color;
@@ -28,9 +30,13 @@ import java.util.function.Consumer;
  */
 public final class SecurityIcon extends JComponent {
 
-    private static final int ICON_SIZE = 16;
-    private static final Color SECURE_GREEN = new Color(0x2E, 0x9E, 0x5B);
-    private static final Color ERROR_RED = new Color(0xD9, 0x44, 0x34);
+    /** The painted geometry's design space (the draw code uses 16 px units). */
+    private static final int DESIGN_SIZE = 16;
+    /**
+     * The rendered icon size follows the app's toolbar icon size (Appearance
+     * settings), the same convention as the other modules' icons.
+     */
+    private final int iconSize = Math.max(14, (int) Math.round(GuiConstants.getToolBarIconSize()));
 
     private final Consumer<String> clickAction;
     private SslStatus status = SslStatus.INSECURE;
@@ -43,7 +49,7 @@ public final class SecurityIcon extends JComponent {
      */
     public SecurityIcon(Consumer<String> clickAction) {
         this.clickAction = clickAction;
-        setPreferredSize(new Dimension(28, 28));
+        setPreferredSize(new Dimension(iconSize * 2, iconSize * 2));
         setOpaque(false);
         setFocusable(false);
         addMouseListener(new MouseAdapter() {
@@ -104,10 +110,11 @@ public final class SecurityIcon extends JComponent {
         super.paintComponent(g);
         Graphics2D g2 = (Graphics2D) g.create();
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        g2.translate((getWidth() - ICON_SIZE) / 2, (getHeight() - ICON_SIZE) / 2);
+        g2.translate((getWidth() - iconSize) / 2f, (getHeight() - iconSize) / 2f);
+        g2.scale(iconSize / (float) DESIGN_SIZE, iconSize / (float) DESIGN_SIZE);
         Color color = switch (status) {
-            case SECURE -> SECURE_GREEN;
-            case CERT_ERROR -> ERROR_RED;
+            case SECURE -> secureGreen();
+            case CERT_ERROR -> errorRed();
             case INSECURE -> gray();
         };
         if (status == SslStatus.CERT_ERROR) {
@@ -119,8 +126,23 @@ public final class SecurityIcon extends JComponent {
     }
 
     private static Color gray() {
-        Color c = UIManager.getColor("Label.disabledForeground");
+        Color c = GuiColors.getFaintText();
+        if (c == null) {
+            c = UIManager.getColor("Label.disabledForeground");
+        }
         return c != null ? c : Color.GRAY;
+    }
+
+    /** The app palette's "ready/running" green (falls back to a fixed green). */
+    private static Color secureGreen() {
+        Color c = GuiColors.getReady();
+        return c != null ? c : new Color(0x2E, 0x9E, 0x5B);
+    }
+
+    /** The app palette's error red (falls back to a fixed red). */
+    private static Color errorRed() {
+        Color c = GuiColors.getContrastRed();
+        return c != null ? c : new Color(0xD9, 0x44, 0x34);
     }
 
     private static Color background() {

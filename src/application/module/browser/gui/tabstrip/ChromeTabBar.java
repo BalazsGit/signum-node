@@ -37,8 +37,13 @@ import javax.swing.DefaultListModel;
  */
 public final class ChromeTabBar extends JPanel {
 
-    private static final int MIN_TAB_WIDTH = 100;
-    private static final int MAX_TAB_WIDTH = 240;
+    /**
+     * The fixed tab width (user request): tabs must NOT elastically stretch to
+     * fill the window — they keep a constant, JTabbedPane-like width and the
+     * overflow scroll handles the rest.
+     */
+    private static final int TAB_WIDTH = 220;
+    private static final int MAX_TAB_WIDTH = 260;
     private static final int SCROLL_STEP_TABS = 4;
 
     private final TabController controller;
@@ -52,7 +57,7 @@ public final class ChromeTabBar extends JPanel {
     private final JButton scrollLeft;
     private final JButton scrollRight;
     private final Timer repaintTimer;
-    private int cellWidth = 200;
+    private int cellWidth = 220;
 
     public ChromeTabBar(TabController controller) {
         super(new BorderLayout());
@@ -74,6 +79,9 @@ public final class ChromeTabBar extends JPanel {
         // Note: JViewport.setBorder() is not supported (JDK 25) — no viewport border.
 
         this.addButton = flatTabButton("+", I18n.get("browser.tab.new.tooltip"));
+        // The "+" glyph is a few points above the app's UI button font, so it
+        // reads as a tab-size control and still tracks the Appearance settings.
+        addButton.setFont(addButton.getFont().deriveFont(addButton.getFont().getSize2D() + 3f));
         addButton.setPreferredSize(new Dimension(32, ChromeTabRenderer.HEIGHT));
         addButton.addActionListener(e -> controller.openNewTab());
 
@@ -241,16 +249,11 @@ public final class ChromeTabBar extends JPanel {
     }
 
     // ------------------------------------------------------------------
-    // Layout (T6: elastic tab width + overflow arrows)
+    // Layout (T6: fixed tab width + overflow arrows)
     // ------------------------------------------------------------------
 
     private void recomputeCellWidth() {
-        int count = model.size();
-        if (count == 0) {
-            return;
-        }
-        int available = Math.max(0, scroll.getWidth() - 80); // arrows + button reserve
-        int width = clamp(available / Math.max(count, 3), MIN_TAB_WIDTH, MAX_TAB_WIDTH);
+        int width = Math.min(TAB_WIDTH, MAX_TAB_WIDTH);
         if (width != cellWidth) {
             cellWidth = width;
             list.setFixedCellWidth(cellWidth);

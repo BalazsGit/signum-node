@@ -253,4 +253,58 @@ class SystemLoggerTest {
             }
         }
     }
+
+    // ── Early-startup ring buffer ───────────────────────────────────────
+
+    @Nested
+    @DisplayName("Early-startup ring buffer")
+    class RingBufferTests {
+
+        @Test
+        @DisplayName("events logged before a subscriber attaches are replayed to it")
+        void earlyEventsAreReplayed() {
+            SystemLogger logger = SystemLogger.getInstance();
+            logger.info("early-1");
+            logger.warn("early-2");
+
+            java.util.List<LogEvent> received = new java.util.ArrayList<>();
+            logger.addSubscriber(new TestSubscriber(received::add));
+
+            assertEquals(2, received.size());
+            assertEquals("early-1", received.get(0).getMessage());
+            assertEquals("early-2", received.get(1).getMessage());
+        }
+
+        @Test
+        @DisplayName("a live subscriber is not duplicated by the replay")
+        void replayDoesNotDuplicateLiveEvents() {
+            SystemLogger logger = SystemLogger.getInstance();
+            java.util.List<LogEvent> received = new java.util.ArrayList<>();
+            logger.addSubscriber(new TestSubscriber(received::add));
+
+            logger.info("live-1");
+            logger.info("live-2");
+
+            assertEquals(2, received.size(), "only the two live events, no replayed copies");
+            assertEquals("live-1", received.get(0).getMessage());
+            assertEquals("live-2", received.get(1).getMessage());
+        }
+
+        @Test
+        @DisplayName("the buffer keeps only the last BUFFER_SIZE events (in order)")
+        void bufferIsBounded() {
+            SystemLogger logger = SystemLogger.getInstance();
+            int n = SystemLogger.BUFFER_SIZE + 50;
+            for (int i = 0; i < n; i++) {
+                logger.info("msg-" + i);
+            }
+
+            java.util.List<LogEvent> received = new java.util.ArrayList<>();
+            logger.addSubscriber(new TestSubscriber(received::add));
+
+            assertEquals(SystemLogger.BUFFER_SIZE, received.size());
+            assertEquals("msg-50", received.get(0).getMessage());
+            assertEquals("msg-" + (n - 1), received.get(received.size() - 1).getMessage());
+        }
+    }
 }

@@ -7,19 +7,18 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.FontMetrics;
 import java.awt.Graphics;
-import java.awt.Graphics2D;
 import java.awt.Insets;
-import java.awt.RenderingHints;
 import java.awt.Window;
 import java.awt.event.FocusEvent;
 import java.awt.event.FocusListener;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
-import java.awt.geom.GeneralPath;
 import java.util.List;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
+import javax.swing.BorderFactory;
 import javax.swing.JComponent;
 import javax.swing.JTextField;
 import javax.swing.JPanel;
@@ -27,7 +26,6 @@ import javax.swing.UIManager;
 import javax.swing.border.Border;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
-import javax.swing.plaf.basic.BasicTextFieldUI;
 
 /**
  * The address/search bar (F2, N1/N9/A5): one field for both URLs and search
@@ -61,9 +59,15 @@ public final class Omnibox extends JPanel {
         this.suggestor = suggestor;
 
         this.field = new JTextField();
-        field.setUI(new BasicTextFieldUI());
         field.setMargin(new Insets(6, 14, 6, 14));
-        field.setBorder(new OmniboxBorder());
+        // App-consistent rectangular field: the native L&F border (same look as
+        // every other input in the application) plus the placeholder painting.
+        Border lafBorder = UIManager.getBorder("TextField.border");
+        if (lafBorder != null) {
+            field.setBorder(BorderFactory.createCompoundBorder(lafBorder, new PlaceholderBorder()));
+        } else {
+            field.setBorder(new PlaceholderBorder());
+        }
         field.setPreferredSize(new Dimension(220, HEIGHT));
         field.getDocument().addDocumentListener(new DocumentListener() {
             @Override
@@ -230,51 +234,25 @@ public final class Omnibox extends JPanel {
         p.setSelectedIndex(next);
     }
 
-    /** The rounded "pill" border of the address bar (flat, accent on focus). */
-    private static final class OmniboxBorder implements Border {
+    /**
+     * Paints only the placeholder text (D16: i18n-backed) inside the field's
+     * margin; the border line itself comes from the native L&F.
+     */
+    private static final class PlaceholderBorder implements Border {
 
         @Override
         public void paintBorder(Component c, Graphics g, int x, int y, int width, int height) {
-            if (!(c instanceof JComponent) || width < 8 || height < 8) {
+            if (!(c instanceof JTextField tf) || !tf.getText().isEmpty() || c.isFocusOwner()) {
                 return;
             }
-            Graphics2D g2 = (Graphics2D) g.create();
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            boolean focused = c.isFocusOwner();
-            int radius = Math.min(height - 1, 20);
-            GeneralPath path = rounded(x + 1, y + 1, width - 2, height - 2, radius);
-            g2.setStroke(new java.awt.BasicStroke(focused ? 1.6f : 1f));
-            g2.setColor(focused ? accent() : border());
-            g2.draw(path);
-            if (c instanceof JTextField tf && tf.getText().isEmpty() && !focused) {
-                // Placeholder (D16: the string is i18n-backed).
-                g2.setColor(UIManager.getColor("Label.disabledForeground") != null
-                        ? UIManager.getColor("Label.disabledForeground") : Color.GRAY);
-                g2.setFont(tf.getFont());
-                String placeholder = I18n.get("browser.omnibox.placeholder");
-                int tx = x + 14;
-                int ty = y + (height + g2.getFontMetrics().getAscent() - g2.getFontMetrics()
-                        .getDescent()) / 2;
-                g2.drawString(placeholder, tx, ty);
-            }
-            g2.dispose();
-        }
-
-        private static GeneralPath rounded(int x, int y, int w, int h, int r) {
-            GeneralPath p = new GeneralPath();
-            p.append(new java.awt.geom.RoundRectangle2D.Double(x, y, w, h, r, r), false);
-            p.closePath();
-            return p;
-        }
-
-        private static Color accent() {
-            Color c = UIManager.getColor("Component.focusColor");
-            return c != null ? c : new Color(0x4F, 0x8C, 0xFF);
-        }
-
-        private static Color border() {
-            Color c = UIManager.getColor("Separator.foreground");
-            return c != null ? c : new Color(0x2A, 0x30, 0x38);
+            g.setColor(UIManager.getColor("Label.disabledForeground") != null
+                    ? UIManager.getColor("Label.disabledForeground") : Color.GRAY);
+            g.setFont(tf.getFont());
+            Insets margin = tf.getMargin();
+            int tx = x + (margin != null ? margin.left : 0);
+            FontMetrics fm = g.getFontMetrics();
+            int ty = y + (height + fm.getAscent() - fm.getDescent()) / 2;
+            g.drawString(I18n.get("browser.omnibox.placeholder"), tx, ty);
         }
 
         @Override

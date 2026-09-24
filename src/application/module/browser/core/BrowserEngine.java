@@ -58,9 +58,21 @@ public final class BrowserEngine {
         void onStateChanged(BrowserEngineState state);
     }
 
+    /**
+     * The category of an initialization failure, so the GUI can react
+     * differently (e.g. offer the JCEF auto-install for {@link #MISSING_JCEF}).
+     */
+    public enum FailureKind {
+        /** The native distribution directory is absent — installable at runtime. */
+        MISSING_JCEF,
+        /** Anything else (CEF init failure, sandbox error, ...). */
+        OTHER
+    }
+
     private final Object lock = new Object();
     private volatile BrowserEngineState state = BrowserEngineState.IDLE;
     private volatile String failureReason;
+    private volatile FailureKind failureKind = FailureKind.OTHER;
     private CompletableFuture<BrowserEngineState> initFuture;
     private final List<StateListener> listeners = new CopyOnWriteArrayList<>();
     private final ExecutorService initExecutor = Executors.newSingleThreadExecutor(r -> {
@@ -100,6 +112,14 @@ public final class BrowserEngine {
         return failureReason;
     }
 
+    /**
+     * @return the category of the last initialization failure (meaningful only
+     *         while the state is {@link BrowserEngineState#FAILED})
+     */
+    public FailureKind getFailureKind() {
+        return failureKind;
+    }
+
     public void addStateListener(StateListener listener) {
         listeners.add(listener);
     }
@@ -120,6 +140,7 @@ public final class BrowserEngine {
             return;
         }
         failureReason = null;
+        failureKind = FailureKind.OTHER;
         transition(BrowserEngineState.INITIALIZING);
         CompletableFuture<BrowserEngineState> init =
                 CompletableFuture.supplyAsync(() -> doInit(browserConfDir), initExecutor);
@@ -178,10 +199,18 @@ public final class BrowserEngine {
     private BrowserEngineState doInit(Path browserConfDir) {
         try {
             // 1. The native distribution must be in place (plan D1/D2).
-            Path jcefDir = jcefDirProvider.get().orElseThrow(() -> new IllegalStateException(
-                    "JCEF native distribution not found (expected " + JcefPathResolver.JCEF_FOLDER + "/"
-                            + OsArch.current().key() + "/ next to the application). "
-                            + "Run 'gradlew extractJcef' first."));
+            Optional<Path> jcefOpt = jcefDirProvider.get();
+            if (jcefOpt.isEmpty()) {
+                // Typed: the GUI can offer the runtime auto-install (JcefProvisioner).
+                failureKind = FailureKind.MISSING_JCEF;
+                failureReason = "JCEF native distribution not found (expected "
+                        + JcefPathResolver.JCEF_FOLDER + "/" + OsArch.current().key()
+                        + "/ next to the application). Install it with the browser's "
+                        + "install dialog, or run 'gradlew extractJcef' first.";
+                logger.error("Browser engine initialization failed: {}", failureReason);
+                return BrowserEngineState.FAILED;
+            }
+            Path jcefDir = jcefOpt.get();
             // 2. CEF init (plan D4). The JCEF native loader, the app handler
             //    (which registers the signum:// scheme in ALL processes — CEF
             //    requires that for a custom scheme) and the CefApp instance were
