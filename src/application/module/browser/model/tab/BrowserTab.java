@@ -22,6 +22,8 @@ public final class BrowserTab {
     private boolean loading;
     private int progress;
     private SslStatus sslStatus;
+    private boolean canGoBack;
+    private boolean canGoForward;
     private boolean pinned;
     private boolean privateMode;
     private boolean discarded;
@@ -74,6 +76,16 @@ public final class BrowserTab {
         return sslStatus;
     }
 
+    /** N3: the back button's enabled state (from the CEF navigation stack). */
+    public boolean canGoBack() {
+        return canGoBack;
+    }
+
+    /** N3: the forward button's enabled state (from the CEF navigation stack). */
+    public boolean canGoForward() {
+        return canGoForward;
+    }
+
     public boolean isPinned() {
         return pinned;
     }
@@ -117,5 +129,13 @@ public final class BrowserTab {
 
     void setSslStatus(SslStatus sslStatus) {
         this.sslStatus = sslStatus;
+    }
+
+    void setCanGoBack(boolean canGoBack) {
+        this.canGoBack = canGoBack;
+    }
+
+    void setCanGoForward(boolean canGoForward) {
+        this.canGoForward = canGoForward;
     }
 }

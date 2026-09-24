@@ -11,8 +11,9 @@ import java.util.Map;
  * Registry of the built-in {@code signum://} pages (plan D6): name to static
  * classpath HTML under {@code resources/html/browser/}.
  * <p>
- * F1 ships only the New Tab page plus the built-in 404; F3/F4 (history,
- * bookmarks) add their pages through this same registry — no new mechanism.
+ * F1 ships the New Tab page plus the built-in 404; F2 adds the
+ * certificate-error page (S3); F3/F4 (history, bookmarks) add their pages
+ * through this same registry — no new mechanism.
  */
 public final class InternalPage {
 
@@ -23,6 +24,7 @@ public final class InternalPage {
 
     private static final Map<String, String> PAGES = Map.of(
             "newtab", "/html/browser/newtab.html",
+            "cert-error", "/html/browser/cert-error.html",
             "css/browser.css", "/html/browser/css/browser.css",
             NOT_FOUND, "/html/browser/not-found.html");
 

@@ -1,8 +1,10 @@
 package application.module.browser.engine.handler;
 
+import application.module.browser.config.BrowserSettings;
 import application.module.browser.model.tab.TabController;
 import org.cef.CefClient;
 
+import java.util.function.Supplier;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 
@@ -27,11 +29,18 @@ public final class BrowserCefHandlers {
         // utility class — never instantiated
     }
 
-    /** Attaches the F1 handler set to the client before its browser is created. */
-    public static void attach(CefClient client, String tabId, TabController controller) {
+    /**
+     * Attaches the F2 handler set to the client before its browser is created.
+     *
+     * @param settings live browser settings (the request handler reads the
+     *                 {@code file://} block switch on every navigation, N12)
+     */
+    public static void attach(CefClient client, String tabId, TabController controller,
+                              Supplier<BrowserSettings> settings) {
         client.addLoadHandler(new CefLoadHandlerImpl(tabId, controller));
         client.addDisplayHandler(new CefDisplayHandlerImpl(tabId, controller));
         client.addLifeSpanHandler(new CefLifeSpanHandlerImpl(tabId, controller));
+        client.addRequestHandler(new CefRequestHandlerImpl(tabId, controller, settings));
     }
 
     /**

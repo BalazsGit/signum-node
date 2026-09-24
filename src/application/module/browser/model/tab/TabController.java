@@ -296,6 +296,23 @@ public final class TabController {
         fire(TabEvent.updated(tab));
     }
 
+    /**
+     * N3: updates the tab's back/forward enabled state (the CEF navigation
+     * stack, reported by {@code onLoadingStateChange}).
+     *
+     * @return {@code true} when the state actually changed
+     */
+    public synchronized boolean setNavigationState(String tabId, boolean canGoBack, boolean canGoForward) {
+        BrowserTab tab = byId(tabId);
+        if (tab == null || (tab.canGoBack() == canGoBack && tab.canGoForward() == canGoForward)) {
+            return false;
+        }
+        tab.setCanGoBack(canGoBack);
+        tab.setCanGoForward(canGoForward);
+        fire(TabEvent.updated(tab));
+        return true;
+    }
+
     // ------------------------------------------------------------------
     // Reads (GUI)
     // ------------------------------------------------------------------

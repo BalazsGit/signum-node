@@ -1,5 +1,6 @@
 package application.module.browser.engine;
 
+import application.module.browser.config.BrowserSettings;
 import application.module.browser.core.BrowserEngine;
 import application.module.browser.model.tab.BrowserTab;
 import application.module.browser.model.tab.TabController;
@@ -7,6 +8,7 @@ import application.module.browser.model.tab.TabController;
 import java.awt.Component;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  * The {@code tabId → WebBrowser} map (plan §4.1).
@@ -20,11 +22,14 @@ public final class WebBrowserRegistry {
 
     private final BrowserEngine engine;
     private final TabController controller;
+    private final Supplier<BrowserSettings> settings;
     private final Map<String, WebBrowser> browsers = new LinkedHashMap<>();
 
-    public WebBrowserRegistry(BrowserEngine engine, TabController controller) {
+    public WebBrowserRegistry(BrowserEngine engine, TabController controller,
+                              Supplier<BrowserSettings> settings) {
         this.engine = engine;
         this.controller = controller;
+        this.settings = settings;
     }
 
     /**
@@ -38,7 +43,7 @@ public final class WebBrowserRegistry {
         if (browser == null) {
             BrowserTab tab = controller.getTab(tabId)
                     .orElseThrow(() -> new IllegalStateException("Unknown tab id: " + tabId));
-            browser = new WebBrowser(engine.createClient(), tabId, controller, tab.getUrl());
+            browser = new WebBrowser(engine.createClient(), tabId, controller, tab.getUrl(), settings);
             browsers.put(tabId, browser);
         }
         return browser.getUiComponent();

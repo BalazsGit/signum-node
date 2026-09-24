@@ -33,6 +33,7 @@ final class CefLoadHandlerImpl extends CefLoadHandlerAdapter {
         BrowserCefHandlers.runInEdt(() -> {
             controller.setLoading(tabId, isLoading);
             controller.setProgress(tabId, isLoading ? 0 : 100);
+            controller.setNavigationState(tabId, canGoBack, canGoForward); // N3 enabled state
         });
     }
 

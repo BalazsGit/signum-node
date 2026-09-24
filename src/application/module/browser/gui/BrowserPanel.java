@@ -5,6 +5,7 @@ import application.module.browser.config.BrowserSettingsRepository;
 import application.module.browser.core.BrowserEngine;
 import application.module.browser.core.BrowserEngineState;
 import application.module.browser.engine.WebBrowserRegistry;
+import application.module.browser.gui.toolbar.NavigationToolbar;
 import application.module.browser.model.session.SessionSnapshot;
 import application.module.browser.model.session.SessionStore;
 import application.module.browser.model.tab.BrowserTab;
@@ -58,7 +59,9 @@ public final class BrowserPanel extends JPanel {
     private final TabController controller = new TabController();
     private final WebBrowserRegistry registry;
     private final SessionStore sessionStore;
+    private final BrowserSettingsRepository settingsRepository;
     private final ChromeTabBar tabBar;
+    private final NavigationToolbar toolbar;
     private final EngineReadyScreen readyScreen;
     private final ContentPanel contentPanel;
     private final CardLayout cards = new CardLayout();
@@ -70,15 +73,21 @@ public final class BrowserPanel extends JPanel {
         super(new BorderLayout());
         this.engine = engine;
         this.confDir = browserConfDir;
-        this.registry = new WebBrowserRegistry(engine, controller);
+        this.settingsRepository = new BrowserSettingsRepository(
+                browserConfDir.resolve("settings.json"));
+        this.registry = new WebBrowserRegistry(engine, controller, settingsRepository::load);
         this.sessionStore = new SessionStore(browserConfDir.resolve("session.json"));
         this.tabBar = new ChromeTabBar(controller);
+        this.toolbar = new NavigationToolbar(controller, registry, settingsRepository::load);
         this.readyScreen = new EngineReadyScreen();
         this.contentPanel = new ContentPanel();
 
         cardHost.add(readyScreen, CARD_ENGINE);
         cardHost.add(contentPanel, CARD_CONTENT);
-        add(tabBar, BorderLayout.NORTH);
+        JPanel north = new JPanel(new BorderLayout());
+        north.add(tabBar, BorderLayout.NORTH);
+        north.add(toolbar, BorderLayout.SOUTH);
+        add(north, BorderLayout.NORTH);
         add(cardHost, BorderLayout.CENTER);
 
         // Engine and CEF callbacks arrive off the EDT (plan §4.2) -> pump.
@@ -94,7 +103,11 @@ public final class BrowserPanel extends JPanel {
     // ------------------------------------------------------------------
 
     private void installKeyBindings() {
-        InputMap im = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+        // WHEN_ANCESTOR_OF_FOCUSED_COMPONENT (the codebase-wide idiom): a
+        // plain JPanel's WHEN_IN_FOCUSED_WINDOW map is never consulted by
+        // JComponent.processKeyBindings (only JRootPane checks that
+        // condition) — F1 shipped with dead bindings.
+        InputMap im = getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT);
         ActionMap am = getActionMap();
         bind(im, am, "browser.newTab", KeyStroke.getKeyStroke("ctrl T"), () -> controller.openNewTab());
         bind(im, am, "browser.closeTab", KeyStroke.getKeyStroke("ctrl W"),
@@ -109,11 +122,12 @@ public final class BrowserPanel extends JPanel {
                     () -> controller.activateIndex(index));
         }
         bind(im, am, "browser.gotoLast", KeyStroke.getKeyStroke("ctrl 9"), () -> controller.activateLast());
+        bind(im, am, "browser.focusOmnibox", KeyStroke.getKeyStroke("ctrl L"), toolbar::focusOmnibox);
         bind(im, am, "browser.reload", KeyStroke.getKeyStroke("F5"), () -> registry.reload(activeTabId()));
         bind(im, am, "browser.reloadAlt", KeyStroke.getKeyStroke("ctrl R"), () -> registry.reload(activeTabId()));
         bind(im, am, "browser.back", KeyStroke.getKeyStroke("alt LEFT"), () -> registry.back(activeTabId()));
         bind(im, am, "browser.forward", KeyStroke.getKeyStroke("alt RIGHT"), () -> registry.forward(activeTabId()));
-        bind(im, am, "browser.stop", KeyStroke.getKeyStroke("ESCAPE"), () -> registry.stop(activeTabId()));
+        bind(im, am, "browser.stop", KeyStroke.getKeyStroke("ESCAPE"), toolbar::onEscape);
         setFocusable(true);
     }
 
@@ -167,7 +181,7 @@ public final class BrowserPanel extends JPanel {
      * (or an NTP when it is empty); {@code urls} → the configured list.
      */
     private void restoreInitialTabs() {
-        BrowserSettings settings = new BrowserSettingsRepository(confDir.resolve("settings.json")).load();
+        BrowserSettings settings = settingsRepository.load();
         switch (settings.getStartup()) {
             case NEW_TAB -> controller.openNewTab();
             case LAST_SESSION -> sessionStore.load()

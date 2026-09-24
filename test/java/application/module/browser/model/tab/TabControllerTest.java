@@ -273,6 +273,23 @@ class TabControllerTest {
         assertArrayEquals(icon, tab.getFavicon());
     }
 
+    @Test
+    @DisplayName("setNavigationState updates back/forward and fires one event on change (N3)")
+    void navigationStateChangeFiresEvent() {
+        String id = controller.openTab("https://a.example", TabSource.USER);
+        events.clear();
+
+        assertTrue(controller.setNavigationState(id, true, false));
+        assertFalse(controller.setNavigationState(id, true, false)); // no change — no event
+        assertTrue(controller.setNavigationState(id, true, true));
+        assertFalse(controller.setNavigationState("unknown", true, false));
+
+        assertEquals(2, events.size());
+        BrowserTab tab = controller.getTab(id).orElseThrow();
+        assertTrue(tab.canGoBack());
+        assertTrue(tab.canGoForward());
+    }
+
     // ------------------------------------------------------------------
     // Session (T8)
     // ------------------------------------------------------------------

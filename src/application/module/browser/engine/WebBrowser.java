@@ -1,5 +1,6 @@
 package application.module.browser.engine;
 
+import application.module.browser.config.BrowserSettings;
 import application.module.browser.engine.handler.BrowserCefHandlers;
 import application.module.browser.model.tab.TabController;
 import org.cef.CefClient;
@@ -7,6 +8,7 @@ import org.cef.browser.CefBrowser;
 
 import java.awt.Component;
 import java.awt.Dimension;
+import java.util.function.Supplier;
 
 /**
  * One tab's CEF browser: owns a single {@link CefClient} + {@link CefBrowser}
@@ -24,9 +26,10 @@ public final class WebBrowser {
     private final CefBrowser browser;
     private final Component uiComponent;
 
-    WebBrowser(CefClient client, String tabId, TabController controller, String initialUrl) {
+    WebBrowser(CefClient client, String tabId, TabController controller, String initialUrl,
+               Supplier<BrowserSettings> settings) {
         this.client = client;
-        BrowserCefHandlers.attach(client, tabId, controller);
+        BrowserCefHandlers.attach(client, tabId, controller, settings);
         this.browser = client.createBrowser(initialUrl, false, true); // offscreen=false (D1), focusable
         this.browser.createImmediately();
         this.uiComponent = this.browser.getUIComponent();

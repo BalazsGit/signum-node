@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Certificate error</title>
+  <link rel="stylesheet" href="css/browser.css">
+  <style>
+    /* S3 (F2): the certificate-error page. Data arrives in the query string
+       (code, url) and is rendered exclusively through textContent (S9: no
+       innerHTML with dynamic data). "Proceed" navigates to the internal
+       signum://cert-continue URL, which the Java request handler intercepts
+       (tab-scoped override + reload of the original URL). */
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+    }
+    .card {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 16px;
+      width: min(680px, 88vw);
+      padding: 34px 38px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+    }
+    .warn {
+      font-size: 40px;
+      line-height: 1;
+      color: #d94434;
+    }
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--fg);
+    }
+    h1 span {
+      color: #d94434;
+    }
+    p {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.55;
+      color: var(--fg);
+      opacity: 0.85;
+    }
+    .meta {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--muted);
+      word-break: break-all;
+      font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    }
+    .actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 6px;
+    }
+    button, a.proceed {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 9px 22px;
+      font-size: 14px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--fg);
+      cursor: pointer;
+      text-decoration: none;
+      transition: border-color 120ms ease, background 120ms ease;
+    }
+    button:hover, a.proceed:hover {
+      border-color: var(--accent);
+      background: rgba(79, 140, 255, 0.08);
+    }
+    a.proceed {
+      border-color: #d94434;
+      color: #d94434;
+    }
+    a.proceed:hover {
+      border-color: #d94434;
+      background: rgba(217, 68, 52, 0.08);
+    }
+    .hint {
+      font-size: 11px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="warn" aria-hidden="true">&#9888;</div>
+    <h1>Can't provide a secure connection to <span id="host">this site</span></h1>
+    <p>
+      The security certificate presented by this site failed validation, so the
+      connection was refused. Do not enter any sensitive information on this
+      site unless you understand why its certificate is being rejected.
+    </p>
+    <div class="meta">
+      <div>URL: <span id="url"></span></div>
+      <div>Error: <span id="code"></span></div>
+    </div>
+    <div class="actions">
+      <button type="button" id="back">Go back</button>
+      <a class="proceed" id="proceed" href="#">Proceed anyway</a>
+    </div>
+    <p class="hint">
+      Proceeding creates a tab-scoped exception for this site only — it is not
+      saved and it does not apply to other tabs.
+    </p>
+  </main>
+  <script>
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var url = params.get('url') || '';
+      document.getElementById('url').textContent = url;
+      document.getElementById('code').textContent = params.get('code') || 'unknown';
+      try {
+        document.getElementById('host').textContent = new URL(url).hostname;
+      } catch (e) {
+        document.getElementById('host').textContent = url;
+      }
+      // The Java request handler intercepts this navigation (onBeforeBrowse):
+      // it adds the host to the tab-scoped override set and reloads the URL.
+      document.getElementById('proceed').href =
+        'signum://cert-continue?url=' + encodeURIComponent(url);
+      document.getElementById('back').addEventListener('click', function () {
+        history.back();
+      });
+    })();
+  </script>
+</body>
+</html>
