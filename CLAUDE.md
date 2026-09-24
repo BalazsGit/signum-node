@@ -310,6 +310,76 @@ public void transferAsset(long fromId, long toId, long assetId, long quantity) {
 - Never implement custom cryptographic algorithms
 - Use secure random number generation
 
+### Node Profile Architecture Patterns
+
+**Multi-Profile Isolation:** The node supports multiple independent profiles (mainnet, testnet, custom). Each profile has fully isolated resources.
+
+#### NodeProfile Builder Pattern
+```java
+// NodeProfile is constructed via Builder (fluent API)
+NodeProfile profile = new NodeProfile.Builder("mainnet")
+    .properties(new Properties())  // from .properties file
+    .loggingProfile(loggingProfile)
+    .headlessMode(false)
+    .build();
+
+// Access runtime state through composition
+NodeLifecycleState state = profile.getRuntime().getStateMachine().get();
+long blockchainHeight = profile.getRuntime().getCoreContext().getBlockchain().getHeight();
+```
+
+#### Service Implementation Pattern (with Profile Context)
+```java
+@Component
+public class AccountServiceImpl implements AccountService {
+    private final AccountStore accountStore;
+    
+    // Constructor injection ONLY - no static access
+    public AccountServiceImpl(AccountStore accountStore) {
+        this.accountStore = accountStore;
+    }
+    
+    @Override
+    public Account getAccount(long id) {
+        return accountStore.getAccount(id);
+    }
+}
+```
+
+#### Profile-Aware Access Pattern
+```java
+// GOOD: Profile-aware, instance-scoped
+NodeProfile profile = lifecycleManager.getProfile("mainnet");
+Blockchain blockchain = profile.getRuntime().getCoreContext().getBlockchain();
+
+// BAD: Static global access (legacy - being eliminated)
+Blockchain blockchain = Signum.getBlockchain();  // ❌ Not multi-profile safe
+```
+
+### Unit Test Pattern
+
+```java
+@ExtendWith(MockitoExtension.class)
+class AccountServiceImplTest {
+    @Mock private AccountStore accountStore;
+    @InjectMocks private AccountServiceImpl accountService;
+    
+    @Test
+    void getAccount_GivenValidId_ReturnsAccount() {
+        // Arrange
+        Account expected = createTestAccount();
+        when(accountStore.getAccount(123L)).thenReturn(expected);
+        
+        // Act
+        Account result = accountService.getAccount(123L);
+        
+        // Assert
+        assertEquals(expected, result);
+        verify(accountStore).getAccount(123L);
+    }
+}
+```
+
 ### Code Review Checklist
 
 Before submitting code, verify:
@@ -323,3 +393,4 @@ Before submitting code, verify:
 - [ ] No direct database access from business logic
 - [ ] Javadoc for public APIs
 - [ ] No security vulnerabilities
+- [ ] No stateful static references (use profile-aware patterns above)
