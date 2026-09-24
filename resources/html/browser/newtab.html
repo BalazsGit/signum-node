@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>New Tab</title>
+  <link rel="stylesheet" href="css/browser.css">
+  <style>
+    /* NTP v1 (F1): fully static — no JS, no data injection (that arrives with
+       the history/bookmarks phases). The search form is a plain HTML GET to
+       the default engine, so it works without any bridge. */
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background:
+        radial-gradient(1200px 500px at 50% -10%, rgba(79, 140, 255, 0.14), transparent 60%),
+        var(--bg);
+    }
+    .ntp {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 26px;
+      transform: translateY(-6vh);
+      width: min(620px, 84vw);
+    }
+    .brand {
+      margin: 0;
+      font-size: 54px;
+      font-weight: 300;
+      letter-spacing: 8px;
+      color: var(--fg);
+    }
+    .brand b {
+      font-weight: 600;
+      color: var(--accent);
+    }
+    .search {
+      display: flex;
+      width: 100%;
+    }
+    .search input {
+      flex: 1;
+      min-width: 0;
+      padding: 14px 20px;
+      font-size: 16px;
+      color: var(--fg);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-right: 0;
+      border-radius: 24px 0 0 24px;
+      outline: none;
+      transition: border-color 120ms ease;
+    }
+    .search input::placeholder {
+      color: var(--muted);
+    }
+    .search input:focus {
+      border-color: var(--accent);
+    }
+    .search button {
+      width: 54px;
+      border: 0;
+      border-radius: 0 24px 24px 0;
+      background: var(--accent);
+      color: #ffffff;
+      font-size: 18px;
+      cursor: pointer;
+      transition: filter 120ms ease;
+    }
+    .search button:hover {
+      filter: brightness(1.12);
+    }
+    .hint {
+      margin: 0;
+      font-size: 12px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <main class="ntp">
+    <h1 class="brand">Sign<b>u</b>m</h1>
+    <form class="search" action="https://duckduckgo.com" method="get" role="search">
+      <input type="text" name="q" placeholder="Search the web" aria-label="Search the web"
+             autocomplete="off" autofocus>
+      <button type="submit" aria-label="Search">&#8629;</button>
+    </form>
+    <p class="hint">Signum Browser</p>
+  </main>
+</body>
+</html>

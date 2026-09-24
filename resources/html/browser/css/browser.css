@@ -1,0 +1,31 @@
+/* Signum internal pages — design tokens (plan D6: framework-free, CSS variables).
+   Every signum:// page links this file first; page-specific styles follow. */
+:root {
+  --bg: #14171c;
+  --card: #1d2229;
+  --fg: #e6e9ee;
+  --muted: #8b93a1;
+  --accent: #4f8cff;
+  --border: #2a3038;
+  --danger: #e5484d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--accent);
+}

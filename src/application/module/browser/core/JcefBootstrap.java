@@ -34,8 +34,9 @@ public final class JcefBootstrap {
         settings.windowless_rendering_enabled = false;
 
         // Security baseline (plan D17): explicit, so it is never relaxed by accident.
-        // Remote debugging (CDP) stays closed, and the explicit CEF command-line arg
-        // list (BrowserEngine#cefCommandlineArgs) must remain in effect.
+        // Remote debugging (CDP) stays closed, and the CEF command line stays the
+        // engine's safe default — the app handler (SignumSchemeRegistrar)
+        // forwards no JVM arguments to it.
         settings.remote_debugging_port = 0;
         settings.command_line_args_disabled = false;
 

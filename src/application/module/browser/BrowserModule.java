@@ -3,7 +3,7 @@ package application.module.browser;
 import application.api.Module;
 import application.api.ModuleContext;
 import application.module.browser.core.BrowserEngine;
-import application.module.browser.gui.BrowserSmokePanel;
+import application.module.browser.gui.BrowserPanel;
 import application.utils.config.ModuleIds;
 import application.utils.i18n.I18n;
 import org.slf4j.Logger;
@@ -14,12 +14,12 @@ import java.nio.file.Path;
 import javax.swing.JComponent;
 
 /**
- * Web3-enabled browser module (plan D3) — F0 scope: engine bootstrap + smoke
- * view of {@code https://example.com}.
+ * Web3-enabled browser module (plan D3) — F1: the full tab-based UI
+ * (tab strip, NTP, popups-as-tabs, session restore) on the JCEF engine.
  * <p>
  * This class is lifecycle only (kept small on purpose, plan §5.2): the engine
- * lives in {@code core.BrowserEngine}, the smoke UI in
- * {@code gui.BrowserSmokePanel} (F1 replaces it with the full {@code BrowserPanel}).
+ * lives in {@code core.BrowserEngine}, the tab model in
+ * {@code model.tab.TabController}, the UI in {@code gui.BrowserPanel}.
  * <p>
  * Headless contract (AC-1): the module registers and starts normally, but the
  * CEF engine is never initialized and {@link #getUI()} returns {@code null}.
@@ -35,7 +35,7 @@ public class BrowserModule implements Module {
     private ModuleContext context;
     private Path browserConfDir;
     private volatile boolean headless;
-    private volatile BrowserSmokePanel ui;
+    private volatile BrowserPanel ui;
 
     @Override
     public String getId() {
@@ -87,7 +87,7 @@ public class BrowserModule implements Module {
         }
         if (ui == null) {
             // Called on the EDT by the ApplicationKernel (see its boot sequence).
-            ui = new BrowserSmokePanel(engine);
+            ui = new BrowserPanel(engine, browserConfDir);
         }
         return ui;
     }

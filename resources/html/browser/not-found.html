@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Not Found</title>
+  <link rel="stylesheet" href="css/browser.css">
+  <style>
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .nf {
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .nf h1 {
+      margin: 0;
+      font-size: 44px;
+      font-weight: 300;
+      letter-spacing: 4px;
+    }
+    .nf p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+      word-break: break-all;
+    }
+    .nf a {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 10px 22px;
+      border: 1px solid var(--accent);
+      border-radius: 20px;
+      text-decoration: none;
+      font-size: 14px;
+    }
+    .nf a:hover {
+      background: rgba(79, 140, 255, 0.12);
+    }
+  </style>
+</head>
+<body>
+  <main class="nf">
+    <h1>Page not found</h1>
+    <p>The requested <code>signum://</code> page does not exist.</p>
+    <a href="signum://newtab">Open a new tab</a>
+  </main>
+</body>
+</html>

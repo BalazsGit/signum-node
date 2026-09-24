@@ -1,5 +1,8 @@
 package application.module.browser.core;
 
+import application.module.browser.engine.scheme.BrowserSchemeHandler;
+import application.module.browser.engine.scheme.SignumSchemeRegistrar;
+import application.module.browser.engine.security.SandboxVerifier;
 import application.module.browser.util.OsArch;
 import org.cef.CefApp;
 import org.cef.CefClient;
@@ -7,7 +10,6 @@ import org.cef.CefSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
@@ -180,19 +182,30 @@ public final class BrowserEngine {
                     "JCEF native distribution not found (expected " + JcefPathResolver.JCEF_FOLDER + "/"
                             + OsArch.current().key() + "/ next to the application). "
                             + "Run 'gradlew extractJcef' first."));
-            // 2. Make the native libraries loadable from the distribution directory.
-            //    (System.loadLibrary cannot see a runtime-extended java.library.path —
-            //    see JcefNativeLoader; must run before the first org.cef.* use.)
-            JcefNativeLoader.install(jcefDir, OsArch.current());
-            // 3. CEF cache/log locations (plan D8).
-            Files.createDirectories(browserConfDir.resolve("cef"));
-
-            // 4. Create the app (loads the native libraries; the pre-init step runs
-            //    on the EDT and requires it to be free) and the first client, which
-            //    performs the real, blocking CEF initialization (2–10 s).
-            CefSettings settings = JcefBootstrap.buildSettings(browserConfDir, jcefDir, OsArch.current());
-            CefApp.getInstance(cefCommandlineArgs(), settings);
+            // 2. CEF init (plan D4). The JCEF native loader, the app handler
+            //    (which registers the signum:// scheme in ALL processes — CEF
+            //    requires that for a custom scheme) and the CefApp instance were
+            //    set up as early as possible at startup by
+            //    {@link JcefProcessBootstrap}. If that pre-init was skipped
+            //    (headless) or failed, complete it here — still before the first
+            //    createClient(), which performs the real, blocking CEF
+            //    initialization (2–10 s).
+            if (!JcefProcessBootstrap.isPreinitialized()) {
+                JcefNativeLoader.install(jcefDir, OsArch.current());
+                if (!CefApp.startup(JcefProcessBootstrap.mainArgs())) {
+                    throw new IllegalStateException("JCEF startup failed (another JCEF process already running?)");
+                }
+                CefApp.addAppHandler(new SignumSchemeRegistrar());
+                CefSettings settings = JcefBootstrap.buildSettings(browserConfDir, jcefDir, OsArch.current());
+                CefApp.getInstance(JcefProcessBootstrap.mainArgs(), settings);
+            }
             CefApp.getInstance().createClient();
+
+            // Built-in signum:// pages (plan D6): registered once, after init.
+            CefApp.getInstance().registerSchemeHandlerFactory(
+                    BrowserSchemeHandler.SCHEME, "", BrowserSchemeHandler.factory());
+            // S7 (D17): verify the renderer sandbox is actually in effect (log-only, delayed).
+            SandboxVerifier.verifyAfterReady();
 
             CefApp.CefVersion version = CefApp.getInstance().getVersion();
             logger.info("Browser engine ready (JCEF {})",
@@ -203,25 +216,6 @@ public final class BrowserEngine {
             failureReason = t.getMessage() != null ? t.getMessage() : t.toString();
             return BrowserEngineState.FAILED;
         }
-    }
-
-    /**
-     * CEF command-line switches forwarded to the engine at start.
-     * <p>
-     * <b>Security baseline (plan D17):</b> the list is deliberately the empty
-     * set. Verified (F0, jcef-api bytecode): java-cef appends <em>only</em> the
-     * args we pass ({@code CefAppHandlerAdapter.onBeforeCommandLineProcessing}),
-     * with no JVM-argument fallback — so with no args the engine's safe defaults
-     * (renderer sandbox ON, no remote debugging) stay in force.
-     * <p>
-     * Forbidden switches in this project (code-review gate):
-     * {@code --no-sandbox}, {@code --disable-web-security},
-     * {@code --allow-running-insecure-content}, {@code --remote-debugging-port},
-     * {@code --test-type} / {@code --enable-automation}.
-     * (plan D13: the {@code --disable-gpu} auto-fallback is added in F1.)
-     */
-    private String[] cefCommandlineArgs() {
-        return new String[0];
     }
 
     private void transition(BrowserEngineState next) {

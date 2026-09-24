@@ -1,6 +1,7 @@
 package application.launcher;
 
 import application.kernel.ApplicationKernel;
+import application.module.browser.core.JcefProcessBootstrap;
 import application.module.node.profile.NodeProfileRepository;
 import application.module.node.profile.ProfileCli;
 import application.module.node.profile.ProfileConfig;
@@ -53,10 +54,10 @@ public class Launcher {
         if (System.getProperty("java.util.logging.manager") == null) {
             System.setProperty("java.util.logging.manager", "application.module.node.util.SignumLogManager");
         }
-        // Note (JCEF/browser module): no early setup is needed here. The engine
-        // installs its own native library loader (SystemBootstrap) during
-        // initialization, before the first org.cef.* use — see
-        // application.module.browser.core.JcefNativeLoader.
+        // Note (JCEF/browser module): no early setup is needed here. The JCEF
+        // process bootstrap (JcefProcessBootstrap) runs at the very start of
+        // main() — before any application logic — and installs the native
+        // library loader before the first org.cef.* use.
     }
 
     /**
@@ -99,6 +100,15 @@ public class Launcher {
         }
 
         Path confPath = PathUtils.resolvePath(confFolder);
+
+        // ── JCEF process bootstrap (must precede ALL application logic) ──
+        // JCEF renderer/utility/GPU processes re-run this main() with an extra
+        // CEF --type= switch; the subprocess must not initialize logging, the
+        // kernel or any module — it goes straight into the CEF process loop and
+        // exits through CEF. In the browser process this pre-initializes the
+        // engine (fast) so the custom-scheme handler is installed before the
+        // first CEF subprocess launches.
+        JcefProcessBootstrap.bootstrap(args, confPath, headless);
 
         // Logging inicializálás (Ez maradhat a Launcher-ben mint infra)
         List<String> initLogs = new ArrayList<>();

@@ -35,7 +35,7 @@ class I18nTest {
     @DisplayName("MessageFormat arguments are applied")
     void argsAreFormatted() {
         assertEquals("Reason: engine exploded",
-                I18n.get("browser.smoke.failed.reason", "engine exploded"));
+                I18n.get("browser.engine.failed.reason", "engine exploded"));
     }
 
     @Test
