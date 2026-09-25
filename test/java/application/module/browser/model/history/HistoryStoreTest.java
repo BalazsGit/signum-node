@@ -15,6 +15,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -105,6 +106,38 @@ class HistoryStoreTest {
             assertEquals(64L, store.count());
         }
     }
+    @Test
+    @DisplayName("record trims the title and normalizes a blank referrer to null")
+    void recordNormalizesFields(@TempDir Path dir) {
+        try (HistoryStore store = storeIn(dir)) {
+            store.record("https://example.com", "  Padded Title  ", T0, "   ");
+            store.flush();
+
+            HistoryEntry entry = store.search(null, 0L, Long.MAX_VALUE, 1).get(0);
+            assertEquals("Padded Title", entry.getTitle());
+            assertNull(entry.getReferrer());
+        }
+    }
+
+    @Test
+    @DisplayName("reopening the same database after close keeps the persisted rows")
+    void reopenKeepsRows(@TempDir Path dir) {
+        Path dbFile = dir.resolve("history.db");
+        HistoryStore first = new HistoryStore(dbFile);
+        first.record("https://kept.example", "Kept", T0, null);
+        first.close();
+
+        HistoryStore second = new HistoryStore(dbFile);
+        try {
+            List<HistoryEntry> rows = second.search(null, 0L, Long.MAX_VALUE, 0);
+            assertEquals(1, rows.size());
+            assertEquals("https://kept.example", rows.get(0).getUrl());
+            assertEquals(1L, second.count());
+        } finally {
+            second.close();
+        }
+    }
+
     // ------------------------------------------------------------------
     // Search (H2)
     // ------------------------------------------------------------------
