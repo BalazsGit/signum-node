@@ -4,6 +4,8 @@ import application.module.browser.config.BrowserSettings;
 import application.module.browser.engine.WebBrowserRegistry;
 import application.module.browser.engine.security.CertificateInspector;
 import application.module.browser.gui.dialogs.CertificateDetailsDialog;
+import application.module.browser.model.history.HistoryEntry;
+import application.module.browser.model.history.HistoryStore;
 import application.module.browser.model.tab.BrowserTab;
 import application.module.browser.model.tab.TabController;
 import application.module.browser.model.tab.TabEvent;
@@ -50,6 +52,7 @@ public final class NavigationToolbar extends JPanel {
     private final TabController controller;
     private final WebBrowserRegistry registry;
     private final Supplier<BrowserSettings> settings;
+    private final HistoryStore history;
     private final JButton back;
     private final JButton forward;
     private final JButton reloadStop;
@@ -65,11 +68,12 @@ public final class NavigationToolbar extends JPanel {
     });
 
     public NavigationToolbar(TabController controller, WebBrowserRegistry registry,
-                             Supplier<BrowserSettings> settings) {
+                             Supplier<BrowserSettings> settings, HistoryStore history) {
         super(new BorderLayout(0, 2));
         this.controller = controller;
         this.registry = registry;
         this.settings = settings;
+        this.history = history;
 
         this.back = flatNavButton("\u25C0", I18n.get("browser.nav.back.tooltip"));
         this.forward = flatNavButton("\u25B6", I18n.get("browser.nav.forward.tooltip"));
@@ -170,14 +174,29 @@ public final class NavigationToolbar extends JPanel {
                 url, inspector, certExecutor);
     }
 
+    /** N2: how many history rows may fill the omnibox popup. */
+    private static final int HISTORY_SUGGESTIONS = 6;
+
     /**
-     * N2 suggestion rows for the current input. F2: the normalized-URL entry
-     * (when the input looks navigable) plus the search entry; F3/F4 append
-     * history and bookmarks to this same list.
+     * N2 suggestion rows for the current input. F3: history matches first
+     * (the most recent visits for the input), then the normalized-URL entry
+     * (when the input looks navigable) and the search entry; F4 appends
+     * bookmarks to this same list.
      */
     private List<OmniboxPopup.Suggestion> suggestFor(Omnibox box, String input) {
         List<OmniboxPopup.Suggestion> items = new ArrayList<>();
         String normalized = UrlUtils.normalize(input, settings.get().getSearchEngineTemplate());
+        for (HistoryEntry entry :
+                history.search(input, 0L, Long.MAX_VALUE, HISTORY_SUGGESTIONS)) {
+            if (normalized != null && normalized.equals(entry.getUrl())) {
+                continue; // the normalized-URL row below already covers this one
+            }
+            String label = (entry.getTitle() == null || entry.getTitle().isBlank())
+                    ? entry.getUrl()
+                    : entry.getTitle();
+            items.add(new OmniboxPopup.Suggestion(OmniboxPopup.Suggestion.Kind.URL,
+                    I18n.get("browser.omnibox.suggestion.visit", label), entry.getUrl()));
+        }
         if (normalized != null
                 && (UrlUtils.isWebUrl(input) || UrlUtils.looksLikeHost(input))) {
             items.add(new OmniboxPopup.Suggestion(OmniboxPopup.Suggestion.Kind.URL,

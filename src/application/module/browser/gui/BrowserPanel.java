@@ -6,8 +6,11 @@ import application.module.browser.core.BrowserEngine;
 import application.module.browser.core.BrowserEngineState;
 import application.module.browser.core.JcefProvisioner;
 import application.module.browser.engine.WebBrowserRegistry;
+import application.module.browser.engine.scheme.HistoryPageRenderer;
+import application.module.browser.engine.scheme.InternalPage;
 import application.module.browser.gui.dialogs.JcefSetupDialog;
 import application.module.browser.gui.toolbar.NavigationToolbar;
+import application.module.browser.model.history.HistoryStore;
 import application.module.browser.model.session.SessionSnapshot;
 import application.module.browser.model.session.SessionStore;
 import application.module.browser.model.tab.BrowserTab;
@@ -62,6 +65,7 @@ public final class BrowserPanel extends JPanel {
     private final Path confDir;
     private final TabController controller = new TabController();
     private final WebBrowserRegistry registry;
+    private final HistoryStore historyStore;
     private final SessionStore sessionStore;
     private final BrowserSettingsRepository settingsRepository;
     private final ChromeTabBar tabBar;
@@ -81,10 +85,17 @@ public final class BrowserPanel extends JPanel {
         this.confDir = browserConfDir;
         this.settingsRepository = new BrowserSettingsRepository(
                 browserConfDir.resolve("settings.json"));
-        this.registry = new WebBrowserRegistry(engine, controller, settingsRepository::load);
+        this.historyStore = new HistoryStore(browserConfDir.resolve("history.db"));
+        // F3: the history page is a dynamic internal page (signum://history)
+        // whose body is produced from this store at request time.
+        InternalPage.registerRenderer(HistoryPageRenderer.PAGE,
+                new HistoryPageRenderer(historyStore));
+        this.registry = new WebBrowserRegistry(engine, controller,
+                settingsRepository::load, historyStore);
         this.sessionStore = new SessionStore(browserConfDir.resolve("session.json"));
         this.tabBar = new ChromeTabBar(controller);
-        this.toolbar = new NavigationToolbar(controller, registry, settingsRepository::load);
+        this.toolbar = new NavigationToolbar(controller, registry,
+                settingsRepository::load, historyStore);
         this.readyScreen = new EngineReadyScreen();
         this.contentPanel = new ContentPanel();
 
@@ -140,6 +151,14 @@ public final class BrowserPanel extends JPanel {
         }
         bind(im, am, "browser.gotoLast", KeyStroke.getKeyStroke("ctrl 9"), () -> controller.activateLast());
         bind(im, am, "browser.focusOmnibox", KeyStroke.getKeyStroke("ctrl L"), toolbar::focusOmnibox);
+        // F3 (H4): Ctrl+H opens the history page in the active tab.
+        bind(im, am, "browser.history", KeyStroke.getKeyStroke("ctrl H"),
+                () -> {
+                    String tabId = activeTabId();
+                    if (tabId != null) {
+                        registry.navigate(tabId, "signum://history");
+                    }
+                });
         bind(im, am, "browser.reload", KeyStroke.getKeyStroke("F5"), () -> registry.reload(activeTabId()));
         bind(im, am, "browser.reloadAlt", KeyStroke.getKeyStroke("ctrl R"), () -> registry.reload(activeTabId()));
         bind(im, am, "browser.back", KeyStroke.getKeyStroke("alt LEFT"), () -> registry.back(activeTabId()));
@@ -190,6 +209,8 @@ public final class BrowserPanel extends JPanel {
             case SHUTTING_DOWN, SHUT_DOWN -> {
                 sessionStore.save(controller.snapshot()); // persist before teardown
                 registry.clear();
+                InternalPage.registerRenderer(HistoryPageRenderer.PAGE, null);
+                historyStore.close(); // F3: drain the batch writer, release SQLite
                 readyScreen.showIdle();
                 cards.show(cardHost, CARD_ENGINE);
             }

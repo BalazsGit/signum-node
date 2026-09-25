@@ -64,16 +64,27 @@ public final class BrowserSchemeHandler implements CefResourceHandler, CefScheme
         String url = request != null ? request.getURL() : null;
         String requested = InternalPage.pageForUrl(url);
         boolean found = requested != null;
-        String page = found ? requested : InternalPage.NOT_FOUND;
-        byte[] body = InternalPage.read(page);
+        byte[] body = null;
+        if (found) {
+            // Dynamic pages (F3+): the body is produced from live module data
+            // (a null body means "unknown action" → the 404 page).
+            InternalPage.PageRenderer renderer = InternalPage.rendererFor(requested);
+            if (renderer != null) {
+                body = renderer.render(url, InternalPage.query(url));
+                found = body != null;
+            }
+        }
+        if (found && body == null) {
+            body = InternalPage.read(requested);
+        }
         if (body == null) {
-            page = InternalPage.NOT_FOUND;
-            found = false;
-            body = InternalPage.read(page);
+            // A missing classpath resource still falls back to the friendly 404.
+            body = InternalPage.read(InternalPage.NOT_FOUND);
         }
         if (body == null) {
             body = new byte[0];
         }
+        String page = found ? requested : InternalPage.NOT_FOUND;
         return new BrowserSchemeHandler(body, found, InternalPage.mimeFor(page));
     }
 

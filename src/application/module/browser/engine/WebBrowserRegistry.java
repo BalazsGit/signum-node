@@ -2,6 +2,7 @@ package application.module.browser.engine;
 
 import application.module.browser.config.BrowserSettings;
 import application.module.browser.core.BrowserEngine;
+import application.module.browser.model.history.HistoryStore;
 import application.module.browser.model.tab.BrowserTab;
 import application.module.browser.model.tab.TabController;
 
@@ -23,13 +24,15 @@ public final class WebBrowserRegistry {
     private final BrowserEngine engine;
     private final TabController controller;
     private final Supplier<BrowserSettings> settings;
+    private final HistoryStore history;
     private final Map<String, WebBrowser> browsers = new LinkedHashMap<>();
 
     public WebBrowserRegistry(BrowserEngine engine, TabController controller,
-                              Supplier<BrowserSettings> settings) {
+                              Supplier<BrowserSettings> settings, HistoryStore history) {
         this.engine = engine;
         this.controller = controller;
         this.settings = settings;
+        this.history = history;
     }
 
     /**
@@ -43,7 +46,8 @@ public final class WebBrowserRegistry {
         if (browser == null) {
             BrowserTab tab = controller.getTab(tabId)
                     .orElseThrow(() -> new IllegalStateException("Unknown tab id: " + tabId));
-            browser = new WebBrowser(engine.createClient(), tabId, controller, tab.getUrl(), settings);
+            browser = new WebBrowser(engine.createClient(), tabId, controller, tab.getUrl(),
+                    settings, history);
             browsers.put(tabId, browser);
         }
         return browser.getUiComponent();

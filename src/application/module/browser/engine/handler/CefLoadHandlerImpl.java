@@ -1,5 +1,7 @@
 package application.module.browser.engine.handler;
 
+import application.module.browser.model.history.HistoryStore;
+import application.module.browser.model.tab.BrowserTab;
 import application.module.browser.model.tab.TabController;
 import org.cef.browser.CefBrowser;
 import org.cef.browser.CefFrame;
@@ -10,7 +12,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Load events of one tab → tab model (loading flag, progress, final URL).
+ * Load events of one tab → tab model (loading flag, progress, final URL) and
+ * the browsing history (F3, H1).
+ * <p>
+ * <b>History capture (H1):</b> a successful main-frame load records
+ * (url, title, ts, referrer) into the {@link HistoryStore}; the referrer is
+ * the tab's URL <em>before</em> the model switches over (the navigation
+ * chain), and only recordable URLs are queued (http/https + internal pages,
+ * the New Tab page excluded — {@link HistoryStore#isRecordable}).
  * <p>
  * F1 note: the pinned JCEF fork (146.0.10) has no progress callback, so the
  * tab's progress is 0/100 from the load state — the F2 progress bar will be
@@ -22,10 +31,12 @@ final class CefLoadHandlerImpl extends CefLoadHandlerAdapter {
 
     private final String tabId;
     private final TabController controller;
+    private final HistoryStore history;
 
-    CefLoadHandlerImpl(String tabId, TabController controller) {
+    CefLoadHandlerImpl(String tabId, TabController controller, HistoryStore history) {
         this.tabId = tabId;
         this.controller = controller;
+        this.history = history;
     }
 
     @Override
@@ -50,6 +61,17 @@ final class CefLoadHandlerImpl extends CefLoadHandlerAdapter {
             return;
         }
         String finalUrl = browser.getURL();
+        // H1: capture the visit while the tab model still holds the previous
+        // URL (the referrer); the store queues it for the batch writer. The
+        // title comes from the model (onTitleChange lands before load end;
+        // the pinned JCEF CefBrowser has no getTitle()).
+        BrowserTab tab = controller.getTab(tabId).orElse(null);
+        String referrer = tab == null ? null : tab.getUrl();
+        if (HistoryStore.isRecordable(finalUrl)) {
+            history.record(finalUrl, tab == null ? null : tab.getTitle(),
+                    System.currentTimeMillis(),
+                    referrer != null && !referrer.equals(finalUrl) ? referrer : null);
+        }
         BrowserCefHandlers.runInEdt(() -> {
             controller.setLoading(tabId, false);
             controller.setProgress(tabId, 100);

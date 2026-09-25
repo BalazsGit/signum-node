@@ -2,6 +2,7 @@ package application.module.browser.engine;
 
 import application.module.browser.config.BrowserSettings;
 import application.module.browser.engine.handler.BrowserCefHandlers;
+import application.module.browser.model.history.HistoryStore;
 import application.module.browser.model.tab.TabController;
 import org.cef.CefClient;
 import org.cef.browser.CefBrowser;
@@ -27,9 +28,9 @@ public final class WebBrowser {
     private final Component uiComponent;
 
     WebBrowser(CefClient client, String tabId, TabController controller, String initialUrl,
-               Supplier<BrowserSettings> settings) {
+               Supplier<BrowserSettings> settings, HistoryStore history) {
         this.client = client;
-        BrowserCefHandlers.attach(client, tabId, controller, settings);
+        BrowserCefHandlers.attach(client, tabId, controller, settings, history);
         this.browser = client.createBrowser(initialUrl, false, true); // offscreen=false (D1), focusable
         this.browser.createImmediately();
         this.uiComponent = this.browser.getUIComponent();

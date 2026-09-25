@@ -1,6 +1,7 @@
 package application.module.browser.engine.handler;
 
 import application.module.browser.config.BrowserSettings;
+import application.module.browser.model.history.HistoryStore;
 import application.module.browser.model.tab.TabController;
 import org.cef.CefClient;
 
@@ -17,8 +18,9 @@ import javax.swing.Timer;
  * {@link #runInEdt} — nothing CEF-derived may touch Swing directly.
  * <p>
  * F1 wires the load, display and lifespan handlers. F2 adds the request
- * handler (certificate errors S3, {@code file://} block N12); F5 the download
- * handler; F8 the JS dialog handler.
+ * handler (certificate errors S3, {@code file://} block N12); F3 the history
+ * capture into the load handler (H1); F5 the download handler; F8 the JS
+ * dialog handler.
  */
 public final class BrowserCefHandlers {
 
@@ -30,14 +32,15 @@ public final class BrowserCefHandlers {
     }
 
     /**
-     * Attaches the F2 handler set to the client before its browser is created.
+     * Attaches the F3 handler set to the client before its browser is created.
      *
      * @param settings live browser settings (the request handler reads the
      *                 {@code file://} block switch on every navigation, N12)
+     * @param history  the module's history store (visit capture, H1)
      */
     public static void attach(CefClient client, String tabId, TabController controller,
-                              Supplier<BrowserSettings> settings) {
-        client.addLoadHandler(new CefLoadHandlerImpl(tabId, controller));
+                              Supplier<BrowserSettings> settings, HistoryStore history) {
+        client.addLoadHandler(new CefLoadHandlerImpl(tabId, controller, history));
         client.addDisplayHandler(new CefDisplayHandlerImpl(tabId, controller));
         client.addLifeSpanHandler(new CefLifeSpanHandlerImpl(tabId, controller));
         client.addRequestHandler(new CefRequestHandlerImpl(tabId, controller, settings));
