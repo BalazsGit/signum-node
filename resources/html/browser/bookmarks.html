@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title></title>
+  <link rel="stylesheet" href="css/browser.css">
+  <style>
+    /* F4 (B2/B3/B5): the bookmarks manager page. Pure template — every UI
+       string and every node arrives in the JSON data island (i18n +
+       BookmarkStore tree), rendered exclusively through textContent
+       (S9: no innerHTML with dynamic data). The tree is flat data with
+       parent ids; search filtering, indentation and the HTML5 drag-and-
+       drop (drop onto a folder row) are client-side. Every mutation is a
+       plain navigation to a signum://bookmarks/* action URL. */
+    body {
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+    }
+    .bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 18px 26px 12px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--fg);
+    }
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-left: auto;
+    }
+    #search-form {
+      display: flex;
+      align-items: center;
+    }
+    #search-form input {
+      width: 200px;
+      padding: 8px 14px;
+      font-size: 13px;
+      color: var(--fg);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-right: 0;
+      border-radius: 18px 0 0 18px;
+      outline: none;
+      transition: border-color 120ms ease;
+    }
+    #search-form input::placeholder {
+      color: var(--muted);
+    }
+    #search-form input:focus {
+      border-color: var(--accent);
+    }
+    #search-form button {
+      width: 40px;
+      border: 1px solid var(--border);
+      border-left: 0;
+      border-radius: 0 18px 18px 0;
+      background: var(--card);
+      color: var(--accent);
+      font-size: 15px;
+      cursor: pointer;
+      transition: filter 120ms ease;
+    }
+    #search-form button:hover {
+      filter: brightness(1.25);
+    }
+    .ctl {
+      padding: 8px 16px;
+      font-size: 13px;
+      border-radius: 18px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--fg);
+      cursor: pointer;
+      transition: border-color 120ms ease, background 120ms ease;
+    }
+    .ctl:hover {
+      border-color: var(--accent);
+      background: rgba(79, 140, 255, 0.08);
+    }
+    #list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 26px 26px;
+    }
+    .empty {
+      margin-top: 40px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      transition: background 100ms ease;
+      cursor: grab;
+    }
+    .row:hover {
+      background: var(--card);
+    }
+    .row__icon {
+      width: 20px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .row__label {
+      flex: 1;
+      min-width: 0;
+    }
+    .row__name {
+      display: block;
+      font-size: 14px;
+      color: var(--fg);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .row__url {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .row__actions {
+      display: flex;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 120ms ease;
+    }
+    .row:hover .row__actions {
+      opacity: 1;
+    }
+    .row__actions button {
+      width: 26px;
+      height: 26px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 100ms ease, color 100ms ease;
+    }
+    .row__actions button:hover {
+      background: rgba(79, 140, 255, 0.15);
+      color: var(--accent);
+    }
+    .row__actions button.is-active {
+      color: var(--accent);
+    }
+    /* drop target (B5 drag): a folder row the dragged node may enter */
+    .row.drop-ok {
+      outline: 1.5px dashed var(--accent);
+      outline-offset: -1.5px;
+      cursor: default;
+    }
+  </style>
+</head>
+<body>
+  <header class="bar">
+    <h1 id="title"></h1>
+    <div class="controls">
+      <form id="search-form">
+        <input id="search" type="text" autocomplete="off">
+        <button type="submit" title="search">\u{1F50D}</button>
+      </form>
+      <button id="new-folder" class="ctl" type="button"></button>
+      <button id="add-bookmark" class="ctl" type="button"></button>
+    </div>
+  </header>
+  <main id="list"></main>
+  <script id="signum-data" type="application/json">__SIGNUM_DATA__</script>
+  <script>
+    (function () {
+      var data = JSON.parse(document.getElementById('signum-data').textContent);
+      var s = data.strings || {};
+      document.title = s.title;
+      document.getElementById('title').textContent = s.title;
+      document.getElementById('new-folder').textContent = s.newFolder;
+      document.getElementById('add-bookmark').textContent = s.addBookmark;
+      var searchInput = document.getElementById('search');
+      searchInput.placeholder = s.searchPlaceholder;
+      searchInput.value = data.q || '';
+      var barIds = data.bar || [];
+
+      // ---- flat tree helpers -------------------------------------------------
+      var nodes = data.nodes || [];
+      var byId = {};
+      nodes.forEach(function (n) { byId[n.id] = n; });
+
+      // a node is visible when it matches the query or any descendant matches
+      var q = (data.q || '').trim().toLowerCase();
+      var visible = {};
+      function matches(n) {
+        return !q || (n.name && n.name.toLowerCase().indexOf(q) >= 0) ||
+               (n.url && n.url.toLowerCase().indexOf(q) >= 0);
+      }
+      function depthOf(id) {
+        var d = 0;
+        var cur = byId[id];
+        while (cur && cur.parent) { d++; cur = byId[cur.parent]; }
+        return d;
+      }
+      nodes.forEach(function (n) { visible[n.id] = matches(n); });
+      // propagation: a matching child keeps every ancestor visible (the
+      // iteration is in tree order, so parents come before children)
+      nodes.forEach(function (n) {
+        if (!visible[n.id]) return;
+        var p = n.parent;
+        while (p && !visible[p]) { visible[p] = true; p = byId[p].parent; }
+      });
+
+      // ---- rendering ---------------------------------------------------------
+      var list = document.getElementById('list');
+      if (!nodes.some(function (n) { return visible[n.id]; })) {
+        var empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = s.empty;
+        list.appendChild(empty);
+        return;
+      }
+      // the drag carries the node id; only a node dragged from OUTSIDE the
+      // folder's own subtree may be moved into it (cycle guard, mirrored
+      // server-side in the BookmarkStore)
+      function inSubtree(ancestorId, nodeId) {
+        var cur = byId[nodeId];
+        while (cur) {
+          if (cur.id === ancestorId) return true;
+          cur = cur.parent ? byId[cur.parent] : null;
+        }
+        return false;
+      }
+      nodes.forEach(function (n) {
+        if (!visible[n.id]) return;
+        var row = document.createElement('div');
+        row.className = 'row';
+        row.draggable = true;
+        row.style.paddingLeft = (10 + 18 * depthOf(n.id)) + 'px';
+
+        var icon = document.createElement('span');
+        icon.className = 'row__icon';
+        icon.textContent = n.type === 'folder' ? '\u25B8'
+                : (barIds.indexOf(n.id) >= 0 ? '\u2605' : '\u25CB');
+
+        var label = document.createElement('span');
+        label.className = 'row__label';
+        var name = document.createElement('span');
+        name.className = 'row__name';
+        name.textContent = n.name || n.url;
+        label.appendChild(name);
+        if (n.type === 'bookmark' && n.url) {
+          var urlEl = document.createElement('span');
+          urlEl.className = 'row__url';
+          urlEl.textContent = n.url;
+          label.appendChild(urlEl);
+        }
+
+        var actions = document.createElement('span');
+        actions.className = 'row__actions';
+        function actBtn(glyph, tip, fn) {
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.textContent = glyph;
+          b.title = tip;
+          b.addEventListener('click', function (e) { e.stopPropagation(); fn(); });
+          actions.appendChild(b);
+          return b;
+        }
+        var barBtn = actBtn('\u2606', barIds.indexOf(n.id) >= 0 ? s.removeFromBar : s.addToBar, function () {
+          var on = barIds.indexOf(n.id) >= 0 ? '0' : '1';
+          window.location.href = 'signum://bookmarks/bar?id=' + encodeURIComponent(n.id) + '&on=' + on;
+        });
+        if (barIds.indexOf(n.id) >= 0) {
+          barBtn.classList.add('is-active');
+        }
+        actBtn('\u270E', s.edit, function () {
+          var newName = prompt(s.edit, n.name);
+          if (newName !== null && newName.trim()) {
+            window.location.href = 'signum://bookmarks/rename?id=' + encodeURIComponent(n.id) +
+                '&name=' + encodeURIComponent(newName.trim());
+          }
+        });
+        actBtn('\u00D7', s.delete, function () {
+          var msg = (n.type === 'folder' ? s.confirmDeleteFolder : s.confirmDelete)
+              .replace('{0}', n.name || n.url);
+          if (confirm(msg)) {
+            window.location.href = 'signum://bookmarks/delete?id=' + encodeURIComponent(n.id);
+          }
+        });
+
+        // opening a bookmark = follow its URL; a folder has no direct target
+        if (n.type === 'bookmark') {
+          row.addEventListener('click', function () { window.location.href = n.url; });
+        }
+        // B5 drag: the drag carries the node id; folder rows accept it
+        row.addEventListener('dragstart', function (e) {
+          e.dataTransfer.setData('text/plain', n.id);
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        if (n.type === 'folder') {
+          row.addEventListener('dragover', function (e) {
+            e.preventDefault(); // accept the drop
+            e.dataTransfer.dropEffect = 'move';
+            row.classList.add('drop-ok');
+          });
+          row.addEventListener('dragleave', function () { row.classList.remove('drop-ok'); });
+          row.addEventListener('drop', function (e) {
+            e.preventDefault();
+            row.classList.remove('drop-ok');
+            var draggedId = e.dataTransfer.getData('text/plain');
+            var dragged = byId[draggedId];
+            if (!dragged || draggedId === n.id || inSubtree(n.id, draggedId)) return;
+            window.location.href = 'signum://bookmarks/move?id=' + encodeURIComponent(draggedId) +
+                '&target=' + encodeURIComponent(n.id);
+          });
+        }
+
+        row.appendChild(icon);
+        row.appendChild(label);
+        row.appendChild(actions);
+        list.appendChild(row);
+      });
+
+      // ---- top controls ------------------------------------------------------
+      document.getElementById('search-form').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var v = searchInput.value.trim();
+        window.location.href = 'signum://bookmarks' + (v ? '?q=' + encodeURIComponent(v) : '');
+      });
+      document.getElementById('new-folder').addEventListener('click', function () {
+        var name = prompt(s.newFolderPrompt, s.newFolder);
+        if (name && name.trim()) {
+          window.location.href = 'signum://bookmarks/folder?name=' + encodeURIComponent(name.trim());
+        }
+      });
+      document.getElementById('add-bookmark').addEventListener('click', function () {
+        var name = prompt(s.addNamePrompt, '');
+        if (!name || !name.trim()) return;
+        var url = prompt(s.addUrlPrompt, 'https://');
+        if (!url || !url.trim()) return;
+        window.location.href = 'signum://bookmarks/add?name=' + encodeURIComponent(name.trim()) +
+            '&url=' + encodeURIComponent(url.trim());
+      });
+    })();
+  </script>
+</body>
+</html>

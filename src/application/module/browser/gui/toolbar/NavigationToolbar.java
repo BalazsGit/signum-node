@@ -3,7 +3,10 @@ package application.module.browser.gui.toolbar;
 import application.module.browser.config.BrowserSettings;
 import application.module.browser.engine.WebBrowserRegistry;
 import application.module.browser.engine.security.CertificateInspector;
+import application.module.browser.gui.bookmarks.BookmarkDialog;
 import application.module.browser.gui.dialogs.CertificateDetailsDialog;
+import application.module.browser.model.bookmarks.Bookmark;
+import application.module.browser.model.bookmarks.BookmarkStore;
 import application.module.browser.model.history.HistoryEntry;
 import application.module.browser.model.history.HistoryStore;
 import application.module.browser.model.tab.BrowserTab;
@@ -53,6 +56,7 @@ public final class NavigationToolbar extends JPanel {
     private final WebBrowserRegistry registry;
     private final Supplier<BrowserSettings> settings;
     private final HistoryStore history;
+    private final BookmarkStore bookmarks;
     private final JButton back;
     private final JButton forward;
     private final JButton reloadStop;
@@ -60,6 +64,8 @@ public final class NavigationToolbar extends JPanel {
     private final SecurityIcon securityIcon;
     private final FadingLabel titleLabel;
     private final ProgressBar progressBar;
+    /** F4 (B1): the star button of the omnibox row (fade-in on toggle). */
+    private final StarButton star;
     private final CertificateInspector inspector = new CertificateInspector();
     private final ExecutorService certExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "browser-cert-inspector");
@@ -68,12 +74,14 @@ public final class NavigationToolbar extends JPanel {
     });
 
     public NavigationToolbar(TabController controller, WebBrowserRegistry registry,
-                             Supplier<BrowserSettings> settings, HistoryStore history) {
+                             Supplier<BrowserSettings> settings, HistoryStore history,
+                             BookmarkStore bookmarks) {
         super(new BorderLayout(0, 2));
         this.controller = controller;
         this.registry = registry;
         this.settings = settings;
         this.history = history;
+        this.bookmarks = bookmarks;
 
         this.back = flatNavButton("\u25C0", I18n.get("browser.nav.back.tooltip"));
         this.forward = flatNavButton("\u25B6", I18n.get("browser.nav.forward.tooltip"));
@@ -104,9 +112,14 @@ public final class NavigationToolbar extends JPanel {
         this.securityIcon = new SecurityIcon(this::openCertificateDialog);
         this.titleLabel = new FadingLabel("", 0.8f);
         titleLabel.setToolTipText(I18n.get("browser.nav.title.tooltip"));
+        // F4 (B1): the star toggles the current page's bookmark
+        this.star = new StarButton("\u2606");
+        star.setFocusable(false);
+        star.addActionListener(e -> toggleBookmark());
 
         JPanel east = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         east.setOpaque(false);
+        east.add(star);
         east.add(securityIcon);
         east.add(titleLabel);
 
@@ -132,6 +145,52 @@ public final class NavigationToolbar extends JPanel {
     /** N9: Ctrl+L — focus the omnibox. */
     public void focusOmnibox() {
         omnibox.focusAndSelect();
+    }
+
+    /**
+     * F4 (B1): the star button / Ctrl+D — toggles the active page's bookmark:
+     * unbookmarked pages are saved immediately (name = the page title) with
+     * a fade-in animation; an already-bookmarked page opens the edit dialog
+     * (rename/move/remove). Internal and non-web pages are not bookmarkable.
+     */
+    public void toggleBookmark() {
+        BrowserTab tab = controller.getActiveTab().orElse(null);
+        if (tab == null) {
+            return;
+        }
+        String url = tab.getUrl();
+        String scheme = UrlUtils.scheme(url);
+        if (!"http".equals(scheme) && !"https".equals(scheme)) {
+            return; // the star only bookmarks web pages
+        }
+        List<Bookmark> existing = bookmarks.findByUrl(url);
+        if (existing.isEmpty()) {
+            String name = (tab.getTitle() == null || tab.getTitle().isBlank()) ? url : tab.getTitle();
+            if (bookmarks.newBookmark(BookmarkStore.ROOT_ID, name, url) != null) {
+                bookmarks.save();
+                star.pulse(); // B1: the star's fade-in animation
+                if (bookmarksChanged != null) {
+                    bookmarksChanged.run();
+                }
+            }
+        } else {
+            Window owner = getTopLevelAncestor() instanceof Window w ? w : null;
+            BookmarkDialog.show(owner, bookmarks, url, tab.getTitle(), existing.get(0));
+            if (bookmarksChanged != null) {
+                bookmarksChanged.run();
+            }
+        }
+        syncForActive();
+    }
+
+    /**
+     * Registers the callback fired after any bookmark change here (the
+     * bookmarks bar listens to refresh itself).
+     */
+    private Runnable bookmarksChanged;
+
+    public void onBookmarksChanged(Runnable changed) {
+        this.bookmarksChanged = changed;
     }
 
     /**
@@ -176,6 +235,8 @@ public final class NavigationToolbar extends JPanel {
 
     /** N2: how many history rows may fill the omnibox popup. */
     private static final int HISTORY_SUGGESTIONS = 6;
+    /** N2 (F4): how many bookmark rows may fill the omnibox popup. */
+    private static final int BOOKMARK_SUGGESTIONS = 4;
 
     /**
      * N2 suggestion rows for the current input. F3: history matches first
@@ -196,6 +257,18 @@ public final class NavigationToolbar extends JPanel {
                     : entry.getTitle();
             items.add(new OmniboxPopup.Suggestion(OmniboxPopup.Suggestion.Kind.URL,
                     I18n.get("browser.omnibox.suggestion.visit", label), entry.getUrl()));
+        }
+        // F4 (N2): bookmark matches (the star glyph marks the kind in the popup)
+        int bookmarksAdded = 0;
+        for (Bookmark bookmark : bookmarks.search(input)) {
+            if (bookmarksAdded >= BOOKMARK_SUGGESTIONS) {
+                break;
+            }
+            String label = (bookmark.getName() == null || bookmark.getName().isBlank())
+                    ? bookmark.getUrl() : bookmark.getName();
+            items.add(new OmniboxPopup.Suggestion(OmniboxPopup.Suggestion.Kind.BOOKMARK,
+                    I18n.get("browser.omnibox.suggestion.visit", label), bookmark.getUrl()));
+            bookmarksAdded++;
         }
         if (normalized != null
                 && (UrlUtils.isWebUrl(input) || UrlUtils.looksLikeHost(input))) {
@@ -239,6 +312,13 @@ public final class NavigationToolbar extends JPanel {
         omnibox.showUrl(tab.getUrl());
         back.setEnabled(tab.canGoBack());
         forward.setEnabled(tab.canGoForward());
+        // F4 (B1): the star mirrors the active page's bookmark state (web pages only)
+        String scheme = UrlUtils.scheme(tab.getUrl());
+        boolean bookmarkable = "http".equals(scheme) || "https".equals(scheme);
+        star.setVisible(bookmarkable);
+        if (bookmarkable) {
+            star.setState(!bookmarks.findByUrl(tab.getUrl()).isEmpty());
+        }
         if (tab.isLoading()) {
             reloadStop.setText("\u2715");
             reloadStop.setToolTipText(I18n.get("browser.nav.stop.tooltip"));
@@ -384,6 +464,67 @@ public final class NavigationToolbar extends JPanel {
         private static Color accent() {
             Color c = UIManager.getColor("Component.focusColor");
             return c != null ? c : new Color(0x4F, 0x8C, 0xFF);
+        }
+    }
+
+    /**
+     * F4 (B1): the omnibox star — an outline/filled glyph with a short
+     * fade-in "pulse" when a bookmark is added (alpha compositing, the same
+     * mechanism as {@link FadingLabel}).
+     */
+    private static final class StarButton extends JButton {
+
+        private static final String OUTLINE = "\u2606"; // ☆
+        private static final String FILLED = "\u2605";  // ★
+
+        private int alpha = 255;
+        private Timer animation;
+
+        StarButton(String text) {
+            super(text);
+            setFont(getFont().deriveFont(GuiConstants.getToolBarIconSize()));
+            setFocusable(false);
+            setMargin(new java.awt.Insets(0, 6, 0, 6));
+            setPreferredSize(new Dimension(30, 30));
+        }
+
+        /** Fills/empties the star without the animation (tab switching). */
+        void setState(boolean bookmarked) {
+            setText(bookmarked ? FILLED : OUTLINE);
+            setToolTipText(I18n.get(bookmarked
+                    ? "browser.nav.star.remove" : "browser.nav.star.add"));
+            alpha = 255;
+            if (animation != null) {
+                animation.stop();
+            }
+        }
+
+        /** The B1 animation: a quick fade-in of the (now filled) star. */
+        void pulse() {
+            setState(true);
+            alpha = 0;
+            if (animation == null) {
+                animation = new Timer(16, e -> {
+                    alpha = Math.min(255, alpha + 30);
+                    if (alpha >= 255) {
+                        animation.stop();
+                    }
+                    repaint();
+                });
+            }
+            animation.start();
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            if (alpha >= 255) {
+                super.paintComponent(g);
+                return;
+            }
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha / 255f));
+            super.paintComponent(g2);
+            g2.dispose();
         }
     }
 }

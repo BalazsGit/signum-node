@@ -37,7 +37,9 @@ public final class OmniboxPopup extends JWindow {
             /** A direct navigation target. */
             URL,
             /** A search-engine query. */
-            SEARCH
+            SEARCH,
+            /** A saved bookmark (F4, N2). */
+            BOOKMARK
         }
 
         private final Kind kind;
@@ -204,6 +206,8 @@ public final class OmniboxPopup extends JWindow {
             if (current.getKind() == Suggestion.Kind.SEARCH) {
                 g2.drawOval(cx - 6, cy - 6, 9, 9);
                 g2.drawLine(cx + 2, cy + 2, cx + 6, cy + 6);
+            } else if (current.getKind() == Suggestion.Kind.BOOKMARK) {
+                g2.fill(drawStar(cx, cy, 7)); // a filled star = a saved bookmark
             } else {
                 g2.drawOval(cx - 6, cy - 6, 12, 12);
                 g2.drawLine(cx, cy - 6, cx, cy + 6);
@@ -216,6 +220,25 @@ public final class OmniboxPopup extends JWindow {
             g2.drawString(current.getLabel(), cx + 14,
                     cy + g2.getFontMetrics().getAscent() / 2 - 2);
             g2.dispose();
+        }
+
+        /** A 5-point star centered at (cx, cy) with the given outer radius. */
+        private static GeneralPath drawStar(double cx, double cy, double radius) {
+            GeneralPath star = new GeneralPath();
+            for (int i = 0; i < 10; i++) {
+                double r = i % 2 == 0 ? radius : radius * 0.45;
+                // start at the top (-90°), alternate outer/inner every 36°
+                double angle = Math.toRadians(-90 + i * 36);
+                double x = cx + r * Math.cos(angle);
+                double y = cy + r * Math.sin(angle);
+                if (i == 0) {
+                    star.moveTo(x, y);
+                } else {
+                    star.lineTo(x, y);
+                }
+            }
+            star.closePath();
+            return star;
         }
     }
 }

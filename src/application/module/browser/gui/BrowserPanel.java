@@ -6,10 +6,13 @@ import application.module.browser.core.BrowserEngine;
 import application.module.browser.core.BrowserEngineState;
 import application.module.browser.core.JcefProvisioner;
 import application.module.browser.engine.WebBrowserRegistry;
+import application.module.browser.engine.scheme.BookmarkPageRenderer;
 import application.module.browser.engine.scheme.HistoryPageRenderer;
 import application.module.browser.engine.scheme.InternalPage;
+import application.module.browser.gui.bookmarks.BookmarksBar;
 import application.module.browser.gui.dialogs.JcefSetupDialog;
 import application.module.browser.gui.toolbar.NavigationToolbar;
+import application.module.browser.model.bookmarks.BookmarkStore;
 import application.module.browser.model.history.HistoryStore;
 import application.module.browser.model.session.SessionSnapshot;
 import application.module.browser.model.session.SessionStore;
@@ -66,10 +69,12 @@ public final class BrowserPanel extends JPanel {
     private final TabController controller = new TabController();
     private final WebBrowserRegistry registry;
     private final HistoryStore historyStore;
+    private final BookmarkStore bookmarkStore;
     private final SessionStore sessionStore;
     private final BrowserSettingsRepository settingsRepository;
     private final ChromeTabBar tabBar;
     private final NavigationToolbar toolbar;
+    private final BookmarksBar bookmarksBar;
     private final EngineReadyScreen readyScreen;
     private final ContentPanel contentPanel;
     private final CardLayout cards = new CardLayout();
@@ -90,12 +95,31 @@ public final class BrowserPanel extends JPanel {
         // whose body is produced from this store at request time.
         InternalPage.registerRenderer(HistoryPageRenderer.PAGE,
                 new HistoryPageRenderer(historyStore));
+        // F4: the bookmarks store (JSON tree) + the manager page
+        // (signum://bookmarks, the same dynamic-page mechanism).
+        this.bookmarkStore = new BookmarkStore(browserConfDir.resolve("bookmarks.json"));
+        InternalPage.registerRenderer(BookmarkPageRenderer.PAGE,
+                new BookmarkPageRenderer(bookmarkStore));
         this.registry = new WebBrowserRegistry(engine, controller,
                 settingsRepository::load, historyStore);
         this.sessionStore = new SessionStore(browserConfDir.resolve("session.json"));
         this.tabBar = new ChromeTabBar(controller);
         this.toolbar = new NavigationToolbar(controller, registry,
-                settingsRepository::load, historyStore);
+                settingsRepository::load, historyStore, bookmarkStore);
+        this.bookmarksBar = new BookmarksBar(bookmarkStore,
+                url -> {
+                    String tabId = activeTabId();
+                    if (tabId != null) {
+                        registry.navigate(tabId, url);
+                    }
+                },
+                page -> {
+                    String tabId = activeTabId();
+                    if (tabId != null) {
+                        registry.navigate(tabId, page);
+                    }
+                });
+        toolbar.onBookmarksChanged(bookmarksBar::refresh);
         this.readyScreen = new EngineReadyScreen();
         this.contentPanel = new ContentPanel();
 
@@ -103,7 +127,13 @@ public final class BrowserPanel extends JPanel {
         cardHost.add(contentPanel, CARD_CONTENT);
         JPanel north = new JPanel(new BorderLayout());
         north.add(tabBar, BorderLayout.NORTH);
-        north.add(toolbar, BorderLayout.SOUTH);
+        // F4 (B4): the bookmarks bar sits between the toolbar and the page,
+        // its visibility is the persisted showBookmarksBar setting
+        JPanel belowToolbar = new JPanel(new BorderLayout());
+        belowToolbar.add(bookmarksBar, BorderLayout.NORTH);
+        belowToolbar.add(toolbar, BorderLayout.SOUTH);
+        bookmarksBar.setVisible(settingsRepository.load().isShowBookmarksBar());
+        north.add(belowToolbar, BorderLayout.SOUTH);
         add(north, BorderLayout.NORTH);
         add(cardHost, BorderLayout.CENTER);
 
@@ -159,6 +189,18 @@ public final class BrowserPanel extends JPanel {
                         registry.navigate(tabId, "signum://history");
                     }
                 });
+        // F4 (B1): Ctrl+D toggles the active page's bookmark (the star).
+        bind(im, am, "browser.toggleBookmark", KeyStroke.getKeyStroke("ctrl D"),
+                toolbar::toggleBookmark);
+        // F4 (B4): Ctrl+Shift+B shows/hides the bookmarks bar (persisted).
+        bind(im, am, "browser.toggleBookmarksBar", KeyStroke.getKeyStroke("ctrl shift B"),
+                () -> {
+                    boolean show = !bookmarksBar.isVisible();
+                    bookmarksBar.setVisible(show);
+                    BrowserSettings settings = settingsRepository.load();
+                    settings.setShowBookmarksBar(show);
+                    settingsRepository.save(settings);
+                });
         bind(im, am, "browser.reload", KeyStroke.getKeyStroke("F5"), () -> registry.reload(activeTabId()));
         bind(im, am, "browser.reloadAlt", KeyStroke.getKeyStroke("ctrl R"), () -> registry.reload(activeTabId()));
         bind(im, am, "browser.back", KeyStroke.getKeyStroke("alt LEFT"), () -> registry.back(activeTabId()));
@@ -210,6 +252,7 @@ public final class BrowserPanel extends JPanel {
                 sessionStore.save(controller.snapshot()); // persist before teardown
                 registry.clear();
                 InternalPage.registerRenderer(HistoryPageRenderer.PAGE, null);
+                InternalPage.registerRenderer(BookmarkPageRenderer.PAGE, null);
                 historyStore.close(); // F3: drain the batch writer, release SQLite
                 readyScreen.showIdle();
                 cards.show(cardHost, CARD_ENGINE);
