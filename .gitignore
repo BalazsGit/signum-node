@@ -8,11 +8,6 @@
 /conf/node.properties
 /conf/node.properties
 _config.yml
-/html/ui/doc/*
-/html/ui/phoenix/*
-/html/ui/classic/*
-!/html/ui/phoenix/README.md
-!/html/ui/classic/README.md
 target
 *.prefs
 .project

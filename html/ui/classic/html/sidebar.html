@@ -1,0 +1,70 @@
+<section class="sidebar">
+  <div class="user-panel">
+    <div class="pull-left info">
+      <div class="pull-left info">
+        <div style="margin-bottom:5px;margin-top:5px;"><a href="#" id="account_name" data-toggle="modal" data-target="#account_info_modal" data-i18n="no_name_set">No Name Set</a></div>
+        <a id="account_id" class="copy_link" role="menuitem" tabindex="-1" href="#" data-type="account_rs" title="Copy"></a>
+        <div id="account_id_sidebar">
+          <ul class="nav nav-pills nav-stacked" role="menu">
+            <li role="presentation"><a class="copy_link" role="menuitem" tabindex="-1" href="#" data-type="account_id"  data-i18n="copy_account_id">Copy Numeric Account ID</a></li>
+            <li role="presentation"><a class="copy_link" role="menuitem" tabindex="-1" href="#" data-type="message_link" data-i18n="copy_send_message_link">Copy "Send Message" Link</a></li>
+            <li role="presentation"><a class="copy_link" role="menuitem" tabindex="-1" href="#" data-type="send_link" data-i18n="copy_send_burst_link">Copy "Send SIGNA" Link</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+  <form action="#" method="get" class="sidebar-form" id="id_search" autocomplete="off">
+    <div class="input-group" title="search_help" data-i18n="[title]search_help">
+      <input type="text" name="q" class="form-control" placeholder="search" data-i18n="[placeholder]search">
+      <span class="input-group-btn">
+      <button type="submit" name="search" id="search-btn" class="btn btn-flat"><i class="fas fa-search"></i></button>
+      </span>
+    </div>
+  </form>
+  <ul class="sidebar-menu">
+    <li class="active" id="dashboard_link"><a href="#" data-page="dashboard"><i class="fas fa-tachometer-alt"></i> <span data-i18n="dashboard">Dashboard</span></a></li>
+    <li class="treeview" id="sidebar_transactions">
+      <a href="#" data-page="transactions"><i class="fas fa-briefcase"></i> <span data-i18n="transactions">Transactions</span><i class="fa pull-right fa-angle-right" style="padding-top:3px"></i></a>
+      <ul class="treeview-menu" style="display: none;">
+        <li><a href="#" data-page="transactions"><i class="fas fa-exchange-alt"></i> <span data-i18n="transactions">Transactions</span></a></li>
+        <li><a href="#" data-toggle="modal" data-target="#send_money_modal"><i class="fas fa-paper-plane"></i> <span data-i18n="send_burst">send_burst</span></a></li>
+        <li><a href="#" data-toggle="modal" data-target="#request_burst_qr_modal"><i class="fas fa-qrcode"></i> <span data-i18n="request_burst_qr">request_burst_qr</span></a></li>
+        <li><a href="#" data-page="escrow"><i class="fas fa-check-circle"></i> <span data-i18n="escrow">Escrow</span></a></li>
+        <li><a href="#" data-page="subscription"><i class="far fa-handshake"></i> <span data-i18n="subscriptions">Subscriptions</span></a></li>
+        <li><a href="#" data-page="at"><i class="fas fa-laptop"></i> <span data-i18n="ats">ATs (Smart Contracts)</span></a></li>
+      </ul>
+    </li>
+    <li class="treeview" id="sidebar_asset_exchange">
+      <a href="#" data-page="keep"><i class="fas fa-tag"></i> <span data-i18n="assets">assets</span><i class="fa pull-right fa-angle-right" style="padding-top:3px"></i></a>
+      <ul class="treeview-menu" style="display: none;">
+        <li><a href="#" data-toggle="modal" data-target="#transfer_asset_modal"><i class="fas fa-location-arrow"></i> <span data-i18n="transfer_asset">transfer_asset</span></a></li>
+        <li><a href="#" data-page="asset_exchange"><i class="fas fa-chart-area"></i> <span data-i18n="asset_exchange">Asset Exchange</span></a></li>
+        <li><a href="#" data-page="transfer_history"><i class="fas fa-exchange-alt"></i> <span data-i18n="transfer_history">Transfer History</span></a></li>
+        <li><a href="#" data-page="my_assets"><i class="fas fa-chart-pie"></i> <span data-i18n="my_assets">My Assets</span></a></li>
+        <li><a href="#" data-page="open_orders"><i class="fas fa-pause"></i> <span data-i18n="open_orders">Open Orders</span></a></li>
+        <li><a href="#" data-toggle="modal" data-target="#issue_asset_modal"><i class="fas fa-chart-line"></i> <span data-i18n="issue_asset">Issue Asset</span></a></li>
+        <li><a href="#" data-page="nsv_dividends" id="nsv_div_start"><i class="fas fa-users"></i> Payout Dividends</a></li>
+      </ul>
+    </li>
+      <li class="treeview" id="sidebar_mining">
+        <a href="#" data-page="keep"><i class="fas fa-hdd"></i> <span data-i18n="mining">Mining</span><i class="fa pull-right fa-angle-right" style="padding-top:3px"></i></a>
+        <ul class="treeview-menu" style="display: none;">
+            <li><a href="#" data-toggle="modal" data-target="#reward_assignment_modal"><i class="fas fa-arrow-circle-right"></i> <span data-i18n="reward_assignment">Reward</span></a></li>
+            <li><a href="#" data-toggle="modal" data-target="#commitment_modal"><i class="fas fa-hand-holding-usd"></i> <span data-i18n="commitment">Commitment</span></a></li>
+            <li><a href="#" data-page="blocks_forged"><i class="fas fa-crosshairs"></i> <span data-i18n="forged_blocks">forged_blocks</span></a></li>
+        </ul>
+      </li>
+    <li><a href="#" data-page="contacts"><i class="fas fa-address-book"></i> <span data-i18n="contacts">Contacts</span></a></li>
+    <li><a href="#" data-page="messages"><i class="fas fa-inbox"></i> <span data-i18n="messages">Messages</span></a></li>
+    <li><a href="#" data-page="aliases"><i class="fas fa-address-card"></i> <span data-i18n="aliases">Aliases</span></a></li>
+    <li class="treeview" id="sidebar_blockchain">
+      <a href="#" data-page="keep"><i class="fas fa-link"></i> <span data-i18n="blockchain">blockchain</span><i class="fa pull-right fa-angle-right" style="padding-top:3px"></i></a>
+      <ul class="treeview-menu" style="display: none;">
+          <li><a href="#" data-page="blocks"><span data-i18n="latest_blocks">latest_blocks</span></a></li>
+          <li><a href="#" data-page="block_info"><span data-i18n="block_info">block_info</span></a></li>
+      </ul>
+    </li>
+    <li><a href="#" data-page="peers"><i class="fab fa-connectdevelop"></i> <span data-i18n="peers">Peers</span></a></li>
+  </ul>
+</section>

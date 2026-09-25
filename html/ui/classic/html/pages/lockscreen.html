@@ -1,0 +1,166 @@
+    <div id="lockscreen_content" style="display: none;">
+        <div id="lockscreen_logo">
+          <img class="burst_logo_effect" src="img/signum_logo.png" alt="Signum" width="242" height="64" style="margin-right:20px;" />
+          <img src="img/signum_logo.png" alt="Signum" width="242" height="64" style="margin-right:20px; opacity: 0.45" />
+
+          <div style="padding-bottom: 20px; padding-top: 10px; color: #c4c4c4" >
+            <span id="node_alert" data-i18n="node_to_connect_error">Select a valid node</span>
+            <span id="brs_version" class="loading_dots"><span>&#149;</span><span>&#149;</span><span>&#149;</span></span>
+          </div>
+		</div>
+        <div>
+            <div class="form-group">
+                <label for="prefered_node" data-i18n="node_to_connect_text" style="color: #c4c4c4;">Connect to node:</label>
+                <i id="testnet_login" style="display: none;color: red;" class="fas fa-question-circle show_popover" data-content="Log in with your <strong>TestNet</strong> account - not your real one!" data-i18n="[data-content]testnet_login_warning" data-container="body" style="color:red" data-original-title="" title=""></i>
+                <br />
+                <div class="input-group">
+                  <input type="text" class="form-control" list="nodes" placeholder="Prefered node" data-i18n="[placeholder]prefered_node" name="prefered_node" id="prefered_node" />
+                  <span class="input-group-btn btn-group node_selector">
+                    <button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown"><span class="fas fa-server text-muted"></span></button>
+                    <ul class="dropdown-menu" role="menu" style="right:0;left:auto;"></ul>
+                  </span>
+                </div>
+                <input type="checkbox" name="automatic_node_selection" id="automatic_node_selection" /> <label for="automatic_node_selection" data-i18n="automatic_node_selection" style="color: #c4c4c4;font-weight: normal;">automatic_node_selection</label>
+            </div>
+        </div>
+        <div id="login_panel">
+          <form>
+            <div class="form-group">
+              <label for="login_account" data-i18n="login_with_account">Login as watcher (no pass needed):</label><br />
+              <div class="input-group">
+                <input type="text" class="form-control" id="login_account" name="account_id" placeholder="S-____-____-____-_____" />
+                <span class="input-group-btn btn-group recipient_selector">
+                  <button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown"><span class="fas fa-user text-muted"></span></button>
+                  <ul class="dropdown-menu" role="menu" style="right:0;left:auto;"></ul>
+                </span>
+              </div>
+              <input type="checkbox" name="remember_account" id="remember_account" /> <label for="remember_account" class="checkbox-label" data-i18n="remember_account">Remember this account</label>
+            </div>
+            <div class="form-group">
+              <label for="login_password" data-i18n="login_with_passphrase">Login with passphrase:</label><br />
+              <div class="input-group">
+                <input type="password" class="form-control" id="login_password" name="login_password" placeholder="Your Passphrase" data-i18n="[placeholder]your_passphrase" autocomplete="" autofocus />
+                <span class="input-group-btn btn-group">
+                  <button class="btn btn-login" id="login_button"><span class="fas fa-arrow-right text-muted"></span></button>
+                </span>
+              </div>
+              <input type="checkbox" name="remember_password" id="remember_password" /> <label for="remember_password" class="checkbox-label" data-i18n="remember_passphrase_during_session">Remember passphrase on during session</label>
+              <input type="hidden" name="check_password_length" id="login_check_password_length" value="1" />
+            </div>
+            <div id="login_error" style="max-width:400px;min-width:400px;display:none">
+              <div class="callout callout-danger"></div>
+            </div>
+          </form>
+          <div id="registration_link">
+            <a href="#" onclick="BRS.registerAccount();" data-i18n="no_account_q_create_account">Don't have an account? Click here to create one!</a>
+          </div>
+        </div>
+        <div class="panel panel-default" id="welcome_panel" style="display:none;max-width:500px;">
+          <div class="panel-heading"><span class="glyphicon glyphicon-lock"></span> <span data-i18n="welcome_to_burst">Welcome to Signum</span></div>
+          <div class="panel-body">
+          <div class="form-group">
+            <label for="start_settings_language" data-i18n="language">Idioma</label>  
+            <select name="language" id="start_settings_language" class="form-control">
+              <option value="en">English (Default)</option><!-- english -->
+              <option value="bg">Български</option><!-- bulgarian -->
+              <option value="ca">Català</option><!-- catalan -->
+              <option value="cs">Čeština</option><!-- czech -->
+              <option value="de-de">Deutsch</option><!-- german -->
+              <option value="el">Ελληνικά</option><!-- greek -->
+              <option value="es-es">Español</option><!-- spanish -->
+              <option value="fi">Suomi</option><!-- finnish -->
+              <option value="fr">Français</option><!-- french -->
+              <option value="gl">Galego</option><!-- galician -->
+              <option value="hi">हिंदी</option><!-- hindi -->
+              <option value="hr">Hrvatski</option><!-- croatian -->
+              <option value="id">Bahasa Indonesia</option><!-- indonesian -->
+              <option value="it">Italiano</option><!-- italian -->
+              <option value="ja">日本語</option><!-- japanese -->
+              <option value="lt">Lietuviškai</option><!-- lithuanian -->
+              <option value="nl">Nederlands</option><!-- dutch -->
+              <option value="sh">Hrvatski</option><!-- croatian -->
+              <option value="sk">Slovensky</option><!-- slovakian -->
+              <option value="pt">Português (Portugal)</option><!-- portugese -->
+              <option value="pt-br">Português (Brazil)</option><!-- portugese -->
+              <option value="sr">Српски</option><!-- serbian, cyrillic -->
+              <option value="sr-cs">Srpski</option><!-- serbian, latin -->
+              <option value="tr">Türk</option><!-- turkish -->
+              <option value="uk">Yкраiнска</option><!-- ukranian -->
+              <option value="ro">Român</option><!-- romanian -->
+              <option value="ru">Русский</option><!-- russian -->
+              <option value="zh-cn">中文 (simplified)</option><!-- chinese simplified -->
+              <option value="zh-tw">中文 (traditional)</option><!-- chinese traditional -->
+            </select>
+          </div>
+            <button class="btn btn-primary" id="registration_cancel" onclick="BRS.showLoginScreen();return false;" data-i18n="returning_user_q">Returning User?</button>
+            &nbsp;&nbsp;
+            <button class="btn btn-success" id="registration_cancel" onclick="BRS.registerAccount();return false;" data-i18n="new_q_create_account">New? Create Your Account!</button>
+          </div>
+        </div>
+        <div class="panel panel-default" id="account_phrase_custom_panel" style="display:none;max-width:500px;">
+          <div class="panel-heading"><span class="glyphicon glyphicon-lock"></span> <span data-i18n="create_your_account">Create Your Account</span></div>
+          <div class="panel-body">
+            <form class="form-horizontal" role="form" method="post" autocomplete="off">
+              <div class="callout callout-info" style="max-width:500px;" data-i18n="passphrase_length_warning">Your passphrase must be at least 35 characters long. Better over 40 characters!</div>
+              <div class="callout callout-danger" data-i18n="[html]passphrase_warning"><strong>Attention</strong>: The passphrase is everything that stands between your account and the rest of the world. Do not use any meaningful sentence, especially any that appears in song or literature.<br /><br />Don't ever disclose your passphrase. If you lose it you lose access to your account! Write it on Paper!!</div>
+              <div class="form-group">
+                <label for="registration_password" class="col-sm-3 control-label" data-i18n="passphrase">Passphrase</label>
+                <div class="col-sm-9"><input type="password" name="registration_password" class="form-control" id="registration_password" placeholder="" autocomplete="" /></div>
+              </div>
+              <div class="form-group">
+                <label for="registration_password_repeat" class="col-sm-3 control-label" data-i18n="repeat">Repeat</label>
+                <div class="col-sm-9"><input type="password" name="registration_password_repeat" class="form-control" id="registration_password_repeat" placeholder="" autocomplete="" /></div>
+              </div>
+              <div style="text-align:right"><input type="submit" class="btn btn-primary btn-sm" value="Register" data-i18n="[value]register" />&nbsp;&nbsp;<button class="btn btn-sm btn-default" id="registration_cancel" onclick="BRS.showLoginOrWelcomeScreen();return false;" data-i18n="cancel">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+        <div class="panel panel-default" id="account_phrase_generator_panel" style="display:none;max-width:500px">
+          <div class="panel-heading"><span class="glyphicon glyphicon-lock"></span> <span data-i18n="create_your_account">Create Your Account</span></div>
+          <div class="panel-body">
+            <div id="account_phrase_generator_loading">
+              <p><span class="loading_text" data-i18n="loading_word_list">Loading Word List</span><span class="loading_dots"><span>.</span><span>.</span><span>.</span></span></p>
+              <div style="text-align:center;margin-top:20px;margin-bottom:20px;"><i class="fas fa-circle-notch fa-spin fa-3x" style="display: block;"></i></div>
+            </div>
+            <div id="account_phrase_generator_loaded">
+              <div class="step_1 account_phrase_generator_steps">
+                <div id="account_phrase_generator_seeder" class="seeder">
+                  <p data-i18n="seed_password_generator">Move your cursor around to seed the random number generator...</p>
+                  <div class="progress progress-striped">
+                    <div class="progress-bar progress-bar-info" id="account_phrase_generator_seed_progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" style="width: 0%;">
+                      <span class="sr-only">0% Seeded</span>
+                    </div>
+                  </div>
+                </div>
+                <div style="text-align:right">
+                  <button class="btn btn-sm btn-default" id="registration_cancel" onclick="BRS.showLoginOrWelcomeScreen();return false;" data-i18n="cancel">Cancel</button>
+                </div>
+              </div>
+              <div class="step_2 account_phrase_generator_steps">
+                <div id="account_phrase_generator_start">
+                  <p><span data-i18n="generating_passphrase_wait">Generating your passphrase. Please wait</span><span class="loading_dots"><span>.</span><span>.</span><span>.</span></span></p>
+                  <div style="text-align:center;margin-top:20px;margin-bottom:20px;"><i class="fas fa-circle-notch fa-spin fa-3x" style="display: block;"></i></div>
+                </div>
+                <div id="account_phrase_generator_stop" style="display:none">
+                  <p data-i18n="automatically_generated_passphrase_is">Your automatically generated passphrase is:</p>
+                  <textarea style="width:100%;height:50px;margin-bottom:10px;padding:3px;" class="form-control" rows="2" readonly></textarea>
+                  <p data-i18n="memorize_passphrase_help">Please WRITE DOWN(on paper!) or memorize these 12 words (their order and capitalization matters - always lowercase). This passphrase is needed in order to access your Signum account. Write it down on Paper!</p>
+                  <div class="callout callout-danger" data-i18n="[html]assphrase_disclosure_warning"><strong>Attention</strong>: Don't ever disclose your passphrase. If you lose it you lose access to your account!</div>
+                  <div style="text-align:right">
+                    <input type="submit" class="btn btn-primary btn-sm" value="Next" data-i18n="[value]next" onclick="$('.step_2').hide();$('.step_3').show();return false;" />&nbsp;&nbsp;<button class="btn btn-sm btn-default" id="registration_cancel" onclick="BRS.showLoginOrWelcomeScreen();return false;" data-i18n="cancel">Cancel</button>
+                  </div>
+                </div>
+              </div>
+              <div class="step_3 account_phrase_generator_steps">
+                <p data-i18n="passphrase_write_below">Your passphrase is very important! In order to be sure that you have saved it, please write your passphrase below:</p>
+                <div class="callout callout-danger" style="display:none" data-i18n="incorrectly_typed_passphrase">You have not typed the passphrase correctly, please try again!</div>
+                <textarea style="width:100%;height:50px;margin-bottom:10px;" class="form-control" rows="2"></textarea>
+                <div style="text-align:right">
+                  <input type="submit" class="btn btn-primary btn-sm" value="Next" data-i18n="[value]next" onclick="BRS.verifyGeneratedPassphrase();return false;" />&nbsp;&nbsp;<button class="btn btn-sm btn-default" id="registration_cancel" onclick="BRS.showLoginOrWelcomeScreen();return false;" data-i18n="cancel">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+    </div>

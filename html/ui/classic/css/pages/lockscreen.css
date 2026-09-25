@@ -1,0 +1,84 @@
+/*
+ * Page: Lock Screen
+ * -----------------
+ */
+
+#registration_link {
+  color: #fff;
+  margin-top: 20px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+#registration_link a, #custom_passphrase_link a {
+  color: rgba(255,255,255,0.7);
+}
+
+#registration_link a:hover, #custom_passphrase_link a:hover {
+  color: rgba(255,255,255,1.0);
+}
+
+#login_panel {
+  color: rgba(255,255,255,0.7);
+}
+
+#login_panel .checkbox-label {
+  font-weight: normal;
+}
+
+#login_panel .checkbox-label:hover {
+  color: rgba(255,255,255,1.0);
+}
+
+.lockscreen header, .lockscreen #page, .lockscreen #downloading_blockchain {
+  display: none !important;
+}
+
+#lockscreen {
+  height: 100%;
+  overflow: auto;
+  background-image: url(../../img/bg1.svg);
+  background-size: cover;
+  background-position: center; 
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media screen and (max-width: 1920px) and (max-height: 1280px) {
+    #lockscreen {
+        background-size: auto;
+    }
+}
+
+#lockscreen img.burst_logo_effect {
+  position: absolute;
+  animation: blurring 10s infinite alternate ease-in-out;
+}
+
+@keyframes blurring {
+  0% {
+    opacity: 0.5;
+    filter: blur(10px);
+    transform: scale(1.0);
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(5deg);
+  }
+  66% {
+    opacity: 0.8;    
+  }
+  75% {
+    transform: rotate(0deg);
+  }
+  100% {
+    opacity: 0.2;
+    filter: blur(20px);
+    transform: rotate(-5deg);
+  }
+}
+
+#lockscreen_logo {
+    text-align: center;
+}
