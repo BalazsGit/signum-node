@@ -4,6 +4,7 @@ import application.api.Module;
 import application.api.ModuleContext;
 import application.module.browser.core.BrowserEngine;
 import application.module.browser.gui.BrowserPanel;
+import application.module.browser.logging.BrowserLoggingProvider;
 import application.utils.config.ModuleIds;
 import application.utils.i18n.I18n;
 import org.slf4j.Logger;
@@ -61,6 +62,9 @@ public class BrowserModule implements Module {
 
     @Override
     public void start() {
+        // X3: the module participates in the composite logging (headless or
+        // not — the log profile is a headless-relevant setting too).
+        new BrowserLoggingProvider().register();
         if (headless) {
             logger.info("Browser module started in headless mode; the CEF engine is not initialized");
             return;
@@ -71,6 +75,8 @@ public class BrowserModule implements Module {
 
     @Override
     public void stop() {
+        // X3: the logging provider goes away with the module (both modes)
+        new BrowserLoggingProvider().unregister();
         if (headless) {
             return;
         }

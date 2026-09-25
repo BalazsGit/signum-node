@@ -166,6 +166,10 @@ public final class ChromeTabBar extends JPanel {
                 if (index < 0) {
                     return;
                 }
+                if (SwingUtilities.isRightMouseButton(e)) {
+                    showContextMenu(index, e.getX(), e.getY()); // T9
+                    return;
+                }
                 if (SwingUtilities.isMiddleMouseButton(e)) {
                     close(index); // T2
                     return;
@@ -238,6 +242,33 @@ public final class ChromeTabBar extends JPanel {
     private void close(int index) {
         BrowserTab tab = model.get(index);
         controller.closeTab(tab.getId());
+    }
+
+    /**
+     * T9: the tab's context menu (right-click): close, close others, close
+     * tabs to the right, copy the page address.
+     */
+    private void showContextMenu(int index, int x, int y) {
+        BrowserTab tab = model.get(index);
+        javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
+        menu.add(menuItem(I18n.get("browser.tab.context.close"),
+                () -> controller.closeTab(tab.getId())));
+        menu.add(menuItem(I18n.get("browser.tab.context.closeOthers"),
+                () -> controller.closeOthers(tab.getId())));
+        menu.add(menuItem(I18n.get("browser.tab.context.closeRight"),
+                () -> controller.closeRightOf(tab.getId())));
+        menu.addSeparator();
+        menu.add(menuItem(I18n.get("browser.tab.context.copyUrl"), () -> {
+            java.awt.Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
+                    new java.awt.datatransfer.StringSelection(tab.getUrl()), null);
+        }));
+        menu.show(list, x, y);
+    }
+
+    private static javax.swing.JMenuItem menuItem(String text, Runnable action) {
+        javax.swing.JMenuItem item = new javax.swing.JMenuItem(text);
+        item.addActionListener(e -> action.run());
+        return item;
     }
 
     private boolean overCloseZone(MouseEvent e, int index) {

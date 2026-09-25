@@ -10,6 +10,8 @@ import org.cef.browser.CefFrame;
 import org.cef.callback.CefCallback;
 import org.cef.handler.CefLoadHandler;
 import org.cef.handler.CefRequestHandlerAdapter;
+import org.cef.handler.CefResourceRequestHandler;
+import org.cef.misc.BoolRef;
 import org.cef.network.CefRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,6 +52,8 @@ final class CefRequestHandlerImpl extends CefRequestHandlerAdapter {
     private final Supplier<BrowserSettings> settings;
     /** S3: hosts the user explicitly proceeded to (tab-scoped, never global). */
     private final Set<String> allowedCertHosts = ConcurrentHashMap.newKeySet();
+    /** S5: the main document's URL (updated on main-frame navigations). */
+    private volatile String mainUrl;
 
     CefRequestHandlerImpl(String tabId, TabController controller, Supplier<BrowserSettings> settings) {
         this.tabId = tabId;
@@ -67,6 +71,7 @@ final class CefRequestHandlerImpl extends CefRequestHandlerAdapter {
         if (url == null) {
             return false;
         }
+        mainUrl = url; // S5: the mixed-content check compares against this
         if (url.toLowerCase().startsWith(CERT_CONTINUE_PREFIX)) {
             // S3: the internal error page asked to proceed to the original URL.
             String target = UrlUtils.queryParam(url, "url");
@@ -112,5 +117,30 @@ final class CefRequestHandlerImpl extends CefRequestHandlerAdapter {
             callback.cancel();
         }
         return true;
+    }
+
+    /**
+     * S5: mixed-content detection — an insecure (http) subresource on a
+     * secure (https) main page flags the tab; the toolbar's security icon
+     * shows the warning from the next tab event on. (The pinned fork has no
+     * onBeforeResourceLoad; this hook sees every resource request and a
+     * {@code null} return keeps the default handling.)
+     */
+    @Override
+    public CefResourceRequestHandler getResourceRequestHandler(CefBrowser browser, CefFrame frame,
+                                                               CefRequest request, boolean isDownload,
+                                                               boolean cacheOption, String mime,
+                                                               BoolRef download) {
+        if (frame != null && !frame.isMain() && request != null) {
+            String subUrl = request.getURL();
+            if (subUrl != null && "http".equals(UrlUtils.scheme(subUrl))) {
+                String main = mainUrl;
+                if (main != null && "https".equals(UrlUtils.scheme(main))) {
+                    logger.debug("Mixed content in tab {} (page {}): {}", tabId, main, subUrl);
+                    controller.markMixedContent(tabId);
+                }
+            }
+        }
+        return null; // no custom resource handling
     }
 }

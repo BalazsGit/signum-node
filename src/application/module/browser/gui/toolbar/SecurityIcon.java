@@ -42,6 +42,8 @@ public final class SecurityIcon extends JComponent {
     private SslStatus status = SslStatus.INSECURE;
     private String url;
     private boolean clickable;
+    /** S5: an insecure subresource was loaded on this (https) page. */
+    private boolean mixedContent;
 
     /**
      * @param clickAction invoked on click with the tab's URL (only when the
@@ -67,17 +69,22 @@ public final class SecurityIcon extends JComponent {
      *
      * @param status the tab's security state
      * @param url    the tab's URL (for the tooltip and the click action)
+     * @param mixedContent S5: the page loaded an insecure subresource
      */
-    public void update(SslStatus status, String url) {
+    public void update(SslStatus status, String url, boolean mixedContent) {
         this.status = status;
         this.url = url;
+        this.mixedContent = mixedContent && status == SslStatus.SECURE;
         String host = UrlUtils.host(url);
         switch (status) {
             case SECURE -> {
                 if ("https".equals(UrlUtils.scheme(url))) {
                     clickable = true;
-                    setToolTipText(I18n.get("browser.security.secure.tooltip",
-                            host.isEmpty() ? "—" : host));
+                    setToolTipText(mixedContent
+                            ? I18n.get("browser.security.mixedContent.tooltip",
+                                    host.isEmpty() ? "—" : host)
+                            : I18n.get("browser.security.secure.tooltip",
+                                    host.isEmpty() ? "—" : host));
                 } else {
                     clickable = false;
                     setToolTipText(I18n.get("browser.security.internal.tooltip"));
@@ -112,17 +119,33 @@ public final class SecurityIcon extends JComponent {
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g2.translate((getWidth() - iconSize) / 2f, (getHeight() - iconSize) / 2f);
         g2.scale(iconSize / (float) DESIGN_SIZE, iconSize / (float) DESIGN_SIZE);
-        Color color = switch (status) {
-            case SECURE -> secureGreen();
-            case CERT_ERROR -> errorRed();
-            case INSECURE -> gray();
-        };
         if (status == SslStatus.CERT_ERROR) {
-            paintWarning(g2, color);
+            paintWarning(g2, errorRed());
         } else {
-            paintLock(g2, color, status == SslStatus.SECURE);
+            // S5: a secure page with mixed content warns (orange lock + badge)
+            paintLock(g2, mixedContent ? warnOrange() : (status == SslStatus.SECURE
+                    ? secureGreen() : gray()), status == SslStatus.SECURE);
+            if (mixedContent) {
+                paintMixedBadge(g2);
+            }
         }
         g2.dispose();
+    }
+
+    /** S5: the "!" badge in the lock's corner (a small filled circle + stem). */
+    private static void paintMixedBadge(Graphics2D g2) {
+        Color badge = warnOrange();
+        g2.setColor(badge);
+        g2.fillOval(11, 0, 5, 5);
+        g2.setColor(background());
+        g2.setStroke(new java.awt.BasicStroke(0.9f));
+        g2.drawLine(13, 2, 13, 3);
+        g2.fillOval(12, 4, 2, 2);
+    }
+
+    /** The mixed-content warning orange (fixed — the palette has no amber). */
+    private static Color warnOrange() {
+        return new Color(0xE8, 0x9A, 0x2C);
     }
 
     private static Color gray() {

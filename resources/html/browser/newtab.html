@@ -6,9 +6,9 @@
   <title>New Tab</title>
   <link rel="stylesheet" href="css/browser.css">
   <style>
-    /* NTP v1 (F1): fully static — no JS, no data injection (that arrives with
-       the history/bookmarks phases). The search form is a plain HTML GET to
-       the default engine, so it works without any bridge. */
+    /* NTP (F1 + F9 H5): the template carries no UI text (D16) and no data —
+       the top sites and the search engine arrive in the JSON data island,
+       rendered through textContent / createElement only (S9). */
     body {
       display: flex;
       align-items: center;
@@ -79,17 +79,118 @@
       text-transform: uppercase;
       color: var(--muted);
     }
+    /* H5: the "frequently visited" grid (4 columns, A4 transitions). */
+    .frequent {
+      display: none;
+      width: 100%;
+    }
+    .frequent.visible {
+      display: block;
+    }
+    .frequent h2 {
+      margin: 0 0 12px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .sites {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+    }
+    .site {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 8px 12px;
+      text-decoration: none;
+      color: var(--fg);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      transition: border-color 120ms ease, transform 120ms ease;
+    }
+    .site:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+    }
+    .site .dot {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      font-weight: 600;
+      color: #ffffff;
+      background: var(--accent);
+      text-transform: uppercase;
+    }
+    .site .name {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
   <main class="ntp">
     <h1 class="brand">Sign<b>u</b>m</h1>
-    <form class="search" action="https://duckduckgo.com" method="get" role="search">
-      <input type="text" name="q" placeholder="Search the web" aria-label="Search the web"
+    <form class="search" id="search" role="search">
+      <input type="text" id="query" placeholder="" aria-label="Search"
              autocomplete="off" autofocus>
       <button type="submit" aria-label="Search">&#8629;</button>
     </form>
+    <section class="frequent" id="frequent">
+      <h2 id="frequent-title"></h2>
+      <div class="sites" id="sites"></div>
+    </section>
     <p class="hint">Signum Browser</p>
   </main>
+  <script id="data" type="application/json">__SIGNUM_DATA__</script>
+  <script>
+    (function () {
+      var data = JSON.parse(document.getElementById('data').textContent);
+      var s = data.strings || {};
+      // Search: the active engine's template (C3) with {query} replaced.
+      var template = data.searchTemplate || 'https://duckduckgo.com/?q={query}';
+      document.getElementById('search').addEventListener('submit', function (e) {
+        e.preventDefault();
+        var q = document.getElementById('query').value.trim();
+        if (q) {
+          window.location.href = template.replace('{query}', encodeURIComponent(q));
+        }
+      });
+      // H5: the frequently visited cards (the link target is set as a
+      // property — never innerHTML with data).
+      var section = document.getElementById('frequent');
+      if (data.topSites && data.topSites.length > 0) {
+        document.getElementById('frequent-title').textContent = s.frequent || '';
+        var host = document.getElementById('sites');
+        data.topSites.forEach(function (site) {
+          var a = document.createElement('a');
+          a.className = 'site';
+          a.href = site.url;
+          var dot = document.createElement('span');
+          dot.className = 'dot';
+          dot.textContent = (site.host || '?').charAt(0);
+          var name = document.createElement('span');
+          name.className = 'name';
+          name.textContent = site.title || site.host;
+          name.title = site.title || site.host;
+          a.appendChild(dot);
+          a.appendChild(name);
+          host.appendChild(a);
+        });
+        section.classList.add('visible');
+      }
+    })();
+  </script>
 </body>
 </html>

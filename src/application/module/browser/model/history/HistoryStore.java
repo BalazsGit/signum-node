@@ -15,7 +15,9 @@ import java.sql.Statement;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -425,6 +427,168 @@ public final class HistoryStore implements AutoCloseable {
                 return 0L;
             }
         }
+    }
+
+    /**
+     * H6: searches the history with <em>ranking</em> instead of plain
+     * recency (plan F9): the score is the visit count weighted by a
+     * freshness decay — {@code visits * 10000 / (ageHours + 10)}. A site
+     * visited 10 times a day long outlives a site visited once an hour ago;
+     * a fresh single visit still outranks a stale heavy one.
+     *
+     * @param query  case-insensitive substring (same semantics as
+     *               {@link #search})
+     * @param nowMs  the reference "now" (epoch millis; tests pass a fixed
+     *               value)
+     * @param limit  maximum number of rows ({@code <= 0} = default, capped at
+     *               {@link #MAX_LIMIT})
+     * @return the matching entries, best score first, never null
+     */
+    public List<HistoryEntry> searchRanked(String query, long nowMs, int limit) {
+        List<HistoryEntry> result = new ArrayList<>();
+        if (closed || degraded || nowMs <= 0) {
+            return result;
+        }
+        String q = query == null ? "" : query.trim();
+        int effectiveLimit = limit <= 0 ? DEFAULT_LIMIT : Math.min(limit, MAX_LIMIT);
+
+        StringBuilder sql = new StringBuilder(
+                "SELECT id, url, title, visit_ts, referrer, visits FROM history");
+        List<Object> params = new ArrayList<>();
+        if (!q.isEmpty()) {
+            String like = "%" + escapeLike(q) + "%";
+            sql.append(" WHERE (url LIKE ? ESCAPE '\\'")
+                    .append(" OR COALESCE(title, '') LIKE ? ESCAPE '\\')");
+            params.add(like);
+            params.add(like);
+        }
+        // H6: score = visits * 10000 / (ageHours + 10); MAX() guards against
+        // clock skew (future timestamps would make the denominator negative).
+        sql.append(" ORDER BY visits * 10000.0 / ((MAX(0, ? - visit_ts)) / 3600000.0 + 10.0) DESC,")
+                .append(" visit_ts DESC LIMIT ?");
+        params.add(nowMs);
+        params.add(effectiveLimit);
+
+        synchronized (dbLock) {
+            if (connection == null) {
+                return result;
+            }
+            try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+                for (int i = 0; i < params.size(); i++) {
+                    Object value = params.get(i);
+                    if (value instanceof Integer intParam) {
+                        statement.setInt(i + 1, intParam);
+                    } else {
+                        statement.setObject(i + 1, value);
+                    }
+                }
+                try (ResultSet rs = statement.executeQuery()) {
+                    while (rs.next()) {
+                        result.add(new HistoryEntry(rs.getLong(1), rs.getString(2),
+                                rs.getString(3), rs.getLong(4), rs.getString(5), rs.getInt(6)));
+                    }
+                }
+            } catch (SQLException e) {
+                logger.error("Ranked history search failed", e);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * H5: the most visited sites for the New Tab page: the (scanned) history
+     * is aggregated <em>per site</em> (host, see {@link #hostOf}) in Java —
+     * no SQL dialect tricks. Only http/https pages count (internal pages are
+     * pages of the application itself), and only the most recent page of a
+     * site is reported.
+     *
+     * @param limit maximum number of sites ({@code <= 0} = 8, the NTP grid)
+     * @return the top sites, most visits first (ties: most recent first)
+     */
+    public List<TopSite> topSites(int limit) {
+        int effectiveLimit = limit <= 0 ? 8 : Math.min(limit, 24);
+        Map<String, TopSiteAgg> byHost = new LinkedHashMap<>();
+        for (HistoryEntry entry : search("", 0L, Long.MAX_VALUE, MAX_LIMIT)) {
+            String host = hostOf(entry.getUrl());
+            if (host.isEmpty()) {
+                continue; // internal and other pages are not web sites
+            }
+            TopSiteAgg agg = byHost.get(host);
+            if (agg == null) {
+                agg = new TopSiteAgg();
+                byHost.put(host, agg);
+            }
+            agg.totalVisits += Math.max(1, entry.getVisits());
+            if (entry.getVisitTs() >= agg.latestTs) {
+                // the rows arrive newest first; >= keeps the newest seen
+                agg.latestTs = entry.getVisitTs();
+                agg.url = entry.getUrl();
+                agg.title = entry.getTitle();
+            }
+        }
+        List<TopSite> sites = new ArrayList<>(byHost.size());
+        for (Map.Entry<String, TopSiteAgg> e : byHost.entrySet()) {
+            TopSiteAgg agg = e.getValue();
+            sites.add(new TopSite(e.getKey(), agg.url, agg.title,
+                    agg.totalVisits, agg.latestTs));
+        }
+        sites.sort((a, b) -> {
+            int byVisits = Integer.compare(b.getTotalVisits(), a.getTotalVisits());
+            return byVisits != 0 ? byVisits
+                    : Long.compare(b.getLatestVisitTs(), a.getLatestVisitTs());
+        });
+        return sites.size() > effectiveLimit
+                ? new ArrayList<>(sites.subList(0, effectiveLimit))
+                : sites;
+    }
+
+    /**
+     * The site (host) of a web URL: the authority part after the scheme,
+     * lowercased, without the path/query/fragment and without a default port
+     * ({@code :80} on http, {@code :443} on https). Pure — unit-testable.
+     *
+     * @return the host, or the empty string for anything that is not a
+     *         plain http/https URL
+     */
+    public static String hostOf(String url) {
+        if (url == null) {
+            return "";
+        }
+        String scheme = UrlUtils.scheme(url);
+        if (!"http".equals(scheme) && !"https".equals(scheme)) {
+            return "";
+        }
+        int schemeEnd = url.indexOf("://");
+        if (schemeEnd < 0) {
+            return "";
+        }
+        String rest = url.substring(schemeEnd + 3);
+        int cut = rest.length();
+        for (char c : new char[]{'/', '?', '#'}) {
+            int at = rest.indexOf(c);
+            if (at >= 0 && at < cut) {
+                cut = at;
+            }
+        }
+        String host = rest.substring(0, cut).toLowerCase();
+        int at = host.lastIndexOf('@'); // user:pass@host — keep the host
+        if (at >= 0) {
+            host = host.substring(at + 1);
+        }
+        if ("http".equals(scheme) && host.endsWith(":80")) {
+            host = host.substring(0, host.length() - 3);
+        } else if ("https".equals(scheme) && host.endsWith(":443")) {
+            host = host.substring(0, host.length() - 4);
+        }
+        return host;
+    }
+
+    /** The mutable per-host accumulator of {@link #topSites}. */
+    private static final class TopSiteAgg {
+        int totalVisits;
+        long latestTs;
+        String url;
+        String title;
     }
 
     // ------------------------------------------------------------------

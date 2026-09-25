@@ -13,6 +13,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -263,6 +264,81 @@ class BookmarkStoreTest {
             assertEquals(List.of(second),
                     store.barItems().stream().map(Bookmark::getId).toList());
             assertFalse(store.isInBar(first));
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Export / import (B6)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("export -> import into a fresh store round-trips the tree (B6)")
+    void exportImportRoundTrip(@TempDir Path dir) {
+        try (BookmarkStore source = new BookmarkStore(dir.resolve("a.json"))) {
+            String folder = source.newFolder(BookmarkStore.ROOT_ID, "Work");
+            String bm = source.newBookmark(folder, "Example", "https://example.com/");
+            source.setInBar(bm, true);
+
+            String json = source.exportJson();
+
+            try (BookmarkStore target = new BookmarkStore(dir.resolve("b.json"))) {
+                int imported = target.importJson(json);
+                assertEquals(2, imported); // the folder + the bookmark (root not counted)
+
+                List<Bookmark> children = target.children(BookmarkStore.ROOT_ID);
+                assertEquals(1, children.size());
+                Bookmark importedFolder = children.get(0);
+                assertTrue(importedFolder.isFolder());
+                assertEquals("Work", importedFolder.getName());
+                assertNotEquals(folder, importedFolder.getId()); // remapped id
+
+                List<Bookmark> folderChildren = target.children(importedFolder.getId());
+                assertEquals(1, folderChildren.size());
+                assertEquals("https://example.com/", folderChildren.get(0).getUrl());
+
+                // the bar entry survived the remap
+                assertEquals(1, target.barItems().size());
+                assertEquals(folderChildren.get(0).getId(), target.barItems().get(0).getId());
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("import never duplicates existing nodes and appends to the bar (B6)")
+    void importDoesNotTouchExisting(@TempDir Path dir) {
+        try (BookmarkStore store = new BookmarkStore(dir.resolve("bookmarks.json"))) {
+            String existing = store.newBookmark(BookmarkStore.ROOT_ID, "Existing",
+                    "https://keep.example/");
+            store.setInBar(existing, true);
+            int before = store.search("").size();
+
+            String foreign = """
+                    {"version":1,"bar":["x1"],"nodes":{
+                    "root":{"id":"root","type":"folder","name":"","children":["x1"]},
+                    "x1":{"id":"x1","type":"bookmark","name":"X","url":"https://x.example/"}}}
+                    """;
+            assertEquals(1, store.importJson(foreign));
+
+            assertEquals(before + 1, store.search("").size());
+            // the original node is untouched
+            assertTrue(store.get(existing).isPresent());
+            assertEquals("https://keep.example/", store.get(existing).orElseThrow().getUrl());
+            // both bar entries are present
+            assertEquals(2, store.barItems().size());
+            store.save();
+            assertTrue(Files.exists(dir.resolve("bookmarks.json")));
+        }
+    }
+
+    @Test
+    @DisplayName("import rejects corrupt or empty input (D17)")
+    void importRejectsGarbage(@TempDir Path dir) {
+        try (BookmarkStore store = new BookmarkStore(dir.resolve("bookmarks.json"))) {
+            assertEquals(0, store.importJson(null));
+            assertEquals(0, store.importJson(""));
+            assertEquals(0, store.importJson("{not json"));
+            assertEquals(0, store.importJson("{\"nodes\":[]}"));
+            assertEquals(0, store.importJson("{\"nodes\":{\"a\":{\"type\":\"bookmark\"}}}")); // no id
         }
     }
 }

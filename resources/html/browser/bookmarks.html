@@ -179,6 +179,8 @@
       </form>
       <button id="new-folder" class="ctl" type="button"></button>
       <button id="add-bookmark" class="ctl" type="button"></button>
+      <button id="export-bookmarks" class="ctl" type="button"></button>
+      <button id="import-bookmarks" class="ctl" type="button"></button>
     </div>
   </header>
   <main id="list"></main>
@@ -191,6 +193,8 @@
       document.getElementById('title').textContent = s.title;
       document.getElementById('new-folder').textContent = s.newFolder;
       document.getElementById('add-bookmark').textContent = s.addBookmark;
+      document.getElementById('export-bookmarks').textContent = s.exportBookmarks;
+      document.getElementById('import-bookmarks').textContent = s.importBookmarks;
       var searchInput = document.getElementById('search');
       searchInput.placeholder = s.searchPlaceholder;
       searchInput.value = data.q || '';
@@ -353,6 +357,13 @@
         if (!url || !url.trim()) return;
         window.location.href = 'signum://bookmarks/add?name=' + encodeURIComponent(name.trim()) +
             '&url=' + encodeURIComponent(url.trim());
+      });
+      // B6: JSON export / import (the renderer pumps to the GUI file chooser)
+      document.getElementById('export-bookmarks').addEventListener('click', function () {
+        window.location.href = 'signum://bookmarks/export';
+      });
+      document.getElementById('import-bookmarks').addEventListener('click', function () {
+        window.location.href = 'signum://bookmarks/import';
       });
     })();
   </script>

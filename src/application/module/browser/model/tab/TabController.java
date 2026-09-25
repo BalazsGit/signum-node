@@ -55,6 +55,11 @@ public final class TabController {
     private final Deque<ClosedTab> closedTabs = new ArrayDeque<>();
     private final List<TabEventListener> listeners = new CopyOnWriteArrayList<>();
     private int activeIndex = -1;
+    /**
+     * C8: the live max-tabs cap (0 or negative = unlimited). Set by the GUI
+     * from the settings; checked in {@link #openTab}.
+     */
+    private volatile int maxTabs = 0;
 
     // ------------------------------------------------------------------
     // Observers
@@ -77,10 +82,16 @@ public final class TabController {
      *
      * @param url    the initial URL (never null)
      * @param source where the request came from
-     * @return the new tab's id
+     * @return the new tab's id, or {@code null} when the live max-tabs cap
+     *         (C8) is reached — the caller simply ignores the request
      */
     public synchronized String openTab(String url, TabSource source) {
         Objects.requireNonNull(url, "url");
+        int cap = maxTabs;
+        if (cap > 0 && tabs.size() >= cap) {
+            logger.debug("Max-tabs cap ({}) reached — not opening {}", cap, url);
+            return null;
+        }
         BrowserTab tab = new BrowserTab(url);
         tabs.add(tab);
         activeIndex = tabs.size() - 1;
@@ -165,6 +176,108 @@ public final class TabController {
     }
 
     // ------------------------------------------------------------------
+    // Batch close (T9: the tab context menu)
+    // ------------------------------------------------------------------
+
+    /**
+     * T9: closes every tab except the given one, which becomes active.
+     *
+     * @return {@code true} when at least one tab was closed
+     */
+    public synchronized boolean closeOthers(String tabId) {
+        int index = indexOf(tabId);
+        if (index < 0 || tabs.size() < 2) {
+            return false;
+        }
+        activateById(tabId);
+        boolean closed = false;
+        for (String otherId : new ArrayList<>(idsExcept(tabId))) {
+            if (closeTab(otherId)) {
+                closed = true;
+            }
+        }
+        return closed;
+    }
+
+    /**
+     * T9: closes every tab to the right of the given one (the given tab
+     * itself is never closed and becomes active).
+     *
+     * @return {@code true} when at least one tab was closed
+     */
+    public synchronized boolean closeRightOf(String tabId) {
+        int index = indexOf(tabId);
+        if (index < 0 || index >= tabs.size() - 1) {
+            return false;
+        }
+        activateById(tabId);
+        boolean closed = false;
+        // close from the rightmost leftwards so indices stay valid
+        List<String> doomed = new ArrayList<>();
+        for (int i = tabs.size() - 1; i > index; i--) {
+            doomed.add(tabs.get(i).getId());
+        }
+        for (String id : doomed) {
+            if (closeTab(id)) {
+                closed = true;
+            }
+        }
+        return closed;
+    }
+
+    private List<String> idsExcept(String keepId) {
+        List<String> out = new ArrayList<>();
+        for (BrowserTab tab : tabs) {
+            if (!tab.getId().equals(keepId)) {
+                out.add(tab.getId());
+            }
+        }
+        return out;
+    }
+
+    // ------------------------------------------------------------------
+    // Live limits (C8) and engine flags (S5, T10)
+    // ------------------------------------------------------------------
+
+    /**
+     * C8: sets the live max-tabs cap (0 or negative = unlimited).
+     */
+    public void setMaxTabs(int maxTabs) {
+        this.maxTabs = Math.max(0, maxTabs);
+    }
+
+    /** @return the current max-tabs cap (0 = unlimited). */
+    public synchronized int getMaxTabs() {
+        return maxTabs;
+    }
+
+    /**
+     * S5: flags the tab as mixed-content (an http subresource on an https
+     * page) and notifies the listeners when the flag changed.
+     */
+    public synchronized void markMixedContent(String tabId) {
+        BrowserTab tab = byId(tabId);
+        if (tab == null || tab.isMixedContent()) {
+            return;
+        }
+        tab.markMixedContent();
+        fire(TabEvent.updated(tab));
+    }
+
+    /**
+     * T10/D13: the discard flag of the tab (set by the engine layer when the
+     * CEF browser is disposed or recreated); notifies when it changed.
+     */
+    public synchronized void setDiscarded(String tabId, boolean discarded) {
+        BrowserTab tab = byId(tabId);
+        if (tab == null || tab.isDiscarded() == discarded) {
+            return;
+        }
+        tab.setDiscarded(discarded);
+        fire(TabEvent.updated(tab));
+    }
+
+    // ------------------------------------------------------------------
     // Order and activation (T3, T4)
     // ------------------------------------------------------------------
 
@@ -201,6 +314,7 @@ public final class TabController {
             return true;
         }
         activeIndex = index;
+        tabs.get(index).touchActive(); // T10/D13: the discard clock restarts
         fire(TabEvent.activated(tabs.get(index), index));
         return true;
     }
@@ -256,6 +370,7 @@ public final class TabController {
             return false;
         }
         tab.setUrl(url);
+        tab.resetMixedContent(); // S5: the flag belongs to the page that loaded it
         fire(TabEvent.updated(tab));
         return true;
     }

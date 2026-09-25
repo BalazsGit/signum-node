@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -348,5 +349,119 @@ class TabControllerTest {
         assertEquals(0, controller.restore(new SessionSnapshot()));
 
         assertEquals(0, controller.size());
+    }
+
+    // ------------------------------------------------------------------
+    // Batch close (T9)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("closeOthers keeps only the given tab and activates it")
+    void closeOthersKeepsOnlyGiven() {
+        String a = controller.openTab("https://a.example", TabSource.USER);
+        controller.openTab("https://b.example", TabSource.USER);
+        controller.openTab("https://c.example", TabSource.USER);
+        controller.activateById(a);
+
+        assertTrue(controller.closeOthers(a));
+
+        assertEquals(1, controller.size());
+        assertEquals(a, controller.getActiveTab().orElseThrow().getId());
+    }
+
+    @Test
+    @DisplayName("closeOthers is a no-op with a single tab or an unknown id")
+    void closeOthersEdgeCases() {
+        String a = controller.openTab("https://a.example", TabSource.USER);
+        controller.openTab("https://b.example", TabSource.USER);
+
+        assertFalse(controller.closeOthers("nope"));
+        assertEquals(2, controller.size());
+        controller.closeTab(controller.getTabAt(1).orElseThrow().getId());
+        assertFalse(controller.closeOthers(a)); // only one tab left
+        assertEquals(1, controller.size());
+    }
+
+    @Test
+    @DisplayName("closeRightOf keeps the given tab and everything to its left")
+    void closeRightOfKeepsLeft() {
+        String a = controller.openTab("https://a.example", TabSource.USER);
+        String b = controller.openTab("https://b.example", TabSource.USER);
+        controller.openTab("https://c.example", TabSource.USER);
+
+        assertTrue(controller.closeRightOf(b));
+
+        assertEquals(2, controller.size());
+        assertTrue(controller.getTab(a).isPresent());
+        assertTrue(controller.getTab(b).isPresent());
+        assertEquals(b, controller.getActiveTab().orElseThrow().getId());
+    }
+
+    @Test
+    @DisplayName("closeRightOf is a no-op for the rightmost tab or unknown id")
+    void closeRightOfEdgeCases() {
+        controller.openTab("https://a.example", TabSource.USER);
+        String b = controller.openTab("https://b.example", TabSource.USER);
+
+        assertFalse(controller.closeRightOf(b)); // nothing to the right
+        assertFalse(controller.closeRightOf("nope"));
+        assertEquals(2, controller.size());
+    }
+
+    // ------------------------------------------------------------------
+    // Live limits and engine flags (C8, S5, T10)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("the max-tabs cap rejects new tabs once reached (C8)")
+    void maxTabsCap() {
+        controller.setMaxTabs(2);
+        assertEquals(2, controller.getMaxTabs());
+
+        String a = controller.openTab("https://a.example", TabSource.USER);
+        String b = controller.openTab("https://b.example", TabSource.USER);
+        assertNull(controller.openTab("https://c.example", TabSource.USER));
+        assertEquals(2, controller.size());
+
+        // closing one frees a slot; the cap is live
+        controller.closeTab(b);
+        String c = controller.openTab("https://c.example", TabSource.USER);
+        assertNotNull(c);
+        assertEquals(2, controller.size());
+        assertEquals("https://c.example", controller.getTab(c).orElseThrow().getUrl());
+        assertTrue(controller.getTab(a).isPresent());
+
+        // 0 = unlimited
+        controller.setMaxTabs(0);
+        assertNotNull(controller.openTab("https://d.example", TabSource.USER));
+    }
+
+    @Test
+    @DisplayName("markMixedContent fires UPDATED once and is idempotent (S5)")
+    void markMixedContentFiresOnce() {
+        String a = controller.openTab("https://a.example", TabSource.USER);
+        events.clear();
+
+        controller.markMixedContent(a);
+        controller.markMixedContent(a);
+        controller.markMixedContent("nope");
+
+        assertEquals(1, events.size());
+        assertEquals(TabEvent.Type.UPDATED, events.get(0).getType());
+        assertTrue(controller.getTab(a).orElseThrow().isMixedContent());
+    }
+
+    @Test
+    @DisplayName("setDiscarded fires UPDATED only on change (T10)")
+    void setDiscardedFiresOnChange() {
+        String a = controller.openTab("https://a.example", TabSource.USER);
+        events.clear();
+
+        controller.setDiscarded(a, false); // no change
+        assertEquals(0, events.size());
+        controller.setDiscarded(a, true);
+        controller.setDiscarded(a, true); // no change
+        assertEquals(1, events.size());
+        assertTrue(controller.getTab(a).orElseThrow().isDiscarded());
     }
 }

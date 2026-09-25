@@ -117,4 +117,31 @@ public final class WebBrowserRegistry {
             browser.stop();
         }
     }
+
+    /** X1: F12 — opens the tab's DevTools window. @return {@code true} when handled. */
+    public boolean openDevTools(String tabId) {
+        WebBrowser browser = of(tabId);
+        if (browser == null) {
+            return false;
+        }
+        browser.openDevTools();
+        return true;
+    }
+
+    /** X1: F12 — closes the tab's DevTools window. */
+    public void closeDevTools(String tabId) {
+        WebBrowser browser = of(tabId);
+        if (browser != null) {
+            browser.closeDevTools();
+        }
+    }
+
+    /**
+     * T10/D13: discards the tab's engine (the tab itself stays in the strip;
+     * the next {@link #component} call recreates the browser from the tab's
+     * URL — the transparent restore).
+     */
+    public void discard(String tabId) {
+        remove(tabId);
+    }
 }

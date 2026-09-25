@@ -75,6 +75,16 @@ public final class WebBrowser {
         browser.stopLoad();
     }
 
+    /** X1: F12 — opens CEF's own DevTools window (detached). */
+    public void openDevTools() {
+        browser.openDevTools();
+    }
+
+    /** X1: F12 — closes the DevTools window again. */
+    public void closeDevTools() {
+        browser.closeDevTools();
+    }
+
     /**
      * Tears the browser down. Must run on the EDT. Idempotent enough for the
      * CEF close-callback race (a second call on a closed browser is a no-op

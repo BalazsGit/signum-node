@@ -27,12 +27,17 @@ public final class BrowserTab {
     private boolean pinned;
     private boolean privateMode;
     private boolean discarded;
+    /** S5: an http:// subresource was loaded on this (https) page. */
+    private boolean mixedContent;
     private int zoomLevel;
+    /** T10/D13: when the tab was last active (discard policy input). */
+    private long lastActiveAt;
 
     BrowserTab(String initialUrl) {
         this.id = UUID.randomUUID().toString();
         this.url = initialUrl;
         this.createdAt = System.currentTimeMillis();
+        this.lastActiveAt = this.createdAt;
         this.sslStatus = SslStatus.forUrl(initialUrl);
         this.zoomLevel = 0;
     }
@@ -98,6 +103,16 @@ public final class BrowserTab {
         return discarded;
     }
 
+    /** S5: the page loaded at least one insecure (http) subresource. */
+    public boolean isMixedContent() {
+        return mixedContent;
+    }
+
+    /** T10/D13: the tab's last activity timestamp (epoch millis). */
+    public long getLastActiveAt() {
+        return lastActiveAt;
+    }
+
     public int getZoomLevel() {
         return zoomLevel;
     }
@@ -137,5 +152,30 @@ public final class BrowserTab {
 
     void setCanGoForward(boolean canGoForward) {
         this.canGoForward = canGoForward;
+    }
+
+    /** S5: flags the page as mixed-content (idempotent). */
+    void markMixedContent() {
+        this.mixedContent = true;
+    }
+
+    /** S5: a new page committed — the mixed-content state is cleared. */
+    void resetMixedContent() {
+        this.mixedContent = false;
+    }
+
+    /** T10/D13: the discard flag (the engine recreates the browser on demand). */
+    void setDiscarded(boolean discarded) {
+        this.discarded = discarded;
+    }
+
+    /** T10/D13: stamps the tab as active now (activation). */
+    void touchActive() {
+        this.lastActiveAt = System.currentTimeMillis();
+    }
+
+    /** Test hook: backdates the last-activity stamp (same package only). */
+    void setLastActiveAtForTest(long ts) {
+        this.lastActiveAt = ts;
     }
 }

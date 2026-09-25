@@ -2,6 +2,7 @@ package application.module.browser.engine.scheme;
 
 import application.module.browser.config.BrowserSettings;
 import application.module.browser.config.BrowserSettingsRepository;
+import application.module.browser.config.SearchEnginePresets;
 import com.google.gson.Gson;
 import application.utils.i18n.I18n;
 import org.slf4j.Logger;
@@ -48,6 +49,10 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
     public static final String PAGE_URL = BrowserSchemeHandler.SCHEME_PREFIX + PAGE;
     /** Cap of the startup URL list (a sanity bound, not a feature). */
     public static final int MAX_STARTUP_URLS = 20;
+    /** Cap of the max-tabs setting (C8 sanity bound). */
+    public static final int MAX_MAX_TABS = 100;
+    /** Cap of the discard delay in minutes (C8: one week). */
+    public static final int MAX_DISCARD_MINUTES = 7 * 24 * 60;
 
     private static final Logger logger = LoggerFactory.getLogger(SettingsPageRenderer.class);
 
@@ -66,6 +71,10 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
      */
     private final Function<String, String> dirPicker;
     private final Gson gson = new Gson();
+    /** F9 (C6): the clear-browsing-data action (GUI, EDT); may be null. */
+    private Runnable clearDataAction;
+    /** F9 (C8): fired on the scheme thread after a save (the GUI pumps it). */
+    private Runnable savedCallback;
 
     public SettingsPageRenderer(BrowserSettingsRepository repository,
                                 Path defaultDownloadsDir,
@@ -73,6 +82,16 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
         this.repository = repository;
         this.defaultDownloadsDir = defaultDownloadsDir;
         this.dirPicker = dirPicker;
+    }
+
+    /** F9 (C6): the clear-data dialog opener (the GUI implements it on the EDT). */
+    public void setClearDataAction(Runnable clearDataAction) {
+        this.clearDataAction = clearDataAction;
+    }
+
+    /** F9 (C8): a hook fired after every successful save (max-tabs refresh). */
+    public void setOnSaved(Runnable savedCallback) {
+        this.savedCallback = savedCallback;
     }
 
     @Override
@@ -84,6 +103,7 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
                 BrowserSettings settings = repository.load();
                 apply(settings, query);
                 repository.save(settings);
+                fireSaved();
                 return renderPage(repository.load());
             }
             case "settings/pickDownloadsDir": {
@@ -99,11 +119,35 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
                 if (chosen != null && !chosen.isBlank()) {
                     settings.setDownloadsDir(chosen.trim());
                     repository.save(settings);
+                    fireSaved();
+                }
+                return renderPage(repository.load());
+            }
+            case "settings/clearData": {
+                // C6: the GUI opens the clear-data dialog (history + cookies)
+                Runnable action = clearDataAction;
+                if (action != null) {
+                    try {
+                        action.run();
+                    } catch (RuntimeException e) {
+                        logger.warn("The clear-data dialog failed: {}", e.toString());
+                    }
                 }
                 return renderPage(repository.load());
             }
             default:
                 return null; // unknown action → the 404 page
+        }
+    }
+
+    private void fireSaved() {
+        Runnable callback = savedCallback;
+        if (callback != null) {
+            try {
+                callback.run(); // the GUI implementation must not block
+            } catch (RuntimeException e) {
+                logger.warn("The settings-saved callback failed: {}", e.toString());
+            }
         }
     }
     // ------------------------------------------------------------------
@@ -201,6 +245,83 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
         }
     }
 
+    // ------------------------------------------------------------------
+    // F9 validation (pure — unit-tested)
+    // ------------------------------------------------------------------
+
+    /** The name the settings form shows for a non-preset engine. */
+    public static final String ENGINE_CUSTOM = "Custom";
+
+    /**
+     * C3/N11: the search engine. A preset name takes its built-in template;
+     * anything else is a custom engine and its template must be a web URL
+     * containing {@code {query}}. Invalid input keeps both current values.
+     *
+     * @return the (name, template) pair to store (never null)
+     */
+    static String[] validateSearchEngine(String rawName, String rawTemplate,
+                                         String currentName, String currentTemplate) {
+        String name = rawName == null ? "" : rawName.trim();
+        String preset = SearchEnginePresets.templateOf(name);
+        if (preset != null) {
+            return new String[]{name, preset};
+        }
+        String template = rawTemplate == null ? "" : rawTemplate.trim();
+        if (template.matches("https?://[^\\s]*\\{query\\}[^\\s]*")) {
+            return new String[]{ENGINE_CUSTOM, template};
+        }
+        return new String[]{
+                currentName != null && !currentName.isBlank() ? currentName : SearchEnginePresets.DUCKDUCKGO,
+                currentTemplate != null && currentTemplate.contains("{query}")
+                        ? currentTemplate : BrowserSettings.DEFAULT_SEARCH_ENGINE_TEMPLATE};
+    }
+
+    /** C4: the theme mode; {@code null} = keep the current one. */
+    static String validateTheme(String raw) {
+        if (raw != null && ThemePalette.isKnown(raw.trim())) {
+            return raw.trim();
+        }
+        return null;
+    }
+
+    /** C8: the max-tabs cap (1..{@value #MAX_MAX_TABS}); {@code null} = keep. */
+    static Integer validateMaxTabs(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        try {
+            int value = Integer.parseInt(raw.trim());
+            return (value >= 1 && value <= MAX_MAX_TABS) ? value : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** C8: the discard delay in minutes (1..{@value #MAX_DISCARD_MINUTES}); {@code null} = keep. */
+    static Integer validateDiscardMinutes(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        try {
+            int value = Integer.parseInt(raw.trim());
+            return (value >= 1 && value <= MAX_DISCARD_MINUTES) ? value : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** N12: the file:// block switch token; {@code null} = keep the current one. */
+    static Boolean parseBlockFileUrls(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        return switch (raw.trim()) {
+            case "true" -> true;
+            case "false" -> false;
+            default -> null;
+        };
+    }
+
     /**
      * The effective download directory (C5, D1). A stored value that is not
      * a valid path (e.g. hand-edited garbage) degrades to the default —
@@ -240,6 +361,32 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
         if (dir != null) {
             settings.setDownloadsDir(validateDownloadsDir(dir));
         }
+        // F9 (C3/N11): the search engine (preset or custom template)
+        if (query.containsKey("searchEngine") || query.containsKey("searchTemplate")) {
+            String[] engine = validateSearchEngine(query.get("searchEngine"),
+                    query.get("searchTemplate"),
+                    settings.getSearchEngineName(), settings.getSearchEngineTemplate());
+            settings.setSearchEngineName(engine[0]);
+            settings.setSearchEngineTemplate(engine[1]);
+        }
+        // F9 (C4): the internal-page theme
+        String theme = validateTheme(query.get("theme"));
+        if (theme != null) {
+            settings.setTheme(theme);
+        }
+        // F9 (C8/N12): the limits and the file:// block
+        Integer maxTabs = validateMaxTabs(query.get("maxTabs"));
+        if (maxTabs != null) {
+            settings.setMaxTabs(maxTabs);
+        }
+        Integer discard = validateDiscardMinutes(query.get("discardMinutes"));
+        if (discard != null) {
+            settings.setDiscardMinutes(discard);
+        }
+        Boolean blockFile = parseBlockFileUrls(query.get("blockFileUrls"));
+        if (blockFile != null) {
+            settings.setBlockFileUrls(blockFile);
+        }
     }
 
     private byte[] renderPage(BrowserSettings settings) {
@@ -250,6 +397,15 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
         data.urls = new ArrayList<>(settings.getStartupUrls());
         data.downloadsDir = settings.getDownloadsDir() == null ? "" : settings.getDownloadsDir();
         data.effectiveDownloadsDir = effectiveDownloadsDir(settings).toString();
+        // F9 fields
+        data.searchEngine = settings.getSearchEngineName();
+        data.searchTemplate = settings.getSearchEngineTemplate();
+        data.enginePresets = new LinkedHashMap<>(SearchEnginePresets.all());
+        data.engineCustom = ENGINE_CUSTOM;
+        data.theme = settings.getTheme();
+        data.maxTabs = settings.getMaxTabs();
+        data.discardMinutes = settings.getDiscardMinutes();
+        data.blockFileUrls = settings.isBlockFileUrls();
         data.strings.put("title", I18n.get("browser.settings.title"));
         data.strings.put("startupSection", I18n.get("browser.settings.section.startup"));
         data.strings.put("startupNewtab", I18n.get("browser.settings.startup.newtab"));
@@ -267,6 +423,28 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
         data.strings.put("browse", I18n.get("browser.settings.browse"));
         data.strings.put("save", I18n.get("browser.settings.save"));
         data.strings.put("about", I18n.get("browser.settings.link.about"));
+        // F9 strings
+        data.strings.put("searchSection", I18n.get("browser.settings.section.search"));
+        data.strings.put("searchEngine", I18n.get("browser.settings.searchEngine"));
+        data.strings.put("searchTemplate", I18n.get("browser.settings.searchEngine.template"));
+        data.strings.put("searchTemplateHint",
+                I18n.get("browser.settings.searchEngine.template.hint"));
+        data.strings.put("searchHint", I18n.get("browser.settings.searchEngine.hint"));
+        data.strings.put("appearanceSection", I18n.get("browser.settings.section.appearance"));
+        data.strings.put("theme", I18n.get("browser.settings.theme"));
+        data.strings.put("themeFollowApp", I18n.get("browser.settings.theme.follow-app"));
+        data.strings.put("themeLight", I18n.get("browser.settings.theme.light"));
+        data.strings.put("themeDark", I18n.get("browser.settings.theme.dark"));
+        data.strings.put("themeHint", I18n.get("browser.settings.theme.hint"));
+        data.strings.put("privacySection", I18n.get("browser.settings.section.privacy"));
+        data.strings.put("blockFile", I18n.get("browser.settings.blockFile"));
+        data.strings.put("blockFileHint", I18n.get("browser.settings.blockFile.hint"));
+        data.strings.put("clearData", I18n.get("browser.settings.clearData"));
+        data.strings.put("advancedSection", I18n.get("browser.settings.section.advanced"));
+        data.strings.put("maxTabs", I18n.get("browser.settings.maxTabs"));
+        data.strings.put("maxTabsHint", I18n.get("browser.settings.maxTabs.hint"));
+        data.strings.put("discardMinutes", I18n.get("browser.settings.discardMinutes"));
+        data.strings.put("discardHint", I18n.get("browser.settings.discardMinutes.hint"));
 
         String template = readTemplate();
         if (template == null) {
@@ -331,6 +509,15 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
         List<String> urls = new ArrayList<>();
         String downloadsDir;
         String effectiveDownloadsDir;
+        // F9 fields
+        String searchEngine;
+        String searchTemplate;
+        Map<String, String> enginePresets = new LinkedHashMap<>();
+        String engineCustom;
+        String theme;
+        int maxTabs;
+        int discardMinutes;
+        boolean blockFileUrls;
         Map<String, String> strings = new LinkedHashMap<>();
     }
 }

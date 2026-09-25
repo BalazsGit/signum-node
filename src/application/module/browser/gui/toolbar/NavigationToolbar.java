@@ -258,8 +258,10 @@ public final class NavigationToolbar extends JPanel {
     private List<OmniboxPopup.Suggestion> suggestFor(Omnibox box, String input) {
         List<OmniboxPopup.Suggestion> items = new ArrayList<>();
         String normalized = UrlUtils.normalize(input, settings.get().getSearchEngineTemplate());
+        // F9 (H6): the history rows are ranked by visits x freshness instead
+        // of plain recency
         for (HistoryEntry entry :
-                history.search(input, 0L, Long.MAX_VALUE, HISTORY_SUGGESTIONS)) {
+                history.searchRanked(input, System.currentTimeMillis(), HISTORY_SUGGESTIONS)) {
             if (normalized != null && normalized.equals(entry.getUrl())) {
                 continue; // the normalized-URL row below already covers this one
             }
@@ -337,7 +339,7 @@ public final class NavigationToolbar extends JPanel {
             reloadStop.setText("\u27F3");
             reloadStop.setToolTipText(I18n.get("browser.nav.reload.tooltip"));
         }
-        securityIcon.update(tab.getSslStatus(), tab.getUrl());
+        securityIcon.update(tab.getSslStatus(), tab.getUrl(), tab.isMixedContent());
         String title = tab.getTitle();
         titleLabel.setTextAnimated(title == null || title.isBlank() ? "" : title);
         progressBar.setActive(tab.isLoading());
@@ -479,8 +481,9 @@ public final class NavigationToolbar extends JPanel {
     }
 
     /**
-     * F4 (B1): the omnibox star — an outline/filled glyph with a short
-     * fade-in "pulse" when a bookmark is added (alpha compositing, the same
+     * F4 (B1) / F9 (A7): the omnibox star — an outline/filled glyph with a
+     * "puff" when a bookmark is added: the filled star fades in while
+     * settling from a 140% scale (alpha + transform, the same timer
      * mechanism as {@link FadingLabel}).
      */
     private static final class StarButton extends JButton {
@@ -489,6 +492,8 @@ public final class NavigationToolbar extends JPanel {
         private static final String FILLED = "\u2605";  // ★
 
         private int alpha = 255;
+        /** A7: the puff scale factor (1.4 → 1.0 while fading in). */
+        private float scale = 1f;
         private Timer animation;
 
         StarButton(String text) {
@@ -505,20 +510,24 @@ public final class NavigationToolbar extends JPanel {
             setToolTipText(I18n.get(bookmarked
                     ? "browser.nav.star.remove" : "browser.nav.star.add"));
             alpha = 255;
+            scale = 1f;
             if (animation != null) {
                 animation.stop();
             }
         }
 
-        /** The B1 animation: a quick fade-in of the (now filled) star. */
+        /** The A7 puff: the (now filled) star fades in while settling down. */
         void pulse() {
             setState(true);
             alpha = 0;
+            scale = 1.4f;
             if (animation == null) {
                 animation = new Timer(16, e -> {
                     alpha = Math.min(255, alpha + 30);
+                    scale = Math.max(1f, scale - 0.08f);
                     if (alpha >= 255) {
                         animation.stop();
+                        scale = 1f;
                     }
                     repaint();
                 });
@@ -528,12 +537,16 @@ public final class NavigationToolbar extends JPanel {
 
         @Override
         protected void paintComponent(Graphics g) {
-            if (alpha >= 255) {
+            if (alpha >= 255 && scale <= 1f) {
                 super.paintComponent(g);
                 return;
             }
             Graphics2D g2 = (Graphics2D) g.create();
             g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha / 255f));
+            // A7: scale around the button center
+            g2.translate(getWidth() / 2f, getHeight() / 2f);
+            g2.scale(scale, scale);
+            g2.translate(-getWidth() / 2f, -getHeight() / 2f);
             super.paintComponent(g2);
             g2.dispose();
         }

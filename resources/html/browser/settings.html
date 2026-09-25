@@ -122,6 +122,23 @@
       border-color: var(--accent);
       background: rgba(79, 140, 255, 0.08);
     }
+    .field-row input[type="number"] {
+      flex: 0 0 120px;
+    }
+    .field-row select {
+      flex: 0 0 220px;
+      padding: 8px 12px;
+      font-size: 13px;
+      color: var(--fg);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      outline: none;
+      transition: border-color 120ms ease;
+    }
+    .field-row select:focus {
+      border-color: var(--accent);
+    }
     .footer {
       display: flex;
       align-items: center;
@@ -183,6 +200,56 @@
       <div class="hint" id="downloads-dir-hint"></div>
     </div>
 
+    <div class="section">
+      <h2 id="search-section"></h2>
+      <div class="hint" id="search-engine-label"></div>
+      <div class="field-row">
+        <select id="search-engine"></select>
+      </div>
+      <div class="hint" id="search-template-label"></div>
+      <div class="field-row">
+        <input type="text" id="search-template" spellcheck="false" autocomplete="off">
+      </div>
+      <div class="hint" id="search-template-hint"></div>
+      <div class="hint" id="search-hint"></div>
+    </div>
+
+    <div class="section">
+      <h2 id="appearance-section"></h2>
+      <div class="hint" id="theme-label"></div>
+      <div class="field-row">
+        <select id="theme">
+          <option value="follow-app"></option>
+          <option value="light"></option>
+          <option value="dark"></option>
+        </select>
+      </div>
+      <div class="hint" id="theme-hint"></div>
+    </div>
+
+    <div class="section">
+      <h2 id="privacy-section"></h2>
+      <label class="option"><input type="checkbox" id="block-file"><span id="block-file-label"></span></label>
+      <div class="hint" id="block-file-hint"></div>
+      <div class="field-row">
+        <button type="button" id="clear-data" class="ghost"></button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2 id="advanced-section"></h2>
+      <div class="hint" id="max-tabs-label"></div>
+      <div class="field-row">
+        <input type="number" id="max-tabs" min="1" max="100">
+      </div>
+      <div class="hint" id="max-tabs-hint"></div>
+      <div class="hint" id="discard-label"></div>
+      <div class="field-row">
+        <input type="number" id="discard-minutes" min="1" max="10080">
+      </div>
+      <div class="hint" id="discard-hint"></div>
+    </div>
+
     <div class="footer">
       <button type="button" class="save" id="save"></button>
       <a class="about" href="signum://about" id="about"></a>
@@ -216,10 +283,67 @@
       text('browse', s.browse);
       text('save', s.save);
       text('about', s.about);
+      // F9 strings
+      text('search-section', s.searchSection);
+      text('search-engine-label', s.searchEngine);
+      text('search-template-label', s.searchTemplate);
+      text('search-template-hint', s.searchTemplateHint);
+      text('search-hint', s.searchHint);
+      text('appearance-section', s.appearanceSection);
+      text('theme-label', s.theme);
+      document.querySelector('#theme option[value="follow-app"]').textContent = s.themeFollowApp;
+      document.querySelector('#theme option[value="light"]').textContent = s.themeLight;
+      document.querySelector('#theme option[value="dark"]').textContent = s.themeDark;
+      text('theme-hint', s.themeHint);
+      text('privacy-section', s.privacySection);
+      text('block-file-label', s.blockFile);
+      text('block-file-hint', s.blockFileHint);
+      text('clear-data', s.clearData);
+      text('advanced-section', s.advancedSection);
+      text('max-tabs-label', s.maxTabs);
+      text('max-tabs-hint', s.maxTabsHint);
+      text('discard-label', s.discardMinutes);
+      text('discard-hint', s.discardHint);
 
       document.getElementById('homepage').value = data.homepage || '';
       document.getElementById('downloads-dir').value = data.downloadsDir || '';
       document.getElementById('urls').value = (data.urls || []).join('\n');
+      // F9 values
+      document.getElementById('theme').value = data.theme || 'follow-app';
+      document.getElementById('max-tabs').value = data.maxTabs || 25;
+      document.getElementById('discard-minutes').value = data.discardMinutes || 15;
+      document.getElementById('block-file').checked = !!data.blockFileUrls;
+      var templateInput = document.getElementById('search-template');
+      templateInput.value = data.searchTemplate || '';
+      // C3: the engine select (presets + the custom entry)
+      var engineSelect = document.getElementById('search-engine');
+      Object.keys(data.enginePresets || {}).forEach(function (name) {
+        var option = document.createElement('option');
+        option.value = name;
+        option.textContent = name;
+        engineSelect.appendChild(option);
+      });
+      var customOption = document.createElement('option');
+      customOption.value = data.engineCustom || 'Custom';
+      customOption.textContent = data.engineCustom || 'Custom';
+      engineSelect.appendChild(customOption);
+      var storedEngine = data.searchEngine || '';
+      engineSelect.value = (data.enginePresets || {})[storedEngine] ? storedEngine
+          : (customOption.value);
+      function syncTemplateField() {
+        var presetTemplate = (data.enginePresets || {})[engineSelect.value];
+        templateInput.disabled = !!presetTemplate;
+        if (presetTemplate) {
+          templateInput.value = presetTemplate;
+        }
+      }
+      engineSelect.addEventListener('change', syncTemplateField);
+      syncTemplateField();
+
+      // C6: the clear-data dialog (the renderer calls the GUI action)
+      document.getElementById('clear-data').addEventListener('click', function () {
+        window.location.href = 'signum://settings/clearData';
+      });
 
       // C1: the URL list is editable only in "open URLs" mode.
       var radios = document.querySelectorAll('input[name="startup"]');
@@ -268,6 +392,13 @@
         params.set('startup', mode);
         params.set('urls', document.getElementById('urls').value.replace(/\n/g, ';'));
         params.set('downloadsDir', document.getElementById('downloads-dir').value);
+        params.set('searchEngine', engineSelect.value);
+        params.set('searchTemplate', templateInput.value);
+        params.set('theme', document.getElementById('theme').value);
+        params.set('maxTabs', document.getElementById('max-tabs').value);
+        params.set('discardMinutes', document.getElementById('discard-minutes').value);
+        params.set('blockFileUrls',
+            String(document.getElementById('block-file').checked));
         window.location.href = 'signum://settings/save?' + params.toString();
       });
     })();

@@ -36,6 +36,20 @@ public final class ContentPanel extends JPanel {
         }
     }
 
+    /**
+     * T10/D13: swaps the tab's component in place (discard → placeholder,
+     * restore → the fresh CEF component).
+     */
+    public void replaceBrowser(String tabId, JComponent component) {
+        JComponent old = components.get(tabId);
+        if (old != null) {
+            remove(old);
+        }
+        components.put(tabId, component);
+        add(component, BorderLayout.CENTER);
+        repaint();
+    }
+
     /** Shows only the active tab's component (T4). */
     public void showBrowser(String activeTabId) {
         components.forEach((id, component) -> component.setVisible(id.equals(activeTabId)));

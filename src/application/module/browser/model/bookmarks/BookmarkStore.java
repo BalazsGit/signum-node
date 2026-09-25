@@ -110,6 +110,131 @@ public final class BookmarkStore implements AutoCloseable {
             logger.error("Could not save the bookmarks to {}", file, e);
         }
     }
+
+    // ------------------------------------------------------------------
+    // Export / import (B6)
+    // ------------------------------------------------------------------
+
+    /**
+     * B6: serializes the whole tree (including the bookmarks bar) to the
+     * portable JSON document — the same shape as the on-disk file
+     * (Appendix C), so a plain {@code bookmarks.json} is also a valid
+     * import source.
+     *
+     * @return the JSON text (never null)
+     */
+    public synchronized String exportJson() {
+        FileShape shape = new FileShape();
+        shape.version = VERSION;
+        synchronized (lock) {
+            bar.forEach(id -> {
+                if (!ROOT_ID.equals(id) && nodes.containsKey(id)) {
+                    shape.bar.add(id);
+                }
+            });
+            shape.nodes.putAll(nodes);
+        }
+        return gson.toJson(shape);
+    }
+
+    /**
+     * B6: merges a previously exported JSON document into the tree.
+     * <p>
+     * Every imported node is copied under a <em>fresh id</em> (the import
+     * never touches existing nodes; the virtual root is mapped onto this
+     * store's root, and its children are appended when not already
+     * present). Child references are remapped accordingly; a dangling
+     * reference is dropped. Imported bar entries are appended when absent.
+     * Never throws (D17): corrupt input simply imports nothing.
+     *
+     * @param json the exported document (see {@link #exportJson})
+     * @return the number of imported nodes (the root is not counted)
+     */
+    public synchronized int importJson(String json) {
+        if (json == null || json.isBlank()) {
+            return 0;
+        }
+        JsonObject raw;
+        try {
+            raw = gson.fromJson(json, JsonObject.class);
+        } catch (RuntimeException e) {
+            logger.warn("Bookmark import rejected (unreadable document): {}", e.toString());
+            return 0;
+        }
+        if (raw == null || !raw.has("nodes") || !raw.get("nodes").isJsonObject()) {
+            return 0;
+        }
+        Map<String, Bookmark> imported = new LinkedHashMap<>();
+        List<String> importedBar = new ArrayList<>();
+        for (Map.Entry<String, com.google.gson.JsonElement> entry
+                : raw.getAsJsonObject("nodes").entrySet()) {
+            try {
+                Bookmark node = gson.fromJson(entry.getValue(), Bookmark.class);
+                if (node != null && node.getId() != null && node.getType() != null) {
+                    imported.put(node.getId(), node);
+                }
+            } catch (RuntimeException e) {
+                logger.warn("Dropping an unreadable imported bookmark node");
+            }
+        }
+        if (raw.has("bar") && raw.get("bar").isJsonArray()) {
+            for (com.google.gson.JsonElement element : raw.getAsJsonArray("bar")) {
+                if (element.isJsonPrimitive()) {
+                    importedBar.add(element.getAsString());
+                }
+            }
+        }
+        if (imported.isEmpty()) {
+            return 0;
+        }
+        synchronized (lock) {
+            // 1) remap every imported id (root -> this root, the rest fresh)
+            Map<String, String> idMap = new LinkedHashMap<>();
+            for (String id : imported.keySet()) {
+                idMap.put(id, ROOT_ID.equals(id) ? ROOT_ID : nextId());
+            }
+            // 2) copy the nodes with the remapped ids and child references
+            for (Map.Entry<String, Bookmark> entry : imported.entrySet()) {
+                Bookmark source = entry.getValue();
+                String newId = idMap.get(entry.getKey());
+                List<String> children = new ArrayList<>();
+                for (String childId : source.getChildren()) {
+                    String mapped = idMap.get(childId);
+                    if (mapped != null && !children.contains(mapped)) {
+                        children.add(mapped);
+                    }
+                }
+                if (ROOT_ID.equals(newId)) {
+                    // merge the imported top level into this store's root
+                    Bookmark root = nodes.get(ROOT_ID);
+                    if (root != null) {
+                        for (String child : children) {
+                            if (!root.getChildren().contains(child)) {
+                                root.getChildren().add(child);
+                            }
+                        }
+                    }
+                    continue; // the root itself is never replaced
+                }
+                Bookmark copy = new Bookmark(newId, source.getType(), source.getName(),
+                        source.getUrl());
+                copy.setChildren(children);
+                nodes.put(newId, copy);
+            }
+            // 3) append the imported bar entries (remapped, no duplicates)
+            for (String id : importedBar) {
+                String mapped = idMap.get(id);
+                if (mapped != null && !ROOT_ID.equals(mapped)
+                        && nodes.containsKey(mapped) && !bar.contains(mapped)) {
+                    bar.add(mapped);
+                }
+            }
+            int importedCount = (int) imported.keySet().stream()
+                    .filter(id -> !ROOT_ID.equals(id)).count();
+            return importedCount;
+        }
+    }
+
     private void loadLocked() {
         nodes.clear();
         bar.clear();

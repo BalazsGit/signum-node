@@ -243,4 +243,86 @@ class HistoryStoreTest {
             assertEquals(1, rs.getInt(1));
         }
     }
+
+    // ------------------------------------------------------------------
+    // Ranking and top sites (F9: H5, H6)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("hostOf extracts the site: scheme-only, path/query cut, default ports, userinfo")
+    void hostOfExtraction() {
+        assertEquals("example.com", HistoryStore.hostOf("https://example.com"));
+        assertEquals("example.com", HistoryStore.hostOf("https://Example.COM/a/b?c=d#e"));
+        assertEquals("example.com", HistoryStore.hostOf("http://example.com:80/x"));
+        assertEquals("example.com", HistoryStore.hostOf("https://example.com:443/x"));
+        assertEquals("example.com:8080", HistoryStore.hostOf("http://example.com:8080/x"));
+        assertEquals("example.com", HistoryStore.hostOf("https://user:pw@example.com/x"));
+        assertEquals("", HistoryStore.hostOf("signum://newtab"));
+        assertEquals("", HistoryStore.hostOf("file:///C:/x.txt"));
+        assertEquals("", HistoryStore.hostOf("not a url"));
+        assertEquals("", HistoryStore.hostOf(null));
+    }
+
+    @Test
+    @DisplayName("searchRanked orders by visits x freshness, not by recency alone (H6)")
+    void searchRankedScores(@TempDir Path dir) {
+        try (HistoryStore store = storeIn(dir)) {
+            long now = T0 + 12L * 3600_000L;
+            // a heavy site visited 10 times a day ago
+            for (int i = 0; i < 10; i++) {
+                store.record("https://heavy.example/page", "Heavy", now - 24 * 3600_000L, null);
+            }
+            // a light site visited once 20 minutes ago
+            store.record("https://fresh.example/", "Fresh", now - 20 * 60_000L, null);
+            store.flush();
+
+            List<HistoryEntry> ranked = store.searchRanked("example", now, 0);
+            assertEquals(2, ranked.size());
+            // 10 visits a day old: 100000/24+10 ≈ 3.3k  vs  10000/10.33 ≈ 968
+            assertEquals("https://heavy.example/page", ranked.get(0).getUrl());
+            assertEquals("https://fresh.example/", ranked.get(1).getUrl());
+
+            // plain search would put the fresh one first
+            assertEquals("https://fresh.example/", store.search("example", 0L, Long.MAX_VALUE, 0)
+                    .get(0).getUrl());
+        }
+    }
+
+    @Test
+    @DisplayName("topSites aggregates per host: totals, newest page, ordering, limit (H5)")
+    void topSitesAggregates(@TempDir Path dir) {
+        try (HistoryStore store = storeIn(dir)) {
+            long t = T0;
+            for (int i = 0; i < 5; i++) {
+                store.record("https://a.example/old", "A old", t + i, null);
+            }
+            store.record("https://a.example/new", "A new", t + 100, null);
+            store.record("https://b.example/", "B", t + 50, null);
+            store.record("https://b.example/other", "B other", t + 90, null);
+            store.record("signum://history", "Internal", t + 999, null); // must not count
+            store.flush();
+
+            List<TopSite> sites = store.topSites(0);
+            assertEquals(2, sites.size());
+            TopSite a = sites.get(0);
+            assertEquals("a.example", a.getHost());
+            assertEquals(6, a.getTotalVisits());
+            assertEquals("https://a.example/new", a.getUrl()); // the newest page
+            assertEquals("A new", a.getTitle());
+            TopSite b = sites.get(1);
+            assertEquals("b.example", b.getHost());
+            assertEquals(2, b.getTotalVisits());
+            assertEquals("https://b.example/other", b.getUrl());
+
+            assertEquals(1, store.topSites(1).size());
+        }
+    }
+
+    @Test
+    @DisplayName("topSites is empty on an empty store")
+    void topSitesEmpty(@TempDir Path dir) {
+        try (HistoryStore store = storeIn(dir)) {
+            assertTrue(store.topSites(0).isEmpty());
+        }
+    }
 }

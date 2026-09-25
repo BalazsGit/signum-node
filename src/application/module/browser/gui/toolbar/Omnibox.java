@@ -45,6 +45,8 @@ public final class Omnibox extends JPanel {
     private OmniboxPopup popup;
     private final Consumer<String> navigateAction;
     private final BiFunction<Omnibox, String, List<OmniboxPopup.Suggestion>> suggestor;
+    /** N10: the omnibox's own input history (Up/Down while the popup is closed). */
+    private final OmniboxInputHistory inputHistory = new OmniboxInputHistory();
     private boolean updatingText;
 
     /**
@@ -107,24 +109,34 @@ public final class Omnibox extends JPanel {
                 switch (e.getKeyCode()) {
                     case KeyEvent.VK_ENTER -> {
                         hidePopup();
-                        if (popup.isPopupVisible()) {
+                        if (popup != null && popup.isPopupVisible()) {
                             OmniboxPopup.Suggestion selected =
                                     popup.suggestionAt(popup.getSelectedIndex());
                             if (selected != null) {
+                                inputHistory.commit(selected.getTarget()); // N10
                                 navigateAction.accept(selected.getTarget());
                                 field.setText(selected.getTarget());
                                 return;
                             }
                         }
+                        inputHistory.commit(field.getText()); // N10
                         navigateAction.accept(field.getText());
                     }
                     case KeyEvent.VK_DOWN -> {
                         e.consume();
-                        moveSelection(1);
+                        if (popup == null || !popup.isPopupVisible()) {
+                            setTextFromHistory(inputHistory.down(field.getText()));
+                        } else {
+                            moveSelection(1);
+                        }
                     }
                     case KeyEvent.VK_UP -> {
                         e.consume();
-                        moveSelection(-1);
+                        if (popup == null || !popup.isPopupVisible()) {
+                            setTextFromHistory(inputHistory.up(field.getText()));
+                        } else {
+                            moveSelection(-1);
+                        }
                     }
                     case KeyEvent.VK_ESCAPE -> {
                         e.consume();
@@ -232,6 +244,17 @@ public final class Omnibox extends JPanel {
             next = 0;
         }
         p.setSelectedIndex(next);
+    }
+
+    /** N10: applies the input-history text without reopening the suggestion popup. */
+    private void setTextFromHistory(String text) {
+        updatingText = true;
+        try {
+            field.setText(text);
+            field.setCaretPosition(field.getText().length());
+        } finally {
+            updatingText = false;
+        }
     }
 
     /**

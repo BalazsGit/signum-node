@@ -51,9 +51,30 @@ public final class BookmarkPageRenderer implements InternalPage.PageRenderer {
 
     private final BookmarkStore store;
     private final Gson gson = new Gson();
+    /**
+     * B6: the export target chooser (GUI, EDT): takes the default file name
+     * and returns the chosen path, or null when canceled. May be null — then
+     * the export action just re-renders.
+     */
+    private java.util.function.Function<String, String> exportPicker;
+    /**
+     * B6: the import source chooser (GUI, EDT): returns the chosen path or
+     * null when canceled. May be null.
+     */
+    private java.util.function.Supplier<String> importPicker;
 
     public BookmarkPageRenderer(BookmarkStore store) {
         this.store = store;
+    }
+
+    /** B6: sets the export file chooser (the GUI implements it). */
+    public void setExportPicker(java.util.function.Function<String, String> exportPicker) {
+        this.exportPicker = exportPicker;
+    }
+
+    /** B6: sets the import file chooser (the GUI implements it). */
+    public void setImportPicker(java.util.function.Supplier<String> importPicker) {
+        this.importPicker = importPicker;
     }
 
     @Override
@@ -111,6 +132,55 @@ public final class BookmarkPageRenderer implements InternalPage.PageRenderer {
                 }
                 return renderList(Map.of());
             }
+            case "bookmarks/export": {
+                // B6: the GUI picks the target file; the store serializes
+                java.util.function.Function<String, String> picker = exportPicker;
+                if (picker != null) {
+                    String path = null;
+                    try {
+                        path = picker.apply("signum-bookmarks.json");
+                    } catch (RuntimeException e) {
+                        logger.warn("The bookmark export chooser failed: {}", e.toString());
+                    }
+                    if (path != null && !path.isBlank()) {
+                        try {
+                            java.nio.file.Files.writeString(java.nio.file.Path.of(path.trim()),
+                                    store.exportJson(), java.nio.charset.StandardCharsets.UTF_8);
+                            logger.info("Bookmarks exported to {}", path.trim());
+                        } catch (java.io.IOException e) {
+                            logger.error("Could not write the bookmark export to {}", path, e);
+                        }
+                    }
+                }
+                return renderList(Map.of());
+            }
+            case "bookmarks/import": {
+                // B6: the GUI picks the source file; the store merges it
+                java.util.function.Supplier<String> picker = importPicker;
+                if (picker != null) {
+                    String path = null;
+                    try {
+                        path = picker.get();
+                    } catch (RuntimeException e) {
+                        logger.warn("The bookmark import chooser failed: {}", e.toString());
+                    }
+                    if (path != null && !path.isBlank()) {
+                        try {
+                            String json = java.nio.file.Files.readString(
+                                    java.nio.file.Path.of(path.trim()),
+                                    java.nio.charset.StandardCharsets.UTF_8);
+                            int imported = store.importJson(json);
+                            if (imported > 0) {
+                                store.save();
+                                logger.info("Imported {} bookmark nodes from {}", imported, path.trim());
+                            }
+                        } catch (java.io.IOException e) {
+                            logger.error("Could not read the bookmark import from {}", path, e);
+                        }
+                    }
+                }
+                return renderList(Map.of());
+            }
             default:
                 return null; // unknown action — the 404 page wins
         }
@@ -140,6 +210,9 @@ public final class BookmarkPageRenderer implements InternalPage.PageRenderer {
         strings.put("removeFromBar", I18n.get("browser.bookmarks.removeFromBar"));
         strings.put("confirmDelete", I18n.get("browser.bookmarks.delete.confirm"));
         strings.put("confirmDeleteFolder", I18n.get("browser.bookmarks.deleteFolder.confirm"));
+        // B6
+        strings.put("exportBookmarks", I18n.get("browser.bookmarks.export"));
+        strings.put("importBookmarks", I18n.get("browser.bookmarks.import"));
 
         String template = readTemplate();
         if (template == null) {
