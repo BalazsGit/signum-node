@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 /**
  * Registry of the built-in {@code signum://} pages (plan D6): name to static
@@ -39,6 +40,16 @@ public final class InternalPage {
     /** Dynamic page bodies, produced at request time (F3+; S9-escaped data). */
     private static final Map<String, PageRenderer> RENDERERS = new ConcurrentHashMap<>();
 
+    /**
+     * F6 (D6): the theme provider — produces the LAF-palette CSS override
+     * block injected into every HTML page at request time (plan D6:
+     * "témakövető, a LAF palettából generált CSS-változók"). Registered by
+     * the GUI layer ({@code BrowserPanel}); {@code null} = the static dark
+     * tokens of {@code css/browser.css} stay in effect (also the state in
+     * unit tests and on a palette failure).
+     */
+    private static volatile Supplier<String> themeStyleProvider;
+
     private InternalPage() {
         // utility class — never instantiated
     }
@@ -66,6 +77,35 @@ public final class InternalPage {
             RENDERERS.remove(page);
         } else {
             RENDERERS.put(page, renderer);
+        }
+    }
+
+    /**
+     * Sets the LAF theme provider (F6, D6).
+     *
+     * @param provider the block producer, or {@code null} to disable theme
+     *                 injection
+     */
+    public static void setThemeStyleProvider(Supplier<String> provider) {
+        themeStyleProvider = provider;
+    }
+
+    /**
+     * @return the current theme override block, or {@code null} when there is
+     *         no provider (or it failed) — serving must never break on the
+     *         theme
+     */
+    static String themeStyle() {
+        Supplier<String> provider = themeStyleProvider;
+        if (provider == null) {
+            return null;
+        }
+        try {
+            String block = provider.get();
+            return block == null || block.isEmpty() ? null : block;
+        } catch (RuntimeException e) {
+            logger.warn("Theme provider failed, serving the static palette: {}", e.toString());
+            return null;
         }
     }
 

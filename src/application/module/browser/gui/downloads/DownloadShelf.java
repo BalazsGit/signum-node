@@ -1,6 +1,7 @@
 package application.module.browser.gui.downloads;
 
 import application.module.browser.engine.handler.ActiveDownloadRegistry;
+import application.module.browser.engine.scheme.DownloadsPageRenderer;
 import application.module.browser.model.download.DownloadItem;
 import application.module.browser.model.download.DownloadManager;
 import application.utils.i18n.I18n;
@@ -69,9 +70,16 @@ public final class DownloadShelf extends JPanel {
         this.retry = retry;
 
         this.header = new JPanel(new BorderLayout());
-        JLabel title = new JLabel(I18n.get("browser.downloads.title"));
+        // F6 (D4): the header title opens the downloads page
+        // (signum://downloads) in a tab — the recent list, with deletion.
+        JButton title = new JButton(I18n.get("browser.downloads.title"));
         title.setFont(title.getFont().deriveFont(Font.BOLD));
         title.setBorder(BorderFactory.createEmptyBorder(6, 10, 0, 0));
+        title.setOpaque(false);
+        title.setContentAreaFilled(false);
+        title.setFocusable(false);
+        title.setToolTipText(I18n.get("browser.downloads.page.title"));
+        title.addActionListener(e -> retry.accept(DownloadsPageRenderer.PAGE_URL));
         header.add(title, BorderLayout.WEST);
         JButton close = new JButton("\u00D7");
         close.setFocusable(false);

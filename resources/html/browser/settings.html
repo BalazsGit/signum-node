@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title></title>
+  <link rel="stylesheet" href="css/browser.css">
+  <style>
+    /* F6 (C1/C2/C5): the settings page. Pure template (D16): every UI string
+       and every value arrives in the JSON data island, rendered through
+       textContent only (S9). Saving is a plain navigation to
+       signum://settings/save with the form values as query parameters. */
+    body {
+      background: var(--bg);
+    }
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 26px 30px 40px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--fg);
+    }
+    .section {
+      margin-top: 26px;
+    }
+    .section h2 {
+      margin: 0 0 10px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .option {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 2px;
+      font-size: 14px;
+      color: var(--fg);
+      cursor: pointer;
+      border-radius: 6px;
+      transition: background 100ms ease;
+    }
+    .option:hover {
+      background: var(--card);
+    }
+    .option input {
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+    /* A4: the URL list slides in when "open URLs" is chosen. */
+    .urls-box {
+      overflow: hidden;
+      max-height: 0;
+      opacity: 0;
+      transition: max-height 180ms ease, opacity 180ms ease;
+    }
+    .urls-box.open {
+      max-height: 220px;
+      opacity: 1;
+    }
+    .urls-box textarea {
+      width: 100%;
+      margin-top: 8px;
+      padding: 10px 12px;
+      font-size: 13px;
+      font-family: Consolas, "Cascadia Mono", monospace;
+      color: var(--fg);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      outline: none;
+      resize: vertical;
+      min-height: 84px;
+      transition: border-color 120ms ease;
+    }
+    .urls-box textarea:focus {
+      border-color: var(--accent);
+    }
+    .hint {
+      margin: 6px 2px 0;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .field-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 4px;
+    }
+    .field-row input {
+      flex: 1;
+      min-width: 0;
+      padding: 8px 12px;
+      font-size: 13px;
+      color: var(--fg);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      outline: none;
+      transition: border-color 120ms ease;
+    }
+    .field-row input:focus {
+      border-color: var(--accent);
+    }
+    .field-row button {
+      padding: 8px 16px;
+      font-size: 13px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--fg);
+      cursor: pointer;
+      transition: border-color 120ms ease, background 120ms ease;
+    }
+    .field-row button:hover {
+      border-color: var(--accent);
+      background: rgba(79, 140, 255, 0.08);
+    }
+    .footer {
+      display: flex;
+      align-items: center;
+      margin-top: 34px;
+      padding-top: 18px;
+      border-top: 1px solid var(--border);
+    }
+    .footer .save {
+      padding: 9px 22px;
+      font-size: 14px;
+      border-radius: 18px;
+      border: 0;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      transition: filter 120ms ease;
+    }
+    .footer .save:hover {
+      filter: brightness(1.15);
+    }
+    .footer .about {
+      margin-left: auto;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 id="title"></h1>
+
+    <div class="section">
+      <h2 id="startup-section"></h2>
+      <label class="option"><input type="radio" name="startup" value="newtab"><span id="startup-newtab"></span></label>
+      <label class="option"><input type="radio" name="startup" value="last-session"><span id="startup-last-session"></span></label>
+      <label class="option"><input type="radio" name="startup" value="urls"><span id="startup-urls"></span></label>
+      <div class="urls-box" id="urls-box">
+        <textarea id="urls" spellcheck="false"></textarea>
+        <div class="hint" id="urls-hint"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2 id="general-section"></h2>
+      <div class="hint" id="homepage-label"></div>
+      <div class="field-row">
+        <input type="text" id="homepage" spellcheck="false" autocomplete="off">
+      </div>
+      <div class="hint" id="homepage-hint"></div>
+    </div>
+
+    <div class="section">
+      <h2 id="downloads-section"></h2>
+      <div class="hint" id="downloads-dir-label"></div>
+      <div class="field-row">
+        <input type="text" id="downloads-dir" spellcheck="false" autocomplete="off">
+        <button type="button" id="browse"></button>
+      </div>
+      <div class="hint" id="effective-dir"></div>
+      <div class="hint" id="downloads-dir-hint"></div>
+    </div>
+
+    <div class="footer">
+      <button type="button" class="save" id="save"></button>
+      <a class="about" href="signum://about" id="about"></a>
+    </div>
+  </div>
+  <script id="data" type="application/json">__SIGNUM_DATA__</script>
+  <script>
+    (function () {
+      var data = JSON.parse(document.getElementById('data').textContent);
+      var s = data.strings || {};
+      function text(id, value) {
+        var el = document.getElementById(id);
+        if (el) {
+          el.textContent = value || '';
+        }
+      }
+      document.title = s.title || '';
+      text('title', s.title);
+      text('startup-section', s.startupSection);
+      text('startup-newtab', s.startupNewtab);
+      text('startup-last-session', s.startupLastSession);
+      text('startup-urls', s.startupUrls);
+      text('urls-hint', s.startupUrlsHint);
+      text('general-section', s.generalSection);
+      text('homepage-label', s.homepage);
+      text('homepage-hint', s.homepageHint);
+      text('downloads-section', s.downloadsSection);
+      text('downloads-dir-label', s.downloadsDir);
+      text('downloads-dir-hint', s.downloadsDirHint);
+      text('effective-dir', s.effectiveDir);
+      text('browse', s.browse);
+      text('save', s.save);
+      text('about', s.about);
+
+      document.getElementById('homepage').value = data.homepage || '';
+      document.getElementById('downloads-dir').value = data.downloadsDir || '';
+      document.getElementById('urls').value = (data.urls || []).join('\n');
+
+      // C1: the URL list is editable only in "open URLs" mode.
+      var radios = document.querySelectorAll('input[name="startup"]');
+      var urlsBox = document.getElementById('urls-box');
+      function syncUrlsBox() {
+        var urlsMode = false;
+        radios.forEach(function (r) {
+          if (r.value === (data.startup || 'last-session')) {
+            r.checked = true;
+            urlsMode = r.value === 'urls';
+          } else {
+            r.checked = false;
+          }
+        });
+        urlsBox.classList.toggle('open', urlsMode);
+      }
+      radios.forEach(function (r) {
+        r.addEventListener('change', function () {
+          var mode = 'last-session';
+          radios.forEach(function (x) {
+            if (x.checked) {
+              mode = x.value;
+            }
+          });
+          urlsBox.classList.toggle('open', mode === 'urls');
+        });
+      });
+      syncUrlsBox();
+
+      // C5: the native folder chooser (the renderer pumps to the EDT).
+      document.getElementById('browse').addEventListener('click', function () {
+        window.location.href = 'signum://settings/pickDownloadsDir';
+      });
+
+      // Save: one navigation, all values in the query (the renderer
+      // validates; an invalid value simply keeps the old one).
+      document.getElementById('save').addEventListener('click', function () {
+        var mode = 'last-session';
+        radios.forEach(function (r) {
+          if (r.checked) {
+            mode = r.value;
+          }
+        });
+        var params = new URLSearchParams();
+        params.set('homepage', document.getElementById('homepage').value);
+        params.set('startup', mode);
+        params.set('urls', document.getElementById('urls').value.replace(/\n/g, ';'));
+        params.set('downloadsDir', document.getElementById('downloads-dir').value);
+        window.location.href = 'signum://settings/save?' + params.toString();
+      });
+    })();
+  </script>
+</body>
+</html>

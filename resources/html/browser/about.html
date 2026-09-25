@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title></title>
+  <link rel="stylesheet" href="css/browser.css">
+  <style>
+    /* F6 (C9): the about page — app, pinned JCEF release, running CEF
+       runtime, JVM, OS and the D17 engine-hardening state. Pure template
+       (D16): every string arrives in the JSON data island, rendered
+       through textContent only (S9). */
+    body {
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      width: min(560px, 86vw);
+      margin-top: -8vh;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 26px 30px;
+    }
+    .brand {
+      margin: 0 0 4px;
+      font-size: 26px;
+      font-weight: 300;
+      letter-spacing: 4px;
+      color: var(--fg);
+    }
+    .brand b {
+      font-weight: 600;
+      color: var(--accent);
+    }
+    table {
+      width: 100%;
+      margin-top: 18px;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    td {
+      padding: 7px 0;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+      word-break: break-word;
+    }
+    tr:last-child td {
+      border-bottom: 0;
+    }
+    td.k {
+      width: 42%;
+      color: var(--muted);
+      white-space: nowrap;
+      padding-right: 14px;
+    }
+    td.v {
+      color: var(--fg);
+    }
+    td.v.off {
+      color: var(--danger);
+    }
+    .back {
+      margin-top: 20px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1 class="brand" id="brand"></h1>
+    <table>
+      <tr><td class="k" id="k-jcef"></td><td class="v" id="v-jcef"></td></tr>
+      <tr><td class="k" id="k-cef"></td><td class="v" id="v-cef"></td></tr>
+      <tr><td class="k" id="k-java"></td><td class="v" id="v-java"></td></tr>
+      <tr><td class="k" id="k-os"></td><td class="v" id="v-os"></td></tr>
+      <tr><td class="k" id="k-gpu"></td><td class="v" id="v-gpu"></td></tr>
+      <tr><td class="k" id="k-sandbox"></td><td class="v" id="v-sandbox"></td></tr>
+    </table>
+    <a class="back" href="signum://settings" id="back"></a>
+  </div>
+  <script id="data" type="application/json">__SIGNUM_DATA__</script>
+  <script>
+    (function () {
+      var data = JSON.parse(document.getElementById('data').textContent);
+      var s = data.strings || {};
+      document.title = s.title || '';
+      function text(id, value) {
+        var el = document.getElementById(id);
+        if (el) {
+          el.textContent = value || '';
+        }
+      }
+      text('brand', data.appName || s.app);
+      text('k-jcef', s.jcef);
+      text('v-jcef', data.jcefVersion || '-');
+      text('k-cef', s.cef);
+      text('v-cef', data.cefVersion || s.cefNotStarted);
+      text('k-java', s.java);
+      text('v-java', data.javaVersion || '-');
+      text('k-os', s.os);
+      text('v-os', data.os || '-');
+      text('k-gpu', s.gpu);
+      var gpuOn = data.gpu === 'enabled';
+      text('v-gpu', gpuOn ? s.gpuEnabled : s.gpuDisabled);
+      if (!gpuOn) {
+        document.getElementById('v-gpu').classList.add('off');
+      }
+      text('k-sandbox', s.sandbox);
+      var sandboxOn = data.sandbox === 'enabled';
+      text('v-sandbox', sandboxOn ? s.sandboxEnabled : s.sandboxDisabled);
+      if (!sandboxOn) {
+        document.getElementById('v-sandbox').classList.add('off');
+      }
+      text('back', s.back);
+    })();
+  </script>
+</body>
+</html>

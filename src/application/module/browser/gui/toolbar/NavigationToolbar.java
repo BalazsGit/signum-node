@@ -2,6 +2,7 @@ package application.module.browser.gui.toolbar;
 
 import application.module.browser.config.BrowserSettings;
 import application.module.browser.engine.WebBrowserRegistry;
+import application.module.browser.engine.scheme.SettingsPageRenderer;
 import application.module.browser.engine.security.CertificateInspector;
 import application.module.browser.gui.bookmarks.BookmarkDialog;
 import application.module.browser.gui.dialogs.CertificateDetailsDialog;
@@ -117,11 +118,21 @@ public final class NavigationToolbar extends JPanel {
         star.setFocusable(false);
         star.addActionListener(e -> toggleBookmark());
 
+        // F6: the settings gear — opens signum://settings in the active tab.
+        JButton settingsButton = flatNavButton("\u2699", I18n.get("browser.nav.settings.tooltip"));
+        settingsButton.addActionListener(e -> {
+            String tabId = activeTabId();
+            if (tabId != null) {
+                registry.navigate(tabId, SettingsPageRenderer.PAGE_URL);
+            }
+        });
+
         JPanel east = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         east.setOpaque(false);
         east.add(star);
         east.add(securityIcon);
         east.add(titleLabel);
+        east.add(settingsButton);
 
         JPanel row = new JPanel(new BorderLayout(6, 0));
         row.add(navButtons, BorderLayout.WEST);

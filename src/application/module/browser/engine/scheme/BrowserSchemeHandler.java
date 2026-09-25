@@ -85,6 +85,12 @@ public final class BrowserSchemeHandler implements CefResourceHandler, CefScheme
             body = new byte[0];
         }
         String page = found ? requested : InternalPage.NOT_FOUND;
+        // F6 (D6, A4): every HTML page is theme-following — the active LAF
+        // palette is injected as CSS :root overrides right before </head>
+        // (after the css/browser.css link, so the overrides win).
+        if (InternalPage.mimeFor(page).equals("text/html")) {
+            body = PageTheme.inject(body, InternalPage.themeStyle());
+        }
         return new BrowserSchemeHandler(body, found, InternalPage.mimeFor(page));
     }
 

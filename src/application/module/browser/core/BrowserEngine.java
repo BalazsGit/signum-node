@@ -120,6 +120,23 @@ public final class BrowserEngine {
         return failureKind;
     }
 
+    /**
+     * F6 (C9, about page): the running CEF/Chromium version.
+     *
+     * @return the version string (newlines flattened), or "" when the engine
+     *         is not started or the version is unavailable
+     */
+    public String cefVersion() {
+        try {
+            CefApp.CefVersion version = CefApp.getInstance() == null
+                    ? null
+                    : CefApp.getInstance().getVersion();
+            return version == null ? "" : version.toString().replace('\n', ' ').trim();
+        } catch (Throwable t) {
+            return "";
+        }
+    }
+
     public void addStateListener(StateListener listener) {
         listeners.add(listener);
     }

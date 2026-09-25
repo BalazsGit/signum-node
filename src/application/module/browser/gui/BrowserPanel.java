@@ -4,12 +4,16 @@ import application.module.browser.config.BrowserSettings;
 import application.module.browser.config.BrowserSettingsRepository;
 import application.module.browser.core.BrowserEngine;
 import application.module.browser.core.BrowserEngineState;
+import application.module.browser.core.JcefProcessBootstrap;
 import application.module.browser.core.JcefProvisioner;
 import application.module.browser.engine.WebBrowserRegistry;
 import application.module.browser.engine.handler.ActiveDownloadRegistry;
+import application.module.browser.engine.scheme.AboutPageRenderer;
 import application.module.browser.engine.scheme.BookmarkPageRenderer;
+import application.module.browser.engine.scheme.DownloadsPageRenderer;
 import application.module.browser.engine.scheme.HistoryPageRenderer;
 import application.module.browser.engine.scheme.InternalPage;
+import application.module.browser.engine.scheme.SettingsPageRenderer;
 import application.module.browser.gui.bookmarks.BookmarksBar;
 import application.module.browser.gui.dialogs.JcefSetupDialog;
 import application.module.browser.gui.downloads.DownloadShelf;
@@ -24,15 +28,19 @@ import application.module.browser.model.tab.TabController;
 import application.module.browser.model.tab.TabEvent;
 import application.module.browser.model.tab.TabSource;
 import application.module.browser.gui.tabstrip.ChromeTabBar;
+import application.module.browser.gui.theme.LafCssTheme;
 import application.utils.i18n.I18n;
 
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.event.ActionEvent;
 import java.awt.event.HierarchyEvent;
+import java.io.File;
+import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Path;
 import javax.swing.AbstractAction;
 import javax.swing.JComponent;
+import javax.swing.JFileChooser;
 import javax.swing.JPanel;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
@@ -114,6 +122,19 @@ public final class BrowserPanel extends JPanel {
         this.activeDownloads = new ActiveDownloadRegistry();
         this.registry = new WebBrowserRegistry(engine, controller,
                 settingsRepository::load, historyStore, downloadManager, activeDownloads);
+        // F6: the settings + internal-page framework — the settings page
+        // (C1/C2/C5, chooser pumped to the EDT by this panel), the downloads
+        // page (D4, the manager's recent list) and the about page (C9) join
+        // the signum:// registry; the LAF palette becomes the pages' CSS
+        // variables (D6, A4).
+        InternalPage.registerRenderer(SettingsPageRenderer.PAGE,
+                new SettingsPageRenderer(settingsRepository, defaultDownloadsDir(),
+                        this::pickDownloadsDir));
+        InternalPage.registerRenderer(DownloadsPageRenderer.PAGE,
+                new DownloadsPageRenderer(downloadManager));
+        InternalPage.registerRenderer(AboutPageRenderer.PAGE,
+                new AboutPageRenderer(engine::cefVersion, JcefProcessBootstrap.mainArgs()));
+        InternalPage.setThemeStyleProvider(LafCssTheme::styleBlock);
         this.sessionStore = new SessionStore(browserConfDir.resolve("session.json"));
         this.tabBar = new ChromeTabBar(controller);
         this.toolbar = new NavigationToolbar(controller, registry,
@@ -243,17 +264,62 @@ public final class BrowserPanel extends JPanel {
         return controller.getActiveTab().map(BrowserTab::getId).orElse(null);
     }
 
+    /** The OS default downloads directory (D1 fallback, shown in the settings). */
+    private static Path defaultDownloadsDir() {
+        return Path.of(System.getProperty("user.home", "."), "Downloads");
+    }
+
     /**
      * D1: the download base folder — the configured directory (C5, F6 UI)
      * when set, otherwise the user's OS Downloads folder. The manager
-     * falls back further (temp dir) if the directory cannot be created.
+     * falls back further (temp dir) if the directory cannot be created;
+     * an unparseable stored value degrades to the default (D17: a bad
+     * setting must never kill a download on the CEF thread).
      */
     private static Path resolveDownloadsDir(BrowserSettings settings) {
         String dir = settings.getDownloadsDir();
         if (dir != null && !dir.isBlank()) {
-            return Path.of(dir.trim());
+            try {
+                return Path.of(dir.trim());
+            } catch (RuntimeException e) {
+                logger.warn("Invalid downloadsDir in the settings ({}), using the default", dir);
+            }
         }
-        return Path.of(System.getProperty("user.home", "."), "Downloads");
+        return defaultDownloadsDir();
+    }
+
+    /**
+     * F6 (C5): the folder chooser of the settings page. The request arrives
+     * on a CEF thread, so the dialog is pumped to the EDT and the caller
+     * blocks until the user decides.
+     *
+     * @param currentDir the currently configured directory ("" = the default)
+     * @return the chosen directory, or null when the user cancels
+     */
+    private String pickDownloadsDir(String currentDir) {
+        String[] chosen = new String[1];
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                JFileChooser chooser = new JFileChooser(defaultDownloadsDir().toString());
+                if (currentDir != null && !currentDir.isBlank()) {
+                    try {
+                        chooser.setCurrentDirectory(new File(currentDir));
+                    } catch (RuntimeException ignored) {
+                        // an odd saved path — the default directory stays
+                    }
+                }
+                chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+                if (chooser.showDialog(this, I18n.get("browser.settings.downloadsDir"))
+                        == JFileChooser.APPROVE_OPTION) {
+                    chosen[0] = chooser.getSelectedFile().getAbsolutePath();
+                }
+            });
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (InvocationTargetException ignored) {
+            // the chooser could not be shown — treated as a cancel
+        }
+        return chosen[0];
     }
 
     // ------------------------------------------------------------------
@@ -286,6 +352,10 @@ public final class BrowserPanel extends JPanel {
                 registry.clear();
                 InternalPage.registerRenderer(HistoryPageRenderer.PAGE, null);
                 InternalPage.registerRenderer(BookmarkPageRenderer.PAGE, null);
+                InternalPage.registerRenderer(SettingsPageRenderer.PAGE, null);
+                InternalPage.registerRenderer(DownloadsPageRenderer.PAGE, null);
+                InternalPage.registerRenderer(AboutPageRenderer.PAGE, null);
+                InternalPage.setThemeStyleProvider(null);
                 historyStore.close(); // F3: drain the batch writer, release SQLite
                 activeDownloads.clear(); // F5: drop the CEF cancel hooks
                 downloadManager.close(); // F5: persist the recent list

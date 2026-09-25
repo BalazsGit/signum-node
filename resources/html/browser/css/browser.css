@@ -29,3 +29,29 @@ body {
 a {
   color: var(--accent);
 }
+
+/* A4 (F6): the internal pages' entrance transition — a short fade + rise on
+   every navigation. The per-page hover/focus transitions live in the pages.
+   Honors the OS "reduce motion" preference. */
+body {
+  animation: page-in 160ms ease-out;
+}
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  body {
+    animation: none;
+  }
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

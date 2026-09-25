@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title></title>
+  <link rel="stylesheet" href="css/browser.css">
+  <style>
+    /* F6 (D4): the downloads page — the recent list from the download
+       manager, newest first, with single-entry deletion (the file is not
+       touched) and a confirmed bulk clear. Pure template (D16): every UI
+       string and every row arrives in the JSON data island, rendered
+       through textContent only (S9). Actions are plain navigations. */
+    body {
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+    }
+    .bar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 18px 26px 12px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--fg);
+    }
+    #clear {
+      padding: 8px 16px;
+      font-size: 13px;
+      border-radius: 18px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--danger);
+      cursor: pointer;
+      margin-left: auto;
+      transition: border-color 120ms ease, background 120ms ease;
+    }
+    #clear:hover {
+      border-color: var(--danger);
+      background: rgba(229, 72, 77, 0.08);
+    }
+    #list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 26px 26px;
+    }
+    .empty {
+      margin-top: 40px;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      transition: background 100ms ease;
+    }
+    .row:hover {
+      background: var(--card);
+    }
+    .glyph {
+      width: 26px;
+      text-align: center;
+      font-size: 15px;
+      color: var(--muted);
+      flex: none;
+    }
+    .main {
+      flex: 1;
+      min-width: 0;
+    }
+    .name {
+      display: block;
+      font-size: 14px;
+      color: var(--fg);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .sub {
+      display: block;
+      margin-top: 2px;
+      font-size: 12px;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .status {
+      flex: none;
+      min-width: 92px;
+      text-align: right;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .status.ok {
+      color: var(--fg);
+    }
+    .status.bad {
+      color: var(--danger);
+    }
+    .row__delete {
+      flex: none;
+      width: 26px;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 15px;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: color 100ms ease, background 100ms ease;
+    }
+    .row__delete:hover {
+      color: var(--fg);
+      background: rgba(139, 147, 161, 0.15);
+    }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <h1 id="title"></h1>
+    <button type="button" id="clear"></button>
+  </div>
+  <div id="list"></div>
+  <script id="data" type="application/json">__SIGNUM_DATA__</script>
+  <script>
+    (function () {
+      var data = JSON.parse(document.getElementById('data').textContent);
+      var s = data.strings || {};
+      document.title = s.title || '';
+      document.getElementById('title').textContent = s.title || '';
+      document.getElementById('clear').textContent = s.clear || '';
+
+      // D4: bulk clear, with confirmation (the files stay on disk).
+      document.getElementById('clear').addEventListener('click', function () {
+        if (confirm(s.clearConfirm)) {
+          window.location.href = 'signum://downloads/clear';
+        }
+      });
+
+      function bytes(n) {
+        if (n < 1024) {
+          return n + ' B';
+        }
+        if (n < 1048576) {
+          return (n / 1024).toFixed(1) + ' KB';
+        }
+        if (n < 1073741824) {
+          return (n / 1048576).toFixed(1) + ' MB';
+        }
+        return (n / 1073741824).toFixed(2) + ' GB';
+      }
+
+      function statusFor(entry) {
+        if (entry.state === 'IN_PROGRESS') {
+          return { text: (s.percent || '').replace('{0}', String(entry.percent)) + ' · ' + bytes(entry.received), cls: '' };
+        }
+        if (entry.state === 'COMPLETE') {
+          return { text: s.stateDone, cls: 'ok' };
+        }
+        if (entry.state === 'CANCELED') {
+          return { text: s.stateCanceled, cls: 'bad' };
+        }
+        if (entry.state === 'FAILED') {
+          return { text: s.stateFailed, cls: 'bad' };
+        }
+        return { text: s.statePending, cls: '' };
+      }
+
+      function glyphFor(entry) {
+        if (entry.state === 'COMPLETE') {
+          return '\u2713'; // ✓
+        }
+        if (entry.state === 'CANCELED' || entry.state === 'FAILED') {
+          return '\u2717'; // ✗
+        }
+        return '\u21C4'; // ⇄
+      }
+
+      var list = document.getElementById('list');
+      var entries = data.entries || [];
+      if (!entries.length) {
+        var empty = document.createElement('div');
+        empty.className = 'empty';
+        empty.textContent = s.empty;
+        list.appendChild(empty);
+        return;
+      }
+      entries.forEach(function (entry) {
+        var row = document.createElement('div');
+        row.className = 'row';
+        var glyph = document.createElement('span');
+        glyph.className = 'glyph';
+        glyph.textContent = glyphFor(entry);
+        var main = document.createElement('div');
+        main.className = 'main';
+        var name = document.createElement('span');
+        name.className = 'name';
+        name.textContent = entry.name || entry.path;
+        name.title = entry.path || '';
+        var sub = document.createElement('span');
+        sub.className = 'sub';
+        sub.textContent = entry.path || '';
+        main.appendChild(name);
+        main.appendChild(sub);
+        var status = statusFor(entry);
+        var statusEl = document.createElement('span');
+        statusEl.className = 'status ' + status.cls;
+        statusEl.textContent = status.text;
+        var when = entry.finishedAt > 0 ? entry.finishedAt : entry.startedAt;
+        if (when > 0) {
+          statusEl.title = new Date(when).toLocaleString();
+        }
+        var del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'row__delete';
+        del.textContent = '\u00D7';
+        del.title = s.remove;
+        // D4: single-entry deletion (the file is not touched).
+        del.addEventListener('click', function () {
+          window.location.href = 'signum://downloads/remove?id=' + encodeURIComponent(entry.id);
+        });
+        row.appendChild(glyph);
+        row.appendChild(main);
+        row.appendChild(statusEl);
+        row.appendChild(del);
+        list.appendChild(row);
+      });
+    })();
+  </script>
+</body>
+</html>
