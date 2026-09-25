@@ -6,13 +6,16 @@ import application.module.browser.core.BrowserEngine;
 import application.module.browser.core.BrowserEngineState;
 import application.module.browser.core.JcefProvisioner;
 import application.module.browser.engine.WebBrowserRegistry;
+import application.module.browser.engine.handler.ActiveDownloadRegistry;
 import application.module.browser.engine.scheme.BookmarkPageRenderer;
 import application.module.browser.engine.scheme.HistoryPageRenderer;
 import application.module.browser.engine.scheme.InternalPage;
 import application.module.browser.gui.bookmarks.BookmarksBar;
 import application.module.browser.gui.dialogs.JcefSetupDialog;
+import application.module.browser.gui.downloads.DownloadShelf;
 import application.module.browser.gui.toolbar.NavigationToolbar;
 import application.module.browser.model.bookmarks.BookmarkStore;
+import application.module.browser.model.download.DownloadManager;
 import application.module.browser.model.history.HistoryStore;
 import application.module.browser.model.session.SessionSnapshot;
 import application.module.browser.model.session.SessionStore;
@@ -72,6 +75,9 @@ public final class BrowserPanel extends JPanel {
     private final BookmarkStore bookmarkStore;
     private final SessionStore sessionStore;
     private final BrowserSettingsRepository settingsRepository;
+    private final DownloadManager downloadManager;
+    private final ActiveDownloadRegistry activeDownloads;
+    private final DownloadShelf downloadShelf;
     private final ChromeTabBar tabBar;
     private final NavigationToolbar toolbar;
     private final BookmarksBar bookmarksBar;
@@ -100,8 +106,14 @@ public final class BrowserPanel extends JPanel {
         this.bookmarkStore = new BookmarkStore(browserConfDir.resolve("bookmarks.json"));
         InternalPage.registerRenderer(BookmarkPageRenderer.PAGE,
                 new BookmarkPageRenderer(bookmarkStore));
+        // F5: the download manager (D1 target paths, D2 state, downloads.json)
+        // + the shared cancel hooks; the shelf at the bottom (D3, A9).
+        this.downloadManager = new DownloadManager(
+                browserConfDir.resolve("downloads.json"),
+                () -> resolveDownloadsDir(settingsRepository.load()));
+        this.activeDownloads = new ActiveDownloadRegistry();
         this.registry = new WebBrowserRegistry(engine, controller,
-                settingsRepository::load, historyStore);
+                settingsRepository::load, historyStore, downloadManager, activeDownloads);
         this.sessionStore = new SessionStore(browserConfDir.resolve("session.json"));
         this.tabBar = new ChromeTabBar(controller);
         this.toolbar = new NavigationToolbar(controller, registry,
@@ -122,6 +134,8 @@ public final class BrowserPanel extends JPanel {
         toolbar.onBookmarksChanged(bookmarksBar::refresh);
         this.readyScreen = new EngineReadyScreen();
         this.contentPanel = new ContentPanel();
+        this.downloadShelf = new DownloadShelf(downloadManager, activeDownloads,
+                url -> controller.openTab(url, TabSource.USER));
 
         cardHost.add(readyScreen, CARD_ENGINE);
         cardHost.add(contentPanel, CARD_CONTENT);
@@ -136,6 +150,9 @@ public final class BrowserPanel extends JPanel {
         north.add(belowToolbar, BorderLayout.SOUTH);
         add(north, BorderLayout.NORTH);
         add(cardHost, BorderLayout.CENTER);
+        // F5 (D3): the download shelf slides in at the bottom (A9); hidden
+        // until the first active download or a Ctrl+J toggle.
+        add(downloadShelf, BorderLayout.SOUTH);
 
         // Engine and CEF callbacks arrive off the EDT (plan §4.2) -> pump.
         controller.addListener(event -> SwingUtilities.invokeLater(() -> onTabEvent(event)));
@@ -202,6 +219,9 @@ public final class BrowserPanel extends JPanel {
                     settingsRepository.save(settings);
                 });
         bind(im, am, "browser.reload", KeyStroke.getKeyStroke("F5"), () -> registry.reload(activeTabId()));
+        // F5 (D3): Ctrl+J toggles the download shelf (Appendix B).
+        bind(im, am, "browser.toggleDownloads", KeyStroke.getKeyStroke("ctrl J"),
+                downloadShelf::toggle);
         bind(im, am, "browser.reloadAlt", KeyStroke.getKeyStroke("ctrl R"), () -> registry.reload(activeTabId()));
         bind(im, am, "browser.back", KeyStroke.getKeyStroke("alt LEFT"), () -> registry.back(activeTabId()));
         bind(im, am, "browser.forward", KeyStroke.getKeyStroke("alt RIGHT"), () -> registry.forward(activeTabId()));
@@ -221,6 +241,19 @@ public final class BrowserPanel extends JPanel {
 
     private String activeTabId() {
         return controller.getActiveTab().map(BrowserTab::getId).orElse(null);
+    }
+
+    /**
+     * D1: the download base folder — the configured directory (C5, F6 UI)
+     * when set, otherwise the user's OS Downloads folder. The manager
+     * falls back further (temp dir) if the directory cannot be created.
+     */
+    private static Path resolveDownloadsDir(BrowserSettings settings) {
+        String dir = settings.getDownloadsDir();
+        if (dir != null && !dir.isBlank()) {
+            return Path.of(dir.trim());
+        }
+        return Path.of(System.getProperty("user.home", "."), "Downloads");
     }
 
     // ------------------------------------------------------------------
@@ -254,6 +287,8 @@ public final class BrowserPanel extends JPanel {
                 InternalPage.registerRenderer(HistoryPageRenderer.PAGE, null);
                 InternalPage.registerRenderer(BookmarkPageRenderer.PAGE, null);
                 historyStore.close(); // F3: drain the batch writer, release SQLite
+                activeDownloads.clear(); // F5: drop the CEF cancel hooks
+                downloadManager.close(); // F5: persist the recent list
                 readyScreen.showIdle();
                 cards.show(cardHost, CARD_ENGINE);
             }

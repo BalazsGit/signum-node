@@ -2,6 +2,8 @@ package application.module.browser.engine;
 
 import application.module.browser.config.BrowserSettings;
 import application.module.browser.core.BrowserEngine;
+import application.module.browser.engine.handler.ActiveDownloadRegistry;
+import application.module.browser.model.download.DownloadManager;
 import application.module.browser.model.history.HistoryStore;
 import application.module.browser.model.tab.BrowserTab;
 import application.module.browser.model.tab.TabController;
@@ -25,14 +27,19 @@ public final class WebBrowserRegistry {
     private final TabController controller;
     private final Supplier<BrowserSettings> settings;
     private final HistoryStore history;
+    private final DownloadManager downloads;
+    private final ActiveDownloadRegistry activeDownloads;
     private final Map<String, WebBrowser> browsers = new LinkedHashMap<>();
 
     public WebBrowserRegistry(BrowserEngine engine, TabController controller,
-                              Supplier<BrowserSettings> settings, HistoryStore history) {
+                              Supplier<BrowserSettings> settings, HistoryStore history,
+                              DownloadManager downloads, ActiveDownloadRegistry activeDownloads) {
         this.engine = engine;
         this.controller = controller;
         this.settings = settings;
         this.history = history;
+        this.downloads = downloads;
+        this.activeDownloads = activeDownloads;
     }
 
     /**
@@ -47,7 +54,7 @@ public final class WebBrowserRegistry {
             BrowserTab tab = controller.getTab(tabId)
                     .orElseThrow(() -> new IllegalStateException("Unknown tab id: " + tabId));
             browser = new WebBrowser(engine.createClient(), tabId, controller, tab.getUrl(),
-                    settings, history);
+                    settings, history, downloads, activeDownloads);
             browsers.put(tabId, browser);
         }
         return browser.getUiComponent();

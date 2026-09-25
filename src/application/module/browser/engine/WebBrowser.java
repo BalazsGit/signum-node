@@ -1,7 +1,9 @@
 package application.module.browser.engine;
 
 import application.module.browser.config.BrowserSettings;
+import application.module.browser.engine.handler.ActiveDownloadRegistry;
 import application.module.browser.engine.handler.BrowserCefHandlers;
+import application.module.browser.model.download.DownloadManager;
 import application.module.browser.model.history.HistoryStore;
 import application.module.browser.model.tab.TabController;
 import org.cef.CefClient;
@@ -28,9 +30,11 @@ public final class WebBrowser {
     private final Component uiComponent;
 
     WebBrowser(CefClient client, String tabId, TabController controller, String initialUrl,
-               Supplier<BrowserSettings> settings, HistoryStore history) {
+               Supplier<BrowserSettings> settings, HistoryStore history,
+               DownloadManager downloads, ActiveDownloadRegistry activeDownloads) {
         this.client = client;
-        BrowserCefHandlers.attach(client, tabId, controller, settings, history);
+        BrowserCefHandlers.attach(client, tabId, controller, settings, history,
+                downloads, activeDownloads);
         this.browser = client.createBrowser(initialUrl, false, true); // offscreen=false (D1), focusable
         this.browser.createImmediately();
         this.uiComponent = this.browser.getUIComponent();

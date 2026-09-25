@@ -1,6 +1,7 @@
 package application.module.browser.engine.handler;
 
 import application.module.browser.config.BrowserSettings;
+import application.module.browser.model.download.DownloadManager;
 import application.module.browser.model.history.HistoryStore;
 import application.module.browser.model.tab.TabController;
 import org.cef.CefClient;
@@ -32,18 +33,22 @@ public final class BrowserCefHandlers {
     }
 
     /**
-     * Attaches the F3 handler set to the client before its browser is created.
+     * Attaches the F5 handler set to the client before its browser is created.
      *
-     * @param settings live browser settings (the request handler reads the
-     *                 {@code file://} block switch on every navigation, N12)
-     * @param history  the module's history store (visit capture, H1)
+     * @param settings  live browser settings (the request handler reads the
+     *                  {@code file://} block switch on every navigation, N12)
+     * @param history   the module's history store (visit capture, H1)
+     * @param downloads the module's download manager (D1 target paths, D2 state)
+     * @param activeDownloads the shared cancel hooks of the active downloads
      */
     public static void attach(CefClient client, String tabId, TabController controller,
-                              Supplier<BrowserSettings> settings, HistoryStore history) {
+                              Supplier<BrowserSettings> settings, HistoryStore history,
+                              DownloadManager downloads, ActiveDownloadRegistry activeDownloads) {
         client.addLoadHandler(new CefLoadHandlerImpl(tabId, controller, history));
         client.addDisplayHandler(new CefDisplayHandlerImpl(tabId, controller));
         client.addLifeSpanHandler(new CefLifeSpanHandlerImpl(tabId, controller));
         client.addRequestHandler(new CefRequestHandlerImpl(tabId, controller, settings));
+        client.addDownloadHandler(new CefDownloadHandlerImpl(downloads, activeDownloads));
     }
 
     /**
