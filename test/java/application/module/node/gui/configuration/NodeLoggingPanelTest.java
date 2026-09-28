@@ -1,12 +1,14 @@
 package application.module.node.gui.configuration;
 
 import application.module.logging.gui.ModuleLoggingProfilePanel;
+import application.utils.gui.GuiColors;
 import application.utils.logging.ModuleLoggingProfile;
 import application.utils.logging.ModuleLoggingProvider;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
@@ -19,7 +21,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -183,6 +188,91 @@ class NodeLoggingPanelTest {
                 }
             } else if (child instanceof Container) {
                 JButton found = findButton((Container) child, text);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    @Test
+    @DisplayName("row coloring: an untouched row is never 'unsaved' (it is saved/applied)")
+    void untouchedRowIsNotUnsaved() {
+        NodeLoggingPanel panel = newPanel();
+        JLabel label = findLabel(panel, "File Count");
+        assertNotNull(label, "File Count row label present");
+        assertNotEquals(GuiColors.getUnsaved(), label.getForeground(),
+                "an untouched row (value == default/saved) must not be colored unsaved");
+    }
+
+    @Test
+    @DisplayName("row coloring: editing a row turns it 'unsaved' (the unsaved color)")
+    void editedRowBecomesUnsaved() {
+        final NodeLoggingPanel[] holder = new NodeLoggingPanel[1];
+        onEdt(() -> {
+            NodeLoggingPanel p = new NodeLoggingPanel(() -> { }); // already on the EDT
+            JComponent editor = editorForLabel(p, "File Count"); // text field, default "1"
+            ((JTextField) editor).setText("2");
+            holder[0] = p;
+        });
+        JLabel label = findLabel(holder[0], "File Count");
+        assertEquals(GuiColors.getUnsaved(), label.getForeground(), "an edited row is colored unsaved");
+    }
+
+    @Test
+    @DisplayName("the 'Show values' filter hides rows of the unchecked state")
+    void showValuesFilterHidesUnsavedRows() {
+        final NodeLoggingPanel[] panelHolder = new NodeLoggingPanel[1];
+        final JCheckBox[] boxHolder = new JCheckBox[1];
+        onEdt(() -> {
+            NodeLoggingPanel p = new NodeLoggingPanel(() -> { }); // already on the EDT
+            ((JTextField) editorForLabel(p, "File Count")).setText("2"); // make it unsaved
+            panelHolder[0] = p;
+            boxHolder[0] = findCheckBox(p, "Unsaved values");
+        });
+        assertNotNull(boxHolder[0], "the 'Unsaved values' filter checkbox is present");
+
+        final JCheckBox box = boxHolder[0];
+        // doClick() (a simulated user click) — a programmatic setSelected does
+        // not fire the ActionEvent that drives the row re-render.
+        onEdt(box::doClick); // uncheck → hide unsaved rows
+        assertFalse(hasLabel(panelHolder[0], "File Count"),
+                "the unsaved row is hidden while 'Unsaved values' is off");
+
+        onEdt(box::doClick); // check again → show them
+        assertTrue(hasLabel(panelHolder[0], "File Count"),
+                "the row reappears when the filter is switched back on");
+    }
+
+    private static boolean hasLabel(Container root, String text) {
+        return allLabels(root).contains(text);
+    }
+
+    private static JLabel findLabel(Container root, String text) {
+        for (int i = 0; i < root.getComponentCount(); i++) {
+            Component child = root.getComponent(i);
+            if (child instanceof JLabel && text.equals(((JLabel) child).getText())) {
+                return (JLabel) child;
+            }
+            if (child instanceof Container) {
+                JLabel found = findLabel((Container) child, text);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static JCheckBox findCheckBox(Container root, String text) {
+        for (int i = 0; i < root.getComponentCount(); i++) {
+            Component child = root.getComponent(i);
+            if (child instanceof JCheckBox cb && text.equals(cb.getText())) {
+                return cb;
+            }
+            if (child instanceof Container) {
+                JCheckBox found = findCheckBox((Container) child, text);
                 if (found != null) {
                     return found;
                 }

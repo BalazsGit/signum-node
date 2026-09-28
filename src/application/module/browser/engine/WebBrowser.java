@@ -1,6 +1,7 @@
 package application.module.browser.engine;
 
 import application.module.browser.config.BrowserSettings;
+import application.module.browser.core.CefFocusGuard;
 import application.module.browser.engine.handler.ActiveDownloadRegistry;
 import application.module.browser.engine.handler.BrowserCefHandlers;
 import application.module.browser.model.download.DownloadManager;
@@ -39,6 +40,12 @@ public final class WebBrowser {
         this.browser.createImmediately();
         this.uiComponent = this.browser.getUIComponent();
         this.uiComponent.setPreferredSize(PREFERRED_SIZE);
+        // Windowed-JCEF focus fix: join the application-wide guard so the
+        // page can never keep the OS keyboard focus while the user works in
+        // the Swing UI (any module), and so JCEF's own dormant
+        // focusLost→setFocus(false) path can be activated by the guard.
+        CefFocusGuard.register(browser, uiComponent);
+        CefFocusGuard.watchComponent(uiComponent);
     }
 
     /** @return the persistent AWT component shown in the content panel. */
@@ -98,6 +105,7 @@ public final class WebBrowser {
             }
             browser.close(true);
         } finally {
+            CefFocusGuard.unregister(browser);
             client.dispose();
         }
     }

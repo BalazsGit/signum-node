@@ -1,10 +1,13 @@
 package application.module.browser.engine.handler;
 
 import application.module.browser.config.BrowserSettings;
+import application.module.browser.core.CefFocusGuard;
 import application.module.browser.model.download.DownloadManager;
 import application.module.browser.model.history.HistoryStore;
 import application.module.browser.model.tab.TabController;
 import org.cef.CefClient;
+import org.cef.browser.CefBrowser;
+import org.cef.handler.CefFocusHandlerAdapter;
 
 import java.util.function.Supplier;
 import javax.swing.SwingUtilities;
@@ -49,6 +52,16 @@ public final class BrowserCefHandlers {
         client.addLifeSpanHandler(new CefLifeSpanHandlerImpl(tabId, controller));
         client.addRequestHandler(new CefRequestHandlerImpl(tabId, controller, settings));
         client.addDownloadHandler(new CefDownloadHandlerImpl(downloads, activeDownloads));
+        // Windowed-JCEF focus fix: whenever this browser gains the CEF-side
+        // (OS-level) keyboard focus, let the application-wide guard decide
+        // whether it is a legitimate page click or a steal from the Swing UI
+        // (see CefFocusGuard#onCefGotFocus).
+        client.addFocusHandler(new CefFocusHandlerAdapter() {
+            @Override
+            public void onGotFocus(CefBrowser browser) {
+                runInEdt(() -> CefFocusGuard.onCefGotFocus(browser));
+            }
+        });
     }
 
     /**

@@ -3,29 +3,44 @@ package application.module.logging.gui;
 import application.api.ModuleContext;
 import application.module.logging.EffectiveProfileResolver;
 import application.module.logging.LoggingProfileRepository;
+import application.utils.gui.ConfigurationUtils;
+import application.utils.gui.GuiColors;
+import application.utils.gui.GuiConstants;
+import application.utils.gui.SearchMatchPanel;
 import application.utils.logging.ModuleLoggingProvider;
+import jiconfont.icons.font_awesome.FontAwesome;
+import jiconfont.swing.IconFontSwing;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.swing.BorderFactory;
+import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
+import javax.swing.ListCellRenderer;
 import javax.swing.border.EmptyBorder;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.table.DefaultTableModel;
 import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Component;
 import java.awt.Font;
 import java.awt.GridLayout;
+import java.awt.KeyboardFocusManager;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import javax.swing.text.JTextComponent;
 
 /**
  * Generic per-module logging profile panel.
@@ -50,6 +65,15 @@ public class ModuleLoggingProfilePanel extends JPanel {
     private static final String[] LOG_LEVELS =
             {"SEVERE", "WARNING", "INFO", "CONFIG", "FINE", "FINER", "FINEST", "ALL", "OFF"};
 
+    /**
+     * The virtual "Default" profile entry shown at the top of the profile
+     * selector. Selecting it loads the application's built-in default values
+     * into the editor — it is NOT an on-disk profile file: nothing is read
+     * from or written to disk for it, and the reserved sample config on disk
+     * ({@code logging-default}) is not listed at all.
+     */
+    public static final String DEFAULT_PROFILE_ENTRY = "Default";
+
     private final ModuleContext context;
     private final ModuleLoggingProvider provider;
     private final LoggingProfileRepository repo;
@@ -60,14 +84,22 @@ public class ModuleLoggingProfilePanel extends JPanel {
     private final Map<String, JComponent> rowEditors = new LinkedHashMap<>();
     /** key → the human-readable label shown in the editor (may equal the key). */
     private final Map<String, String> rowLabels = new LinkedHashMap<>();
+    /** key → the label component currently shown for the row (rebuilt on every full render). */
+    private final Map<String, JLabel> rowLabelComponents = new LinkedHashMap<>();
+    /** key → the application default value of the row (also the value shown for the virtual "Default" profile). */
+    private final Map<String, String> rowDefaults = new LinkedHashMap<>();
     private JComboBox<String> presetCombo;
     private JTable effectiveTable;
     private DefaultTableModel effectiveModel;
 
     /** The editor row grid; held so rows can be re-rendered for search / dynamic add-key. */
     private JPanel editorGrid;
-    /** Live row filter; created in the constructor, hidden until {@link #enableSearch()} is called. */
-    private JTextField searchField;
+    /** Live row filter (unified search box); added to the header strip by {@link #enableSearch()}. */
+    private SearchMatchPanel searchPanel;
+    /** The header filter box; hosts may add extra filter controls (e.g. the node "Show values" checkboxes). */
+    private JPanel filterBox;
+    /** The profile currently marked applied for this module (null = fall back to the built-in default). */
+    private String appliedProfileName;
     /** Reserved strip for a host-provided control (e.g. the node "link to node profile" checkbox). */
     private JPanel linkStrip;
     /** Help button; created in the constructor, disabled until {@link #setHelpSupplier} is called. */
@@ -91,6 +123,9 @@ public class ModuleLoggingProfilePanel extends JPanel {
     }
 
     public ModuleLoggingProfilePanel(ModuleContext context, ModuleLoggingProvider provider) {
+        // Defensive icon-font registration (the app registers it at startup in
+        // AppearanceModule#init; this covers standalone/test construction).
+        IconFontSwing.register(FontAwesome.getIconFont());
         super(new BorderLayout(8, 8));
         this.context = context;
         this.provider = provider;
@@ -128,10 +163,52 @@ public class ModuleLoggingProfilePanel extends JPanel {
         JPanel panel = new JPanel(new BorderLayout(6, 0));
         panel.setBorder(BorderFactory.createTitledBorder("Profile"));
         profileCombo = new JComboBox<>();
+        profileCombo.setRenderer(new ProfileCellRenderer());
         profileCombo.addActionListener(e -> loadProfileIntoEditor());
         panel.add(new JLabel("Active:"), BorderLayout.WEST);
         panel.add(profileCombo, BorderLayout.CENTER);
         return panel;
+    }
+
+    /**
+     * Profile combo renderer: the profile currently marked <b>applied</b> for
+     * this module is painted in the applied (green) color with a leading check
+     * icon, so the active profile is recognizable at a glance. The virtual
+     * "Default" entry counts as applied when no explicit profile (or the
+     * reserved sample config) is the applied marker.
+     */
+    private final class ProfileCellRenderer extends JLabel implements ListCellRenderer<String> {
+        private final Icon appliedIcon = IconFontSwing.buildIcon(FontAwesome.CHECK,
+                GuiConstants.getHelpIconSize(), GuiColors.getApplied());
+
+        ProfileCellRenderer() {
+            setOpaque(true);
+        }
+
+        @Override
+        public Component getListCellRendererComponent(JList<? extends String> list, String value,
+                int index, boolean isSelected, boolean cellHasFocus) {
+            setIcon(null);
+            setText(value);
+            if (value != null && isAppliedProfile(value)) {
+                setIcon(appliedIcon);
+                setIconTextGap(4);
+                setForeground(isSelected ? list.getSelectionForeground() : GuiColors.getApplied());
+            } else {
+                setForeground(isSelected ? list.getSelectionForeground() : list.getForeground());
+            }
+            setBackground(isSelected ? list.getSelectionBackground() : list.getBackground());
+            return this;
+        }
+    }
+
+    /** @return true when the given profile entry is the one currently applied for this module. */
+    private boolean isAppliedProfile(String name) {
+        if (DEFAULT_PROFILE_ENTRY.equals(name)) {
+            return appliedProfileName == null || appliedProfileName.isBlank()
+                    || LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(appliedProfileName);
+        }
+        return name != null && name.equals(appliedProfileName);
     }
 
     private JComponent buildLevelEditor() {
@@ -152,10 +229,15 @@ public class ModuleLoggingProfilePanel extends JPanel {
         editorGrid.setOpaque(false);
         renderEditorRows();
 
-        // Header strip: a (hidden) live filter + a "+ add key" affordance.
-        searchField = new JTextField(16);
-        searchField.setVisible(false);
-        searchField.addActionListener(e -> renderEditorRows());
+        // Header strip: the unified live filter + a "+ add key" affordance.
+        // The search box is added to the strip LAZILY by enableSearch() —
+        // hiding a panel inside a FlowLayout does not stick: FlowLayout's
+        // layout pass force-shows hidden children. The row grid has no match
+        // navigation, so the search box only drives row visibility; the "x/y"
+        // match counter is updated from renderEditorRows().
+        searchPanel = new SearchMatchPanel("Filter the logger rows by label or key (live, case-insensitive)");
+        searchPanel.setSearchTextListener(text -> renderEditorRows());
+        searchPanel.setChevronsVisible(false);
 
         JPanel addRowPanel = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
         addRowPanel.setOpaque(false);
@@ -172,10 +254,8 @@ public class ModuleLoggingProfilePanel extends JPanel {
         addRowPanel.add(keyInput);
         addRowPanel.add(addBtn);
 
-        JPanel filterBox = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
+        filterBox = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
         filterBox.setOpaque(false);
-        filterBox.add(new JLabel("Filter:"));
-        filterBox.add(searchField);
 
         JPanel header = new JPanel(new BorderLayout(6, 0));
         header.setOpaque(false);
@@ -197,15 +277,122 @@ public class ModuleLoggingProfilePanel extends JPanel {
         JComponent editor = makeEditor(defaultValue);
         rowEditors.put(key, editor);
         rowLabels.put(key, display);
+        rowDefaults.put(key, defaultValue == null ? "" : defaultValue);
+        addEditorChangeListener(key, editor);
         renderEditorRows();
     }
 
-    private void renderEditorRows() {
+    /** Registers the "editor changed → re-evaluate derived row state" listener. */
+    private void addEditorChangeListener(String key, JComponent editor) {
+        if (editor instanceof JComboBox) {
+            ((JComboBox<?>) editor).addActionListener(e -> handleEditorValueChange(key));
+        } else if (editor instanceof JTextField textField) {
+            textField.getDocument().addDocumentListener(new DocumentListener() {
+                @Override
+                public void insertUpdate(DocumentEvent e) {
+                    handleEditorValueChange(key);
+                }
+
+                @Override
+                public void removeUpdate(DocumentEvent e) {
+                    handleEditorValueChange(key);
+                }
+
+                @Override
+                public void changedUpdate(DocumentEvent e) {
+                    handleEditorValueChange(key);
+                }
+            });
+        }
+    }
+
+    /**
+     * Subclass hook: recompute any derived per-row state without touching the
+     * UI (the node panel uses this for its unsaved/saved/applied row states).
+     * Invoked on every editor value change and before every full re-render.
+     * Default: no derived state.
+     */
+    protected void recomputeRowStates() {
+        // the generic panel has no per-row state
+    }
+
+    /**
+     * Recomputes the derived row states and re-renders the row grid. Use it for
+     * <em>structural</em> changes only: profile selection, save/apply/rename/
+     * delete/refresh, preset application, default reset, filter toggles. The
+     * re-render removes and re-adds every row editor, so per-keystroke value
+     * changes must go through {@link #handleEditorValueChange(String)} instead,
+     * which updates the existing rows in place and keeps the keyboard focus.
+     */
+    protected void reevaluateRowStates() {
+        recomputeRowStates();
+        renderEditorRows();
+    }
+
+    /**
+     * Handles a single editor value change (per keystroke or combo selection).
+     * Deliberately does NOT re-render the grid: removing and re-adding the
+     * focused editor makes the follow-up focus request race the AWT focus
+     * machinery (the re-added field may not be "showing" yet), and when it
+     * loses that race the field silently loses the keyboard focus and every
+     * further keystroke is lost. The derived state is therefore applied to the
+     * existing row components in place; a full re-render only happens when the
+     * structure changed or the row's visibility actually toggled (e.g. a
+     * "Show values" filter now hides it).
+     */
+    private void handleEditorValueChange(String key) {
+        recomputeRowStates();
+        JComponent editor = rowEditors.get(key);
+        JLabel label = rowLabelComponents.get(key);
+        if (editor == null || label == null || label.getParent() == null) {
+            reevaluateRowStates();
+            return; // structure changed; a full render is needed anyway
+        }
+        styleRow(key, label, editor);
+        if (!isRowVisible(key)) {
+            reevaluateRowStates();
+            return; // the row just became hidden by the state filters
+        }
+        updateSearchMatchIndicator();
+    }
+
+    /**
+     * Subclass hook: additional row visibility beyond the text filter (e.g.
+     * the node panel's unsaved/saved/applied "Show values" checkboxes).
+     * Default: every row passes.
+     */
+    protected boolean isRowVisible(String key) {
+        return true;
+    }
+
+    /**
+     * Subclass hook: per-row decoration (e.g. the node panel's
+     * unsaved/saved/applied coloring). Default: none.
+     */
+    protected void styleRow(String key, JLabel label, JComponent editor) {
+        // the generic panel does not decorate rows
+    }
+
+    protected void renderEditorRows() {
         if (editorGrid == null) {
             return; // construction in progress
         }
+        // The re-render removes and re-adds every row editor. If the currently
+        // focused editor (e.g. a text field being typed into) is detached, AWT
+        // drops the keyboard focus and every following keystroke is lost —
+        // "only the first character lands, then nothing" — so capture the
+        // focused text component now and restore it (with its caret) after
+        // the re-render.
+        final Component focusOwner =
+                KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
+        final JTextComponent focusedText =
+                (focusOwner instanceof JTextComponent text && editorGrid.isAncestorOf(text))
+                        ? text : null;
+        final int caretPosition = focusedText == null ? -1 : focusedText.getCaretPosition();
+
         String filter = currentFilter();
         editorGrid.removeAll();
+        rowLabelComponents.clear();
         for (Map.Entry<String, JComponent> entry : rowEditors.entrySet()) {
             String key = entry.getKey();
             String label = rowLabels.getOrDefault(key, key);
@@ -213,13 +400,45 @@ public class ModuleLoggingProfilePanel extends JPanel {
                     && !(label.toLowerCase().contains(filter) || key.toLowerCase().contains(filter))) {
                 continue;
             }
+            if (!isRowVisible(key)) {
+                continue;
+            }
             JLabel lbl = new JLabel(label);
             lbl.setToolTipText(key);
+            styleRow(key, lbl, entry.getValue());
+            rowLabelComponents.put(key, lbl);
             editorGrid.add(lbl);
             editorGrid.add(entry.getValue());
         }
         editorGrid.revalidate();
         editorGrid.repaint();
+
+        if (focusedText != null) {
+            focusedText.requestFocusInWindow();
+            focusedText.setCaretPosition(caretPosition);
+        }
+        updateSearchMatchIndicator();
+    }
+
+    /** Updates the unified search box's "x/y" match counter (hidden while no filter is active). */
+    private void updateSearchMatchIndicator() {
+        if (searchPanel == null) {
+            return;
+        }
+        String filter = currentFilter();
+        if (filter.isEmpty()) {
+            searchPanel.setMatchIndicatorText(null);
+            return;
+        }
+        int visible = 0;
+        for (Map.Entry<String, JComponent> entry : rowEditors.entrySet()) {
+            String key = entry.getKey();
+            String label = rowLabels.getOrDefault(key, key);
+            if ((label.toLowerCase().contains(filter) || key.toLowerCase().contains(filter)) && isRowVisible(key)) {
+                visible++;
+            }
+        }
+        searchPanel.setMatchIndicatorText(visible + "/" + rowEditors.size());
     }
 
     private JComponent makeEditor(String defaultValue) {
@@ -232,7 +451,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
     }
 
     private String currentFilter() {
-        return searchField == null ? "" : searchField.getText().trim().toLowerCase();
+        return searchPanel == null ? "" : searchPanel.getSearchText().trim().toLowerCase();
     }
 
     private JComponent buildPresetAndToolbar() {
@@ -301,7 +520,15 @@ public class ModuleLoggingProfilePanel extends JPanel {
         helpButton.setToolTipText("Show module-specific help");
         helpButton.setEnabled(false);
         helpButton.addActionListener(e -> showHelp());
+        helpButton.setIcon(IconFontSwing.buildIcon(FontAwesome.QUESTION_CIRCLE,
+                GuiConstants.getHelpIconSize(), GuiColors.getHelpIcon()));
+        ConfigurationUtils.fixComponentSize(helpButton);
         buttons.add(helpButton);
+
+        // Icon toolbar (same look as the node configuration panel): one glyph
+        // per action, sized consistently.
+        ConfigurationUtils.configureProfileToolbar(
+                newBtn, saveBtn, applyBtn, renameBtn, deleteBtn, reloadBtn, refreshBtn, resetBtn);
 
         panel.add(buttons, BorderLayout.CENTER);
 
@@ -355,10 +582,15 @@ public class ModuleLoggingProfilePanel extends JPanel {
         }
 
         profileCombo.removeAllItems();
-        profileCombo.addItem(LoggingProfileRepository.RESERVED_PROFILE_NAME);
+        // The virtual "Default" entry is listed INSTEAD of the reserved sample
+        // config on disk (logging-default): selecting Default uses the
+        // application's built-in values and never touches a profile file.
+        profileCombo.addItem(DEFAULT_PROFILE_ENTRY);
         for (String name : profiles) {
             profileCombo.addItem(name);
         }
+
+        refreshAppliedMarker();
 
         if (selected != null) {
             for (int i = 0; i < profileCombo.getItemCount(); i++) {
@@ -373,6 +605,19 @@ public class ModuleLoggingProfilePanel extends JPanel {
     private void loadProfileIntoEditor() {
         String name = (String) profileCombo.getSelectedItem();
         if (name == null) {
+            return;
+        }
+        if (DEFAULT_PROFILE_ENTRY.equals(name)) {
+            // Virtual entry: load the application's built-in defaults. Nothing
+            // is read from (or written to) disk.
+            for (Map.Entry<String, JComponent> entry : rowEditors.entrySet()) {
+                String d = rowDefaults.get(entry.getKey());
+                if (d != null) {
+                    setEditorValue(entry.getValue(), d);
+                }
+            }
+            reevaluateRowStates();
+            refreshEffectiveView();
             return;
         }
         Properties props;
@@ -390,7 +635,18 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 setEditorValue(entry.getValue(), value);
             }
         }
+        reevaluateRowStates();
         refreshEffectiveView();
+    }
+
+    /** Re-reads the module's applied-profile marker from the repository (never throws). */
+    private void refreshAppliedMarker() {
+        try {
+            appliedProfileName = repo.getApplied(moduleId);
+        } catch (Exception e) {
+            LOGGER.warn("Failed to read the applied marker for module '{}': {}", moduleId, e.getMessage());
+            appliedProfileName = null;
+        }
     }
 
     private void applyPresetToEditor() {
@@ -409,6 +665,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 setEditorValue(editor, entry.getValue());
             }
         }
+        reevaluateRowStates();
         refreshEffectiveView();
     }
 
@@ -429,9 +686,14 @@ public class ModuleLoggingProfilePanel extends JPanel {
         if (name == null) {
             return;
         }
+        // The virtual "Default" entry composes from the reserved sample config
+        // (the resolver's fallback target).
+        String resolved = DEFAULT_PROFILE_ENTRY.equals(name)
+                ? LoggingProfileRepository.RESERVED_PROFILE_NAME
+                : name;
         try {
             EffectiveProfileResolver resolver = new EffectiveProfileResolver();
-            List<EffectiveProfileResolver.EffectiveKey> keys = resolver.previewComposition(name);
+            List<EffectiveProfileResolver.EffectiveKey> keys = resolver.previewComposition(resolved);
             for (EffectiveProfileResolver.EffectiveKey key : keys) {
                 effectiveModel.addRow(new Object[]{key.key(), key.value(), key.source().label()});
             }
@@ -471,9 +733,17 @@ public class ModuleLoggingProfilePanel extends JPanel {
         if (name == null) {
             return;
         }
+        if (DEFAULT_PROFILE_ENTRY.equals(name)) {
+            JOptionPane.showMessageDialog(this,
+                    "The \"Default\" profile is the application's built-in configuration — it cannot be saved.\n"
+                            + "Create or select a named profile to persist your changes.",
+                    "Default profile", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
         try {
             repo.saveProps(moduleId, name, collectEditorProps());
             LOGGER.info("Saved profile '{}' for module '{}'", name, moduleId);
+            reevaluateRowStates();
             refreshEffectiveView();
         } catch (Exception e) {
             JOptionPane.showMessageDialog(this, "Failed to save profile: " + e.getMessage(),
@@ -486,16 +756,28 @@ public class ModuleLoggingProfilePanel extends JPanel {
         if (name == null) {
             return;
         }
+        boolean isDefault = DEFAULT_PROFILE_ENTRY.equals(name);
         int result = JOptionPane.showConfirmDialog(this,
                 "Apply profile '" + name + "' for module '" + moduleId + "'?\n\n"
-                + "This marks it as applied. A node restart is required for the change to take effect.",
+                + (isDefault
+                        ? "This restores the application's built-in default configuration."
+                        : "This marks it as applied.")
+                + " A node restart is required for the change to take effect.",
                 "Apply Profile", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
         if (result != JOptionPane.YES_OPTION) {
             return;
         }
         try {
-            saveCurrentProfile();
-            repo.setApplied(moduleId, name);
+            if (isDefault) {
+                // Clearing the marker makes the module fall back to the built-in
+                // defaults — no profile file is read or written.
+                repo.setApplied(moduleId, null);
+            } else {
+                saveCurrentProfile();
+                repo.setApplied(moduleId, name);
+            }
+            refreshAppliedMarker();
+            reevaluateRowStates();
             if (applyHook != null) {
                 applyHook.accept(name);
             } else if (context != null) {
@@ -512,8 +794,8 @@ public class ModuleLoggingProfilePanel extends JPanel {
 
     private void renameProfile() {
         String oldName = (String) profileCombo.getSelectedItem();
-        if (oldName == null || LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(oldName)) {
-            JOptionPane.showMessageDialog(this, "The reserved profile cannot be renamed.",
+        if (oldName == null || DEFAULT_PROFILE_ENTRY.equals(oldName)) {
+            JOptionPane.showMessageDialog(this, "The \"Default\" profile cannot be renamed.",
                     "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
@@ -528,6 +810,8 @@ public class ModuleLoggingProfilePanel extends JPanel {
         }
         try {
             repo.rename(moduleId, oldName, newName);
+            // refreshProfileList() re-reads the applied marker (the repository
+            // follows the rename) before re-loading the editor.
             refreshProfileList();
             profileCombo.setSelectedItem(newName);
             loadProfileIntoEditor();
@@ -539,8 +823,8 @@ public class ModuleLoggingProfilePanel extends JPanel {
 
     private void deleteProfile() {
         String name = (String) profileCombo.getSelectedItem();
-        if (name == null || LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(name)) {
-            JOptionPane.showMessageDialog(this, "The reserved profile cannot be deleted.",
+        if (name == null || DEFAULT_PROFILE_ENTRY.equals(name)) {
+            JOptionPane.showMessageDialog(this, "The \"Default\" profile cannot be deleted.",
                     "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
@@ -566,13 +850,15 @@ public class ModuleLoggingProfilePanel extends JPanel {
     // ── Reset / Help helpers ───────────────────────────────────────────
 
     private void resetToDefaults() {
-        Map<String, String> defaults = provider.getProfile().getDefaults();
+        // rowDefaults covers every row (provider defaults, common loggers and
+        // host-added extra fields such as the node FileHandler keys).
         for (Map.Entry<String, JComponent> entry : rowEditors.entrySet()) {
-            String d = defaults.get(entry.getKey());
+            String d = rowDefaults.get(entry.getKey());
             if (d != null) {
                 setEditorValue(entry.getValue(), d);
             }
         }
+        reevaluateRowStates();
         refreshEffectiveView();
     }
 
@@ -702,11 +988,65 @@ public class ModuleLoggingProfilePanel extends JPanel {
      * @return {@code this} for fluent chaining
      */
     public ModuleLoggingProfilePanel enableSearch() {
-        if (searchField != null) {
-            searchField.setVisible(true);
-            searchField.revalidate();
-            searchField.repaint();
+        // Add the search box to the header strip (FlowLayout would force-show
+        // a hidden child on the next layout pass, so "enabled" = "present").
+        if (searchPanel != null && searchPanel.getParent() == null) {
+            filterBox.add(searchPanel);
+            filterBox.revalidate();
+            filterBox.repaint();
         }
         return this;
+    }
+
+    // ── Subclass surface (used by the node panel's row-state coloring) ─────
+
+    /** @return the currently selected profile entry (may be the virtual {@link #DEFAULT_PROFILE_ENTRY}). */
+    protected String selectedProfileName() {
+        return (String) profileCombo.getSelectedItem();
+    }
+
+    /** @return the profile name currently marked applied for this module (null = built-in default). */
+    protected String appliedProfileName() {
+        return appliedProfileName;
+    }
+
+    /** @return the application default value of the given row key (never null). */
+    protected String defaultRowValue(String key) {
+        String d = rowDefaults.get(key);
+        return d != null ? d : "";
+    }
+
+    /** @return the current editor value of the given row key (null if no such row). */
+    protected String editorValueOf(String key) {
+        JComponent editor = rowEditors.get(key);
+        return editor == null ? null : editorValue(editor);
+    }
+
+    /** @return the keys of all editor rows (insertion order preserved). */
+    protected java.util.Set<String> rowKeys() {
+        return rowEditors.keySet();
+    }
+
+    /** Safely loads the given profile from disk (empty Properties for the virtual Default entry or on failure). */
+    protected Properties loadProfilePropsSafely(String profileName) {
+        if (profileName == null || DEFAULT_PROFILE_ENTRY.equals(profileName)) {
+            return new Properties();
+        }
+        try {
+            return repo.loadProps(moduleId, profileName);
+        } catch (Exception e) {
+            LOGGER.warn("Failed to load profile '{}' for module '{}': {}", profileName, moduleId, e.getMessage());
+            return new Properties();
+        }
+    }
+
+    /** @return the header filter box (hosts may add extra filter controls, e.g. status checkboxes). */
+    protected JPanel getFilterBox() {
+        return filterBox;
+    }
+
+    /** @return the profile combo (read access for tests and hosts). */
+    public JComboBox<String> getProfileCombo() {
+        return profileCombo;
     }
 }

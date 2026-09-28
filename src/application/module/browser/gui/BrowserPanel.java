@@ -207,6 +207,11 @@ public final class BrowserPanel extends JPanel {
             }
         });
 
+        // (Windowed-JCEF focus fix: handled application-wide by
+        // CefFocusGuard — it attaches to the top-level window when the first
+        // browser becomes visible and releases the CEF keyboard focus for any
+        // Swing interaction in the whole application, not just this panel.)
+
         // F9: the new-tab page (H5) joins the dynamic internal pages; the
         // settings page's clear-data action (C6) and the bookmark
         // export/import pickers (B6) are implemented by this panel (EDT);
