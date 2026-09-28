@@ -7,6 +7,7 @@ import application.module.browser.model.history.HistoryStore;
 import application.module.browser.model.tab.TabController;
 import org.cef.CefClient;
 import org.cef.browser.CefBrowser;
+import org.cef.handler.CefFocusHandler;
 import org.cef.handler.CefFocusHandlerAdapter;
 
 import java.util.function.Supplier;
@@ -60,6 +61,16 @@ public final class BrowserCefHandlers {
             @Override
             public void onGotFocus(CefBrowser browser) {
                 runInEdt(() -> CefFocusGuard.onCefGotFocus(browser));
+            }
+
+            @Override
+            public boolean onSetFocus(CefBrowser browser, CefFocusHandler.FocusSource source) {
+                // The official focus-request veto: the decision must go back
+                // to CEF synchronously (on CEF's UI thread) — no EDT pump, or
+                // the veto would always read as "allow". CEF cancels the
+                // focus request when true is returned. onCefSetFocus also fires
+                // the focus-gained listeners (omnibox popup dismissal) on the EDT.
+                return CefFocusGuard.onCefSetFocus(browser, source);
             }
         });
     }

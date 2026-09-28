@@ -240,13 +240,19 @@ class CefFocusGuardTest {
     void mousePressInSwingUIReleasesCefFocus() {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         CefBrowser browser = registerInSharedFrame(new JPanel());
-        // The guard listens on the top-level window: a real click on ANY
-        // lightweight Swing component (any module, any tab) is delivered
-        // there by AWT — the native CEF windows never generate AWT mouse
-        // events. Here the press is delivered to the window itself.
-        onEdt(() -> sharedFrame().dispatchEvent(new MouseEvent(sharedFrame(),
-                MouseEvent.MOUSE_PRESSED, System.nanoTime(), 0, 10, 10, 1, false,
-                MouseEvent.BUTTON1)));
+        // The guard listens on the global AWT input listener: a real click
+        // on ANY lightweight Swing component (any module, any tab) flows
+        // through the event queue and is seen there — the native CEF
+        // windows never generate AWT mouse events. So the synthetic press
+        // must also go through the queue (dispatchEvent would bypass the
+        // listener), and the assertion runs in the next EDT turn, after
+        // dispatch.
+        java.awt.Toolkit.getDefaultToolkit().getSystemEventQueue().postEvent(
+                new MouseEvent(sharedFrame(),
+                        MouseEvent.MOUSE_PRESSED, System.nanoTime(), 0, 10, 10, 1, false,
+                        MouseEvent.BUTTON1));
+        onEdt(() -> {
+        });
         verify(browser, atLeastOnce()).setFocus(false);
     }
 
@@ -287,6 +293,23 @@ class CefFocusGuardTest {
     }
 
     @Test
+    @DisplayName("a CEF focus gain with the pointer over the page is a genuine click (no release)")
+    void cefFocusGainWithPointerOverPageIsAClick() {
+        onEdt(() -> {
+            CefBrowser browser = mock(CefBrowser.class);
+            CefFocusGuard.register(browser, new JPanel());
+            JTextField field = new JTextField("https://…"); // the omnibox
+            // the user was just typing in the omnibox, but the pointer is over
+            // the page — a genuine click, not an async steal: the page keeps
+            // the keyboard (the omnibox caret stops, Chrome-like)
+            CefFocusGuard.markSwingTypingForTests();
+            CefFocusGuard.handleCefGotFocus(browser, field, true);
+            verify(browser, never()).setFocus(false);
+        });
+    }
+
+
+    @Test
     @DisplayName("an idle page click keeps the CEF focus (no release)")
     void idlePageClickKeepsCefFocus() {
         onEdt(() -> {
@@ -300,6 +323,61 @@ class CefFocusGuardTest {
             // the same holds when the AWT focus owner is inside the browser
             CefFocusGuard.handleCefGotFocus(browser, new JPanel());
             verify(browser, never()).setFocus(false);
+        });
+    }
+
+    @Test
+    @DisplayName("a CEF focus gain right after a Swing click is a steal (omnibox repro)")
+    void cefRegrabAfterSwingClickIsReleased() {
+        onEdt(() -> {
+            CefBrowser browser = mock(CefBrowser.class);
+            CefFocusGuard.register(browser, new JPanel());
+            JTextField field = new JTextField("https://…"); // the omnibox
+            // the user just clicked the field — nothing typed yet, but the
+            // mouse marker makes the re-grab a steal, not an "idle page click"
+            CefFocusGuard.markSwingMouseForTests();
+            CefFocusGuard.handleCefGotFocus(browser, field);
+            verify(browser, atLeastOnce()).setFocus(false);
+        });
+    }
+
+    @Test
+    @DisplayName("a CEF focus request is vetoed while the user works in the Swing UI")
+    void cefFocusRequestIsVetoedInSwingUi() {
+        onEdt(() -> {
+            CefFocusGuard.register(mock(CefBrowser.class), new JPanel());
+            JTextField field = new JTextField("omnibox");
+            // …while typing in a field (navigation, e.g. Enter, must not yank
+            // the keyboard back to the page)
+            CefFocusGuard.markSwingTypingForTests();
+            assertTrue(CefFocusGuard.handleCefSetFocus(field),
+                    "typing in the Swing UI vetoes the CEF focus request");
+            // …and right after a click in the Swing chrome (e.g. the omnibox):
+            // JCEF's own setFocus(true) bookkeeping must not re-grab the
+            // OS keyboard focus from the just-clicked field
+            CefFocusGuard.markSwingMouseForTests();
+            assertTrue(CefFocusGuard.handleCefSetFocus(field),
+                    "a recent Swing click vetoes the CEF focus request");
+        });
+    }
+
+    @Test
+    @DisplayName("CEF focus requests are allowed for page use and stale owners")
+    void cefFocusRequestIsAllowedForPagesAndIdle() {
+        onEdt(() -> {
+            JPanel wrapper = new JPanel();
+            CefFocusGuard.register(mock(CefBrowser.class), wrapper);
+            // no recent Swing input (fresh state per test): a stale Swing
+            // owner must not be vetoed, or a real page click could not focus
+            // the page
+            assertFalse(CefFocusGuard.handleCefSetFocus(new JTextField("stale owner")),
+                    "an idle Swing owner must not veto (page click)");
+            // …and neither may a null owner or the browser's own UI tree
+            assertFalse(CefFocusGuard.handleCefSetFocus(null),
+                    "a null owner must not veto");
+            CefFocusGuard.markSwingMouseForTests();
+            assertFalse(CefFocusGuard.handleCefSetFocus(wrapper),
+                    "an owner inside the browser must not veto (user in the pages)");
         });
     }
 
@@ -318,6 +396,34 @@ class CefFocusGuardTest {
             CefFocusGuard.handleWindowActivated(new JTextField("hidden"));
             assertEquals(before, defocusCalls(browser),
                     "a hidden owner must not trigger a repair");
+        });
+    }
+
+    @Test
+    @DisplayName("a Swing click re-syncs the OS focus via the Win32 SetFocus path without throwing")
+    void swingClickReassertsNativeOsFocus() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
+        CefBrowser browser = registerInSharedFrame(new JPanel()); // the visible shared frame
+        JTextField field = new JTextField("https://…");
+        addToFrame(field);
+        assumeTrue(awaitActiveWindow(), "the test window could not be activated");
+        onEdt(() -> {
+            CefFocusGuard.markSwingMouseForTests();
+            CefFocusGuard.releaseAll(); // the mouse-press hook does this first
+            // private: the guard's mouse-press hook drives it in production;
+            // here we invoke it directly on the shared (active) frame — the
+            // real "keys land in the web page" behaviour is verified by the
+            // manual repro with a live CEF child window
+            try {
+                java.lang.reflect.Method reassert = CefFocusGuard.class.getDeclaredMethod(
+                        "reassertOsFocusOnSwingClick", java.awt.Window.class);
+                reassert.setAccessible(true);
+                reassert.invoke(null, sharedFrame());
+            } catch (ReflectiveOperationException e) {
+                throw new AssertionError(e);
+            }
+            // the click also releases the CEF-side focus of every browser
+            verify(browser, atLeastOnce()).setFocus(false);
         });
     }
 

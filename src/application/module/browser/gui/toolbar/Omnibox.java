@@ -1,20 +1,29 @@
 package application.module.browser.gui.toolbar;
 
+import application.module.browser.core.CefFocusGuard;
 import application.module.browser.util.UrlUtils;
 import application.utils.i18n.I18n;
+import org.cef.browser.CefBrowser;
 
+import java.awt.AWTEvent;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
+import java.awt.GraphicsEnvironment;
 import java.awt.Insets;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.Toolkit;
 import java.awt.Window;
+import java.awt.event.AWTEventListener;
 import java.awt.event.FocusEvent;
 import java.awt.event.FocusListener;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
+import java.awt.event.MouseEvent;
 import java.util.List;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -48,6 +57,8 @@ public final class Omnibox extends JPanel {
     /** N10: the omnibox's own input history (Up/Down while the popup is closed). */
     private final OmniboxInputHistory inputHistory = new OmniboxInputHistory();
     private boolean updatingText;
+    /** Dismisses the popup when a browser takes the CEF keyboard focus (a page click). */
+    private final Consumer<CefBrowser> cefFocusGainedListener = browser -> hidePopup();
 
     /**
      * @param navigateAction  invoked with the raw text (Enter) or a suggestion
@@ -151,6 +162,7 @@ public final class Omnibox extends JPanel {
         });
         add(field, BorderLayout.CENTER);
         this.popup = null; // created lazily — the owner window only exists once shown
+        installDismissalHooks();
     }
 
     /** The popup, created on first need (the top-level owner must exist then). */
@@ -227,9 +239,52 @@ public final class Omnibox extends JPanel {
     }
 
     private void hidePopup() {
-        if (popup != null) {
+        if (popup != null && popup.isPopupVisible()) {
             popup.hidePopup();
         }
+    }
+
+    /**
+     * Installs the hooks that dismiss the suggestion popup when the user moves
+     * out of the omnibox. The field's {@code focusLost} already covers ordinary
+     * AWT focus changes (another focusable component, window deactivation);
+     * these two hooks cover the cases where AWT stays silent:
+     * <ul>
+     *   <li>a click on the native CEF page generates no AWT event, so the
+     *       CEF focus-gained signal from {@link CefFocusGuard} dismisses the
+     *       popup even when the focus request is vetoed;</li>
+     *   <li>a mouse press on a non-focusable area of the chrome leaves the
+     *       field's AWT focus intact, so a global press listener dismisses the
+     *       popup when the press lands outside it and the field.</li>
+     * </ul>
+     * The omnibox is a long-lived singleton (one per browser panel), so the
+     * hooks are installed once and never removed.
+     */
+    private void installDismissalHooks() {
+        CefFocusGuard.addFocusGainedListener(cefFocusGainedListener);
+        if (GraphicsEnvironment.isHeadless()) {
+            return; // no AWT mouse events; the field's focusLost still dismisses
+        }
+        AWTEventListener outsidePress = event -> {
+            if (!(event instanceof MouseEvent press) || press.getID() != MouseEvent.MOUSE_PRESSED) {
+                return;
+            }
+            OmniboxPopup p = popup;
+            if (p == null || !p.isPopupVisible()) {
+                return;
+            }
+            // JDK 25 dropped Component.getBoundsOnScreen(), so build the screen
+            // rectangles from location + size (same approach as MenuPopupController).
+            Point screen = press.getLocationOnScreen();
+            Rectangle popupBounds = new Rectangle(p.getLocationOnScreen(), p.getSize());
+            Rectangle fieldBounds = new Rectangle(field.getLocationOnScreen(), field.getSize());
+            if (popupBounds.contains(screen) || fieldBounds.contains(screen)) {
+                return; // a press on the popup or the field must not dismiss
+            }
+            hidePopup();
+        };
+        Toolkit.getDefaultToolkit().addAWTEventListener(outsidePress,
+                AWTEvent.MOUSE_EVENT_MASK);
     }
 
     private void moveSelection(int delta) {
