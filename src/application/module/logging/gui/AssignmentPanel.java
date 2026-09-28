@@ -3,7 +3,12 @@ package application.module.logging.gui;
 import application.api.ModuleContext;
 import application.module.logging.LoggingAssignmentStore;
 import application.module.logging.LoggingProfileRepository;
+import application.utils.gui.ConfigurationUtils;
+import application.utils.gui.GuiColors;
+import application.utils.gui.GuiConstants;
 import application.utils.logging.ModuleLoggingProvider;
+import jiconfont.icons.font_awesome.FontAwesome;
+import jiconfont.swing.IconFontSwing;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,6 +23,7 @@ import javax.swing.JTable;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableCellEditor;
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.FlowLayout;
 import java.util.ArrayList;
@@ -65,6 +71,9 @@ public class AssignmentPanel extends JPanel {
      * @throws IllegalArgumentException if {@code provider} is null
      */
     public AssignmentPanel(ModuleContext context, ModuleLoggingProvider provider) {
+        // Defensive icon-font registration (the app registers it at startup in
+        // AppearanceModule#init; this covers standalone/test construction).
+        IconFontSwing.register(FontAwesome.getIconFont());
         super(new BorderLayout(8, 8));
         if (provider == null) {
             throw new IllegalArgumentException("provider must not be null");
@@ -90,11 +99,24 @@ public class AssignmentPanel extends JPanel {
                 "Logging profile assignments for module '" + moduleId + "'"));
 
         JButton deleteBtn = new JButton("Delete selected");
+        deleteBtn.setToolTipText("Remove the logging-profile association of the selected node profile");
         deleteBtn.addActionListener(e -> deleteSelected());
         JButton refreshBtn = new JButton("Refresh");
+        refreshBtn.setToolTipText("Re-scan the node profiles and their logging assignments on disk");
         refreshBtn.addActionListener(e -> refresh());
         JButton applyBtn = new JButton("Apply (restart node)");
+        applyBtn.setToolTipText("Persist all associations; a node restart is required for them to take effect");
         applyBtn.addActionListener(e -> applyAssignments());
+
+        // Icon toolbar (same look as the node configuration panel).
+        float iconSize = GuiConstants.getHelpIconSize();
+        Color iconColor = GuiColors.getButtonIcon();
+        deleteBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.TRASH_O, iconSize, iconColor));
+        refreshBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.REFRESH, iconSize, iconColor));
+        applyBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.CHECK_CIRCLE_O, iconSize, iconColor));
+        ConfigurationUtils.fixComponentSize(deleteBtn);
+        ConfigurationUtils.fixComponentSize(refreshBtn);
+        ConfigurationUtils.fixComponentSize(applyBtn);
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
         toolbar.setOpaque(false);
         toolbar.add(deleteBtn);
