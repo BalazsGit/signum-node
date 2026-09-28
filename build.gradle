@@ -94,7 +94,7 @@ dependencies {
 // ── JCEF (browser module) ──────────────────────────────────────────────────────────────
 // Pinned JCEF distribution (gradle.properties; provenance: implementation plan Appendix A).
 // Two artifacts per platform:
-//   jcef-api            : pure Java API (org.cef.*) + transitive JOGL/gluegen (JNA) ->
+//   jcef-api            : pure Java API (org.cef.*) + transitive JOGL/gluegen ->
 //                         shadow-safe, ends up in the fat jar like any other dependency
 //   jcef-natives-<key>  : the full native CEF distribution (libcef, subprocesses, locales).
 //                         NEVER placed on the classpath: the `extractJcef` task unpacks it
@@ -136,6 +136,13 @@ configurations {
 
 dependencies {
     implementation "me.friwi:jcef-api:${jcefVersion}"
+    // JNA: the browser module's CefFocusGuard calls Win32 user32 (SetFocus /
+    // AttachThreadInput) to reclaim the OS keyboard focus from the JCEF
+    // native child window. Already on the runtime classpath via
+    // signumj -> net.java.dev.jna:jna:5.7.0 (runtimeOnly, invisible to the
+    // compiler); declared explicitly so it is visible at compile time.
+    // Pin matches the already-resolved 5.7.0 -> no new jar in the fat jar.
+    implementation 'net.java.dev.jna:jna:5.7.0'
     jcefNatives "me.friwi:jcef-natives-${jcefKey}:${jcefVersion}"
 }
 
@@ -340,6 +347,12 @@ application {
     mainClass.set('application.launcher.Launcher')
 }
 
+tasks.named('run') {
+    // JDK 24+ restricts JNI access (JNA/System.load): allow it for JCEF and
+    // the browser module's JNA-based CefFocusGuard.
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+}
+
 sourceSets {
     main {
         java.srcDir "src"
@@ -430,7 +443,7 @@ def registerJpackageWinTask = { String taskName, String outputRelDir, boolean bu
     tasks.register(taskName, Exec) {
         group = 'distribution'
         description = "Builds a Windows app-image using jpackage (${bundleJcef ? 'with bundled JCEF' : 'slim — JCEF on demand'})"
-        dependsOn shadowJar, 'unzipWindowsJDK'
+        dependsOn shadowJar, 'unzipWindowsJRE'
         if (bundleJcef) {
             dependsOn stageJcefData
         }
@@ -536,17 +549,20 @@ tasks.register('jdeps') {
         }
     }
 }
-def jdkVersion = 'zulu25.36.205-ca-jre25.0.4.1'
-def jdkZip = "build/distributions/${jdkVersion}-win_x64.zip"
-def jdkZipName = "${jdkVersion}-win_x64.zip"
+// The portable distribution bundles a Zulu **JRE** (runtime image only — the
+// app needs no toolchain; the build itself runs on the JAVA_HOME toolchain).
+// The artifact coordinate carries "-ca-jre", so the variables/tasks say JRE.
+def jreVersion = 'zulu25.36.205-ca-jre25.0.4.1'
+def jreZip = "build/distributions/${jreVersion}-win_x64.zip"
+def jreZipName = "${jreVersion}-win_x64.zip"
 
 
-tasks.register('downloadWindowsJDK', de.undercouch.gradle.tasks.download.Download) {
-    src "https://cdn.azul.com/zulu/bin/${jdkVersion}-win_x64.zip"
-    dest jdkZip
+tasks.register('downloadWindowsJRE', de.undercouch.gradle.tasks.download.Download) {
+    src "https://cdn.azul.com/zulu/bin/${jreVersion}-win_x64.zip"
+    dest jreZip
     overwrite true
     doLast {
-    def file = file("build/distributions/${jdkZipName}")
+    def file = file("build/distributions/${jreZipName}")
     if (!file.exists() || file.length() < 10_000) {
         throw new GradleException("ZIP file seems invalid or too small: ${file}")
         }
@@ -554,14 +570,14 @@ tasks.register('downloadWindowsJDK', de.undercouch.gradle.tasks.download.Downloa
 }
 
 
-tasks.register('unzipWindowsJDK', Copy) {
-    dependsOn downloadWindowsJDK
+tasks.register('unzipWindowsJRE', Copy) {
+    dependsOn downloadWindowsJRE
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     outputs.dir("build/distributions/jre")
     into "build/distributions/jre"
 
-    def zipRoot = zipTree(jdkZip)
-    def rootDirName = "${jdkVersion}-win_x64"
+    def zipRoot = zipTree(jreZip)
+    def rootDirName = "${jreVersion}-win_x64"
 
     from(zipRoot.matching {
         eachFile { f ->
@@ -574,9 +590,9 @@ tasks.register('unzipWindowsJDK', Copy) {
     })
 
     doFirst {
-        def zipFile = file(jdkZip)
+        def zipFile = file(jreZip)
         if (!zipFile.exists()) {
-            throw new GradleException("Expected JDK zip not found: ${zipFile}")
+            throw new GradleException("Expected JRE zip not found: ${zipFile}")
         }
     }
 }
@@ -594,7 +610,7 @@ def registerZipWinTask = { String taskName, String jpackageTaskName, String appI
         group = 'distribution'
         description = "Packages the Windows release zip (${bundleJcef ? 'with bundled JCEF' : 'slim — no JCEF'})"
         dependsOn jpackageTaskName
-        dependsOn unzipWindowsJDK
+        dependsOn unzipWindowsJRE
 
         def appImageDir = "${project.buildDir}/${appImageRelDir}/${appName}"
 
@@ -745,4 +761,12 @@ processResources.dependsOn setupDatabaseDirectories
 // so flywayMigrate must also wait for the directory setup.
 tasks.named('flywayMigrate').configure {
     dependsOn(setupDatabaseDirectories)
+}
+
+// Debug helper: prints the resolved runtime classpath (used to compile and run
+// standalone focus repro code against the exact app dependencies).
+tasks.register('printRuntimeClasspath') {
+    doLast {
+        println configurations.runtimeClasspath.asPath
+    }
 }

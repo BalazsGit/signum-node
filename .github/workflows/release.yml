@@ -39,7 +39,7 @@ jobs:
           java-version: '25'
 
       - name: Build artifacts
-        run: ./gradlew unzipWindowsJDK shadowJar jpackageWin jpackageWinSlim zipWinExe zipWinExeSlim release
+        run: ./gradlew unzipWindowsJRE shadowJar jpackageWin jpackageWinSlim zipWinExe zipWinExeSlim release
 
       - name: Create GitHub Release Draft
         uses: softprops/action-gh-release@v2

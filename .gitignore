@@ -64,3 +64,10 @@ result
 # Browser module (web3-browser plan, F0/F1): JCEF native distribution + browser runtime state
 /jcef/
 /conf/browser/
+
+# Focus-repro run output (CEF user-data dir under conf/)
+/conf/repro/
+
+# CEF runtime logs created by the focus repro at the project root
+/jcef.log
+/vulkan.d3d12.cache
