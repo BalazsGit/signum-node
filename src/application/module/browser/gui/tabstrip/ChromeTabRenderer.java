@@ -2,8 +2,11 @@ package application.module.browser.gui.tabstrip;
 
 import application.module.browser.gui.animation.TabAnimation;
 import application.module.browser.model.tab.BrowserTab;
+import application.module.node.gui.GuiResources;
 import application.utils.gui.GuiConstants;
 import application.utils.i18n.I18n;
+import com.github.weisj.jsvg.SVGDocument;
+import com.github.weisj.jsvg.parser.SVGLoader;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -15,9 +18,11 @@ import java.awt.Graphics2D;
 import java.awt.Image;
 import java.awt.RenderingHints;
 import java.awt.geom.AffineTransform;
+import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.net.URI;
+import java.net.URL;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -71,6 +76,15 @@ final class ChromeTabRenderer extends JComponent implements ListCellRenderer<Bro
 
     private final TabAnimation animation;
     private final Map<String, Image> iconCache = new HashMap<>();
+
+    // T5 loading mark: the app's Signum logo (the same SVG the frame glass pane
+    // and the engine-ready screen use), pre-rendered ONCE per theme variant and
+    // shared by every renderer — no per-tab images, no per-tab timers.
+    private static final int MARK_SIZE = 64;
+    private static volatile BufferedImage markWhite;
+    private static volatile BufferedImage markBlack;
+    /** The variant visible on this renderer's tab pill (white on dark, black on light). */
+    private final BufferedImage loadingMark = pickLoadingMark();
 
     // L&F-derived palette
     private final Color bgInactive = uiColor("control", new Color(0xE8, 0xEA, 0xED));
@@ -168,7 +182,7 @@ final class ChromeTabRenderer extends JComponent implements ListCellRenderer<Bro
         int iconX = PADDING_X;
         int iconY = (h - ICON_SIZE) / 2;
         if (tab.isLoading()) {
-            drawSpinner(g2, iconX + ICON_SIZE / 2, iconY + ICON_SIZE / 2, ICON_SIZE);
+            drawLoadingMark(g2, iconX + ICON_SIZE / 2, iconY + ICON_SIZE / 2, ICON_SIZE);
         } else {
             Image icon = iconFor(tab);
             if (icon != null) {
@@ -215,6 +229,97 @@ final class ChromeTabRenderer extends JComponent implements ListCellRenderer<Bro
     // ------------------------------------------------------------------
     // Drawing helpers
     // ------------------------------------------------------------------
+
+    /**
+     * T5 loading state: the Signum mark rotating in the icon slot.
+     * <p>
+     * The rotation angle is derived from the wall clock (not a per-cell
+     * {@code Timer}), so the existing {@code ChromeTabBar} repaint pump — which
+     * only runs while at least one tab is loading — drives the animation and
+     * the rotation stops (and the mark object is simply no longer painted) the
+     * moment the last load finishes: no leftover timer, thread or per-tab
+     * resource keeps running in the background. Falls back to the plain arc
+     * spinner when the SVG resource is unavailable.
+     */
+    private void drawLoadingMark(Graphics2D g2, int cx, int cy, int size) {
+        BufferedImage mark = loadingMark;
+        if (mark == null) {
+            drawSpinner(g2, cx, cy, size);
+            return;
+        }
+        // Same cadence as the previous arc spinner: 16 ms per degree.
+        float angle = (float) ((System.currentTimeMillis() / 16.0) % 360.0);
+        AffineTransform original = g2.getTransform();
+        g2.translate(cx, cy);
+        g2.rotate(Math.toRadians(angle));
+        g2.drawImage(mark, -size / 2, -size / 2, size, size, null);
+        g2.setTransform(original);
+    }
+
+    /**
+     * Picks the Signum mark variant readable on the tab pill background
+     * (white mark on a dark control color, black mark on a light one) and
+     * returns it — never null on a missing resource only when BOTH variants
+     * failed to render, in which case {@link #drawLoadingMark} falls back to
+     * the arc spinner.
+     */
+    private static BufferedImage pickLoadingMark() {
+        Color control = uiColor("control", new Color(0xE8, 0xEA, 0xED));
+        // Perceptual luminance of the tab pill's base color.
+        double luminance = (0.2126 * control.getRed()
+                + 0.7152 * control.getGreen()
+                + 0.0722 * control.getBlue()) / 255.0;
+        BufferedImage preferred = loadSignumMark(luminance < 0.5
+                ? GuiResources.SIGNUM_NODE_WHITE_SVG
+                : GuiResources.SIGNUM_NODE_BLACK_SVG);
+        if (preferred != null) {
+            return preferred;
+        }
+        // The theme variant failed to render — fall back to the other one.
+        return loadSignumMark(luminance < 0.5
+                ? GuiResources.SIGNUM_NODE_BLACK_SVG
+                : GuiResources.SIGNUM_NODE_WHITE_SVG);
+    }
+
+    /**
+     * Renders the given Signum SVG once into a small ARGB image (cached in a
+     * static field, shared by all tab renderers). Returns null when the
+     * resource is missing or fails to render (the caller falls back to the
+     * arc spinner).
+     */
+    private static synchronized BufferedImage loadSignumMark(String resource) {
+        // Double-check the cache: the method is synchronized, so a concurrent
+        // first paint may already have filled the matching variant.
+        BufferedImage cached = GuiResources.SIGNUM_NODE_WHITE_SVG.equals(resource) ? markWhite : markBlack;
+        if (cached != null) {
+            return cached;
+        }
+        try {
+            URL url = ChromeTabRenderer.class.getClassLoader().getResource(resource);
+            if (url == null) {
+                return null;
+            }
+            SVGLoader loader = new SVGLoader();
+            SVGDocument document = loader.load(url);
+            Rectangle2D box = document.viewBox();
+            BufferedImage img = new BufferedImage(MARK_SIZE, MARK_SIZE, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = img.createGraphics();
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            double scale = Math.min(MARK_SIZE / box.getWidth(), MARK_SIZE / box.getHeight()) * 0.9;
+            g.translate((MARK_SIZE - box.getWidth() * scale) / 2.0, (MARK_SIZE - box.getHeight() * scale) / 2.0);
+            g.scale(scale, scale);
+            document.render(null, g);
+            g.dispose();
+            if (GuiResources.SIGNUM_NODE_WHITE_SVG.equals(resource)) {
+                markWhite = img;
+            } else {
+                markBlack = img;
+            }
+            return img;
+        } catch (Exception e) {
+            return null;
+        }
+    }
 
     private void drawSpinner(Graphics2D g2, int cx, int cy, int size) {
         int r = size - 3;

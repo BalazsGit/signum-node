@@ -178,4 +178,15 @@ public final class BrowserTab {
     void setLastActiveAtForTest(long ts) {
         this.lastActiveAt = ts;
     }
+
+    /**
+     * Test hook (public, unlike the package-private hooks above): creates a tab
+     * in the given loading state for the cross-package tab-strip rendering
+     * tests (the {@code ChromeTabRenderer} loading-mark animation).
+     */
+    public static BrowserTab forTest(String initialUrl, boolean loading) {
+        BrowserTab tab = new BrowserTab(initialUrl);
+        tab.setLoading(loading);
+        return tab;
+    }
 }
