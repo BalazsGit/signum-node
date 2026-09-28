@@ -184,6 +184,18 @@ public class NodeConsolePanel extends JPanel {
     }
 
     /**
+     * Returns the console's bottom status strip (latest block, sync progress,
+     * peers, volume, ...). This panel BUILDS and updates the strip but does
+     * NOT host it: the owning {@link NodeProfilePanel} adds it to its own
+     * SOUTH region so the strip stays visible on every inner tab (Console,
+     * Configuration, Logging). The strip is non-opaque (thin transparent
+     * margin against the window edge).
+     */
+    public JPanel getStatusPanel() {
+        return bottomPanel;
+    }
+
+    /**
      * Returns this console panel's Signum facade.
      * <p>
      * There is no "active node" in the multi-node architecture: each console
@@ -418,6 +430,7 @@ public class NodeConsolePanel extends JPanel {
     private JLabel measurementLabel;
     private JPanel contentPanel;   // Content BorderLayout inside CardLayout (holds toolbar, console, bottomPanel)
     private JPanel consoleWrapper;
+    /** Status strip built by this console but hosted by the NodeProfilePanel (SOUTH). */
     private JPanel bottomPanel;
     private JPanel topPanel;
     private JPanel mainCardPanel;
@@ -1036,9 +1049,13 @@ public class NodeConsolePanel extends JPanel {
         leftButtons.add(restartButton);
         leftButtons.add(shutdownButton);
 
+        // The status strip (latest block / sync progress / peers / volume / ...)
+        // is BUILT here but hosted at the NodeProfilePanel level (its SOUTH
+        // region), so it stays visible on every inner tab (Console,
+        // Configuration, Logging) — see NodeProfilePanel and getStatusPanel().
+        // Thin transparent margin: the strip is non-opaque with no inner border.
         bottomPanel = new JPanel(new BorderLayout());
-        bottomPanel.setBorder(BorderFactory.createEmptyBorder(2, 2, 2, 2));
-        contentPanel.add(bottomPanel, BorderLayout.PAGE_END);
+        bottomPanel.setOpaque(false);
 
         syncProgressBar = new JProgressBar(0, 100);
         syncProgressBar.setStringPainted(true);
@@ -2972,9 +2989,11 @@ public class NodeConsolePanel extends JPanel {
             unifiedConsole.setShowCommandInput(showCommandInput);
         }
 
-        // Revalidate the full content hierarchy (toolbar -> metricsPanelWrapper -> bottomPanel)
-        // toolBar.revalidate() alone is insufficient because isValidateRoot barriers prevent layout propagation
-        // to bottomPanel. We must explicitly revalidate contentPanel which contains all three regions.
+        // Revalidate the full content hierarchy (toolbar -> metricsPanelWrapper).
+        // (The bottom status strip is hosted by the NodeProfilePanel since v6 —
+        // see getStatusPanel() — so it no longer lives in contentPanel.)
+        // toolBar.revalidate() alone is insufficient because isValidateRoot barriers prevent layout propagation.
+        // We must explicitly revalidate contentPanel which contains all regions.
         toolBar.revalidate();
         if (contentPanel != null) {
             contentPanel.revalidate();

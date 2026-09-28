@@ -132,7 +132,10 @@ public class NodeProfilePanel extends JPanel {
             }
 
             setLayout(new BorderLayout());
-            setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+            // Thin (2px) bottom margin: the SOUTH status strip sits almost
+            // flush with the window edge (transparent strip, no visible gap
+            // border).
+            setBorder(BorderFactory.createEmptyBorder(5, 5, 2, 5));
 
             LOGGER.debug("Creating NodeInfoBar for profile: {}", profile.getName());
             infoBar = new NodeInfoBar(profile);
@@ -204,6 +207,15 @@ public class NodeProfilePanel extends JPanel {
 
             LOGGER.debug("Adding innerTabbedPane to CENTER (total tabs: {})", innerTabbedPane.getTabCount());
             add(innerTabbedPane, BorderLayout.CENTER);
+
+            // The console's bottom status strip (latest block / sync progress /
+            // peers / volume / ...) is hosted HERE — at the profile-panel level,
+            // SOUTH of the inner tabbed pane — so it stays visible on every
+            // inner tab (Console, Configuration, Logging), like the NodeInfoBar
+            // above. The console builds and updates it (see
+            // NodeConsolePanel#getStatusPanel); the strip is non-opaque so only
+            // the panel's thin bottom inset separates it from the window edge.
+            add(consolePanel.getStatusPanel(), BorderLayout.SOUTH);
             
             LOGGER.debug("Wiring toolbar callbacks for profile: {}", profile.getName());
             wireToolbarCallbacks();

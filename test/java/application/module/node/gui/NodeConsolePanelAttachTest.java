@@ -1,6 +1,7 @@
 package application.module.node.gui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -78,6 +79,18 @@ class NodeConsolePanelAttachTest {
     private static void assertEventuallyOccurrences(NodeConsolePanel panel, String marker, int expected,
                                                      String message) throws InterruptedException {
         assertTrue(awaitOccurrences(panel, marker, expected, 5000), message);
+    }
+
+    @Test
+    @DisplayName("the status strip is built by the console but hosted by the NodeProfilePanel")
+    void statusPanel_builtByConsole_notHostedByConsole() {
+        NodeProfile profile = new NodeProfile(newProfileName());
+        NodeConsolePanel panel = new NodeConsolePanel(null, profile);
+        javax.swing.JPanel status = panel.getStatusPanel();
+        assertNotNull(status, "the console builds its bottom status strip");
+        assertNull(status.getParent(),
+                "the console must NOT host the strip — the NodeProfilePanel (BorderLayout.SOUTH) does");
+        assertFalse(status.isOpaque(), "the strip is transparent (thin margin against the window edge)");
     }
 
     @Test
