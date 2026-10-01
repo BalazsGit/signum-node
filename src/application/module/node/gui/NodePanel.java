@@ -10,10 +10,8 @@ import application.module.node.profile.ProfileConfig;
 import application.module.node.profile.ProfileNameSuggester;
 import application.module.node.profile.ProfileRuntimeService;
 import application.module.node.gui.wizard.NodeSetupWizardDialog;
-import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiFontManager;
-import application.utils.gui.GuiIcons;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.TabUtils;
 import jiconfont.icons.font_awesome.FontAwesome;
@@ -82,8 +80,7 @@ public class NodePanel extends JPanel  {
      */
     private final Runnable appearanceListener = () -> {
         GuiFontManager.applyDefaultFont(profileTabbedPane);
-        // Keep the trailing new-profile "+" button's icon in sync with the new size / theme color.
-        newProfileButton.setIcon(GuiIcons.plus(GuiIcons.sizeSmall(), GuiColors.getButtonIcon()));
+        // The trailing "+" (PlusGlyph) reads its colour at paint time, so no icon re-set is needed.
     };
 
     /**
@@ -107,7 +104,9 @@ public class NodePanel extends JPanel  {
     private void initialize() {
 
         setLayout(new BorderLayout());
-        setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+        // No top inset: the profile tab strip sits flush against the top edge, exactly like the
+        // Database module's engine tab headers. Left/bottom/right padding stays for the tab content.
+        setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
 
         // Create tabbed pane for profiles with application-wide tab layout policy.
         // Policy is read from GuiManager which loads from gui-settings.json at startup.
@@ -605,7 +604,7 @@ public class NodePanel extends JPanel  {
      */
     private JButton buildNewProfileButton() {
         JButton button = new NewProfileButton();
-        button.setIcon(GuiIcons.plus(GuiIcons.sizeSmall(), GuiColors.getButtonIcon()));
+        button.setIcon(new PlusGlyph());
         button.setToolTipText("Create a new node profile (setup wizard or empty default profile)");
         button.addActionListener(e -> showNewProfileMenu());
         return button;
@@ -1053,10 +1052,46 @@ public class NodePanel extends JPanel  {
                         java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
                 java.awt.Color c = javax.swing.UIManager.getColor("TabbedPane.hoverBackground");
                 g2.setColor(c != null ? c : new java.awt.Color(0x80, 0x80, 0x80, 48));
-                g2.fillRoundRect(1, 1, getWidth() - 3, getHeight() - 3, 10, 10);
+                g2.fillRoundRect(1, 1, getWidth() - 2, getHeight() - 2, 10, 10);
                 g2.dispose();
             }
             super.paintComponent(g);
+        }
+    }
+
+    /**
+     * The trailing "+" glyph of the new-profile button. Kept pixel-identical to the Browser module's
+     * new-tab "+" (same 16px box, same 8px cross, same 1.4f stroke, same {@code controlText} colour)
+     * so the two "new" buttons render the same everywhere, and it matches this panel's close "X" glyph
+     * ({@link #CloseGlyph}).
+     */
+    private static final class PlusGlyph implements Icon {
+
+        private static final int SIZE = 16;
+
+        @Override
+        public int getIconWidth() {
+            return SIZE;
+        }
+
+        @Override
+        public int getIconHeight() {
+            return SIZE;
+        }
+
+        @Override
+        public void paintIcon(Component c, java.awt.Graphics g, int x, int y) {
+            java.awt.Graphics2D g2 = (java.awt.Graphics2D) g.create();
+            g2.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,
+                    java.awt.RenderingHints.VALUE_ANTIALIAS_ON);
+            java.awt.Color color = javax.swing.UIManager.getColor("controlText");
+            g2.setColor(color != null ? color : new java.awt.Color(0x20, 0x21, 0x24));
+            g2.setStroke(new java.awt.BasicStroke(1.4f));
+            int cx = x + SIZE / 2;
+            int cy = y + SIZE / 2;
+            g2.drawLine(cx - 4, cy, cx + 4, cy);
+            g2.drawLine(cx, cy - 4, cx, cy + 4);
+            g2.dispose();
         }
     }
 
