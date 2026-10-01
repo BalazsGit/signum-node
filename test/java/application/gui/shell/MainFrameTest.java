@@ -8,10 +8,13 @@ import org.junit.jupiter.api.Timeout;
 
 import javax.swing.JPanel;
 import java.awt.GraphicsEnvironment;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.mockito.Mockito.*;
@@ -54,6 +57,53 @@ class MainFrameTest {
                         "setDimmed(false) must hide the veil again");
             } finally {
                 frame.dispose();
+            }
+        }
+    }
+
+    // ====================================================================
+    // Trailing shutdown button
+    // ====================================================================
+
+    @Nested
+    @DisplayName("Trailing shutdown button")
+    class TrailingShutdownTests {
+
+        @Test
+        @DisplayName("the module tab row ends with the restart and shutdown buttons (trailingComponent client property)")
+        void moduleTabRow_hasTrailingRestartAndShutdownButtons() {
+            assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
+
+            MainFrame frame = new MainFrame();
+            try {
+                javax.swing.JTabbedPane pane = (javax.swing.JTabbedPane) frame.getTabManager().getComponent();
+                java.awt.Container trailing =
+                        (java.awt.Container) pane.getClientProperty("JTabbedPane.trailingComponent");
+                assertNotNull(trailing, "the tab row must host the trailing buttons via trailingComponent");
+
+                List<javax.swing.JButton> buttons = new ArrayList<>();
+                collectButtons(trailing, buttons);
+                assertEquals(2, buttons.size(),
+                        "the trailing content must hold the restart and the shutdown button");
+                // Restart sits to the left of (before) the shutdown button.
+                assertEquals("Restart the entire application (all nodes restart)",
+                        buttons.get(0).getToolTipText());
+                assertEquals("Gracefully shut down all components and exit the application",
+                        buttons.get(1).getToolTipText());
+            } finally {
+                frame.dispose();
+            }
+        }
+
+        /** Depth-first collects every JButton under the given container (in order). */
+        private static void collectButtons(java.awt.Container container, List<javax.swing.JButton> out) {
+            for (java.awt.Component c : container.getComponents()) {
+                if (c instanceof javax.swing.JButton b) {
+                    out.add(b);
+                }
+                if (c instanceof java.awt.Container sub) {
+                    collectButtons(sub, out);
+                }
             }
         }
     }

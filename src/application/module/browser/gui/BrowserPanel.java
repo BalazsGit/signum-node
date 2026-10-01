@@ -7,7 +7,8 @@ import application.module.browser.core.BrowserEngineState;
 import application.module.browser.core.JcefProcessBootstrap;
 import application.module.browser.core.JcefProvisioner;
 import application.module.browser.engine.CefDataCleaner;
-import application.module.browser.engine.WebBrowserRegistry;
+import application.module.browser.engine.WebBrowser;
+import application.module.browser.engine.WebBrowserHost;
 import application.module.browser.engine.handler.ActiveDownloadRegistry;
 import application.module.browser.engine.scheme.AboutPageRenderer;
 import application.module.browser.engine.scheme.BookmarkPageRenderer;
@@ -20,7 +21,6 @@ import application.module.browser.gui.bookmarks.BookmarksBar;
 import application.module.browser.gui.dialogs.ClearDataDialog;
 import application.module.browser.gui.dialogs.JcefSetupDialog;
 import application.module.browser.gui.downloads.DownloadShelf;
-import application.module.browser.gui.toolbar.NavigationToolbar;
 import application.module.browser.model.bookmarks.BookmarkStore;
 import application.module.browser.model.download.DownloadManager;
 import application.module.browser.model.history.HistoryStore;
@@ -31,26 +31,24 @@ import application.module.browser.model.tab.TabController;
 import application.module.browser.model.tab.TabDiscardPolicy;
 import application.module.browser.model.tab.TabEvent;
 import application.module.browser.model.tab.TabSource;
-import application.module.browser.gui.tabstrip.ChromeTabBar;
 import application.module.browser.gui.theme.LafCssTheme;
 import application.utils.i18n.I18n;
 
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
-import java.awt.FlowLayout;
 import java.awt.event.ActionEvent;
 import java.awt.event.HierarchyEvent;
 import java.io.File;
 import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import javax.swing.AbstractAction;
-import javax.swing.BorderFactory;
 import javax.swing.JComponent;
 import javax.swing.JFileChooser;
-import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.SwingConstants;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
@@ -62,9 +60,12 @@ import org.slf4j.LoggerFactory;
 /**
  * Root panel of the browser module (plan §4.1) — replaces the F0 smoke panel.
  * <p>
- * Layout: the {@link ChromeTabBar} on top, below it a card host that shows
- * either the {@link EngineReadyScreen} (A8: preparing / error / idle) or the
- * {@link ContentPanel} with the tabs' CEF components.
+ * Layout: the shared {@link BookmarksBar} on top, and a card host that
+ * shows either the {@link EngineReadyScreen} (A8: preparing / error /
+ * idle) or the {@link BrowserTabPane} — a single tabbed pane whose tabs
+ * ARE the tabs' self-contained {@link BrowserTabView}s (each owning its
+ * own toolbar (omnibox) and CEF browser); switching tabs is the pane's
+ * own show/hide, which is what isolates the native render surfaces.
  * <p>
  * Wiring:
  * <ul>
@@ -89,7 +90,6 @@ public final class BrowserPanel extends JPanel {
     private final BrowserEngine engine;
     private final Path confDir;
     private final TabController controller = new TabController();
-    private final WebBrowserRegistry registry;
     private final HistoryStore historyStore;
     private final BookmarkStore bookmarkStore;
     private final SessionStore sessionStore;
@@ -97,11 +97,11 @@ public final class BrowserPanel extends JPanel {
     private final DownloadManager downloadManager;
     private final ActiveDownloadRegistry activeDownloads;
     private final DownloadShelf downloadShelf;
-    private final ChromeTabBar tabBar;
-    private final NavigationToolbar toolbar;
+    private final BrowserTabPane browserTabs;
     private final BookmarksBar bookmarksBar;
     private final EngineReadyScreen readyScreen;
-    private final ContentPanel contentPanel;
+    /** One self-contained view per tab (its toolbar/omnibox + CEF browser). */
+    private final Map<String, BrowserTabView> tabViews = new LinkedHashMap<>();
     /** F6/F9: the settings renderer (the clear-data + saved hooks are wired below). */
     private final SettingsPageRenderer settingsRenderer;
     /** F4 (B6): the bookmarks renderer (the export/import pickers are wired below). */
@@ -137,8 +137,6 @@ public final class BrowserPanel extends JPanel {
                 browserConfDir.resolve("downloads.json"),
                 () -> resolveDownloadsDir(settingsRepository.load()));
         this.activeDownloads = new ActiveDownloadRegistry();
-        this.registry = new WebBrowserRegistry(engine, controller,
-                settingsRepository::load, historyStore, downloadManager, activeDownloads);
         // F6: the settings + internal-page framework — the settings page
         // (C1/C2/C5, chooser pumped to the EDT by this panel), the downloads
         // page (D4, the manager's recent list) and the about page (C9) join
@@ -153,47 +151,42 @@ public final class BrowserPanel extends JPanel {
                 new AboutPageRenderer(engine::cefVersion, JcefProcessBootstrap.mainArgs()));
         InternalPage.setThemeStyleProvider(LafCssTheme::styleBlock);
         this.sessionStore = new SessionStore(browserConfDir.resolve("session.json"));
-        this.tabBar = new ChromeTabBar(controller);
-        this.toolbar = new NavigationToolbar(controller, registry,
-                settingsRepository::load, historyStore, bookmarkStore);
+        // F4 (B3): the shared bookmarks bar — the one shared view of the
+        // shared bookmark store; clicking a bookmark navigates the active
+        // tab's view
         this.bookmarksBar = new BookmarksBar(bookmarkStore,
-                url -> {
-                    String tabId = activeTabId();
-                    if (tabId != null) {
-                        registry.navigate(tabId, url);
-                    }
-                },
-                page -> {
-                    String tabId = activeTabId();
-                    if (tabId != null) {
-                        registry.navigate(tabId, page);
-                    }
-                });
-        toolbar.onBookmarksChanged(bookmarksBar::refresh);
+                url -> activeView().ifPresent(v -> v.navigate(url)),
+                page -> activeView().ifPresent(v -> v.navigate(page)));
         this.readyScreen = new EngineReadyScreen();
-        this.contentPanel = new ContentPanel();
+        this.browserTabs = new BrowserTabPane(controller);
         this.downloadShelf = new DownloadShelf(downloadManager, activeDownloads,
                 url -> controller.openTab(url, TabSource.USER));
 
         cardHost.add(readyScreen, CARD_ENGINE);
-        cardHost.add(contentPanel, CARD_CONTENT);
-        JPanel north = new JPanel(new BorderLayout());
-        north.add(tabBar, BorderLayout.NORTH);
-        // F4 (B4): the bookmarks bar sits between the toolbar and the page,
-        // its visibility is the persisted showBookmarksBar setting
-        JPanel belowToolbar = new JPanel(new BorderLayout());
-        belowToolbar.add(bookmarksBar, BorderLayout.NORTH);
-        belowToolbar.add(toolbar, BorderLayout.SOUTH);
+        cardHost.add(browserTabs, CARD_CONTENT);
+        // F4 (B4): the shared bookmarks bar sits above the tab container —
+        // every tab's own toolbar (omnibox row) is part of the tab view
+        // below; its visibility is the persisted showBookmarksBar setting.
         bookmarksBar.setVisible(settingsRepository.load().isShowBookmarksBar());
-        north.add(belowToolbar, BorderLayout.SOUTH);
-        add(north, BorderLayout.NORTH);
+        add(bookmarksBar, BorderLayout.NORTH);
         add(cardHost, BorderLayout.CENTER);
         // F5 (D3): the download shelf slides in at the bottom (A9); hidden
         // until the first active download or a Ctrl+J toggle.
         add(downloadShelf, BorderLayout.SOUTH);
 
-        // Engine and CEF callbacks arrive off the EDT (plan §4.2) -> pump.
-        controller.addListener(event -> SwingUtilities.invokeLater(() -> onTabEvent(event)));
+        // Engine and CEF callbacks arrive off the EDT (plan §4.2) -> pump. But a
+        // tab event that is already fired on the EDT (the session restore) must
+        // run synchronously: the restore batch (N CEF canvas creations) has to
+        // land in one uninterrupted EDT pass. Pumping each event separately would
+        // let repaints interleave between the canvas creations, which is what
+        // makes the restored tabs visibly "race" (flicker) as they come up.
+        controller.addListener(event -> {
+            if (SwingUtilities.isEventDispatchThread()) {
+                onTabEvent(event);
+            } else {
+                SwingUtilities.invokeLater(() -> onTabEvent(event));
+            }
+        });
         engine.addStateListener(state -> SwingUtilities.invokeLater(() -> onEngineState(state)));
         // The JCEF setup dialog belongs to the moment the user actually opens the
         // browser tab, not to app boot: the engine may already be FAILED while the
@@ -204,6 +197,17 @@ public final class BrowserPanel extends JPanel {
                     && engine.getState() == BrowserEngineState.FAILED
                     && engine.getFailureKind() == BrowserEngine.FailureKind.MISSING_JCEF) {
                 offerJcefDialogIfVisible();
+            }
+        });
+        // Windowed-JCEF flicker fix: restore the initial tabs only while the
+        // browserTabs is actually showing (laid out + painted). A windowed JCEF
+        // canvas created while its container is hidden keeps a wrong native
+        // window size (flicker + a mis-placed native window that disturbs the
+        // surrounding UI). Deferred to the next EDT pass so the pane's layout has
+        // settled before the native canvases are created.
+        browserTabs.addHierarchyListener(e -> {
+            if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0 && browserTabs.isShowing()) {
+                SwingUtilities.invokeLater(this::restoreInitialTabsWhenVisible);
             }
         });
 
@@ -253,18 +257,14 @@ public final class BrowserPanel extends JPanel {
                     () -> controller.activateIndex(index));
         }
         bind(im, am, "browser.gotoLast", KeyStroke.getKeyStroke("ctrl 9"), () -> controller.activateLast());
-        bind(im, am, "browser.focusOmnibox", KeyStroke.getKeyStroke("ctrl L"), toolbar::focusOmnibox);
+        bind(im, am, "browser.focusOmnibox", KeyStroke.getKeyStroke("ctrl L"),
+                () -> activeView().ifPresent(BrowserTabView::focusOmnibox));
         // F3 (H4): Ctrl+H opens the history page in the active tab.
         bind(im, am, "browser.history", KeyStroke.getKeyStroke("ctrl H"),
-                () -> {
-                    String tabId = activeTabId();
-                    if (tabId != null) {
-                        registry.navigate(tabId, "signum://history");
-                    }
-                });
+                () -> activeView().ifPresent(v -> v.navigate("signum://history")));
         // F4 (B1): Ctrl+D toggles the active page's bookmark (the star).
         bind(im, am, "browser.toggleBookmark", KeyStroke.getKeyStroke("ctrl D"),
-                toolbar::toggleBookmark);
+                () -> activeView().ifPresent(BrowserTabView::toggleBookmark));
         // F4 (B4): Ctrl+Shift+B shows/hides the bookmarks bar (persisted).
         bind(im, am, "browser.toggleBookmarksBar", KeyStroke.getKeyStroke("ctrl shift B"),
                 () -> {
@@ -274,14 +274,19 @@ public final class BrowserPanel extends JPanel {
                     settings.setShowBookmarksBar(show);
                     settingsRepository.save(settings);
                 });
-        bind(im, am, "browser.reload", KeyStroke.getKeyStroke("F5"), () -> registry.reload(activeTabId()));
+        bind(im, am, "browser.reload", KeyStroke.getKeyStroke("F5"),
+                () -> activeView().ifPresent(BrowserTabView::reload));
         // F5 (D3): Ctrl+J toggles the download shelf (Appendix B).
         bind(im, am, "browser.toggleDownloads", KeyStroke.getKeyStroke("ctrl J"),
                 downloadShelf::toggle);
-        bind(im, am, "browser.reloadAlt", KeyStroke.getKeyStroke("ctrl R"), () -> registry.reload(activeTabId()));
-        bind(im, am, "browser.back", KeyStroke.getKeyStroke("alt LEFT"), () -> registry.back(activeTabId()));
-        bind(im, am, "browser.forward", KeyStroke.getKeyStroke("alt RIGHT"), () -> registry.forward(activeTabId()));
-        bind(im, am, "browser.stop", KeyStroke.getKeyStroke("ESCAPE"), toolbar::onEscape);
+        bind(im, am, "browser.reloadAlt", KeyStroke.getKeyStroke("ctrl R"),
+                () -> activeView().ifPresent(BrowserTabView::reload));
+        bind(im, am, "browser.back", KeyStroke.getKeyStroke("alt LEFT"),
+                () -> activeView().ifPresent(BrowserTabView::back));
+        bind(im, am, "browser.forward", KeyStroke.getKeyStroke("alt RIGHT"),
+                () -> activeView().ifPresent(BrowserTabView::forward));
+        bind(im, am, "browser.stop", KeyStroke.getKeyStroke("ESCAPE"),
+                () -> activeView().ifPresent(BrowserTabView::onEscape));
         setFocusable(true);
     }
 
@@ -297,6 +302,11 @@ public final class BrowserPanel extends JPanel {
 
     private String activeTabId() {
         return controller.getActiveTab().map(BrowserTab::getId).orElse(null);
+    }
+
+    /** The self-contained view of the active tab (keyboard intents route to it). */
+    private Optional<BrowserTabView> activeView() {
+        return controller.getActiveTab().map(t -> tabViews.get(t.getId()));
     }
 
     /** The OS default downloads directory (D1 fallback, shown in the settings). */
@@ -496,34 +506,15 @@ public final class BrowserPanel extends JPanel {
             if (controller.getTab(tabId).isEmpty()) {
                 continue; // closed between the policy check and now
             }
-            registry.discard(tabId); // the engine is released
-            contentPanel.replaceBrowser(tabId, newDiscardPlaceholder());
+            BrowserTabView view = tabViews.get(tabId);
+            if (view != null) {
+                view.discard(); // the engine is released, the placeholder takes over
+            }
             controller.setDiscarded(tabId, true); // UPDATED → the tab strip refreshes
         }
         if (!discardable.isEmpty()) {
             logger.info("Discarded {} inactive tab(s)", discardable.size());
         }
-    }
-
-    /** The stand-in shown for a discarded tab's content (T10). */
-    private JComponent newDiscardPlaceholder() {
-        JLabel label = new JLabel(I18n.get("browser.tab.discarded"), SwingConstants.CENTER);
-        label.setBorder(BorderFactory.createEmptyBorder(40, 20, 40, 20));
-        JPanel placeholder = new JPanel(new FlowLayout());
-        placeholder.setOpaque(false);
-        placeholder.add(label);
-        return placeholder;
-    }
-
-    /**
-     * F9 (T10): switching back to a discarded tab recreates its engine
-     * transparently — the registry lazily rebuilds the browser from the
-     * tab's URL and the content panel swaps the placeholder back.
-     */
-    private void restoreDiscarded(BrowserTab tab) {
-        JComponent component = (JComponent) registry.component(tab.getId());
-        contentPanel.replaceBrowser(tab.getId(), component);
-        controller.setDiscarded(tab.getId(), false);
     }
 
     // ------------------------------------------------------------------
@@ -533,10 +524,12 @@ public final class BrowserPanel extends JPanel {
     private void onEngineState(BrowserEngineState state) {
         switch (state) {
             case READY -> {
-                if (!initialTabsRestored) {
-                    initialTabsRestored = true;
-                    restoreInitialTabs(); // T8
-                }
+                // Windowed-JCEF flicker fix: only show the content card. The
+                // initial tabs are restored by the browserTabs HierarchyListener
+                // below, and ONLY once that pane is actually showing — a windowed
+                // JCEF canvas created while its container is hidden keeps a wrong
+                // native window size (persistent repaint flicker + a mis-placed
+                // native window that disturbs the surrounding UI / steals hover).
                 cards.show(cardHost, CARD_CONTENT);
             }
             case FAILED -> {
@@ -557,7 +550,10 @@ public final class BrowserPanel extends JPanel {
                     discardTimer = null;
                 }
                 sessionStore.save(controller.snapshot()); // persist before teardown
-                registry.clear();
+                tabViews.values().forEach(BrowserTabView::dispose);
+                tabViews.clear();
+                browserTabs.clearAll(); // the tabs + the per-tab strip state
+                browserTabs.dispose(); // the spinner animation timer
                 InternalPage.registerRenderer(HistoryPageRenderer.PAGE, null);
                 InternalPage.registerRenderer(NewTabPageRenderer.PAGE, null);
                 InternalPage.registerRenderer(BookmarkPageRenderer.PAGE, null);
@@ -605,6 +601,23 @@ public final class BrowserPanel extends JPanel {
     }
 
     /**
+     * Windowed-JCEF flicker fix: restores the initial tabs once, but only while
+     * the browserTabs is actually showing (see its HierarchyListener). A windowed
+     * JCEF canvas created while its container is hidden keeps a wrong native
+     * window size -> persistent repaint flicker and a mis-placed native window
+     * that disturbs the surrounding UI. If the engine became READY while the
+     * browser module was hidden, the restore is deferred until the pane is shown.
+     */
+    private void restoreInitialTabsWhenVisible() {
+        if (initialTabsRestored || engine.getState() != BrowserEngineState.READY
+                || !browserTabs.isShowing()) {
+            return;
+        }
+        initialTabsRestored = true;
+        restoreInitialTabs(); // T8 — the canvases are created while the pane is showing
+    }
+
+    /**
      * F2.1: offers the one-shot JCEF setup dialog, but only while the browser
      * tab is actually visible and it has not been offered yet (user request:
      * the install popup appears when the user clicks the browser tab, not at
@@ -626,29 +639,66 @@ public final class BrowserPanel extends JPanel {
     private void onTabEvent(TabEvent event) {
         switch (event.getType()) {
             case ADDED -> {
-                JComponent component = (JComponent) registry.component(event.getTab().getId());
-                contentPanel.addBrowser(event.getTab().getId(), component);
-                tabBar.animateBirth(event.getTab().getId());
-                tabBar.refresh();
+                BrowserTab tab = event.getTab();
+                // The tab is an entity: its own toolbar (omnibox) + CEF
+                // browser live in one self-contained view hosted as the
+                // tab pane's tab component.
+                BrowserTabView view = new BrowserTabView(tab, controller,
+                        this::createBrowser, settingsRepository::load,
+                        historyStore, bookmarkStore);
+                tabViews.put(tab.getId(), view);
+                browserTabs.addTab(tab, view);
+                // Windowed-JCEF fix: the startup session restore creates the
+                // tabs while the content card is not showing (it is switched to
+                // only after the restore). A windowed canvas created in that
+                // state keeps a mis-sized native window that flickers; flag it
+                // so the view rebuilds its browser on the first show.
+                if (!browserTabs.isShowing()) {
+                    view.markCreatedWhileHidden();
+                }
+                // Bookmark changes refresh the shared bar and re-sync every
+                // tab's star (each toolbar watches the shared store view).
+                view.getToolbar().onBookmarksChanged(() -> {
+                    bookmarksBar.refresh();
+                    tabViews.values().forEach(v -> v.getToolbar().sync(v.getTab()));
+                });
             }
             case REMOVED -> {
-                registry.remove(event.getTab().getId());
-                contentPanel.removeBrowser(event.getTab().getId());
-                tabBar.refresh();
+                BrowserTabView view = tabViews.remove(event.getTab().getId());
+                if (view != null) {
+                    view.dispose(); // its listener + CEF browser go with it
+                }
+                browserTabs.removeTab(event.getTab().getId());
                 saveSessionSoon();
             }
-            case MOVED -> tabBar.refresh();
-            case UPDATED -> tabBar.refresh();
+            case MOVED -> browserTabs.refresh();
+            case UPDATED -> browserTabs.refresh();
             case ACTIVATED -> {
                 BrowserTab activated = event.getTab();
-                if (activated.isDiscarded()) {
-                    restoreDiscarded(activated); // F9 (T10): the transparent restore
+                BrowserTabView view = tabViews.get(activated.getId());
+                if (view != null) {
+                    // F9 (T10): the transparent restore — a discarded tab
+                    // gets its engine back before it is shown again
+                    if (activated.isDiscarded()) {
+                        view.activate();
+                        controller.setDiscarded(activated.getId(), false);
+                    }
+                    browserTabs.showTab(activated.getId());
                 }
-                tabBar.refresh();
-                contentPanel.showBrowser(activated.getId());
                 saveSessionSoon();
             }
         }
+    }
+
+    /**
+     * T9: one tab's CEF browser — the tab's view owns it for the tab's
+     * whole lifetime (created on ADDED, recreated on a T10 restore,
+     * disposed on REMOVED/shutdown).
+     */
+    private WebBrowserHost createBrowser(BrowserTab tab) {
+        return new WebBrowser(engine.createClient(), tab.getId(), controller,
+                tab.getUrl(), settingsRepository::load, historyStore,
+                downloadManager, activeDownloads);
     }
 
     /**

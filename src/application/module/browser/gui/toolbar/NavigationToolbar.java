@@ -1,9 +1,9 @@
 package application.module.browser.gui.toolbar;
 
 import application.module.browser.config.BrowserSettings;
-import application.module.browser.engine.WebBrowserRegistry;
 import application.module.browser.engine.scheme.SettingsPageRenderer;
 import application.module.browser.engine.security.CertificateInspector;
+import application.module.browser.gui.BrowserTabView;
 import application.module.browser.gui.bookmarks.BookmarkDialog;
 import application.module.browser.gui.dialogs.CertificateDetailsDialog;
 import application.module.browser.model.bookmarks.Bookmark;
@@ -11,10 +11,10 @@ import application.module.browser.model.bookmarks.BookmarkStore;
 import application.module.browser.model.history.HistoryEntry;
 import application.module.browser.model.history.HistoryStore;
 import application.module.browser.model.tab.BrowserTab;
-import application.module.browser.model.tab.TabController;
-import application.module.browser.model.tab.TabEvent;
 import application.module.browser.util.UrlUtils;
+import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
+import application.utils.gui.HoverScaleIcon;
 import application.utils.i18n.I18n;
 
 import java.awt.AlphaComposite;
@@ -33,28 +33,35 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
+import jiconfont.icons.font_awesome.FontAwesome;
+import jiconfont.swing.IconFontSwing;
+import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.UIManager;
 
 /**
- * The navigation toolbar of the browser main tab (F2): back/forward/reload-
- * stop/home buttons (N3, N5), the {@link Omnibox} (N1/N2), the
+ * The navigation toolbar of <em>one</em> browser tab (F2): back/forward/
+ * reload-stop/home buttons (N3, N5), the {@link Omnibox} (N1/N2), the
  * {@link SecurityIcon} (S1/S2/S4) and the thin indeterminate progress bar
  * (N4/A3) below the row.
  * <p>
- * Pure view: every state comes from the {@link TabController} (tab events,
- * pumped to the EDT) and every intent goes through the controller or the
- * {@link WebBrowserRegistry}. Must be constructed on the EDT.
+ * One toolbar exists per tab (owned by the tab's {@code BrowserTabView}): it
+ * renders <em>its</em> tab's state and routes every intent to <em>its</em>
+ * tab's browser — there is no shared toolbar that mirrors the active tab.
+ * Pure view: its state is refreshed by {@link #sync(BrowserTab)} (driven by
+ * the owning view on the tab's events, on the EDT). Must be constructed on
+ * the EDT.
  */
 public final class NavigationToolbar extends JPanel {
 
-    private final TabController controller;
-    private final WebBrowserRegistry registry;
+    /** The owning tab view — the navigation intents (its own tab's browser). */
+    private final BrowserTabView view;
+    /** The model of the tab this toolbar belongs to (mutated in place). */
+    private final BrowserTab tab;
     private final Supplier<BrowserSettings> settings;
     private final HistoryStore history;
     private final BookmarkStore bookmarks;
@@ -68,37 +75,43 @@ public final class NavigationToolbar extends JPanel {
     /** F4 (B1): the star button of the omnibox row (fade-in on toggle). */
     private final StarButton star;
     private final CertificateInspector inspector = new CertificateInspector();
+    /**
+     * The toolbar renders its own FontAwesome glyphs: the font must be
+     * registered with IconFontSwing before the first icon build (in the app
+     * some other icon does it first; a standalone toolbar — unit tests —
+     * must not depend on that side effect). The same once-only guard
+     * GuiIcons uses (double registration corrupts the glyph metrics).
+     */
+    private static final java.util.concurrent.atomic.AtomicBoolean FONT_REGISTERED =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
     private final ExecutorService certExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "browser-cert-inspector");
         t.setDaemon(true);
         return t;
     });
 
-    public NavigationToolbar(TabController controller, WebBrowserRegistry registry,
+    public NavigationToolbar(BrowserTabView view, BrowserTab tab,
                              Supplier<BrowserSettings> settings, HistoryStore history,
                              BookmarkStore bookmarks) {
         super(new BorderLayout(0, 2));
-        this.controller = controller;
-        this.registry = registry;
+        this.view = view;
+        this.tab = tab;
         this.settings = settings;
         this.history = history;
         this.bookmarks = bookmarks;
 
-        this.back = flatNavButton("\u25C0", I18n.get("browser.nav.back.tooltip"));
-        this.forward = flatNavButton("\u25B6", I18n.get("browser.nav.forward.tooltip"));
-        this.reloadStop = flatNavButton("\u27F3", I18n.get("browser.nav.reload.tooltip"));
-        JButton home = flatNavButton("\u2302", I18n.get("browser.nav.home.tooltip"));
-        back.addActionListener(e -> registry.back(activeTabId()));
-        forward.addActionListener(e -> registry.forward(activeTabId()));
+        this.back = flatNavButton(FontAwesome.ANGLE_LEFT, I18n.get("browser.nav.back.tooltip"));
+        this.forward = flatNavButton(FontAwesome.ANGLE_RIGHT, I18n.get("browser.nav.forward.tooltip"));
+        this.reloadStop = flatNavButton(FontAwesome.REFRESH, I18n.get("browser.nav.reload.tooltip"));
+        JButton home = flatNavButton(FontAwesome.HOME, I18n.get("browser.nav.home.tooltip"));
+        back.addActionListener(e -> view.back());
+        forward.addActionListener(e -> view.forward());
         reloadStop.addActionListener(e -> {
-            String tabId = activeTabId();
-            controller.getTab(tabId).ifPresent(tab -> {
-                if (tab.isLoading()) {
-                    registry.stop(tabId);
-                } else {
-                    registry.reload(tabId);
-                }
-            });
+            if (tab.isLoading()) {
+                view.stop();
+            } else {
+                view.reload();
+            }
         });
         home.addActionListener(e -> navigateToHomepage());
 
@@ -118,14 +131,9 @@ public final class NavigationToolbar extends JPanel {
         star.setFocusable(false);
         star.addActionListener(e -> toggleBookmark());
 
-        // F6: the settings gear — opens signum://settings in the active tab.
-        JButton settingsButton = flatNavButton("\u2699", I18n.get("browser.nav.settings.tooltip"));
-        settingsButton.addActionListener(e -> {
-            String tabId = activeTabId();
-            if (tabId != null) {
-                registry.navigate(tabId, SettingsPageRenderer.PAGE_URL);
-            }
-        });
+        // F6: the settings gear — opens signum://settings in this tab.
+        JButton settingsButton = flatNavButton(FontAwesome.COG, I18n.get("browser.nav.settings.tooltip"));
+        settingsButton.addActionListener(e -> view.navigate(SettingsPageRenderer.PAGE_URL));
 
         JPanel east = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         east.setOpaque(false);
@@ -143,10 +151,12 @@ public final class NavigationToolbar extends JPanel {
         this.progressBar = new ProgressBar();
         add(progressBar, BorderLayout.SOUTH);
 
-        controller.addListener(event ->
-                SwingUtilities.invokeLater(() -> onTabEvent(event)));
+        // No controller listener of its own — the owning view drives
+        // sync(tab) on this tab's events (the toolbar is per-tab, not
+        // active-tab-driven).
         back.setEnabled(false);
         forward.setEnabled(false);
+        sync(tab);
     }
 
     // ------------------------------------------------------------------
@@ -159,16 +169,21 @@ public final class NavigationToolbar extends JPanel {
     }
 
     /**
-     * F4 (B1): the star button / Ctrl+D — toggles the active page's bookmark:
+     * Tab-switch hook: dismisses the omnibox's suggestion popup if it is open,
+     * so it never lingers over another tab's content when this tab is switched
+     * away from. Idempotent.
+     */
+    public void hideOmniboxPopup() {
+        omnibox.dismissPopup();
+    }
+
+    /**
+     * F4 (B1): the star button / Ctrl+D — toggles this tab's page bookmark:
      * unbookmarked pages are saved immediately (name = the page title) with
      * a fade-in animation; an already-bookmarked page opens the edit dialog
      * (rename/move/remove). Internal and non-web pages are not bookmarkable.
      */
     public void toggleBookmark() {
-        BrowserTab tab = controller.getActiveTab().orElse(null);
-        if (tab == null) {
-            return;
-        }
         String url = tab.getUrl();
         String scheme = UrlUtils.scheme(url);
         if (!"http".equals(scheme) && !"https".equals(scheme)) {
@@ -191,7 +206,7 @@ public final class NavigationToolbar extends JPanel {
                 bookmarksChanged.run();
             }
         }
-        syncForActive();
+        sync(tab);
     }
 
     /**
@@ -206,31 +221,26 @@ public final class NavigationToolbar extends JPanel {
 
     /**
      * Esc routing (N9): the omnibox consumes the key when it has focus
-     * (closes the popup); otherwise the toolbar stops the active load.
+     * (closes the popup); otherwise the toolbar stops this tab's load.
      */
     public void onEscape() {
         if (omnibox.consumeEscape()) {
             return;
         }
-        registry.stop(activeTabId());
+        view.stop();
     }
 
     private void navigate(String input) {
         String target = UrlUtils.normalize(input, settings.get().getSearchEngineTemplate());
-        if (target == null) {
-            return;
-        }
-        String tabId = activeTabId();
-        if (tabId != null) {
-            registry.navigate(tabId, target);
+        if (target != null) {
+            view.navigate(target);
         }
     }
 
     private void navigateToHomepage() {
-        String tabId = activeTabId();
         String homepage = settings.get().getHomepage();
-        if (tabId != null && homepage != null && !homepage.isBlank()) {
-            registry.navigate(tabId, homepage);
+        if (homepage != null && !homepage.isBlank()) {
+            view.navigate(homepage);
         }
     }
 
@@ -294,38 +304,19 @@ public final class NavigationToolbar extends JPanel {
     }
 
     // ------------------------------------------------------------------
-    // Tab events (controller → toolbar, on the EDT)
+    // State sync (owning view → toolbar, on the EDT)
     // ------------------------------------------------------------------
 
-    private void onTabEvent(TabEvent event) {
-        switch (event.getType()) {
-            case ADDED, ACTIVATED -> syncForActive();
-            case UPDATED -> {
-                BrowserTab active = controller.getActiveTab().orElse(null);
-                if (active != null && active.getId().equals(event.getTab().getId())) {
-                    syncForActive();
-                }
-            }
-            case REMOVED -> syncForActive();
-            case MOVED -> {
-                // the toolbar does not render tab order
-            }
-        }
-    }
-
-    /** Refreshes every toolbar widget from the active tab's model state. */
-    private void syncForActive() {
-        BrowserTab tab = controller.getActiveTab().orElse(null);
-        if (tab == null) {
-            back.setEnabled(false);
-            forward.setEnabled(false);
-            progressBar.setActive(false);
-            return;
-        }
+    /**
+     * Refreshes every toolbar widget from the tab's model state. Driven by
+     * the owning {@code BrowserTabView} on this tab's ADDED/UPDATED/ACTIVATED
+     * events — the toolbar only ever renders its own tab.
+     */
+    public void sync(BrowserTab tab) {
         omnibox.showUrl(tab.getUrl());
         back.setEnabled(tab.canGoBack());
         forward.setEnabled(tab.canGoForward());
-        // F4 (B1): the star mirrors the active page's bookmark state (web pages only)
+        // F4 (B1): the star mirrors this page's bookmark state (web pages only)
         String scheme = UrlUtils.scheme(tab.getUrl());
         boolean bookmarkable = "http".equals(scheme) || "https".equals(scheme);
         star.setVisible(bookmarkable);
@@ -333,10 +324,10 @@ public final class NavigationToolbar extends JPanel {
             star.setState(!bookmarks.findByUrl(tab.getUrl()).isEmpty());
         }
         if (tab.isLoading()) {
-            reloadStop.setText("\u2715");
+            installIcon(reloadStop, FontAwesome.STOP);
             reloadStop.setToolTipText(I18n.get("browser.nav.stop.tooltip"));
         } else {
-            reloadStop.setText("\u27F3");
+            installIcon(reloadStop, FontAwesome.REFRESH);
             reloadStop.setToolTipText(I18n.get("browser.nav.reload.tooltip"));
         }
         securityIcon.update(tab.getSslStatus(), tab.getUrl(), tab.isMixedContent());
@@ -345,25 +336,45 @@ public final class NavigationToolbar extends JPanel {
         progressBar.setActive(tab.isLoading());
     }
 
-    private String activeTabId() {
-        return controller.getActiveTab().map(BrowserTab::getId).orElse(null);
+    /**
+     * Tab close: stops the widget animations and uninstalls the omnibox's
+     * global dismissal hooks (one set exists per tab — a closing tab must
+     * not leak the toolkit listener).
+     */
+    public void dispose() {
+        titleLabel.stopAnimation();
+        star.stopAnimation();
+        omnibox.dispose();
     }
 
     /**
-     * A compact toolbar button in the application's native L&F style (the
-     * glyphs are font-based, sized by the UI font — no custom painting).
+     * A compact icon-only navigation button styled exactly like the node
+     * profile toolbar (NodeToolbar#createIconButton): a FontAwesome glyph at
+     * the app's toolbar icon size (Appearance settings) that grows on hover
+     * via {@link HoverScaleIcon} — the same "icon grows on rollover, no
+     * layout shift" behaviour the node start/pause buttons use.
      */
-    private static JButton flatNavButton(String text, String tooltip) {
-        JButton button = new JButton(text);
-        // The glyph follows the app's toolbar icon size (Appearance settings) —
-        // the same convention as the other modules' FontAwesome icons — instead
-        // of the raw (smaller) button font.
-        button.setFont(button.getFont().deriveFont(GuiConstants.getToolBarIconSize()));
+    private static JButton flatNavButton(FontAwesome iconCode, String tooltip) {
+        JButton button = new JButton();
+        installIcon(button, iconCode);
         button.setFocusable(false);
-        button.setMargin(new java.awt.Insets(0, 6, 0, 6));
-        button.setPreferredSize(new Dimension(30, 30));
+        button.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
+        button.setOpaque(false);
+        button.setContentAreaFilled(false);
         button.setToolTipText(tooltip);
         return button;
+    }
+
+    /** Sets the button glyph, keeping the normal/rollover (hover-grow) pair. */
+    private static void installIcon(JButton button, FontAwesome iconCode) {
+        if (FONT_REGISTERED.compareAndSet(false, true)) {
+            IconFontSwing.register(FontAwesome.getIconFont());
+        }
+        float iconSize = GuiConstants.getToolBarIconSize();
+        HoverScaleIcon.install(button,
+                IconFontSwing.buildIcon(iconCode, iconSize, GuiColors.getButtonIcon()),
+                IconFontSwing.buildIcon(iconCode, iconSize * HoverScaleIcon.DEFAULT_SCALE,
+                        GuiColors.getButtonIcon()));
     }
 
     /**
@@ -381,6 +392,13 @@ public final class NavigationToolbar extends JPanel {
             // the UI's default label font (app-consistent)
             setForeground(faint());
             alpha = (int) (opacity * 255);
+        }
+
+        /** Tab close: the timer must not outlive the toolbar. */
+        void stopAnimation() {
+            if (animation != null) {
+                animation.stop();
+            }
         }
 
         void setTextAnimated(String text) {
@@ -502,6 +520,13 @@ public final class NavigationToolbar extends JPanel {
             setFocusable(false);
             setMargin(new java.awt.Insets(0, 6, 0, 6));
             setPreferredSize(new Dimension(30, 30));
+        }
+
+        /** Tab close: the timer must not outlive the toolbar. */
+        void stopAnimation() {
+            if (animation != null) {
+                animation.stop();
+            }
         }
 
         /** Fills/empties the star without the animation (tab switching). */

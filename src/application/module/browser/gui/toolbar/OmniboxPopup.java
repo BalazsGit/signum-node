@@ -7,15 +7,19 @@ import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.RenderingHints;
 import java.awt.Window;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.geom.Arc2D;
 import java.awt.geom.GeneralPath;
 import java.util.List;
+import java.util.function.Consumer;
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
 import javax.swing.JComponent;
 import javax.swing.JList;
 import javax.swing.JWindow;
 import javax.swing.ListCellRenderer;
+import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.UIManager;
 
@@ -73,6 +77,8 @@ public final class OmniboxPopup extends JWindow {
     private final Timer slideTimer;
     private int slideOffset;
     private Point targetLocation;
+    /** N2: reports a suggestion the user clicked with the mouse (wired by the omnibox). */
+    private Consumer<Suggestion> selectionAction;
 
     public OmniboxPopup(Window owner) {
         super(owner);
@@ -93,6 +99,26 @@ public final class OmniboxPopup extends JWindow {
         list.setCellRenderer(new SuggestionRenderer());
         list.setSelectionBackground(accent());
         add(list);
+
+        // A click on a row selects that suggestion (the omnibox navigates and
+        // dismisses the popup). The list is non-focusable, so the press lands
+        // here while the omnibox field keeps the keyboard focus.
+        list.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (!SwingUtilities.isLeftMouseButton(e)) {
+                    return;
+                }
+                int index = list.locationToIndex(e.getPoint());
+                if (index < 0 || index >= list.getModel().getSize()) {
+                    return;
+                }
+                Consumer<Suggestion> action = selectionAction;
+                if (action != null) {
+                    action.accept(list.getModel().getElementAt(index));
+                }
+            }
+        });
 
         // A5: the popup slides in 4 px from above while fading in.
         slideTimer = new Timer(FADE_STEP_MS, e -> {
@@ -152,6 +178,16 @@ public final class OmniboxPopup extends JWindow {
             list.setSelectedIndex(index);
             list.ensureIndexIsVisible(index);
         }
+    }
+
+    /**
+     * Sets the callback invoked when the user clicks a suggestion row. The
+     * omnibox wires it to navigate to the row's target and dismiss the popup.
+     *
+     * @param action the per-row click handler (may be {@code null}: clicks no-op)
+     */
+    public void setSelectionAction(Consumer<Suggestion> action) {
+        this.selectionAction = action;
     }
 
     /** @return the suggestion at the given index, or null. */

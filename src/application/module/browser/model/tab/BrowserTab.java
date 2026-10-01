@@ -8,9 +8,10 @@ import java.util.UUID;
  * One browser tab — the pure state model (plan §4.4).
  * <p>
  * No Swing and no {@code org.cef} imports by design (plan §5.2): the CEF
- * objects live in the engine layer ({@code WebBrowserRegistry}), and the GUI
- * reads this model through {@link TabEvent}s. All mutations go through
- * {@link TabController} so every change is observable as an event (SSOT).
+ * objects live in the engine layer ({@code WebBrowser}, owned by the tab's
+ * GUI view), and the GUI reads this model through {@link TabEvent}s. All
+ * mutations go through {@link TabController} so every change is observable
+ * as an event (SSOT).
  */
 public final class BrowserTab {
 
@@ -182,7 +183,7 @@ public final class BrowserTab {
     /**
      * Test hook (public, unlike the package-private hooks above): creates a tab
      * in the given loading state for the cross-package tab-strip rendering
-     * tests (the {@code ChromeTabRenderer} loading-mark animation).
+     * tests (loading-spinner vs. placeholder icon).
      */
     public static BrowserTab forTest(String initialUrl, boolean loading) {
         BrowserTab tab = new BrowserTab(initialUrl);

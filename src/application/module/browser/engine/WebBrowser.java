@@ -22,7 +22,7 @@ import java.util.function.Supplier;
  * and disposed on the EDT. Disposal removes the component from its parent,
  * force-closes the browser and releases the client.
  */
-public final class WebBrowser {
+public final class WebBrowser implements WebBrowserHost {
 
     private static final Dimension PREFERRED_SIZE = new Dimension(640, 480);
 
@@ -30,7 +30,7 @@ public final class WebBrowser {
     private final CefBrowser browser;
     private final Component uiComponent;
 
-    WebBrowser(CefClient client, String tabId, TabController controller, String initialUrl,
+    public WebBrowser(CefClient client, String tabId, TabController controller, String initialUrl,
                Supplier<BrowserSettings> settings, HistoryStore history,
                DownloadManager downloads, ActiveDownloadRegistry activeDownloads) {
         this.client = client;
@@ -48,7 +48,8 @@ public final class WebBrowser {
         CefFocusGuard.watchComponent(uiComponent);
     }
 
-    /** @return the persistent AWT component shown in the content panel. */
+    /** @return the persistent AWT component shown in the tab's content slot. */
+    @Override
     public Component getUiComponent() {
         return uiComponent;
     }
@@ -57,27 +58,32 @@ public final class WebBrowser {
         return browser.getURL();
     }
 
+    @Override
     public void loadUrl(String url) {
         browser.loadURL(url);
     }
 
+    @Override
     public void goBack() {
         if (browser.canGoBack()) {
             browser.goBack();
         }
     }
 
+    @Override
     public void goForward() {
         if (browser.canGoForward()) {
             browser.goForward();
         }
     }
 
+    @Override
     public void reload() {
         browser.reload();
     }
 
     /** N9: Esc — stops the current load. */
+    @Override
     public void stop() {
         browser.stopLoad();
     }
@@ -97,6 +103,7 @@ public final class WebBrowser {
      * CEF close-callback race (a second call on a closed browser is a no-op
      * as far as the GUI is concerned).
      */
+    @Override
     public void dispose() {
         try {
             java.awt.Container parent = uiComponent.getParent();

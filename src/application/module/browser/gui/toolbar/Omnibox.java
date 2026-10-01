@@ -57,8 +57,17 @@ public final class Omnibox extends JPanel {
     /** N10: the omnibox's own input history (Up/Down while the popup is closed). */
     private final OmniboxInputHistory inputHistory = new OmniboxInputHistory();
     private boolean updatingText;
+    /**
+     * True when the user modified the field text since the last mirror
+     * ({@link #showUrl}): then the field holds a real query that a tab switch
+     * must not clobber. A focused-but-unedited field (Ctrl+L, a plain click)
+     * still follows the active tab.
+     */
+    private boolean userEdited;
     /** Dismisses the popup when a browser takes the CEF keyboard focus (a page click). */
     private final Consumer<CefBrowser> cefFocusGainedListener = browser -> hidePopup();
+    /** The toolkit mouse listener of {@link #installDismissalHooks()} (removal on {@link #dispose()}). */
+    private AWTEventListener outsidePressListener;
 
     /**
      * @param navigateAction  invoked with the raw text (Enter) or a suggestion
@@ -86,6 +95,7 @@ public final class Omnibox extends JPanel {
             @Override
             public void insertUpdate(DocumentEvent e) {
                 if (!updatingText) {
+                    userEdited = true;
                     refreshPopup();
                 }
             }
@@ -93,6 +103,7 @@ public final class Omnibox extends JPanel {
             @Override
             public void removeUpdate(DocumentEvent e) {
                 if (!updatingText) {
+                    userEdited = true;
                     refreshPopup();
                 }
             }
@@ -106,7 +117,10 @@ public final class Omnibox extends JPanel {
             @Override
             public void focusGained(FocusEvent e) {
                 field.selectAll(); // Chrome: focusing the bar selects the whole URL
-                refreshPopup();
+                // Do not auto-open the suggestion popup on focus: a tab switch
+                // can move the keyboard focus into this field, and the dropdown
+                // must not pop open on a tab change. It opens on real text entry
+                // instead (the document listener above calls refreshPopup()).
             }
 
             @Override
@@ -124,9 +138,7 @@ public final class Omnibox extends JPanel {
                             OmniboxPopup.Suggestion selected =
                                     popup.suggestionAt(popup.getSelectedIndex());
                             if (selected != null) {
-                                inputHistory.commit(selected.getTarget()); // N10
-                                navigateAction.accept(selected.getTarget());
-                                field.setText(selected.getTarget());
+                                selectSuggestion(selected);
                                 return;
                             }
                         }
@@ -170,6 +182,7 @@ public final class Omnibox extends JPanel {
         if (popup == null) {
             java.awt.Container owner = getTopLevelAncestor();
             popup = new OmniboxPopup(owner instanceof Window w ? w : null);
+            popup.setSelectionAction(this::selectSuggestion); // a row click navigates
         }
         return popup;
     }
@@ -202,16 +215,22 @@ public final class Omnibox extends JPanel {
     }
 
     /**
-     * Mirrors the active tab's URL into the field (tab switch, navigation)
-     * without stealing the user's input while the field is focused.
+     * Mirrors the active tab's URL into the field (tab switch, navigation).
+     * The mirror is skipped only when the field is focused <em>and</em> the
+     * user actually edited it ({@link #userEdited}): a focused but unedited
+     * field (Ctrl+L, a plain click) must follow the tab, otherwise clicking
+     * a tab while the field has focus leaves the previous tab's URL behind.
      */
     public void showUrl(String url) {
-        if (hasFieldFocus()) {
+        if (hasFieldFocus() && userEdited) {
             return;
         }
+        hidePopup(); // the suggestions belonged to the previous text
         updatingText = true;
+        userEdited = false;
         try {
             field.setText(url == null ? "" : url);
+            field.setCaretPosition(field.getText().length());
         } finally {
             updatingText = false;
         }
@@ -245,6 +264,32 @@ public final class Omnibox extends JPanel {
     }
 
     /**
+     * Public dismissal hook (tab switch): hides the suggestion popup if it is
+     * open. The owning tab view calls this when the tab is switched away, so a
+     * popup can never linger over another tab's content. Idempotent.
+     */
+    public void dismissPopup() {
+        hidePopup();
+    }
+
+    /**
+     * Navigates to a chosen suggestion (Enter on the highlighted row, or a
+     * mouse click on a row): dismisses the popup, commits the target to the
+     * input history and loads it, then mirrors the target into the field.
+     */
+    private void selectSuggestion(OmniboxPopup.Suggestion suggestion) {
+        hidePopup();
+        inputHistory.commit(suggestion.getTarget()); // N10
+        navigateAction.accept(suggestion.getTarget());
+        updatingText = true; // the mirror must not count as user input
+        try {
+            field.setText(suggestion.getTarget());
+        } finally {
+            updatingText = false;
+        }
+    }
+
+    /**
      * Installs the hooks that dismiss the suggestion popup when the user moves
      * out of the omnibox. The field's {@code focusLost} already covers ordinary
      * AWT focus changes (another focusable component, window deactivation);
@@ -257,8 +302,9 @@ public final class Omnibox extends JPanel {
      *       field's AWT focus intact, so a global press listener dismisses the
      *       popup when the press lands outside it and the field.</li>
      * </ul>
-     * The omnibox is a long-lived singleton (one per browser panel), so the
-     * hooks are installed once and never removed.
+     * The omnibox is long-lived (one per tab, for the tab's whole lifetime),
+     * so the hooks are installed once at construction and removed again by
+     * {@link #dispose()} when the tab closes.
      */
     private void installDismissalHooks() {
         CefFocusGuard.addFocusGainedListener(cefFocusGainedListener);
@@ -285,6 +331,20 @@ public final class Omnibox extends JPanel {
         };
         Toolkit.getDefaultToolkit().addAWTEventListener(outsidePress,
                 AWTEvent.MOUSE_EVENT_MASK);
+        outsidePressListener = outsidePress;
+    }
+
+    /**
+     * Tab close: removes the global dismissal hooks (the CEF focus-gained
+     * listener and the toolkit mouse listener) so a closed tab leaves no
+     * listener behind. Idempotent.
+     */
+    public void dispose() {
+        CefFocusGuard.removeFocusGainedListener(cefFocusGainedListener);
+        if (outsidePressListener != null) {
+            Toolkit.getDefaultToolkit().removeAWTEventListener(outsidePressListener);
+            outsidePressListener = null;
+        }
     }
 
     private void moveSelection(int delta) {
