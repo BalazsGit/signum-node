@@ -65,8 +65,6 @@ public class NodePanel extends JPanel  {
      * default profile) as a popup, so no dedicated "+" tab is needed.
      */
     private final JButton newProfileButton = buildNewProfileButton();
-    /** Fixed profile tab width (px): tabs never stretch to fill the window (the browser strip's policy). */
-    private static final int TAB_WIDTH = 220;
 
     /** Maps profile name -> actual NodeProfilePanel (after lazy-load) */
     private final Map<String, NodeProfilePanel> loadedProfilePanels = new LinkedHashMap<>();
@@ -121,7 +119,7 @@ public class NodePanel extends JPanel  {
             }
         };
         // Apply application-wide tab layout policy from GuiManager (global, not explicit).
-        // (SCROLL by default — the same overflow policy the browser tab strip uses.)
+        // (SCROLL by default — the same overflow policy the other JTabbedPanes use.)
         GuiUtils.applyDefaultTabLayoutPolicy(profileTabbedPane);
         GuiFontManager.applyDefaultFont(profileTabbedPane);
         applyProfileTabStripAppearance();
@@ -572,9 +570,11 @@ public class NodePanel extends JPanel  {
     // ── New-profile "+" trailing button + close "X" (new-browsertab pattern) ──
 
     /**
-     * Applies the new-browsertab pattern to the profile tab strip (the same client-property
-     * setup the browser's {@code BrowserTabPane} uses): a native per-tab close "X", fixed-width
-     * tabs, and the new-profile "+" pinned to the end of the row as the trailing component.
+     * Applies the new-browsertab pattern to the profile tab strip: a native per-tab close "X"
+     * and the new-profile "+" pinned to the end of the row as the trailing component. The tab
+     * sizing follows the app-wide convention (preferred width, {@code SCROLL} overflow) rather
+     * than a fixed width, so the profile tabs match the other JTabbedPanes (logging/console/
+     * configuration).
      */
     private void applyProfileTabStripAppearance() {
         // Native per-tab close "X" (FlatLaf): clicking the "X" asks to delete the profile
@@ -588,10 +588,9 @@ public class NodePanel extends JPanel  {
                 deleteProfileTabFromUi(name);
             }
         });
-        // Fixed tab width: tabs never stretch to fill the window (the browser strip's policy);
-        // overflow is the L&F's SCROLL arrows.
-        profileTabbedPane.putClientProperty("JTabbedPane.minimumTabWidth", TAB_WIDTH);
-        profileTabbedPane.putClientProperty("JTabbedPane.maximumTabWidth", TAB_WIDTH);
+        // No fixed tab width: the profile tabs use the same app-wide preferred-width sizing as
+        // every other JTabbedPane (logging/console/configuration); overflow is the L&F's SCROLL
+        // arrows (GuiManager policy, SCROLL by default).
         // The new-profile "+" pinned to the left end of the trailing band, right after the last
         // tab (WEST, not CENTER: CENTER would stretch the button across the whole trailing band).
         JPanel plusWrap = new JPanel(new BorderLayout());

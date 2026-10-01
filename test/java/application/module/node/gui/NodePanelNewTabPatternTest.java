@@ -13,10 +13,11 @@ import org.junit.jupiter.api.Test;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Verifies that the Node panel's profile tab strip follows the new-browsertab pattern
- * (the same native FlatLaf client-property setup the browser's {@code BrowserTabPane}
- * uses): the new-profile "+" is the tab row's trailing component (not a dedicated "+"
- * tab), profile tabs are closable via the native "X", and the tabs are fixed-width.
+ * Verifies that the Node panel's profile tab strip follows the new-browsertab pattern: the
+ * new-profile "+" is the tab row's trailing component (not a dedicated "+" tab) and the
+ * profile tabs are closable via the native "X". The tab SIZING follows the app-wide
+ * convention (preferred width, no fixed tab width) rather than the browser strip's fixed
+ * width, so the profile tabs match the other JTabbedPanes (logging/console/configuration).
  * <p>
  * These client properties are set synchronously in the {@link NodePanel} constructor, so the
  * assertions are deterministic regardless of the (async) profile loading.
@@ -25,8 +26,8 @@ import java.util.concurrent.atomic.AtomicReference;
 class NodePanelNewTabPatternTest {
 
     @Test
-    @DisplayName("profile tab strip uses a trailing new-profile button, closable tabs and fixed width")
-    void profileTabStrip_usesTrailingPlus_closableTabs_fixedWidth() throws Exception {
+    @DisplayName("profile tab strip uses a trailing new-profile button and closable tabs, with app-wide sizing")
+    void profileTabStrip_usesTrailingPlus_closableTabs_appWideSizing() throws Exception {
         final AtomicReference<JTabbedPane> paneRef = new AtomicReference<>();
         final AtomicReference<Throwable> error = new AtomicReference<>();
 
@@ -55,10 +56,11 @@ class NodePanelNewTabPatternTest {
                 "profile tabs must be closable (native 'X')");
         assertNotNull(pane.getClientProperty("JTabbedPane.tabCloseCallback"),
                 "a close callback must be wired to the tab close 'X'");
-        // Fixed tab width (the browser strip's policy).
-        assertNotNull(pane.getClientProperty("JTabbedPane.minimumTabWidth"),
-                "the profile tabs must have a fixed width");
-        assertNotNull(pane.getClientProperty("JTabbedPane.maximumTabWidth"),
-                "the profile tabs must have a fixed width");
+        // No fixed tab width: the profile tabs follow the app-wide preferred-width sizing,
+        // like the other JTabbedPanes (logging/console/configuration).
+        assertNull(pane.getClientProperty("JTabbedPane.minimumTabWidth"),
+                "the profile tabs must not pin a fixed width (app-wide preferred-width sizing)");
+        assertNull(pane.getClientProperty("JTabbedPane.maximumTabWidth"),
+                "the profile tabs must not pin a fixed width (app-wide preferred-width sizing)");
     }
 }
