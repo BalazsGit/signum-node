@@ -80,6 +80,12 @@ public class BrowserModule implements Module {
         if (headless) {
             return;
         }
+        // T8: flush the debounced tab-session save BEFORE the engine goes down,
+        // so a restart restores the tabs the user actually had open (the
+        // 400 ms quiet timer would not survive the exit).
+        if (ui != null) {
+            ui.dispose();
+        }
         logger.info("Stopping browser engine...");
         engine.shutdown();
     }

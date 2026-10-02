@@ -715,4 +715,38 @@ public final class BrowserPanel extends JPanel {
         sessionSaveTimer.setRepeats(false);
         sessionSaveTimer.start();
     }
+
+    /**
+     * T8 (exit safety): flushes the debounced session save. The 400 ms quiet
+     * timer often does not survive an application exit or restart (the process
+     * goes before it fires), and the last tab state would be lost — the
+     * restarted app would then restore the stale session instead of the tabs
+     * the user closed with. Called by the module on {@code stop()}, before the
+     * engine goes down.
+     */
+    public void dispose() {
+        Runnable flush = () -> {
+            if (discardTimer != null) {
+                discardTimer.stop();
+                discardTimer = null;
+            }
+            if (sessionSaveTimer != null) {
+                sessionSaveTimer.stop();
+                sessionSaveTimer = null;
+            }
+            sessionStore.save(controller.snapshot());
+        };
+        if (SwingUtilities.isEventDispatchThread()) {
+            flush.run();
+        } else {
+            try {
+                SwingUtilities.invokeAndWait(flush);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (java.lang.reflect.InvocationTargetException e) {
+                logger.error("Could not flush the browser session on dispose: {}",
+                        e.getCause() != null ? e.getCause().toString() : e.toString());
+            }
+        }
+    }
 }
