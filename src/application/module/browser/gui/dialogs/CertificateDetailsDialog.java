@@ -10,9 +10,13 @@ import java.awt.Dialog;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Window;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.text.DateFormat;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import javax.swing.JButton;
 import javax.swing.JDialog;
@@ -39,7 +43,17 @@ public final class CertificateDetailsDialog extends JDialog {
     private static final String CARD_DETAILS = "details";
 
     /**
-     * Creates and shows the dialog (the inspection starts immediately).
+     * S2: the open dialogs keyed by the inspected URL (EDT-only state). A
+     * repeated click on the same lock must bring the already-open dialog to
+     * the front instead of opening another one (and re-running the
+     * handshake).
+     */
+    private static final Map<String, CertificateDetailsDialog> OPEN_BY_URL = new HashMap<>();
+
+    /**
+     * Creates and shows the dialog (the inspection starts immediately). When
+     * a dialog for the same URL is already open it is brought to the front
+     * instead of creating a new one.
      *
      * @param owner     the window the dialog is centered on
      * @param url       the https URL to inspect
@@ -48,9 +62,27 @@ public final class CertificateDetailsDialog extends JDialog {
      */
     public static void show(Window owner, String url, CertificateInspector inspector,
                             ExecutorService executor) {
+        CertificateDetailsDialog existing = OPEN_BY_URL.get(url);
+        if (existing != null && existing.isShowing()) {
+            raise(existing);
+            return;
+        }
         CertificateDetailsDialog dialog =
                 new CertificateDetailsDialog(owner, url, inspector, executor);
+        OPEN_BY_URL.put(url, dialog);
         dialog.setVisible(true);
+    }
+
+    /**
+     * Brings an already-open dialog to the front. On Windows a plain
+     * {@code toFront()} is not enough while the owner window is active, so
+     * the always-on-top toggle forces the re-order first.
+     */
+    private static void raise(CertificateDetailsDialog dialog) {
+        dialog.setAlwaysOnTop(true);
+        dialog.setAlwaysOnTop(false);
+        dialog.toFront();
+        dialog.requestFocusInWindow();
     }
 
     private final CardLayout cards = new CardLayout();
@@ -92,6 +124,16 @@ public final class CertificateDetailsDialog extends JDialog {
         setSize(560, 420);
         setMinimumSize(new java.awt.Dimension(420, 280));
         setLocationRelativeTo(owner);
+
+        // Drop this dialog from the registry when it closes, so the next
+        // lock click opens a fresh one (the conditional remove only drops
+        // the entry if it still points at this dialog).
+        addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosed(WindowEvent e) {
+                OPEN_BY_URL.remove(url, CertificateDetailsDialog.this);
+            }
+        });
 
         executor.execute(() -> {
             CertificateInspector.Result result = inspector.inspect(url);
