@@ -19,6 +19,8 @@ import java.awt.Rectangle;
 import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.AWTEventListener;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.awt.event.FocusEvent;
 import java.awt.event.FocusListener;
 import java.awt.event.KeyAdapter;
@@ -40,7 +42,11 @@ import javax.swing.event.DocumentListener;
  * The address/search bar (F2, N1/N9/A5): one field for both URLs and search
  * queries (Chrome semantics via {@link UrlUtils#normalize}), Ctrl+L focus,
  * Enter navigation, Up/Down popup selection, Esc to close the popup (or
- * cancel — the toolbar routes the remaining Esc to "stop load").
+ * cancel — the toolbar routes the remaining Esc to "stop load"). The
+ * {@link SecurityIcon} lock (S1/S4) is embedded in the field's left side,
+ * Chrome-style: the field keeps its native border and the lock rides on the
+ * field (managed bounds), so it always sits inside the omnibox box at the
+ * lock's own width — only the lock's rectangle is clickable.
  * <p>
  * Suggestion sources: F2 builds the URL + search entries here
  * ({@code suggestFor}); F3/F4 extend the same list with history and
@@ -49,8 +55,17 @@ import javax.swing.event.DocumentListener;
 public final class Omnibox extends JPanel {
 
     private static final int HEIGHT = 32;
+    /**
+     * Left pad (in field coordinates) where the lock is pinned — hugging the
+     * field's left edge, just inside the border line.
+     */
+    static final int LOCK_LEFT_PAD = 6;
+    /** The gap between the lock's right edge and the URL text. */
+    static final int LOCK_TEXT_GAP = 2;
 
     private final JTextField field;
+    /** S1/S4: the lock embedded in the field's left side (may be null). */
+    private final SecurityIcon securityIcon;
     private OmniboxPopup popup;
     private final Consumer<String> navigateAction;
     private final BiFunction<Omnibox, String, List<OmniboxPopup.Suggestion>> suggestor;
@@ -70,15 +85,29 @@ public final class Omnibox extends JPanel {
     private AWTEventListener outsidePressListener;
 
     /**
-     * @param navigateAction  invoked with the raw text (Enter) or a suggestion
-     *                        target (popup selection)
-     * @param suggestor       builds the popup rows for the current input
+     * @param navigateAction invoked with the raw text (Enter) or a suggestion
+     *                       target (popup selection)
+     * @param suggestor      builds the popup rows for the current input
      */
     public Omnibox(Consumer<String> navigateAction,
                    BiFunction<Omnibox, String, List<OmniboxPopup.Suggestion>> suggestor) {
+        this(navigateAction, suggestor, null);
+    }
+
+    /**
+     * @param navigateAction invoked with the raw text (Enter) or a suggestion
+     *                       target (popup selection)
+     * @param suggestor      builds the popup rows for the current input
+     * @param securityIcon   the lock painted inside the field's left side
+     *                       (Chrome-style S1/S4); {@code null} omits it
+     */
+    public Omnibox(Consumer<String> navigateAction,
+                   BiFunction<Omnibox, String, List<OmniboxPopup.Suggestion>> suggestor,
+                   SecurityIcon securityIcon) {
         super(new BorderLayout());
         this.navigateAction = navigateAction;
         this.suggestor = suggestor;
+        this.securityIcon = securityIcon;
 
         this.field = new JTextField();
         field.setMargin(new Insets(6, 14, 6, 14));
@@ -173,8 +202,70 @@ public final class Omnibox extends JPanel {
             }
         });
         add(field, BorderLayout.CENTER);
+        if (securityIcon != null) {
+            installSecurityIcon();
+        }
         this.popup = null; // created lazily — the owner window only exists once shown
         installDismissalHooks();
+    }
+
+    /**
+     * Embeds the lock in the field's left side (vertically centered) as a
+     * plain child with <em>managed bounds</em>: the field keeps the native
+     * L&amp;F border, so the lock sits within the omnibox box like Chrome's,
+     * and it keeps its own mouse handler (the certificate-details click,
+     * S2). The bounds are managed here instead of with a layout manager —
+     * a previous OverlayLayout attempt did not keep the icon at the field's
+     * left side.
+     */
+    private void installSecurityIcon() {
+        field.setLayout(null); // the lock's bounds are managed, not laid out
+        field.add(securityIcon);
+        field.addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent e) {
+                positionSecurityIcon();
+            }
+        });
+        applySecurityIconInsets();
+    }
+
+    /**
+     * Keeps the field's left text margin clear of the embedded lock (the
+     * placeholder painting reuses this margin, so it stays clear too) and
+     * re-places the lock. Called again after an appearance change resizes
+     * the icon.
+     * <p>
+     * The margin is derived <em>only</em> from the lock's geometry, never
+     * from {@code getBorderInsets}: FlatLaf folds the field's margin into the
+     * border insets, so adding the inset here would be self-referential —
+     * every call would inflate the margin (and with it the lock's x and the
+     * text start) until the lock and the URL text overlapped.
+     */
+    public void applySecurityIconInsets() {
+        if (securityIcon == null) {
+            return;
+        }
+        int iconWidth = securityIcon.getPreferredSize().width;
+        field.setMargin(new Insets(6, LOCK_LEFT_PAD + iconWidth + LOCK_TEXT_GAP, 6, 14));
+        positionSecurityIcon();
+    }
+
+    /**
+     * Pins the lock to the field's left edge (a small fixed pad, just inside
+     * the border line), vertically centered, at exactly the glyph's
+     * preferred size: the lock occupies only its own width, and only that
+     * rectangle is clickable. The fixed pad — instead of the
+     * (margin-inflated) border inset — keeps it at the left in every L&amp;F.
+     */
+    private void positionSecurityIcon() {
+        if (securityIcon == null || field.getWidth() <= 0 || field.getHeight() <= 0) {
+            return;
+        }
+        Dimension pref = securityIcon.getPreferredSize();
+        int x = LOCK_LEFT_PAD;
+        int y = Math.max(0, (field.getHeight() - pref.height) / 2);
+        securityIcon.setBounds(x, y, pref.width, pref.height);
     }
 
     /** The popup, created on first need (the top-level owner must exist then). */

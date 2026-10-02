@@ -19,11 +19,13 @@ import javax.swing.UIManager;
 import java.util.function.Consumer;
 
 /**
- * The toolbar's security indicator (F2, S1/S4): a green padlock for valid
- * TLS (clickable — S2 opens the certificate details dialog), a gray open
- * padlock for plain HTTP ("not secure"), a red warning triangle on
- * certificate errors, and a plain tooltip for internal {@code signum://}
- * pages.
+ * The toolbar's security indicator (F2, S1/S4) — Chrome-style rules: a
+ * <em>green closed</em> padlock for valid TLS (clickable — S2 opens the
+ * certificate details dialog), a <em>yellow open</em> padlock for plain HTTP
+ * ("not secure"), a <em>red open</em> padlock on certificate errors, and a
+ * plain tooltip for internal {@code signum://} pages. The icon is embedded
+ * in the omnibox's field (left side) and follows the app's toolbar icon
+ * size ({@link #refreshSize()} on appearance changes).
  * <p>
  * Must be constructed on the EDT; {@link #update} is called from the
  * toolbar on tab events (already on the EDT).
@@ -32,11 +34,14 @@ public final class SecurityIcon extends JComponent {
 
     /** The painted geometry's design space (the draw code uses 16 px units). */
     private static final int DESIGN_SIZE = 16;
+    /** Transparent padding around the glyph (keeps the hit area usable). */
+    private static final int PAD = 8;
     /**
      * The rendered icon size follows the app's toolbar icon size (Appearance
-     * settings), the same convention as the other modules' icons.
+     * settings), the same convention as the other modules' icons; it is
+     * re-read by {@link #refreshSize()} when the appearance changes.
      */
-    private final int iconSize = Math.max(14, (int) Math.round(GuiConstants.getToolBarIconSize()));
+    private int iconSize = Math.max(14, (int) Math.round(GuiConstants.getToolBarIconSize()));
 
     private final Consumer<String> clickAction;
     private SslStatus status = SslStatus.INSECURE;
@@ -51,7 +56,7 @@ public final class SecurityIcon extends JComponent {
      */
     public SecurityIcon(Consumer<String> clickAction) {
         this.clickAction = clickAction;
-        setPreferredSize(new Dimension(iconSize * 2, iconSize * 2));
+        applyPreferredSize();
         setOpaque(false);
         setFocusable(false);
         addMouseListener(new MouseAdapter() {
@@ -112,6 +117,26 @@ public final class SecurityIcon extends JComponent {
         return status;
     }
 
+    /**
+     * Appearance change hook: re-reads the app's toolbar icon size and
+     * resizes the component. The omnibox re-measures its own insets for the
+     * icon (it embeds this component inside the field).
+     */
+    public void refreshSize() {
+        int size = Math.max(14, (int) Math.round(GuiConstants.getToolBarIconSize()));
+        if (size == iconSize) {
+            return;
+        }
+        iconSize = size;
+        applyPreferredSize();
+        revalidate();
+        repaint();
+    }
+
+    private void applyPreferredSize() {
+        setPreferredSize(new Dimension(iconSize + 2 * PAD, iconSize));
+    }
+
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
@@ -120,11 +145,14 @@ public final class SecurityIcon extends JComponent {
         g2.translate((getWidth() - iconSize) / 2f, (getHeight() - iconSize) / 2f);
         g2.scale(iconSize / (float) DESIGN_SIZE, iconSize / (float) DESIGN_SIZE);
         if (status == SslStatus.CERT_ERROR) {
-            paintWarning(g2, errorRed());
+            // Chrome-style rule: a failed certificate renders a RED open lock
+            paintLock(g2, errorRed(), false);
         } else {
-            // S5: a secure page with mixed content warns (orange lock + badge)
+            // Chrome-style rule: valid TLS = green closed lock, plain HTTP
+            // (no SSL) = yellow open lock; S5: mixed content warns (orange +
+            // badge)
             paintLock(g2, mixedContent ? warnOrange() : (status == SslStatus.SECURE
-                    ? secureGreen() : gray()), status == SslStatus.SECURE);
+                    ? secureGreen() : insecureYellow()), status == SslStatus.SECURE);
             if (mixedContent) {
                 paintMixedBadge(g2);
             }
@@ -148,12 +176,9 @@ public final class SecurityIcon extends JComponent {
         return new Color(0xE8, 0x9A, 0x2C);
     }
 
-    private static Color gray() {
-        Color c = GuiColors.getFaintText();
-        if (c == null) {
-            c = UIManager.getColor("Label.disabledForeground");
-        }
-        return c != null ? c : Color.GRAY;
+    /** The Chrome-style "not secure" yellow for plain HTTP (open lock). */
+    private static Color insecureYellow() {
+        return new Color(0xE8, 0xB9, 0x2C);
     }
 
     /** The app palette's "ready/running" green (falls back to a fixed green). */
@@ -168,8 +193,16 @@ public final class SecurityIcon extends JComponent {
         return c != null ? c : new Color(0xD9, 0x44, 0x34);
     }
 
+    /**
+     * The surface behind the glyph (the keyhole cut-outs are painted in it).
+     * The icon is embedded in the omnibox's text field, so the field's
+     * background wins; the panel background is the fallback.
+     */
     private static Color background() {
-        Color c = UIManager.getColor("Panel.background");
+        Color c = UIManager.getColor("TextField.background");
+        if (c == null) {
+            c = UIManager.getColor("Panel.background");
+        }
         return c != null ? c : Color.WHITE;
     }
 
@@ -188,18 +221,5 @@ public final class SecurityIcon extends JComponent {
         }
     }
 
-    private static void paintWarning(Graphics2D g2, Color color) {
-        java.awt.geom.GeneralPath triangle = new java.awt.geom.GeneralPath();
-        triangle.moveTo(8, 1);
-        triangle.lineTo(15, 14);
-        triangle.lineTo(1, 14);
-        triangle.closePath();
-        g2.setColor(color);
-        g2.fill(triangle);
-        g2.setColor(background());
-        g2.setStroke(new java.awt.BasicStroke(1.6f));
-        g2.drawLine(8, 5, 8, 9);
-        g2.fillOval(7, 11, 2, 2);
-    }
 }
 

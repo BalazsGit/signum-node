@@ -1,5 +1,6 @@
 package application.module.browser.gui.toolbar;
 
+import application.module.appearance.AppearanceModule;
 import application.module.browser.config.BrowserSettings;
 import application.module.browser.engine.scheme.SettingsPageRenderer;
 import application.module.browser.engine.security.CertificateInspector;
@@ -22,32 +23,36 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Container;
 import java.awt.Dimension;
-import java.awt.FlowLayout;
 import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.Window;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
+import net.miginfocom.swing.MigLayout;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComponent;
-import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.UIManager;
 
 /**
  * The navigation toolbar of <em>one</em> browser tab (F2): back/forward/
- * reload-stop/home buttons (N3, N5), the {@link Omnibox} (N1/N2), the
- * {@link SecurityIcon} (S1/S2/S4) and the thin indeterminate progress bar
- * (N4/A3) below the row.
+ * reload-stop/home buttons (N3, N5), the {@link Omnibox} (N1/N2) with the
+ * {@link SecurityIcon} (S1/S2/S4) embedded in its field's left side, the
+ * bookmark star, the settings gear and the thin
+ * indeterminate progress bar (N4/A3) below the row.
  * <p>
  * One toolbar exists per tab (owned by the tab's {@code BrowserTabView}): it
  * renders <em>its</em> tab's state and routes every intent to <em>its</em>
@@ -68,9 +73,18 @@ public final class NavigationToolbar extends JPanel {
     private final JButton back;
     private final JButton forward;
     private final JButton reloadStop;
+    private final JButton home;
+    private final JButton settingsButton;
     private final Omnibox omnibox;
+    /**
+     * Appearance change hook (uninstalled in {@link #dispose()}): rebuilds
+     * every toolbar glyph at the new app icon size — the same pattern the
+     * node profile toolbar uses, so the browser icons never drift away from
+     * the node/profile icon size after an appearance change.
+     */
+    private final Runnable appearanceListener =
+            () -> SwingUtilities.invokeLater(this::refreshIconSizes);
     private final SecurityIcon securityIcon;
-    private final FadingLabel titleLabel;
     private final ProgressBar progressBar;
     /** F4 (B1): the star button of the omnibox row (fade-in on toggle). */
     private final StarButton star;
@@ -103,7 +117,7 @@ public final class NavigationToolbar extends JPanel {
         this.back = flatNavButton(FontAwesome.ANGLE_LEFT, I18n.get("browser.nav.back.tooltip"));
         this.forward = flatNavButton(FontAwesome.ANGLE_RIGHT, I18n.get("browser.nav.forward.tooltip"));
         this.reloadStop = flatNavButton(FontAwesome.REFRESH, I18n.get("browser.nav.reload.tooltip"));
-        JButton home = flatNavButton(FontAwesome.HOME, I18n.get("browser.nav.home.tooltip"));
+        this.home = flatNavButton(FontAwesome.HOME, I18n.get("browser.nav.home.tooltip"));
         back.addActionListener(e -> view.back());
         forward.addActionListener(e -> view.forward());
         reloadStop.addActionListener(e -> {
@@ -115,31 +129,33 @@ public final class NavigationToolbar extends JPanel {
         });
         home.addActionListener(e -> navigateToHomepage());
 
-        JPanel navButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 0));
+        // aligny center: the icons sit vertically centered against the
+        // omnibox field (FlowLayout would top-align them and look off-center)
+        JPanel navButtons = new JPanel(new MigLayout("insets 0, gap 2, aligny center"));
         navButtons.setOpaque(false);
         navButtons.add(back);
         navButtons.add(forward);
         navButtons.add(reloadStop);
         navButtons.add(home);
 
-        this.omnibox = new Omnibox(this::navigate, this::suggestFor);
+        // S1/S4: the lock is embedded inside the omnibox's field (Chrome-style)
         this.securityIcon = new SecurityIcon(this::openCertificateDialog);
-        this.titleLabel = new FadingLabel("", 0.8f);
-        titleLabel.setToolTipText(I18n.get("browser.nav.title.tooltip"));
+        this.omnibox = new Omnibox(this::navigate, this::suggestFor, securityIcon);
         // F4 (B1): the star toggles the current page's bookmark
-        this.star = new StarButton("\u2606");
-        star.setFocusable(false);
+        this.star = new StarButton();
         star.addActionListener(e -> toggleBookmark());
 
         // F6: the settings gear — opens signum://settings in this tab.
-        JButton settingsButton = flatNavButton(FontAwesome.COG, I18n.get("browser.nav.settings.tooltip"));
+        this.settingsButton = flatNavButton(FontAwesome.COG, I18n.get("browser.nav.settings.tooltip"));
         settingsButton.addActionListener(e -> view.navigate(SettingsPageRenderer.PAGE_URL));
 
-        JPanel east = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+        // gap 0 on purpose: the star and the gear carry their own 6 px side
+        // borders, so the visual star-to-gear distance is 6 + 6 = 12 px — the
+        // same as the omnibox-to-star distance (the row's 6 px hgap + the
+        // star's 6 px left border)
+        JPanel east = new JPanel(new MigLayout("insets 0, gap 0, aligny center"));
         east.setOpaque(false);
         east.add(star);
-        east.add(securityIcon);
-        east.add(titleLabel);
         east.add(settingsButton);
 
         JPanel row = new JPanel(new BorderLayout(6, 0));
@@ -157,6 +173,28 @@ public final class NavigationToolbar extends JPanel {
         back.setEnabled(false);
         forward.setEnabled(false);
         sync(tab);
+
+        AppearanceModule.registerAppearanceListener(appearanceListener);
+    }
+
+    /**
+     * Appearance change hook (the NodeToolbar#updateStyles pattern): the
+     * glyphs were built at the old toolbar icon size — rebuild them at the
+     * current app size so the browser toolbar icons stay exactly the same
+     * size as the node/profile toolbar icons (start, pause, ...) after any
+     * appearance change.
+     */
+    private void refreshIconSizes() {
+        installIcon(back, FontAwesome.ANGLE_LEFT);
+        installIcon(forward, FontAwesome.ANGLE_RIGHT);
+        installIcon(reloadStop, tab.isLoading() ? FontAwesome.STOP : FontAwesome.REFRESH);
+        installIcon(home, FontAwesome.HOME);
+        installIcon(settingsButton, FontAwesome.COG);
+        star.rebuildIcon();
+        securityIcon.refreshSize();
+        omnibox.applySecurityIconInsets();
+        revalidate();
+        repaint();
     }
 
     // ------------------------------------------------------------------
@@ -267,13 +305,17 @@ public final class NavigationToolbar extends JPanel {
      */
     private List<OmniboxPopup.Suggestion> suggestFor(Omnibox box, String input) {
         List<OmniboxPopup.Suggestion> items = new ArrayList<>();
+        // One row per URL: the same page must never appear twice (history
+        // keeps title variants of one URL, and the same page can also be a
+        // bookmark and the normalized-URL row) — the first source wins.
+        Set<String> seen = new HashSet<>();
         String normalized = UrlUtils.normalize(input, settings.get().getSearchEngineTemplate());
         // F9 (H6): the history rows are ranked by visits x freshness instead
         // of plain recency
         for (HistoryEntry entry :
                 history.searchRanked(input, System.currentTimeMillis(), HISTORY_SUGGESTIONS)) {
-            if (normalized != null && normalized.equals(entry.getUrl())) {
-                continue; // the normalized-URL row below already covers this one
+            if (!seen.add(dedupeKey(entry.getUrl()))) {
+                continue; // the same URL already has a row above
             }
             String label = (entry.getTitle() == null || entry.getTitle().isBlank())
                     ? entry.getUrl()
@@ -287,6 +329,9 @@ public final class NavigationToolbar extends JPanel {
             if (bookmarksAdded >= BOOKMARK_SUGGESTIONS) {
                 break;
             }
+            if (!seen.add(dedupeKey(bookmark.getUrl()))) {
+                continue; // the same page already has a row above
+            }
             String label = (bookmark.getName() == null || bookmark.getName().isBlank())
                     ? bookmark.getUrl() : bookmark.getName();
             items.add(new OmniboxPopup.Suggestion(OmniboxPopup.Suggestion.Kind.BOOKMARK,
@@ -294,13 +339,34 @@ public final class NavigationToolbar extends JPanel {
             bookmarksAdded++;
         }
         if (normalized != null
-                && (UrlUtils.isWebUrl(input) || UrlUtils.looksLikeHost(input))) {
+                && (UrlUtils.isWebUrl(input) || UrlUtils.looksLikeHost(input))
+                && seen.add(dedupeKey(normalized))) {
             items.add(new OmniboxPopup.Suggestion(OmniboxPopup.Suggestion.Kind.URL,
                     I18n.get("browser.omnibox.suggestion.visit", normalized), normalized));
         }
-        items.add(new OmniboxPopup.Suggestion(OmniboxPopup.Suggestion.Kind.SEARCH,
-                I18n.get("browser.omnibox.suggestion.search", input), normalized));
+        // The search row only when it would not duplicate an existing target
+        // (a URL-like input normalizes to the same URL the URL rows cover).
+        if (normalized == null || seen.add(dedupeKey(normalized))) {
+            items.add(new OmniboxPopup.Suggestion(OmniboxPopup.Suggestion.Kind.SEARCH,
+                    I18n.get("browser.omnibox.suggestion.search", input), normalized));
+        }
         return items;
+    }
+
+    /**
+     * Case-insensitive, trailing-slash-insensitive URL key for deduplicating
+     * suggestion rows (the same page saved with/without a trailing slash, or
+     * in mixed case, is one row).
+     */
+    private static String dedupeKey(String url) {
+        if (url == null) {
+            return "";
+        }
+        String key = url.trim().toLowerCase(Locale.ROOT);
+        while (key.endsWith("/")) {
+            key = key.substring(0, key.length() - 1);
+        }
+        return key;
     }
 
     // ------------------------------------------------------------------
@@ -331,8 +397,6 @@ public final class NavigationToolbar extends JPanel {
             reloadStop.setToolTipText(I18n.get("browser.nav.reload.tooltip"));
         }
         securityIcon.update(tab.getSslStatus(), tab.getUrl(), tab.isMixedContent());
-        String title = tab.getTitle();
-        titleLabel.setTextAnimated(title == null || title.isBlank() ? "" : title);
         progressBar.setActive(tab.isLoading());
     }
 
@@ -342,7 +406,7 @@ public final class NavigationToolbar extends JPanel {
      * not leak the toolkit listener).
      */
     public void dispose() {
-        titleLabel.stopAnimation();
+        AppearanceModule.removeAppearanceListener(appearanceListener);
         star.stopAnimation();
         omnibox.dispose();
     }
@@ -375,69 +439,6 @@ public final class NavigationToolbar extends JPanel {
                 IconFontSwing.buildIcon(iconCode, iconSize, GuiColors.getButtonIcon()),
                 IconFontSwing.buildIcon(iconCode, iconSize * HoverScaleIcon.DEFAULT_SCALE,
                         GuiColors.getButtonIcon()));
-    }
-
-    /**
-     * A6: the active tab's title with a 200 ms fade-in on every change
-     * (rendered with an alpha composite while animating).
-     */
-    private static final class FadingLabel extends JLabel {
-
-        private int alpha = 255;
-        private Timer animation;
-
-        FadingLabel(String text, float opacity) {
-            super(text);
-            setOpaque(false);
-            // the UI's default label font (app-consistent)
-            setForeground(faint());
-            alpha = (int) (opacity * 255);
-        }
-
-        /** Tab close: the timer must not outlive the toolbar. */
-        void stopAnimation() {
-            if (animation != null) {
-                animation.stop();
-            }
-        }
-
-        void setTextAnimated(String text) {
-            if (text.equals(getText())) {
-                return;
-            }
-            setText(text);
-            if (text.isEmpty()) {
-                return;
-            }
-            alpha = 0;
-            if (animation == null) {
-                animation = new Timer(16, e -> {
-                    alpha = Math.min(255, alpha + 30);
-                    if (alpha >= 255) {
-                        animation.stop();
-                    }
-                    repaint();
-                });
-            }
-            animation.start();
-        }
-
-        @Override
-        protected void paintComponent(Graphics g) {
-            if (alpha >= 255 || getText().isEmpty()) {
-                super.paintComponent(g);
-                return;
-            }
-            Graphics2D g2 = (Graphics2D) g.create();
-            g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha / 255f));
-            super.paintComponent(g2);
-            g2.dispose();
-        }
-
-        private static Color faint() {
-            Color c = UIManager.getColor("Label.disabledForeground");
-            return c != null ? c : Color.GRAY;
-        }
     }
 
     /**
@@ -499,27 +500,32 @@ public final class NavigationToolbar extends JPanel {
     }
 
     /**
-     * F4 (B1) / F9 (A7): the omnibox star — an outline/filled glyph with a
+     * F4 (B1) / F9 (A7): the omnibox star — a flat icon button in exactly
+     * the same style as the other nav buttons (a FontAwesome glyph at the
+     * app's toolbar icon size, hover-grow, no fill): the outline star
+     * (☆, not bookmarked) becomes the filled star (★, bookmarked) with a
      * "puff" when a bookmark is added: the filled star fades in while
-     * settling from a 140% scale (alpha + transform, the same timer
-     * mechanism as {@link FadingLabel}).
+     * settling from a 140% scale (alpha + transform).
      */
     private static final class StarButton extends JButton {
 
-        private static final String OUTLINE = "\u2606"; // ☆
-        private static final String FILLED = "\u2605";  // ★
+        /** Outline star (☆) — the page is not bookmarked yet. */
+        private static final FontAwesome OUTLINE = FontAwesome.STAR_O;
+        /** Filled star (★) — the page is bookmarked. */
+        private static final FontAwesome FILLED = FontAwesome.STAR;
 
+        private boolean bookmarked;
         private int alpha = 255;
         /** A7: the puff scale factor (1.4 → 1.0 while fading in). */
         private float scale = 1f;
         private Timer animation;
 
-        StarButton(String text) {
-            super(text);
-            setFont(getFont().deriveFont(GuiConstants.getToolBarIconSize()));
+        StarButton() {
             setFocusable(false);
-            setMargin(new java.awt.Insets(0, 6, 0, 6));
-            setPreferredSize(new Dimension(30, 30));
+            setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
+            setOpaque(false);
+            setContentAreaFilled(false);
+            setState(false);
         }
 
         /** Tab close: the timer must not outlive the toolbar. */
@@ -531,7 +537,7 @@ public final class NavigationToolbar extends JPanel {
 
         /** Fills/empties the star without the animation (tab switching). */
         void setState(boolean bookmarked) {
-            setText(bookmarked ? FILLED : OUTLINE);
+            this.bookmarked = bookmarked;
             setToolTipText(I18n.get(bookmarked
                     ? "browser.nav.star.remove" : "browser.nav.star.add"));
             alpha = 255;
@@ -539,6 +545,12 @@ public final class NavigationToolbar extends JPanel {
             if (animation != null) {
                 animation.stop();
             }
+            rebuildIcon();
+        }
+
+        /** Appearance change: re-renders the glyph at the current app icon size. */
+        void rebuildIcon() {
+            installIcon(this, bookmarked ? FILLED : OUTLINE);
         }
 
         /** The A7 puff: the (now filled) star fades in while settling down. */
