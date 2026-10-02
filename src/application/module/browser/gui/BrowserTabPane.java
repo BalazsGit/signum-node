@@ -105,6 +105,10 @@ public final class BrowserTabPane extends JTabbedPane {
         putClientProperty("TabbedPane.closeIcon", new XGlyph());
         putClientProperty("TabbedPane.tabCloseToolTipText", I18n.get("browser.tab.close.tooltip"));
         putClientProperty("JTabbedPane.tabClosable", Boolean.TRUE);
+        // Left-align the tab's content (favicon + title) inside the fixed-width
+        // tab: FlatLaf centers it by default (TabbedPane.tabAlignment), but the
+        // title is easier to scan at the tab's leading edge (user request).
+        putClientProperty("JTabbedPane.tabAlignment", "leading");
         putClientProperty("JTabbedPane.tabCloseCallback", (IntConsumer) index -> {
             String tabId = tabIdAt(index);
             if (tabId != null) {
