@@ -3,6 +3,7 @@ package application.gui.shell;
 import application.AppInfo;
 import application.gui.glassPanel.GlassPanelManager;
 import application.kernel.ApplicationShutdown;
+import application.launcher.LaunchCommand;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiIcons;
@@ -20,16 +21,13 @@ import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JToolBar;
+import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.FlowLayout;
 import java.awt.Graphics;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
-import java.io.File;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Main application frame containing the (optional) toolbar and tabbed
@@ -327,27 +325,39 @@ public class MainFrame extends JFrame {
      */
     private void relaunchNewInstance() {
         try {
-            ProcessHandle current = ProcessHandle.current();
-            String command = current.info().command().orElse(null);
-            if (command == null || command.isBlank()) {
-                LOGGER.warn("Restart: could not determine the launch command - not relaunching");
-                return;
-            }
-            List<String> commandLine = new ArrayList<>();
-            commandLine.add(command);
-            for (String arg : current.info().arguments().orElse(new String[0])) {
-                commandLine.add(arg);
-            }
-
-            ProcessBuilder builder = new ProcessBuilder(commandLine);
-            builder.directory(new File("").getAbsoluteFile());
-            builder.redirectErrorStream(true);
-            Process child = builder.start();
+            // LaunchCommand was captured in Launcher.main (the exact launch
+            // command line, with a classpath-based fallback), so the relaunch
+            // works from a fat jar and from a class directory (IDE/Gradle).
+            Process child = LaunchCommand.startNewInstance();
             LOGGER.info("Restart: launched a new application instance (pid {})", child.pid());
-        } catch (IOException e) {
-            LOGGER.error("Restart: failed to relaunch the application", e);
         } catch (Exception e) {
-            LOGGER.error("Restart: unexpected error while relaunching the application", e);
+            LOGGER.error("Restart: failed to relaunch the application", e);
+            showRelaunchFailure(e);
+        }
+    }
+
+    /**
+     * Shows a modal error dialog when the replacement instance could not be
+     * started, so a failed restart is never silent (previously the failure was
+     * only logged and the application just exited — the button "only stopped"
+     * the app). The dialog runs on the EDT ahead of the shutdown-exit runnable
+     * that is already queued behind it, so the user sees the message before the
+     * JVM terminates.
+     *
+     * @param error the reason the relaunch failed
+     */
+    private void showRelaunchFailure(Throwable error) {
+        String detail = error.getMessage() != null ? error.getMessage() : String.valueOf(error);
+        Runnable show = () -> JOptionPane.showMessageDialog(
+                this,
+                "The application could not be restarted:\n\n" + detail
+                        + "\n\nPlease start it again from your launcher.",
+                "Restart failed",
+                JOptionPane.ERROR_MESSAGE);
+        if (SwingUtilities.isEventDispatchThread()) {
+            show.run();
+        } else {
+            SwingUtilities.invokeLater(show);
         }
     }
 

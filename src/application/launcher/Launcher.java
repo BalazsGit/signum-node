@@ -21,11 +21,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.awt.GraphicsEnvironment;
-import java.io.File;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.net.ServerSocket;
-import java.lang.management.ManagementFactory;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.Date;
@@ -37,7 +35,6 @@ import java.util.Scanner;
 
 public class Launcher {
 
-    private static String[] savedArgs;
     private static Logger logger;
 
     // Globális CLI opciók definíciója
@@ -68,8 +65,6 @@ public class Launcher {
      * @param args Command line arguments
      */
     public static void main(String[] args) {
-        savedArgs = args;
-
         String confFolder = "conf"; // Default
         boolean headless = false;
         String orderArg = null;
@@ -117,6 +112,12 @@ public class Launcher {
         // engine (fast) so the custom-scheme handler is installed before the
         // first CEF subprocess launches.
         JcefProcessBootstrap.bootstrap(args, confPath, headless);
+
+        // Capture how this JVM was launched so a restart (Restart button,
+        // .restart, requestRestart) can relaunch the application with a verified
+        // command line. Only the main process reaches this point: a JCEF
+        // subprocess has already terminated inside bootstrap().
+        LaunchCommand.capture(args);
 
         // Logging inicializálás (Ez maradhat a Launcher-ben mint infra).
         // (The SystemLoggerJulHandler bridge was already installed above; the
@@ -200,45 +201,21 @@ public class Launcher {
      * Restarts the application by spawning a new process and exiting the current
      * one.
      * This ensures a full reload of the Node and GUI components.
+     * <p>
+     * The command line comes from {@link LaunchCommand} (exact launch command
+     * captured at startup, with a classpath-based fallback), so a restart works
+     * both from a fat jar and from a class directory (IDE/Gradle) and never
+     * fails silently: if the replacement cannot be started, the failure is
+     * reported to both the log and the console.
      */
     public static void restart() {
         logger.info("Initiating application restart...");
-
-        // Ideális esetben itt a Kernel-t kérjük meg a leállásra
-        // waitForResources(); // Ez maradhat segédmetódusnak
-
         try {
-            // 2. Reconstruct the command line to start a new process
-            String javaBin = System.getProperty("java.home") + File.separator + "bin" + File.separator + "java";
-            File currentJar = new File(Launcher.class.getProtectionDomain().getCodeSource().getLocation().toURI());
-
-            if (!currentJar.getName().endsWith(".jar")) {
-                logger.warn("Restart is only supported when running from a JAR file.");
-                return;
-            }
-
-            List<String> command = new ArrayList<>();
-            command.add(javaBin);
-
-            // Add VM arguments (like -Xmx, -Dproperties, etc.)
-            command.addAll(ManagementFactory.getRuntimeMXBean().getInputArguments());
-
-            command.add("-jar");
-            command.add(currentJar.getPath());
-
-            // Add original application arguments
-            if (savedArgs != null) {
-                for (String arg : savedArgs) {
-                    command.add(arg);
-                }
-            }
-
-            // 3. Spawn the new process
-            ProcessBuilder builder = new ProcessBuilder(command);
-            builder.inheritIO(); // Share the console output
-            builder.start();
-
-            logger.info("New process spawned. Exiting current process...");
+            // Spawn the replacement first: if this fails, nothing below runs and
+            // the current process keeps running (no "restart" that is a plain
+            // shutdown).
+            Process child = LaunchCommand.startNewInstance();
+            logger.info("New process spawned (pid {}), exiting current process...", child.pid());
 
             // Close stdin to stop the current process from stealing input from the new one
             try {
@@ -256,11 +233,12 @@ public class Launcher {
                 }
             }, 5000);
 
-            // 4. Terminate the current process
+            // Terminate the current process
             System.exit(0);
 
         } catch (Exception e) {
-            logger.error("Failed to restart application", e);
+            logger.error("Failed to restart application: {}", e.getMessage(), e);
+            System.err.println("Failed to restart application: " + e.getMessage());
         }
     }
 
