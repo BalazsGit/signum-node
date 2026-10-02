@@ -261,13 +261,19 @@
 
         var label = document.createElement('span');
         label.className = 'row__label';
-        var name = document.createElement('span');
-        name.className = 'row__name';
-        name.textContent = n.name || n.url;
-        label.appendChild(name);
+        var inBar = n.type === 'bookmark' && barIds.indexOf(n.id) >= 0;
+        // A favorite (the star) shows only the URL next to the star — the page
+        // title is not repeated there (user request); the other rows keep the
+        // title line.
+        if (!inBar) {
+          var name = document.createElement('span');
+          name.className = 'row__name';
+          name.textContent = n.name || n.url;
+          label.appendChild(name);
+        }
         if (n.type === 'bookmark' && n.url) {
           var urlEl = document.createElement('span');
-          urlEl.className = 'row__url';
+          urlEl.className = inBar ? 'row__name' : 'row__url';
           urlEl.textContent = n.url;
           label.appendChild(urlEl);
         }
