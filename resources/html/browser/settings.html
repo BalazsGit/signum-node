@@ -351,7 +351,7 @@
       function syncUrlsBox() {
         var urlsMode = false;
         radios.forEach(function (r) {
-          if (r.value === (data.startup || 'last-session')) {
+          if (r.value === (data.startup || 'newtab')) {
             r.checked = true;
             urlsMode = r.value === 'urls';
           } else {
@@ -362,7 +362,7 @@
       }
       radios.forEach(function (r) {
         r.addEventListener('change', function () {
-          var mode = 'last-session';
+          var mode = 'newtab';
           radios.forEach(function (x) {
             if (x.checked) {
               mode = x.value;
@@ -381,7 +381,7 @@
       // Save: one navigation, all values in the query (the renderer
       // validates; an invalid value simply keeps the old one).
       document.getElementById('save').addEventListener('click', function () {
-        var mode = 'last-session';
+        var mode = 'newtab';
         radios.forEach(function (r) {
           if (r.checked) {
             mode = r.value;

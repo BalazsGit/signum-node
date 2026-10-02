@@ -24,7 +24,7 @@ class BrowserSettingsRepositoryTest {
         BrowserSettings settings = new BrowserSettingsRepository(dir.resolve("settings.json")).load();
 
         assertEquals(BrowserSettings.DEFAULT_HOME_PAGE, settings.getHomepage());
-        assertEquals(BrowserSettings.StartupMode.LAST_SESSION, settings.getStartup());
+        assertEquals(BrowserSettings.StartupMode.NEW_TAB, settings.getStartup());
         assertTrue(settings.isBlockFileUrls());
         assertFalse(settings.isWeb3Enabled());
     }
@@ -55,7 +55,7 @@ class BrowserSettingsRepositoryTest {
 
         BrowserSettings settings = new BrowserSettingsRepository(file).load();
 
-        assertEquals(BrowserSettings.StartupMode.LAST_SESSION, settings.getStartup());
+        assertEquals(BrowserSettings.StartupMode.NEW_TAB, settings.getStartup());
     }
 
     @Test

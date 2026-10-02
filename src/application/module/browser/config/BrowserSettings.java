@@ -35,7 +35,7 @@ public final class BrowserSettings {
 
     private int version = VERSION;
     private String homepage = DEFAULT_HOME_PAGE;
-    private StartupMode startup = StartupMode.LAST_SESSION;
+    private StartupMode startup = StartupMode.NEW_TAB;
     private List<String> startupUrls = new ArrayList<>();
     private String searchEngineName = DEFAULT_SEARCH_ENGINE_NAME;
     private String searchEngineTemplate = DEFAULT_SEARCH_ENGINE_TEMPLATE;
@@ -164,7 +164,7 @@ public final class BrowserSettings {
             homepage = DEFAULT_HOME_PAGE;
         }
         if (startup == null) {
-            startup = StartupMode.LAST_SESSION;
+            startup = StartupMode.NEW_TAB;
         }
         if (startupUrls == null) {
             startupUrls = new ArrayList<>();
