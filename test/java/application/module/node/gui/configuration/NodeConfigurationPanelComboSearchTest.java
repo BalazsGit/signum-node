@@ -23,9 +23,9 @@ import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.SwingUtilities;
 
+import application.utils.gui.ComboSearchHighlightRenderer;
 import application.utils.gui.SearchMatchLabel;
 import application.utils.gui.SearchMatchPanel;
-import application.module.node.gui.configuration.NodeConfigurationPanel.ComboSearchHighlightRenderer;
 import application.module.node.gui.configuration.NodeConfigurationPanel.PropertyRow;
 
 import org.junit.jupiter.api.DisplayName;
@@ -34,8 +34,8 @@ import org.junit.jupiter.api.Test;
 /**
  * Regression test for extending the live configuration search to the
  * SELECT menus: the value currently configured in a (non-editable) combo
- * box is visible to the user, so a query in that value must match the row —
- * while the (not visible) other dropdown items must NOT match — and the
+ * box is visible to the user, so a query in that value must match the row â€”
+ * while the (not visible) other dropdown items must NOT match â€” and the
  * match band must be painted behind the matched part of the selected value
  * (the combo's renderer is swapped for a band-painting label and restored
  * when the search is cleared).
@@ -149,7 +149,7 @@ class NodeConfigurationPanelComboSearchTest {
                             ready[0] = true;
                         }
                     } catch (Exception ignore) {
-                        // fields not ready yet — keep polling
+                        // fields not ready yet â€” keep polling
                     }
                 });
                 if (ready[0] == null) {

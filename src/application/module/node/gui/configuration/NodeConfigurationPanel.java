@@ -18,6 +18,7 @@ import application.module.node.props.Props;
 import application.module.node.util.Convert;
 import jiconfont.icons.font_awesome.FontAwesome;
 import application.utils.gui.CheckboxGroupPanel;
+import application.utils.gui.ComboSearchHighlightRenderer;
 import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
@@ -26,6 +27,7 @@ import application.utils.gui.HelpButton;
 import application.utils.gui.ResponsiveToolbarScrollPane;
 import application.utils.gui.SearchMatchLabel;
 import application.utils.gui.SearchMatchPanel;
+import application.utils.gui.SearchValueHighlight;
 import application.utils.io.PathUtils;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
@@ -36,8 +38,6 @@ import java.awt.event.ActionListener;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.text.BadLocationException;
-import javax.swing.text.Document;
-import javax.swing.text.Element;
 import javax.swing.text.Highlighter;
 import javax.swing.text.JTextComponent;
 import javax.swing.text.SimpleAttributeSet;
@@ -83,155 +83,17 @@ public class NodeConfigurationPanel extends JPanel {
     private final Map<JComboBox<?>, ListCellRenderer<?>> originalComboRenderers = new IdentityHashMap<>();
 
     /**
-     * Painters for value search highlights — the palette's SSOT search
-     * colors (the same ones the console "find" feature uses): the soft
-     * match color for every match, the active color for the match being
-     * navigated to. Each paints the EXACT matching character range derived
-     * from the document offsets ({@link #paintValueMatchRange}) — the
-     * {@code bounds} rectangle the highlighter passes in is the component's
-     * ENTIRE content area, which filling would only suit a single-line field.
+     * Painters for value search highlights — the palette's SSOT search colors
+     * (the same ones the console "find" feature uses): the soft match color
+     * for every match, the active color for the match being navigated to.
+     * The actual painting is the shared {@link SearchValueHighlight} utility
+     * (the same bands the module logging profile panels' row search uses).
      */
     static final Highlighter.HighlightPainter SEARCH_MATCH_PAINTER =
-            searchValueMatchPainter(GuiColors.getSearchMatch());
+            SearchValueHighlight.PAINTER;
 
     static final Highlighter.HighlightPainter SEARCH_MATCH_PAINTER_ACTIVE =
-            searchValueMatchPainter(GuiColors.getSearchActiveMatch());
-
-    /**
-     * Creates a value-match painter carrying the given band color. The actual
-     * painting is done by {@link #paintValueMatchRange}.
-     */
-    static Highlighter.HighlightPainter searchValueMatchPainter(Color color) {
-        return (g, start, end, bounds, component) -> paintValueMatchRange(g, start, end, component, color);
-    }
-
-    /**
-     * Paints the value search-match band for the document range
-     * {@code [start, end)}.
-     * <p>
-     * The Swing highlighter hands this painter the component's whole content
-     * bounds (in this JDK build the match offsets arrive as separate
-     * {@code int} parameters), so filling those bounds would paint the entire
-     * text box for multi-line value components. Instead the match's own
-     * rectangles are computed line by line from the document positions
-     * ({@link JTextComponent#modelToView2D(int)}), so only the actually
-     * matching text receives the band — the same policy as the console's
-     * {@code SearchHighlighter}.
-     * </p>
-     */
-    static void paintValueMatchRange(Graphics g, int start, int end, JTextComponent component, Color color) {
-        if (component == null || start < 0) {
-            return;
-        }
-        Document document = component.getDocument();
-        end = Math.min(end, document.getLength());
-        if (end <= start) {
-            return;
-        }
-        Element root = document.getDefaultRootElement();
-        int firstLine = root.getElementIndex(start);
-        int lastLine = root.getElementIndex(Math.max(start, end - 1));
-        Graphics2D gg = (Graphics2D) g.create();
-        gg.setColor(color);
-        for (int line = firstLine; line <= lastLine; line++) {
-            Element lineElement = root.getElement(line);
-            int lineStart = lineElement.getStartOffset();
-            int lineEnd = lineElement.getEndOffset();
-            int rangeStart = Math.max(start, lineStart);
-            int rangeEnd = Math.min(end, lineEnd);
-            if (rangeEnd <= rangeStart) {
-                continue;
-            }
-            Rectangle2D rangeShape = viewOf(component, rangeStart);
-            if (rangeShape == null) {
-                continue;
-            }
-            int x1 = (int) rangeShape.getX();
-            int y = (int) rangeShape.getY();
-            int height = Math.max(1, (int) rangeShape.getHeight());
-            int x2;
-            if (line < lastLine) {
-                // A fully covered line of a multi-line range: the band spans
-                // the full line width.
-                x2 = component.getWidth();
-            } else {
-                // The view position of the range's end: the next character's
-                // start for a mid-line match, or the end of the line's text
-                // when the match ends at the line end (the position of the
-                // line separator still resolves to that line in the view).
-                Rectangle2D endShape = viewOf(component, rangeEnd);
-                x2 = endShape == null ? x1 : (int) endShape.getX();
-            }
-            if (x2 > x1) {
-                gg.fillRect(x1, y, x2 - x1, height);
-            }
-        }
-        gg.dispose();
-    }
-
-    /**
-     * {@link JTextComponent#modelToView2D(int)} for the given offset, or
-     * {@code null} when the offset is out of bounds (the document can change
-     * concurrently on the EDT).
-     */
-    private static Rectangle2D viewOf(JTextComponent component, int offset) {
-        try {
-            return component.modelToView2D(offset);
-        } catch (BadLocationException e) {
-            return null;
-        }
-    }
-
-    /**
-     * The list-cell renderer that shows the search-match band behind the
-     * selected value of a non-editable combo box (a non-editable combo has
-     * no text component a document highlight could live in, so its value is
-     * rendered by this band-painting label instead of the LAF's plain
-     * renderer).
-     * <p>
-     * The renderer stays NON-opaque: the combo's own (opaque) background is
-     * painted by the LAF underneath it, and the {@link SearchMatchLabel}
-     * band is painted below the text. The band is anchored to a query: on
-     * every (re)render its range is re-resolved in the item's own text, so
-     * the band shows on the selected value and — while the popup is open —
-     * on every popup item containing the query, and on nothing else.
-     * </p>
-     */
-    static final class ComboSearchHighlightRenderer extends SearchMatchLabel
-            implements ListCellRenderer<Object> {
-        /** The query the band is anchored to (empty = no band). */
-        private String bandQuery;
-        /** The band color for the anchored query. */
-        private Color bandColor;
-
-        /** Anchors the band to the given query and color (an empty query clears it). */
-        void setBand(String query, Color color) {
-            this.bandQuery = query == null ? "" : query;
-            this.bandColor = color;
-        }
-
-        @Override
-        public Component getListCellRendererComponent(JList<?> list, Object value, int index,
-                boolean isSelected, boolean cellHasFocus) {
-            String text = value == null ? "" : value.toString();
-            setText(text);
-            setForeground(isSelected ? list.getSelectionForeground() : list.getForeground());
-            setFont(list.getFont());
-            // The reduced JDK's JList has no cell-renderer border accessor:
-            // use the plain empty border (the LAF's default).
-            setBorder(BorderFactory.createEmptyBorder());
-            if (!bandQuery.isEmpty()) {
-                int idx = text.toLowerCase(Locale.ROOT).indexOf(bandQuery.toLowerCase(Locale.ROOT));
-                if (idx >= 0) {
-                    setHighlightRange(idx, bandQuery.length());
-                    setHighlightColor(bandColor);
-                } else {
-                    clearHighlight();
-                }
-            }
-            return this;
-        }
-    }
+            SearchValueHighlight.PAINTER_ACTIVE;
 
     private static final String KEY_PROFILE_LINKS = "profileLinks";
     private static final String KEY_DATABASE = "database";
@@ -480,9 +342,6 @@ public class NodeConfigurationPanel extends JPanel {
                 "<html>Copy Configuration<br><br>Copies another profile's configuration into this editor.<br>"
                         + "Unsaved changes in the editor are discarded (with confirmation).</html>");
         copyProfileDataBtn.addActionListener(e -> runProfileAction("Copy Configuration", this::copyProfileData));
-        copyProfileDataBtn.setIcon(
-                IconFontSwing.buildIcon(FontAwesome.CLIPBOARD, GuiConstants.getHelpIconSize(), GuiColors.getButtonIcon()));
-        ConfigurationUtils.fixComponentSize(copyProfileDataBtn);
         profilePanel.add(copyProfileDataBtn);
 
         cloneProfileBtn = new JButton();
@@ -491,9 +350,6 @@ public class NodeConfigurationPanel extends JPanel {
                         + "effective state: only the values that differ from the default are copied.<br>"
                         + "The new profile is not started; the source profile is left untouched.</html>");
         cloneProfileBtn.addActionListener(e -> runProfileAction("Clone Configuration", this::cloneProfile));
-        cloneProfileBtn.setIcon(
-                IconFontSwing.buildIcon(FontAwesome.FILES_O, GuiConstants.getHelpIconSize(), GuiColors.getButtonIcon()));
-        ConfigurationUtils.fixComponentSize(cloneProfileBtn);
         profilePanel.add(cloneProfileBtn);
 
         reloadProfileBtn = new JButton();
@@ -960,7 +816,8 @@ public class NodeConfigurationPanel extends JPanel {
 
     private void updateProfileButtonsUI() {
         ConfigurationUtils.configureProfileToolbar(null, saveApplyBtn, null, renameProfileBtn,
-                deleteProfileBtn, reloadProfileBtn, null, resetToDefaultsBtn);
+                deleteProfileBtn, reloadProfileBtn, null, resetToDefaultsBtn,
+                copyProfileDataBtn, cloneProfileBtn);
     }
 
     private void refreshUIColors() {

@@ -14,6 +14,7 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
+import javax.swing.border.TitledBorder;
 import java.awt.Component;
 import java.awt.Container;
 import java.util.ArrayList;
@@ -77,7 +78,17 @@ class NodeLoggingPanelTest {
             Component child = root.getComponent(i);
             if (child instanceof JLabel) {
                 if (label.equals(((JLabel) child).getText()) && i + 1 < root.getComponentCount()) {
-                    return (JComponent) root.getComponent(i + 1);
+                    JComponent next = (JComponent) root.getComponent(i + 1);
+                    // The editor now sits inside the row's value cell (editor +
+                    // per-row "Remove key" trash icon) — unwrap the cell.
+                    if (next instanceof Container cell) {
+                        for (Component inner : cell.getComponents()) {
+                            if (inner instanceof JComboBox || inner instanceof JTextField) {
+                                return (JComponent) inner;
+                            }
+                        }
+                    }
+                    return next;
                 }
             } else if (child instanceof Container) {
                 JComponent found = editorForLabel((Container) child, label);
@@ -140,24 +151,42 @@ class NodeLoggingPanelTest {
             core.setHelpSupplier(() -> "<html>help</html>");
             holder[0] = core;
         });
-        JButton help = findButton(holder[0], "Help");
+        JButton help = findButtonByTooltip(holder[0], "Help");
         assertNotNull(help, "Help button present");
         assertTrue(help.isEnabled(), "Help button enabled after setHelpSupplier");
     }
 
     @Test
-    @DisplayName("core enableSearch makes the live filter visible")
-    void enableSearch() {
+    @DisplayName("the live row search is on by default (enableSearch stays idempotent)")
+    void searchIsOnByDefault() {
         final ModuleLoggingProfilePanel[] holder = new ModuleLoggingProfilePanel[1];
         final int[] before = new int[1];
         onEdt(() -> {
             ModuleLoggingProfilePanel core = new ModuleLoggingProfilePanel(new TestProvider());
+            assertNotNull(findTitled(core, "Search"),
+                    "the 'Search' titled box must be visible straight after construction (default-on)");
             before[0] = countVisibleTextFields(core);
-            core.enableSearch();
+            core.enableSearch(); // idempotent: the constructor already enabled it
             holder[0] = core;
         });
-        assertTrue(countVisibleTextFields(holder[0]) > before[0],
-                "a visible text field (the filter) should appear after enableSearch");
+        assertEquals(before[0], countVisibleTextFields(holder[0]),
+                "enableSearch must not add a second search field (the search is on by default)");
+    }
+
+    @Test
+    @DisplayName("unsaved rows carry the trailing star (saved/applied rows do not)")
+    void unsavedRowIsStarred() {
+        NodeLoggingPanel panel = newPanel();
+        // With the virtual 'Default' entry selected, any change is unsaved.
+        JComboBox<?> fileLevel = assertInstanceOf(JComboBox.class, editorForLabel(panel, "File Level"));
+        Object current = fileLevel.getSelectedItem();
+        String other = "FINE".equals(String.valueOf(current)) ? "INFO" : "FINE";
+        onEdt(() -> fileLevel.setSelectedItem(other));
+        List<String> labels = allLabels(panel);
+        assertTrue(labels.contains("File Level *"),
+                "the changed row carries the trailing star; labels=" + labels);
+        assertFalse(labels.contains("File Count *"),
+                "an untouched row must not be starred; labels=" + labels);
     }
 
     // ── Helpers ────────────────────────────────────────────────────────
@@ -179,15 +208,17 @@ class NodeLoggingPanelTest {
         }
     }
 
-    private static JButton findButton(Container root, String text) {
+    private static JButton findButtonByTooltip(Container root, String part) {
         for (int i = 0; i < root.getComponentCount(); i++) {
             Component child = root.getComponent(i);
             if (child instanceof JButton) {
-                if (text.equals(((JButton) child).getText())) {
+                if (part.equals(((JButton) child).getToolTipText())
+                        || (((JButton) child).getToolTipText() != null
+                                && ((JButton) child).getToolTipText().contains(part))) {
                     return (JButton) child;
                 }
             } else if (child instanceof Container) {
-                JButton found = findButton((Container) child, text);
+                JButton found = findButtonByTooltip((Container) child, part);
                 if (found != null) {
                     return found;
                 }
@@ -245,14 +276,117 @@ class NodeLoggingPanelTest {
                 "the row reappears when the filter is switched back on");
     }
 
+    @Test
+    @DisplayName("host-added (FileHandler) rows carry a DISABLED 'Remove key' icon (built-in rows)")
+    void hostRowsAreNotRemovable() {
+        NodeLoggingPanel panel = newPanel();
+        JComponent editor = editorForLabel(panel, "File Count");
+        assertNotNull(editor, "the File Count row editor is present");
+        Container cell = (Container) editor.getParent();
+        JButton remove = null;
+        for (Component child : cell.getComponents()) {
+            if (child instanceof JButton) {
+                remove = (JButton) child;
+            }
+        }
+        assertNotNull(remove, "the row's value cell carries the 'Remove key' trash icon");
+        assertFalse(remove.isEnabled(), "host-registered (built-in) rows cannot be removed");
+    }
+
     private static boolean hasLabel(Container root, String text) {
-        return allLabels(root).contains(text);
+        return allLabels(root).stream().anyMatch(t2 -> text.equals(t2) || (text + " *").equals(t2));
+    }
+
+    @Test
+    @DisplayName("search row: Profile / Search / Show values are left-aligned with uniform gaps and equal heights")
+    void searchRowAlignment() {
+        NodeLoggingPanel panel = newPanel();
+        onEdt(() -> {
+            panel.enableSearch(); // idempotent: the constructor already enabled it
+            panel.setSize(900, 600);
+            layoutRecursively(panel);
+        });
+
+        Container profileBox = findTitled(panel, "Profile");
+        Container searchBox = findTitled(panel, "Search");
+        Container showValues = findTitled(panel, "Show values");
+        Container levelsFrame = findTitled(panel, "Logger levels");
+        assertNotNull(profileBox, "the 'Profile' titled box is present");
+        assertNotNull(searchBox, "the 'Search' titled box is present");
+        assertNotNull(showValues, "the 'Show values' titled box is present");
+        assertNotNull(levelsFrame, "the 'Logger levels' titled frame is present");
+
+        // Left-aligned: the row's first box starts at the same left edge as
+        // the "Logger levels" frame (the panels line up column-wise).
+        assertEquals(horizontalPosition(panel, levelsFrame), horizontalPosition(panel, profileBox),
+                "the profile box must start at the same left edge as the 'Logger levels' frame");
+
+        // Uniform gaps between all three boxes (Profile ↔ Search ↔ Show values).
+        int profileToSearch = horizontalPosition(panel, searchBox)
+                - (horizontalPosition(panel, profileBox) + profileBox.getWidth());
+        int searchToShowValues = horizontalPosition(panel, showValues)
+                - (horizontalPosition(panel, searchBox) + searchBox.getWidth());
+        assertEquals(profileToSearch, searchToShowValues,
+                "the gaps between Profile/Search/Show values must be uniform (profile→search="
+                        + profileToSearch + ", search→show-values=" + searchToShowValues + ")");
+        assertEquals(4, profileToSearch, "the gap must be the row's uniform 4px gap");
+
+        // Uniform heights across all three boxes.
+        assertEquals(profileBox.getHeight(), searchBox.getHeight(),
+                "the Profile and Search boxes must have the same height");
+        assertEquals(profileBox.getHeight(), showValues.getHeight(),
+                "the Profile and Show values boxes must have the same height");
+    }
+
+    /** The first container carrying a TitledBorder with exactly the given title (may be null). */
+    private static Container findTitled(Container root, String title) {
+        for (int i = 0; i < root.getComponentCount(); i++) {
+            Component child = root.getComponent(i);
+            if (child instanceof JComponent jcomponent && jcomponent instanceof Container) {
+                Container container = jcomponent;
+                if (jcomponent.getBorder() instanceof TitledBorder border && title.equals(border.getTitle())) {
+                    return container;
+                }
+                Container found = findTitled(container, title);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** The x position of {@code c} relative to {@code root} (walking up the parents). */
+    private static int horizontalPosition(Container root, Component c) {
+        int x = c.getX();
+        Component p = c.getParent();
+        while (p != null && p != root) {
+            x += p.getX();
+            p = p.getParent();
+        }
+        return x;
+    }
+
+    /** Forces a full layout pass over the component tree (mirrors the core panel's test). */
+    private static void layoutRecursively(Container c) {
+        c.doLayout();
+        for (Component child : c.getComponents()) {
+            if (child instanceof Container nested) {
+                layoutRecursively(nested);
+            }
+        }
+    }
+
+    /** Whether the label shows the row name, with or without the trailing unsaved star. */
+    private static boolean labelMatches(JLabel label, String text) {
+        String shown = label.getText();
+        return text.equals(shown) || (shown != null && shown.equals(text + " *"));
     }
 
     private static JLabel findLabel(Container root, String text) {
         for (int i = 0; i < root.getComponentCount(); i++) {
             Component child = root.getComponent(i);
-            if (child instanceof JLabel && text.equals(((JLabel) child).getText())) {
+            if (child instanceof JLabel && labelMatches((JLabel) child, text)) {
                 return (JLabel) child;
             }
             if (child instanceof Container) {
@@ -294,9 +428,6 @@ class NodeLoggingPanelTest {
                     return Map.of(
                             "test.level", "INFO",
                             "test.handler", "java.util.logging.ConsoleHandler");
-                }
-                @Override public Map<String, Map<String, String>> getPresetOverrides() {
-                    return Collections.emptyMap();
                 }
             };
         }

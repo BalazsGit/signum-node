@@ -367,8 +367,13 @@ public class ConfigurationUtils {
     }
 
     /**
-     * Configures a set of toolbar buttons with consistent icons and sizes for
-     * profile management.
+     * Configures a set of profile-management toolbar buttons as icon-only,
+     * flat buttons in the node profile toolbar's icon-button pattern
+     * (see {@code NodeToolbar#createIconButton}): a FontAwesome glyph at the
+     * application's toolbar icon size that grows on hover
+     * ({@link HoverScaleIcon}) without any layout shift, on a transparent,
+     * unfilled button. The tooltip is the single source of information about
+     * each action (set by the callers).
      *
      * @param newBtn             Button for creating a new profile.
      * @param saveBtn            Button for saving the current profile.
@@ -378,45 +383,45 @@ public class ConfigurationUtils {
      * @param reloadBtn          Button for reloading from disk.
      * @param refreshBtn         Button for refreshing the profile list.
      * @param resetToDefaultsBtn Button for resetting to application defaults.
+     * @param copyBtn            Button for copying another profile's data.
+     * @param cloneBtn           Button for cloning the current profile.
      */
     public static void configureProfileToolbar(
             JButton newBtn, JButton saveBtn, JButton applyBtn,
-            JButton renameBtn, JButton deleteBtn, JButton reloadBtn, JButton refreshBtn, JButton resetToDefaultsBtn) {
-        float iconSize = GuiConstants.getHelpIconSize();
+            JButton renameBtn, JButton deleteBtn, JButton reloadBtn, JButton refreshBtn,
+            JButton resetToDefaultsBtn, JButton copyBtn, JButton cloneBtn) {
+        float iconSize = GuiConstants.getToolBarIconSize();
         Color iconColor = GuiColors.getButtonIcon();
 
-        if (newBtn != null) {
-            newBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.FILE_O, iconSize, iconColor));
-            fixComponentSize(newBtn);
+        styleProfileIconButton(newBtn, FontAwesome.FILE_O, iconColor, iconSize);
+        styleProfileIconButton(saveBtn, FontAwesome.FLOPPY_O, iconColor, iconSize);
+        styleProfileIconButton(applyBtn, FontAwesome.CHECK_CIRCLE_O, iconColor, iconSize);
+        styleProfileIconButton(renameBtn, FontAwesome.PENCIL_SQUARE_O, iconColor, iconSize);
+        // delete stands out in the palette's contrast red (a destructive action)
+        styleProfileIconButton(deleteBtn, FontAwesome.TRASH_O, GuiColors.getContrastRed(), iconSize);
+        styleProfileIconButton(reloadBtn, FontAwesome.RECYCLE, iconColor, iconSize);
+        styleProfileIconButton(refreshBtn, FontAwesome.REFRESH, iconColor, iconSize);
+        styleProfileIconButton(resetToDefaultsBtn, FontAwesome.UNDO, iconColor, iconSize);
+        styleProfileIconButton(copyBtn, FontAwesome.CLIPBOARD, iconColor, iconSize);
+        styleProfileIconButton(cloneBtn, FontAwesome.FILES_O, iconColor, iconSize);
+    }
+
+    /**
+     * Styles one profile-toolbar button in the node profile toolbar's flat
+     * icon-button pattern (a glyph at the toolbar icon size, hover-grow,
+     * no fill, a slim uniform border). A {@code null} button is skipped —
+     * the callers pass only the buttons they own.
+     */
+    public static void styleProfileIconButton(JButton button, FontAwesome iconCode, Color color, float iconSize) {
+        if (button == null) {
+            return;
         }
-        if (saveBtn != null) {
-            saveBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.FLOPPY_O, iconSize, iconColor));
-            fixComponentSize(saveBtn);
-        }
-        if (applyBtn != null) {
-            applyBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.CHECK_CIRCLE_O, iconSize, iconColor));
-            fixComponentSize(applyBtn);
-        }
-        if (renameBtn != null) {
-            renameBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.PENCIL_SQUARE_O, iconSize, iconColor));
-            fixComponentSize(renameBtn);
-        }
-        if (deleteBtn != null) {
-            deleteBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.TRASH_O, iconSize, iconColor));
-            fixComponentSize(deleteBtn);
-        }
-        if (reloadBtn != null) {
-            reloadBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.RECYCLE, iconSize, iconColor));
-            fixComponentSize(reloadBtn);
-        }
-        if (refreshBtn != null) {
-            refreshBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.REFRESH, iconSize, iconColor));
-            fixComponentSize(refreshBtn);
-        }
-        if (resetToDefaultsBtn != null) {
-            resetToDefaultsBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.UNDO, iconSize, iconColor));
-            fixComponentSize(resetToDefaultsBtn);
-        }
+        HoverScaleIcon.install(button,
+                IconFontSwing.buildIcon(iconCode, iconSize, color),
+                IconFontSwing.buildIcon(iconCode, iconSize * HoverScaleIcon.DEFAULT_SCALE, color));
+        button.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
+        button.setOpaque(false);
+        button.setContentAreaFilled(false);
     }
 
     /**

@@ -3,8 +3,6 @@ package application.module.logging;
 import application.utils.config.ConfigPaths;
 import application.utils.config.ModuleIds;
 import application.utils.config.PropertiesProfileLoader;
-import application.utils.logging.LoggingModuleRegistry;
-import application.utils.logging.ModuleLoggingProvider;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
@@ -155,8 +153,7 @@ public final class LoggingProfileRepository {
 
     /**
      * Returns {@code true} when the given profile name is <b>resolvable</b> for the module:
-     * either an on-disk profile file exists ({@code conf/{module}/logging/{name}.properties})
-     * or the module's registered provider exposes a preset with that name.
+     * an on-disk profile file exists ({@code conf/{module}/logging/{name}.properties}).
      * <p>
      * Used to validate an assignment before it is applied: a profile that has been deleted
      * (or never existed) is <i>not</i> resolvable and must fall back to the default
@@ -165,20 +162,13 @@ public final class LoggingProfileRepository {
      *
      * @param moduleId    Module identifier
      * @param profileName Profile name to check (without extension)
-     * @return true if the profile name resolves to an on-disk file or a provider preset
+     * @return true if the profile name resolves to an on-disk file
      */
     public boolean hasProfile(String moduleId, String profileName) {
         if (profileName == null || profileName.isBlank()) {
             return false;
         }
-        if (Files.exists(getProfileFile(moduleId, profileName))) {
-            return true;
-        }
-        ModuleLoggingProvider provider = LoggingModuleRegistry.getInstance().getProvider(moduleId);
-        if (provider != null) {
-            return provider.getProfile().getPresetOverrides().containsKey(profileName);
-        }
-        return false;
+        return Files.exists(getProfileFile(moduleId, profileName));
     }
 
     /**
@@ -239,21 +229,18 @@ public final class LoggingProfileRepository {
     // ── Write ──────────────────────────────────────────────────────────
 
     /**
-     * Creates a new logging profile.
-     * <p>
-     * If {@code presetName} is provided and the module has a registered provider
-     * exposing that preset, the preset overrides are written as the initial
-     * content. Otherwise an empty profile file is created.
-     * </p>
+     * Creates a new logging profile from explicit initial content — the seed
+     * properties are written as-is, which lets a caller create a profile from
+     * an arbitrary state (e.g. the editor's currently set values).
      *
      * @param moduleId    Module identifier
      * @param profileName New profile name (must not be reserved or already present)
-     * @param presetName  Optional preset to seed the new profile from (may be null)
+     * @param seed        Initial content (may be null — an empty profile is created)
      * @return Path of the created file
      * @throws IOException          if the file cannot be written
      * @throws IllegalArgumentException if the name is reserved, blank, or already exists
      */
-    public Path create(String moduleId, String profileName, String presetName) throws IOException {
+    public Path create(String moduleId, String profileName, Properties seed) throws IOException {
         validateName(profileName);
         Path file = getProfileFile(moduleId, profileName);
         if (Files.exists(file)) {
@@ -261,13 +248,7 @@ public final class LoggingProfileRepository {
                     + moduleId + "'");
         }
 
-        Properties props = new Properties();
-        if (presetName != null && !presetName.isBlank()) {
-            for (Map.Entry<String, String> entry : presetOverridesFor(moduleId, presetName).entrySet()) {
-                props.setProperty(entry.getKey(), entry.getValue());
-            }
-        }
-
+        Properties props = seed != null ? (Properties) seed.clone() : new Properties();
         Files.createDirectories(file.getParent());
         try (Writer writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
             props.store(writer, "Created logging profile: " + profileName);
@@ -408,19 +389,5 @@ public final class LoggingProfileRepository {
         if (RESERVED_PROFILE_NAME.equals(profileName)) {
             throw new IllegalArgumentException("The name '" + profileName + "' is reserved");
         }
-    }
-
-    /**
-     * Resolves the preset override map for a module, or an empty map if the module
-     * has no registered provider or no such preset.
-     */
-    private static java.util.Map<String, String> presetOverridesFor(String moduleId, String presetName) {
-        ModuleLoggingProvider provider = LoggingModuleRegistry.getInstance().getProvider(moduleId);
-        if (provider == null) {
-            LOGGER.debug("No logging provider registered for module '{}'; new profile will be empty", moduleId);
-            return Collections.emptyMap();
-        }
-        Map<String, String> overrides = provider.getProfile().getPresetOverrides().get(presetName);
-        return overrides != null ? overrides : Collections.emptyMap();
     }
 }

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.swing.JButton;
 import javax.swing.JTabbedPane;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
@@ -18,6 +19,7 @@ import java.nio.file.Path;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -100,6 +102,34 @@ class LoggingPanelTest {
         assertEquals(2, inner.getTabCount(), "two sub-tabs");
         assertEquals("Logging Profiles", inner.getTitleAt(0));
         assertEquals("Assignments", inner.getTitleAt(1));
+
+        // Regression: this host never registers a help supplier, so the "Logging Profiles"
+        // sub-tab's Help (question mark) button must still work — the core provides its
+        // own default help.
+        ModuleLoggingProfilePanel profilesTab = (ModuleLoggingProfilePanel) inner.getComponentAt(0);
+        JButton help = findHelpButton(profilesTab);
+        assertNotNull(help, "the Help button is present in the 'Logging Profiles' sub-tab");
+        assertTrue(help.isEnabled(),
+                "the Help button is enabled by default (core default help — no host supplier needed)");
+    }
+
+    /** Finds the toolbar Help (question mark) button in the component tree by its tooltip. */
+    private static JButton findHelpButton(Container root) {
+        for (int i = 0; i < root.getComponentCount(); i++) {
+            Component child = root.getComponent(i);
+            if (child instanceof JButton button
+                    && button.getToolTipText() != null
+                    && button.getToolTipText().contains("Help<br>")) {
+                return button;
+            }
+            if (child instanceof Container container) {
+                JButton found = findHelpButton(container);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
     }
 
     @Test
@@ -199,11 +229,6 @@ class LoggingPanelTest {
         @Override
         public Map<String, String> getDefaults() {
             return Map.of(moduleId + ".level", "INFO");
-        }
-
-        @Override
-        public Map<String, Map<String, String>> getPresetOverrides() {
-            return Map.of("quiet", Map.of(moduleId + ".level", "SEVERE"));
         }
     }
 

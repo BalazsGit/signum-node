@@ -2,37 +2,30 @@ package application.module.node.gui.configuration;
 
 import application.module.logging.gui.ModuleLoggingProfilePanel;
 import application.module.logging.LoggingAssignmentStore;
-import application.module.logging.LoggingProfileRepository;
 import application.module.node.logging.NodeLoggingProvider;
 import application.utils.config.ModuleIds;
-import application.utils.gui.CheckboxGroupPanel;
 import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
-import application.utils.gui.GuiConstants;
-import jiconfont.icons.font_awesome.FontAwesome;
-import jiconfont.swing.IconFontSwing;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
-import javax.swing.JLabel;
 import javax.swing.JPanel;
-import java.awt.Color;
 import java.awt.FlowLayout;
-import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Properties;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
  * Thin, node-specific adapter over the generic {@link ModuleLoggingProfilePanel}.
  *
- * <p>Owns ONLY the node concerns and delegates all generic logging-profile editing to the core:
- * the File Handler rows, the apply→restart hook, the optional "link to node profile" control,
- * node help text, and the row search filter. All storage goes through the shared
+ * <p>Owns ONLY the node concerns and delegates all generic logging-profile editing to the core
+ * (including the live row search and the "Show values" unsaved/saved/applied row-state filter —
+ * both core features of the {@link ModuleLoggingProfilePanel}): the File Handler rows, the
+ * apply→restart hook, the optional "link to node profile" control and the node help text.
+ * All storage goes through the shared
  * {@code LoggingProfileRepository} (module {@code node}) at {@code ./conf/node/logging/}, exactly
  * where the legacy {@code LoggerConfigurationPanel} stored profiles.</p>
  *
@@ -54,48 +47,28 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
      */
     private final String nodeProfileName;
 
-    /**
-     * Per-row value state (node-logging exclusive): the row's editor value
-     * compared against what is saved and what is applied.
-     */
-    private enum RowState {
-        /** Editor value differs from the selected profile's saved value (dirty). */
-        UNSAVED(GuiColors.getUnsaved()),
-        /** Editor value is saved to the selected profile, but differs from the applied profile. */
-        SAVED(GuiColors.getSaved()),
-        /** Editor value matches what the (restarted) node is actually running. */
-        APPLIED(GuiColors.getApplied());
-
-        private final Color color;
-
-        RowState(Color color) {
-            this.color = color;
-        }
-
-        Color color() {
-            return color;
-        }
-    }
-
-    /** Last computed per-row state (key → state); drives the coloring and the "Show values" filters. */
-    private final Map<String, RowState> rowStates = new LinkedHashMap<>();
-    private CheckboxGroupPanel statusPanel;
-    private JCheckBox showUnsavedBox;
-    private JCheckBox showSavedBox;
-    private JCheckBox showAppliedBox;
-
-    /** Node-logging help text (HTML). */
+    /** Node-logging help text (HTML), rendered in the compact {@code HelpDialog} frame. */
     private static final String NODE_HELP_HTML =
-            "<html><b>Signum Node logging profile</b><br>"
-            + "Each row is a key/value entry written to the node's JUL {@code Properties}. Rows with a "
-            + "log level are dropdowns; others are free text (e.g. FileHandler limit/count).<br><br>"
-            + "<b>Row colors</b> (node-logging): <b>unsaved</b> = the value differs from the selected "
-            + "profile's saved content; <b>saved</b> = saved in the selected profile but differs from the "
-            + "applied profile; <b>applied</b> = the value matches what the applied profile (the running "
-            + "configuration) uses. The \"Show values\" boxes filter rows by these states.<br><br>"
+            "<html><body style='width: 500px'>"
+            + "<b>Signum Node logging profile</b><br>"
+            + "Each row is a key/value entry written to the node's JUL <b>Properties</b>. Rows with a "
+            + "log level are dropdowns; others are free text (e.g. FileHandler limit/count)."
+            + "<br><br>"
+            + "<b>Row colors</b> (node-logging):"
+            + "<ul>"
+            + "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getUnsaved()) + "'>\u25A0 Unsaved:</font> "
+            + "the value differs from the selected profile's saved content. Unsaved rows are additionally "
+            + "marked with a trailing <b>*</b> star on their label (the same convention as the node configuration panel).</li>"
+            + "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getSaved()) + "'>\u25A0 Saved:</font> "
+            + "saved in the selected profile but differs from the applied profile.</li>"
+            + "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getApplied()) + "'>\u25A0 Applied:</font> "
+            + "the value matches what the applied profile (the running configuration) uses.</li>"
+            + "</ul>"
+            + "The \u201CShow values\u201D boxes filter rows by these states."
+            + "<br><br>"
             + "<b>Apply</b> records this profile as the node's active logging profile for <i>this</i> node "
             + "profile; a node restart is required for the change to take effect."
-            + "</html>";
+            + "</body></html>";
 
     /**
      * Creates the node logging tab wired to the given apply action (used by the
@@ -178,141 +151,14 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
             setLinkControl(buildLinkControl(onLinkAction, linkedProfileSupplier));
         }
 
-        // Node-logging exclusive: the "Show values" status filters (rendered
-        // next to the search box) plus the per-row unsaved/saved/applied
-        // coloring — see reevaluateRowStates()/styleRow()/isRowVisible().
-        buildStatusFilter();
+        // The FileHandler rows were registered AFTER the super-constructor's
+        // initial profile load — recompute their row states (the unsaved/
+        // saved/applied coloring and the "Show values" filters) now.
+        reevaluateRowStates();
 
         setHelpSupplier(() -> NODE_HELP_HTML);
-        enableSearch();
 
         LOGGER.debug("NodeLoggingPanel constructed (module: node)");
-    }
-
-    // ── Node-logging exclusive: row states (Unsaved / Saved / Applied) ──────
-
-    /**
-     * Builds the "Show values" status filter next to the search box. Each
-     * checkbox toggles the visibility of rows in the corresponding state;
-     * toggling re-renders the rows.
-     */
-    private void buildStatusFilter() {
-        statusPanel = new CheckboxGroupPanel("Show values");
-        statusPanel.setChangeListener(button -> reevaluateRowStates());
-
-        showUnsavedBox = statusPanel.addCheckbox("Unsaved values", GuiColors.getUnsaved(), true);
-        showUnsavedBox.setToolTipText(
-                "Show / hide the values that differ from the selected profile's saved content (dirty edits).");
-
-        showSavedBox = statusPanel.addCheckbox("Saved values", GuiColors.getSaved(), true);
-        showSavedBox.setToolTipText(
-                "Show / hide the values that are saved in the selected profile but differ from the applied profile.");
-
-        showAppliedBox = statusPanel.addCheckbox("Applied values", GuiColors.getApplied(), true);
-        showAppliedBox.setToolTipText(
-                "Show / hide the values that match exactly what the applied profile (the running configuration) uses.");
-
-        getFilterBox().add(statusPanel);
-
-        // The state computation that ran during the super-constructor was
-        // skipped (this subclass's fields are not initialized yet) — do the
-        // first real recompute now that everything is in place.
-        reevaluateRowStates();
-    }
-
-    /**
-     * Recomputes the state of every row against the two reference profiles:
-     * <ul>
-     * <li><b>Unsaved</b> — the editor value differs from the selected
-     *     profile's saved content (or differs from the built-in default while
-     *     the virtual Default entry is selected — Default cannot be saved).</li>
-     * <li><b>Applied</b> — the editor value matches the applied profile's
-     *     value (or the built-in default when no profile — or only the
-     *     reserved sample config — is the applied marker).</li>
-     * <li><b>Saved</b> — otherwise: saved in the selected profile, but not
-     *     what is applied.</li>
-     * </ul>
-     */
-    @Override
-    protected void recomputeRowStates() {
-        if (rowStates == null) {
-            return; // super-constructor in progress
-        }
-        rowStates.clear();
-        String selected = selectedProfileName();
-        boolean selectedIsDefault = ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY.equals(selected);
-        Properties selectedProps = selectedIsDefault ? new Properties() : loadProfilePropsSafely(selected);
-
-        String applied = appliedProfileName();
-        boolean appliedIsDefault = applied == null || applied.isBlank()
-                || LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(applied);
-        Properties appliedProps = appliedIsDefault ? null : loadProfilePropsSafely(applied);
-
-        for (String key : rowKeys()) {
-            String value = editorValueOf(key);
-            if (value == null) {
-                value = "";
-            }
-            String def = defaultRowValue(key);
-
-            // 1) Unsaved: dirty against the selected profile's saved content.
-            boolean dirty;
-            if (selectedIsDefault) {
-                dirty = !value.equals(def);
-            } else {
-                String saved = selectedProps.getProperty(key);
-                dirty = saved == null ? !value.equals(def) : !value.equals(saved);
-            }
-            if (dirty) {
-                rowStates.put(key, RowState.UNSAVED);
-                continue;
-            }
-
-            // 2) Applied: matches the applied profile's value (built-in
-            //    defaults when nothing — or only the sample config — is applied).
-            String appliedValue = appliedProps == null ? def : appliedProps.getProperty(key, def);
-            if (value.equals(appliedValue)) {
-                rowStates.put(key, RowState.APPLIED);
-                continue;
-            }
-
-            // 3) Saved: persisted in the selected profile, but not applied.
-            rowStates.put(key, RowState.SAVED);
-        }
-    }
-
-    /** @return true when the row's state is currently shown by the "Show values" filters. */
-    @Override
-    protected boolean isRowVisible(String key) {
-        // null while the super-constructor is still running (the core renders
-        // rows before this subclass's fields are initialized).
-        if (rowStates == null) {
-            return true;
-        }
-        RowState state = rowStates.get(key);
-        if (state == null) {
-            return true;
-        }
-        return switch (state) {
-            case UNSAVED -> showUnsavedBox != null && showUnsavedBox.isSelected();
-            case SAVED -> showSavedBox != null && showSavedBox.isSelected();
-            case APPLIED -> showAppliedBox != null && showAppliedBox.isSelected();
-        };
-    }
-
-    /** Colors the row's label and editor with the state color (node-logging exclusive). */
-    @Override
-    protected void styleRow(String key, JLabel label, JComponent editor) {
-        // null while the super-constructor is still running.
-        if (rowStates == null) {
-            return;
-        }
-        RowState state = rowStates.get(key);
-        if (state == null) {
-            return;
-        }
-        label.setForeground(state.color());
-        editor.setForeground(state.color());
     }
 
     /** The underlying core panel (this panel IS the core panel). */

@@ -1,6 +1,7 @@
-package application.module.node.gui.configuration;
+package application.utils.gui;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.Color;
@@ -19,11 +20,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Pixel-level regression test for the value search-match band of
- * {@link NodeConfigurationPanel}: when a multi-line value box is searched
- * (property values on their own lines) ONLY the matching text itself must be
- * highlighted — a reported bug was that the entire text box content got
- * painted.
+ * Pixel-level regression test for the {@link SearchValueHighlight} utility
+ * (the shared value search-match band of the node configuration panel's
+ * property search and the module logging profile panels' row search): when a
+ * multi-line value box is searched (property values on their own lines) ONLY
+ * the matching text itself must be highlighted — a reported bug was that the
+ * entire text box content got painted.
  * <p>
  * The band is painted into an opaque white {@code TYPE_INT_RGB} image with an
  * opaque, glyph-distinct band color and a monospaced font, so the paint
@@ -31,8 +33,8 @@ import org.junit.jupiter.api.Test;
  * {@link JComponent#modelToView2D(int)} positions.
  * </p>
  */
-@DisplayName("NodeConfigurationPanel value-match highlight tests")
-class NodeConfigurationPanelValueMatchHighlightTest {
+@DisplayName("SearchValueHighlight tests")
+class SearchValueHighlightTest {
 
     /** Opaque, distinct from the white background and the black glyphs. */
     private static final Color BAND = new Color(255, 221, 0);
@@ -47,7 +49,7 @@ class NodeConfigurationPanelValueMatchHighlightTest {
         int idx = text.indexOf("target");
         assertTrue(idx >= 0);
         Object highlight = area.getHighlighter().addHighlight(idx, idx + 6,
-                NodeConfigurationPanel.searchValueMatchPainter(BAND));
+                SearchValueHighlight.painter(BAND));
         try {
             BufferedImage img = render(area);
 
@@ -74,6 +76,7 @@ class NodeConfigurationPanelValueMatchHighlightTest {
             area.getHighlighter().removeHighlight(highlight);
         }
     }
+
     @Test
     @DisplayName("a match ending at the end of a line stops at the last matched character")
     void matchEndingAtLineEnd_stopsAtTheLastMatchedCharacter() throws Exception {
@@ -82,7 +85,7 @@ class NodeConfigurationPanelValueMatchHighlightTest {
         int idx = area.getText().indexOf("beta");
         assertTrue(idx >= 0);
         Object highlight = area.getHighlighter().addHighlight(idx, idx + 4,
-                NodeConfigurationPanel.searchValueMatchPainter(BAND));
+                SearchValueHighlight.painter(BAND));
         try {
             BufferedImage img = render(area);
 
@@ -123,7 +126,7 @@ class NodeConfigurationPanelValueMatchHighlightTest {
         int idx = field.getText().indexOf("signum");
         assertTrue(idx >= 0);
         Object highlight = field.getHighlighter().addHighlight(idx, idx + 6,
-                NodeConfigurationPanel.searchValueMatchPainter(BAND));
+                SearchValueHighlight.painter(BAND));
         try {
             BufferedImage img = render(field);
 
@@ -142,6 +145,7 @@ class NodeConfigurationPanelValueMatchHighlightTest {
             field.getHighlighter().removeHighlight(highlight);
         }
     }
+
     @Test
     @DisplayName("filling the highlighter's bounds paints the whole box — why the band uses the offsets")
     void fullBoundsFill_paintsTheWholeBox() throws Exception {
@@ -167,6 +171,20 @@ class NodeConfigurationPanelValueMatchHighlightTest {
         } finally {
             area.getHighlighter().removeHighlight(highlight);
         }
+    }
+
+    @Test
+    @DisplayName("viewOf resolves offsets inside the document and null outside it")
+    void viewOf_outOfBoundsOffsetsAreNull() throws Exception {
+        JTextArea area = areaWithLines(200, 80, "line one", "line two");
+        assertTrue(SearchValueHighlight.viewOf(area, 0) != null,
+                "an in-bounds offset resolves to a view rectangle");
+        assertTrue(SearchValueHighlight.viewOf(area, area.getDocument().getLength()) != null,
+                "the document end offset resolves to a view rectangle");
+        assertNull(SearchValueHighlight.viewOf(area, -1),
+                "a negative offset is out of bounds");
+        assertNull(SearchValueHighlight.viewOf(area, area.getDocument().getLength() + 5),
+                "an offset past the document length is out of bounds");
     }
 
     /** Creates a white multi-line text area with a monospaced font and a fixed size. */
