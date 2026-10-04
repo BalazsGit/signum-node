@@ -8,26 +8,40 @@
   <style>
     /* NTP (F1 + F9 H5): the template carries no UI text (D16) and no data —
        the top sites and the search engine arrive in the JSON data island,
-       rendered through textContent / createElement only (S9). */
+       rendered through textContent / createElement only (S9).
+       Redesign: the background is a soft, full-viewport gradient (no hard
+       edge, no clipped brand) and the "frequently visited" cards are a
+       uniform grid that can never overflow the viewport horizontally. */
+    html {
+      background: var(--bg); /* the canvas behind everything is always themed */
+    }
     body {
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 32px 0 20px;
+      overflow-x: hidden; /* the NTP never scrolls sideways */
       background:
-        radial-gradient(1200px 500px at 50% -10%, rgba(79, 140, 255, 0.14), transparent 60%),
-        var(--bg);
+        radial-gradient(120% 90% at 78% -20%, rgba(79, 140, 255, 0.16) 0%, rgba(79, 140, 255, 0.05) 45%, transparent 72%),
+        radial-gradient(100% 80% at 8% 115%, rgba(139, 92, 246, 0.10) 0%, rgba(139, 92, 246, 0.03) 45%, transparent 72%),
+        linear-gradient(180deg, #1a1f27 0%, var(--bg) 45%, var(--bg) 100%);
+      background-attachment: fixed; /* pinned to the viewport: full-page, edge-free */
     }
     .ntp {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 26px;
-      transform: translateY(-6vh);
-      width: min(620px, 84vw);
+      gap: 28px;
+      width: min(640px, calc(100vw - 48px));
+      padding-top: 10px; /* headroom: the brand is never clipped at the top */
     }
     .brand {
       margin: 0;
-      font-size: 54px;
+      font-size: 50px;
+      line-height: 1.25; /* the ascenders get their own space */
       font-weight: 300;
       letter-spacing: 8px;
       color: var(--fg);
@@ -39,47 +53,62 @@
     .search {
       display: flex;
       width: 100%;
+      border-radius: 26px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+      transition: border-color 120ms ease, box-shadow 120ms ease;
+    }
+    .search:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 8px 28px rgba(79, 140, 255, 0.18);
     }
     .search input {
       flex: 1;
       min-width: 0;
-      padding: 14px 20px;
+      padding: 14px 22px;
       font-size: 16px;
       color: var(--fg);
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-right: 0;
-      border-radius: 24px 0 0 24px;
+      background: transparent;
+      border: 0;
       outline: none;
-      transition: border-color 120ms ease;
     }
     .search input::placeholder {
       color: var(--muted);
     }
-    .search input:focus {
-      border-color: var(--accent);
-    }
     .search button {
-      width: 54px;
+      flex: 0 0 54px;
+      height: 52px;
       border: 0;
-      border-radius: 0 24px 24px 0;
-      background: var(--accent);
-      color: #ffffff;
+      border-left: 1px solid var(--border);
+      border-radius: 0 26px 26px 0;
+      background: rgba(79, 140, 255, 0.14);
+      color: var(--accent);
       font-size: 18px;
       cursor: pointer;
-      transition: filter 120ms ease;
+      transition: background 120ms ease, color 120ms ease;
     }
     .search button:hover {
-      filter: brightness(1.12);
+      background: var(--accent);
+      color: #ffffff;
     }
     .hint {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 16px;
       margin: 0;
-      font-size: 12px;
-      letter-spacing: 2px;
+      text-align: center;
+      font-size: 11px;
+      letter-spacing: 2.5px;
       text-transform: uppercase;
       color: var(--muted);
+      opacity: 0.75;
+      pointer-events: none;
     }
-    /* H5: the "frequently visited" grid (4 columns, A4 transitions). */
+    /* H5: the "frequently visited" grid — uniform cards (minmax(0, 1fr)
+       keeps every column the same width and lets long names ellipsize
+       instead of pushing the page wider). */
     .frequent {
       display: none;
       width: 100%;
@@ -89,45 +118,55 @@
     }
     .frequent h2 {
       margin: 0 0 12px;
-      font-size: 13px;
+      padding-left: 4px;
+      font-size: 12px;
       font-weight: 600;
-      letter-spacing: 1px;
+      letter-spacing: 1.2px;
       text-transform: uppercase;
       color: var(--muted);
     }
     .sites {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 10px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+    @media (max-width: 560px) {
+      .sites {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
     }
     .site {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 8px;
-      padding: 14px 8px 12px;
+      justify-content: flex-start;
+      gap: 10px;
+      min-width: 0; /* shrink inside the grid cell: no sideways overflow */
+      min-height: 96px; /* every card is the same size */
+      padding: 18px 10px 14px;
       text-decoration: none;
       color: var(--fg);
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 12px;
-      transition: border-color 120ms ease, transform 120ms ease;
+      border-radius: 14px;
+      transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
     }
     .site:hover {
       border-color: var(--accent);
       transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
     }
     .site .dot {
-      width: 34px;
-      height: 34px;
+      width: 38px;
+      height: 38px;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 15px;
+      font-size: 16px;
       font-weight: 600;
       color: #ffffff;
-      background: var(--accent);
+      background: linear-gradient(135deg, var(--accent), rgba(139, 92, 246, 0.85));
       text-transform: uppercase;
     }
     .site .name {
@@ -135,7 +174,7 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      font-size: 12px;
+      font-size: 12.5px;
     }
   </style>
 </head>
@@ -151,8 +190,8 @@
       <h2 id="frequent-title"></h2>
       <div class="sites" id="sites"></div>
     </section>
-    <p class="hint">Signum Browser</p>
   </main>
+  <p class="hint">Signum Browser</p>
   <script id="data" type="application/json">__SIGNUM_DATA__</script>
   <script>
     (function () {

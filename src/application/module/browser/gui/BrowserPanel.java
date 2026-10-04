@@ -17,7 +17,6 @@ import application.module.browser.engine.scheme.HistoryPageRenderer;
 import application.module.browser.engine.scheme.InternalPage;
 import application.module.browser.engine.scheme.NewTabPageRenderer;
 import application.module.browser.engine.scheme.SettingsPageRenderer;
-import application.module.browser.gui.bookmarks.BookmarksBar;
 import application.module.browser.gui.dialogs.ClearDataDialog;
 import application.module.browser.gui.dialogs.JcefSetupDialog;
 import application.module.browser.gui.downloads.DownloadShelf;
@@ -60,11 +59,12 @@ import org.slf4j.LoggerFactory;
 /**
  * Root panel of the browser module (plan §4.1) — replaces the F0 smoke panel.
  * <p>
- * Layout: the shared {@link BookmarksBar} on top, and a card host that
+ * Layout: a card host that
  * shows either the {@link EngineReadyScreen} (A8: preparing / error /
  * idle) or the {@link BrowserTabPane} — a single tabbed pane whose tabs
  * ARE the tabs' self-contained {@link BrowserTabView}s (each owning its
- * own toolbar (omnibox) and CEF browser); switching tabs is the pane's
+ * own toolbar (omnibox) row, its bookmarks bar directly below that row,
+ * and its CEF browser); switching tabs is the pane's
  * own show/hide, which is what isolates the native render surfaces.
  * <p>
  * Wiring:
@@ -98,7 +98,6 @@ public final class BrowserPanel extends JPanel {
     private final ActiveDownloadRegistry activeDownloads;
     private final DownloadShelf downloadShelf;
     private final BrowserTabPane browserTabs;
-    private final BookmarksBar bookmarksBar;
     private final EngineReadyScreen readyScreen;
     /** One self-contained view per tab (its toolbar/omnibox + CEF browser). */
     private final Map<String, BrowserTabView> tabViews = new LinkedHashMap<>();
@@ -131,6 +130,12 @@ public final class BrowserPanel extends JPanel {
         this.bookmarkStore = new BookmarkStore(browserConfDir.resolve("bookmarks.json"));
         this.bookmarkRenderer = new BookmarkPageRenderer(bookmarkStore);
         InternalPage.registerRenderer(BookmarkPageRenderer.PAGE, bookmarkRenderer);
+        // F8: a mutation made through the manager PAGE (its action URLs) must
+        // refresh every tab's bar and star exactly like a Swing-side one —
+        // save() is the shared chokepoint (the store fires on the caller's
+        // thread; this listener pumps to the EDT).
+        bookmarkStore.addChangeListener(() ->
+                SwingUtilities.invokeLater(this::refreshAllBookmarkViews));
         // F5: the download manager (D1 target paths, D2 state, downloads.json)
         // + the shared cancel hooks; the shelf at the bottom (D3, A9).
         this.downloadManager = new DownloadManager(
@@ -151,12 +156,6 @@ public final class BrowserPanel extends JPanel {
                 new AboutPageRenderer(engine::cefVersion, JcefProcessBootstrap.mainArgs()));
         InternalPage.setThemeStyleProvider(LafCssTheme::styleBlock);
         this.sessionStore = new SessionStore(browserConfDir.resolve("session.json"));
-        // F4 (B3): the shared bookmarks bar — the one shared view of the
-        // shared bookmark store; clicking a bookmark navigates the active
-        // tab's view
-        this.bookmarksBar = new BookmarksBar(bookmarkStore,
-                url -> activeView().ifPresent(v -> v.navigate(url)),
-                page -> activeView().ifPresent(v -> v.navigate(page)));
         this.readyScreen = new EngineReadyScreen();
         this.browserTabs = new BrowserTabPane(controller);
         this.downloadShelf = new DownloadShelf(downloadManager, activeDownloads,
@@ -164,11 +163,10 @@ public final class BrowserPanel extends JPanel {
 
         cardHost.add(readyScreen, CARD_ENGINE);
         cardHost.add(browserTabs, CARD_CONTENT);
-        // F4 (B4): the shared bookmarks bar sits above the tab container —
-        // every tab's own toolbar (omnibox row) is part of the tab view
-        // below; its visibility is the persisted showBookmarksBar setting.
-        bookmarksBar.setVisible(settingsRepository.load().isShowBookmarksBar());
-        add(bookmarksBar, BorderLayout.NORTH);
+        // F4 (B4): the bookmarks bar now lives inside every tab view,
+        // directly below that tab's toolbar (omnibox row) — its visibility
+        // is the persisted showBookmarksBar setting (read by the view) and
+        // toggled with Ctrl+Shift+B (below).
         add(cardHost, BorderLayout.CENTER);
         // F5 (D3): the download shelf slides in at the bottom (A9); hidden
         // until the first active download or a Ctrl+J toggle.
@@ -265,11 +263,12 @@ public final class BrowserPanel extends JPanel {
         // F4 (B1): Ctrl+D toggles the active page's bookmark (the star).
         bind(im, am, "browser.toggleBookmark", KeyStroke.getKeyStroke("ctrl D"),
                 () -> activeView().ifPresent(BrowserTabView::toggleBookmark));
-        // F4 (B4): Ctrl+Shift+B shows/hides the bookmarks bar (persisted).
+        // F4 (B4): Ctrl+Shift+B shows/hides every tab's bookmarks bar
+        // (persisted; the setting is the single source of truth).
         bind(im, am, "browser.toggleBookmarksBar", KeyStroke.getKeyStroke("ctrl shift B"),
                 () -> {
-                    boolean show = !bookmarksBar.isVisible();
-                    bookmarksBar.setVisible(show);
+                    boolean show = !settingsRepository.load().isShowBookmarksBar();
+                    tabViews.values().forEach(v -> v.setBookmarksBarVisible(show));
                     BrowserSettings settings = settingsRepository.load();
                     settings.setShowBookmarksBar(show);
                     settingsRepository.save(settings);
@@ -422,6 +421,17 @@ public final class BrowserPanel extends JPanel {
     }
 
     /**
+     * Rebuilds every tab's bookmarks bar and re-syncs every tab's star from
+     * the shared store — the single refresh path of the Swing side (the
+     * store's change listener, the bars' changed hook and the toolbars'
+     * bookmark hook all funnel here; EDT).
+     */
+    private void refreshAllBookmarkViews() {
+        tabViews.values().forEach(BrowserTabView::refreshBookmarksBar);
+        tabViews.values().forEach(v -> v.getToolbar().sync(v.getTab()));
+    }
+
+    /**
      * F4 (B6): the bookmark export target chooser. The request arrives on a
      * CEF scheme thread; the dialog is pumped to the EDT and the caller
      * blocks until the user decides.
@@ -472,12 +482,16 @@ public final class BrowserPanel extends JPanel {
     }
 
     /**
-     * F9 (C8): a settings save may change the max-tabs cap — it applies
-     * live (the hook fires on the scheme thread; the GUI pumps it).
+     * F9 (C8): a settings save may change the max-tabs cap or the
+     * bookmarks-bar visibility — both apply live (the hook fires on the
+     * scheme thread; the GUI pumps it).
      */
     private void onSettingsSaved() {
-        SwingUtilities.invokeLater(
-                () -> controller.setMaxTabs(settingsRepository.load().getMaxTabs()));
+        SwingUtilities.invokeLater(() -> {
+            BrowserSettings settings = settingsRepository.load();
+            controller.setMaxTabs(settings.getMaxTabs());
+            tabViews.values().forEach(v -> v.setBookmarksBarVisible(settings.isShowBookmarksBar()));
+        });
     }
 
     /** F9 (T10/D13): the periodic inactive-tab discard check (EDT). */
@@ -656,12 +670,11 @@ public final class BrowserPanel extends JPanel {
                 if (!browserTabs.isShowing()) {
                     view.markCreatedWhileHidden();
                 }
-                // Bookmark changes refresh the shared bar and re-sync every
-                // tab's star (each toolbar watches the shared store view).
-                view.getToolbar().onBookmarksChanged(() -> {
-                    bookmarksBar.refresh();
-                    tabViews.values().forEach(v -> v.getToolbar().sync(v.getTab()));
-                });
+                // Bookmark changes refresh every tab's bar and re-sync
+                // every tab's star (each toolbar watches the shared
+                // store view; the bars listen through the changed hook).
+                view.getBookmarksBar().setOnChanged(this::refreshAllBookmarkViews);
+                view.getToolbar().onBookmarksChanged(this::refreshAllBookmarkViews);
             }
             case REMOVED -> {
                 BrowserTabView view = tabViews.remove(event.getTab().getId());

@@ -62,10 +62,26 @@ public final class Omnibox extends JPanel {
     static final int LOCK_LEFT_PAD = 6;
     /** The gap between the lock's right edge and the URL text. */
     static final int LOCK_TEXT_GAP = 2;
+    /**
+     * Right pad (in field coordinates) where the trailing button (the
+     * bookmark star) is pinned — hugging the field's right edge, just
+     * inside the border line.
+     */
+    static final int STAR_RIGHT_PAD = 6;
+    /** The gap between the URL text and the star's left edge. */
+    static final int STAR_TEXT_GAP = 2;
+    /** The plain margin of the field's left/right text side (no embedded component). */
+    static final int PLAIN_MARGIN = 14;
 
     private final JTextField field;
     /** S1/S4: the lock embedded in the field's left side (may be null). */
     private final SecurityIcon securityIcon;
+    /**
+     * F4 (B1): the bookmark star embedded in the field's RIGHT side
+     * (Chrome-style, always available on every page type — the toolbar
+     * syncs its visibility/state); may be null.
+     */
+    private final JComponent trailingButton;
     private OmniboxPopup popup;
     private final Consumer<String> navigateAction;
     private final BiFunction<Omnibox, String, List<OmniboxPopup.Suggestion>> suggestor;
@@ -104,10 +120,28 @@ public final class Omnibox extends JPanel {
     public Omnibox(Consumer<String> navigateAction,
                    BiFunction<Omnibox, String, List<OmniboxPopup.Suggestion>> suggestor,
                    SecurityIcon securityIcon) {
+        this(navigateAction, suggestor, securityIcon, null);
+    }
+
+    /**
+     * @param navigateAction invoked with the raw text (Enter) or a suggestion
+     *                       target (popup selection)
+     * @param suggestor      builds the popup rows for the current input
+     * @param securityIcon   the lock painted inside the field's left side
+     *                       (Chrome-style S1/S4); {@code null} omits it
+     * @param trailingButton the button painted inside the field's right
+     *                       side (the bookmark star, F4 B1); {@code null}
+     *                       omits it
+     */
+    public Omnibox(Consumer<String> navigateAction,
+                   BiFunction<Omnibox, String, List<OmniboxPopup.Suggestion>> suggestor,
+                   SecurityIcon securityIcon,
+                   JComponent trailingButton) {
         super(new BorderLayout());
         this.navigateAction = navigateAction;
         this.suggestor = suggestor;
         this.securityIcon = securityIcon;
+        this.trailingButton = trailingButton;
 
         this.field = new JTextField();
         field.setMargin(new Insets(6, 14, 6, 14));
@@ -205,6 +239,9 @@ public final class Omnibox extends JPanel {
         if (securityIcon != null) {
             installSecurityIcon();
         }
+        if (trailingButton != null) {
+            installTrailingButton();
+        }
         this.popup = null; // created lazily — the owner window only exists once shown
         installDismissalHooks();
     }
@@ -219,53 +256,88 @@ public final class Omnibox extends JPanel {
      * left side.
      */
     private void installSecurityIcon() {
-        field.setLayout(null); // the lock's bounds are managed, not laid out
+        field.setLayout(null); // the embedded components' bounds are managed, not laid out
         field.add(securityIcon);
         field.addComponentListener(new ComponentAdapter() {
             @Override
             public void componentResized(ComponentEvent e) {
-                positionSecurityIcon();
+                positionEmbeddedComponents();
             }
         });
         applySecurityIconInsets();
     }
 
     /**
-     * Keeps the field's left text margin clear of the embedded lock (the
-     * placeholder painting reuses this margin, so it stays clear too) and
-     * re-places the lock. Called again after an appearance change resizes
-     * the icon.
-     * <p>
-     * The margin is derived <em>only</em> from the lock's geometry, never
-     * from {@code getBorderInsets}: FlatLaf folds the field's margin into the
-     * border insets, so adding the inset here would be self-referential —
-     * every call would inflate the margin (and with it the lock's x and the
-     * text start) until the lock and the URL text overlapped.
+     * F4 (B1): embeds the trailing button (the bookmark star) in the
+     * field's right side, vertically centered — the same managed-bounds
+     * embedding as the lock: the field keeps the native L&amp;F border, the
+     * button sits within the omnibox box at the right edge, and only its
+     * own rectangle is clickable.
      */
-    public void applySecurityIconInsets() {
-        if (securityIcon == null) {
-            return;
-        }
-        int iconWidth = securityIcon.getPreferredSize().width;
-        field.setMargin(new Insets(6, LOCK_LEFT_PAD + iconWidth + LOCK_TEXT_GAP, 6, 14));
-        positionSecurityIcon();
+    private void installTrailingButton() {
+        field.setLayout(null); // managed bounds (the lock may have set it already)
+        field.add(trailingButton);
+        field.addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent e) {
+                positionEmbeddedComponents();
+            }
+        });
+        applySecurityIconInsets();
     }
 
     /**
-     * Pins the lock to the field's left edge (a small fixed pad, just inside
-     * the border line), vertically centered, at exactly the glyph's
-     * preferred size: the lock occupies only its own width, and only that
-     * rectangle is clickable. The fixed pad — instead of the
-     * (margin-inflated) border inset — keeps it at the left in every L&amp;F.
+     * Keeps the field's text margins clear of the embedded components —
+     * the lock on the LEFT (always present when set) and the star on the
+     * RIGHT (its margin follows its VISIBILITY: the star is kept visible
+     * on every page type — on non-bookmarkable schemes it simply stays
+     * outlined and inert)
+     * — and re-places both. Called again after an appearance change
+     * resizes the glyphs and whenever the star's visibility changes.
+     * <p>
+     * The margins are derived <em>only</em> from the components'
+     * geometry, never from {@code getBorderInsets}: FlatLaf folds the
+     * field's margin into the border insets, so adding the inset here
+     * would be self-referential — every call would inflate the margin
+     * (and with it the embedded x and the text start) until the
+     * components and the URL text overlapped.
      */
-    private void positionSecurityIcon() {
-        if (securityIcon == null || field.getWidth() <= 0 || field.getHeight() <= 0) {
+    public void applySecurityIconInsets() {
+        int left = PLAIN_MARGIN;
+        if (securityIcon != null) {
+            left = LOCK_LEFT_PAD + securityIcon.getPreferredSize().width + LOCK_TEXT_GAP;
+        }
+        int right = PLAIN_MARGIN;
+        if (trailingButton != null && trailingButton.isVisible()) {
+            right = STAR_RIGHT_PAD + trailingButton.getPreferredSize().width + STAR_TEXT_GAP;
+        }
+        field.setMargin(new Insets(6, left, 6, right));
+        positionEmbeddedComponents();
+    }
+
+    /**
+     * Pins the embedded components: the lock to the field's left edge
+     * (a small fixed pad, just inside the border line), the star to the
+     * right edge — both vertically centered at exactly their preferred
+     * sizes: each occupies only its own width, and only that rectangle
+     * is clickable. The fixed pads — instead of the (margin-inflated)
+     * border inset — keep them at their sides in every L&amp;F.
+     */
+    private void positionEmbeddedComponents() {
+        if (field.getWidth() <= 0 || field.getHeight() <= 0) {
             return;
         }
-        Dimension pref = securityIcon.getPreferredSize();
-        int x = LOCK_LEFT_PAD;
-        int y = Math.max(0, (field.getHeight() - pref.height) / 2);
-        securityIcon.setBounds(x, y, pref.width, pref.height);
+        if (securityIcon != null) {
+            Dimension pref = securityIcon.getPreferredSize();
+            int y = Math.max(0, (field.getHeight() - pref.height) / 2);
+            securityIcon.setBounds(LOCK_LEFT_PAD, y, pref.width, pref.height);
+        }
+        if (trailingButton != null) {
+            Dimension pref = trailingButton.getPreferredSize();
+            int x = Math.max(LOCK_LEFT_PAD, field.getWidth() - STAR_RIGHT_PAD - pref.width);
+            int y = Math.max(0, (field.getHeight() - pref.height) / 2);
+            trailingButton.setBounds(x, y, pref.width, pref.height);
+        }
     }
 
     /** The popup, created on first need (the top-level owner must exist then). */

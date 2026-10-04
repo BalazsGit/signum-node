@@ -98,13 +98,13 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
     public byte[] render(String url, Map<String, String> query) {
         switch (pathOf(url)) {
             case "settings":
-                return renderPage(repository.load());
+                return renderPage(repository.load(), Map.of());
             case "settings/save": {
                 BrowserSettings settings = repository.load();
                 apply(settings, query);
                 repository.save(settings);
                 fireSaved();
-                return renderPage(repository.load());
+                return renderPage(repository.load(), query);
             }
             case "settings/pickDownloadsDir": {
                 BrowserSettings settings = repository.load();
@@ -121,7 +121,7 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
                     repository.save(settings);
                     fireSaved();
                 }
-                return renderPage(repository.load());
+                return renderPage(repository.load(), query);
             }
             case "settings/clearData": {
                 // C6: the GUI opens the clear-data dialog (history + cookies)
@@ -133,7 +133,7 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
                         logger.warn("The clear-data dialog failed: {}", e.toString());
                     }
                 }
-                return renderPage(repository.load());
+                return renderPage(repository.load(), query);
             }
             default:
                 return null; // unknown action → the 404 page
@@ -322,6 +322,18 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
         };
     }
 
+    /** B4: the bookmarks-bar visibility token; {@code null} = keep the current one. */
+    static Boolean parseShowBookmarksBar(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        return switch (raw.trim()) {
+            case "true" -> true;
+            case "false" -> false;
+            default -> null;
+        };
+    }
+
     /**
      * The effective download directory (C5, D1). A stored value that is not
      * a valid path (e.g. hand-edited garbage) degrades to the default —
@@ -387,9 +399,13 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
         if (blockFile != null) {
             settings.setBlockFileUrls(blockFile);
         }
+        Boolean showBar = parseShowBookmarksBar(query.get("showBookmarksBar"));
+        if (showBar != null) {
+            settings.setShowBookmarksBar(showBar);
+        }
     }
 
-    private byte[] renderPage(BrowserSettings settings) {
+    private byte[] renderPage(BrowserSettings settings, Map<String, String> query) {
         PageData data = new PageData();
         data.homepage = settings.getHomepage();
         data.homepageDefault = BrowserSettings.DEFAULT_HOME_PAGE;
@@ -406,6 +422,12 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
         data.maxTabs = settings.getMaxTabs();
         data.discardMinutes = settings.getDiscardMinutes();
         data.blockFileUrls = settings.isBlockFileUrls();
+        data.showBookmarksBar = settings.isShowBookmarksBar();
+        // The save navigation re-renders the whole page: the template
+        // carries the current scroll offset in the query so the form stays
+        // where the user was (a plain page open carries no scroll and starts
+        // at the top).
+        data.scroll = scrollOf(query);
         data.strings.put("title", I18n.get("browser.settings.title"));
         data.strings.put("startupSection", I18n.get("browser.settings.section.startup"));
         data.strings.put("startupNewtab", I18n.get("browser.settings.startup.newtab"));
@@ -436,6 +458,9 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
         data.strings.put("themeLight", I18n.get("browser.settings.theme.light"));
         data.strings.put("themeDark", I18n.get("browser.settings.theme.dark"));
         data.strings.put("themeHint", I18n.get("browser.settings.theme.hint"));
+        data.strings.put("showBookmarksBar", I18n.get("browser.settings.showBookmarksBar"));
+        data.strings.put("showBookmarksBarHint", I18n.get("browser.settings.showBookmarksBar.hint"));
+        data.strings.put("manageBookmarks", I18n.get("browser.settings.link.bookmarks"));
         data.strings.put("privacySection", I18n.get("browser.settings.section.privacy"));
         data.strings.put("blockFile", I18n.get("browser.settings.blockFile"));
         data.strings.put("blockFileHint", I18n.get("browser.settings.blockFile.hint"));
@@ -452,6 +477,23 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
         }
         String json = escapeForScript(gson.toJson(data));
         return template.replace(DATA_PLACEHOLDER, json).getBytes(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * The scroll offset the template carries back on the save navigation
+     * (garbage or a negative value degrades to the top of the page — the
+     * save itself must never fail because of it).
+     */
+    static int scrollOf(Map<String, String> query) {
+        String raw = query.get("scroll");
+        if (raw == null) {
+            return 0;
+        }
+        try {
+            return Math.max(0, Integer.parseInt(raw.trim()));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     private static String pathOf(String url) {
@@ -518,6 +560,9 @@ public final class SettingsPageRenderer implements InternalPage.PageRenderer {
         int maxTabs;
         int discardMinutes;
         boolean blockFileUrls;
+        boolean showBookmarksBar;
+        /** The page's scroll offset to restore after the save re-render. */
+        int scroll;
         Map<String, String> strings = new LinkedHashMap<>();
     }
 }

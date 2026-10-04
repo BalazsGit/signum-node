@@ -184,6 +184,28 @@ class BookmarkPageRendererTest {
         assertFalse(store.isInBar(b1));
     }
 
+    @Test
+    @DisplayName("bookmarks/add at the top level puts the new bookmark on the bar (nested adds do not)")
+    void addActionJoinsTheBarAtTopLevel() {
+        JsonObject top = island(renderer.render("signum://bookmarks/add",
+                Map.of("name", "Top", "url", "https://top.example")));
+        assertEquals(1, top.getAsJsonArray("bar").size());
+
+        String nestedFolder = store.newFolder(BookmarkStore.ROOT_ID, "F");
+        JsonObject nested = island(renderer.render("signum://bookmarks/add",
+                Map.of("name", "Nested", "url", "https://nested.example", "folder", nestedFolder)));
+        assertEquals(1, nested.getAsJsonArray("bar").size(),
+                "a nested add must not join the bar (only the top-level one is on it)");
+    }
+
+    @Test
+    @DisplayName("bookmarks/folder at the top level puts the new folder on the bar")
+    void folderActionJoinsTheBarAtTopLevel() {
+        JsonObject page = island(renderer.render("signum://bookmarks/folder",
+                Map.of("name", "Web")));
+        assertEquals(1, page.getAsJsonArray("bar").size());
+    }
+
     // ------------------------------------------------------------------
     // S9: script safety of the data island
     // ------------------------------------------------------------------

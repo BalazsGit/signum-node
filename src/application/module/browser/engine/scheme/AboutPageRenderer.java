@@ -75,6 +75,8 @@ public final class AboutPageRenderer implements InternalPage.PageRenderer {
         data.sandbox = flagOff(cefCommandline, "--no-sandbox") ? "enabled" : "disabled";
         data.strings.put("title", I18n.get("browser.about.title"));
         data.strings.put("app", I18n.get("browser.about.app"));
+        data.strings.put("engineSection", I18n.get("browser.about.section.engine"));
+        data.strings.put("runtimeSection", I18n.get("browser.about.section.runtime"));
         data.strings.put("jcef", I18n.get("browser.about.jcef"));
         data.strings.put("cef", I18n.get("browser.about.cef"));
         data.strings.put("cefNotStarted", I18n.get("browser.about.cef.notStarted"));

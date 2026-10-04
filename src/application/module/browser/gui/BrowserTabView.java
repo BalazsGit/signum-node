@@ -3,6 +3,7 @@ package application.module.browser.gui;
 import application.module.browser.config.BrowserSettings;
 import application.module.browser.engine.WebBrowserHost;
 import application.module.browser.gui.toolbar.NavigationToolbar;
+import application.module.browser.gui.bookmarks.BookmarksBar;
 import application.module.browser.model.bookmarks.BookmarkStore;
 import application.module.browser.model.history.HistoryStore;
 import application.module.browser.model.tab.BrowserTab;
@@ -62,6 +63,13 @@ public final class BrowserTabView extends JPanel {
     private final TabEventListener tabEvents =
             event -> SwingUtilities.invokeLater(() -> onTabEvent(event));
     private final NavigationToolbar toolbar;
+    /**
+     * F4 (B4): this tab's bookmarks bar — one shared view of the shared
+     * bookmark store per tab, sitting directly below this tab's own
+     * toolbar (the omnibox row), like Chrome's bar below the URL field.
+     * The visibility is the persisted {@code showBookmarksBar} setting.
+     */
+    private final BookmarksBar bookmarksBar;
     private final JPanel contentHost = new JPanel(new BorderLayout());
     /** The tab's CEF browser; {@code null} while the tab is discarded. */
     private WebBrowserHost browser;
@@ -84,7 +92,20 @@ public final class BrowserTabView extends JPanel {
         // it inside the demoted tab's omnibox/page (input must follow the tab).
         setFocusable(true);
         this.toolbar = new NavigationToolbar(this, tab, settings, history, bookmarks);
-        add(toolbar, BorderLayout.NORTH);
+        // The bookmarks bar sits BELOW this tab's toolbar row, like Chrome's
+        // bar below the URL field; bookmarks open in THIS tab. Both must be
+        // nested in ONE container: a BorderLayout keeps a single component
+        // per side, so a second NORTH add would silently REPLACE the toolbar
+        // in the NORTH slot and the toolbar (omnibox) would never be laid
+        // out (it would stay 0×0 and be invisible).
+        this.bookmarksBar = new BookmarksBar(bookmarks,
+                this::navigate,
+                this::navigate);
+        bookmarksBar.setVisible(settings.get().isShowBookmarksBar());
+        JPanel topArea = new JPanel(new BorderLayout());
+        topArea.add(toolbar, BorderLayout.NORTH);
+        topArea.add(bookmarksBar, BorderLayout.SOUTH);
+        add(topArea, BorderLayout.NORTH);
         add(contentHost, BorderLayout.CENTER);
         this.browser = browserFactory.create(tab);
         contentHost.add((JComponent) browser.getUiComponent(), BorderLayout.CENTER);
@@ -126,6 +147,23 @@ public final class BrowserTabView extends JPanel {
     /** @return the tab's own toolbar (its omnibox, star, security icon...). */
     public NavigationToolbar getToolbar() {
         return toolbar;
+    }
+
+    /** @return the tab's bookmarks bar (below its toolbar row). */
+    public BookmarksBar getBookmarksBar() {
+        return bookmarksBar;
+    }
+
+    /** Shows/hides the tab's bookmarks bar (the Ctrl+Shift+B toggle and the settings). */
+    public void setBookmarksBarVisible(boolean visible) {
+        bookmarksBar.setVisible(visible);
+        revalidate();
+        repaint();
+    }
+
+    /** Rebuilds the tab's bookmarks bar from the shared store (after any bookmark change). */
+    public void refreshBookmarksBar() {
+        bookmarksBar.refresh();
     }
 
     // ------------------------------------------------------------------

@@ -341,4 +341,84 @@ class BookmarkStoreTest {
             assertEquals(0, store.importJson("{\"nodes\":{\"a\":{\"type\":\"bookmark\"}}}")); // no id
         }
     }
+
+    // ------------------------------------------------------------------
+    // Change listeners (the GUI refresh hooks)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("save() fires the change listeners; remove stops them")
+    void changeListenersFireOnSave(@TempDir Path dir) {
+        try (BookmarkStore store = new BookmarkStore(dir.resolve("bookmarks.json"))) {
+            int[] fired = {0};
+            Runnable listener = () -> fired[0]++;
+            store.addChangeListener(listener);
+
+            store.newBookmark(BookmarkStore.ROOT_ID, "Alpha", "https://alpha.example");
+            store.save();
+            assertEquals(1, fired[0], "save must fire the listeners");
+
+            store.save();
+            assertEquals(2, fired[0], "every save is a change (the UI may re-sync)");
+
+            store.removeChangeListener(listener);
+            store.save();
+            assertEquals(2, fired[0], "a removed listener must not fire");
+        }
+    }
+
+    @Test
+    @DisplayName("one failing listener does not swallow the others")
+    void failingListenerDoesNotBreakTheRest(@TempDir Path dir) {
+        try (BookmarkStore store = new BookmarkStore(dir.resolve("bookmarks.json"))) {
+            int[] fired = {0};
+            store.addChangeListener(() -> {
+                throw new IllegalStateException("boom");
+            });
+            store.addChangeListener(() -> fired[0]++);
+
+            store.save();
+            assertEquals(1, fired[0], "the healthy listener must still run");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Bar / top-level sync (the drag-and-drop must show a visible change)
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("moving a bar bookmark into a folder removes it from the bar (the drop is visible)")
+    void moveIntoFolderLeavesTheBar(@TempDir Path dir) {
+        try (BookmarkStore store = new BookmarkStore(dir.resolve("bookmarks.json"))) {
+            String folder = store.newFolder(BookmarkStore.ROOT_ID, "Web");
+            String b = store.newBookmark(BookmarkStore.ROOT_ID, "A", "https://a.example");
+            store.setInBar(b, true);
+            assertEquals(List.of(b), barIds(store));
+
+            assertTrue(store.move(b, folder));
+            assertTrue(store.barItems().isEmpty(), "a folder member must leave the bar");
+            assertEquals(List.of(b), childIds(store, folder));
+        }
+    }
+
+    @Test
+    @DisplayName("moving a node back to the top level puts it on the bar")
+    void moveBackToRootJoinsTheBar(@TempDir Path dir) {
+        try (BookmarkStore store = new BookmarkStore(dir.resolve("bookmarks.json"))) {
+            String folder = store.newFolder(BookmarkStore.ROOT_ID, "Web");
+            String b = store.newBookmark(folder, "B", "https://b.example");
+            assertTrue(store.barItems().isEmpty(), "a nested node starts off the bar");
+
+            assertTrue(store.move(b, BookmarkStore.ROOT_ID));
+            assertEquals(List.of(b), barIds(store));
+        }
+    }
+
+    private static List<String> barIds(BookmarkStore store) {
+        return store.barItems().stream().map(Bookmark::getId).toList();
+    }
+
+    private static List<String> childIds(BookmarkStore store, String folderId) {
+        return store.children(folderId).stream().map(Bookmark::getId).toList();
+    }
 }

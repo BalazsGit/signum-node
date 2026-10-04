@@ -83,21 +83,30 @@ public final class BookmarkPageRenderer implements InternalPage.PageRenderer {
             case "bookmarks":
                 return renderList(query);
             case "bookmarks/add": {
-                String folder = param(query, "folder");
+                String parent = param(query, "folder");
                 String id = store.newBookmark(
-                        folder.isEmpty() ? BookmarkStore.ROOT_ID : folder,
+                        parent.isEmpty() ? BookmarkStore.ROOT_ID : parent,
                         param(query, "name"), param(query, "url"));
                 if (id != null) {
+                    // A top-level bookmark shows on the bar (the same rule the
+                    // star button and the bar's "new folder" apply) — without
+                    // this, bookmarks added here never appeared on the bar.
+                    if (BookmarkStore.ROOT_ID.equals(parent.isEmpty() ? BookmarkStore.ROOT_ID : parent)) {
+                        store.setInBar(id, true);
+                    }
                     store.save();
                 }
                 return renderList(Map.of());
             }
             case "bookmarks/folder": {
-                String folder = param(query, "folder");
+                String parent = param(query, "folder");
                 String id = store.newFolder(
-                        folder.isEmpty() ? BookmarkStore.ROOT_ID : folder,
+                        parent.isEmpty() ? BookmarkStore.ROOT_ID : parent,
                         param(query, "name"));
                 if (id != null) {
+                    if (BookmarkStore.ROOT_ID.equals(parent.isEmpty() ? BookmarkStore.ROOT_ID : parent)) {
+                        store.setInBar(id, true);
+                    }
                     store.save();
                 }
                 return renderList(Map.of());

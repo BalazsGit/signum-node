@@ -53,6 +53,10 @@ public final class BrowserCefHandlers {
         client.addLifeSpanHandler(new CefLifeSpanHandlerImpl(tabId, controller));
         client.addRequestHandler(new CefRequestHandlerImpl(tabId, controller, settings));
         client.addDownloadHandler(new CefDownloadHandlerImpl(downloads, activeDownloads));
+        // F8: the page's JS dialogs (alert/confirm/prompt) become native
+        // Swing dialogs — without the handler CEF drops them silently and
+        // the internal pages' buttons would do nothing.
+        client.addJSDialogHandler(new CefJSDialogHandlerImpl());
         // Windowed-JCEF focus fix: whenever this browser gains the CEF-side
         // (OS-level) keyboard focus, let the application-wide guard decide
         // whether it is a legitimate page click or a steal from the Swing UI

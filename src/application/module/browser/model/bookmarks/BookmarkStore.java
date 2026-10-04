@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * The bookmarks store (plan F4, B1–B5): a JSON tree at
@@ -56,6 +57,8 @@ public final class BookmarkStore implements AutoCloseable {
     private final Map<String, Bookmark> nodes = new LinkedHashMap<>();
     /** Ordered bookmarks-bar item ids (no root). Guarded by {@link #lock}. */
     private final List<String> bar = new ArrayList<>();
+    /** GUI refresh hooks fired after every {@link #save()} (the store is pure Java — no Swing). */
+    private final List<Runnable> changeListeners = new CopyOnWriteArrayList<>();
     private long idCounter;
 
     /**
@@ -79,7 +82,12 @@ public final class BookmarkStore implements AutoCloseable {
         loadLocked();
     }
 
-    /** Saves the tree atomically (never throws; failures are logged). */
+    /**
+     * Saves the tree atomically (never throws; failures are logged) and
+     * fires the change listeners afterwards — {@code save()} is the single
+     * chokepoint every mutation path (toolbar star, bar menus, the manager
+     * page's action URLs) goes through, so the GUI hooks off of it.
+     */
     public synchronized void save() {
         FileShape shape = new FileShape();
         shape.version = VERSION;
@@ -108,6 +116,32 @@ public final class BookmarkStore implements AutoCloseable {
             }
         } catch (IOException e) {
             logger.error("Could not save the bookmarks to {}", file, e);
+        }
+        fireChangeListeners();
+    }
+
+    /**
+     * Registers a hook fired after every {@link #save()} (the in-memory tree
+     * changed, persisted or not). The store is pure Java and fires on the
+     * caller's thread — GUI listeners pump to the EDT themselves.
+     */
+    public void addChangeListener(Runnable listener) {
+        if (listener != null) {
+            changeListeners.add(listener);
+        }
+    }
+
+    public void removeChangeListener(Runnable listener) {
+        changeListeners.remove(listener);
+    }
+
+    private void fireChangeListeners() {
+        for (Runnable listener : changeListeners) {
+            try {
+                listener.run();
+            } catch (RuntimeException e) {
+                logger.warn("A bookmark change listener failed: {}", e.toString());
+            }
         }
     }
 
@@ -557,6 +591,18 @@ public final class BookmarkStore implements AutoCloseable {
         }
         parentOf(id).ifPresent(current -> nodes.get(current).getChildren().remove(id));
         target.getChildren().add(id);
+        // The bar mirrors the top level (Chrome-style): a node dropped into a
+        // subfolder leaves the bar, a node dropped back to the top level
+        // joins it — the drag produces a visible change in the bar itself
+        // (before this sync, a drop into a folder was invisible: the item
+        // simply stayed on the bar and the move "did nothing" to the eye).
+        if (ROOT_ID.equals(targetFolderId)) {
+            if (!bar.contains(id)) {
+                bar.add(id);
+            }
+        } else {
+            bar.remove(id);
+        }
         return true;
     }
 

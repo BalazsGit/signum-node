@@ -50,8 +50,9 @@ import javax.swing.UIManager;
 /**
  * The navigation toolbar of <em>one</em> browser tab (F2): back/forward/
  * reload-stop/home buttons (N3, N5), the {@link Omnibox} (N1/N2) with the
- * {@link SecurityIcon} (S1/S2/S4) embedded in its field's left side, the
- * bookmark star, the settings gear and the thin
+ * {@link SecurityIcon} (S1/S2/S4) embedded in its field's left side and
+ * the bookmark star embedded in its field's right side (B1, always
+ * available), the settings gear and the thin
  * indeterminate progress bar (N4/A3) below the row.
  * <p>
  * One toolbar exists per tab (owned by the tab's {@code BrowserTabView}): it
@@ -114,10 +115,10 @@ public final class NavigationToolbar extends JPanel {
         this.history = history;
         this.bookmarks = bookmarks;
 
-        this.back = flatNavButton(FontAwesome.ANGLE_LEFT, I18n.get("browser.nav.back.tooltip"));
-        this.forward = flatNavButton(FontAwesome.ANGLE_RIGHT, I18n.get("browser.nav.forward.tooltip"));
+        this.back = flatNavButton(FontAwesome.ANGLE_LEFT, I18n.get("browser.nav.back.tooltip"), CHEVRON_SCALE);
+        this.forward = flatNavButton(FontAwesome.ANGLE_RIGHT, I18n.get("browser.nav.forward.tooltip"), CHEVRON_SCALE);
         this.reloadStop = flatNavButton(FontAwesome.REFRESH, I18n.get("browser.nav.reload.tooltip"));
-        this.home = flatNavButton(FontAwesome.HOME, I18n.get("browser.nav.home.tooltip"));
+        this.home = flatNavButton(FontAwesome.HOME, I18n.get("browser.nav.home.tooltip"), HOME_SCALE);
         back.addActionListener(e -> view.back());
         forward.addActionListener(e -> view.forward());
         reloadStop.addActionListener(e -> {
@@ -140,22 +141,22 @@ public final class NavigationToolbar extends JPanel {
 
         // S1/S4: the lock is embedded inside the omnibox's field (Chrome-style)
         this.securityIcon = new SecurityIcon(this::openCertificateDialog);
-        this.omnibox = new Omnibox(this::navigate, this::suggestFor, securityIcon);
-        // F4 (B1): the star toggles the current page's bookmark
+        // F4 (B1): the star toggles the current page's bookmark — embedded
+        // in the omnibox's field's RIGHT side (Chrome-style), so it is
+        // available on every page type: web pages (http/https) AND the
+        // built-in internal pages (signum://) are bookmarkable; the toolbar
+        // sync keeps the star visible but inert on other (non-bookmarkable)
+        // schemes.
         this.star = new StarButton();
         star.addActionListener(e -> toggleBookmark());
+        this.omnibox = new Omnibox(this::navigate, this::suggestFor, securityIcon, star);
 
         // F6: the settings gear — opens signum://settings in this tab.
         this.settingsButton = flatNavButton(FontAwesome.COG, I18n.get("browser.nav.settings.tooltip"));
         settingsButton.addActionListener(e -> view.navigate(SettingsPageRenderer.PAGE_URL));
 
-        // gap 0 on purpose: the star and the gear carry their own 6 px side
-        // borders, so the visual star-to-gear distance is 6 + 6 = 12 px — the
-        // same as the omnibox-to-star distance (the row's 6 px hgap + the
-        // star's 6 px left border)
         JPanel east = new JPanel(new MigLayout("insets 0, gap 0, aligny center"));
         east.setOpaque(false);
-        east.add(star);
         east.add(settingsButton);
 
         JPanel row = new JPanel(new BorderLayout(6, 0));
@@ -185,10 +186,10 @@ public final class NavigationToolbar extends JPanel {
      * appearance change.
      */
     private void refreshIconSizes() {
-        installIcon(back, FontAwesome.ANGLE_LEFT);
-        installIcon(forward, FontAwesome.ANGLE_RIGHT);
-        installIcon(reloadStop, tab.isLoading() ? FontAwesome.STOP : FontAwesome.REFRESH);
-        installIcon(home, FontAwesome.HOME);
+        installIcon(back, FontAwesome.ANGLE_LEFT, CHEVRON_SCALE);
+        installIcon(forward, FontAwesome.ANGLE_RIGHT, CHEVRON_SCALE);
+        installIcon(reloadStop, tab.isLoading() ? FontAwesome.STOP_CIRCLE_O : FontAwesome.REFRESH);
+        installIcon(home, FontAwesome.HOME, HOME_SCALE);
         installIcon(settingsButton, FontAwesome.COG);
         star.rebuildIcon();
         securityIcon.refreshSize();
@@ -218,19 +219,23 @@ public final class NavigationToolbar extends JPanel {
     /**
      * F4 (B1): the star button / Ctrl+D — toggles this tab's page bookmark:
      * unbookmarked pages are saved immediately (name = the page title) with
-     * a fade-in animation; an already-bookmarked page opens the edit dialog
-     * (rename/move/remove). Internal and non-web pages are not bookmarkable.
+     * a fade-in animation and land on the bookmarks bar (Chrome-style: a
+     * starred favorite is a bar item); an already-bookmarked page opens the
+     * edit dialog (rename/move/remove). Web pages (http/https) and the
+     * built-in internal pages (signum://) are bookmarkable; other non-web
+     * schemes are not.
      */
     public void toggleBookmark() {
         String url = tab.getUrl();
-        String scheme = UrlUtils.scheme(url);
-        if (!"http".equals(scheme) && !"https".equals(scheme)) {
-            return; // the star only bookmarks web pages
+        if (!isBookmarkableUrl(url)) {
+            return; // the star only bookmarks web and internal pages
         }
         List<Bookmark> existing = bookmarks.findByUrl(url);
         if (existing.isEmpty()) {
             String name = (tab.getTitle() == null || tab.getTitle().isBlank()) ? url : tab.getTitle();
-            if (bookmarks.newBookmark(BookmarkStore.ROOT_ID, name, url) != null) {
+            String id = bookmarks.newBookmark(BookmarkStore.ROOT_ID, name, url);
+            if (id != null) {
+                bookmarks.setInBar(id, true); // the star puts the favorite on the bar
                 bookmarks.save();
                 star.pulse(); // B1: the star's fade-in animation
                 if (bookmarksChanged != null) {
@@ -245,6 +250,17 @@ public final class NavigationToolbar extends JPanel {
             }
         }
         sync(tab);
+    }
+
+    /**
+     * @param url any URL (may be null)
+     * @return {@code true} when the star may bookmark it: web pages
+     *         (http/https) and the built-in internal pages (signum:// —
+     *         settings, history, bookmarks, downloads, about)
+     */
+    private static boolean isBookmarkableUrl(String url) {
+        String scheme = UrlUtils.scheme(url);
+        return "http".equals(scheme) || "https".equals(scheme) || "signum".equals(scheme);
     }
 
     /**
@@ -382,15 +398,21 @@ public final class NavigationToolbar extends JPanel {
         omnibox.showUrl(tab.getUrl());
         back.setEnabled(tab.canGoBack());
         forward.setEnabled(tab.canGoForward());
-        // F4 (B1): the star mirrors this page's bookmark state (web pages only)
-        String scheme = UrlUtils.scheme(tab.getUrl());
-        boolean bookmarkable = "http".equals(scheme) || "https".equals(scheme);
-        star.setVisible(bookmarkable);
+        // F4 (B1): the star mirrors this page's bookmark state. It is
+        // embedded in the omnibox's right side, so it stays VISIBLE on
+        // every page type — on bookmarkable pages (web and the built-in
+        // signum:// internal pages) it reflects the store; on other
+        // (non-bookmarkable) schemes it shows the outline star and its
+        // click is a no-op (toggleBookmark guards the scheme). Previously
+        // the star disappeared on such pages, leaving a gap and hiding
+        // the affordance.
+        boolean bookmarkable = isBookmarkableUrl(tab.getUrl());
+        star.setVisible(true);
         if (bookmarkable) {
             star.setState(!bookmarks.findByUrl(tab.getUrl()).isEmpty());
         }
         if (tab.isLoading()) {
-            installIcon(reloadStop, FontAwesome.STOP);
+            installIcon(reloadStop, FontAwesome.STOP_CIRCLE_O);
             reloadStop.setToolTipText(I18n.get("browser.nav.stop.tooltip"));
         } else {
             installIcon(reloadStop, FontAwesome.REFRESH);
@@ -419,8 +441,16 @@ public final class NavigationToolbar extends JPanel {
      * layout shift" behaviour the node start/pause buttons use.
      */
     private static JButton flatNavButton(FontAwesome iconCode, String tooltip) {
+        return flatNavButton(iconCode, tooltip, 1f);
+    }
+
+    /**
+     * Same, but the glyph is rendered at {@code scale} × the toolbar icon
+     * size (the chevron optical correction — see {@link #CHEVRON_SCALE}).
+     */
+    private static JButton flatNavButton(FontAwesome iconCode, String tooltip, float scale) {
         JButton button = new JButton();
-        installIcon(button, iconCode);
+        installIcon(button, iconCode, scale);
         button.setFocusable(false);
         button.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
         button.setOpaque(false);
@@ -431,15 +461,35 @@ public final class NavigationToolbar extends JPanel {
 
     /** Sets the button glyph, keeping the normal/rollover (hover-grow) pair. */
     private static void installIcon(JButton button, FontAwesome iconCode) {
+        installIcon(button, iconCode, 1f);
+    }
+
+    /**
+     * Same, but the glyph is rendered at {@code scale} × the toolbar icon
+     * size: the ANGLE_LEFT / ANGLE_RIGHT chevrons only occupy a small part
+     * of the em box, so at the plain size they look clearly smaller than
+     * the HOME / REFRESH glyphs. The scale makes them read the same size.
+     */
+    private static void installIcon(JButton button, FontAwesome iconCode, float scale) {
         if (FONT_REGISTERED.compareAndSet(false, true)) {
             IconFontSwing.register(FontAwesome.getIconFont());
         }
-        float iconSize = GuiConstants.getToolBarIconSize();
+        float iconSize = GuiConstants.getToolBarIconSize() * scale;
         HoverScaleIcon.install(button,
                 IconFontSwing.buildIcon(iconCode, iconSize, GuiColors.getButtonIcon()),
                 IconFontSwing.buildIcon(iconCode, iconSize * HoverScaleIcon.DEFAULT_SCALE,
                         GuiColors.getButtonIcon()));
     }
+
+    /** The optical size correction of the back/forward chevron glyphs. */
+    private static final float CHEVRON_SCALE = 1.3f;
+
+    /**
+     * The optical size correction of the home glyph: the HOME glyph occupies
+     * only a small part of its em box (the REFRESH glyph fills it), so at
+     * the plain size the house reads clearly smaller than the reload arrow.
+     */
+    private static final float HOME_SCALE = 1.18f;
 
     /**
      * N4/A3: the thin (3 px) indeterminate progress bar under the row — the
@@ -522,6 +572,10 @@ public final class NavigationToolbar extends JPanel {
 
         StarButton() {
             setFocusable(false);
+            // The star is a flat inline glyph, not a "button" affordance: keep
+            // the plain arrow cursor on hover (the JButton default hand cursor
+            // read as inconsistent with the rest of the omnibox row).
+            setCursor(java.awt.Cursor.getDefaultCursor());
             setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
             setOpaque(false);
             setContentAreaFilled(false);

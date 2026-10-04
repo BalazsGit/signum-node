@@ -16,22 +16,27 @@
     .wrap {
       max-width: 720px;
       margin: 0 auto;
-      padding: 26px 30px 40px;
+      padding: 30px 30px 44px;
     }
     h1 {
-      margin: 0 0 8px;
-      font-size: 22px;
+      margin: 0 0 6px;
+      font-size: 26px;
       font-weight: 600;
       color: var(--fg);
     }
+    /* Segmented look: every settings block is its own card. */
     .section {
-      margin-top: 26px;
+      margin-top: 16px;
+      padding: 18px 20px 14px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
     }
     .section h2 {
-      margin: 0 0 10px;
-      font-size: 13px;
+      margin: 0 0 12px;
+      font-size: 12px;
       font-weight: 600;
-      letter-spacing: 1px;
+      letter-spacing: 1.2px;
       text-transform: uppercase;
       color: var(--muted);
     }
@@ -39,15 +44,16 @@
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 6px 2px;
+      padding: 7px 8px;
+      margin: 0 -8px;
       font-size: 14px;
       color: var(--fg);
       cursor: pointer;
-      border-radius: 6px;
+      border-radius: 8px;
       transition: background 100ms ease;
     }
     .option:hover {
-      background: var(--card);
+      background: rgba(79, 140, 255, 0.07);
     }
     .option input {
       accent-color: var(--accent);
@@ -71,7 +77,7 @@
       font-size: 13px;
       font-family: Consolas, "Cascadia Mono", monospace;
       color: var(--fg);
-      background: var(--card);
+      background: var(--bg);
       border: 1px solid var(--border);
       border-radius: 8px;
       outline: none;
@@ -99,7 +105,7 @@
       padding: 8px 12px;
       font-size: 13px;
       color: var(--fg);
-      background: var(--card);
+      background: var(--bg);
       border: 1px solid var(--border);
       border-radius: 8px;
       outline: none;
@@ -130,7 +136,7 @@
       padding: 8px 12px;
       font-size: 13px;
       color: var(--fg);
-      background: var(--card);
+      background: var(--bg);
       border: 1px solid var(--border);
       border-radius: 8px;
       outline: none;
@@ -159,9 +165,38 @@
     .footer .save:hover {
       filter: brightness(1.15);
     }
-    .footer .about {
+    /* The footer links (bookmarks manager, about) are icon buttons: a quiet
+       round glyph that lights up on hover; the label arrives as the hover
+       tooltip (the i18n strings). */
+    .footer .icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1;
+      text-decoration: none;
+      cursor: pointer;
+      transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+    }
+    .footer .icon svg {
+      display: block;
+    }
+    .footer .icon:hover {
+      border-color: var(--accent);
+      background: rgba(79, 140, 255, 0.1);
+      color: var(--accent);
+    }
+    .footer .icon + .icon {
+      margin-left: 10px;
+    }
+    .footer .icon:first-of-type {
       margin-left: auto;
-      font-size: 13px;
     }
   </style>
 </head>
@@ -225,6 +260,8 @@
         </select>
       </div>
       <div class="hint" id="theme-hint"></div>
+      <label class="option"><input type="checkbox" id="show-bookmarks-bar"><span id="show-bookmarks-bar-label"></span></label>
+      <div class="hint" id="show-bookmarks-bar-hint"></div>
     </div>
 
     <div class="section">
@@ -252,7 +289,20 @@
 
     <div class="footer">
       <button type="button" class="save" id="save"></button>
-      <a class="about" href="signum://about" id="about"></a>
+      <a class="icon" href="signum://bookmarks" id="manage-bookmarks">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
+        </svg>
+      </a>
+      <a class="icon" href="signum://about" id="about">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="16" x2="12" y2="12"></line>
+          <line x1="12" y1="8" x2="12.01" y2="8"></line>
+        </svg>
+      </a>
     </div>
   </div>
   <script id="data" type="application/json">__SIGNUM_DATA__</script>
@@ -282,7 +332,9 @@
       text('effective-dir', s.effectiveDir);
       text('browse', s.browse);
       text('save', s.save);
-      text('about', s.about);
+      // The footer links are icon buttons: the label becomes the hover tooltip.
+      document.getElementById('manage-bookmarks').title = s.manageBookmarks;
+      document.getElementById('about').title = s.about;
       // F9 strings
       text('search-section', s.searchSection);
       text('search-engine-label', s.searchEngine);
@@ -295,6 +347,8 @@
       document.querySelector('#theme option[value="light"]').textContent = s.themeLight;
       document.querySelector('#theme option[value="dark"]').textContent = s.themeDark;
       text('theme-hint', s.themeHint);
+      text('show-bookmarks-bar-label', s.showBookmarksBar);
+      text('show-bookmarks-bar-hint', s.showBookmarksBarHint);
       text('privacy-section', s.privacySection);
       text('block-file-label', s.blockFile);
       text('block-file-hint', s.blockFileHint);
@@ -313,6 +367,7 @@
       document.getElementById('max-tabs').value = data.maxTabs || 25;
       document.getElementById('discard-minutes').value = data.discardMinutes || 15;
       document.getElementById('block-file').checked = !!data.blockFileUrls;
+      document.getElementById('show-bookmarks-bar').checked = !!data.showBookmarksBar;
       var templateInput = document.getElementById('search-template');
       templateInput.value = data.searchTemplate || '';
       // C3: the engine select (presets + the custom entry)
@@ -378,6 +433,16 @@
         window.location.href = 'signum://settings/pickDownloadsDir';
       });
 
+      // B4: the bookmarks-bar visibility applies IMMEDIATELY on the checkbox
+      // change (no Save click): a partial save navigation that carries only
+      // the showBookmarksBar value — the renderer updates just that setting
+      // and the live bars react through the settings-saved hook. The scroll
+      // offset rides along so the re-render keeps the page position.
+      document.getElementById('show-bookmarks-bar').addEventListener('change', function () {
+        window.location.href = 'signum://settings/save?showBookmarksBar=' + String(this.checked)
+            + '&scroll=' + Math.round(window.scrollY || 0);
+      });
+
       // Save: one navigation, all values in the query (the renderer
       // validates; an invalid value simply keeps the old one).
       document.getElementById('save').addEventListener('click', function () {
@@ -399,8 +464,21 @@
         params.set('discardMinutes', document.getElementById('discard-minutes').value);
         params.set('blockFileUrls',
             String(document.getElementById('block-file').checked));
+        params.set('showBookmarksBar',
+            String(document.getElementById('show-bookmarks-bar').checked));
+        // The save is a full navigation (the page re-renders): carry the
+        // current scroll offset so the re-rendered form stays where the
+        // user was instead of jumping back to the top.
+        params.set('scroll', String(Math.round(window.scrollY || 0)));
         window.location.href = 'signum://settings/save?' + params.toString();
       });
+
+      // Restore the scroll offset carried by the save navigation: the save
+      // re-renders the whole form, and without this the page would jump back
+      // to the top after every save (user was mid-form when they saved).
+      if (data.scroll > 0) {
+        window.scrollTo(0, data.scroll);
+      }
     })();
   </script>
 </body>

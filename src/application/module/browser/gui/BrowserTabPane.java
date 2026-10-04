@@ -4,6 +4,7 @@ import application.module.browser.model.tab.BrowserTab;
 import application.module.browser.model.tab.TabController;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiManager;
+import application.utils.gui.PlusGlyphIcon;
 import application.utils.gui.SpinnerIcon;
 import application.utils.i18n.I18n;
 
@@ -430,7 +431,7 @@ public final class BrowserTabPane extends JTabbedPane {
     private static final class NewTabButton extends JButton {
 
         NewTabButton() {
-            setIcon(new PlusGlyph());
+            PlusGlyphIcon.installHover(this);
             setToolTipText(I18n.get("browser.tab.new.tooltip"));
             setContentAreaFilled(false);
             setFocusPainted(false);
@@ -621,37 +622,4 @@ public final class BrowserTabPane extends JTabbedPane {
         }
     }
 
-    /** The new-tab "+" glyph (the same size and stroke as the close "X"). */
-    private static final class PlusGlyph implements Icon {
-
-        private static final int SIZE = 16;
-
-        @Override
-        public int getIconWidth() {
-            return SIZE;
-        }
-
-        @Override
-        public int getIconHeight() {
-            return SIZE;
-        }
-
-        @Override
-        public void paintIcon(Component c, Graphics g, int x, int y) {
-            Graphics2D g2 = (Graphics2D) g.create();
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g2.setColor(color());
-            g2.setStroke(new BasicStroke(1.4f));
-            int cx = x + SIZE / 2;
-            int cy = y + SIZE / 2;
-            g2.drawLine(cx - 4, cy, cx + 4, cy);
-            g2.drawLine(cx, cy - 4, cx, cy + 4);
-            g2.dispose();
-        }
-
-        private static Color color() {
-            Color c = UIManager.getColor("controlText");
-            return c != null ? c : new Color(0x20, 0x21, 0x24);
-        }
-    }
 }

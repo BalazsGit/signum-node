@@ -87,6 +87,13 @@ class SettingsPageRendererTest {
         assertEquals(BrowserSettings.DEFAULT_HOME_PAGE,
                 SettingsPageRenderer.validateHomepage("ftp://nope.example", null));
     }
+    @Test
+    @DisplayName("a plain settings open starts at the top (no scroll parameter)")
+    void plainOpenHasNoScroll() {
+        JsonObject page = island(renderer.render("signum://settings", Map.of()));
+        assertEquals(0, page.get("scroll").getAsInt());
+    }
+
     // ------------------------------------------------------------------
     // C1: startup validation
     // ------------------------------------------------------------------
@@ -228,6 +235,52 @@ class SettingsPageRendererTest {
         assertEquals("https://old.example", saved.getHomepage());
         assertEquals(BrowserSettings.StartupMode.NEW_TAB, saved.getStartup());
         assertEquals(List.of(), saved.getStartupUrls());
+    }
+
+    // ------------------------------------------------------------------
+    // B4: the bookmarks-bar switch
+    // ------------------------------------------------------------------
+
+    @Test
+    @DisplayName("the bookmarks-bar token maps to the switch, unknown keeps the current one")
+    void bookmarksBarToken() {
+        assertEquals(Boolean.TRUE, SettingsPageRenderer.parseShowBookmarksBar("true"));
+        assertEquals(Boolean.FALSE, SettingsPageRenderer.parseShowBookmarksBar("false"));
+        assertNull(SettingsPageRenderer.parseShowBookmarksBar("bogus"));
+        assertNull(SettingsPageRenderer.parseShowBookmarksBar(null));
+    }
+
+    @Test
+    @DisplayName("settings/save persists the bookmarks-bar switch (and the page injects it)")
+    void saveActionBookmarksBar() {
+        BrowserSettings settings = new BrowserSettings();
+        settings.setShowBookmarksBar(true);
+        repository.save(settings);
+
+        assertTrue(island(renderer.render(SettingsPageRenderer.PAGE_URL, Map.of()))
+                .get("showBookmarksBar").getAsBoolean());
+
+        String url = "signum://settings/save?showBookmarksBar=false";
+        renderer.render(url, InternalPage.query(url));
+        assertFalse(repository.load().isShowBookmarksBar());
+    }
+
+    @Test
+    @DisplayName("a save carries the scroll offset into the re-rendered page (the form keeps its position)")
+    void saveActionCarriesScroll() {
+        String url = "signum://settings/save?showBookmarksBar=true&scroll=480";
+        JsonObject page = island(renderer.render(url, InternalPage.query(url)));
+        assertEquals(480, page.get("scroll").getAsInt(),
+                "the re-rendered form must restore the page position");
+    }
+
+    @Test
+    @DisplayName("a garbage or missing scroll offset degrades to the top (the save never fails because of it)")
+    void scrollGarbageDegradesToTop() {
+        String url = "signum://settings/save?showBookmarksBar=true&scroll=not-a-number";
+        JsonObject page = island(renderer.render(url, InternalPage.query(url)));
+        assertEquals(0, page.get("scroll").getAsInt());
+        assertTrue(repository.load().isShowBookmarksBar(), "the save itself must still apply");
     }
 
     @Test

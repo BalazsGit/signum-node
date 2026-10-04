@@ -2,6 +2,7 @@ package application.module.browser.gui;
 
 import application.module.browser.config.BrowserSettings;
 import application.module.browser.engine.WebBrowserHost;
+import application.module.browser.model.bookmarks.BookmarkStore;
 import application.module.browser.model.tab.BrowserTab;
 import application.module.browser.model.tab.TabController;
 import application.module.browser.model.tab.TabSource;
@@ -10,6 +11,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.awt.Component;
+import java.io.IOException;
+import java.nio.file.Files;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 
@@ -82,6 +85,16 @@ class BrowserTabViewTest {
         }
     }
 
+    /** A throwaway empty bookmark store (the tests don't touch bookmarks). */
+    private static BookmarkStore emptyBookmarks() {
+        try {
+            return new BookmarkStore(Files.createTempDirectory("browser-tabview-test")
+                    .resolve("bookmarks.json"));
+        } catch (IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+    }
+
     private record Harness(TabController controller, BrowserTabView view, BrowserTab tab,
                            FakeBrowser browser) {
         static Harness newHarness(String url) {
@@ -90,7 +103,7 @@ class BrowserTabViewTest {
             BrowserTab tab = controller.getTab(id).orElseThrow();
             FakeBrowser browser = new FakeBrowser();
             BrowserTabView view = new BrowserTabView(tab, controller, t -> browser,
-                    BrowserSettings::new, null, null);
+                    BrowserSettings::new, null, emptyBookmarks());
             return new Harness(controller, view, tab, browser);
         }
     }
@@ -140,6 +153,38 @@ class BrowserTabViewTest {
             assertSame(h.tab().getId(), h.view().getTabId());
             assertEquals(1, h.controller().getTabs().size());
         }
+
+        @Test
+        @DisplayName("the toolbar (omnibox row) is actually laid out next to the bookmarks bar")
+        void toolbar_isLaidOutBesideBookmarksBar() {
+            Harness h = Harness.newHarness("signum://newtab");
+            BrowserTabView view = h.view();
+
+            // Regression: a BorderLayout keeps only ONE component per side —
+            // adding the bookmarks bar as a SECOND NORTH silently replaced
+            // the toolbar in the NORTH slot, so the toolbar was never laid
+            // out and the omnibox stayed invisible (0×0). Force a full
+            // layout pass (a real window gets this from its top-level; a
+            // detached test tree needs the recursive doLayout() below, as
+            // JDK 25's validate() no longer lays out a detached subtree).
+            view.setSize(900, 600);
+            layoutRecursively(view);
+
+            javax.swing.JComponent toolbar = view.getToolbar();
+            assertTrue(toolbar.getHeight() > 0,
+                    "the toolbar must be laid out (height was " + toolbar.getHeight() + ")");
+            assertEquals(900, toolbar.getWidth(), "the toolbar must span the view width");
+        }
+
+    /** doLayout() on the component and, recursively, on every child. */
+    private static void layoutRecursively(Component c) {
+        c.doLayout();
+        if (c instanceof java.awt.Container container) {
+            for (Component child : container.getComponents()) {
+                layoutRecursively(child);
+            }
+        }
+    }
     }
 
     // ====================================================================
@@ -180,10 +225,10 @@ class BrowserTabViewTest {
             FakeBrowser browserB = new FakeBrowser();
             BrowserTabView viewA = new BrowserTabView(tabA, controller,
                     t -> t.getId().equals(idA) ? browserA : browserB,
-                    BrowserSettings::new, null, null);
+                    BrowserSettings::new, null, emptyBookmarks());
             BrowserTabView viewB = new BrowserTabView(tabB, controller,
                     t -> t.getId().equals(idA) ? browserA : browserB,
-                    BrowserSettings::new, null, null);
+                    BrowserSettings::new, null, emptyBookmarks());
 
             viewA.navigate("signum://changed");
 
@@ -245,7 +290,7 @@ class BrowserTabViewTest {
                 FakeBrowser next = created[Math.min(calls[0], 1)];
                 calls[0]++;
                 return next;
-            }, BrowserSettings::new, null, null);
+            }, BrowserSettings::new, null, emptyBookmarks());
             assertTrue(hasComponent(view, first.canvas));
 
             view.discard();
@@ -271,7 +316,7 @@ class BrowserTabViewTest {
             BrowserTabView view = new BrowserTabView(tab, controller, t -> {
                 calls[0]++;
                 return browser;
-            }, BrowserSettings::new, null, null);
+            }, BrowserSettings::new, null, emptyBookmarks());
 
             view.activate();
 
