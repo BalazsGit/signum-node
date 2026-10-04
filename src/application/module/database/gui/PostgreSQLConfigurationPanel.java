@@ -993,7 +993,7 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
     private void updateProfileButtonsUI() {
         // The saveProfileBtn was removed, ensure this argument is null
         ConfigurationUtils.configureProfileToolbar(newProfileBtn, null, null, renameProfileBtn, deleteProfileBtn,
-                reloadProfileBtn, refreshProfilesBtn, null);
+                reloadProfileBtn, refreshProfilesBtn, null, null, null);
     }
 
     @Override

@@ -54,6 +54,33 @@ public class ConfigurationUtils {
     }
 
     /**
+     * Styles a read-only JDBC URL preview as a readable "code chip": monospaced text on
+     * a subtle contrasting background with a 1px border and padding. The background is
+     * derived from the current L&F text background so it works in both light and dark
+     * themes.
+     *
+     * @param field The preview text field to style.
+     */
+    public static void styleJdbcPreview(JTextField field) {
+        field.setEditable(false);
+        field.setOpaque(true);
+        Color base = UIManager.getColor("TextField.background");
+        if (base == null)
+            base = Color.WHITE;
+        double luminance = 0.299 * base.getRed() + 0.587 * base.getGreen() + 0.114 * base.getBlue();
+        Color adjust = luminance > 128 ? Color.BLACK : Color.WHITE;
+        int mix = 12;
+        field.setBackground(new Color(
+                (base.getRed() * (255 - mix) + adjust.getRed() * mix) / 255,
+                (base.getGreen() * (255 - mix) + adjust.getGreen() * mix) / 255,
+                (base.getBlue() * (255 - mix) + adjust.getBlue() * mix) / 255));
+        field.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(GuiColors.getSeparator(), 1),
+                new EmptyBorder(4, 8, 4, 8)));
+        field.setFont(new Font(Font.MONOSPACED, Font.PLAIN, Math.max(11, field.getFont().getSize())));
+    }
+
+    /**
      * Calculates and sets a fixed height for a component based on font metrics and
      * standard icon sizes to ensure consistent UI layout across different systems.
      *

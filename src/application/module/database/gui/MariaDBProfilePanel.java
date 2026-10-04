@@ -1536,7 +1536,7 @@ public class MariaDBProfilePanel extends JPanel {
         // ConfigurationUtils.fixComponentSize(profileComboBox);
         ConfigurationUtils.configureProfileToolbar(null, null, null, renameProfileBtn, // saveProfileBtn is now
                                                                                        // null
-                deleteProfileBtn, reloadProfileBtn, null, null);
+                deleteProfileBtn, reloadProfileBtn, null, null, null, null);
     }
 
     public void updateUIFromData() {

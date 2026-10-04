@@ -1,24 +1,22 @@
 package application.module.node.gui.wizard;
 
 import application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine;
-import application.module.logging.LoggingAssignmentStore;
+import application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine;
 import application.module.node.NodeModule;
 import application.module.node.profile.NodeProfile;
 import application.module.node.profile.NodeProfileRepository;
 import application.module.node.profile.ProfileCreateDefaults;
 import application.module.node.props.Props;
-import application.utils.config.ModuleIds;
 
 import java.util.Properties;
 
 /**
  * Terminal step of the wizard: turns the collected {@link WizardContext} into a persisted
- * node profile + logging assignment (+ optional immediate start).
+ * node profile (+ optional immediate start).
  * <p>
  * All property mapping goes through the SSOT ({@link ProfileCreateDefaults}); persistence
- * through {@link NodeProfileRepository}; the logging association through
- * {@link LoggingAssignmentStore} (canonical {@code profiles.json} writer); the start
- * through {@link NodeModule} (the only composition root for node lifecycle).
+ * through {@link NodeProfileRepository}; the start through {@link NodeModule} (the only
+ * composition root for node lifecycle).
  * </p>
  */
 public final class WizardFinish {
@@ -69,8 +67,14 @@ public final class WizardFinish {
 
         NodeProfile profile = NodeProfileRepository.createProfile(name, props);
 
-        // Logging association (SSOT: LoggingAssignmentStore → conf/node/profiles.json)
-        new LoggingAssignmentStore().setAssignmentForModule(name, ModuleIds.NODE, c.getLoggingPreset());
+        // The new node's SQLite configuration gets its companion database
+        // profile immediately (the same rule the configuration panel's save
+        // applies): a complete SQLite setup creates ./database/SQLite/<name>/
+        // with its profile.json, so the profile is discoverable right away.
+        if (engine == DatabaseEngine.SQLITE) {
+            ProfileCreateDefaults.ensureSqliteDatabaseProfile(
+                    name, props.getProperty(Props.DB_URL.getName()));
+        }
 
         if (c.isStartImmediately()) {
             NodeModule.getInstance().startNode(name);

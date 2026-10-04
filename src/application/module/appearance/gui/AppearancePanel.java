@@ -385,7 +385,7 @@ public class AppearancePanel extends JPanel {
             ConfigurationUtils.fixComponentSize(profileComboBox);
         }
         ConfigurationUtils.configureProfileToolbar(newProfileBtn, saveProfileBtn, null, renameProfileBtn,
-                deleteProfileBtn, reloadProfileBtn, refreshProfilesBtn, resetToDefaultsBtn);
+                deleteProfileBtn, reloadProfileBtn, refreshProfilesBtn, resetToDefaultsBtn, null, null);
     }
 
     @Override

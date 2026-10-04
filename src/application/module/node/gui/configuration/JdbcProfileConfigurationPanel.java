@@ -36,6 +36,9 @@ public class JdbcProfileConfigurationPanel extends JPanel {
         setOpaque(false);
 
         engineCombo = new JComboBox<>(DatabaseConfigurationPanel.DatabaseEngine.values());
+        // SQLite is the recommended (default) engine — the same default the
+        // manual panel shows first.
+        engineCombo.setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.SQLITE);
         profileCombo = new JComboBox<>();
         dbCombo = new JComboBox<>();
         hostCombo = new JComboBox<>(new String[] { "localhost", "127.0.0.1", "::1", "0.0.0.0", "::" });
@@ -49,10 +52,7 @@ public class JdbcProfileConfigurationPanel extends JPanel {
         showPass = new JCheckBox("Show Password");
         showPass.setOpaque(false);
         resultField = new JTextField();
-        resultField.setEditable(false);
-        resultField.setBorder(null);
-        resultField.setOpaque(false);
-        resultField.setFont(resultField.getFont().deriveFont(java.awt.Font.BOLD));
+        ConfigurationUtils.styleJdbcPreview(resultField);
 
         engineLabel = new JLabel("Engine:");
         profileLabel = new JLabel("Profile:");
@@ -96,7 +96,14 @@ public class JdbcProfileConfigurationPanel extends JPanel {
         });
 
         engineCombo.addActionListener(e -> {
+            // A new engine gets a fresh server input structure: a stale host
+            // (e.g. the empty one left behind by a SQLite database) must not
+            // leak into the new engine's fields.
+            if (!DatabaseConfigurationPanel.DatabaseEngine.SQLITE
+                    .equals(engineCombo.getSelectedItem()))
+                hostCombo.setSelectedItem(hostCombo.getItemAt(0));
             refreshProfiles();
+            updateFieldVisibility();
             if (!isProgrammatic && onChange != null)
                 onChange.run();
         });
@@ -152,6 +159,26 @@ public class JdbcProfileConfigurationPanel extends JPanel {
                 onChange.run();
         });
         refreshProfiles();
+        updateFieldVisibility();
+    }
+
+    /** Only the fields relevant for the selected engine stay visible. */
+    private void updateFieldVisibility() {
+        boolean sqlite = DatabaseConfigurationPanel.DatabaseEngine.SQLITE
+                .equals(engineCombo.getSelectedItem());
+        hostLabel.setVisible(!sqlite);
+        hostCombo.setVisible(!sqlite);
+        portLabel.setVisible(!sqlite);
+        portField.setVisible(!sqlite);
+        suffixLabel.setVisible(!sqlite);
+        suffixField.setVisible(!sqlite);
+        userLabel.setVisible(!sqlite);
+        userCombo.setVisible(!sqlite);
+        passLabel.setVisible(!sqlite);
+        passField.setVisible(!sqlite);
+        showPass.setVisible(!sqlite);
+        revalidate();
+        repaint();
     }
 
     private void refreshProfiles() {

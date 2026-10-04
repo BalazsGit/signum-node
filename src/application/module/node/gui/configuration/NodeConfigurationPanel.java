@@ -7,6 +7,7 @@ import application.module.node.crypto.Crypto;
 import application.module.node.gui.NodePanel;
 import application.module.node.profile.NodeProfile;
 import application.module.node.profile.NodeProfileRepository;
+import application.module.node.profile.ProfileCreateDefaults;
 import application.module.node.profile.ProfileDiffCalculator;
 import application.module.node.profile.ProfileNameSuggester;
 import application.module.node.profile.ProfileRuntimeService;
@@ -183,6 +184,12 @@ public class NodeConfigurationPanel extends JPanel {
     private JButton resetToDefaultsBtn;
     private String runningProfileName;
     private String loadedProfileName;
+    /**
+     * A database profile discovered while the UI was still being built (the
+     * initial {@code updateFromUrl} runs before the Linked Profiles tab
+     * exists) — linked by the post-init auto-link pass.
+     */
+    private String pendingDiscoveredDbProfile;
     private int currentAddingTabIndex = -1;
     private int linkedProfilesTabIndex = -1;
     private boolean isProgrammaticChange = false;
@@ -236,10 +243,18 @@ public class NodeConfigurationPanel extends JPanel {
             e.printStackTrace();
         }
 
-        this.appliedProfile = new NodeProfile(this.runningProfileName);
-        // Request the running values from the Signum service for accurate comparison
-        // Populated on demand in addProperty methods to avoid compilation errors with
-        // Props class
+        this.appliedProfile = new NodeProfile(this.loadedProfileName);
+        // The values LOADED from the profile file ARE the applied values (the
+        // applied baseline of the value-status coloring): this node runs — or
+        // will run — with exactly this profile, so whatever the profile
+        // loaded into the editor states is what the node uses. The baseline is
+        // refreshed when the profile is reloaded from disk or the changes are
+        // saved AND applied. It is deliberately NOT populated from the live
+        // PropertyService: its string form can drift from the file's form (and
+        // it is empty until the node starts, falling back to the application
+        // defaults), which used to color freshly loaded profile values "saved"
+        // instead of "applied".
+        this.appliedProfile.setProperties(copyProperties(this.savedProfile.getProperties()));
 
         this.renameProfileBtn = new JButton();
         this.deleteProfileBtn = new JButton();
@@ -277,6 +292,9 @@ public class NodeConfigurationPanel extends JPanel {
                 LOGGER.debug("NodeConfigurationPanel - async loadProfileLinks START for: {}", loadedProfileName);
                 loadProfileLinks(loadedProfileName);
                 LOGGER.debug("NodeConfigurationPanel - async loadProfileLinks DONE");
+
+                autoLinkAppliedDatabaseProfile();
+                linkPendingDiscoveredDatabaseProfile();
             } catch (Exception e) {
                 LOGGER.error("NodeConfigurationPanel - async init FAILED", e);
             }
@@ -489,7 +507,9 @@ public class NodeConfigurationPanel extends JPanel {
         // --- Database Settings ---
         LOGGER.debug("initUI - Building Database tab");
         currentAddingTabIndex = 1;
-        JPanel dbPanel = createCategoryPanel();
+        // Tighter row gap than the other tabs: the database entries should
+        // read as one continuous list.
+        JPanel dbPanel = createCategoryPanel(3);
         addJdbcUrlProperty(dbPanel, (Prop<String>) Props.DB_URL, "JDBC Connection URL");
         addProperty(dbPanel, Props.DB_CONNECTIONS, "Max Connections");
         addProperty(dbPanel, Props.DB_ARCHIVAL_MODE, "Archival Mode",
@@ -1443,11 +1463,12 @@ public class NodeConfigurationPanel extends JPanel {
                     if (links.has(KEY_DATABASE)) {
                         String dbLink = links.get(KEY_DATABASE).getAsString();
                         if (dbLink.contains(":")) {
-                            String[] parts = dbLink.split(":");
+                            String[] parts = dbLink.split(":", 2);
                             ((JComboBox<DatabaseConfigurationPanel.DatabaseEngine>) linkedDbPanel.getEngineCombo())
                                     .setSelectedItem(
                                             DatabaseConfigurationPanel.DatabaseEngine.fromDisplayName(parts[0]));
-                            ((JComboBox<String>) linkedDbPanel.getProfileCombo()).setSelectedItem(parts[1]);
+                            ((JComboBox<String>) linkedDbPanel.getProfileCombo())
+                                    .setSelectedItem(parts.length > 1 && !parts[1].isEmpty() ? parts[1] : "");
                         }
                     }
                     if (links.has(KEY_LOGGING))
@@ -1524,6 +1545,126 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     /**
+     * Automatically creates (or updates) the SQLite database profile matching the
+     * manual (non-linked) SQLite configuration: every new SQLite database setting
+     * creates a new SQLite database profile in the database module's profile area
+     * ({@code ./database/SQLite/<profile>/profile.json}). Linked configurations are
+     * skipped because they already reference an existing profile, and an
+     * incomplete SQLite trio (any of the Profile / Path / DB-file fields empty)
+     * creates nothing — the profile is only created when every field is filled.
+     */
+    private void autoCreateSqliteDatabaseProfile(Properties props) {
+        try {
+            String dbUrl = props.getProperty(Props.DB_URL.getName());
+            if (dbUrl == null || !dbUrl.startsWith("jdbc:sqlite:"))
+                return;
+            JComponent jdbcComp = propertyComponents.get(Props.DB_URL.getName());
+            if (jdbcComp == null)
+                return;
+            JCheckBox useProfileCheck = (JCheckBox) jdbcComp.getClientProperty("useProfileCheck");
+            if (useProfileCheck != null && useProfileCheck.isSelected())
+                return;
+            JdbcManualConfigurationPanel mp = (JdbcManualConfigurationPanel) jdbcComp
+                    .getClientProperty("manualPanel");
+            if (mp == null)
+                return;
+            String profileName = mp.getSqliteProfile();
+            String basePath = mp.getSqlitePath();
+            String dbFile = mp.getSqliteFile();
+            if (profileName.isEmpty() || basePath.isEmpty() || dbFile.isEmpty()) {
+                // Incomplete trio: there is no well-formed profile to create
+                // (the composed URL would not even carry a profile folder).
+                return;
+            }
+            if (!DatabaseConfigurationUtils.isValidProfileName(profileName)) {
+                LOGGER.warn(
+                        "Skipping auto-created SQLite database profile: invalid profile name '{}'",
+                        profileName);
+                return;
+            }
+            ProfileCreateDefaults.ensureSqliteDatabaseProfile(profileName, dbUrl);
+            LOGGER.info("Auto-created/updated SQLite database profile '{}' (URL: {})",
+                    profileName, dbUrl);
+        } catch (Exception e) {
+            LOGGER.warn("Failed to auto-create SQLite database profile", e);
+        }
+    }
+
+    /**
+     * On load (i.e. application start-up), if the database module has an
+     * <b>applied</b> SQLite profile and this node profile uses the matching SQLite
+     * database without an explicit database link recorded yet, record the
+     * assignment: the "Linked Database Profile" checkbox is selected, the node-to-
+     * database profile link is persisted, and the UI shows the linked profile name
+     * with only the relevant fields.
+     */
+    private void autoLinkAppliedDatabaseProfile() {
+        try {
+            String applied = ConfigurationUtils.loadAppliedProfile(
+                    ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.DATABASE_SUBFOLDER));
+            if (applied == null || !applied.startsWith("SQLite:"))
+                return;
+            String appliedProfile = applied.substring("SQLite:".length());
+            if (appliedProfile.isEmpty() || linkedDbPanel == null)
+                return;
+            if (!getLinkedDbProfile().isEmpty())
+                return; // an explicit link is already recorded
+            String dbUrl = savedProfile.getProperty(Props.DB_URL.getName(), getSafeDefault(Props.DB_URL));
+            if (dbUrl == null || !dbUrl.startsWith("jdbc:sqlite:"))
+                return;
+            if (!dbUrlMatchesSqliteProfile(appliedProfile, dbUrl))
+                return;
+            setLinkedDbProfile(DatabaseConfigurationPanel.DatabaseEngine.SQLITE + ":" + appliedProfile);
+            LOGGER.info("Auto-linked applied database profile 'SQLite:{}' to node profile '{}'",
+                    appliedProfile, loadedProfileName);
+        } catch (Exception e) {
+            LOGGER.warn("Auto-link of applied database profile failed", e);
+        }
+    }
+
+    /**
+     * Whether the given SQLite JDBC URL points at the database of the named database
+     * profile (the per-profile default URL, or any file inside the profile's data
+     * directory).
+     */
+    private static boolean dbUrlMatchesSqliteProfile(String profileName, String dbUrl) {
+        if (ProfileCreateDefaults.isPerProfileSqliteUrl(profileName, dbUrl))
+            return true;
+        String path = dbUrl.substring("jdbc:sqlite:".length());
+        if (path.startsWith("file:"))
+            path = path.substring(5);
+        int paramIdx = path.indexOf('?');
+        if (paramIdx != -1)
+            path = path.substring(0, paramIdx);
+        String normalized = path.replace('\\', '/').replaceAll("^\\./", "").replaceAll("/+$", "");
+        return normalized.startsWith("database/SQLite/" + profileName + "/")
+                || normalized.equals("database/SQLite/" + profileName);
+    }
+
+    /**
+     * Links the database profile remembered during UI construction (the
+     * initial {@code updateFromUrl} found the manual SQLite trio on the
+     * per-profile convention with a discoverable profile, but the Linked
+     * Profiles tab did not exist yet). Skipped when an explicit link is
+     * already recorded (e.g. by the applied-profile auto-link).
+     */
+    private void linkPendingDiscoveredDatabaseProfile() {
+        if (pendingDiscoveredDbProfile == null || linkedDbPanel == null)
+            return;
+        String pending = pendingDiscoveredDbProfile;
+        pendingDiscoveredDbProfile = null;
+        try {
+            if (getLinkedDbProfile().isEmpty()) {
+                setLinkedDbProfile(DatabaseConfigurationPanel.DatabaseEngine.SQLITE + ":" + pending);
+                LOGGER.info("Auto-linked discovered database profile 'SQLite:{}' to node profile '{}'",
+                        pending, loadedProfileName);
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Auto-link of discovered database profile failed", e);
+        }
+    }
+
+    /**
      * Saves the currently loaded profile: writes the effective UI values to
      * the profile file (preserving its original format) and refreshes the saved
      * state, dirty markers and colors.
@@ -1544,6 +1685,7 @@ public class NodeConfigurationPanel extends JPanel {
                 isProgrammaticChange = false;
             }
             saveProfileLinks(loadedProfileName);
+            autoCreateSqliteDatabaseProfile(propsToSave);
             updateDirtyStatus();
             refreshUIColors();
             return true;
@@ -1605,6 +1747,12 @@ public class NodeConfigurationPanel extends JPanel {
         ConfigurationUtils.updateAppliedProfile(
                 ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER),
                 loadedProfileName);
+        // The freshly saved values are now the applied baseline: the node
+        // restarts with them, so the editor's value-status coloring turns them
+        // from "saved" (on disk, not yet applied) to "applied".
+        this.appliedProfile = new NodeProfile(loadedProfileName);
+        this.appliedProfile.setProperties(copyProperties(this.savedProfile.getProperties()));
+        refreshUIColors();
         if (restartAction != null) {
             restartAction.run();
         }
@@ -1846,8 +1994,14 @@ public class NodeConfigurationPanel extends JPanel {
                     loaded.load(in);
                     savedProfile = new NodeProfile(loadedProfileName);
                     savedProfile.setProperties(loaded);
+                    // A reload re-loads the profile into the editor: the
+                    // freshly loaded values are again the applied baseline
+                    // (the editor now mirrors the file on disk).
+                    appliedProfile = new NodeProfile(loadedProfileName);
+                    appliedProfile.setProperties(copyProperties(loaded));
                     updateUIFromProperties(loaded);
                     updateDirtyStatus();
+                    refreshUIColors();
                     isProgrammaticChange = false;
                 } catch (Exception e) {
                     JOptionPane.showMessageDialog(this, "Error reloading profile: " + e.getMessage(), "Error",
@@ -2283,6 +2437,13 @@ public class NodeConfigurationPanel extends JPanel {
                     useProfileCheck.setSelected(false);
                     JPanel cardPanel = (JPanel) comp.getClientProperty("cardPanel");
                     ((CardLayout) cardPanel.getLayout()).show(cardPanel, "MANUAL");
+                    // keep the card panel's "current card" tracking in sync
+                    // (it sizes itself to the shown card only)
+                    Component[] currentCard = (Component[]) comp.getClientProperty("currentJdbcCard");
+                    if (currentCard != null)
+                        currentCard[0] = (Component) comp.getClientProperty("manualPanel");
+                    cardPanel.revalidate();
+                    cardPanel.repaint();
                 }
                 updateColor(comp, key, defaultValues.get(key));
                 continue;
@@ -2368,7 +2529,11 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private JPanel createCategoryPanel() {
-        JPanel panel = new JPanel(new MigLayout("fillx, insets 10, gap 5", "[][grow]", ""));
+        return createCategoryPanel(5);
+    }
+
+    private JPanel createCategoryPanel(int rowGap) {
+        JPanel panel = new JPanel(new MigLayout("fillx, insets 10, gap " + rowGap, "[][grow]", ""));
         return panel;
     }
 
@@ -2405,69 +2570,16 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     public void loadAppliedProperties() {
-        // Node may not be started yet when this panel is constructed.
-        // Defer loading until the node is running (will be called from onNodeStateChanged).
-        try {
-            application.module.node.props.PropertyService service = resolvePropertyService();
-            if (service == null) {
-                LOGGER.debug("loadAppliedProperties - PropertyService is null, deferring until node starts");
-                return;
-            }
-
-        for (PropertyRow row : allPropertyRows) {
-            String val = getServiceValueAsString(service, row.prop);
-            if (val != null) {
-                appliedProfile.setProperty(row.prop.getName(), val);
-            }
-        }
-
-        // Special case for database credentials which are part of DB_URL composite
-        // property
-        String appliedUser = getServiceValueAsString(service, Props.DB_USERNAME);
-        if (appliedUser != null && !appliedUser.isEmpty())
-            appliedProfile.setProperty(Props.DB_USERNAME.getName(), appliedUser);
-
-        String appliedPass = getServiceValueAsString(service, Props.DB_PASSWORD);
-        if (appliedPass != null && !appliedPass.isEmpty())
-            appliedProfile.setProperty(Props.DB_PASSWORD.getName(), appliedPass);
-
-            refreshUIColors();
-        } catch (IllegalStateException e) {
-            // Node not started yet - "No active Signum instance"
-            // Properties will be loaded when the node starts via onNodeStateChanged callback.
-            LOGGER.debug("loadAppliedProperties - Node not started yet, properties will load on node start: {}", e.getMessage());
-        }
-    }
-
-    /**
-     * Resolves this profile's running {@code PropertyService} from the injected
-     * {@code Signum} facade. Returns {@code null} until the node has started, which
-     * callers already treat as "defer until node start". This replaces the deprecated
-     * static {@code Signum.getPropertyService()} without any global active-instance.
-     */
-    private application.module.node.props.PropertyService resolvePropertyService() {
-        Signum facade = this.signum;
-        if (facade == null || facade.getPropertyService() == null) {
-            return null;
-        }
-        return facade.getPropertyService();
-    }
-
-    private String getServiceValueAsString(application.module.node.props.PropertyService service, Prop prop) {
-        Object defaultValue = prop.getDefaultValue();
-        if (defaultValue instanceof Boolean) {
-            return String.valueOf(service.getBoolean(prop));
-        } else if (defaultValue instanceof Integer) {
-            return String.valueOf(service.getInt(prop));
-        } else if (defaultValue instanceof List) {
-            List<String> list = service.getStringList(prop);
-            return list != null ? String.join(";", list) : "";
-        }
-        try {
-            return service.getString(prop);
-        } catch (Exception e) {
-            return null;
-        }
+        // No-op (intentional): the values loaded from the profile ARE the
+        // applied values (see the appliedProfile initialization in the
+        // constructor). This method used to overwrite that baseline with the
+        // live PropertyService values, but their string form drifts from the
+        // profile file's form (and until the node starts the baseline is
+        // empty, falling back to the application defaults) — which colored
+        // freshly loaded profile values "saved" instead of "applied". Kept for
+        // API compatibility: ConfigurationPanel still invokes it on node
+        // state changes.
+        LOGGER.debug("loadAppliedProperties - no-op: the loaded profile values are the applied baseline");
     }
 
     private void addSectionHeader(JPanel panel, String title, boolean isFirst) {
@@ -2683,8 +2795,60 @@ public class NodeConfigurationPanel extends JPanel {
         wrapper.add(useProfileCheck, "wrap");
 
         CardLayout cardLayout = new CardLayout();
-        JPanel cardPanel = new JPanel(cardLayout);
+        // The card currently shown (this JDK's CardLayout has no public
+        // "current card" accessor): the panel sizes itself to the CURRENT
+        // card only (CardLayout's default preferred size is the max of ALL
+        // cards, which left a large dead area under the shorter profile card
+        // in linked mode).
+        final Component[] currentJdbcCard = { null };
+        JPanel cardPanel = new JPanel(cardLayout) {
+            @Override
+            public Dimension getPreferredSize() {
+                Component current = currentJdbcCard[0];
+                if (current instanceof JComponent jc) {
+                    int containerWidth = getWidth();
+                    if (containerWidth > 50) {
+                        // MigLayout computes its preferred size from the
+                        // component's CURRENT bounds: measure the card at the
+                        // container's real width so the wrapped labels (the
+                        // SQLite note, the JDBC URL preview) wrap at the real
+                        // width instead of the narrow default component width
+                        // that inflated the row and left several dead lines
+                        // under the last entry. setSize stores the bounds only
+                        // (no doLayout — no re-entrance into the layout pass).
+                        jc.setSize(containerWidth, jc.getPreferredSize().height);
+                        Dimension cardPref = jc.getPreferredSize();
+                        return new Dimension(containerWidth, cardPref.height);
+                    }
+                    return jc.getPreferredSize();
+                }
+                return super.getPreferredSize();
+            }
+        };
         cardPanel.setOpaque(false);
+        // Settle pass: during the FIRST layout pass the row's height is
+        // measured while the card still has a stale (narrow) width, so the
+        // wrapped labels (the SQLite note, the URL preview) look several
+        // lines taller than at the real width — the dead space under the
+        // last entry. Once the card has a real width, re-run the parent's
+        // layout ONCE so the row adopts the true (shorter) height. The
+        // re-validation fires only when the measured height differs from
+        // the settled one, so a pure height-settle resize cannot retrigger
+        // it (no layout oscillation).
+        final int[] settledCardHeight = { -1 };
+        cardPanel.addComponentListener(new java.awt.event.ComponentAdapter() {
+            @Override
+            public void componentResized(java.awt.event.ComponentEvent e) {
+                if (getWidth() < 50 || currentJdbcCard[0] == null || getParent() == null) {
+                    return;
+                }
+                Dimension measured = getPreferredSize();
+                if (settledCardHeight[0] < 0 || measured.height != settledCardHeight[0]) {
+                    settledCardHeight[0] = measured.height;
+                    javax.swing.SwingUtilities.invokeLater(() -> getParent().revalidate());
+                }
+            }
+        });
 
         final boolean[] jdbcInitialized = { false };
         Runnable jdbcOnChange = () -> {
@@ -2694,12 +2858,30 @@ public class NodeConfigurationPanel extends JPanel {
             }
         };
 
-        JdbcManualConfigurationPanel manualPanel = new JdbcManualConfigurationPanel(jdbcOnChange);
+        JdbcManualConfigurationPanel manualPanel = new JdbcManualConfigurationPanel(jdbcOnChange, loadedProfileName);
         JdbcProfileConfigurationPanel profilePanel = new JdbcProfileConfigurationPanel(confFolder, jdbcOnChange);
 
         cardPanel.add(manualPanel, "MANUAL");
         cardPanel.add(profilePanel, "PROFILE");
+        currentJdbcCard[0] = manualPanel;
         wrapper.add(cardPanel, "growx");
+
+        // When the manual SQLite trio follows the per-profile convention
+        // (Path = ./database/SQLite) and the database profile is discoverable
+        // there, link the node to it: the "Linked Database Profile" checkbox
+        // turns on and the profile card takes over with the loaded profile.
+        manualPanel.setOnProfileDiscovered(profile -> {
+            if (isProgrammaticChange || useProfileCheck.isSelected())
+                return;
+            if (linkedDbPanel == null) {
+                // The Linked Profiles tab is not built yet (the initial
+                // updateFromUrl runs during initUI): remember it, the
+                // post-init auto-link pass will link it.
+                pendingDiscoveredDbProfile = profile;
+                return;
+            }
+            setLinkedDbProfile(DatabaseConfigurationPanel.DatabaseEngine.SQLITE + ":" + profile);
+        });
 
         JComboBox<?> engineCombo = (JComboBox<?>) profilePanel.getEngineCombo();
         JComboBox<?> profileCombo = (JComboBox<?>) profilePanel.getProfileCombo();
@@ -2718,7 +2900,13 @@ public class NodeConfigurationPanel extends JPanel {
         profileCombo.addActionListener(profileSyncListener);
 
         useProfileCheck.addActionListener(e -> {
+            currentJdbcCard[0] = useProfileCheck.isSelected() ? profilePanel : manualPanel;
+            settledCardHeight[0] = -1; // the other card measures at a different height
             cardLayout.show(cardPanel, useProfileCheck.isSelected() ? "PROFILE" : "MANUAL");
+            // The card panel sizes itself to the current card — re-run the
+            // layout so the row adopts the (different) card height at once.
+            cardPanel.revalidate();
+            cardPanel.repaint();
             updateDirtyStatus();
             refreshUIColors();
         });
@@ -2727,6 +2915,7 @@ public class NodeConfigurationPanel extends JPanel {
         wrapper.putClientProperty("profilePanel", profilePanel);
         wrapper.putClientProperty("cardPanel", cardPanel);
         wrapper.putClientProperty("useProfileCheck", useProfileCheck);
+        wrapper.putClientProperty("currentJdbcCard", currentJdbcCard);
 
         // Register sub-components for coloring and dirty status tracking
         wrapper.putClientProperty("engineCombo", manualPanel.getEngineCombo());
@@ -2736,6 +2925,12 @@ public class NodeConfigurationPanel extends JPanel {
         wrapper.putClientProperty("suffixField", manualPanel.getSuffixField());
         wrapper.putClientProperty("userField", manualPanel.getUserField());
         wrapper.putClientProperty("passField", manualPanel.getPassField());
+        wrapper.putClientProperty("sqlProfileField", manualPanel.getSqlProfileField());
+        wrapper.putClientProperty("sqlPathField", manualPanel.getSqlPathField());
+        wrapper.putClientProperty("sqlFileField", manualPanel.getSqlFileField());
+        wrapper.putClientProperty("sqlProfileLabel", manualPanel.getSqlProfileLabel());
+        wrapper.putClientProperty("sqlPathLabel", manualPanel.getSqlPathLabel());
+        wrapper.putClientProperty("sqlFileLabel", manualPanel.getSqlFileLabel());
 
         wrapper.putClientProperty("engineLabel", manualPanel.getEngineLabel());
         wrapper.putClientProperty("hostLabel", manualPanel.getHostLabel());
@@ -2982,14 +3177,18 @@ public class NodeConfigurationPanel extends JPanel {
                     .getClientProperty("profilePanel");
             JCheckBox cb = (JCheckBox) jdbcComp.getClientProperty("useProfileCheck");
             if (pp != null && value != null && value.contains(":")) {
-                String[] parts = value.split(":");
+                String[] parts = value.split(":", 2);
                 isProgrammaticChange = true;
-                ((JComboBox<?>) pp.getEngineCombo())
-                        .setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.fromDisplayName(parts[0]));
-                ((JComboBox<?>) pp.getProfileCombo()).setSelectedItem(parts[1]);
-                if (cb != null)
-                    cb.setSelected(true);
-                isProgrammaticChange = false;
+                try {
+                    ((JComboBox<?>) pp.getEngineCombo())
+                            .setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.fromDisplayName(parts[0]));
+                    ((JComboBox<?>) pp.getProfileCombo())
+                            .setSelectedItem(parts.length > 1 && !parts[1].isEmpty() ? parts[1] : "");
+                    if (cb != null)
+                        cb.setSelected(true);
+                } finally {
+                    isProgrammaticChange = false;
+                }
             }
         }
     }
@@ -3011,18 +3210,24 @@ public class NodeConfigurationPanel extends JPanel {
 
     public void setLinkedDbProfile(String value) {
         isProgrammaticChange = true;
-        if (linkedDbPanel != null) {
-            if (value == null || value.isEmpty()) {
-                ((JComboBox<?>) linkedDbPanel.getProfileCombo()).setSelectedItem("");
-            } else if (value.contains(":")) {
-                String[] parts = value.split(":");
-                ((JComboBox<DatabaseConfigurationPanel.DatabaseEngine>) linkedDbPanel.getEngineCombo())
-                        .setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.fromDisplayName(parts[0]));
-                ((JComboBox<String>) linkedDbPanel.getProfileCombo()).setSelectedItem(parts[1]);
+        try {
+            if (linkedDbPanel != null) {
+                if (value == null || value.isEmpty() || !value.contains(":")) {
+                    ((JComboBox<?>) linkedDbPanel.getProfileCombo()).setSelectedItem("");
+                } else {
+                    String[] parts = value.split(":", 2);
+                    ((JComboBox<DatabaseConfigurationPanel.DatabaseEngine>) linkedDbPanel.getEngineCombo())
+                            .setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.fromDisplayName(parts[0]));
+                    // "Engine:" (empty profile) splits to a single element —
+                    // the profile part only exists with a limited split.
+                    ((JComboBox<String>) linkedDbPanel.getProfileCombo())
+                            .setSelectedItem(parts.length > 1 && !parts[1].isEmpty() ? parts[1] : "");
+                }
+                syncDbProfileSelection(value);
             }
-            syncDbProfileSelection(value);
+        } finally {
+            isProgrammaticChange = false;
         }
-        isProgrammaticChange = false;
         saveProfileLinks(loadedProfileName);
     }
 
@@ -3317,8 +3522,27 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     /**
+     * JDK-25-safe copy of a {@link Properties}: the
+     * {@code Properties(Properties)} constructor NO LONGER copies entries in
+     * JDK 25 (Properties now backs itself with a {@code ConcurrentHashMap}
+     * and that constructor treats the argument as a *defaults* fallback
+     * chain, leaving the new instance EMPTY), so copy via an explicit
+     * {@code putAll} instead.
+     *
+     * @param source the properties to copy (may be null)
+     * @return an independent copy of {@code source} (empty when null)
+     */
+    private static Properties copyProperties(Properties source) {
+        Properties copy = new Properties();
+        if (source != null)
+            copy.putAll(source);
+        return copy;
+    }
+
+    /**
      * Resolves the value-level state of a configuration value against the
-     * saved (profile-on-disk) and applied (running-node) values:
+     * saved (profile-on-disk) and applied (the values loaded from the profile
+     * into the editor — the baseline the node runs with) values:
      * {@link ValueStatus#APPLIED} (green) when it equals the applied value,
      * {@link ValueStatus#SAVED} (yellow) when it equals the saved value,
      * otherwise {@link ValueStatus#UNSAVED} (normal text color). Boolean
@@ -3583,6 +3807,25 @@ public class NodeConfigurationPanel extends JPanel {
         updateJdbcPart(passField, passLabel, "Password:", passVal,
                 savedProfile.getProperty(passKey, getSafeDefault(Props.DB_PASSWORD)),
                 appliedProfile.getProperty(passKey, getSafeDefault(Props.DB_PASSWORD)));
+
+        // SQLite trio (manual mode): color profile/path/file by the composed
+        // URL's status against the saved/applied URLs.
+        if (!useProfile) {
+            JdbcManualConfigurationPanel mp = (JdbcManualConfigurationPanel) panel
+                    .getClientProperty("manualPanel");
+            JComponent sqlProfile = (JComponent) panel.getClientProperty("sqlProfileField");
+            if (mp != null && sqlProfile != null && mp.isSqliteSelected()) {
+                String current = mp.getJdbcUrl();
+                updateJdbcPart(sqlProfile, (JLabel) panel.getClientProperty("sqlProfileLabel"), "Profile:",
+                        current, savedUrl, appliedUrl);
+                updateJdbcPart((JComponent) panel.getClientProperty("sqlPathField"),
+                        (JLabel) panel.getClientProperty("sqlPathLabel"), "Path:",
+                        current, savedUrl, appliedUrl);
+                updateJdbcPart((JComponent) panel.getClientProperty("sqlFileField"),
+                        (JLabel) panel.getClientProperty("sqlFileLabel"), "DB file:",
+                        current, savedUrl, appliedUrl);
+            }
+        }
     }
 
     private String getCompValue(JComponent comp) {
@@ -3653,15 +3896,17 @@ public class NodeConfigurationPanel extends JPanel {
                 "<ul>" +
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getUnsaved())
                 + "'>\u25A0 Unsaved Values:</font></b> " +
-                "These values have been modified in the UI but have not yet been saved to the configuration file. " +
+                "These values have been modified in the UI and match neither the values loaded from the profile " +
+                "nor the values saved in the configuration file. " +
                 "Properties with unsaved changes are marked with an asterisk (*).</li>" +
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getSaved())
                 + "'>\u25A0 Saved Values:</font></b> " +
                 "These values are saved in the currently loaded profile on disk, but they differ from the values " +
-                "currently being used by the running node.</li>" +
+                "the profile loaded into the editor (the applied baseline) — saved, but not yet applied.</li>" +
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getApplied())
                 + "'>\u25A0 Applied Values:</font></b> " +
-                "These values match exactly what the node is currently using. Note that most changes require a restart to take effect.</li>"
+                "These values match exactly the values loaded from the currently loaded profile — the baseline " +
+                "this node runs (or will run) with. Note that most changes require a restart to take effect.</li>"
                 +
                 "</ul>" +
                 "</body></html>";

@@ -226,6 +226,28 @@ class NodeConfigurationPanelSaveButtonTest {
             }
             java.nio.file.Files.deleteIfExists(
                     java.nio.file.Path.of("conf", "node", "profiles", "save-button-repro-test.properties"));
+            // The save auto-creates the companion SQLite database profile
+            // (./database/SQLite/<name>/profile.json) — remove it with the
+            // profile so the test leaves no residue in the shared tree.
+            deleteRecursively(java.nio.file.Path.of("database", "SQLite", "save-button-repro-test"));
+        }
+    }
+
+    /** Best-effort recursive delete of a test-created directory tree. */
+    private static void deleteRecursively(java.nio.file.Path dir) {
+        if (dir == null || !java.nio.file.Files.exists(dir)) {
+            return;
+        }
+        try (java.util.stream.Stream<java.nio.file.Path> walk = java.nio.file.Files.walk(dir)) {
+            walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                try {
+                    java.nio.file.Files.delete(p);
+                } catch (java.io.IOException ignore) {
+                    // best-effort cleanup only
+                }
+            });
+        } catch (java.io.IOException ignore) {
+            // best-effort cleanup only
         }
     }
 

@@ -1,5 +1,6 @@
 package application.cli;
 
+import application.module.node.profile.NodeProfile;
 import application.utils.config.ModuleIds;
 import application.utils.config.PropertiesProfileLoader;
 
@@ -19,7 +20,12 @@ import java.util.Set;
 public final class SystemCommandsHandler implements CommandHandler {
 
     /** Reserved node-profile names excluded from {@code sys.profiles} (matches the SSOT loader). */
-    private static final Set<String> RESERVED_NODE_PROFILES = Set.of("node-default", "node");
+    /**
+     * Reserved node profile names — the SSOT is
+     * {@link NodeProfile#RESERVED_PROFILE_NAMES} so the CLI listing always agrees
+     * with the Node panel and the Logging module's Assignments table.
+     */
+    private static final Set<String> RESERVED_NODE_PROFILES = NodeProfile.RESERVED_PROFILE_NAMES;
 
     private final String action;
     private final CommandRegistry registry;

@@ -507,6 +507,13 @@ public class DatabaseConfigurationUtils {
                 } catch (Exception e) {
                     logger.warn("Could not parse MariaDB profile '{}': {}", profileName, e.getMessage());
                 }
+            } else if (engine.equalsIgnoreCase("SQLite") && json.has("DB.Url")) {
+                // Portable SQLite profile format: the profile.json itself carries
+                // the JDBC URL (see SQLiteProfile).
+                DbInstance instance = new DbInstance();
+                instance.name = profileName;
+                instance.url = json.get("DB.Url").getAsString();
+                profile.databases.add(instance);
             } else if (json.has("databases")) {
                 // Legacy/Generic format
                 JsonArray dbs = json.getAsJsonArray("databases");

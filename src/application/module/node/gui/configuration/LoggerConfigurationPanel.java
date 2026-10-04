@@ -420,7 +420,7 @@ public class LoggerConfigurationPanel extends JPanel {
         if (profileComboBox != null)
             ConfigurationUtils.fixComponentSize(profileComboBox);
         ConfigurationUtils.configureProfileToolbar(newProfileBtn, saveProfileBtn, applyProfileBtn, renameProfileBtn,
-                deleteProfileBtn, reloadProfileBtn, refreshProfilesBtn, resetToDefaultsBtn);
+                deleteProfileBtn, reloadProfileBtn, refreshProfilesBtn, resetToDefaultsBtn, null, null);
     }
 
     private void addHandlersProperty(JPanel panel) {

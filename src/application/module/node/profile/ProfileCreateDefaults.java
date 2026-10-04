@@ -1,6 +1,9 @@
 package application.module.node.profile;
 
+import application.module.database.profile.SQLiteProfile;
 import application.module.node.props.Props;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.util.Properties;
@@ -21,6 +24,8 @@ import java.util.Properties;
  */
 public final class ProfileCreateDefaults {
 
+    private static final Logger logger = LoggerFactory.getLogger(ProfileCreateDefaults.class);
+
     private ProfileCreateDefaults() {
         throw new UnsupportedOperationException("Utility class");
     }
@@ -33,9 +38,12 @@ public final class ProfileCreateDefaults {
         return Path.of("database", "SQLite", profileName);
     }
 
+    /** Default SQLite database file name used by per-profile databases. */
+    public static final String DEFAULT_SQLITE_FILE_NAME = "signum.sqlite.db";
+
     /** Per-profile SQLite JDBC URL (SSOT): {@code ./database/SQLite/<name>/signum.sqlite.db}. */
     public static String sqliteDbUrl(String profileName) {
-        return "jdbc:sqlite:file:./database/SQLite/" + profileName + "/signum.sqlite.db";
+        return "jdbc:sqlite:file:./database/SQLite/" + profileName + "/" + DEFAULT_SQLITE_FILE_NAME;
     }
 
     /**
@@ -48,9 +56,53 @@ public final class ProfileCreateDefaults {
         return profileName != null && dbUrl != null && sqliteDbUrl(profileName).equals(dbUrl);
     }
 
-    /** Maps the network selection to {@code node.network} ({@code mainnet}/{@code testnet}). */
+    /**
+     * Creates (or updates) the SQLite database profile of the given name in the
+     * database module's profile area ({@code ./database/SQLite/<name>/profile.json})
+     * pointing at the given JDBC URL, and ensures the database's own directory
+     * exists. This is the single rule both node-profile save paths apply (the
+     * configuration panel's save and the setup wizard): a new/changed SQLite
+     * configuration is discoverable as a database profile right after saving.
+     * <p>
+     * Never throws (D17): an invalid name/URL or a write failure is logged and
+     * swallowed — the node-profile save itself must never fail because of the
+     * companion database profile.
+     */
+    public static void ensureSqliteDatabaseProfile(String profileName, String dbUrl) {
+        try {
+            if (profileName == null || profileName.isBlank()
+                    || dbUrl == null || !dbUrl.startsWith("jdbc:sqlite:")) {
+                return;
+            }
+            SQLiteProfile profile = new SQLiteProfile(profileName.trim());
+            profile.getConfiguration().put(SQLiteProfile.CFG_URL, dbUrl);
+            profile.saveToProfileJson();
+            profile.ensureDatabaseDirectory();
+        } catch (Exception e) {
+            logger.warn("Could not create/update the SQLite database profile '{}': {}",
+                    profileName, e.toString());
+        }
+    }
+
+    /** Fully-qualified testnet network-parameters class ({@code signum.net.TestnetNetwork}). */
+    public static final String TESTNET_NETWORK_CLASS = "signum.net.TestnetNetwork";
+
+    /**
+     * Maps the network selection to {@code node.network} — the fully-qualified
+     * {@code NetworkParameters} class name loaded via reflection at node start.
+     * <p>
+     * Mainnet is the default network: the property is left unset (its default is
+     * {@code null}) so the node falls back to the built-in mainnet parameters.
+     * Writing a non-class value (or a mainnet marker) here would make
+     * {@code Class.forName(...)} fail at start-up.
+     * </p>
+     */
     public static Properties applyNetwork(Properties props, boolean testnet) {
-        props.setProperty(Props.NETWORK_PARAMETERS.getName(), testnet ? "testnet" : "mainnet");
+        if (testnet) {
+            props.setProperty(Props.NETWORK_PARAMETERS.getName(), TESTNET_NETWORK_CLASS);
+        } else {
+            props.remove(Props.NETWORK_PARAMETERS.getName());
+        }
         return props;
     }
 
