@@ -16,17 +16,16 @@ import org.slf4j.LoggerFactory;
  * A provider supplies:
  * <ul>
  *   <li>A {@link ModuleLoggingProfile} that describes the module's logger keys,
- *       defaults, presets, and metadata.</li>
+ *       defaults, and metadata.</li>
  *   <li>Optional on-disk profile files located under {@code conf/{moduleId}/logging/}.</li>
  * </ul>
  * </p>
  *
- * <h3>Design Pattern: Factory + Strategy</h3>
- * Each provider acts as a factory for its module's logging data and provides
- * swappable strategies (presets) the user can select at runtime.
+ * <h3>Design Pattern: Factory</h3>
+ * Each provider acts as a factory for its module's logging data.
  * <p>
  * Profile discovery and loading are delegated to {@link PropertiesProfileLoader},
- * which is specifically designed for Java {@code .properties}-based logging presets.
+ * which is specifically designed for Java {@code .properties}-based logging profiles.
  * Other profile formats (e.g., JSON-based database profiles) use their own loaders.
  *
  * <h3>Usage Example</h3>
@@ -130,7 +129,7 @@ public abstract class ModuleLoggingProvider {
             Properties props = PropertiesProfileLoader.loadProfile(
                     confFolder, getModuleId(), getLoggingCategory(), profileName);
             if (!props.isEmpty()) {
-                LOGGER.info("Loaded {} properties for preset '{}'", props.size(), profileName);
+                LOGGER.info("Loaded {} properties for profile '{}'", props.size(), profileName);
             }
             return props;
         } catch (Exception e) {

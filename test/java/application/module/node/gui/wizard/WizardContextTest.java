@@ -24,7 +24,6 @@ class WizardContextTest {
         assertNull(c.getApiPort());
         assertNull(c.getP2pPort());
         assertNull(c.getWsPort());
-        assertEquals("standard", c.getLoggingPreset());
         assertTrue(c.isStartImmediately());
     }
 }

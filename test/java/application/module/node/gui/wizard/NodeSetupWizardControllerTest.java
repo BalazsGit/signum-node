@@ -2,7 +2,6 @@ package application.module.node.gui.wizard;
 
 import application.module.node.gui.wizard.steps.DatabaseInstallationStep;
 import application.module.node.gui.wizard.steps.DatabaseSelectionStep;
-import application.module.node.gui.wizard.steps.LoggingProfileStep;
 import application.module.node.gui.wizard.steps.NodeConfigurationStep;
 import application.module.node.gui.wizard.steps.SummaryStep;
 import org.junit.jupiter.api.DisplayName;
@@ -52,13 +51,12 @@ class NodeSetupWizardControllerTest {
     @DisplayName("default wizard chain has the canonical steps (incl. install + connection)")
     void defaultStepChain() {
         List<WizardStep> steps = NodeSetupWizardController.defaultSteps();
-        assertEquals(6, steps.size());
+        assertEquals(5, steps.size());
         assertEquals("database-selection", steps.get(0).getId());
         assertEquals("database-installation", steps.get(1).getId());
         assertEquals("database-connection", steps.get(2).getId());
         assertEquals("node-configuration", steps.get(3).getId());
-        assertEquals("logging-profile", steps.get(4).getId());
-        assertEquals("summary", steps.get(5).getId());
+        assertEquals("summary", steps.get(4).getId());
     }
 
     @Test
@@ -132,7 +130,6 @@ class NodeSetupWizardControllerTest {
                 new DatabaseInstallationStep(),
                 new application.module.node.gui.wizard.steps.DatabaseConnectionStep(),
                 nodeStep,
-                new LoggingProfileStep(),
                 new SummaryStep()));
         WizardContext ctx = c.getContext();
 
@@ -144,15 +141,10 @@ class NodeSetupWizardControllerTest {
 
         // step 2: node config — suggested name avoids the taken names
         assertNull(c.next());
-        assertEquals("logging-profile", c.currentStep().getId());
+        assertEquals("summary", c.currentStep().getId());
         assertEquals("mainnet_02", ctx.getName());
 
-        // step 3: logging — default preset
-        assertNull(c.next());
-        assertEquals("summary", c.currentStep().getId());
-        assertEquals("standard", ctx.getLoggingPreset());
-
-        // step 4: finish
+        // step 3: finish
         assertNull(c.finish());
         assertTrue(ctx.isStartImmediately());
         assertNotNull(ctx.getName());

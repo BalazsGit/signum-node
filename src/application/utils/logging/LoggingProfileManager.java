@@ -6,8 +6,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -21,8 +19,8 @@ import org.slf4j.LoggerFactory;
  * <p>
  * <h3>Design Pattern: Composite + Factory</h3>
  * <ul>
- *   <li><b>Composite:</b> Merges multiple module profiles (each with its own defaults,
- *       presets, and on-disk overrides) into one unified configuration.</li>
+ *   <li><b>Composite:</b> Merges multiple module profiles (each with its own defaults
+ *       and on-disk overrides) into one unified configuration.</li>
  *   <li><b>Factory:</b> Produces ready-to-use {@link Properties} objects via
  *       {@link #createCompositeProfile(String, String, Map)}.</li>
  * </ul>
@@ -32,7 +30,6 @@ import org.slf4j.LoggerFactory;
  * <ol>
  *   <li>Global base defaults (from existing {@code conf/logging-default.properties})</li>
  *   <li>Each enabled module's built-in defaults ({@link ModuleLoggingProfile#getDefaults()})</li>
- *   <li>Each enabled module's preset overrides (if a preset is selected)</li>
  *   <li>On-disk profile file from {@code conf/{module}/logging/{profileName}.properties}</li>
  *   <li>User-provided runtime overrides (final argument map)</li>
  * </ol>
@@ -41,14 +38,9 @@ import org.slf4j.LoggerFactory;
  * <pre>{@code
  * LoggingProfileManager manager = new LoggingProfileManager();
  *
- * // Enable node + database modules, apply "verbose" preset for database
- * Map<String, String> presetMap = new HashMap<>();
- * presetMap.put("database", "verbose");
- *
  * Properties composite = manager.createCompositeProfile(
  *         "conf/mainnet",          // conf folder
- *         "production",            // base profile name per module
- *         presetMap               // module → preset mapping
+ *         "production"             // base profile name per module
  * );
  *
  * // Apply to Java LogManager:
@@ -86,14 +78,11 @@ public final class LoggingProfileManager {
      * @param confFolder   Base configuration folder (e.g. "conf/mainnet")
      * @param profileName  The profile name to load from each module's directory
      *                     (without .properties extension)
-     * @param presetMap    Optional per-module preset selections. Map key = module ID,
-     *                     value = preset name. Omit a module to use no preset for it.
      * @return Merged Properties object (never null)
      */
     public Properties createCompositeProfile(
             String confFolder,
-            String profileName,
-            Map<String, String> presetMap) {
+            String profileName) {
 
         Properties result = new Properties();
 
@@ -112,15 +101,7 @@ public final class LoggingProfileManager {
             profile.mergeDefaults(result, false);
             LOGGER.debug("Merged defaults for module '{}'", moduleId);
 
-            // Step 3: Apply preset if selected
-            if (presetMap != null && presetMap.containsKey(moduleId)) {
-                String preset = presetMap.get(moduleId);
-                if (preset != null && !preset.isEmpty()) {
-                    profile.applyPreset(result, preset);
-                }
-            }
-
-            // Step 4: Load on-disk profile file overrides
+            // Step 3: Load on-disk profile file overrides
             Properties diskProps = provider.loadProfileFile(confFolder, profileName);
             result.putAll(diskProps);
             LOGGER.debug("Applied disk overrides for module '{}' ({} keys)", moduleId, diskProps.size());
@@ -131,32 +112,19 @@ public final class LoggingProfileManager {
     }
 
     /**
-     * Overload that uses no presets (defaults only + disk files).
-     *
-     * @param confFolder  Base configuration folder
-     * @param profileName Profile name
-     * @return Merged Properties (never null)
-     */
-    public Properties createCompositeProfile(String confFolder, String profileName) {
-        return createCompositeProfile(confFolder, profileName, Collections.emptyMap());
-    }
-
-    /**
      * Overload that accepts runtime overrides applied AFTER all composition steps.
      *
      * @param confFolder   Base configuration folder
      * @param profileName  Profile name
-     * @param presetMap    Per-module preset selections
      * @param overrides    Final key→value overrides (highest priority)
      * @return Merged Properties (never null)
      */
     public Properties createCompositeProfile(
             String confFolder,
             String profileName,
-            Map<String, String> presetMap,
             Map<String, String> overrides) {
 
-        Properties result = createCompositeProfile(confFolder, profileName, presetMap);
+        Properties result = createCompositeProfile(confFolder, profileName);
         if (overrides != null && !overrides.isEmpty()) {
             for (Map.Entry<String, String> entry : overrides.entrySet()) {
                 result.setProperty(entry.getKey(), entry.getValue());
@@ -167,23 +135,6 @@ public final class LoggingProfileManager {
     }
 
     // ── Metadata queries ──────────────────────────────────────────────
-
-    /**
-     * Returns a summary map of all registered modules with their available presets.
-     * Useful for populating UI dropdowns/checkboxes.
-     *
-     * @return Immutable map: module ID → available preset names (never null)
-     */
-    public Map<String, List<String>> getModulePresetSummary() {
-        Map<String, List<String>> summary = new LinkedHashMap<>();
-        for (ModuleLoggingProvider provider : LoggingModuleRegistry.getInstance().getAllProviders()) {
-            ModuleLoggingProfile profile = provider.getProfile();
-            List<String> presets = new ArrayList<>(profile.getPresetOverrides().keySet());
-            Collections.sort(presets);
-            summary.put(profile.getModuleId(), presets);
-        }
-        return Collections.unmodifiableMap(summary);
-    }
 
     /**
      * Returns all supported logger keys across registered modules (union of defaults).

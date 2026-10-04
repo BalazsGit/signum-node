@@ -101,13 +101,13 @@ public final class ProfileRuntimeService {
 
         // 2) Logging association (SSOT: LoggingAssignmentStore → conf/node/profiles.json).
         LoggingAssignmentStore store = new LoggingAssignmentStore(confRoot);
-        String preset = store.getAssignment(sourceProfileName).get(ModuleIds.NODE);
-        if (preset != null && !preset.isBlank()) {
-            store.setAssignmentForModule(newProfileName, ModuleIds.NODE, preset);
+        String loggingProfile = store.getAssignment(sourceProfileName).get(ModuleIds.NODE);
+        if (loggingProfile != null && !loggingProfile.isBlank()) {
+            store.setAssignmentForModule(newProfileName, ModuleIds.NODE, loggingProfile);
         }
 
-        LOGGER.info("Cloned node profile '{}' -> '{}' (logging preset: {})",
-                sourceProfileName, newProfileName, preset);
+        LOGGER.info("Cloned node profile '{}' -> '{}' (logging profile: {})",
+                sourceProfileName, newProfileName, loggingProfile);
         return created.getName();
     }
 
@@ -127,9 +127,9 @@ public final class ProfileRuntimeService {
     /**
      * Creates a truly empty (zero-override) node profile: the profile file
      * contains <b>no keys at all</b>, so every setting resolves to the
-     * application's internal {@code Props} defaults. The profile is registered
-     * with the default logging preset
-     * (SSOT: {@link NodeProfile#DEFAULT_LOGGING_PRESET}).
+     * application's internal {@code Props} defaults. No logging assignment is
+     * written — the module falls back to its built-in logging defaults until
+     * the user assigns a logging profile.
      * <p>
      * Create-only semantics (this is a <i>create</i> action, not a lifecycle
      * action): the new profile is <b>not</b> started — no {@code NodeModule}
@@ -145,16 +145,11 @@ public final class ProfileRuntimeService {
      */
     static String createEmptyProfile(String confRoot, String profileName) throws IOException {
         Objects.requireNonNull(confRoot, "confRoot");
-        // 1) Profile file with zero overrides (validates the name).
+        // Profile file with zero overrides (validates the name). No logging
+        // assignment is recorded: the module's built-in defaults apply.
         NodeProfile created = NodeProfileRepository.createProfile(confRoot, profileName, new Properties());
 
-        // 2) Logging association with the default preset
-        //    (SSOT: LoggingAssignmentStore → conf/node/profiles.json).
-        new LoggingAssignmentStore(confRoot).setAssignmentForModule(
-                profileName, ModuleIds.NODE, NodeProfile.DEFAULT_LOGGING_PRESET);
-
-        LOGGER.info("Created empty default node profile '{}' (logging preset: {})",
-                profileName, NodeProfile.DEFAULT_LOGGING_PRESET);
+        LOGGER.info("Created empty default node profile '{}'", profileName);
         return created.getName();
     }
 
@@ -471,7 +466,7 @@ public final class ProfileRuntimeService {
      *       since a deleted profile must never leave a ghost under its dead name.</li>
      *   <li><b>Meta operations:</b> the profile file + tab order + logging association
      *       ({@link NodeProfileRepository#deleteProfile} — which also clears the canonical
-     *       logging presets) and the {@code profile.json} {@code appliedProfile} /
+     *       logging assignments) and the {@code profile.json} {@code appliedProfile} /
      *       {@code profileLinks} entries that name the deleted profile.</li>
      *   <li><b>Optional data deletion:</b> the per-profile SQLite data directory, but only when
      *       {@code deleteData} is set AND the profile actually uses its per-profile SQLite
@@ -526,8 +521,8 @@ public final class ProfileRuntimeService {
             module.removeNode(profileName);
         }
 
-        // 3) Meta operations: profile file + tab order + logging association
-        //    (SSOT: NodeProfileRepository — also clears the canonical logging presets).
+        // 3) Meta operations: profile file + tab order + logging assignment
+        //    (SSOT: NodeProfileRepository — also clears the canonical logging assignments).
         NodeProfileRepository.deleteProfile(confRoot, profileName);
         stripProfileJsonMetadata(confRoot, profileName);
 

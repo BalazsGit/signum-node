@@ -20,6 +20,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
+import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableCellEditor;
 import java.awt.BorderLayout;
@@ -27,6 +28,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.FlowLayout;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -37,8 +39,8 @@ import java.util.Set;
  * <p>
  * Shows, in one place, the logging profiles associated with the node profiles for this
  * module (plan §2.5). Each row is a node profile (e.g. "mainnet"); the "Logging profile"
- * column is a select menu holding the module's logging profiles (built-in presets plus
- * the on-disk profiles under {@code conf/{module}/logging/}). An association can be
+ * column is a select menu holding the module's on-disk logging profiles under
+ * {@code conf/{module}/logging/}. An association can be
  * edited or replaced by picking another entry, or removed by choosing "(default)" /
  * pressing "Delete selected". Changes are persisted via the headless
  * {@link LoggingAssignmentStore} (SSOT: {@code conf/node/profiles.json}) and require a
@@ -62,12 +64,20 @@ public class AssignmentPanel extends JPanel {
     private final JTable table;
     private final DefaultTableModel model;
     private final List<String> options = new ArrayList<>();
+    /**
+     * The "last persisted" reference of every row (node profile → the logging
+     * profile value as loaded from / saved to the store). A row whose cell
+     * differs from this baseline is UNSAVED and is shown with a trailing
+     * {@code " *"} star on the "Node profile" cell (the node configuration
+     * convention) — see {@link #isRowUnsaved(int)}.
+     */
+    private final Map<String, String> baselineValues = new LinkedHashMap<>();
 
     /**
      * Creates a module-scoped assignments panel.
      *
      * @param context  the host module context (used for the restart request); may be null
-     * @param provider the module's logging provider (module id, presets); must not be null
+     * @param provider the module's logging provider (module id); must not be null
      * @throws IllegalArgumentException if {@code provider} is null
      */
     public AssignmentPanel(ModuleContext context, ModuleLoggingProvider provider) {
@@ -83,7 +93,7 @@ public class AssignmentPanel extends JPanel {
         this.store = new LoggingAssignmentStore();
         setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
 
-        collectOptions(provider);
+        collectOptions();
 
         model = new DefaultTableModel(new Object[]{COL_NODE_PROFILE, COL_LOGGING_PROFILE}, 0) {
             @Override
@@ -93,6 +103,15 @@ public class AssignmentPanel extends JPanel {
         };
         table = new JTable(model);
         table.setDefaultEditor(Object.class, new ProfileCellEditor());
+        // Rows with a pending (unsaved) change are marked with the unsaved star
+        // + palette color on the "Node profile" cell (the row's identity — the
+        // same convention the node configuration panel uses). The star is
+        // DISPLAY-ONLY (applied by the renderer): the model values stay clean,
+        // because the CRUD actions read them back by name.
+        table.getColumn(COL_NODE_PROFILE).setCellRenderer(new NodeProfileCellRenderer());
+        // Any cell edit (the combo commit, a delete reset) makes the row
+        // unsaved — repaint it with the new marker state.
+        model.addTableModelListener(e -> table.repaint());
 
         JScrollPane scroll = new JScrollPane(table);
         scroll.setBorder(BorderFactory.createTitledBorder(
@@ -130,14 +149,12 @@ public class AssignmentPanel extends JPanel {
     }
 
     /**
-     * Builds the select-menu options in display order: the "(default)" sentinel, the
-     * module's built-in presets, then the module's on-disk logging profiles
-     * (deduplicated, first occurrence wins).
+     * Builds the select-menu options in display order: the "(default)" sentinel, then the
+     * module's on-disk logging profiles (deduplicated, first occurrence wins).
      */
-    private void collectOptions(ModuleLoggingProvider provider) {
+    private void collectOptions() {
         Set<String> known = new LinkedHashSet<>();
         known.add(DEFAULT);
-        known.addAll(provider.getProfile().getPresetOverrides().keySet());
         try {
             known.addAll(new LoggingProfileRepository().listProfiles(moduleId));
         } catch (Exception e) {
@@ -163,8 +180,44 @@ public class AssignmentPanel extends JPanel {
             } catch (Exception e) {
                 assignment = Map.of();
             }
-            String preset = assignment.get(moduleId);
-            model.addRow(new Object[]{profile, preset != null ? preset : DEFAULT});
+            String loggingProfile = assignment.get(moduleId);
+            model.addRow(new Object[]{profile, loggingProfile != null ? loggingProfile : DEFAULT});
+        }
+        snapshotBaseline();
+    }
+
+    /**
+     * Whether the row's logging-profile cell differs from what is persisted in
+     * the store — i.e. the row has a pending (unsaved) change.
+     */
+    private boolean isRowUnsaved(int row) {
+        if (row < 0 || row >= model.getRowCount()) {
+            return false;
+        }
+        String profile = (String) model.getValueAt(row, 0);
+        Object current = model.getValueAt(row, 1);
+        String baseline = baselineValues.get(profile);
+        return !String.valueOf(current).equals(baseline == null ? "" : baseline);
+    }
+
+    /** Re-baselines every row from the model (called after load/save). */
+    private void snapshotBaseline() {
+        baselineValues.clear();
+        for (int row = 0; row < model.getRowCount(); row++) {
+            baselineValues.put((String) model.getValueAt(row, 0), String.valueOf(model.getValueAt(row, 1)));
+        }
+    }
+
+    /** Re-reads the persisted baseline of every row from the store (defensive; never throws). */
+    private void reloadBaselineFromStore() {
+        for (int row = 0; row < model.getRowCount(); row++) {
+            String profile = (String) model.getValueAt(row, 0);
+            try {
+                String value = store.getAssignment(profile).get(moduleId);
+                baselineValues.put(profile, value != null ? value : DEFAULT);
+            } catch (Exception e) {
+                baselineValues.put(profile, DEFAULT);
+            }
         }
     }
 
@@ -189,28 +242,48 @@ public class AssignmentPanel extends JPanel {
             return;
         }
         model.setValueAt(DEFAULT, row, 1);
+        baselineValues.put(profile, DEFAULT); // just persisted — the row is not unsaved anymore
         LOGGER.info("Deleted logging assignment for node profile '{}' (module '{}')", profile, moduleId);
     }
 
     private void applyAssignments() {
         for (int row = 0; row < model.getRowCount(); row++) {
             String profile = (String) model.getValueAt(row, 0);
-            String preset = (String) model.getValueAt(row, 1);
-            String value = (preset == null || DEFAULT.equals(preset)) ? null : preset;
+            String loggingProfile = (String) model.getValueAt(row, 1);
+            String value = (loggingProfile == null || DEFAULT.equals(loggingProfile)) ? null : loggingProfile;
             try {
                 store.setAssignmentForModule(profile, moduleId, value);
             } catch (Exception e) {
                 JOptionPane.showMessageDialog(this,
                         "Failed to save assignment for '" + profile + "': " + e.getMessage(),
                         "Error", JOptionPane.ERROR_MESSAGE);
+                // The rows before this one may already be persisted — re-read
+                // the baseline from the store so the stars match reality.
+                reloadBaselineFromStore();
                 return;
             }
         }
+        snapshotBaseline(); // everything persisted — no row is unsaved anymore
         int result = JOptionPane.showConfirmDialog(this,
                 "Assignments saved.\n\nA node restart is required for the changes to take effect.\nRestart now?",
                 "Apply Assignments", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
         if (result == JOptionPane.YES_OPTION && context != null) {
             context.requestRestart();
+        }
+    }
+
+    private class NodeProfileCellRenderer extends DefaultTableCellRenderer {
+        @Override
+        public Component getTableCellRendererComponent(JTable t, Object value,
+                boolean isSelected, boolean hasFocus, int row, int column) {
+            super.getTableCellRendererComponent(t, value, isSelected, hasFocus, row, column);
+            boolean unsaved = !isSelected && isRowUnsaved(row);
+            String text = value == null ? "" : value.toString();
+            setText(unsaved ? text + " *" : text);
+            setForeground(isSelected
+                    ? t.getSelectionForeground()
+                    : (unsaved ? GuiColors.getUnsaved() : t.getForeground()));
+            return this;
         }
     }
 

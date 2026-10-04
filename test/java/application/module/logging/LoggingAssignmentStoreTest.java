@@ -18,8 +18,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * Unit tests for {@link LoggingAssignmentStore}.
  * <p>
  * Verifies canonical read/write, per-module updates, clearing, and read-migration
- * from the two legacy mechanisms ({@code profileLinks} and the {@code logging.preset}
- * property), plus reverse lookup.
+ * from the legacy {@code profileLinks} mechanism, plus reverse lookup.
  */
 @DisplayName("LoggingAssignmentStore Tests")
 class LoggingAssignmentStoreTest {
@@ -93,17 +92,6 @@ class LoggingAssignmentStoreTest {
     }
 
     @Test
-    @DisplayName("legacy logging.preset property (mechanism 1) is read-migrated to the node module")
-    void legacyPresetProperty_readMigrated() throws IOException {
-        Path profilesDir = tempDir.resolve(ModuleIds.NODE).resolve("profiles");
-        Files.createDirectories(profilesDir);
-        Files.writeString(profilesDir.resolve("legacyone.properties"), "logging.preset=debug\n");
-
-        Map<String, String> got = store.getAssignment("legacyone");
-        assertEquals("debug", got.get(ModuleIds.NODE));
-    }
-
-    @Test
     @DisplayName("canonical assignment takes precedence over legacy sources")
     void canonical_precedenceOverLegacy() throws IOException {
         // Legacy says "verbose"
@@ -143,20 +131,26 @@ class LoggingAssignmentStoreTest {
         Files.createDirectories(profilesDir);
         Files.writeString(profilesDir.resolve("node.properties"), "n=1\n");
         Files.writeString(profilesDir.resolve("node-default.properties"), "n=1\n");
+        Files.writeString(profilesDir.resolve("logging-default.properties"), "n=1\n");
         Files.writeString(profilesDir.resolve("mainnet.properties"), "n=1\n");
         Files.writeString(profilesDir.resolve("testnet.properties"), "n=1\n");
 
         List<String> profiles = store.listNodeProfiles();
         assertTrue(profiles.contains("mainnet"));
         assertTrue(profiles.contains("testnet"));
-        assertFalse(profiles.contains("node"));
+        // A profile literally named "node" is a RUNNABLE profile (the Node panel
+        // shows its tab) — only the SSOT reserved set
+        // (NodeProfile.RESERVED_PROFILE_NAMES) is excluded, so the Assignments
+        // table must agree with the Node panel's list.
+        assertTrue(profiles.contains("node"));
         assertFalse(profiles.contains("node-default"));
+        assertFalse(profiles.contains("logging-default"));
     }
 
     @Test
     @DisplayName("resolveEffectiveForModule returns the assigned profile when it resolves")
     void resolveEffectiveForModule_valid() throws IOException {
-        new LoggingProfileRepository(tempDir.toString()).create(ModuleIds.NODE, "myprofile", null);
+        new LoggingProfileRepository(tempDir.toString()).create(ModuleIds.NODE, "myprofile", (java.util.Properties) null);
         store.setAssignment("mainnet", Map.of(ModuleIds.NODE, "myprofile"));
         assertEquals("myprofile", store.resolveEffectiveForModule("mainnet", ModuleIds.NODE));
     }

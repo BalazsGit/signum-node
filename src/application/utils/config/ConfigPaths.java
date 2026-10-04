@@ -29,7 +29,7 @@ public final class ConfigPaths {
      * ├── node/
      * │   ├── profiles/          ← Node profile configurations
      * │   │   └── *.properties
-     * │   └── logging/           ← Node logging presets
+     * │   └── logging/           ← Node logging profiles
      * │       └── *.properties
      * ├── database/
      * │   ├── profiles/

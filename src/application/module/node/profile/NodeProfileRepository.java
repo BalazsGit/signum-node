@@ -439,7 +439,7 @@ public final class NodeProfileRepository {
                 config.setLoggingProfile(newName, logging);
             }
             config.setLoggingProfile(oldName, null);
-            // Canonical logging assignment (per-module presets, SSOT: LoggingAssignmentStore)
+            // Canonical logging assignment (SSOT: LoggingAssignmentStore)
             new LoggingAssignmentStore(confRoot).renameAssignment(oldName, newName);
         } catch (Exception e) {
             LOGGER.warn("Failed to update profiles.json after rename '{}' -> '{}'", oldName, newName, e);
@@ -456,9 +456,9 @@ public final class NodeProfileRepository {
                 config.setTabOrder(newOrder);
             }
             config.setLoggingProfile(name, null);
-            // Canonical logging assignment (per-module presets, SSOT: LoggingAssignmentStore) —
+            // Canonical logging assignment (SSOT: LoggingAssignmentStore) —
             // the same store renameProfile() re-keys; without this a deleted profile would
-            // leave orphaned presets behind in profiles.json.
+            // leave orphaned assignments behind in profiles.json.
             LoggingAssignmentStore store = new LoggingAssignmentStore(confRoot);
             if (store.isManaged(name)) {
                 store.clearAssignment(name);

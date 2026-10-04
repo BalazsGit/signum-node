@@ -2,7 +2,6 @@ package application.module.logging;
 
 import application.utils.config.PropertiesProfileLoader;
 import application.utils.logging.LoggingModuleRegistry;
-import application.utils.logging.ModuleLoggingProfile;
 import application.utils.logging.ModuleLoggingProvider;
 import application.utils.logging.NodeLoggerRegistry;
 import application.utils.logging.ProfileLogger;
@@ -15,7 +14,6 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Map;
 import java.util.Properties;
 
 /**
@@ -25,7 +23,7 @@ import java.util.Properties;
  * (SSOT: {@code conf/node/profiles.json} via {@link LoggingAssignmentStore}), resolves the
  * <b>effective</b> profile for the target module (guaranteeing a fallback to the reserved
  * {@code logging-default} when the assignment is invalid/missing), reads the effective
- * {@code <module>.level} (on-disk profile → preset → hardcoded module default), and sets it
+ * {@code <module>.level} (on-disk profile → hardcoded module default), and sets it
  * as the minimum level of that node profile's {@link ProfileLogger}.
  * </p>
  * <p>
@@ -95,7 +93,7 @@ public final class NodeLoggingApplier {
 
     /**
      * Resolves the effective {@code <module>.level} value for a profile, in precedence order:
-     * on-disk profile file → provider preset override → hardcoded module default.
+     * on-disk profile file → hardcoded module default.
      *
      * @param confRoot    base configuration root
      * @param profileName the (already-fallback-resolved) profile name
@@ -122,15 +120,7 @@ public final class NodeLoggingApplier {
         if (provider == null) {
             return null;
         }
-        ModuleLoggingProfile profile = provider.getProfile();
-        Map<String, String> preset = profile.getPresetOverrides().get(profileName);
-        if (preset != null) {
-            String value = preset.get(key);
-            if (value != null && !value.isBlank()) {
-                return value.trim();
-            }
-        }
-        return profile.getDefaults().get(key);
+        return provider.getProfile().getDefaults().get(key);
     }
 
     /**

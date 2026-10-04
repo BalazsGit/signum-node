@@ -7,7 +7,7 @@ import application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine
  * <p>
  * Plain data holder (no Swing): each step reads what it needs on {@code onExit} and the
  * summary step renders from it. Defaults reflect the "recommended" path
- * (SQLite, mainnet, default ports, standard logging, start immediately).
+ * (SQLite, mainnet, default ports, start immediately).
  * </p>
  */
 public class WizardContext {
@@ -31,9 +31,6 @@ public class WizardContext {
     private Integer apiPort; // null → default
     private Integer p2pPort; // null → default
     private Integer wsPort;  // null → default
-
-    // ── Step 3: logging ──────────────────────────────────────────────────
-    private String loggingPreset = "standard";
 
     // ── Step 4: summary ──────────────────────────────────────────────────
     private boolean startImmediately = true;
@@ -148,14 +145,6 @@ public class WizardContext {
 
     public void setWsPort(Integer wsPort) {
         this.wsPort = wsPort;
-    }
-
-    public String getLoggingPreset() {
-        return loggingPreset;
-    }
-
-    public void setLoggingPreset(String loggingPreset) {
-        this.loggingPreset = loggingPreset;
     }
 
     public boolean isStartImmediately() {

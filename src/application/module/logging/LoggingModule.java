@@ -10,7 +10,7 @@ import javax.swing.JComponent;
 
 /**
  * The Logging module — a first-class GUI module that centralizes the management of
- * per-module logging profiles, presets, and node-profile assignments.
+ * per-module logging profiles and node-profile assignments.
  * <p>
  * This module follows the standard {@link Module} lifecycle: {@code init → start → running → stop}.
  * Its UI is a {@link LoggingPanel} that contains an internal {@code JTabbedPane} with one tab

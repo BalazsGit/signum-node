@@ -20,14 +20,15 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests for the Logging module's {@link AssignmentPanel} (the "Assignments" sub-tab of a
- * module tab: the node-profile → logging-profile association table scoped to one module).
+ * module tab: the node-profile â†’ logging-profile association table scoped to one module).
  * Construction is pumped on the EDT (headless-safe); only the read/display surface is
- * asserted — the Apply and Delete actions open modal dialogs and are deliberately not
+ * asserted â€” the Apply and Delete actions open modal dialogs and are deliberately not
  * exercised in tests.
  */
 @DisplayName("AssignmentPanel Tests")
@@ -108,8 +109,8 @@ class AssignmentPanelTest {
     }
 
     @Test
-    @DisplayName("the select menu offers (default) and the provider presets")
-    void selectOptions_includeDefaultAndProviderPresets() {
+    @DisplayName("the select menu offers (default) and the on-disk profiles")
+    void selectOptions_includeDefaultAndOnDiskProfiles() {
         AssignmentPanel panel = newPanel();
         JTable table = findTable(panel);
         TableCellEditor editor = table.getDefaultEditor(Object.class);
@@ -122,10 +123,52 @@ class AssignmentPanelTest {
             items.add(String.valueOf(combo.getItemAt(i)));
         }
         assertTrue(items.contains("(default)"), "(default) option present; items=" + items);
-        assertTrue(items.contains("quiet"), "provider preset 'quiet' present; items=" + items);
     }
 
-    /** No-op {@link ModuleContext} — the panel's read path never calls back into it. */
+    @Test
+    @DisplayName("a changed assignment is starred on the node-profile cell; Refresh clears it")
+    void changedAssignmentIsStarred() {
+        AssignmentPanel panel = newPanel();
+        JTable table = findTable(panel);
+        javax.swing.table.TableModel model = table.getModel();
+        org.junit.jupiter.api.Assumptions.assumeTrue(model.getRowCount() > 0,
+                "no node profiles on disk â€” nothing to assign");
+
+        // The model value of the row identity stays CLEAN (the star is
+        // display-only, applied by the column renderer).
+        String cleanProfile = String.valueOf(model.getValueAt(0, 0));
+        assertFalse(cleanProfile.endsWith(" *"), "the model value is not starred");
+
+        // Change the assignment in the model: the rendered cell is starred.
+        String current = String.valueOf(model.getValueAt(0, 1));
+        String changed = "(default)".equals(current) ? "starred-probe" : "(default)";
+        onEdt(() -> model.setValueAt(changed, 0, 1));
+        javax.swing.JLabel rendered = (javax.swing.JLabel)
+                renderOnEdt(table, 0, 0);
+        assertTrue(rendered.getText().endsWith(" *"),
+                "the node-profile cell carries the trailing star; got \"" + rendered.getText() + "\"");
+        assertEquals(cleanProfile, rendered.getText().replace(" *", ""),
+                "the star is a suffix of the clean profile name");
+
+        // Refresh re-reads the store (the change was never persisted): the row
+        // reverts to the on-disk value and the star clears.
+        onEdt(() -> findButton(panel, "Refresh").doClick());
+        javax.swing.JLabel refreshed = (javax.swing.JLabel)
+                renderOnEdt(table, 0, 0);
+        assertFalse(refreshed.getText().endsWith(" *"),
+                "Refresh re-baselines the row â€” no star; got \"" + refreshed.getText() + "\"");
+    }
+
+    /** Renders the given cell with the column's own renderer (on the EDT) and returns the component. */
+    private static java.awt.Component renderOnEdt(JTable table, int row, int col) {
+        final java.awt.Component[] holder = new java.awt.Component[1];
+        onEdt(() -> holder[0] = table.prepareRenderer(
+                (javax.swing.table.TableCellRenderer) table.getColumnModel().getColumn(col).getCellRenderer(),
+                row, col));
+        return holder[0];
+    }
+
+    /** No-op {@link ModuleContext} â€” the panel's read path never calls back into it. */
     static final class NoOpContext implements ModuleContext {
         @Override
         public Path getConfigDirectory() {
@@ -162,11 +205,6 @@ class AssignmentPanelTest {
         @Override
         public Map<String, String> getDefaults() {
             return Map.of("node.level", "INFO");
-        }
-
-        @Override
-        public Map<String, Map<String, String>> getPresetOverrides() {
-            return Map.of("quiet", Map.of("node.level", "SEVERE"));
         }
     }
 

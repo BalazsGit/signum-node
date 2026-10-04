@@ -75,7 +75,7 @@ public final class PropertiesProfileLoader {
     /** Default category for module profiles (SSOT: {@link ModuleIds#CATEGORY_PROFILES}). */
     public static final String DEFAULT_CATEGORY_PROFILES = ModuleIds.CATEGORY_PROFILES;
 
-    /** Default category for logging presets (SSOT: {@link ModuleIds#CATEGORY_LOGGING}). */
+    /** Default category for logging profiles (SSOT: {@link ModuleIds#CATEGORY_LOGGING}). */
     public static final String DEFAULT_CATEGORY_LOGGING = ModuleIds.CATEGORY_LOGGING;
 
     /**

@@ -2,8 +2,6 @@ package application.module.node.logging;
 
 import application.utils.logging.ModuleLoggingProvider;
 import application.utils.logging.ModuleLoggingProfile;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Registers the Node module's logging profile with the global
@@ -16,8 +14,6 @@ import org.slf4j.LoggerFactory;
  * @see application.utils.logging.ModuleLoggingProvider
  */
 public class NodeLoggingProvider extends ModuleLoggingProvider {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(NodeLoggingProvider.class);
 
     private final ModuleLoggingProfile profile;
 
@@ -46,13 +42,6 @@ public class NodeLoggingProvider extends ModuleLoggingProvider {
      * Registers this provider and logs confirmation.
      * Call from {@code NodeModule.start()}.
      */
-    @Override
-    public void register() {
-        super.register();
-        LOGGER.info("Node logging provider registered — presets: {}",
-                profile.getPresetOverrides().keySet());
-    }
-
     @Override
     public String toString() {
         return "NodeLoggingProvider{profile=" + getProfile().getDisplayName() + '}';

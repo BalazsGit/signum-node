@@ -34,7 +34,7 @@ public class DatabaseModule implements Module {
     @Override
     public void start() {
         // Register the logging provider so the composite logging infrastructure
-        // knows about the Database module's built-in defaults & presets. This is
+        // knows about the Database module's built-in defaults. This is
         // what makes the "Database Engine" tab appear in the Logging module GUI.
         if (loggingProvider == null) {
             loggingProvider = new DatabaseLoggingProvider();

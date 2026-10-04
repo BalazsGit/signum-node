@@ -629,8 +629,7 @@ public class NodePanel extends JPanel  {
     /**
      * The <b>New Empty Default Profile</b> action card: asks for the name (prefilled
      * via the {@link ProfileNameSuggester} SSOT) and creates a truly empty,
-     * zero-override profile with the default logging preset
-     * (SSOT: {@link ProfileRuntimeService#createEmptyProfile}).
+     * zero-override profile (SSOT: {@link ProfileRuntimeService#createEmptyProfile}).
      * {@link #addProfileTab} registers the new tab and selects it, leaving the "+" tab.
      */
     private void openEmptyDefaultProfile() {

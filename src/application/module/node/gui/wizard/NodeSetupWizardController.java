@@ -3,7 +3,6 @@ package application.module.node.gui.wizard;
 import application.module.node.gui.wizard.steps.DatabaseConnectionStep;
 import application.module.node.gui.wizard.steps.DatabaseInstallationStep;
 import application.module.node.gui.wizard.steps.DatabaseSelectionStep;
-import application.module.node.gui.wizard.steps.LoggingProfileStep;
 import application.module.node.gui.wizard.steps.NodeConfigurationStep;
 import application.module.node.gui.wizard.steps.SummaryStep;
 
@@ -53,7 +52,6 @@ public class NodeSetupWizardController {
                 new DatabaseInstallationStep(),
                 new DatabaseConnectionStep(),
                 new NodeConfigurationStep(),
-                new LoggingProfileStep(),
                 new SummaryStep());
     }
 

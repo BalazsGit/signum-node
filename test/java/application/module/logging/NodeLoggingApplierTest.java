@@ -45,18 +45,6 @@ class NodeLoggingApplierTest {
     }
 
     @Test
-    @DisplayName("applies the assigned preset level to the node's ProfileLogger")
-    void applyForNodeProfile_preset_setsLevel() {
-        new LoggingAssignmentStore(tempDir.toString())
-                .setAssignment(PROFILE, Map.of(MODULE, "verbose"));
-
-        NodeLoggingApplier.applyForNodeProfile(tempDir.toString(), PROFILE, MODULE);
-
-        ProfileLogger logger = NodeLoggerRegistry.get(MODULE, PROFILE);
-        assertEquals(LogLevel.DEBUG, logger.getLogLevel(), "verbose preset (node.level=FINE) → DEBUG");
-    }
-
-    @Test
     @DisplayName("falls back to the module default level when the assigned profile is missing")
     void applyForNodeProfile_fallbackToDefault() {
         new LoggingAssignmentStore(tempDir.toString())
@@ -102,17 +90,25 @@ class NodeLoggingApplierTest {
     }
 
     @Test
-    @DisplayName("resolveLevel falls back to the module default when there is no file or preset")
+    @DisplayName("resolveLevel falls back to the module default when there is no on-disk file")
     void resolveLevel_fallbackToDefault() {
         assertEquals("INFO", NodeLoggingApplier.resolveLevel(tempDir.toString(), "unknown", MODULE));
     }
 
     @Test
     @DisplayName("different node profiles get different levels (multi-node isolation)")
-    void applyForNodeProfile_perProfileIsolation() {
+    void applyForNodeProfile_perProfileIsolation() throws IOException {
+        LoggingProfileRepository repo = new LoggingProfileRepository(tempDir.toString());
+        java.util.Properties loud = new java.util.Properties();
+        loud.setProperty("node.level", "FINE");
+        repo.saveProps(MODULE, "loud", loud);
+        java.util.Properties quiet = new java.util.Properties();
+        quiet.setProperty("node.level", "WARNING");
+        repo.saveProps(MODULE, "quiet", quiet);
+
         LoggingAssignmentStore store = new LoggingAssignmentStore(tempDir.toString());
-        store.setAssignment("mainnet", Map.of(MODULE, "verbose"));   // FINE → DEBUG
-        store.setAssignment("other", Map.of(MODULE, "minimal"));     // WARNING → WARN
+        store.setAssignment("mainnet", Map.of(MODULE, "loud"));    // FINE → DEBUG
+        store.setAssignment("other", Map.of(MODULE, "quiet"));     // WARNING → WARN
 
         NodeLoggingApplier.applyForNodeProfile(tempDir.toString(), "mainnet", MODULE);
         NodeLoggingApplier.applyForNodeProfile(tempDir.toString(), "other", MODULE);
@@ -142,15 +138,6 @@ class NodeLoggingApplierTest {
         @Override
         public Map<String, String> getDefaults() {
             return Map.of("node.level", "INFO");
-        }
-
-        @Override
-        public Map<String, Map<String, String>> getPresetOverrides() {
-            return Map.of(
-                    "minimal", Map.of("node.level", "WARNING"),
-                    "standard", Map.of("node.level", "INFO"),
-                    "verbose", Map.of("node.level", "FINE"),
-                    "debug", Map.of("node.level", "FINEST"));
         }
     }
 

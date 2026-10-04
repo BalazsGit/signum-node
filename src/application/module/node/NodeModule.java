@@ -910,7 +910,7 @@ public class NodeModule implements Module {
     @Override
     public void start() {
         // Register logging provider so the composite logging infrastructure
-        // knows about the Node module's built-in defaults & presets.
+        // knows about the Node module's built-in defaults.
         if (loggingProvider == null) {
             loggingProvider = new NodeLoggingProvider();
         }

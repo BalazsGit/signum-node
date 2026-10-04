@@ -1,7 +1,5 @@
 package application.utils.logging;
 
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
@@ -15,10 +13,6 @@ import org.slf4j.LoggerFactory;
  * its own set of logger name → level mappings that can be composed into a
  * single effective logging configuration at runtime.
  * </p>
- *
- * <h3>Design Pattern: Strategy</h3>
- * Subclasses encapsulate different logging strategies (verbose, production, minimal)
- * that can be swapped without modifying the composition logic.
  *
  * <h3>Usage Example</h3>
  * <pre>{@code
@@ -75,21 +69,6 @@ public abstract class ModuleLoggingProfile {
     public abstract Map<String, String> getDefaults();
 
     /**
-     * Returns the supported logging level presets for this module.
-     * A preset groups related loggers into a single named configuration
-     * (e.g., "minimal", "standard", "verbose", "debug").
-     *
-     * <p>The returned map uses preset name as key and a nested map of
-     * logger→level overrides as value. These overrides are merged on top
-     * of the base defaults from {@link #getDefaults()}.</p>
-     *
-     * @return Immutable map of preset names to their logger level overrides
-     */
-    public Map<String, Map<String, String>> getPresetOverrides() {
-        return Collections.emptyMap();
-    }
-
-    /**
      * Returns the relative path segment for this module's logging configuration directory.
      * Default implementation resolves to {@code conf/{moduleId}/logging/}.
      *
@@ -129,27 +108,6 @@ public abstract class ModuleLoggingProfile {
                 LOGGER.debug("Merged default logger: {} -> {}", entry.getKey(), entry.getValue());
             }
         }
-    }
-
-    /**
-     * Applies the specified preset overrides on top of the given Properties.
-     *
-     * @param target  The properties to apply overrides onto
-     * @param presetName The name of the preset to apply
-     * @return true if the preset was found and applied, false otherwise
-     */
-    public boolean applyPreset(Properties target, String presetName) {
-        Map<String, Map<String, String>> presets = getPresetOverrides();
-        Map<String, String> overrides = presets.get(presetName);
-        if (overrides == null || overrides.isEmpty()) {
-            LOGGER.warn("Preset '{}' not found for module '{}'", presetName, getModuleId());
-            return false;
-        }
-        for (Map.Entry<String, String> entry : overrides.entrySet()) {
-            target.setProperty(entry.getKey(), entry.getValue());
-            LOGGER.debug("Applied preset override [{}]: {} -> {}", presetName, entry.getKey(), entry.getValue());
-        }
-        return true;
     }
 
     @Override

@@ -25,7 +25,7 @@ import java.util.Set;
 /**
  * Read-only resolver that explains the <b>effective</b> logging composition.
  * <p>
- * For a given profile name and per-module preset selections, it computes the same
+ * For a given profile name and runtime overrides, it computes the same
  * effective {@link Properties} the node would run (via {@link LoggingProfileManager})
  * and additionally labels each logger key with the <b>source layer</b> that dominates
  * it ({@link Source}). This backs the "effective view" read-only section of the
@@ -33,7 +33,7 @@ import java.util.Set;
  * </p>
  *
  * <h3>Source precedence (highest → lowest)</h3>
- * {@link Source#RUNTIME_OVERRIDES} → {@link Source#ON_DISK} → {@link Source#PRESET}
+ * {@link Source#RUNTIME_OVERRIDES} → {@link Source#ON_DISK}
  * → {@link Source#MODULE_DEFAULT} → {@link Source#GLOBAL_BASE}.
  *
  * <p>
@@ -80,8 +80,6 @@ public final class EffectiveProfileResolver {
         GLOBAL_BASE("base"),
         /** A module's built-in defaults ({@code getDefaults()}). */
         MODULE_DEFAULT("default"),
-        /** A selected preset override for a module. */
-        PRESET("preset"),
         /** On-disk profile file {@code conf/{module}/logging/{profile}.properties}. */
         ON_DISK("disk"),
         /** Runtime overrides supplied by the caller. */
@@ -110,27 +108,24 @@ public final class EffectiveProfileResolver {
     }
 
     /**
-     * Computes the effective composition for a profile name plus per-module presets and
+     * Computes the effective composition for a profile name plus
      * runtime overrides, labeling each key with its source layer.
      *
      * @param profileName profile name loaded from each module's logging directory
-     * @param presetMap   optional module id → preset name (null treated as empty)
      * @param overrides   optional runtime key → value overrides (null treated as empty)
      * @return Sorted list of {@link EffectiveKey} (never null)
      */
     public List<EffectiveKey> previewComposition(
-            String profileName, Map<String, String> presetMap, Map<String, String> overrides) {
+            String profileName, Map<String, String> overrides) {
 
-        Map<String, String> safePresets = presetMap != null ? presetMap : Map.of();
         Map<String, String> safeOverrides = overrides != null ? overrides : Map.of();
 
         Properties effective = new LoggingProfileManager()
-                .createCompositeProfile(confRoot, profileName, safePresets, safeOverrides);
+                .createCompositeProfile(confRoot, profileName, safeOverrides);
 
         // Precompute the set of keys each layer has an opinion on.
         Set<String> baseKeys = baseDefaultKeys();
         Set<String> defaultKeys = providerKeys(provider -> provider.getProfile().getDefaults().keySet());
-        Set<String> presetKeys = providerPresetKeys(safePresets);
         Set<String> onDiskKeys = providerKeys(provider ->
                 PropertiesProfileLoader.loadProfile(confRoot, provider.getModuleId(), ModuleIds.CATEGORY_LOGGING, profileName).stringPropertyNames());
 
@@ -144,7 +139,7 @@ public final class EffectiveProfileResolver {
 
         List<EffectiveKey> result = new ArrayList<>(keys.size());
         for (String key : keys) {
-            Source source = sourceFor(key, baseKeys, defaultKeys, presetKeys, onDiskKeys, safeOverrides);
+            Source source = sourceFor(key, baseKeys, defaultKeys, onDiskKeys, safeOverrides);
             result.add(new EffectiveKey(key, effective.getProperty(key), source));
         }
         LOGGER.debug("previewComposition({}) produced {} effective keys", profileName, result.size());
@@ -152,13 +147,13 @@ public final class EffectiveProfileResolver {
     }
 
     /**
-     * Convenience: preview with no presets and no runtime overrides.
+     * Convenience: preview with no runtime overrides.
      *
      * @param profileName profile name
      * @return Sorted list of {@link EffectiveKey} (never null)
      */
     public List<EffectiveKey> previewComposition(String profileName) {
-        return previewComposition(profileName, Map.of(), Map.of());
+        return previewComposition(profileName, Map.of());
     }
 
     /**
@@ -175,15 +170,12 @@ public final class EffectiveProfileResolver {
     // ── Private helpers ────────────────────────────────────────────────
 
     private Source sourceFor(String key, Set<String> base, Set<String> defaults,
-            Set<String> presets, Set<String> onDisk, Map<String, String> overrides) {
+            Set<String> onDisk, Map<String, String> overrides) {
         if (overrides.containsKey(key)) {
             return Source.RUNTIME_OVERRIDES;
         }
         if (onDisk.contains(key)) {
             return Source.ON_DISK;
-        }
-        if (presets.contains(key)) {
-            return Source.PRESET;
         }
         if (defaults.contains(key)) {
             return Source.MODULE_DEFAULT;
@@ -219,21 +211,6 @@ public final class EffectiveProfileResolver {
             Set<String> ks = accessor.keys(provider);
             if (ks != null) {
                 keys.addAll(ks);
-            }
-        }
-        return keys;
-    }
-
-    private Set<String> providerPresetKeys(Map<String, String> presetMap) {
-        Set<String> keys = new HashSet<>();
-        for (ModuleLoggingProvider provider : LoggingModuleRegistry.getInstance().getAllProviders()) {
-            String preset = presetMap.get(provider.getModuleId());
-            if (preset == null) {
-                continue;
-            }
-            Map<String, String> overrides = provider.getProfile().getPresetOverrides().get(preset);
-            if (overrides != null) {
-                keys.addAll(overrides.keySet());
             }
         }
         return keys;

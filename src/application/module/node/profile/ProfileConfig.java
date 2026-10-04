@@ -25,7 +25,8 @@ import java.util.stream.Collectors;
  * now only manages cross-profile configuration that does not belong in individual
  * profile files:
  * <ul>
- *   <li>{@code loggingAssociations} — node profile name → logging preset mapping</li>
+ *   <li>{@code loggingPresets} — node profile name → per-module logging profile
+ *       assignment map (the JSON key is retained for compatibility with existing files)</li>
  *   <li>{@code tabOrder} — user-defined GUI tab display order</li>
  *   <li>{@code maxConcurrentNodes} — global limit on parallel running nodes</li>
  * </ul>
@@ -109,7 +110,7 @@ public class ProfileConfig {
         /** Reference to a named logging profile (e.g., "debug", "quiet", "verbose"). Optional. */
         private String loggingProfile;
 
-        /** Per-module logging level presets (e.g., {"node": "debug", "database": "quiet"}). Optional. */
+        /** Per-module logging profile assignments (e.g., {"node": "myprofile", "database": "quiet"}). Optional. */
         private Map<String, String> loggingPresets;
 
         public ProfileEntry() {
@@ -174,16 +175,16 @@ public class ProfileConfig {
         public void setLoggingProfile(String loggingProfile) { this.loggingProfile = loggingProfile; }
 
         /**
-         * Gets per-module logging level presets.
-         * @return unmodifiable map of module ID to log level strings, or null if not set
+         * Gets per-module logging profile assignments.
+         * @return unmodifiable map of module ID to logging profile name, or null if not set
          */
         public Map<String, String> getLoggingPresets() {
             return loggingPresets != null ? Collections.unmodifiableMap(loggingPresets) : null;
         }
 
         /**
-         * Sets per-module logging level presets.
-         * @param loggingPresets map of module ID to log level strings, or null to clear
+         * Sets per-module logging profile assignments.
+         * @param loggingPresets map of module ID to logging profile name, or null to clear
          */
         public void setLoggingPresets(Map<String, String> loggingPresets) {
             this.loggingPresets = loggingPresets;
@@ -396,10 +397,10 @@ public class ProfileConfig {
     }
 
     /**
-     * Gets the per-module logging presets for a profile.
+     * Gets the per-module logging profile assignments for a profile.
      *
      * @param profileName the profile name
-     * @return unmodifiable map of module ID to log level strings, or null if not set
+     * @return unmodifiable map of module ID to logging profile name, or null if not set
      */
     public Map<String, String> getLoggingPresets(String profileName) {
         ProfileData data = load();
@@ -408,10 +409,10 @@ public class ProfileConfig {
     }
 
     /**
-     * Sets and persists the per-module logging presets for a profile.
+     * Sets and persists the per-module logging profile assignments for a profile.
      *
      * @param profileName the profile name
-     * @param loggingPresets map of module ID to log level strings, or null to clear
+     * @param loggingPresets map of module ID to logging profile name, or null to clear
      */
     public void setLoggingPresets(String profileName, Map<String, String> loggingPresets) {
         ProfileData data = load();
@@ -420,7 +421,7 @@ public class ProfileConfig {
         try {
             save();
         } catch (IOException e) {
-            LOGGER.error("Failed to save logging presets for {}", profileName, e);
+            LOGGER.error("Failed to save logging assignments for {}", profileName, e);
         }
     }
 

@@ -48,7 +48,7 @@ class LoggingProfileRepositoryTest {
     @Test
     @DisplayName("create writes a new profile file and it becomes discoverable")
     void create_writesDiscoverableProfile() throws IOException {
-        repo.create(MODULE, "myprofile", null);
+        repo.create(MODULE, "myprofile", (java.util.Properties) null);
 
         assertTrue(repo.getProfileFile(MODULE, "myprofile").endsWith("node/logging/myprofile.properties"));
         assertTrue(Files.exists(repo.getProfileFile(MODULE, "myprofile")));
@@ -56,28 +56,30 @@ class LoggingProfileRepositoryTest {
     }
 
     @Test
-    @DisplayName("create seeds content from a preset when a provider is registered")
-    void create_seedsFromPreset() throws IOException {
-        new TestProvider().register();
+    @DisplayName("create seeds content from explicit properties (the editor-state path)")
+    void create_withPropertiesSeed_writesSeedContent() throws IOException {
+        Properties seed = new Properties();
+        seed.setProperty("test.level", "FINE");
+        seed.setProperty("test.handler", "custom.handler");
 
-        Path file = repo.create(MODULE, "from-preset", "quiet");
-        Properties loaded = repo.loadProps(MODULE, "from-preset");
+        repo.create(MODULE, "from-seed", seed);
+        Properties loaded = repo.loadProps(MODULE, "from-seed");
 
-        assertEquals("SEVERE", loaded.getProperty("testmod.level"));
-        assertNotNull(file);
+        assertEquals("FINE", loaded.getProperty("test.level"));
+        assertEquals("custom.handler", loaded.getProperty("test.handler"));
+        assertEquals(2, loaded.size(), "exactly the seeded entries are written");
     }
 
-    @Test
     @DisplayName("create refuses the reserved name")
     void create_reservedName_rejected() {
-        assertThrows(IllegalArgumentException.class, () -> repo.create(MODULE, "logging-default", null));
+        assertThrows(IllegalArgumentException.class, () -> repo.create(MODULE, "logging-default", (java.util.Properties) null));
     }
 
     @Test
     @DisplayName("create refuses a duplicate name")
     void create_duplicateName_rejected() throws IOException {
-        repo.create(MODULE, "dup", null);
-        assertThrows(IllegalArgumentException.class, () -> repo.create(MODULE, "dup", null));
+        repo.create(MODULE, "dup", (java.util.Properties) null);
+        assertThrows(IllegalArgumentException.class, () -> repo.create(MODULE, "dup", (java.util.Properties) null));
     }
 
     @Test
@@ -96,7 +98,7 @@ class LoggingProfileRepositoryTest {
     @Test
     @DisplayName("rename moves the file and updates the applied metadata")
     void rename_movesFileAndUpdatesApplied() throws IOException {
-        repo.create(MODULE, "old", null);
+        repo.create(MODULE, "old", (java.util.Properties) null);
         repo.setApplied(MODULE, "old");
 
         repo.rename(MODULE, "old", "new");
@@ -115,7 +117,7 @@ class LoggingProfileRepositoryTest {
     @Test
     @DisplayName("delete removes the file and clears applied metadata when it was applied")
     void delete_removesAndClearsApplied() throws IOException {
-        repo.create(MODULE, "doomed", null);
+        repo.create(MODULE, "doomed", (java.util.Properties) null);
         repo.setApplied(MODULE, "doomed");
 
         repo.delete(MODULE, "doomed");
@@ -162,24 +164,16 @@ class LoggingProfileRepositoryTest {
     @Test
     @DisplayName("hasProfile is true for an on-disk profile file")
     void hasProfile_onDisk() throws IOException {
-        repo.create(MODULE, "exists", null);
+        repo.create(MODULE, "exists", (java.util.Properties) null);
         assertTrue(repo.hasProfile(MODULE, "exists"));
         assertFalse(repo.hasProfile(MODULE, "missing"));
         assertFalse(repo.hasProfile(MODULE, null));
     }
 
     @Test
-    @DisplayName("hasProfile is true for a registered provider preset")
-    void hasProfile_preset() {
-        new TestProvider().register();
-        assertTrue(repo.hasProfile(MODULE, "quiet"));
-        assertFalse(repo.hasProfile(MODULE, "not-a-preset"));
-    }
-
-    @Test
     @DisplayName("resolveEffective returns the requested name when it is resolvable")
     void resolveEffective_valid() throws IOException {
-        repo.create(MODULE, "myprofile", null);
+        repo.create(MODULE, "myprofile", (java.util.Properties) null);
         assertEquals("myprofile", repo.resolveEffective(MODULE, "myprofile"));
     }
 
@@ -194,7 +188,7 @@ class LoggingProfileRepositoryTest {
                 repo.resolveEffective(MODULE, "  "));
     }
 
-    // ── Test fixtures ──────────────────────────────────────────────────
+    // â”€â”€ Test fixtures â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     static final class TestProfile extends ModuleLoggingProfile {
         @Override
@@ -215,11 +209,6 @@ class LoggingProfileRepositoryTest {
         @Override
         public Map<String, String> getDefaults() {
             return Map.of("testmod.level", "INFO");
-        }
-
-        @Override
-        public Map<String, Map<String, String>> getPresetOverrides() {
-            return Map.of("quiet", Map.of("testmod.level", "SEVERE"));
         }
     }
 

@@ -53,12 +53,6 @@ public class NodeProfile implements PropertiesProfileEntity {
     static final String DEFAULT_LOGGING_FILENAME =
             PropertiesProfileLoader.DEFAULT_LOGGING_DEFAULT_FILENAME;
 
-    /** Property key for per-profile logging preset selection. */
-    public static final String PROPERTY_LOGGING_PRESET = "logging.preset";
-
-    /** Default logging preset when not specified in profile. */
-    public static final String DEFAULT_LOGGING_PRESET = "standard";
-
     /** Property key for node autostart. When true, the node starts automatically on app launch. */
     public static final String PROPERTY_AUTOSTART = "node.autostart";
 
@@ -68,8 +62,13 @@ public class NodeProfile implements PropertiesProfileEntity {
     /**
      * Set of reserved profile names that are excluded from profile discovery
      * and cannot be used when saving new profiles.
+     * <p>
+     * <b>Single source of truth</b> for "which names are NOT runnable node
+     * profiles": every profile listing (Node panel tabs, the Logging module's
+     * Assignments table, the {@code sys.profiles} CLI command) must use this
+     * set so the lists can never drift apart.
      */
-    static final Set<String> RESERVED_PROFILE_NAMES = Set.of("node-default", "logging-default");
+    public static final Set<String> RESERVED_PROFILE_NAMES = Set.of("node-default", "logging-default");
 
     // ── Immutable Identity Fields ──────────────────────────────────────
 
@@ -170,38 +169,6 @@ public class NodeProfile implements PropertiesProfileEntity {
         } else {
             properties.setProperty(key, value);
         }
-    }
-
-    // ── Logging Configuration ──────────────────────────────────────────
-
-    /**
-     * Returns the logging preset name configured for this profile.
-     * Falls back to {@link #DEFAULT_LOGGING_PRESET} if not set.
-     */
-    public String getLoggingPreset() {
-        String preset = properties.getProperty(PROPERTY_LOGGING_PRESET);
-        if (preset == null || preset.isEmpty()) {
-            return DEFAULT_LOGGING_PRESET;
-        }
-        return preset.trim();
-    }
-
-    /**
-     * Sets the logging preset for this profile.
-     */
-    public void setLoggingPreset(String preset) {
-        if (preset == null || preset.isEmpty()) {
-            properties.remove(PROPERTY_LOGGING_PRESET);
-        } else {
-            properties.setProperty(PROPERTY_LOGGING_PRESET, preset.trim());
-        }
-    }
-
-    /**
-     * Returns true if this profile has an explicit logging preset configured.
-     */
-    public boolean hasLoggingPreset() {
-        return properties.containsKey(PROPERTY_LOGGING_PRESET);
     }
 
     // ── Autostart Configuration ────────────────────────────────────────

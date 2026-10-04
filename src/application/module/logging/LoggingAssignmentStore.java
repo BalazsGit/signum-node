@@ -1,5 +1,6 @@
 package application.module.logging;
 
+import application.module.node.profile.NodeProfile;
 import application.module.node.profile.ProfileConfig;
 import application.utils.config.ConfigPaths;
 import application.utils.config.ModuleIds;
@@ -17,20 +18,17 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
 
 /**
  * Single source of truth for <b>node-profile → logging-profile</b> assignments.
  * <p>
  * Historically the association "which logging profile does a given node profile
- * use" was scattered across three mechanisms that could drift apart:
+ * use" was scattered across two mechanisms that could drift apart:
  * </p>
  * <ol>
  *   <li><b>Canonical (this store's writer):</b> {@code ProfileConfig.loggingPresets}
  *       in {@code conf/node/profiles.json} — a per-module map, e.g.
- *       {@code {"node":"standard","database":"verbose"}}.</li>
- *   <li><b>Legacy property:</b> {@code logging.preset} inside the node profile's own
- *       {@code .properties} file.</li>
+ *       {@code {"node":"myprofile","database":"quiet"}}.</li>
  *   <li><b>Legacy link:</b> {@code profileLinks.<profile>.logging} in
  *       {@code conf/node/profile.json}.</li>
  * </ol>
@@ -38,7 +36,7 @@ import java.util.Properties;
  * <p>
  * This store is the <b>only writer</b>: all writes go to mechanism 1
  * ({@link ProfileConfig#setLoggingPresets}). Reads prefer the canonical map and only
- * fall back to the legacy mechanisms (2 and 3) for backward compatibility with
+ * fall back to the legacy mechanism (2) for backward compatibility with
  * existing {@code conf/} trees that have not yet been migrated.
  * </p>
  *
@@ -58,9 +56,6 @@ public final class LoggingAssignmentStore {
 
     /** JSON key for the linked logging profile within a profile-link entry. */
     static final String LINKED_LOGGING_KEY = "logging";
-
-    /** Legacy property name holding a single logging preset (mechanism 2). */
-    static final String LEGACY_PRESET_PROPERTY = "logging.preset";
 
     private static final Logger LOGGER = LoggerFactory.getLogger(LoggingAssignmentStore.class);
 
@@ -100,8 +95,6 @@ public final class LoggingAssignmentStore {
      *   <li>Canonical {@code ProfileConfig.loggingPresets} map (preferred).</li>
      *   <li>Legacy {@code profileLinks.<profile>.logging} in {@code conf/node/profile.json}
      *       (mapped to the {@code node} module id).</li>
-     *   <li>Legacy {@code logging.preset} property in the node profile's
-     *       {@code .properties} file (mapped to the {@code node} module id).</li>
      * </ol>
      * </p>
      *
@@ -114,19 +107,11 @@ public final class LoggingAssignmentStore {
             return canonical;
         }
 
-        // Legacy fallback 1: profileLinks.<profile>.logging (conf/node/profile.json)
+        // Legacy fallback: profileLinks.<profile>.logging (conf/node/profile.json)
         String linked = readLegacyLinkedLogging(nodeProfileName);
         if (linked != null && !linked.isBlank()) {
             Map<String, String> migrated = new LinkedHashMap<>();
             migrated.put(ModuleIds.NODE, linked);
-            return migrated;
-        }
-
-        // Legacy fallback 2: logging.preset property in the node profile's .properties
-        String preset = readLegacyPresetProperty(nodeProfileName);
-        if (preset != null && !preset.isBlank()) {
-            Map<String, String> migrated = new LinkedHashMap<>();
-            migrated.put(ModuleIds.NODE, preset);
             return migrated;
         }
 
@@ -137,7 +122,7 @@ public final class LoggingAssignmentStore {
      * Resolves the <b>effective</b> logging profile name that a node profile uses for a
      * given module, guaranteeing a valid fallback:
      * <ul>
-     *   <li>if the assignment names a resolvable profile (on-disk file or provider preset)
+     *   <li>if the assignment names a resolvable profile (on-disk file)
      *       → that name is returned;</li>
      *   <li>if the assignment is <b>invalid</b> (e.g. the linked profile was deleted) or
      *       <b>absent</b> → the reserved {@code logging-default} (hardcoded default) is
@@ -210,7 +195,7 @@ public final class LoggingAssignmentStore {
 
     /**
      * Re-keys a renamed node profile's logging assignment: the assignment under
-     * {@code oldName} (canonical presets, or a legacy fallback migrated to the
+     * {@code oldName} (canonical store, or a legacy fallback migrated to the
      * canonical store) is moved to {@code newName}. No-op when the old profile has
      * no assignment.
      *
@@ -244,14 +229,18 @@ public final class LoggingAssignmentStore {
     // ── Discovery / reverse lookup ─────────────────────────────────────
 
     /**
-     * Lists the discoverable node profile names (excluding reserved defaults).
+     * Lists the discoverable node profile names, excluding exactly the reserved
+     * names the Node module itself uses ({@link NodeProfile#RESERVED_PROFILE_NAMES})
+     * — so this list agrees with the profiles shown as tabs in the Node panel
+     * (a profile file literally named {@code node} IS a runnable profile and
+     * must be listed here too).
      *
      * @return Sorted list of node profile names (never null)
      */
     public List<String> listNodeProfiles() {
-        java.util.Set<String> reserved = java.util.Set.of("node-default", "node");
         return PropertiesProfileLoader.discoverProfiles(
-                confRoot, ModuleIds.NODE, ModuleIds.CATEGORY_PROFILES, reserved);
+                confRoot, ModuleIds.NODE, ModuleIds.CATEGORY_PROFILES,
+                NodeProfile.RESERVED_PROFILE_NAMES);
     }
 
     /**
@@ -296,23 +285,6 @@ public final class LoggingAssignmentStore {
             }
         } catch (Exception e) {
             LOGGER.debug("Failed to read legacy profileLinks for '{}': {}", nodeProfileName, e.getMessage());
-        }
-        return null;
-    }
-
-    private String readLegacyPresetProperty(String nodeProfileName) {
-        Path propsFile = PropertiesProfileLoader.resolveProfileFile(
-                confRoot, ModuleIds.NODE, ModuleIds.CATEGORY_PROFILES, nodeProfileName);
-        if (!Files.exists(propsFile)) {
-            return null;
-        }
-        try (java.io.InputStream is = Files.newInputStream(propsFile);
-                java.io.InputStreamReader reader = new java.io.InputStreamReader(is, StandardCharsets.UTF_8)) {
-            Properties props = new Properties();
-            props.load(reader);
-            return props.getProperty(LEGACY_PRESET_PROPERTY);
-        } catch (Exception e) {
-            LOGGER.debug("Failed to read legacy preset property for '{}': {}", nodeProfileName, e.getMessage());
         }
         return null;
     }

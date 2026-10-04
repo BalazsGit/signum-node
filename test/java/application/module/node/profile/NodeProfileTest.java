@@ -130,54 +130,6 @@ class NodeProfileTest {
     }
 
     // =====================================================================
-    // Logging preset methods
-    // =====================================================================
-
-    @Nested
-    @DisplayName("Logging Preset Methods")
-    class LoggingPresetTests {
-
-        @Test
-        @DisplayName("getLoggingPreset returns default 'standard' when not set")
-        void getLoggingPreset_GivenNotSet_ReturnsDefault() {
-            NodeProfile profile = new NodeProfile("test");
-            assertEquals(NodeProfile.DEFAULT_LOGGING_PRESET, profile.getLoggingPreset());
-        }
-
-        @Test
-        @DisplayName("getLoggingPreset returns configured preset")
-        void getLoggingPreset_GivenVerbose_ReturnsVerbose() {
-            NodeProfile profile = new NodeProfile("test");
-            profile.setLoggingPreset("verbose");
-            assertEquals("verbose", profile.getLoggingPreset());
-        }
-
-        @Test
-        @DisplayName("setLoggingPreset with empty string clears the preset")
-        void setLoggingPreset_GivenEmptyString_ClearsPreset() {
-            NodeProfile profile = new NodeProfile("test");
-            profile.setLoggingPreset("debug");
-            profile.setLoggingPreset("");
-            assertEquals(NodeProfile.DEFAULT_LOGGING_PRESET, profile.getLoggingPreset());
-            assertFalse(profile.hasLoggingPreset());
-        }
-
-        @Test
-        @DisplayName("hasLoggingPreset returns true when preset is set")
-        void hasLoggingPreset_GivenPresetSet_ReturnsTrue() {
-            NodeProfile profile = new NodeProfile("test");
-            profile.setLoggingPreset("minimal");
-            assertTrue(profile.hasLoggingPreset());
-        }
-
-        @Test
-        @DisplayName("PROPERTY_LOGGING_PRESET constant has expected value")
-        void propertyKey_HasExpectedValue() {
-            assertEquals("logging.preset", NodeProfile.PROPERTY_LOGGING_PRESET);
-        }
-    }
-
-    // =====================================================================
     // Autostart methods
     // =====================================================================
 

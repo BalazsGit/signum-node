@@ -79,17 +79,6 @@ class EffectiveProfileResolverTest {
     }
 
     @Test
-    @DisplayName("a selected preset overrides the default value and is labeled PRESET")
-    void preview_presetOverridesDefault() {
-        List<EffectiveKey> keys = resolver.previewComposition("p", Map.of(MODULE, "quiet"), Map.of());
-
-        EffectiveKey a = findKey(keys, "resmod.a");
-        assertNotNull(a);
-        assertEquals("SEVERE", a.value());
-        assertEquals(Source.PRESET, a.source());
-    }
-
-    @Test
     @DisplayName("on-disk profile values win and are labeled ON_DISK")
     void preview_onDiskOverridesAll() throws IOException {
         Path loggingDir = tempDir.resolve(MODULE).resolve("logging");
@@ -112,7 +101,7 @@ class EffectiveProfileResolverTest {
     @DisplayName("runtime overrides have the highest precedence and RUNTIME_OVERRIDES source")
     void preview_runtimeOverrideHighest() {
         Map<String, String> overrides = Map.of("override.key", "V", "resmod.a", "OFF");
-        List<EffectiveKey> keys = resolver.previewComposition("p", Map.of(), overrides);
+        List<EffectiveKey> keys = resolver.previewComposition("p", overrides);
 
         assertEquals("V", findKey(keys, "override.key").value());
         assertEquals(Source.RUNTIME_OVERRIDES, findKey(keys, "override.key").source());
@@ -159,13 +148,6 @@ class EffectiveProfileResolverTest {
         @Override
         public Map<String, String> getDefaults() {
             return Map.of("resmod.a", "INFO", "resmod.common", "WARNING");
-        }
-
-        @Override
-        public Map<String, Map<String, String>> getPresetOverrides() {
-            return Map.of(
-                    "quiet", Map.of("resmod.a", "SEVERE"),
-                    "loud", Map.of("resmod.a", "FINEST"));
         }
     }
 

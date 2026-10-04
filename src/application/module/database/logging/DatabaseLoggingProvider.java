@@ -2,8 +2,6 @@ package application.module.database.logging;
 
 import application.utils.logging.ModuleLoggingProvider;
 import application.utils.logging.ModuleLoggingProfile;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Registers the Database module's logging profile with the global
@@ -16,8 +14,6 @@ import org.slf4j.LoggerFactory;
  * @see application.utils.logging.ModuleLoggingProvider
  */
 public class DatabaseLoggingProvider extends ModuleLoggingProvider {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(DatabaseLoggingProvider.class);
 
     private final ModuleLoggingProfile profile;
 
@@ -40,16 +36,6 @@ public class DatabaseLoggingProvider extends ModuleLoggingProvider {
     @Override
     public ModuleLoggingProfile getProfile() {
         return profile;
-    }
-
-    /**
-     * Registers this provider and logs confirmation.
-     */
-    @Override
-    public void register() {
-        super.register();
-        LOGGER.info("Database logging provider registered — presets: {}",
-                profile.getPresetOverrides().keySet());
     }
 
     @Override

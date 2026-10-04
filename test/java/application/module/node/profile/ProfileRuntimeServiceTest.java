@@ -440,7 +440,7 @@ class ProfileRuntimeServiceTest {
         // Act
         ProfileRuntimeService.deleteProfile(confRoot(), "mainnet", false);
 
-        // Assert — no orphaned presets left in profiles.json
+        // Assert — no orphaned assignments left in profiles.json
         LoggingAssignmentStore store = new LoggingAssignmentStore(confRoot());
         assertFalse(store.isManaged("mainnet"));
         assertFalse(store.getAssignment("mainnet").containsKey(ModuleIds.NODE));
@@ -561,7 +561,7 @@ class ProfileRuntimeServiceTest {
     @Test
     @DisplayName("delete leaves other profiles untouched (file, logging, tab order)")
     void delete_OtherProfilesUntouched() throws IOException {
-        // Arrange — two profiles; the surviving one has a logging preset + tab order.
+        // Arrange — two profiles; the surviving one has a logging assignment + tab order.
         NodeProfileRepository.createProfile(confRoot(), "mainnet", new Properties());
         NodeProfileRepository.createProfile(confRoot(), "backup", new Properties());
         new LoggingAssignmentStore(confRoot())
@@ -593,22 +593,23 @@ class ProfileRuntimeServiceTest {
     // ── create empty default (F5: "+" tab, New Empty Default Profile) ─────
 
     @Test
-    @DisplayName("creates a zero-override profile file with the default logging assignment")
-    void createEmpty_CreatesZeroOverrideFileAndDefaultLogging() throws IOException {
+    @DisplayName("creates a zero-override profile file without a logging assignment")
+    void createEmpty_CreatesZeroOverrideFileAndNoLoggingAssignment() throws IOException {
         // Arrange — an existing profile must remain untouched.
         NodeProfileRepository.createProfile(confRoot(), "mainnet", new Properties());
 
         // Act
         String created = ProfileRuntimeService.createEmptyProfile(confRoot(), "node");
 
-        // Assert — the file exists, is truly empty (zero overrides), and gets the
-        // default logging preset (SSOT: NodeProfile.DEFAULT_LOGGING_PRESET).
+        // Assert — the file exists, is truly empty (zero overrides), and no logging
+        // assignment is recorded (the module's built-in defaults apply).
         assertEquals("node", created);
         assertTrue(Files.exists(profileFile("node")));
         NodeProfile profile = NodeProfileRepository.loadProfile(confRoot(), "node");
         assertTrue(profile.getProperties().isEmpty(), "the profile file must contain zero overrides");
         Map<String, String> assignment = new LoggingAssignmentStore(confRoot()).getAssignment("node");
-        assertEquals(NodeProfile.DEFAULT_LOGGING_PRESET, assignment.get(ModuleIds.NODE));
+        assertFalse(assignment.containsKey(ModuleIds.NODE),
+                "a fresh profile must not carry a logging assignment");
     }
 
     @Test

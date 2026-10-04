@@ -44,7 +44,7 @@ public final class ModuleIds {
     public static final String CATEGORY_PROFILES = "profiles";
 
     /**
-     * Module logging preset category (path segment: {@code {conf}/{module}/logging/}).
+     * Module logging profile category (path segment: {@code {conf}/{module}/logging/}).
      * Kept in sync with {@link PropertiesProfileLoader#DEFAULT_CATEGORY_LOGGING}.
      */
     public static final String CATEGORY_LOGGING = "logging";

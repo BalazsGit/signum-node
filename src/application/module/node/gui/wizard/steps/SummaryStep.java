@@ -39,7 +39,7 @@ public class SummaryStep implements WizardStep {
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setOpaque(false);
 
-        JLabel title = new JLabel("4. Summary — review before creating the profile");
+        JLabel title = new JLabel("3. Summary — review before creating the profile");
         title.setFont(title.getFont().deriveFont(java.awt.Font.BOLD, 14f));
         GuiFontManager.applyDefaultFont(title);
         panel.add(title);
@@ -64,7 +64,6 @@ public class SummaryStep implements WizardStep {
         sb.append("Network      : ").append(context.isTestnet() ? "testnet" : "mainnet").append('\n');
         sb.append("Database     : ").append(describeDb(context)).append('\n');
         sb.append("Ports        : ").append(describePorts(context)).append('\n');
-        sb.append("Logging      : ").append(nvl(context.getLoggingPreset())).append('\n');
         text.setText(sb.toString());
 
         List<ProfileConflictDetector.Conflict> conflicts =
