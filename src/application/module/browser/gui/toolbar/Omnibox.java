@@ -3,6 +3,7 @@ package application.module.browser.gui.toolbar;
 import application.module.browser.core.CefFocusGuard;
 import application.module.browser.util.UrlUtils;
 import application.utils.i18n.I18n;
+import com.formdev.flatlaf.FlatClientProperties;
 import org.cef.browser.CefBrowser;
 
 import java.awt.AWTEvent;
@@ -10,6 +11,7 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.GraphicsEnvironment;
@@ -19,10 +21,9 @@ import java.awt.Rectangle;
 import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.event.AWTEventListener;
-import java.awt.event.ComponentAdapter;
-import java.awt.event.ComponentEvent;
 import java.awt.event.FocusEvent;
 import java.awt.event.FocusListener;
+import java.awt.event.HierarchyEvent;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
@@ -43,10 +44,13 @@ import javax.swing.event.DocumentListener;
  * queries (Chrome semantics via {@link UrlUtils#normalize}), Ctrl+L focus,
  * Enter navigation, Up/Down popup selection, Esc to close the popup (or
  * cancel — the toolbar routes the remaining Esc to "stop load"). The
- * {@link SecurityIcon} lock (S1/S4) is embedded in the field's left side,
- * Chrome-style: the field keeps its native border and the lock rides on the
- * field (managed bounds), so it always sits inside the omnibox box at the
- * lock's own width — only the lock's rectangle is clickable.
+ * {@link SecurityIcon} lock (S1/S4) and the bookmark star (B1) ride inside
+ * the field via FlatLaf's official {@code TEXT_FIELD_LEADING_COMPONENT} /
+ * {@code TEXT_FIELD_TRAILING_COMPONENT} client properties — the field's UI
+ * (re-)adds and lays them out on <em>every</em> UI install (including the
+ * full re-init of {@code FlatLaf.updateUI()} on Appearance changes), so they
+ * can never be lost by a font-size change, and the URL text insets follow
+ * them automatically.
  * <p>
  * Suggestion sources: F2 builds the URL + search entries here
  * ({@code suggestFor}); F3/F4 extend the same list with history and
@@ -54,20 +58,19 @@ import javax.swing.event.DocumentListener;
  */
 public final class Omnibox extends JPanel {
 
-    private static final int HEIGHT = 32;
+    /** The field's top/bottom text margin (the vertical padding inside the border). */
+    static final int FIELD_V_MARGIN = 6;
+
     /**
-     * Left pad (in field coordinates) where the lock is pinned — hugging the
-     * field's left edge, just inside the border line.
+     * The minimum width of the field (pixels): the row's initial preferred
+     * size stays stable with an empty field; longer URLs simply stretch it.
+     * The HEIGHT is deliberately never pinned — the UI delegate computes
+     * exactly what the current font needs, so the box always fits the text
+     * (a guessed factor clipped the descenders at larger Appearance fonts).
      */
-    static final int LOCK_LEFT_PAD = 6;
+    static final int MIN_WIDTH = 220;
     /** The gap between the lock's right edge and the URL text. */
     static final int LOCK_TEXT_GAP = 2;
-    /**
-     * Right pad (in field coordinates) where the trailing button (the
-     * bookmark star) is pinned — hugging the field's right edge, just
-     * inside the border line.
-     */
-    static final int STAR_RIGHT_PAD = 6;
     /** The gap between the URL text and the star's left edge. */
     static final int STAR_TEXT_GAP = 2;
     /** The plain margin of the field's left/right text side (no embedded component). */
@@ -143,8 +146,16 @@ public final class Omnibox extends JPanel {
         this.securityIcon = securityIcon;
         this.trailingButton = trailingButton;
 
-        this.field = new JTextField();
-        field.setMargin(new Insets(6, 14, 6, 14));
+        // The field's font follows the app's UI font (Appearance settings);
+        // refreshAppearance() re-applies it on appearance changes. No explicit
+        // size is set: the preferred HEIGHT always follows the current font
+        // (Field#getPreferredSize), so the text never clips at any size.
+        this.field = new Field(this);
+        Font uiFont = UIManager.getFont("TextField.font");
+        if (uiFont != null) {
+            field.setFont(uiFont);
+        }
+        field.setMargin(new Insets(FIELD_V_MARGIN, PLAIN_MARGIN, FIELD_V_MARGIN, PLAIN_MARGIN));
         // App-consistent rectangular field: the native L&F border (same look as
         // every other input in the application) plus the placeholder painting.
         Border lafBorder = UIManager.getBorder("TextField.border");
@@ -153,7 +164,6 @@ public final class Omnibox extends JPanel {
         } else {
             field.setBorder(new PlaceholderBorder());
         }
-        field.setPreferredSize(new Dimension(220, HEIGHT));
         field.getDocument().addDocumentListener(new DocumentListener() {
             @Override
             public void insertUpdate(DocumentEvent e) {
@@ -247,97 +257,77 @@ public final class Omnibox extends JPanel {
     }
 
     /**
-     * Embeds the lock in the field's left side (vertically centered) as a
-     * plain child with <em>managed bounds</em>: the field keeps the native
-     * L&amp;F border, so the lock sits within the omnibox box like Chrome's,
-     * and it keeps its own mouse handler (the certificate-details click,
-     * S2). The bounds are managed here instead of with a layout manager —
-     * a previous OverlayLayout attempt did not keep the icon at the field's
-     * left side.
+     * Embeds the lock in the field's left side via FlatLaf's official
+     * leading-component API: the field's UI adds it on every UI install
+     * (including the full re-init of {@code FlatLaf.updateUI()} on
+     * appearance changes — a plain {@code field.add()} did NOT survive that
+     * re-init: the children came back parentless and vanished) and lays it
+     * out itself (left edge, full field height, its own preferred width).
+     * The lock keeps its native border and its own mouse handler (the
+     * certificate-details click, S2).
      */
     private void installSecurityIcon() {
-        field.setLayout(null); // the embedded components' bounds are managed, not laid out
-        field.add(securityIcon);
-        field.addComponentListener(new ComponentAdapter() {
-            @Override
-            public void componentResized(ComponentEvent e) {
-                positionEmbeddedComponents();
-            }
-        });
+        field.putClientProperty(FlatClientProperties.TEXT_FIELD_LEADING_COMPONENT, securityIcon);
         applySecurityIconInsets();
     }
 
     /**
-     * F4 (B1): embeds the trailing button (the bookmark star) in the
-     * field's right side, vertically centered — the same managed-bounds
-     * embedding as the lock: the field keeps the native L&amp;F border, the
-     * button sits within the omnibox box at the right edge, and only its
-     * own rectangle is clickable.
+     * F4 (B1): embeds the trailing button (the bookmark star) in the field's
+     * right side via FlatLaf's official trailing-component API — the same
+     * (re-)install-on-every-UI-update guarantee as the lock, so an
+     * appearance change can never make it vanish. A hidden star is simply
+     * not placed (FlatLaf skips invisible components in layout and insets).
      */
     private void installTrailingButton() {
-        field.setLayout(null); // managed bounds (the lock may have set it already)
-        field.add(trailingButton);
-        field.addComponentListener(new ComponentAdapter() {
-            @Override
-            public void componentResized(ComponentEvent e) {
-                positionEmbeddedComponents();
+        field.putClientProperty(FlatClientProperties.TEXT_FIELD_TRAILING_COMPONENT, trailingButton);
+        // A hidden browser tab is re-shown at the same size (no resize
+        // event): make sure the field's layout is flushed again on every
+        // shown-state change, so the embedded components are always placed.
+        field.addHierarchyListener(e -> {
+            if (e.getChangeFlags() == HierarchyEvent.SHOWING_CHANGED) {
+                field.revalidate();
+            }
+        });
+        // The right text margin follows the star's visibility.
+        trailingButton.addHierarchyListener(e -> {
+            if (e.getChangeFlags() == HierarchyEvent.SHOWING_CHANGED) {
+                applySecurityIconInsets();
             }
         });
         applySecurityIconInsets();
     }
 
     /**
-     * Keeps the field's text margins clear of the embedded components —
-     * the lock on the LEFT (always present when set) and the star on the
-     * RIGHT (its margin follows its VISIBILITY: the star is kept visible
-     * on every page type — on non-bookmarkable schemes it simply stays
-     * outlined and inert)
-     * — and re-places both. Called again after an appearance change
-     * resizes the glyphs and whenever the star's visibility changes.
-     * <p>
-     * The margins are derived <em>only</em> from the components'
-     * geometry, never from {@code getBorderInsets}: FlatLaf folds the
-     * field's margin into the border insets, so adding the inset here
-     * would be self-referential — every call would inflate the margin
-     * (and with it the embedded x and the text start) until the
-     * components and the URL text overlapped.
+     * Sets the field's text margins so the URL text is separated from the
+     * embedded components by a small gap (the components' OWN widths are
+     * already accounted for by FlatLaf's text insets — adding them here
+     * again would double the padding). The right gap follows the star's
+     * VISIBILITY (it is kept visible on every page type — on non-bookmarkable
+     * schemes it simply stays outlined and inert). Called again after an
+     * appearance change resizes the glyphs; idempotent.
      */
     public void applySecurityIconInsets() {
-        int left = PLAIN_MARGIN;
-        if (securityIcon != null) {
-            left = LOCK_LEFT_PAD + securityIcon.getPreferredSize().width + LOCK_TEXT_GAP;
-        }
-        int right = PLAIN_MARGIN;
-        if (trailingButton != null && trailingButton.isVisible()) {
-            right = STAR_RIGHT_PAD + trailingButton.getPreferredSize().width + STAR_TEXT_GAP;
-        }
-        field.setMargin(new Insets(6, left, 6, right));
-        positionEmbeddedComponents();
+        int left = securityIcon != null ? LOCK_TEXT_GAP : PLAIN_MARGIN;
+        int right = trailingButton != null && trailingButton.isVisible()
+                ? STAR_TEXT_GAP : PLAIN_MARGIN;
+        field.setMargin(new Insets(FIELD_V_MARGIN, left, FIELD_V_MARGIN, right));
+        field.revalidate();
+        field.repaint();
     }
 
     /**
-     * Pins the embedded components: the lock to the field's left edge
-     * (a small fixed pad, just inside the border line), the star to the
-     * right edge — both vertically centered at exactly their preferred
-     * sizes: each occupies only its own width, and only that rectangle
-     * is clickable. The fixed pads — instead of the (margin-inflated)
-     * border inset — keep them at their sides in every L&amp;F.
+     * Appearance change hook: re-applies the app's UI font to the field. The
+     * field's height follows the font automatically (see {@link Field#
+     * getPreferredSize()}), so only revalidate is needed to let the row pick
+     * up the new preferred height; the glyphs are refreshed by the toolbar.
      */
-    private void positionEmbeddedComponents() {
-        if (field.getWidth() <= 0 || field.getHeight() <= 0) {
-            return;
+    void refreshAppearance() {
+        Font font = UIManager.getFont("TextField.font");
+        if (font != null && !font.equals(field.getFont())) {
+            field.setFont(font);
         }
-        if (securityIcon != null) {
-            Dimension pref = securityIcon.getPreferredSize();
-            int y = Math.max(0, (field.getHeight() - pref.height) / 2);
-            securityIcon.setBounds(LOCK_LEFT_PAD, y, pref.width, pref.height);
-        }
-        if (trailingButton != null) {
-            Dimension pref = trailingButton.getPreferredSize();
-            int x = Math.max(LOCK_LEFT_PAD, field.getWidth() - STAR_RIGHT_PAD - pref.width);
-            int y = Math.max(0, (field.getHeight() - pref.height) / 2);
-            trailingButton.setBounds(x, y, pref.width, pref.height);
-        }
+        revalidate();
+        repaint();
     }
 
     /** The popup, created on first need (the top-level owner must exist then). */
@@ -536,8 +526,31 @@ public final class Omnibox extends JPanel {
     }
 
     /**
+     * The omnibox field: the preferred WIDTH never drops below
+     * {@link #MIN_WIDTH} (the row's initial size stays stable), and the
+     * preferred HEIGHT is always the UI delegate's exact requirement for the
+     * current font — never a guessed factor, so the text (descenders
+     * included) always fits after any Appearance font-size change.
+     */
+    private static final class Field extends JTextField {
+
+        Field(Omnibox omnibox) {
+            super(0);
+        }
+
+        @Override
+        public Dimension getPreferredSize() {
+            Dimension d = super.getPreferredSize();
+            return new Dimension(Math.max(MIN_WIDTH, d.width), d.height);
+        }
+    }
+
+    /**
      * Paints only the placeholder text (D16: i18n-backed) inside the field's
-     * margin; the border line itself comes from the native L&F.
+     * margin; the border line itself comes from the native L&F. When a
+     * leading component (the lock) is embedded, the placeholder starts
+     * after it — the text margin no longer reserves the lock's width
+     * (FlatLaf's insets do that for the URL text).
      */
     private static final class PlaceholderBorder implements Border {
 
@@ -551,6 +564,12 @@ public final class Omnibox extends JPanel {
             g.setFont(tf.getFont());
             Insets margin = tf.getMargin();
             int tx = x + (margin != null ? margin.left : 0);
+            // start after any left-embedded component (the lock), not under it
+            for (Component child : tf.getComponents()) {
+                if (child.isVisible() && child.getX() < width / 2) {
+                    tx = Math.max(tx, x + child.getX() + child.getWidth() + LOCK_TEXT_GAP);
+                }
+            }
             FontMetrics fm = g.getFontMetrics();
             int ty = y + (height + fm.getAscent() - fm.getDescent()) / 2;
             g.drawString(I18n.get("browser.omnibox.placeholder"), tx, ty);
