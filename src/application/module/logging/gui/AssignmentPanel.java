@@ -280,9 +280,12 @@ public class AssignmentPanel extends JPanel {
             boolean unsaved = !isSelected && isRowUnsaved(row);
             String text = value == null ? "" : value.toString();
             setText(unsaved ? text + " *" : text);
+            // The node configuration panel's semantics: a row that matches
+            // the loaded (baseline) value is APPLIED (green); a row with a
+            // pending change is UNSAVED (unsaved color + the star).
             setForeground(isSelected
                     ? t.getSelectionForeground()
-                    : (unsaved ? GuiColors.getUnsaved() : t.getForeground()));
+                    : (unsaved ? GuiColors.getUnsaved() : GuiColors.getApplied()));
             return this;
         }
     }

@@ -750,6 +750,10 @@ public class LoggerConfigurationPanel extends JPanel {
                             loaded.load(in);
                             props.clear();
                             props.putAll(loaded);
+                            // The loaded values ARE the applied baseline
+                            // (the node configuration panel's semantics).
+                            appliedProps.clear();
+                            appliedProps.putAll(loaded);
                             updateUIFromProperties(loaded);
                             this.propertiesFile = targetFile;
                             this.loadedProfileName = profileName;
@@ -906,6 +910,9 @@ public class LoggerConfigurationPanel extends JPanel {
                     loaded.load(in);
                     props.clear();
                     props.putAll(loaded);
+                    // Re-baseline: the reloaded values are the applied values.
+                    appliedProps.clear();
+                    appliedProps.putAll(loaded);
                     updateUIFromProperties(loaded);
                     updateDirtyStatus();
                     updateProfileComboBoxColor();
@@ -955,6 +962,10 @@ public class LoggerConfigurationPanel extends JPanel {
                 profileComboBox.setSelectedItem(name);
                 this.props.clear();
                 this.props.putAll(propsToSave);
+                // The new profile's (just created + loaded) values are the
+                // applied baseline.
+                appliedProps.clear();
+                appliedProps.putAll(propsToSave);
                 this.propertiesFile = targetFile;
                 updateDirtyStatus();
                 updateLinkCheckbox();
@@ -1096,10 +1107,17 @@ public class LoggerConfigurationPanel extends JPanel {
     }
 
     public void loadAppliedProperties() {
-        // Replicate exactly what the node is running with
-        LoggerProfile effective = ConfigurationUtils.loadEffectiveLoggerProfile(confFolder, runningProfileName);
+        // No-op against the live node state: the values LOADED from the
+        // profile are the applied baseline (the same semantics the node
+        // configuration panel uses). This method used to overwrite that
+        // baseline with the running node's effective logging values, but
+        // their string form drifts from the profile file's form (and until
+        // the node starts the baseline is empty, falling back to the
+        // application defaults) — which colored freshly loaded profile
+        // values "saved" instead of "applied". Kept for API compatibility:
+        // ConfigurationPanel still invokes it on node state changes.
         appliedProps.clear();
-        appliedProps.putAll(effective.getProperties());
+        appliedProps.putAll(props);
         refreshUIColors();
     }
 
@@ -1695,15 +1713,17 @@ public class LoggerConfigurationPanel extends JPanel {
                 "<ul>" +
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getUnsaved())
                 + "'>\u25A0 Unsaved Values:</font></b> " +
-                "These values have been modified in the UI but have not yet been saved to the configuration file. " +
+                "These values are neither loaded from the profile nor saved in it (modified in the UI, not yet saved). " +
                 "Properties with unsaved changes are marked with an asterisk (*).</li>" +
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getSaved())
                 + "'>\u25A0 Saved Values:</font></b> " +
-                "These values are saved in the currently loaded profile on disk, but they differ from the values " +
-                "currently being used by the running node.</li>" +
+                "These values are saved in the selected profile on disk, but they are not what is currently " +
+                "loaded into the editor.</li>" +
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getApplied())
                 + "'>\u25A0 Applied Values:</font></b> " +
-                "These values match exactly what the node is currently using. Note that most changes require a restart to take effect.</li>"
+                "These values are currently loaded from the profile into the editor (the applied baseline — "
+                +
+                "the same semantics as the node configuration panel). Note that most changes require a restart to take effect.</li>"
                 +
                 "</ul>" +
                 "</body></html>";

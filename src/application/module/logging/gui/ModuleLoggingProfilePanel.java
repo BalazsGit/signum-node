@@ -71,13 +71,17 @@ import javax.swing.text.JTextComponent;
  * </p>
  * <p>
  * <h3>Row states</h3>
- * Every row carries a derived {@link RowState} computed against the two reference profiles:
- * <b>unsaved</b> (differs from the selected profile's saved content), <b>saved</b> (saved in
- * the selected profile but not what is applied) and <b>applied</b> (matches the running
- * configuration). The state colors the row (label + editor), feeds the "Show values"
- * visibility filter, and — for unsaved rows — adds the trailing {@code " *"} star to the
- * label. The live search (enabled by default) matches the label, the key and the displayed
- * value (match bands + chevron/Enter navigation — the node configuration panel's behavior).
+ * Every row carries a derived {@link RowState} with the node configuration
+ * panel's semantics (the values loaded from the profile ARE the applied
+ * values): <b>applied</b> (equals the value loaded from the selected
+ * profile into the editor), <b>saved</b> (equals the selected profile's
+ * saved content but is not what is currently loaded) and <b>unsaved</b>
+ * (neither loaded nor saved — a dirty edit). The state colors the row
+ * (label + editor), feeds the "Show values" visibility filter, and — for
+ * unsaved rows — adds the trailing {@code " *"} star to the label. The
+ * live search (enabled by default) matches the label, the key and the
+ * displayed value (match bands + chevron/Enter navigation — the node
+ * configuration panel's behavior).
  * </p>
  *
  * <h3>Backend</h3>
@@ -151,11 +155,11 @@ public class ModuleLoggingProfilePanel extends JPanel {
      * and painted by {@link #styleRow(String, JLabel, JComponent)}.
      */
     public enum RowState {
-        /** The editor value differs from the selected profile's saved content (dirty edit). */
+        /** Neither loaded nor saved: the editor value was changed and not yet saved. */
         UNSAVED(GuiColors.getUnsaved()),
-        /** Saved in the selected profile, but not what is applied. */
+        /** Saved in the selected profile, but not what is currently loaded into the editor. */
         SAVED(GuiColors.getSaved()),
-        /** Matches what the applied profile (the running configuration) uses. */
+        /** The value currently loaded from the profile into the editor (the applied baseline). */
         APPLIED(GuiColors.getApplied());
 
         private final Color color;
@@ -172,6 +176,17 @@ public class ModuleLoggingProfilePanel extends JPanel {
 
     /** key → the row's derived state (rebuilt by {@link #recomputeRowStates()}). */
     private final Map<String, RowState> rowStates = new LinkedHashMap<>();
+
+    /**
+     * key → the value currently LOADED into the editor from the selected
+     * profile (the applied baseline, the node configuration panel's
+     * semantics: the values loaded from the profile ARE the applied
+     * values). Snapshots the editor content on every profile load
+     * ({@link #loadProfileIntoEditor()}); a plain Save does NOT re-snapshot
+     * it — saved-but-not-reloaded values therefore read as "saved", not
+     * "applied", exactly like the node configuration panel.
+     */
+    private final Map<String, String> loadedValues = new LinkedHashMap<>();
 
     /**
      * The "Show values" state-visibility filter: one checkbox per
@@ -310,13 +325,13 @@ public class ModuleLoggingProfilePanel extends JPanel {
         statusPanel.setChangeListener(button -> reevaluateRowStates());
         showUnsavedBox = statusPanel.addCheckbox("Unsaved values", GuiColors.getUnsaved(), true);
         showUnsavedBox.setToolTipText(
-                "Show / hide the values that differ from the selected profile's saved content (dirty edits).");
+                "Show / hide the values that are neither loaded from the profile nor saved in it (dirty edits).");
         showSavedBox = statusPanel.addCheckbox("Saved values", GuiColors.getSaved(), true);
         showSavedBox.setToolTipText(
-                "Show / hide the values that are saved in the selected profile but differ from the applied profile.");
+                "Show / hide the values that are saved in the selected profile but are not what is currently loaded into the editor.");
         showAppliedBox = statusPanel.addCheckbox("Applied values", GuiColors.getApplied(), true);
         showAppliedBox.setToolTipText(
-                "Show / hide the values that match exactly what the applied profile (the running configuration) uses.");
+                "Show / hide the values that are currently loaded from the profile into the editor (the applied baseline).");
         filterBox.add(statusPanel);
     }
 
@@ -492,18 +507,22 @@ public class ModuleLoggingProfilePanel extends JPanel {
     }
 
     /**
-     * Recomputes the {@link RowState} of every row against the two reference
-     * profiles (no UI updates — the caller re-renders or restyles):
+     * Recomputes the {@link RowState} of every row (no UI updates — the
+     * caller re-renders or restyles) with the node configuration panel's
+     * semantics — loaded values ARE the applied values:
      * <ul>
-     * <li><b>Unsaved</b> — the editor value differs from the selected
-     *     profile's saved content (or differs from the built-in default while
-     *     the virtual {@link #DEFAULT_PROFILE_ENTRY} entry is selected —
-     *     Default cannot be saved).</li>
-     * <li><b>Applied</b> — the editor value matches the applied profile's
-     *     value (or the built-in default when no profile — or only the
-     *     reserved sample config — is the applied marker).</li>
-     * <li><b>Saved</b> — otherwise: saved in the selected profile, but not
-     *     what is applied.</li>
+     * <li><b>Applied</b> — the editor value equals the value loaded from
+     *     the selected profile into the editor (the {@link #loadedValues}
+     *     baseline; the built-in default for keys the profile does not
+     *     define, and for the virtual {@link #DEFAULT_PROFILE_ENTRY} —
+     *     which loads the built-in defaults).</li>
+     * <li><b>Saved</b> — otherwise, the editor value equals the selected
+     *     profile's saved (on-disk) content: it was saved but is not what
+     *     is currently loaded.</li>
+     * <li><b>Unsaved</b> — otherwise: the value is neither loaded nor
+     *     saved (a dirty edit; while the virtual Default entry is selected
+     *     anything deviating from the built-in default, since Default
+     *     cannot be saved).</li>
      * </ul>
      * Invoked on every editor value change and before every full re-render.
      */
@@ -513,11 +532,6 @@ public class ModuleLoggingProfilePanel extends JPanel {
         boolean selectedIsDefault = DEFAULT_PROFILE_ENTRY.equals(selected);
         Properties selectedProps = selectedIsDefault ? new Properties() : loadProfilePropsSafely(selected);
 
-        String applied = appliedProfileName();
-        boolean appliedIsDefault = applied == null || applied.isBlank()
-                || LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(applied);
-        Properties appliedProps = appliedIsDefault ? null : loadProfilePropsSafely(applied);
-
         for (String key : rowKeys()) {
             String value = editorValueOf(key);
             if (value == null) {
@@ -525,31 +539,51 @@ public class ModuleLoggingProfilePanel extends JPanel {
             }
             String def = defaultRowValue(key);
 
-            // 1) Unsaved: dirty against the selected profile's saved content
-            //    (a key the selected profile does not define falls back to
-            //    the built-in default as the reference).
-            boolean dirty;
-            if (selectedIsDefault) {
-                dirty = !value.equals(def);
-            } else {
-                String saved = selectedProps.getProperty(key);
-                dirty = saved == null ? !value.equals(def) : !value.equals(saved);
+            // 1) Applied: equals the value loaded into the editor (the
+            //    baseline; a key the loaded profile does not define falls
+            //    back to the built-in default as the loaded value).
+            String loaded = loadedValues.get(key);
+            if (loaded == null) {
+                loaded = def;
             }
-            if (dirty) {
-                rowStates.put(key, RowState.UNSAVED);
-                continue;
-            }
-
-            // 2) Applied: matches the applied profile's value (built-in
-            //    defaults when nothing — or only the sample config — is applied).
-            String appliedValue = appliedProps == null ? def : appliedProps.getProperty(key, def);
-            if (value.equals(appliedValue)) {
+            if (value.equals(loaded)) {
                 rowStates.put(key, RowState.APPLIED);
                 continue;
             }
 
-            // 3) Saved: persisted in the selected profile, but not applied.
-            rowStates.put(key, RowState.SAVED);
+            // 2) Saved: matches the selected profile's saved content
+            //    (a key the profile does not define falls back to the
+            //    built-in default as the reference).
+            String saved;
+            if (selectedIsDefault) {
+                saved = def;
+            } else {
+                String inProfile = selectedProps.getProperty(key);
+                saved = inProfile != null ? inProfile : def;
+            }
+            if (value.equals(saved)) {
+                rowStates.put(key, RowState.SAVED);
+                continue;
+            }
+
+            // 3) Unsaved: neither loaded nor saved (dirty edit).
+            rowStates.put(key, RowState.UNSAVED);
+        }
+    }
+
+    /**
+     * Snapshots the applied baseline ({@link #loadedValues}) from the
+     * profile content just loaded into the editor: each row takes the
+     * loaded value, or the built-in default when the profile does not
+     * define the key (the default is what the editor shows — and the
+     * virtual Default entry loads exactly the built-in defaults).
+     */
+    private void snapshotLoadedValues(Properties loadedProps) {
+        loadedValues.clear();
+        for (String key : rowKeys()) {
+            String value = loadedProps == null ? null : loadedProps.getProperty(key);
+            String def = defaultRowValue(key);
+            loadedValues.put(key, value != null ? value : (def != null ? def : ""));
         }
     }
 
@@ -567,9 +601,9 @@ public class ModuleLoggingProfilePanel extends JPanel {
     }
 
     /**
-     * @return true when the row's current editor value differs from the
-     *         selected profile's saved content — i.e. it has a pending
-     *         (unsaved) change (exactly the rows computed as
+     * @return true when the row's current editor value is neither loaded
+     *         from the selected profile nor saved in it — i.e. it has a
+     *         pending (unsaved) change (exactly the rows computed as
      *         {@link RowState#UNSAVED} by {@link #recomputeRowStates()}).
      *         Such rows are shown with a trailing {@code " *"} star on their
      *         label (the same convention the node configuration panel uses
@@ -596,7 +630,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
     private String unsavedTooltip(String key) {
         return isRowUnsaved(key)
                 ? "<html>" + key
-                        + "<br><br>Unsaved change: the value differs from the saved content of the selected profile (Save to persist)."
+                        + "<br><br>Unsaved change: the value is neither loaded from the selected profile nor saved in it (Save to persist)."
                 : key;
     }
 
@@ -1193,6 +1227,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
                     setEditorValue(entry.getValue(), d);
                 }
             }
+            snapshotLoadedValues(null); // loaded = the built-in defaults
             reevaluateRowStates();
             return;
         }
@@ -1211,6 +1246,9 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 setEditorValue(entry.getValue(), value);
             }
         }
+        // The loaded values ARE the applied baseline (the node configuration
+        // panel's semantics) — a plain Save below keeps this baseline.
+        snapshotLoadedValues(props);
         reevaluateRowStates();
     }
 
@@ -1433,12 +1471,13 @@ public class ModuleLoggingProfilePanel extends JPanel {
         content.add(HelpDialog.separator());
         content.add(HelpDialog.heading("Row colors"));
         content.add(HelpDialog.legendRow(GuiColors.getUnsaved(), "Unsaved",
-                "The value differs from the selected profile's saved content. Unsaved rows are "
+                "Neither loaded from the profile nor saved in it (a dirty edit). Unsaved rows are "
                         + "marked with a trailing <b>*</b> on their label."));
         content.add(HelpDialog.legendRow(GuiColors.getSaved(), "Saved",
-                "Saved in the selected profile, but differs from the applied profile."));
+                "Saved in the selected profile, but not what is currently loaded into the editor."));
         content.add(HelpDialog.legendRow(GuiColors.getApplied(), "Applied",
-                "Matches what the applied profile (the running configuration) uses."));
+                "The value currently loaded from the profile into the editor (the applied baseline — "
+                        + "the same semantics as the node configuration panel)."));
         content.add(Box.createVerticalStrut(8));
         content.add(HelpDialog.paragraph(
                 "The <b>\u201CShow values\u201D</b> boxes filter rows by these states, and the "
