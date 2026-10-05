@@ -183,6 +183,58 @@ class BookmarkStoreTest {
     }
 
     @Test
+    @DisplayName("moveBefore reorders the bar (and mirrors the top-level order)")
+    void moveBeforeReordersBar(@TempDir Path dir) {
+        try (BookmarkStore store = storeIn(dir)) {
+            String a = store.newBookmark(BookmarkStore.ROOT_ID, "A", "https://a.example");
+            String b = store.newBookmark(BookmarkStore.ROOT_ID, "B", "https://b.example");
+            String c = store.newBookmark(BookmarkStore.ROOT_ID, "C", "https://c.example");
+            store.setInBar(a, true);
+            store.setInBar(b, true);
+            store.setInBar(c, true);
+            assertEquals(List.of(a, b, c), barIds(store));
+
+            // Drop A before C: the bar mirrors the top-level order.
+            assertTrue(store.moveBefore(a, BookmarkStore.ROOT_ID, c));
+            assertEquals(List.of(b, a, c), barIds(store));
+
+            // Drop A before B: A ends up first.
+            assertTrue(store.moveBefore(a, BookmarkStore.ROOT_ID, b));
+            assertEquals(List.of(a, b, c), barIds(store));
+
+            // A null anchor appends to the end (dropping on the bar's tail).
+            assertTrue(store.moveBefore(a, BookmarkStore.ROOT_ID, null));
+            assertEquals(List.of(b, c, a), barIds(store));
+        }
+    }
+
+    @Test
+    @DisplayName("moveBefore guards the no-ops (self anchor, foreign anchor, cycles)")
+    void moveBeforeRules(@TempDir Path dir) {
+        try (BookmarkStore store = storeIn(dir)) {
+            String f1 = store.newFolder(BookmarkStore.ROOT_ID, "F1");
+            String f2 = store.newFolder(f1, "F2"); // F1/F2
+            String a = store.newBookmark(BookmarkStore.ROOT_ID, "A", "https://a.example");
+            String b = store.newBookmark(BookmarkStore.ROOT_ID, "B", "https://b.example");
+            store.setInBar(a, true);
+            store.setInBar(b, true);
+            assertEquals(List.of(a, b), barIds(store));
+
+            assertFalse(store.moveBefore(a, f1, a)); // dropping before itself
+            assertFalse(store.moveBefore(a, f1, b)); // b is not a child of F1
+            assertFalse(store.moveBefore(f1, f2, null)); // F2 is inside F1 — cycle
+            assertFalse(store.moveBefore("no-such-id", BookmarkStore.ROOT_ID, null));
+
+            // Dropping a bar item INTO a folder moves it there and off the bar.
+            assertTrue(store.moveBefore(a, f2, null));
+            assertEquals(List.of(b), barIds(store));
+            assertEquals(f2, store.parentOf(a).orElse(""));
+            assertEquals(List.of(a),
+                    store.children(f2).stream().map(Bookmark::getId).toList());
+        }
+    }
+
+    @Test
     @DisplayName("delete removes the whole subtree and the bar entries; root is delete-proof")
     void deleteRemovesSubtree(@TempDir Path dir) {
         try (BookmarkStore store = storeIn(dir)) {

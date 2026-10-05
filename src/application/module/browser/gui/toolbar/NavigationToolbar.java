@@ -52,8 +52,11 @@ import javax.swing.UIManager;
  * reload-stop/home buttons (N3, N5), the {@link Omnibox} (N1/N2) with the
  * {@link SecurityIcon} (S1/S2/S4) embedded in its field's left side and
  * the bookmark star embedded in its field's right side (B1, always
- * available), the settings gear and the thin
- * indeterminate progress bar (N4/A3) below the row.
+ * available) and the settings gear. The thin indeterminate progress bar
+ * (N4/A3) is OWNED by the toolbar ({@link #progressIndicator()}) but laid
+ * out by the tab view BELOW THE ENTIRE header — the toolbar row and the
+ * bookmarks bar — at the full header width, so its show/hide while loading
+ * never pushes the (possibly open) bookmarks bar down.
  * <p>
  * One toolbar exists per tab (owned by the tab's {@code BrowserTabView}): it
  * renders <em>its</em> tab's state and routes every intent to <em>its</em>
@@ -116,7 +119,8 @@ public final class NavigationToolbar extends JPanel {
         this.bookmarks = bookmarks;
 
         this.back = flatNavButton(FontAwesome.ANGLE_LEFT, I18n.get("browser.nav.back.tooltip"), CHEVRON_SCALE);
-        this.forward = flatNavButton(FontAwesome.ANGLE_RIGHT, I18n.get("browser.nav.forward.tooltip"), CHEVRON_SCALE);
+        this.forward = flatNavButton(FontAwesome.ANGLE_RIGHT, I18n.get("browser.nav.forward.tooltip"),
+                CHEVRON_SCALE);
         this.reloadStop = flatNavButton(FontAwesome.REFRESH, I18n.get("browser.nav.reload.tooltip"));
         this.home = flatNavButton(FontAwesome.HOME, I18n.get("browser.nav.home.tooltip"), HOME_SCALE);
         back.addActionListener(e -> view.back());
@@ -165,8 +169,11 @@ public final class NavigationToolbar extends JPanel {
         row.add(east, BorderLayout.EAST);
         add(row, BorderLayout.CENTER);
 
+        // Owned here, laid out by the tab view: the bar sits below the
+        // ENTIRE header (toolbar row + bookmarks bar) at full width, so
+        // loading never pushes the open bookmarks bar down (see the class
+        // javadoc). Adding it to THIS panel would place it between the two.
         this.progressBar = new ProgressBar();
-        add(progressBar, BorderLayout.SOUTH);
 
         // No controller listener of its own — the owning view drives
         // sync(tab) on this tab's events (the toolbar is per-tab, not
@@ -193,6 +200,7 @@ public final class NavigationToolbar extends JPanel {
         installIcon(settingsButton, FontAwesome.COG);
         star.rebuildIcon();
         securityIcon.refreshSize();
+        omnibox.refreshAppearance();
         omnibox.applySecurityIconInsets();
         revalidate();
         repaint();
@@ -214,6 +222,16 @@ public final class NavigationToolbar extends JPanel {
      */
     public void hideOmniboxPopup() {
         omnibox.dismissPopup();
+    }
+
+    /**
+     * The toolbar's indeterminate progress bar (N4/A3): the owning
+     * {@code BrowserTabView} adds it to the SOUTH of its header area —
+     * below the toolbar row AND the bookmarks bar — at the full header
+     * width, so the load animation never pushes the open bookmarks bar.
+     */
+    public JComponent progressIndicator() {
+        return progressBar;
     }
 
     /**
@@ -469,6 +487,8 @@ public final class NavigationToolbar extends JPanel {
      * size: the ANGLE_LEFT / ANGLE_RIGHT chevrons only occupy a small part
      * of the em box, so at the plain size they look clearly smaller than
      * the HOME / REFRESH glyphs. The scale makes them read the same size.
+     * The PLAIN font size (no rescaling) is what keeps the browser toolbar
+     * icons exactly the same size as the node/profile toolbar icons.
      */
     private static void installIcon(JButton button, FontAwesome iconCode, float scale) {
         if (FONT_REGISTERED.compareAndSet(false, true)) {
@@ -492,9 +512,11 @@ public final class NavigationToolbar extends JPanel {
     private static final float HOME_SCALE = 1.18f;
 
     /**
-     * N4/A3: the thin (3 px) indeterminate progress bar under the row — the
-     * pinned JCEF fork has no progress callback, so a moving gradient segment
-     * signals the load state.
+     * N4/A3: the thin (3 px) indeterminate progress bar — the pinned JCEF
+     * fork has no progress callback, so a moving gradient segment signals
+     * the load state. Laid out below the ENTIRE header (toolbar row +
+     * bookmarks bar) by the tab view at the full header width, so appearing
+     * while loading never pushes the (open) bookmarks bar down.
      */
     private final class ProgressBar extends JComponent {
 
@@ -576,7 +598,9 @@ public final class NavigationToolbar extends JPanel {
             // the plain arrow cursor on hover (the JButton default hand cursor
             // read as inconsistent with the rest of the omnibox row).
             setCursor(java.awt.Cursor.getDefaultCursor());
-            setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
+            // No manual border/padding: the field's UI styles this as a
+            // FlatLaf TOOLBAR button (prepareLeadingOrTrailingComponent),
+            // which owns the inline padding.
             setOpaque(false);
             setContentAreaFilled(false);
             setState(false);

@@ -577,28 +577,68 @@ public final class BookmarkStore implements AutoCloseable {
      *         lies inside the node's own subtree (cycle guard)
      */
     public synchronized boolean move(String id, String targetFolderId) {
+        return moveBefore(id, targetFolderId, null);
+    }
+
+    /**
+     * Moves the node into the target folder at an explicit position (the
+     * bookmarks bar's drag-and-drop reordering): inserted just before
+     * {@code beforeId} when it is one of the target's current children, or
+     * appended at the end when {@code beforeId} is {@code null}.
+     * <p>
+     * The bookmarks-bar order is kept in sync with the top-level order the
+     * same way {@link #move} does: a node dropped into a subfolder leaves
+     * the bar, a node dropped to the top level (re)joins it — at the
+     * mirrored position (before the bar item that renders {@code beforeId},
+     * or at the end).
+     *
+     * @return {@code false} when the node or the target is unknown, the
+     *         target is not a folder, the move is a no-op (dropping a node
+     *         before itself), {@code beforeId} is not a child of the
+     *         target, or the target lies inside the node's own subtree
+     *         (cycle guard)
+     */
+    public synchronized boolean moveBefore(String id, String targetFolderId, String beforeId) {
         if (id == null || targetFolderId == null || id.equals(targetFolderId)
                 || ROOT_ID.equals(id)) {
             return false;
+        }
+        if (beforeId != null && beforeId.equals(id)) {
+            return false; // dropping a node before itself is a no-op
         }
         Bookmark node = nodes.get(id);
         Bookmark target = nodes.get(targetFolderId);
         if (node == null || target == null || !target.isFolder()) {
             return false;
         }
+        if (beforeId != null && !target.getChildren().contains(beforeId)) {
+            return false; // the anchor is not a child of the target folder
+        }
         if (ancestorsOf(targetFolderId).contains(id)) {
             return false; // the target is inside the node's own subtree — cycle
         }
         parentOf(id).ifPresent(current -> nodes.get(current).getChildren().remove(id));
-        target.getChildren().add(id);
+        // The anchor index is looked up AFTER the removal: when the node is
+        // reordered inside its own parent, the removal shifts the anchor's
+        // index down by one.
+        List<String> targetChildren = target.getChildren();
+        int insertAt = beforeId == null ? targetChildren.size() : targetChildren.indexOf(beforeId);
+        targetChildren.add(insertAt, id);
         // The bar mirrors the top level (Chrome-style): a node dropped into a
         // subfolder leaves the bar, a node dropped back to the top level
         // joins it — the drag produces a visible change in the bar itself
         // (before this sync, a drop into a folder was invisible: the item
         // simply stayed on the bar and the move "did nothing" to the eye).
         if (ROOT_ID.equals(targetFolderId)) {
-            if (!bar.contains(id)) {
+            if (beforeId == null) {
+                // Mirrors the top-level append: the item (re)joins the bar
+                // at its END (a no-op when it is already last).
+                bar.remove(id);
                 bar.add(id);
+            } else {
+                bar.remove(id);
+                int at = bar.indexOf(beforeId);
+                bar.add(at < 0 ? bar.size() : at, id);
             }
         } else {
             bar.remove(id);

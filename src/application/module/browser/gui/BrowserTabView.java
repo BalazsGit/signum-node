@@ -22,6 +22,7 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 
 /**
  * One browser tab as a self-contained component — the tab is an entity
@@ -79,6 +80,15 @@ public final class BrowserTabView extends JPanel {
      *  (the startup session restore); it is then transparently rebuilt on the
      *  first show so the windowed canvas gets a valid native-window size. */
     private boolean createdWhileHidden;
+    /**
+     * The logical visibility of this tab's bookmarks bar (the persisted
+     * {@code showBookmarksBar} setting): the bar's PREFERRED HEIGHT — not
+     * its {@code visible} flag — is what implements it, so the toggle can
+     * animate the height (slide in / slide out).
+     */
+    private boolean bookmarksBarVisible;
+    /** The bookmarks-bar slide in/out animation (see {@link #startBarAnimation}). */
+    private Timer barAnimation;
 
     public BrowserTabView(BrowserTab tab, TabController controller, BrowserFactory browserFactory,
                           Supplier<BrowserSettings> settings, HistoryStore history,
@@ -101,10 +111,23 @@ public final class BrowserTabView extends JPanel {
         this.bookmarksBar = new BookmarksBar(bookmarks,
                 this::navigate,
                 this::navigate);
-        bookmarksBar.setVisible(settings.get().isShowBookmarksBar());
+        this.bookmarksBarVisible = settings.get().isShowBookmarksBar();
+        if (!bookmarksBarVisible) {
+            // Start collapsed: the bar's preferred height is 0 (the show/hide
+            // toggle then animates it, see setBookmarksBarVisible).
+            bookmarksBar.setPreferredSize(new java.awt.Dimension(-1, 0));
+        }
+        // The header area, bottom to top: the toolbar's progress bar (the
+        // FULL header width, below EVERYTHING — so it never pushes the bar),
+        // the bookmarks bar (whose height is what the show/hide animates),
+        // and the toolbar row on top.
+        JPanel barArea = new JPanel(new BorderLayout());
+        barArea.setOpaque(false);
+        barArea.add(bookmarksBar, BorderLayout.NORTH);
+        barArea.add(toolbar.progressIndicator(), BorderLayout.SOUTH);
         JPanel topArea = new JPanel(new BorderLayout());
         topArea.add(toolbar, BorderLayout.NORTH);
-        topArea.add(bookmarksBar, BorderLayout.SOUTH);
+        topArea.add(barArea, BorderLayout.CENTER);
         add(topArea, BorderLayout.NORTH);
         add(contentHost, BorderLayout.CENTER);
         this.browser = browserFactory.create(tab);
@@ -154,11 +177,62 @@ public final class BrowserTabView extends JPanel {
         return bookmarksBar;
     }
 
-    /** Shows/hides the tab's bookmarks bar (the Ctrl+Shift+B toggle and the settings). */
+    /**
+     * Shows/hides the tab's bookmarks bar (the Ctrl+Shift+B toggle and the
+     * settings' "Show bookmarks bar") with a slide animation: the bar's
+     * preferred height eases between 0 and its natural height, so the bar
+     * visibly rolls down / up between the toolbar row and the header's
+     * progress bar instead of popping in and out.
+     */
     public void setBookmarksBarVisible(boolean visible) {
-        bookmarksBar.setVisible(visible);
-        revalidate();
-        repaint();
+        if (visible == bookmarksBarVisible && !isBarAnimating()) {
+            return;
+        }
+        bookmarksBarVisible = visible;
+        startBarAnimation(visible);
+    }
+
+    /** @return true while the bookmarks-bar slide animation is running. */
+    private boolean isBarAnimating() {
+        return barAnimation != null && barAnimation.isRunning();
+    }
+
+    /**
+     * Animates the bookmarks bar's preferred height between 0 (hidden) and
+     * its natural FlowLayout height (shown) over ~240 ms with an ease-out
+     * curve. A toggle mid-animation continues from the CURRENT height to
+     * the new target. When the bar is shown the forced size is dropped at
+     * the end (back to the natural size); when hidden it stays pinned at 0.
+     */
+    private void startBarAnimation(boolean visible) {
+        if (barAnimation != null) {
+            barAnimation.stop();
+        }
+        int from = bookmarksBar.getPreferredSize().height;
+        int to = visible ? bookmarksBar.getLayout().preferredLayoutSize(bookmarksBar).height : 0;
+        final int steps = 15;
+        int[] step = {0};
+        barAnimation = new Timer(16, e -> {
+            step[0]++;
+            double t = Math.min(1.0, step[0] / (double) steps);
+            double eased = 1.0 - (1.0 - t) * (1.0 - t); // ease-out
+            int h = Math.max(0, (int) Math.round(from + (to - from) * eased));
+            bookmarksBar.setPreferredSize(new java.awt.Dimension(-1, h));
+            revalidate();
+            repaint();
+            if (step[0] >= steps) {
+                barAnimation.stop();
+                if (visible) {
+                    bookmarksBar.setPreferredSize(null); // the natural height again
+                } else {
+                    bookmarksBar.setPreferredSize(new java.awt.Dimension(-1, 0));
+                }
+                revalidate();
+                repaint();
+            }
+        });
+        barAnimation.setCoalesce(true);
+        barAnimation.start();
     }
 
     /** Rebuilds the tab's bookmarks bar from the shared store (after any bookmark change). */
@@ -299,6 +373,9 @@ public final class BrowserTabView extends JPanel {
      * the CEF browser down. Idempotent enough for the close-callback race.
      */
     public void dispose() {
+        if (barAnimation != null) {
+            barAnimation.stop();
+        }
         controller.removeListener(tabEvents);
         toolbar.dispose();
         if (browser != null) {

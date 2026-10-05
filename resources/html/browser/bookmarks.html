@@ -270,7 +270,17 @@
       nodes.forEach(function (n) {
         if (!visible[n.id]) return;
         var p = n.parent;
-        while (p && !visible[p]) { visible[p] = true; p = byId[p].parent; }
+        // Guard the walk: a top-level node's parent is the virtual "root",
+        // which is NOT in byId (the data island excludes it) — dereferencing
+        // byId['root'] threw a TypeError that aborted the whole script, so
+        // with any top-level item (a bar favorite) the page rendered no list
+        // rows at all and none of the control buttons ever got their
+        // listeners attached (the dead, empty bookmarks page).
+        while (p && !visible[p]) {
+          visible[p] = true;
+          var up = byId[p];
+          p = up ? up.parent : '';
+        }
       });
 
       // ---- rendering ---------------------------------------------------------
