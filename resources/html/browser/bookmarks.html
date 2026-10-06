@@ -61,6 +61,11 @@
     }
     #search-form input {
       width: 200px;
+      height: 34px;
+      /* border-box: the 34px is the OUTER height (padding + borders included),
+         so the input and the search button below share exactly the same
+         outer height and read as one continuous pill control. */
+      box-sizing: border-box;
       padding: 8px 14px;
       font-size: 13px;
       color: var(--fg);
@@ -79,6 +84,9 @@
     }
     #search-form button {
       width: 40px;
+      height: 34px;
+      /* border-box: keep the outer height identical to the input's (34px) */
+      box-sizing: border-box;
       border: 1px solid var(--border);
       border-left: 0;
       border-radius: 0 18px 18px 0;
@@ -93,6 +101,7 @@
     }
     .ctl {
       padding: 8px 16px;
+      height: 34px;
       font-size: 13px;
       border-radius: 18px;
       border: 1px solid var(--border);
