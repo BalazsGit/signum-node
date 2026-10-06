@@ -30,7 +30,10 @@ public class JdbcProfileConfigurationPanel extends JPanel {
     private DatabaseConfigurationUtils.DbProfile currentProfile;
 
     public JdbcProfileConfigurationPanel(String confFolder, Runnable onChange) {
-        super(new MigLayout("insets 0, fillx, gap 2", "[][grow]", ""));
+        // hidemode 3 (full): hidden engine-specific rows are removed from the
+        // layout entirely (default hidemode 0 reserved their vertical space,
+        // leaving a dead gap, and their wide fields still widened the column).
+        super(new MigLayout("insets 0, fillx, gap 2, hidemode 3", "[][grow]", ""));
         this.confFolder = confFolder;
         this.onChange = onChange;
         setOpaque(false);

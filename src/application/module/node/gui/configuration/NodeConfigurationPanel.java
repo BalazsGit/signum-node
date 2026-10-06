@@ -2824,6 +2824,21 @@ public class NodeConfigurationPanel extends JPanel {
                 }
                 return super.getPreferredSize();
             }
+
+            @Override
+            public Dimension getMinimumSize() {
+                // CardLayout's default minimum size is the max of ALL cards'
+                // minimums: with the shorter profile card active, the manual
+                // card's minimum kept the row inflated and left a dead area
+                // under the JDBC URL preview (MigLayout rows never shrink
+                // below the cell minimum). Track the CURRENT card only, same
+                // rule as getPreferredSize above.
+                Component current = currentJdbcCard[0];
+                if (current instanceof JComponent jc) {
+                    return jc.getMinimumSize();
+                }
+                return super.getMinimumSize();
+            }
         };
         cardPanel.setOpaque(false);
         // Settle pass: during the FIRST layout pass the row's height is

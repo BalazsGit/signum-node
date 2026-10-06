@@ -55,7 +55,10 @@ public class JdbcManualConfigurationPanel extends JPanel {
     private Consumer<String> onProfileDiscovered;
 
     public JdbcManualConfigurationPanel(Runnable onChange, String defaultSqliteProfile) {
-        super(new MigLayout("insets 0, fillx, gap 2", "[][grow]", ""));
+        // hidemode 3 (full): hidden engine-specific rows are removed from the
+        // layout entirely (default hidemode 0 reserved their vertical space,
+        // leaving a dead gap, and their wide fields still widened the column).
+        super(new MigLayout("insets 0, fillx, gap 2, hidemode 3", "[][grow]", ""));
         this.onChange = onChange;
         setOpaque(false);
 
@@ -84,10 +87,12 @@ public class JdbcManualConfigurationPanel extends JPanel {
         // the LAST folder of the composed path (the preview concatenates it).
         sqlPathField = new JTextField("./database/SQLite");
         sqlFileField = new JTextField(ProfileCreateDefaults.DEFAULT_SQLITE_FILE_NAME);
+        // Two explicit lines: an unwrapped <html> label's preferred width is
+        // its FULL text width, which stretched the whole DB.Url row several
+        // hundred pixels wider than the fields next to it.
         sqliteInfoLabel = new JLabel(
-                "<html><i>Every SQLite configuration saved under the ./database/SQLite path "
-                        + "automatically creates its database profile — the profile name is the "
-                        + "last folder of the path.</i></html>");
+                "<html><i>Every SQLite configuration saved under the ./database/SQLite path automatically<br>"
+                        + "creates its database profile — the profile name is the last folder of the path.</i></html>");
         sqliteInfoLabel.setOpaque(false);
         sqliteInfoLabel.setForeground(GuiColors.getFaintText());
 
