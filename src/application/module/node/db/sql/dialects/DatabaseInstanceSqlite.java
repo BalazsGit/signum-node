@@ -1,8 +1,10 @@
 package application.module.node.db.sql.dialects;
 
+import application.module.node.instance.NodeStartupException;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.util.DurationFormatter;
+import application.utils.sqlite.SqliteNativeSupport;
 import com.zaxxer.hikari.HikariConfig;
 import org.jooq.SQLDialect;
 import org.slf4j.Logger;
@@ -17,6 +19,18 @@ public class DatabaseInstanceSqlite extends DatabaseInstanceBaseImpl {
     private static final Logger logger = LoggerFactory.getLogger(DatabaseInstanceSqlite.class);
 
     protected DatabaseInstanceSqlite(PropertyService propertyService) {
+        // Last line of defense: if the SQLite native library is not loaded in this
+        // JVM, fail with an actionable error instead of letting HikariCP surface a
+        // raw java.lang.UnsatisfiedLinkError at pool initialization. (sqlite-jdbc
+        // latches a failed first load for the JVM's lifetime — see
+        // SqliteNativeSupport, which pre-warms with retries at startup.)
+        if (!SqliteNativeSupport.ensureLoaded()) {
+            throw new NodeStartupException(
+                    "SQLite is unavailable in this session: the native library (sqlitejdbc) "
+                            + "could not be loaded, all attempts failed at application startup. "
+                            + "Start a server-based profile (MariaDB/PostgreSQL), or restart the "
+                            + "application and try again.");
+        }
         super(propertyService);
     }
 

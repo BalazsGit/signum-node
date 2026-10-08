@@ -113,7 +113,12 @@ public final class DatabaseAvailabilityChecker {
             String reason = String.format("Database unavailable: %s", e.getMessage());
             logger.debug(reason);
             return CheckResult.unavailable(reason);
-        } catch (Exception e) {
+        } catch (Exception | UnsatisfiedLinkError e) {
+            // UnsatisfiedLinkError (an Error, not an Exception) is caught as well:
+            // if the SQLite native library failed to load in this JVM, sqlite-jdbc
+            // latches the failure and DriverManager.getConnection throws a raw
+            // UnsatisfiedLinkError instead of a SQLException (see
+            // application.utils.sqlite.SqliteNativeSupport).
             String reason = String.format("Unexpected error during database check: %s", e.getMessage());
             logger.warn(reason, e);
             return CheckResult.unavailable(reason);

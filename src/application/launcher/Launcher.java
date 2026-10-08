@@ -7,6 +7,7 @@ import application.module.node.profile.ProfileCli;
 import application.module.node.profile.ProfileConfig;
 import application.module.node.util.LoggerConfigurator;
 import application.utils.io.PathUtils;
+import application.utils.sqlite.SqliteNativeSupport;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
@@ -134,6 +135,14 @@ public class Launcher {
         // log bridge installed above), so the GUI shows the same lines as the
         // terminal.
         initLogs.forEach(msg -> logger.info("[Bootstrap] {}", msg));
+
+        // Pre-warm the SQLite JDBC native library (with retries) before the
+        // first sqlite-jdbc usage in this JVM (browser history DB, node DB).
+        // sqlite-jdbc latches a failed first load for the JVM's lifetime — this
+        // is the one place a transient failure (e.g. antivirus locking the
+        // freshly extracted temp DLL) can still be retried. See
+        // application.utils.sqlite.SqliteNativeSupport.
+        SqliteNativeSupport.prewarm();
 
         // Headless "set node order" command: define the node start/tab order and exit.
         // In headless mode there is no GUI to drag tabs, so this is how the

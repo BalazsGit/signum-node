@@ -994,6 +994,10 @@ public final class Signum {
             System.err.println("Exception parsing command line arguments: " + e.getMessage());
         }
         LOGGER.info("Headless boot: delegating to NodeModule (confFolder={})", confFolder);
+        // Pre-warm the SQLite JDBC native library (with retries) before the node
+        // database (or any other sqlite-jdbc usage) triggers the driver's
+        // one-shot native load. See application.utils.sqlite.SqliteNativeSupport.
+        application.utils.sqlite.SqliteNativeSupport.prewarm();
         NodeModule module = NodeModule.getInstance();
         Path confRoot = PathUtils.resolvePath(confFolder);
         module.start();

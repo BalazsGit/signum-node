@@ -97,8 +97,12 @@ public final class HistoryStore implements AutoCloseable {
                 this.connection = DriverManager.getConnection(jdbcUrl());
                 createSchema();
             }
-        } catch (Exception e) {
+        } catch (Exception | UnsatisfiedLinkError e) {
             // D17: a broken database must never break browsing.
+            // UnsatisfiedLinkError (an Error, not an Exception) is caught as well:
+            // if the SQLite native library failed to load in this JVM, sqlite-jdbc
+            // latches the failure and DriverManager.getConnection throws a raw
+            // UnsatisfiedLinkError instead of a SQLException.
             logger.error("Could not open the history database at {}; the store degrades to no-op",
                     dbFile, e);
             this.degraded = true;
