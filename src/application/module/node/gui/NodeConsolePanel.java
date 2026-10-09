@@ -366,6 +366,13 @@ public class NodeConsolePanel extends JPanel {
     private Timer elapsedTimeTimer = null;
     private long elapsedTimeCounter = 0;
     private JPanel infoPanel;
+    /**
+     * The strip's CENTER half (latest block / timestamp / elapsed / trim / prune /
+     * pop-off). Declared as a validate root (see the build site) — layout changes
+     * inside it never propagate to the ancestors, so every content mutation must be
+     * followed by {@link #revalidateStatusStrip()}.
+     */
+    private JPanel latestBlockInfoPanel;
     private JProgressBar syncProgressBar = null;
     private JScrollPane textScrollPane = null;
     private String programName = null;
@@ -1076,7 +1083,7 @@ public class NodeConsolePanel extends JPanel {
         syncProgressBar.setMaximumSize(GuiConstants.PROGRESS_BAR_SIZE_SMALL);
         syncProgressBar.setMinimumSize(GuiConstants.PROGRESS_BAR_SIZE_SMALL);
 
-        JPanel latestBlockInfoPanel = new JPanel(new MigLayout("insets 0, hidemode 3, gap 0")) {
+        latestBlockInfoPanel = new JPanel(new MigLayout("insets 0, hidemode 3, gap 0")) {
             @Override
             public boolean isValidateRoot() {
                 return true;
@@ -2431,6 +2438,7 @@ public class NodeConsolePanel extends JPanel {
         SwingUtilities.invokeLater(() -> {
             uploadVolumeLabel.setText(formatDataSize(uploaded));
             downloadVolumeLabel.setText(formatDataSize(downloaded));
+            revalidateStatusStrip();
 
             // Start the GUI timer only once, when the first download volume is received,
             // and if experimental features are enabled in the config.
@@ -2456,6 +2464,7 @@ public class NodeConsolePanel extends JPanel {
                         .setText(DurationFormatter.format(guiAccumulatedSyncInProgressTimeMs,
                                 DurationFormatter.Unit.YEAR, DurationFormatter.Unit.SECOND));
                 updateTimeLabelVisibility();
+                revalidateStatusStrip();
             }
         });
         guiTimer.start();
@@ -2472,6 +2481,7 @@ public class NodeConsolePanel extends JPanel {
             trimHeightLabel.updateValues("Trim height: " + currentHeight,
                     FontAwesome.ARROW_RIGHT, String.valueOf(targetHeight),
                     GuiColors.getSaved(), GuiColors.getSaved());
+            revalidateStatusStrip();
         });
     }
 
@@ -2480,6 +2490,7 @@ public class NodeConsolePanel extends JPanel {
             trimHeightLabel.updateValues("Trim height: " + currentHeight,
                     null, "", GuiColors.getApplied(), null);
             trimHeightLabel.setAllColors(GuiColors.getApplied());
+            revalidateStatusStrip();
         });
     }
 
@@ -2494,6 +2505,7 @@ public class NodeConsolePanel extends JPanel {
             pruneHeightLabel.updateValues("Prune height: " + currentHeight,
                     FontAwesome.ARROW_RIGHT, String.valueOf(targetHeight),
                     GuiColors.getSaved(), GuiColors.getSaved());
+            revalidateStatusStrip();
         });
     }
 
@@ -2502,6 +2514,7 @@ public class NodeConsolePanel extends JPanel {
             pruneHeightLabel.updateValues("Prune height: " + (currentHeight < 0 ? "-" : currentHeight),
                     null, "", GuiColors.getApplied(), null);
             pruneHeightLabel.setAllColors(GuiColors.getApplied());
+            revalidateStatusStrip();
         });
     }
 
@@ -2597,6 +2610,7 @@ public class NodeConsolePanel extends JPanel {
         popOffBlockCountLabel.setVisible(isVisible);
         popOffSeparator2.setVisible(isVisible);
         popOffBlockHeightLabel.setVisible(isVisible);
+        revalidateStatusStrip();
     }
 
     private void onSyncStateChanged(Boolean isPaused) {
@@ -3377,6 +3391,47 @@ public class NodeConsolePanel extends JPanel {
      */
 
 
+    /**
+     * Re-lays out the bottom status strip after a content mutation.
+     * <p>
+     * Both strip halves ({@link #latestBlockInfoPanel} at CENTER,
+     * {@link #infoPanel} at LINE_END) are <b>validate roots</b>
+     * ({@code isValidateRoot() == true}) — the same barrier documented for
+     * {@link #applyPanelVisibilityState()} ("isValidateRoot barriers prevent
+     * layout propagation"). A {@code revalidate()} requested from a descendant
+     * therefore stops at these roots, and the text / visibility changes made
+     * from the node's push listeners (latest block, peers, volume, elapsed
+     * time, PoC+ pickaxe, sync bar) would otherwise stay un-reflowed: the strip
+     * keeps the layout computed from its placeholder content (or from a
+     * transient parent size when the profile tab was first shown) until an
+     * incidental click / tab switch / resize triggers a full validate. That is
+     * the "sync progress bar shifted right, only half visible until a click"
+     * glitch seen right after a freshly created profile starts syncing.
+     * </p>
+     * <p>
+     * Revalidating the roots marks exactly the strip subtree dirty (a cheap
+     * flag set — the actual MigLayout pass runs once per paint cycle, so
+     * per-tick calls are safe) and the repaints make each root's
+     * {@code paint()} run its pending {@code validate()} (see
+     * {@code Container.paint}) plus redraw. Must be called on the EDT — every
+     * strip mutation site already is.
+     * </p>
+     */
+    public void revalidateStatusStrip() {
+        if (latestBlockInfoPanel != null) {
+            latestBlockInfoPanel.revalidate();
+            latestBlockInfoPanel.repaint();
+        }
+        if (infoPanel != null) {
+            infoPanel.revalidate();
+            infoPanel.repaint();
+        }
+        if (bottomPanel != null) {
+            bottomPanel.revalidate();
+            bottomPanel.repaint();
+        }
+    }
+
     private void updateLatestBlock(Block block, int maxPeerHeight, long blockTime) {
         if (block == null) {
             return;
@@ -3453,6 +3508,11 @@ public class NodeConsolePanel extends JPanel {
         // block (pushed or popped): it flips to red if the chain was popped
         // below the checkpoint height, back to green when above it again.
         updateVerificationStatus();
+
+        // The strip halves are validate roots: reflow them now so the labels /
+        // visibility / bar changes above are laid out immediately instead of on
+        // the next incidental event (see revalidateStatusStrip()).
+        revalidateStatusStrip();
     }
 
     /**
@@ -3507,10 +3567,7 @@ public class NodeConsolePanel extends JPanel {
                         + lastBlock.getHeight() + " < checkpoint " + checkpointHeight + ")");
         checkpointVerificationLabel.setVisible(true);
         checkpointVerificationSeparator.setVisible(true);
-        if (checkpointVerificationLabel.getParent() != null) {
-            checkpointVerificationLabel.getParent().revalidate();
-            checkpointVerificationLabel.getParent().repaint();
-        }
+        revalidateStatusStrip();
     }
 
     private int calculateMaxPeerHeight() {
@@ -3837,6 +3894,7 @@ public class NodeConsolePanel extends JPanel {
         connectedPeersLabel.setText(String.valueOf(connectedCount));
         peersCountLabel.setText(String.valueOf(allKnownCount));
         blacklistedPeersLabel.setText(blacklistedCount + "");
+        revalidateStatusStrip();
     }
 
     private String formatDataSize(double bytes) {

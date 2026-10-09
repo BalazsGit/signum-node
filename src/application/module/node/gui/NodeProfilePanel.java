@@ -120,7 +120,15 @@ public class NodeProfilePanel extends JPanel {
         try {
             this.parentFrame = parentFrame;
             this.profile = profile;
-            this.signum = signum;
+            // Do NOT assign this.signum here: the binding must go through
+            // adoptSignum() (called at the end of the constructor). Pre-setting
+            // the field would make adoptSignum()'s idempotency guard
+            // (newSignum == this.signum) treat the panel as "already bound" and
+            // skip registering the single state listener — so no state push
+            // would ever reach the console and the bottom status strip (latest
+            // block / peers / download volume) would never update for a node
+            // that is started right after this panel is built (setup wizard
+            // "start immediately", boot autostart, ...).
             this.confFolder = determineConfFolder();
 
             // In the multi-node architecture every GUI element belongs to its specific
@@ -216,7 +224,22 @@ public class NodeProfilePanel extends JPanel {
             // NodeConsolePanel#getStatusPanel); the strip is non-opaque so only
             // the panel's thin bottom inset separates it from the window edge.
             add(consolePanel.getStatusPanel(), BorderLayout.SOUTH);
-            
+
+            // First-showing guard for the status strip: this profile tab may be shown
+            // for the first time while the window is still in a transient state (e.g.
+            // right after the setup-wizard dialog closes, with the fresh node already
+            // starting to sync). When the strip (re)appears, force one full re-layout
+            // pass so its two validate-root halves render at the settled size instead
+            // of a layout computed from placeholder content / transient bounds — the
+            // "sync progress bar shifted right, half visible until a click" glitch.
+            final JPanel statusStrip = consolePanel.getStatusPanel();
+            statusStrip.addHierarchyListener(e -> {
+                if ((e.getChangeFlags() & java.awt.event.HierarchyEvent.SHOWING_CHANGED) != 0
+                        && statusStrip.isShowing()) {
+                    SwingUtilities.invokeLater(() -> consolePanel.revalidateStatusStrip());
+                }
+            });
+
             LOGGER.debug("Wiring toolbar callbacks for profile: {}", profile.getName());
             wireToolbarCallbacks();
             
@@ -226,8 +249,12 @@ public class NodeProfilePanel extends JPanel {
             // Adopt the Signum if it already exists at construction time:
             // registers the single state listener (PUSH) + performs the initial
             // refresh. No-op if the node does not exist yet — in that case it is
-            // adopted later via the console panel's onSignumStarted callback.
-            adoptSignum(this.signum);
+            // adopted later via the pending-start broadcast or the console
+            // panel's onSignumStarted callback. (Passes the constructor
+            // parameter, NOT this.signum: the field is still null until
+            // adoptSignum() binds it, and the field would make the idempotency
+            // guard bail out before the state listener is registered.)
+            adoptSignum(signum);
 
             // v5 (multi-node): react IMMEDIATELY when this profile's start becomes
             // pending (queued) or the pending start completes — refresh the toolbar
@@ -321,6 +348,44 @@ public class NodeProfilePanel extends JPanel {
     }
 
     /**
+     * Late binding: adopts this profile's Signum from the {@link NodeModule}
+     * registry when the instance was created by a start path that does NOT hand
+     * the instance back to this panel.
+     * <p>
+     * Only the console's Start ({@code onSignumStarted}) and the toolbar's Start
+     * ({@code onNodeStarted}) pass the started instance back explicitly. Every
+     * other start path — the setup wizard's "start immediately", application
+     * autostart, CLI {@code profile run}, the rename state-restoration — goes
+     * straight to {@code NodeModule.startNode()}, which registers the instance
+     * in the registry synchronously (before the async start task runs) but never
+     * notifies an already-loaded panel. When such a panel was constructed before
+     * the node existed (lazy tab load), its single state listener is never
+     * registered, so no state push ever reaches the console and the bottom
+     * status strip (latest block / peers / upload+download volume) never
+     * updates — the exact symptom of a freshly created profile that starts
+     * automatically.
+     * </p>
+     * <p>
+     * Idempotent: a no-op when the panel is already bound to the registered
+     * instance or when the node does not exist yet. Must be called on the EDT.
+     * </p>
+     */
+    private void ensureSignumAdopted() {
+        Signum registered;
+        try {
+            registered = NodeModule.getInstance().get(profile.getName());
+        } catch (Exception e) {
+            LOGGER.debug("ensureSignumAdopted: registry lookup failed for profile '{}'", profile.getName(), e);
+            return;
+        }
+        if (registered != null && registered != signum) {
+            LOGGER.info("[{}] Late-bound the Signum from the NodeModule registry (start was not initiated by this panel)",
+                    profile.getName());
+            adoptSignum(registered);
+        }
+    }
+
+    /**
      * v5 (multi-node): pushed by {@code NodeModule} whenever THIS profile's
      * start-pending set membership changes — a start/restart was just queued
      * (the task may still be sitting in the lifecycle queue) or it completed
@@ -332,9 +397,21 @@ public class NodeProfilePanel extends JPanel {
      * task actually begins on a pool thread). Both components read the pending
      * set themselves; this method only triggers their refresh.
      * </p>
+     * <p>
+     * This broadcast is also the reliable late-binding trigger (see
+     * {@link #ensureSignumAdopted()}) for start paths that do not hand the
+     * Signum back: whenever the pending set changes for this profile the
+     * instance is resolvable in the registry, so the panel adopts it right
+     * here — before the toolbar/info bar refresh below.
+     * </p>
      */
     public void refreshPendingState() {
         SwingUtilities.invokeLater(() -> {
+            // Late binding first: a start queued via the setup wizard / autostart /
+            // CLI registers the Signum synchronously in the NodeModule registry, so
+            // adopt it now — the toolbar and info bar below then already see the
+            // bound instance instead of rendering the STOPPED placeholder.
+            ensureSignumAdopted();
             if (toolbar != null) {
                 Signum.State state = (signum != null) ? signum.getState() : Signum.State.STOPPED;
                 toolbar.updateButtonStates(state, signum != null);
@@ -343,6 +420,21 @@ public class NodeProfilePanel extends JPanel {
                 infoBar.refreshState();
             }
         });
+    }
+
+    /**
+     * Safety net for late binding: whenever this panel (re)enters the window
+     * hierarchy (tab selection, tab drag/reorder) pick up a Signum that was
+     * registered for this profile in the meantime by a start path that does not
+     * hand the instance back to the panel (see {@link #ensureSignumAdopted()}).
+     * Covers the window where a pending-start broadcast was missed while the
+     * panel was not yet bound (e.g. a fast start/stop cycle before the tab was
+     * first opened).
+     */
+    @Override
+    public void addNotify() {
+        super.addNotify();
+        ensureSignumAdopted();
     }
 
     /**
