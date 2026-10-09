@@ -387,8 +387,22 @@ public class ProfileConfig {
      */
     public void setLoggingProfile(String profileName, String loggingProfile) {
         ProfileData data = load();
-        ProfileEntry entry = data.getProfiles().computeIfAbsent(profileName, k -> new ProfileEntry());
-        entry.setLoggingProfile(loggingProfile);
+        if (loggingProfile == null) {
+            // null clears the association: drop the field, and remove the entry
+            // when nothing else is left on it — a stale EMPTY entry must not
+            // survive a clear, but an entry still carrying the canonical
+            // loggingPresets map (see rename) must be kept.
+            ProfileEntry entry = data.getProfiles().get(profileName);
+            if (entry != null) {
+                entry.setLoggingProfile(null);
+                if (isEffectivelyEmpty(entry)) {
+                    data.getProfiles().remove(profileName);
+                }
+            }
+        } else {
+            data.getProfiles().computeIfAbsent(profileName, k -> new ProfileEntry())
+                    .setLoggingProfile(loggingProfile);
+        }
         try {
             save();
         } catch (IOException e) {
@@ -416,13 +430,35 @@ public class ProfileConfig {
      */
     public void setLoggingPresets(String profileName, Map<String, String> loggingPresets) {
         ProfileData data = load();
-        ProfileEntry entry = data.getProfiles().computeIfAbsent(profileName, k -> new ProfileEntry());
-        entry.setLoggingPresets(loggingPresets);
+        if (loggingPresets == null) {
+            // null clears the association: drop the field, and remove the entry
+            // when nothing else is left on it (see setLoggingProfile).
+            ProfileEntry entry = data.getProfiles().get(profileName);
+            if (entry != null) {
+                entry.setLoggingPresets(null);
+                if (isEffectivelyEmpty(entry)) {
+                    data.getProfiles().remove(profileName);
+                }
+            }
+        } else {
+            data.getProfiles().computeIfAbsent(profileName, k -> new ProfileEntry())
+                    .setLoggingPresets(loggingPresets);
+        }
         try {
             save();
         } catch (IOException e) {
             LOGGER.error("Failed to save logging assignments for {}", profileName, e);
         }
+    }
+
+    /**
+     * Whether the legacy entry carries no logging association at all (neither the
+     * legacy loggingProfile nor the canonical loggingPresets map) — such an empty
+     * entry may be removed from profiles.json on a clear.
+     */
+    private static boolean isEffectivelyEmpty(ProfileEntry entry) {
+        return entry.getLoggingProfile() == null
+                && (entry.getLoggingPresets() == null || entry.getLoggingPresets().isEmpty());
     }
 
     /**
