@@ -43,8 +43,14 @@ public final class WizardFinish {
 
         DatabaseEngine engine = c.getEngine() == null ? DatabaseEngine.SQLITE : c.getEngine();
         if (engine == DatabaseEngine.SQLITE) {
-            // per-profile file-based DB — independently runnable out of the box (plan §2.6)
-            ProfileCreateDefaults.applySqliteDatabase(props, name);
+            // The user-configured DB.Url of the database step (the configuration
+            // panel's db.url editor) wins; an untouched setup keeps the per-profile
+            // file-based DB — independently runnable out of the box (plan §2.6).
+            if (c.getSqliteDbUrl() != null) {
+                props.setProperty(Props.DB_URL.getName(), c.getSqliteDbUrl());
+            } else {
+                ProfileCreateDefaults.applySqliteDatabase(props, name);
+            }
         } else if (!c.isSkipDbSetup()) {
             ProfileCreateDefaults.applyServerDatabase(props, engine == DatabaseEngine.POSTGRESQL,
                     c.getDbHost(), c.getDbPort(), c.getDbUser(), c.getDbPassword(), c.getDbName());
@@ -72,8 +78,13 @@ public final class WizardFinish {
         // applies): a complete SQLite setup creates ./database/SQLite/<name>/
         // with its profile.json, so the profile is discoverable right away.
         if (engine == DatabaseEngine.SQLITE) {
+            // The companion database profile is named after the database's own
+            // profile folder (the Profile field of the edited trio), or after the
+            // node profile for the per-profile default.
+            String companion = c.getSqliteDbProfileName() != null
+                    ? c.getSqliteDbProfileName() : name;
             ProfileCreateDefaults.ensureSqliteDatabaseProfile(
-                    name, props.getProperty(Props.DB_URL.getName()));
+                    companion, props.getProperty(Props.DB_URL.getName()));
         }
 
         if (c.isStartImmediately()) {

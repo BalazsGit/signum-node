@@ -5,6 +5,7 @@ import application.module.node.gui.wizard.WizardStep;
 import application.module.node.profile.NodeProfileRepository;
 import application.module.node.profile.ProfileNameSuggester;
 import application.utils.gui.GuiFontManager;
+import jiconfont.icons.font_awesome.FontAwesome;
 
 import javax.swing.BoxLayout;
 import javax.swing.JCheckBox;
@@ -47,10 +48,18 @@ public class NodeConfigurationStep implements WizardStep {
         this.takenNames = takenNames;
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setOpaque(false);
+        // BoxLayout alignment: the Swing default (alignmentX = 0.5f) would center
+        // each (width-varying) control in the panel, so toggling radios/checkboxes
+        // makes the group slide left/right. Pin them to the left edge.
+        suggestedRadio.setAlignmentX(0f);
+        customRadio.setAlignmentX(0f);
+        nameField.setAlignmentX(0f);
+        testnetBox.setAlignmentX(0f);
+        useDefaultsBox.setAlignmentX(0f);
 
         JLabel title = new JLabel("2. Configure the node profile");
-        title.setFont(title.getFont().deriveFont(java.awt.Font.BOLD, 14f));
-        GuiFontManager.applyDefaultFont(title);
+        title.setFont(GuiFontManager.getBoldScaledDefaultFont(KEYWORD_FONT_SCALE));
+        title.setAlignmentX(0f);
         panel.add(title);
 
         suggestedRadio.addActionListener(e -> {
@@ -72,6 +81,7 @@ public class NodeConfigurationStep implements WizardStep {
         JPanel portsPanel = new JPanel();
         portsPanel.setLayout(new BoxLayout(portsPanel, BoxLayout.Y_AXIS));
         portsPanel.setOpaque(false);
+        portsPanel.setAlignmentX(0f);
         useDefaultsBox.addActionListener(e -> {
             boolean custom = !useDefaultsBox.isSelected();
             apiPortField.setEnabled(custom);
@@ -92,6 +102,7 @@ public class NodeConfigurationStep implements WizardStep {
         JPanel row = new JPanel();
         row.setLayout(new BoxLayout(row, BoxLayout.X_AXIS));
         row.setOpaque(false);
+        row.setAlignmentX(0f);
         JLabel l = new JLabel(label);
         l.setPreferredSize(new java.awt.Dimension(90, 24));
         GuiFontManager.applyDefaultFont(l);
@@ -166,6 +177,11 @@ public class NodeConfigurationStep implements WizardStep {
     @Override
     public String getTitle() {
         return "Node configuration";
+    }
+
+    @Override
+    public FontAwesome getHeaderIcon() {
+        return FontAwesome.COG;
     }
 
     @Override

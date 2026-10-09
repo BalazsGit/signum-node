@@ -1,7 +1,11 @@
 package application.module.node.gui.wizard;
 
 import application.module.node.gui.wizard.WizardStep;
+import application.utils.gui.GuiColors;
+import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiFontManager;
+import jiconfont.icons.font_awesome.FontAwesome;
+import jiconfont.swing.IconFontSwing;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,6 +40,7 @@ public class NodeSetupWizardDialog extends JDialog {
     private final CardLayout cards = new CardLayout();
     private final JPanel stepsPanel = new JPanel();
     private final JLabel stepIndicator = new JLabel();
+    private final JLabel headerIconLabel = new JLabel();
     private final JButton backButton = new JButton("Back");
     private final JButton nextButton = new JButton("Next");
     private final JButton cancelButton = new JButton("Cancel");
@@ -49,6 +54,10 @@ public class NodeSetupWizardDialog extends JDialog {
         super(parent, "Create Node Profile", true);
         this.onFinished = onFinished;
         this.controller = new NodeSetupWizardController();
+        // Live context changes (e.g. the engine radio on the selection step)
+        // alter which steps are visible — refresh the "Step X of Y" indicator
+        // without disturbing focus (no card switch, no focus request).
+        this.controller.addChangeListener(ctx -> updateIndicator());
         initialize();
         showStep();
     }
@@ -68,8 +77,15 @@ public class NodeSetupWizardDialog extends JDialog {
         }
         add(stepsPanel, BorderLayout.CENTER);
 
-        GuiFontManager.applyDefaultFont(stepIndicator);
+        // "Step x/y — Title" is the wizard's heading: same proportional 1.2×
+        // bold keyword style as the in-step titles (WizardStep.KEYWORD_FONT_SCALE).
+        stepIndicator.setFont(GuiFontManager.getBoldScaledDefaultFont(WizardStep.KEYWORD_FONT_SCALE));
         JPanel indicatorPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 4));
+        // Header icon in the dialog's top-left corner: topic-relevant per step
+        // (e.g. the database icon on the database steps) — see
+        // WizardStep#getHeaderIcon; same pattern as the Save Changes dialog's
+        // header icon.
+        indicatorPanel.add(headerIconLabel);
         indicatorPanel.add(stepIndicator);
         add(indicatorPanel, BorderLayout.NORTH);
 
@@ -100,22 +116,42 @@ public class NodeSetupWizardDialog extends JDialog {
     private void showStep() {
         WizardStep step = controller.currentStep();
         cards.show(stepsPanel, step.getId());
-        stepIndicator.setText("Step " + (controller.getCurrentIndex() + 1) + " of "
-                + controller.getSteps().size() + " — " + step.getTitle());
+        FontAwesome headerIcon = step.getHeaderIcon() != null
+                ? step.getHeaderIcon() : FontAwesome.INFO_CIRCLE;
+        headerIconLabel.setIcon(IconFontSwing.buildIcon(headerIcon, GuiConstants.ICON_SIZE_DIALOG,
+                GuiColors.getButtonIcon()));
         backButton.setEnabled(!controller.isFirstStep());
-        nextButton.setText(controller.isLastStep() ? "Finish" : "Next");
+        updateIndicator();
         nextButton.requestFocusInWindow();
     }
 
+    /**
+     * Refreshes the "Step X of Y" indicator and the Next/Finish label from the
+     * controller's <b>effective</b> (context-dependent) step sequence, so
+     * auto-skipped steps (e.g. the server-only DB steps for SQLite) are never
+     * counted. Also called on live context changes (engine selection) — it
+     * deliberately does NOT request focus, so the user's interaction with the
+     * step's controls is not interrupted.
+     */
+    private void updateIndicator() {
+        WizardStep step = controller.currentStep();
+        stepIndicator.setText("Step " + controller.getCurrentVisibleIndex() + " of "
+                + controller.getVisibleStepCount() + " — " + step.getTitle());
+        nextButton.setText(controller.isLastStep() ? "Finish" : "Next");
+    }
+
     private void handleNext() {
+        // On the LAST visible step the button reads "Finish" and completes the
+        // wizard. Only then is the profile created — every other click validates
+        // and advances, so the final (Summary) step is actually shown.
+        if (controller.isLastStep()) {
+            handleFinish();
+            return;
+        }
         String error = controller.next();
         if (error != null) {
             JOptionPane.showMessageDialog(this, error, "Please fix the highlighted input",
                     JOptionPane.ERROR_MESSAGE);
-            return;
-        }
-        if (controller.isLastStep()) {
-            handleFinish();
             return;
         }
         showStep();

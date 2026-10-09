@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * State machine of the node setup wizard (plan §1.6).
@@ -18,8 +19,9 @@ import java.util.List;
  * {@link #next()} validates the current step, collects its state into the shared
  * {@link WizardContext}, then advances (auto-skipping steps whose {@code autoSkip}
  * matches the context, e.g. DB installation for SQLite). {@link #back()} goes back
- * without collecting (the step re-collects when leaving again). {@link #finish()}
- * validates + collects the last step.
+ * over the same visible (non-auto-skipped) sequence without collecting (the step
+ * re-collects when leaving again). {@link #finish()} validates + collects the last
+ * step.
  * </p>
  * <p>
  * The step list is injectable so unit tests can drive the state machine with fake
@@ -30,6 +32,7 @@ public class NodeSetupWizardController {
 
     private final List<WizardStep> steps;
     private final WizardContext context = new WizardContext();
+    private final List<Consumer<WizardContext>> changeListeners = new ArrayList<>();
     private int currentIndex = 0;
 
     /** The canonical wizard chain (3 required + 3 skippable, plan §1.2). */
@@ -43,6 +46,14 @@ public class NodeSetupWizardController {
             throw new IllegalArgumentException("Wizard steps must not be null/empty");
         }
         this.steps = Collections.unmodifiableList(new ArrayList<>(steps));
+        // Live context wiring: steps with a choice that alters the flow (the
+        // database-engine selection) mirror it into the shared context as soon as
+        // it changes and notify this controller, so context-dependent state (the
+        // "Step X of Y" count, the skip logic) adapts dynamically.
+        for (WizardStep step : this.steps) {
+            step.bindContext(context);
+            step.addChangeListener(this::fireChangeListeners);
+        }
     }
 
     /** The default step chain (SSOT of the wizard flow). */
@@ -76,7 +87,59 @@ public class NodeSetupWizardController {
     }
 
     public boolean isLastStep() {
-        return currentIndex == steps.size() - 1;
+        List<WizardStep> visible = effectiveSteps();
+        return visible.get(visible.size() - 1) == currentStep();
+    }
+
+    /**
+     * The steps actually visible for the current context: steps whose
+     * {@link WizardStep#autoSkip(WizardContext)} matches the context (e.g. the
+     * server-only DB installation and connection steps for SQLite) are filtered
+     * out. The first step is always kept (the navigation anchor).
+     */
+    public List<WizardStep> effectiveSteps() {
+        List<WizardStep> visible = new ArrayList<>();
+        for (WizardStep step : steps) {
+            if (visible.isEmpty() || !step.autoSkip(context)) {
+                visible.add(step);
+            }
+        }
+        return visible;
+    }
+
+    /** @return how many steps the user actually walks through for the current context. */
+    public int getVisibleStepCount() {
+        return effectiveSteps().size();
+    }
+
+    /**
+     * @return the 1-based position of the current step within the effective
+     *         (visible) sequence — the "Step X" half of the wizard indicator.
+     */
+    public int getCurrentVisibleIndex() {
+        List<WizardStep> visible = effectiveSteps();
+        for (int i = 0; i < visible.size(); i++) {
+            if (visible.get(i) == currentStep()) {
+                return i + 1;
+            }
+        }
+        return getCurrentIndex() + 1; // defensive fallback; the current step is always visible
+    }
+
+    /**
+     * Registers a callback fired when a live context change of a step (e.g. the
+     * engine selection) may have altered the visible step sequence.
+     *
+     * @param listener notified with the (mutated) context (may be null)
+     */
+    public void addChangeListener(Consumer<WizardContext> listener) {
+        changeListeners.add(listener);
+    }
+
+    private void fireChangeListeners(WizardContext changed) {
+        for (Consumer<WizardContext> listener : changeListeners) {
+            listener.accept(changed);
+        }
     }
 
     /**
@@ -85,6 +148,9 @@ public class NodeSetupWizardController {
      * @return the error message when the current step is invalid (no advance), otherwise null
      */
     public String next() {
+        if (isLastStep()) {
+            return null; // nothing to advance to — the dialog completes via finish()
+        }
         String error = currentStep().validate(context);
         if (error != null) {
             return error;
@@ -102,16 +168,22 @@ public class NodeSetupWizardController {
     }
 
     /**
-     * Goes back one step (no-op on the first step).
+     * Goes back over the <b>visible</b> steps of the current context: a step
+     * that is auto-skipped today (e.g. the DB connection step after the engine
+     * was switched back to SQLite) is not shown when going back, so Back and
+     * Next always iterate the same per-context sequence. No-op on the first
+     * step.
      *
      * @return always null (back navigation is never blocked)
      */
     public String back() {
-        if (currentIndex == 0) {
-            return null;
+        while (currentIndex > 0) {
+            currentIndex--;
+            if (!currentStep().autoSkip(context)) {
+                currentStep().onEnter(context);
+                break;
+            }
         }
-        currentIndex--;
-        steps.get(currentIndex).onEnter(context);
         return null;
     }
 

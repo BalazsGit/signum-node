@@ -419,6 +419,15 @@ public class JdbcManualConfigurationPanel extends JPanel {
         return sqlProfileField.getText().trim();
     }
 
+    /**
+     * True when the user edited the SQLite Profile/Path/DB-file trio — in that case
+     * {@link #getJdbcUrl()} reports the composed (edited) URL; an untouched trio
+     * preserves the original URL it was loaded from (see {@link #updateFromUrl}).
+     */
+    public boolean isSqliteTrioEdited() {
+        return sqliteFieldsEdited;
+    }
+
     /** The directory the SQLite database file lives in. */
     public String getSqlitePath() {
         return sqlPathField.getText().trim();

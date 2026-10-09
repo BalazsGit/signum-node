@@ -7,6 +7,7 @@ import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.node.gui.wizard.WizardContext;
 import application.module.node.gui.wizard.WizardStep;
 import application.utils.gui.GuiFontManager;
+import jiconfont.icons.font_awesome.FontAwesome;
 
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
@@ -118,6 +119,11 @@ public class DatabaseInstallationStep implements WizardStep {
     @Override
     public String getTitle() {
         return "Database installation";
+    }
+
+    @Override
+    public FontAwesome getHeaderIcon() {
+        return FontAwesome.DOWNLOAD;
     }
 
     @Override

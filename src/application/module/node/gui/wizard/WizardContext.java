@@ -24,6 +24,10 @@ public class WizardContext {
     private String dbPassword = "";
     private String dbName = "signum";
 
+    // ── Step 1.2: SQLite DB.Url (the configuration panel's db.url editor) ──
+    private String sqliteDbUrl;         // null → the per-profile SSOT URL applies at finish
+    private String sqliteDbProfileName; // null → the companion DB profile is the node profile name
+
     // ── Step 2: node configuration ───────────────────────────────────────
     private String name;
     private boolean testnet = false;
@@ -145,6 +149,34 @@ public class WizardContext {
 
     public void setWsPort(Integer wsPort) {
         this.wsPort = wsPort;
+    }
+
+    /**
+     * The SQLite {@code DB.Url} the user configured in the database step (the same
+     * Profile/Path/DB-file trio and URL-composition logic as the configuration
+     * panel's DB.Url row). {@code null} when the trio was left untouched — in that
+     * case the finish step derives the per-profile SSOT URL from the final name.
+     */
+    public String getSqliteDbUrl() {
+        return sqliteDbUrl;
+    }
+
+    public void setSqliteDbUrl(String sqliteDbUrl) {
+        this.sqliteDbUrl = sqliteDbUrl;
+    }
+
+    /**
+     * The database-profile name (the last folder of the per-profile convention
+     * path) the configured SQLite database belongs to — the companion database
+     * profile is created under this name. {@code null} when the trio was left
+     * untouched (the node profile name applies).
+     */
+    public String getSqliteDbProfileName() {
+        return sqliteDbProfileName;
+    }
+
+    public void setSqliteDbProfileName(String sqliteDbProfileName) {
+        this.sqliteDbProfileName = sqliteDbProfileName;
     }
 
     public boolean isStartImmediately() {

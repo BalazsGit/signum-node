@@ -199,6 +199,29 @@ public class GuiFontManager {
      * Returns a bold version of the current UI default font.
      */
     public static Font getBoldDefaultFont() {
+        return defaultFont().deriveFont(Font.BOLD);
+    }
+
+    /**
+     * Returns the current UI default font scaled <b>proportionally</b> by the
+     * given factor (e.g. {@code 1.2f} → 120% of the default font size) — the
+     * scaling follows the configured default font, it is not a fixed point size.
+     */
+    public static Font getScaledDefaultFont(float scale) {
+        Font f = defaultFont();
+        return f.deriveFont(f.getSize2D() * scale);
+    }
+
+    /**
+     * Returns a bold version of the current UI default font scaled
+     * <b>proportionally</b> by the given factor (see {@link #getScaledDefaultFont}).
+     */
+    public static Font getBoldScaledDefaultFont(float scale) {
+        Font f = defaultFont();
+        return f.deriveFont(Font.BOLD, f.getSize2D() * scale);
+    }
+
+    private static Font defaultFont() {
         Font f = UIManager.getFont("Label.font");
         if (f == null) {
             f = UIManager.getLookAndFeelDefaults().getFont("Label.font");
@@ -206,7 +229,7 @@ public class GuiFontManager {
         if (f == null) {
             f = new Font(Font.SANS_SERIF, Font.PLAIN, 12);
         }
-        return f.deriveFont(Font.BOLD);
+        return f;
     }
 
     /**

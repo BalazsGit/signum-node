@@ -7,7 +7,9 @@ import application.module.node.gui.wizard.WizardStep;
 import application.module.node.profile.NodeProfile;
 import application.module.node.profile.ProfileConflictDetector;
 import application.module.node.profile.ProfileCreateDefaults;
+import application.module.node.props.Props;
 import application.utils.gui.GuiFontManager;
+import jiconfont.icons.font_awesome.FontAwesome;
 
 import javax.swing.BoxLayout;
 import javax.swing.JCheckBox;
@@ -40,8 +42,7 @@ public class SummaryStep implements WizardStep {
         panel.setOpaque(false);
 
         JLabel title = new JLabel("3. Summary — review before creating the profile");
-        title.setFont(title.getFont().deriveFont(java.awt.Font.BOLD, 14f));
-        GuiFontManager.applyDefaultFont(title);
+        title.setFont(GuiFontManager.getBoldScaledDefaultFont(KEYWORD_FONT_SCALE));
         panel.add(title);
 
         text.setEditable(false);
@@ -117,7 +118,13 @@ public class SummaryStep implements WizardStep {
         Properties props = new Properties();
         ProfileCreateDefaults.applyNetwork(props, context.isTestnet());
         if (context.getEngine() == DatabaseEngine.SQLITE) {
-            ProfileCreateDefaults.applySqliteDatabase(props, name);
+            // The user-configured DB.Url of the database step wins; an untouched
+            // SQLite setup falls back to the per-profile SSOT URL.
+            if (context.getSqliteDbUrl() != null) {
+                props.setProperty(Props.DB_URL.getName(), context.getSqliteDbUrl());
+            } else {
+                ProfileCreateDefaults.applySqliteDatabase(props, name);
+            }
         } else if (!context.isSkipDbSetup()) {
             ProfileCreateDefaults.applyServerDatabase(props, context.getEngine() == DatabaseEngine.POSTGRESQL,
                     context.getDbHost(), context.getDbPort(),
@@ -151,6 +158,11 @@ public class SummaryStep implements WizardStep {
     }
 
     @Override
+    public FontAwesome getHeaderIcon() {
+        return FontAwesome.CHECK;
+    }
+
+    @Override
     public JComponent getPanel() {
         return panel;
     }
@@ -158,6 +170,14 @@ public class SummaryStep implements WizardStep {
     @Override
     public String validate(WizardContext context) {
         return context.getName() == null || context.getName().isBlank() ? "Profile name is missing." : null;
+    }
+
+    @Override
+    public boolean autoSkip(WizardContext context) {
+        // SQLite walks a 3-step flow (selection → database configuration → node
+        // configuration): the node-configuration step is its last step, so the summary
+        // is skipped and the wizard finishes there.
+        return context.getEngine() == DatabaseEngine.SQLITE;
     }
 
     @Override

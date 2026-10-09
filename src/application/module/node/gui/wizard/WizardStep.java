@@ -1,6 +1,9 @@
 package application.module.node.gui.wizard;
 
+import jiconfont.icons.font_awesome.FontAwesome;
+
 import javax.swing.JComponent;
+import java.util.function.Consumer;
 
 /**
  * A single step of the node setup wizard.
@@ -16,11 +19,30 @@ import javax.swing.JComponent;
  */
 public interface WizardStep {
 
+    /**
+     * Proportional scale factor of the wizard's heading/keyword labels — the step
+     * titles ("1. …", "2. …", "3. …"), the engine name in the engine-details panel
+     * and the details section keywords (Description / Setup required / Best for) —
+     * relative to the default UI font size (1.2f = 120%).
+     */
+    float KEYWORD_FONT_SCALE = 1.2f;
+
     /** Stable step identifier (e.g. {@code "database-selection"}). */
     String getId();
 
     /** Human-readable step title shown in the wizard indicator. */
     String getTitle();
+
+    /**
+     * The icon (Font Awesome) representing this step's topic, shown in the wizard's
+     * top-left header (e.g. the database icon for the database steps). The dialog
+     * renders it at its header icon size.
+     *
+     * @return the step's header icon (never null by default)
+     */
+    default FontAwesome getHeaderIcon() {
+        return FontAwesome.INFO_CIRCLE;
+    }
 
     /** The step's UI panel (shown by the dialog's CardLayout). */
     JComponent getPanel();
@@ -43,5 +65,29 @@ public interface WizardStep {
     /** @return true when the controller should skip this step for the given context. */
     default boolean autoSkip(WizardContext context) {
         return false;
+    }
+
+    /**
+     * Called by the controller once the shared {@link WizardContext} exists.
+     * <p>
+     * A step that exposes a live choice altering the navigation flow (e.g. the
+     * database-engine selection, which auto-skips the server-only installation
+     * and connection steps) can mirror that choice into the context
+     * <b>immediately</b> — not only at {@link #onExit} — so the wizard can
+     * adapt its visible step sequence dynamically.
+     * </p>
+     */
+    default void bindContext(WizardContext context) {
+    }
+
+    /**
+     * Registers a callback fired when a live UI change of this step alters the
+     * navigation context (e.g. the engine radio was switched). The controller
+     * uses it to refresh context-dependent state such as the "Step X of Y"
+     * indicator.
+     *
+     * @param listener notified with the (mutated) context (may be null)
+     */
+    default void addChangeListener(Consumer<WizardContext> listener) {
     }
 }
