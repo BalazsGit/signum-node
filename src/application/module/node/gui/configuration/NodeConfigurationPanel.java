@@ -1719,7 +1719,19 @@ public class NodeConfigurationPanel extends JPanel {
             return; // no unsaved changes (the button is disabled in this state)
         }
 
-        if (!ProfileSaveApplyDialog.show(this, name, report)) {
+        ProfileSaveApplyDialog.Result result = ProfileSaveApplyDialog.show(this, name, report);
+        if (result == ProfileSaveApplyDialog.Result.DISCARD) {
+            // The review dialog already listed the changes and the user explicitly
+            // chose to discard them — reload the saved profile from disk without a
+            // second confirmation.
+            reloadFromDisk();
+            JOptionPane.showMessageDialog(this,
+                    "Unsaved changes discarded — the editor now shows the saved configuration of profile '"
+                            + name + "'.",
+                    "Changes Discarded", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        if (result != ProfileSaveApplyDialog.Result.SAVE) {
             return;
         }
         if (!doSaveCurrentProfile()) {
@@ -1974,39 +1986,48 @@ public class NodeConfigurationPanel extends JPanel {
      * was edited by hand). Unsaved UI changes are discarded (with confirmation).
      */
     private void reloadProfile() {
-        if (loadedProfileName != null) {
-            if (hasUnsavedChanges()) {
-                String message = "You have unsaved changes. Are you sure you want to reload from disk and discard these changes?";
-                Object[] options = { "Discard and Reload", "Cancel" };
-                int result = JOptionPane.showOptionDialog(this, message, "Confirm Reload",
-                        JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE,
-                        null, options, options[1]);
-                if (result != JOptionPane.YES_OPTION) {
-                    return;
-                }
+        if (loadedProfileName == null) {
+            return;
+        }
+        if (hasUnsavedChanges()) {
+            String message = "You have unsaved changes. Are you sure you want to reload from disk and discard these changes?";
+            Object[] options = { "Discard and Reload", "Cancel" };
+            int result = JOptionPane.showOptionDialog(this, message, "Confirm Reload",
+                    JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE,
+                    null, options, options[1]);
+            if (result != JOptionPane.YES_OPTION) {
+                return;
             }
+        }
+        reloadFromDisk();
+    }
 
-            Path targetFile = ConfigurationUtils.resolveNodeProfilePath(loadedProfileName);
-            if (Files.exists(targetFile)) {
-                Properties loaded = new Properties();
-                try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
-                    isProgrammaticChange = true;
-                    loaded.load(in);
-                    savedProfile = new NodeProfile(loadedProfileName);
-                    savedProfile.setProperties(loaded);
-                    // A reload re-loads the profile into the editor: the
-                    // freshly loaded values are again the applied baseline
-                    // (the editor now mirrors the file on disk).
-                    appliedProfile = new NodeProfile(loadedProfileName);
-                    appliedProfile.setProperties(copyProperties(loaded));
-                    updateUIFromProperties(loaded);
-                    updateDirtyStatus();
-                    refreshUIColors();
-                    isProgrammaticChange = false;
-                } catch (Exception e) {
-                    JOptionPane.showMessageDialog(this, "Error reloading profile: " + e.getMessage(), "Error",
-                            JOptionPane.ERROR_MESSAGE);
-                }
+    /**
+     * Re-reads the <b>current</b> profile file from disk into the editor, discarding
+     * unsaved UI changes <b>without confirmation</b>. Callers must have already asked
+     * the user (the Reload Profile confirmation, or the Save dialog's Discard action).
+     */
+    private void reloadFromDisk() {
+        Path targetFile = ConfigurationUtils.resolveNodeProfilePath(loadedProfileName);
+        if (Files.exists(targetFile)) {
+            Properties loaded = new Properties();
+            try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
+                isProgrammaticChange = true;
+                loaded.load(in);
+                savedProfile = new NodeProfile(loadedProfileName);
+                savedProfile.setProperties(loaded);
+                // A reload re-loads the profile into the editor: the
+                // freshly loaded values are again the applied baseline
+                // (the editor now mirrors the file on disk).
+                appliedProfile = new NodeProfile(loadedProfileName);
+                appliedProfile.setProperties(copyProperties(loaded));
+                updateUIFromProperties(loaded);
+                updateDirtyStatus();
+                refreshUIColors();
+                isProgrammaticChange = false;
+            } catch (Exception e) {
+                JOptionPane.showMessageDialog(this, "Error reloading profile: " + e.getMessage(), "Error",
+                        JOptionPane.ERROR_MESSAGE);
             }
         }
     }
@@ -2222,7 +2243,7 @@ public class NodeConfigurationPanel extends JPanel {
                 "<p>Profiles allow you to maintain multiple sets of node configurations. Use the toolbar buttons to perform the following actions:</p>"
                 +
                 "<ul>" +
-                "<li><b>Save &amp; Apply</b>: Saves all unsaved changes to the current profile (reviewing them in a dialog first), then asks whether to restart the node so the changes take effect immediately.</li>"
+                "<li><b>Save &amp; Apply</b>: Saves all unsaved changes to the current profile (reviewing them in a dialog first — you can save, discard all unsaved changes, or cancel), then asks whether to restart the node so the changes take effect immediately.</li>"
                 +
                 "<li><b>Rename Profile</b>: Changes the name of the currently selected configuration profile.</li>"
                 +

@@ -9,6 +9,7 @@ import application.module.node.profile.NodeProfileRepository;
 import application.module.node.profile.ProfileConfig;
 import application.module.node.profile.ProfileNameSuggester;
 import application.module.node.profile.ProfileRuntimeService;
+import application.module.node.gui.configuration.ProfileDeleteDialog;
 import application.module.node.gui.wizard.NodeSetupWizardDialog;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiFontManager;
@@ -1005,23 +1006,64 @@ public class NodePanel extends JPanel  {
     }
 
     /**
-     * Delete flow: confirmation guard (extra warning when the node is running), then
-     * delegates to {@link #removeProfileTab(String)} (stop → dispose → file + tabOrder).
+     * Delete flow for the tab's close "X" and the tab context menu's "Delete…".
+     * <p>
+     * Uses the SAME confirmation dialog as the Configuration panel's Delete toolbar
+     * action — {@link ProfileDeleteDialog}: running-node warning plus the optional
+     * "also delete the profile's SQLite database data" question (shown only when the
+     * profile actually uses its per-profile SQLite database). The blocking delete
+     * chain (stop → registry teardown → file + metadata → optional data) runs on a
+     * background thread via {@link ProfileRuntimeService#deleteProfile(String, boolean)}
+     * (SSOT, shared with the config-panel path); afterwards the tab is removed on the
+     * EDT via {@link #removeProfileTab(String)} (dispose → tab + onboarding fallback;
+     * its repository call is a tolerated no-op since the file is already gone).
+     * </p>
      */
     private void deleteProfileTabFromUi(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            return;
+        }
+        final String profileName = name.trim();
+        // Same guard as the Configuration panel's Delete action: the system default
+        // profile cannot be deleted.
+        if ((Signum.NODE_SUBFOLDER + "-default").equals(profileName)) {
+            javax.swing.JOptionPane.showMessageDialog(SwingUtilities.windowForComponent(this),
+                    "The system profiles cannot be deleted.", "Action Not Allowed",
+                    javax.swing.JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
         java.awt.Window parent = SwingUtilities.windowForComponent(this);
-        boolean running = NodeModule.getInstance().get(name) != null;
-        StringBuilder msg = new StringBuilder("Delete profile '").append(name).append("'?");
-        if (running) {
-            msg.append("\nIts node is RUNNING — it will be stopped first.");
+        Signum signum = NodeModule.getInstance().get(profileName);
+        boolean nodeRunning = signum != null
+                && (signum.getState() == Signum.State.RUNNING || signum.getState() == Signum.State.STARTING);
+        boolean sqliteConfigured = ProfileRuntimeService.usesPerProfileSqliteDatabase(profileName);
+
+        ProfileDeleteDialog.Confirmation confirmation =
+                ProfileDeleteDialog.show(this, profileName, nodeRunning, sqliteConfigured);
+        if (confirmation == null) {
+            return; // cancelled
         }
-        msg.append("\n\nThe profile file and its settings will be removed.");
-        int choice = javax.swing.JOptionPane.showConfirmDialog(parent, msg.toString(),
-                "Delete profile", javax.swing.JOptionPane.YES_NO_OPTION,
-                running ? javax.swing.JOptionPane.WARNING_MESSAGE : javax.swing.JOptionPane.QUESTION_MESSAGE);
-        if (choice == javax.swing.JOptionPane.YES_OPTION) {
-            removeProfileTab(name);
-        }
+        final boolean deleteData = confirmation.deleteData();
+
+        application.utils.gui.GuiExecutors.prepare().execute(() -> {
+            try {
+                ProfileRuntimeService.deleteProfile(profileName, deleteData);
+            } catch (Exception e) {
+                LOGGER.error("Failed to delete profile '{}'", profileName, e);
+                SwingUtilities.invokeLater(() -> javax.swing.JOptionPane.showMessageDialog(parent,
+                        "Error deleting profile: " + e.getMessage(), "Error",
+                        javax.swing.JOptionPane.ERROR_MESSAGE));
+                return;
+            }
+            SwingUtilities.invokeLater(() -> {
+                // GUI cleanup: the tab is removed (and its loaded panel disposed).
+                removeProfileTab(profileName);
+                javax.swing.JOptionPane.showMessageDialog(parent,
+                        "Profile '" + profileName + "' deleted successfully.", "Success",
+                        javax.swing.JOptionPane.INFORMATION_MESSAGE);
+            });
+        });
     }
 
     // ------------------------------------------------------------------

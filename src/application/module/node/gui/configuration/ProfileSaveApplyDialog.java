@@ -28,23 +28,42 @@ public final class ProfileSaveApplyDialog {
     }
 
     /**
+     * The user's decision in the save dialog.
+     */
+    public enum Result {
+        /** Save the unsaved changes. */
+        SAVE,
+        /** Discard the unsaved changes (the editor reverts to the saved configuration). */
+        DISCARD,
+        /** Do nothing — the unsaved changes stay in the editor. */
+        CANCEL
+    }
+
+    /**
      * Shows the modal save dialog.
      *
      * @param parent       the parent component (dialogs are owned by its window)
      * @param profileName  the name of the profile that will be saved (read-only)
      * @param changesReport the HTML report of unsaved changes (from
      *                       {@code NodeConfigurationPanel#getUnsavedChangesReport})
-     * @return {@code true} when the user confirmed the save, {@code false} when cancelled
+     * @return {@link Result#SAVE} when the user confirmed the save,
+     *         {@link Result#DISCARD} when the user chose to discard the unsaved
+     *         changes (the caller reverts the editor to the saved configuration),
+     *         {@link Result#CANCEL} when the dialog was closed without a decision
      */
-    public static boolean show(Component parent, String profileName, String changesReport) {
+    public static Result show(Component parent, String profileName, String changesReport) {
         final Window owner = SwingUtilities.windowForComponent(parent);
-        final AtomicBoolean confirmed = new AtomicBoolean(false);
+        final AtomicBoolean saveConfirmed = new AtomicBoolean(false);
+        final AtomicBoolean discardConfirmed = new AtomicBoolean(false);
 
         // ── Profile name (display only — the name is not editable, so a plain label, not a text field) ──
         JLabel nameField = new JLabel(profileName == null ? "" : profileName);
 
         JButton saveBtn = new JButton("Save",
                 IconFontSwing.buildIcon(FontAwesome.FLOPPY_O, GuiConstants.getHelpIconSize(),
+                        GuiColors.getButtonIcon()));
+        JButton discardBtn = new JButton("Discard",
+                IconFontSwing.buildIcon(FontAwesome.ERASER, GuiConstants.getHelpIconSize(),
                         GuiColors.getButtonIcon()));
         JButton cancelBtn = new JButton("Cancel");
 
@@ -71,6 +90,7 @@ public final class ProfileSaveApplyDialog {
         }
         JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         buttons.add(saveBtn);
+        buttons.add(discardBtn);
         buttons.add(cancelBtn);
         content.add(buttons, "gaptop 15");
 
@@ -90,7 +110,11 @@ public final class ProfileSaveApplyDialog {
                 JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT);
 
         saveBtn.addActionListener(e -> {
-            confirmed.set(true);
+            saveConfirmed.set(true);
+            dialog.dispose();
+        });
+        discardBtn.addActionListener(e -> {
+            discardConfirmed.set(true);
             dialog.dispose();
         });
         cancelBtn.addActionListener(e -> dialog.dispose());
@@ -98,6 +122,12 @@ public final class ProfileSaveApplyDialog {
         // Synchronous modal show (called on the EDT from a button listener);
         // the event pump keeps the dialog responsive while it blocks.
         dialog.setVisible(true);
-        return confirmed.get();
+        if (saveConfirmed.get()) {
+            return Result.SAVE;
+        }
+        if (discardConfirmed.get()) {
+            return Result.DISCARD;
+        }
+        return Result.CANCEL;
     }
 }
