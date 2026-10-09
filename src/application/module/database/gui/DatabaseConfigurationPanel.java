@@ -26,13 +26,16 @@ import net.miginfocom.swing.MigLayout;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.imageio.ImageIO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.awt.*;
 import java.awt.event.HierarchyEvent;
+import java.awt.image.BufferedImage;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.nio.charset.StandardCharsets;
@@ -58,13 +61,25 @@ import java.util.zip.ZipInputStream;
 public class DatabaseConfigurationPanel extends JPanel {
 
     public enum DatabaseEngine {
-        MARIADB("MariaDB", 3306, "mariaDb"),
-        POSTGRESQL("PostgreSQL", 5432, "postgresql"),
-        SQLITE("SQLite", 0, "sqlite");
+        MARIADB("MariaDB", 3306, "mariaDb",
+                "Client/server relational database (MySQL-compatible). Runs as a separate server process, locally or on a remote machine.",
+                "A running server is required: host, port, user, password and database name are configured in the following steps; the server itself can be downloaded and initialized from the wizard.",
+                "Use when several nodes must share one database (multi-node cluster) or the database should run on a different machine. Uses more resources than SQLite."),
+        POSTGRESQL("PostgreSQL", 5432, "postgresql",
+                "Client/server relational database with advanced features (JSON, full-text search, extensibility). Runs as a separate server process, locally or on a remote machine.",
+                "A running server is required: host, port, user, password and database name are configured in the following steps; the server itself can be downloaded and initialized from the wizard.",
+                "An alternative to MariaDB for server-based setups — e.g. when PostgreSQL is already part of the environment; multi-node clusters share one instance. Uses more resources than SQLite."),
+        SQLITE("SQLite", 0, "sqlite",
+                "Embedded, file-based database. The data lives in a single file that belongs to the profile — no database server is installed, started or administered.",
+                "None. No server, no credentials: the database file is created for the profile automatically.",
+                "Simplest and lightest setup — recommended for a single node on this machine. Not suitable when multiple nodes must share one database.");
 
         private final String displayName;
         private final int defaultPort;
         private final String settingsKey;
+        private final String description;
+        private final String setupRequirements;
+        private final String usageNotes;
 
         @Override
         public String toString() {
@@ -79,14 +94,79 @@ public class DatabaseConfigurationPanel extends JPanel {
             return defaultPort;
         }
 
-        DatabaseEngine(String displayName, int defaultPort, String settingsKey) {
+        DatabaseEngine(String displayName, int defaultPort, String settingsKey,
+                String description, String setupRequirements, String usageNotes) {
             this.displayName = displayName;
             this.defaultPort = defaultPort;
             this.settingsKey = settingsKey;
+            this.description = description;
+            this.setupRequirements = setupRequirements;
+            this.usageNotes = usageNotes;
         }
 
         public String getSettingsKey() {
             return settingsKey;
+        }
+
+        /** Short factual description of the engine (SSOT of the wizard's engine details). */
+        public String getDescription() {
+            return description;
+        }
+
+        /** What kind of setup/configuration the engine requires (SSOT of the wizard's engine details). */
+        public String getSetupRequirements() {
+            return setupRequirements;
+        }
+
+        /** Typical usage / who should pick this engine (SSOT of the wizard's engine details). */
+        public String getUsageNotes() {
+            return usageNotes;
+        }
+
+        /**
+         * Classpath location of the engine's <b>official logo</b> asset
+         * (see {@code resources/images/databases/} and its {@code LOGO_LICENSES.txt}).
+         * SSOT of the engine branding used in the GUI.
+         */
+        public String getLogoResourcePath() {
+            return switch (this) {
+                case MARIADB -> "images/databases/mariadb.png";
+                case POSTGRESQL -> "images/databases/postgresql.png";
+                case SQLITE -> "images/databases/sqlite.png";
+            };
+        }
+
+        /**
+         * The engine's official logo, scaled to the given height (aspect ratio kept).
+         * <p>
+         * Falls back to the programmatically drawn {@link DatabaseEngineBadgeIcon}
+         * (brand-color monogram badge) when the logo asset is missing from the
+         * classpath, so the GUI never shows a broken icon.
+         * </p>
+         *
+         * @param height the desired icon height in pixels (width is derived from the logo's ratio)
+         * @return a ready-to-use {@link Icon} (never null)
+         */
+        public Icon getLogoIcon(int height) {
+            if (height <= 0) {
+                throw new IllegalArgumentException("height must be positive");
+            }
+            try (InputStream in = DatabaseEngine.class.getClassLoader()
+                    .getResourceAsStream(getLogoResourcePath())) {
+                if (in == null) {
+                    return new DatabaseEngineBadgeIcon(this, height);
+                }
+                BufferedImage logo = ImageIO.read(in);
+                if (logo == null) {
+                    return new DatabaseEngineBadgeIcon(this, height);
+                }
+                int width = Math.max(1,
+                        (int) Math.round(logo.getWidth() * (double) height / logo.getHeight()));
+                Image scaled = logo.getScaledInstance(width, height, Image.SCALE_SMOOTH);
+                return new ImageIcon(scaled);
+            } catch (IOException e) {
+                return new DatabaseEngineBadgeIcon(this, height);
+            }
         }
 
         public static DatabaseEngine fromDisplayName(String displayName) {

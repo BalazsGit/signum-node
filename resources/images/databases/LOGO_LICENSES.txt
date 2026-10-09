@@ -1,0 +1,32 @@
+Database engine logo assets
+===========================
+
+Official logos of the database engines offered by the node setup wizard.
+They are shown in the wizard's "Engine details" panel only, to identify
+the engine the user is looking at (factual reference to the product).
+
+sqlite.png
+  The official SQLite logo ("SQLite370" artwork, distributed with the
+  SQLite documentation; SVG original on sqlite.org).
+  Source: https://www.sqlite.org/ (rendered from File:SQLite370.svg,
+  https://commons.wikimedia.org/wiki/File:SQLite370.svg)
+  License: PUBLIC DOMAIN — "This work has been released into the public
+  domain by its author, D. Richard Hipp."
+
+mariadb.png
+  The official MariaDB Foundation logo (square 270x270 PNG variant
+  published on mariadb.org).
+  Source: https://mariadb.org/about/logos/
+  License: Creative Commons CC-BY-SA, as published at the source page.
+  Attribution: MariaDB logo (c) MariaDB Foundation, used under CC-BY-SA
+  to refer to the MariaDB product. Used unmodified (no altered
+  proportions, colours or elements), as required by the page.
+
+postgresql.png
+  The official PostgreSQL elephant (Slonik) logo, as published on
+  postgresql.org.
+  Source: https://www.postgresql.org/ (press media assets)
+  License: the Elephant Logo (Slonik) is a registered trademark of the
+  PostgreSQL Community Association of Canada. Used unmodified, solely to
+  refer to PostgreSQL software in a factual statement, in line with the
+  trademark policy: https://www.postgresql.org/about/policies/trademarks/
