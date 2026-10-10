@@ -6,6 +6,7 @@ import application.utils.logging.ModuleLoggingProvider;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -209,6 +210,88 @@ class LoggingProfileRepositoryTest {
         @Override
         public Map<String, String> getDefaults() {
             return Map.of("testmod.level", "INFO");
+        }
+    }
+
+    @Nested
+    @DisplayName("Applied-state snapshot")
+    class AppliedSnapshotTests {
+
+        @Test
+        @DisplayName("save then load round-trips the applied values (file under applied/)")
+        void saveThenLoad_roundTrips() throws IOException {
+            Properties values = new Properties();
+            values.setProperty("node.level", "WARNING");
+            values.setProperty("node.handler", "java.util.logging.FileHandler");
+            repo.saveAppliedSnapshot(MODULE, "custom", values);
+
+            assertTrue(Files.exists(repo.getAppliedSnapshotPath(MODULE, "custom")));
+            Path snapshotPath = repo.getAppliedSnapshotPath(MODULE, "custom");
+            assertTrue(snapshotPath.toString().endsWith("applied" + java.io.File.separator + "custom.json"),
+                    "the snapshot lives under the module's applied/ directory");
+            Properties loaded = repo.loadAppliedSnapshot(MODULE, "custom");
+            assertEquals("WARNING", loaded.getProperty("node.level"));
+            assertEquals("java.util.logging.FileHandler", loaded.getProperty("node.handler"));
+        }
+
+        @Test
+        @DisplayName("a missing snapshot reads as empty Properties (callers fall back to defaults)")
+        void missingSnapshot_readsAsEmpty() {
+            assertTrue(repo.loadAppliedSnapshot(MODULE, "never-applied").isEmpty());
+            assertTrue(repo.loadAppliedSnapshot(MODULE, null).isEmpty());
+            assertTrue(repo.loadAppliedSnapshot(MODULE, "").isEmpty());
+        }
+
+        @Test
+        @DisplayName("a corrupt snapshot reads as empty Properties (defensive)")
+        void corruptSnapshot_readsAsEmpty() throws IOException {
+            Path file = repo.getAppliedSnapshotPath(MODULE, "bad");
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, "{ not json", java.nio.charset.StandardCharsets.UTF_8);
+
+            assertTrue(repo.loadAppliedSnapshot(MODULE, "bad").isEmpty());
+        }
+
+        @Test
+        @DisplayName("the reserved profile name cannot be snapshotted")
+        void reservedName_isRejected() {
+            assertThrows(IllegalArgumentException.class, () -> repo.saveAppliedSnapshot(
+                    MODULE, LoggingProfileRepository.RESERVED_PROFILE_NAME, new Properties()));
+        }
+
+        @Test
+        @DisplayName("deleting a profile removes its snapshot")
+        void delete_removesSnapshot() throws IOException {
+            repo.saveProps(MODULE, "custom", new Properties());
+            repo.saveAppliedSnapshot(MODULE, "custom", new Properties());
+            assertTrue(Files.exists(repo.getAppliedSnapshotPath(MODULE, "custom")));
+
+            repo.delete(MODULE, "custom");
+
+            assertFalse(Files.exists(repo.getAppliedSnapshotPath(MODULE, "custom")));
+        }
+
+        @Test
+        @DisplayName("renaming a profile moves its snapshot")
+        void rename_movesSnapshot() throws IOException {
+            repo.saveProps(MODULE, "old", new Properties());
+            repo.saveAppliedSnapshot(MODULE, "old", new Properties());
+
+            repo.rename(MODULE, "old", "new");
+
+            assertFalse(Files.exists(repo.getAppliedSnapshotPath(MODULE, "old")));
+            assertTrue(Files.exists(repo.getAppliedSnapshotPath(MODULE, "new")));
+        }
+
+        @Test
+        @DisplayName("clearing the applied profile drops the stale snapshot")
+        void clearingApplied_dropsSnapshot() throws IOException {
+            repo.setApplied(MODULE, "custom");
+            repo.saveAppliedSnapshot(MODULE, "custom", new Properties());
+
+            repo.setApplied(MODULE, null);
+
+            assertFalse(Files.exists(repo.getAppliedSnapshotPath(MODULE, "custom")));
         }
     }
 

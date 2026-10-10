@@ -370,15 +370,16 @@ class ModuleLoggingProfilePanelTest {
                 "the profile selector must sit on the SAME row as the search box (profile y="
                         + verticalPosition(panel, profile) + ", search y=" + verticalPosition(panel, search) + ")");
 
-        // Everything is LEFT-aligned with the "Logger levels" frame below:
-        // the profile box starts at the same left edge (the panels line up
-        // column-wise).
+        // The search row carries the node configuration panel's search-row
+        // left margin: the profile box starts 10px right of the "Logger
+        // levels" frame (the frame runs flush, like the configuration tab's
+        // tab area).
         Container frame = findTitledContainer(panel, "Logger levels");
         assertNotNull(frame, "the 'Logger levels' titled frame is present");
         Container profileBox = findTitledContainer(panel, "Profile");
         assertNotNull(profileBox, "the 'Profile' titled box is present");
-        assertEquals(horizontalPosition(panel, frame), horizontalPosition(panel, profileBox),
-                "the profile box must start at the same left edge as the 'Logger levels' frame");
+        assertEquals(horizontalPosition(panel, profileBox) - horizontalPosition(panel, frame), 10,
+                "the profile box must start 10px right of the 'Logger levels' frame (the configuration panel's search-row left margin)");
         assertEquals(verticalPosition(panel, profileBox), verticalPosition(panel, search),
                 "the profile box and the search box must top-align on the same row");
         // ONE uniform gap between the profile box and the search box.
@@ -975,7 +976,16 @@ class ModuleLoggingProfilePanelTest {
         onEdt(() -> panel.createProfileFromCurrentState(name));
         try {
             assertEquals(name, combo.getSelectedItem(), "the new profile is selected after creation");
-            assertTrue(findButtonByTooltip(panel, "Save<br>").isEnabled(), "Save is valid for an on-disk profile");
+            // The Save/Apply split: right after creation the editor mirrors the
+            // saved profile exactly, so there is nothing to save yet — Save
+            // stays disabled until a row actually changes.
+            assertFalse(findButtonByTooltip(panel, "Save<br>").isEnabled(),
+                    "Save is not valid while there are no unsaved changes");
+            // An unsaved change lights Save up (it is valid for an on-disk profile now).
+            JComboBox<?> level = assertInstanceOf(JComboBox.class, editorAfterLabel(panel, "test.level"));
+            onEdt(() -> level.setSelectedItem("FINE"));
+            assertTrue(findButtonByTooltip(panel, "Save<br>").isEnabled(),
+                    "Save is valid while the profile has unsaved changes");
             assertTrue(findButtonByTooltip(panel, "Rename<br>").isEnabled(), "Rename is valid for an on-disk profile");
             assertTrue(findButtonByTooltip(panel, "Delete<br>").isEnabled(), "Delete is valid for an on-disk profile");
 
@@ -996,35 +1006,305 @@ class ModuleLoggingProfilePanelTest {
         }
     }
 
+    @Test
+    @DisplayName("selectProfile picks a listed profile and reloads the editor; unknown names are a no-op")
+    void selectProfileSelectsAndLoads() {
+        ModuleLoggingProfilePanel panel = newPanel();
+        JComboBox<String> combo = panel.getProfileCombo();
+
+        String name = "select-profile-" + System.nanoTime();
+        onEdt(() -> panel.createProfileFromCurrentState(name));
+        try {
+            // Back to the virtual 'Default' entry, then programmatically re-select the profile.
+            onEdt(() -> combo.setSelectedItem(ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY));
+
+            // An unsaved change is discarded by the reload.
+            JComboBox<?> level = assertInstanceOf(JComboBox.class, editorAfterLabel(panel, "test.level"));
+            onEdt(() -> level.setSelectedItem("FINE"));
+
+            final boolean[] ok = {false};
+            onEdt(() -> ok[0] = panel.selectProfile(name));
+            assertTrue(ok[0], "selectProfile reports success for a listed profile");
+            assertEquals(name, combo.getSelectedItem(), "selectProfile selects the listed profile");
+            assertEquals("INFO", String.valueOf(level.getSelectedItem()),
+                    "selectProfile reloads the editor from the saved profile (the unsaved change is discarded)");
+
+            final boolean[] no = {true};
+            onEdt(() -> no[0] = panel.selectProfile("no-such-profile"));
+            assertFalse(no[0], "an unknown entry is a no-op");
+            assertEquals(name, combo.getSelectedItem(), "an unknown entry leaves the selection untouched");
+        } finally {
+            // Self-cleaning: never leave a test profile in the runtime conf root.
+            try {
+                new LoggingProfileRepository().delete("test-mod", name);
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+        }
+    }
+
+
     // â”€â”€ Test fixture â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     @Test
-    @DisplayName("the New Profile button seeds the new profile with the editor's currently set values (and the tooltip says so)")
-    void newProfileSeededFromCurrentEditorState() {
+    @DisplayName("a clean profile switch shows no unsaved rows (no stale values, no false dirty rows)")
+    void cleanProfileSwitchShowsNoUnsavedRows() {
+        ModuleLoggingProfilePanel panel = newPanel();
+        String a = "clean-switch-a-" + System.nanoTime();
+        String b = "clean-switch-b-" + System.nanoTime();
+        onEdt(() -> panel.createProfileFromDefaults(a));
+        try {
+            onEdt(() -> panel.createProfileFromDefaults(b));
+            // Switch B → A (the user combo action path).
+            onEdt(() -> panel.getProfileCombo().setSelectedItem(a));
+            SearchMatchLabel label = labelWithText(panel, "test.handler");
+            assertNotNull(label, "the test.handler row label is present: " + allLabels(panel));
+            assertEquals(GuiColors.getApplied(), label.getForeground(),
+                    "a clean switch leaves the row applied (green)");
+            assertFalse(allLabels(panel).stream().anyMatch(l -> l.endsWith(" *")),
+                    "no row may carry the unsaved star after a clean switch; " + allLabels(panel));
+        } finally {
+            cleanupProfiles(a, b);
+        }
+    }
+
+    @Test
+    @DisplayName("unsaved edits survive a profile switch (per-profile workspace) and the combo marks the profile dirty")
+    void dirtyEditSurvivesProfileSwitch() {
+        ModuleLoggingProfilePanel panel = newPanel();
+        String a = "dirty-switch-a-" + System.nanoTime();
+        String b = "dirty-switch-b-" + System.nanoTime();
+        onEdt(() -> panel.createProfileFromDefaults(a));
+        try {
+            JTextField handler = assertInstanceOf(JTextField.class, editorAfterLabel(panel, "test.handler"));
+            onEdt(() -> handler.setText("unsaved.handler.value"));
+            // Switch away: the editor state of 'a' must be kept in memory.
+            onEdt(() -> panel.createProfileFromDefaults(b));
+            // 'a' is dirty: its combo entry carries the trailing star.
+            onEdt(() -> panel.getProfileCombo().setSelectedItem(a));
+            // The unsaved edit is restored on the switch back (the row is starred).
+            SearchMatchLabel starred = labelWithText(panel, "test.handler *");
+            assertNotNull(starred, "the restored row is unsaved (starred): " + allLabels(panel));
+            assertEquals(GuiColors.getUnsaved(), starred.getForeground(),
+                    "the restored row is colored unsaved");
+            assertEquals("unsaved.handler.value",
+                    ((JTextField) editorAfterLabel(panel, "test.handler *")).getText(),
+                    "the unsaved edit is restored on the switch back");
+            // The combo renderer marks the dirty profile with the trailing star.
+            ListCellRenderer<? super String> renderer = panel.getProfileCombo().getRenderer();
+            JLabel cell = (JLabel) renderer.getListCellRendererComponent(
+                    new JList<>(new String[]{a, b}), a, 0, false, false);
+            assertEquals(a + " *", cell.getText(),
+                    "the dirty profile carries the trailing star in the combo");
+        } finally {
+            cleanupProfiles(a, b);
+        }
+    }
+
+    @Test
+    @DisplayName("loading a profile sets EVERY row (missing keys get the default, not the previous profile's value)")
+    void missingKeysLoadDefaultsNotStaleValues() {
+        ModuleLoggingProfilePanel panel = newPanel();
+        String a = "stale-keys-a-" + System.nanoTime();
+        String b = "stale-keys-b-" + System.nanoTime();
+        onEdt(() -> panel.createProfileFromDefaults(a));
+        try {
+            // Give 'a' a distinctive value on one row and save it.
+            onEdt(() -> ((JTextField) editorAfterLabel(panel, "test.handler")).setText("custom.handler.a"));
+            onEdt(findButtonByTooltip(panel, "Save<br>")::doClick);
+            // Profile 'b' on disk defines ONLY test.level (no test.handler at all).
+            Properties partial = new Properties();
+            partial.setProperty("test.level", "FINE");
+            try {
+                new LoggingProfileRepository().saveProps("test-mod", b, partial);
+            } catch (Exception e) {
+                throw new AssertionError(e);
+            }
+            // Re-scan the profiles (the Refresh button).
+            onEdt(findButtonByTooltip(panel, "Refresh<br>")::doClick);
+            onEdt(() -> panel.getProfileCombo().setSelectedItem(b));
+            assertEquals("java.util.logging.ConsoleHandler",
+                    ((JTextField) editorAfterLabel(panel, "test.handler")).getText(),
+                    "a key missing from the profile loads the application default, not the previous profile's value");
+            assertEquals("FINE",
+                    ((JComboBox<?>) editorAfterLabel(panel, "test.level")).getSelectedItem(),
+                    "a key present in the profile loads its value");
+            // Switch back: 'a's saved value comes back.
+            onEdt(() -> panel.getProfileCombo().setSelectedItem(a));
+            assertEquals("custom.handler.a",
+                    ((JTextField) editorAfterLabel(panel, "test.handler")).getText(),
+                    "switching back restores 'a's saved value");
+        } finally {
+            cleanupProfiles(a, b);
+        }
+    }
+
+    @Test
+    @DisplayName("saved-but-not-applied rows stay saved (yellow) across a profile switch round-trip")
+    void savedProfileStaysSavedUntilApplied() {
+        LoggingProfileRepository repo = new LoggingProfileRepository();
+        try {
+            repo.setApplied("test-mod", null); // deterministic start: nothing applied
+            ModuleLoggingProfilePanel panel = newPanel();
+            String a = "saved-not-applied-a-" + System.nanoTime();
+            String b = "saved-not-applied-b-" + System.nanoTime();
+            onEdt(() -> panel.createProfileFromDefaults(a));
+            try {
+                // Save a custom value in 'a' (nothing is applied: baseline = defaults).
+                onEdt(() -> ((JTextField) editorAfterLabel(panel, "test.handler")).setText("custom.handler.a"));
+                onEdt(findButtonByTooltip(panel, "Save<br>")::doClick);
+                assertEquals(GuiColors.getSaved(), labelWithText(panel, "test.handler").getForeground(),
+                        "a saved value that is not applied is colored saved (yellow)");
+
+                // Switch away and back: the row must STAY saved (yellow), not flip to applied.
+                onEdt(() -> panel.createProfileFromDefaults(b));
+                onEdt(() -> panel.getProfileCombo().setSelectedItem(a));
+                assertEquals(GuiColors.getSaved(),
+                        labelWithText(panel, "test.handler").getForeground(),
+                        "the row stays saved (yellow) after the switch round-trip — it is not applied");
+            } finally {
+                cleanupProfiles(a, b);
+            }
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        } finally {
+            try {
+                repo.setApplied("test-mod", null);
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("the applied-state snapshot drives the applied baseline (applied = snapshot values)")
+    void appliedSnapshotDrivesRowStates() {
+        LoggingProfileRepository repo = new LoggingProfileRepository();
+        String a = "applied-snapshot-a-" + System.nanoTime();
+        try {
+            repo.setApplied("test-mod", null); // deterministic start: nothing applied
+            ModuleLoggingProfilePanel panel = newPanel();
+            onEdt(() -> panel.createProfileFromDefaults(a));
+            // Save a custom value, then apply 'a' WITH a snapshot of the pre-edit
+            // values (a runtime that still uses the old values).
+            onEdt(() -> ((JTextField) editorAfterLabel(panel, "test.handler")).setText("custom.handler.a"));
+            onEdt(findButtonByTooltip(panel, "Save<br>")::doClick);
+            Properties snapshot = new Properties();
+            snapshot.setProperty("test.handler", "java.util.logging.ConsoleHandler");
+            snapshot.setProperty("test.level", "INFO");
+            repo.saveAppliedSnapshot("test-mod", a, snapshot);
+            repo.setApplied("test-mod", a);
+
+            // A fresh panel re-reads the marker: the snapshot is the applied baseline.
+            ModuleLoggingProfilePanel fresh = newPanel();
+            onEdt(() -> fresh.getProfileCombo().setSelectedItem(a));
+            assertEquals(GuiColors.getSaved(),
+                    labelWithText(fresh, "test.handler").getForeground(),
+                    "a saved value that differs from the applied snapshot is colored saved (yellow)");
+            assertEquals(GuiColors.getApplied(),
+                    labelWithText(fresh, "test.level").getForeground(),
+                    "a value matching the applied snapshot is colored applied (green)");
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        } finally {
+            try {
+                repo.setApplied("test-mod", null); // also drops the snapshot
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+            cleanupProfiles(a);
+        }
+    }
+
+    @Test
+    @DisplayName("Apply is enabled for an on-disk profile that is not the applied one (unassigned profiles)")
+    void applyEnabledForUnassignedProfile() {
+        LoggingProfileRepository repo = new LoggingProfileRepository();
+        try {
+            repo.setApplied("test-mod", null); // nothing applied
+            ModuleLoggingProfilePanel panel = newPanel();
+            String a = "apply-unassigned-" + System.nanoTime();
+            onEdt(() -> panel.createProfileFromDefaults(a));
+            try {
+                assertTrue(findButtonByTooltip(panel, "Apply<br>").isEnabled(),
+                        "Apply is enabled for an on-disk profile while nothing is applied (it can be assigned)");
+            } finally {
+                cleanupProfiles(a);
+            }
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        } finally {
+            try {
+                repo.setApplied("test-mod", null);
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Apply is disabled when the selected profile IS the applied one and nothing waits")
+    void applyDisabledWhenAppliedAndClean() {
+        LoggingProfileRepository repo = new LoggingProfileRepository();
+        String a = "apply-applied-" + System.nanoTime();
+        try {
+            repo.setApplied("test-mod", null); // deterministic start
+            ModuleLoggingProfilePanel panel = newPanel();
+            onEdt(() -> panel.createProfileFromDefaults(a));
+            // Mark 'a' applied with a snapshot of its current (default) values:
+            // selected == applied and every row matches the baseline.
+            repo.saveAppliedSnapshot("test-mod", a, repo.loadProps("test-mod", a));
+            repo.setApplied("test-mod", a);
+
+            ModuleLoggingProfilePanel fresh = newPanel();
+            onEdt(() -> fresh.getProfileCombo().setSelectedItem(a));
+            assertFalse(findButtonByTooltip(fresh, "Apply<br>").isEnabled(),
+                    "Apply is disabled when the selected profile is the applied one and no change waits");
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        } finally {
+            try {
+                repo.setApplied("test-mod", null); // also drops the snapshot
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+            cleanupProfiles(a);
+        }
+    }
+
+    @Test
+    @DisplayName("the New Profile button creates a profile initialized with the application defaults (the editor state is NOT carried over)")
+    void newProfileInitializedWithApplicationDefaults() {
         ModuleLoggingProfilePanel panel = newPanel();
 
-        // The hover text carries the promise in parentheses: the new
-        // profile's values WILL BE the values currently set in the editor.
+        // The hover text carries the promise: the new profile's values WILL BE
+        // the application default values. Carrying over the editor's current
+        // state is what Clone Configuration is for — New Profile never does it.
         JButton newBtn = findButtonByTooltip(panel, "New Profile<br>");
-        assertTrue(newBtn.getToolTipText().contains(
-                "(the new profile's values will be the values currently set in the editor)"),
-                "the tooltip must say the new profile's values will be the currently set ones: "
+        assertTrue(newBtn.getToolTipText().contains("initialized with"),
+                "the tooltip must say the profile is initialized with the defaults: "
+                        + newBtn.getToolTipText());
+        assertTrue(newBtn.getToolTipText().contains("application default values"),
+                "the tooltip must say the profile is initialized with the application defaults: "
                         + newBtn.getToolTipText());
 
-        // Change a value in the editor â€” the new profile must carry THAT.
+        // Change a value in the editor — the new profile must NOT carry THAT.
         JTextField handler = assertInstanceOf(JTextField.class, editorAfterLabel(panel, "test.handler"));
         onEdt(() -> handler.setText("custom.handler"));
 
-        String name = "created-from-editor-" + System.nanoTime();
-        onEdt(() -> panel.createProfileFromCurrentState(name));
+        String name = "created-from-defaults-" + System.nanoTime();
+        onEdt(() -> panel.createProfileFromDefaults(name));
         try {
+            assertEquals(name, panel.getProfileCombo().getSelectedItem(), "the new profile is selected after creation");
             // The panel's repository is bound to the runtime conf root; verify
             // through a fresh instance of the same root.
             Properties loaded = new LoggingProfileRepository().loadProps("test-mod", name);
-            assertEquals("custom.handler", loaded.getProperty("test.handler"),
-                    "the new profile carries the editor's currently set value");
+            assertEquals("java.util.logging.ConsoleHandler", loaded.getProperty("test.handler"),
+                    "the new profile carries the application default, NOT the editor's changed value");
             assertEquals("INFO", loaded.getProperty("test.level"),
-                    "an untouched row keeps its currently set value");
+                    "an untouched row keeps its application default value");
+            assertFalse(allLabels(panel).stream().anyMatch(l -> l.endsWith(" *")),
+                    "no row may carry the unsaved star right after creation; " + allLabels(panel));
         } finally {
             // Self-cleaning: never leave a test profile in the runtime conf root.
             try {
@@ -1089,6 +1369,16 @@ class ModuleLoggingProfilePanelTest {
                 .filter(l -> text.equals(l.getText()))
                 .findFirst()
                 .orElse(null);
+    }
+
+    private static void cleanupProfiles(String... names) {
+        for (String name : names) {
+            try {
+                new LoggingProfileRepository().delete("test-mod", name);
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+        }
     }
 
     static final class TestProvider extends ModuleLoggingProvider {

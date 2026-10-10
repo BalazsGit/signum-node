@@ -2,6 +2,7 @@ package application.module.node.gui.configuration;
 
 import application.module.logging.gui.ModuleLoggingProfilePanel;
 import application.module.logging.LoggingAssignmentStore;
+import application.module.logging.LoggingProfileRepository;
 import application.module.node.logging.NodeLoggingProvider;
 import application.utils.config.ModuleIds;
 import application.utils.gui.ConfigurationUtils;
@@ -57,12 +58,12 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
             + "<b>Row colors</b> (node-logging):"
             + "<ul>"
             + "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getUnsaved()) + "'>\u25A0 Unsaved:</font> "
-            + "the value is neither loaded from the selected profile nor saved in it. Unsaved rows are additionally "
+            + "the value differs from the selected profile's saved content. Unsaved rows are additionally "
             + "marked with a trailing <b>*</b> star on their label (the same convention as the node configuration panel).</li>"
             + "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getSaved()) + "'>\u25A0 Saved:</font> "
-            + "saved in the selected profile, but not what is currently loaded into the editor.</li>"
+            + "saved in the selected profile, but not what the runtime is currently using.</li>"
             + "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getApplied()) + "'>\u25A0 Applied:</font> "
-            + "the value currently loaded from the profile into the editor (the same semantics as the node configuration panel).</li>"
+            + "what the runtime is currently using (the applied profile's values).</li>"
             + "</ul>"
             + "The \u201CShow values\u201D boxes filter rows by these states."
             + "<br><br>"
@@ -129,6 +130,14 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
         super(new NodeLoggingProvider());
         this.nodeProfileName = nodeProfileName;
 
+        // The applied profile of the NODE tab is the per-node assignment
+        // (SSOT), not the shared module marker: override the core's applied
+        // resolution so the row-state "applied" baseline and the combo's
+        // applied marker follow this node's own profile.
+        if (nodeProfileName != null && !nodeProfileName.isBlank()) {
+            setAppliedProfileNameSupplier(this::resolveNodeAppliedProfileName);
+        }
+
         // Node-specific File Handler rows (not present in the provider defaults).
         addExtraField("java.util.logging.FileHandler.level",   "File Level",            "INFO");
         addExtraField("java.util.logging.FileHandler.pattern", "Log File Pattern",      "logs/signum%u.log");
@@ -155,6 +164,10 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
         // initial profile load — recompute their row states (the unsaved/
         // saved/applied coloring and the "Show values" filters) now.
         reevaluateRowStates();
+
+        // The applied profile is the menu's default selection: the per-node
+        // assignment (SSOT) first, then the shared module applied marker.
+        selectAppliedProfileByDefault();
 
         setHelpSupplier(() -> NODE_HELP_HTML);
 
@@ -189,6 +202,63 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
         } catch (Exception e) {
             LOGGER.warn("Failed to record per-node logging assignment for node profile '{}': {}",
                     nodeProfileName, e.getMessage());
+        }
+    }
+
+    /**
+     * The logging profile this node profile currently applies (the per-node
+     * assignment SSOT), or null to fall back to the shared module marker.
+     * Defensive: a read failure falls back to the module marker.
+     */
+    private String resolveNodeAppliedProfileName() {
+        try {
+            String name = new LoggingAssignmentStore().getAssignment(nodeProfileName).get(ModuleIds.NODE);
+            return (name != null && !name.isBlank() && !LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(name))
+                    ? name
+                    : null;
+        } catch (Exception e) {
+            LOGGER.warn("Failed to read the per-node logging assignment for node profile '{}': {}",
+                    nodeProfileName, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Pre-selects the profile this node profile <b>applied</b> in the profile menu.
+     * <p>
+     * Resolution order:
+     * </p>
+     * <ol>
+     *   <li>the per-node assignment (the SSOT in {@code conf/node/profiles.json} via
+     *       {@link LoggingAssignmentStore}) — when this panel is bound to a node profile;</li>
+     *   <li>the module-level applied marker the core panel loaded
+     *       ({@link #appliedProfileName()}).</li>
+     * </ol>
+     * <p>
+     * A missing or unknown name (e.g. the applied profile was deleted since) keeps
+     * the constructor's default selection (the virtual "Default" entry). Defensive:
+     * a read failure must never break construction.
+     * </p>
+     */
+    private void selectAppliedProfileByDefault() {
+        String name = null;
+        if (nodeProfileName != null && !nodeProfileName.isBlank()) {
+            try {
+                name = new LoggingAssignmentStore().getAssignment(nodeProfileName).get(ModuleIds.NODE);
+            } catch (Exception e) {
+                LOGGER.warn("Failed to read the per-node logging assignment for node profile '{}': {}",
+                        nodeProfileName, e.getMessage());
+            }
+        }
+        if (name == null || name.isBlank()) {
+            name = appliedProfileName();
+        }
+        if (name == null || name.isBlank() || LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(name)) {
+            return; // nothing custom applied — the virtual "Default" entry already represents it
+        }
+        if (selectProfile(name)) {
+            LOGGER.info("Pre-selected applied logging profile '{}' in the profile menu (node profile '{}')",
+                    name, nodeProfileName);
         }
     }
 

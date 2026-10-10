@@ -85,6 +85,17 @@ public final class NodeLoggingApplier {
             logger.setLogLevel(level);
             LOGGER.info("Applied logging level {} (effective profile '{}') to node profile '{}' module '{}'",
                     level, effective, nodeProfile, moduleId);
+            // Persist the applied-state snapshot: the effective profile's
+            // on-disk values are what the runtime uses from now on (the GUI's
+            // applied baseline reads them back). Best-effort: a snapshot
+            // failure must not break the (already done) level application.
+            try {
+                LoggingProfileRepository repo = new LoggingProfileRepository(confRoot);
+                repo.saveAppliedSnapshot(moduleId, effective, repo.loadProps(moduleId, effective));
+            } catch (Exception e) {
+                LOGGER.warn("Failed to persist the applied-state snapshot for effective profile '{}' of module '{}': {}",
+                        effective, moduleId, e.getMessage());
+            }
         } catch (Exception e) {
             LOGGER.warn("Failed to apply per-node logging for profile '{}' module '{}': {}",
                     nodeProfile, moduleId, e.getMessage());

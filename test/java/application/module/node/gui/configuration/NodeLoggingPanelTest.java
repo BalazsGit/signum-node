@@ -1,6 +1,9 @@
 package application.module.node.gui.configuration;
 
+import application.module.logging.LoggingAssignmentStore;
+import application.module.logging.LoggingProfileRepository;
 import application.module.logging.gui.ModuleLoggingProfilePanel;
+import application.utils.config.ModuleIds;
 import application.utils.gui.GuiColors;
 import application.utils.logging.ModuleLoggingProfile;
 import application.utils.logging.ModuleLoggingProvider;
@@ -21,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -189,6 +193,55 @@ class NodeLoggingPanelTest {
                 "an untouched row must not be starred; labels=" + labels);
     }
 
+    @Test
+    @DisplayName("the applied profile (per-node assignment SSOT) is selected by default in the profile menu")
+    void appliedProfileIsSelectedByDefault() throws Exception {
+        LoggingAssignmentStore store = new LoggingAssignmentStore();
+        LoggingProfileRepository repo = new LoggingProfileRepository();
+        String node = "zz-applied-default-node";
+        String profile = "zz-applied-default-" + System.nanoTime();
+        try {
+            repo.create(ModuleIds.NODE, profile, new Properties());
+            store.setAssignmentForModule(node, ModuleIds.NODE, profile);
+
+            final NodeLoggingPanel[] holder = new NodeLoggingPanel[1];
+            onEdt(() -> holder[0] = new NodeLoggingPanel(node, () -> { }));
+            assertEquals(profile, holder[0].getProfileCombo().getSelectedItem(),
+                    "the applied profile is pre-selected in the profile menu");
+        } finally {
+            try {
+                store.clearAssignment(node);
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+            try {
+                repo.delete(ModuleIds.NODE, profile);
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("without any applied profile the virtual 'Default' entry stays the default selection")
+    void defaultEntrySelectedWhenNothingApplied() {
+        // Guard: the assertion only holds when no CUSTOM node logging profile is applied
+        // in the runtime conf (a custom applied marker would be the legitimate selection).
+        try {
+            String applied = new LoggingProfileRepository().getApplied(ModuleIds.NODE);
+            if (applied != null && !applied.isBlank()
+                    && !LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(applied)) {
+                return;
+            }
+        } catch (Exception ignored) {
+            // unreadable marker — keep asserting the default
+        }
+        NodeLoggingPanel panel = newPanel();
+        assertEquals(ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY,
+                panel.getProfileCombo().getSelectedItem(),
+                "nothing applied — the virtual 'Default' entry stays selected");
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────
 
     private static int countVisibleTextFields(Container root) {
@@ -316,10 +369,12 @@ class NodeLoggingPanelTest {
         assertNotNull(showValues, "the 'Show values' titled box is present");
         assertNotNull(levelsFrame, "the 'Logger levels' titled frame is present");
 
-        // Left-aligned: the row's first box starts at the same left edge as
-        // the "Logger levels" frame (the panels line up column-wise).
-        assertEquals(horizontalPosition(panel, levelsFrame), horizontalPosition(panel, profileBox),
-                "the profile box must start at the same left edge as the 'Logger levels' frame");
+        // The search row carries the node configuration panel's search-row
+        // left margin: the row's first box starts 10px right of the
+        // "Logger levels" frame (the frame runs flush, like the configuration
+        // tab's tab area).
+        assertEquals(horizontalPosition(panel, profileBox) - horizontalPosition(panel, levelsFrame), 10,
+                "the profile box must start 10px right of the 'Logger levels' frame (the configuration panel's search-row left margin)");
 
         // Uniform gaps between all three boxes (Profile ↔ Search ↔ Show values).
         int profileToSearch = horizontalPosition(panel, searchBox)

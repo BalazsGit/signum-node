@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Unit tests for {@link NodeLoggingApplier} — per-node logging level application with
@@ -71,6 +72,30 @@ class NodeLoggingApplierTest {
 
         ProfileLogger logger = NodeLoggerRegistry.get(MODULE, PROFILE);
         assertEquals(LogLevel.ERROR, logger.getLogLevel(), "on-disk node.level=SEVERE → ERROR");
+    }
+
+    @Test
+    @DisplayName("applying persists the applied-state snapshot for the effective profile")
+    void applyForNodeProfile_persistsAppliedSnapshot() throws IOException {
+        LoggingProfileRepository repo = new LoggingProfileRepository(tempDir.toString());
+        java.util.Properties props = new java.util.Properties();
+        props.setProperty("node.level", "WARNING");
+        props.setProperty("node.handler", "java.util.logging.FileHandler");
+        repo.saveProps(MODULE, "custom", props);
+
+        new LoggingAssignmentStore(tempDir.toString())
+                .setAssignment(PROFILE, Map.of(MODULE, "custom"));
+
+        NodeLoggingApplier.applyForNodeProfile(tempDir.toString(), PROFILE, MODULE);
+
+        java.util.Properties snapshot = repo.loadAppliedSnapshot(MODULE, "custom");
+        assertEquals("WARNING", snapshot.getProperty("node.level"),
+                "the snapshot stores the applied values (node.level)");
+        assertEquals("java.util.logging.FileHandler", snapshot.getProperty("node.handler"),
+                "the snapshot stores the applied values (node.handler)");
+        assertTrue(repo.getAppliedSnapshotPath(MODULE, "custom")
+                .toString().endsWith("applied" + java.io.File.separator + "custom.json"),
+                "the snapshot lives under the module's applied/ directory");
     }
 
     @Test
