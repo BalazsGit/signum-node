@@ -1,6 +1,7 @@
 package application.module.node.gui.configuration;
 import application.utils.config.ModuleIds;
 
+import application.module.logging.LoggingAssignmentStore;
 import application.module.node.NodeModule;
 import application.module.node.Signum;
 import application.module.node.crypto.Crypto;
@@ -25,6 +26,7 @@ import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
+import application.utils.gui.NewProfileChoiceDialog;
 import application.utils.gui.ResponsiveToolbarScrollPane;
 import application.utils.gui.SearchMatchLabel;
 import application.utils.gui.SearchMatchPanel;
@@ -106,13 +108,12 @@ public class NodeConfigurationPanel extends JPanel {
     private final Map<String, String> defaultValues = new HashMap<>();
     private final Runnable restartAction;
 
-    // Linked Profiles UI
-    private JdbcProfileConfigurationPanel linkedDbPanel;
-    private JComboBox<String> linkedLogCombo;
+    // Database link UI (the "Linked Database Profile" controls of the JDBC
+    // Connection URL row; the former separate "Linked Profiles" tab was
+    // merged into the JDBC row — that control takes over its role)
     private JCheckBox autoStartDbCheck;
     private JCheckBox autoStopDbCheck;
 
-    private String savedLinkedLog = "";
     private String savedLinkedDb = "";
     private boolean savedDbAutoStart = false;
     private boolean savedDbAutoStop = false;
@@ -130,6 +131,24 @@ public class NodeConfigurationPanel extends JPanel {
      */
     private Signum signum;
     private Path propertiesFile;
+    /**
+     * Host callback for the New Profile toolbar button: receives the choice
+     * selected in the shared {@link NewProfileChoiceDialog} (launch the setup
+     * wizard or create a new empty profile). {@code null} until the host
+     * (the node profile window) wires it — with no handler the button shows a
+     * notice instead of a dead click.
+     */
+    private java.util.function.Consumer<NewProfileChoiceDialog.Choice> newProfileHandler;
+
+    /**
+     * Wires the New Profile toolbar button to the host's creation paths.
+     *
+     * @param handler invoked on the EDT with the user's choice from the
+     *                {@link NewProfileChoiceDialog} (wizard / empty profile)
+     */
+    public void setNewProfileHandler(java.util.function.Consumer<NewProfileChoiceDialog.Choice> handler) {
+        this.newProfileHandler = handler;
+    }
     private final java.util.List<PropertyRow> allPropertyRows = new ArrayList<>();
     /** Live search (console-style): the rows matching the current query. */
     private final List<PropertyRow> searchMatches = new ArrayList<>();
@@ -174,7 +193,10 @@ public class NodeConfigurationPanel extends JPanel {
     /** The match set the flat results list currently displays (skips no-op rebuilds). */
     private List<PropertyRow> lastListedMatches;
     private JTabbedPane categoryTabbedPane;
-    private JButton saveApplyBtn;
+    private JButton newProfileBtn;
+    private JButton saveBtn;
+    private JButton applyBtn;
+    private JButton helpBtn;
     private boolean overallDirty = false;
     private JButton renameProfileBtn;
     private JButton deleteProfileBtn;
@@ -186,12 +208,13 @@ public class NodeConfigurationPanel extends JPanel {
     private String loadedProfileName;
     /**
      * A database profile discovered while the UI was still being built (the
-     * initial {@code updateFromUrl} runs before the Linked Profiles tab
-     * exists) — linked by the post-init auto-link pass.
+     * initial {@code updateFromUrl} runs before the JDBC link controls
+     * exist) — linked by the post-init auto-link pass.
      */
     private String pendingDiscoveredDbProfile;
     private int currentAddingTabIndex = -1;
-    private int linkedProfilesTabIndex = -1;
+    /** The category tab index of the Database tab (hosts the JDBC link row). */
+    private int databaseTabIndex = -1;
     private boolean isProgrammaticChange = false;
 
     public NodeConfigurationPanel(Runnable restartAction, String confFolder, Runnable backAction,
@@ -269,7 +292,10 @@ public class NodeConfigurationPanel extends JPanel {
         // Initialize buttons early to avoid NullPointerException in listeners during UI
         // construction. The toolbar is icon-only: the tooltip is the single source of
         // information about each action (F0 of the profile-actions refactor plan).
-        this.saveApplyBtn = new JButton();
+        this.newProfileBtn = new JButton();
+        this.saveBtn = new JButton();
+        this.applyBtn = new JButton();
+        this.helpBtn = new HelpButton();
         
         LOGGER.debug("NodeConfigurationPanel - calling loadAppliedProperties()");
         loadAppliedProperties();
@@ -278,7 +304,7 @@ public class NodeConfigurationPanel extends JPanel {
         
         // Defer heavy UI construction + profile link loading to EDT to avoid blocking the constructor.
         // initHelpTexts is ~1500 lines of HashMap.put calls, initUI builds 3000+ components,
-        // and loadProfileLinks needs UI fields (linkedLogCombo) initialized by initUI.
+        // and loadProfileLinks needs the JDBC link row built by initUI.
         SwingUtilities.invokeLater(() -> {
             try {
                 LOGGER.debug("NodeConfigurationPanel - async initHelpTexts START");
@@ -321,16 +347,32 @@ public class NodeConfigurationPanel extends JPanel {
     private void initUI() {
         JPanel bodyPanel = new JPanel(new BorderLayout());
 
-        // --- Profile Panel ---
-        JPanel profilePanel = new JPanel(new MigLayout("insets 0, gap 5"));
-        profilePanel.setBorder(BorderFactory.createEmptyBorder()); // Remove internal padding, rely on scroll pane's
-                                                                   // padding
-        saveApplyBtn.setToolTipText(
-                "<html>Save &amp; Apply<br><br>Saves all unsaved changes to the current profile, then asks<br>"
-                        + "whether to restart the node so the new configuration takes effect.</html>");
-        saveApplyBtn.setEnabled(false);
-        saveApplyBtn.addActionListener(e -> runProfileAction("Save & Apply", this::saveAndApply));
-        profilePanel.add(saveApplyBtn);
+        // --- Profile Panel (the shared profile-action toolbar row: identical
+        //     button size / gap / margins to the module logging profile panels
+        //     and the node profile toolbar) ---
+        JPanel profilePanel = ConfigurationUtils.createProfileToolbarRow();
+
+        newProfileBtn.setToolTipText(
+                "<html>New Profile<br><br>Opens the dialog to launch the setup wizard<br>"
+                        + "or to create a new empty profile.</html>");
+        newProfileBtn.addActionListener(e -> runProfileAction("New Profile", this::newProfile));
+        profilePanel.add(newProfileBtn);
+
+        saveBtn.setToolTipText(
+                "<html>Save<br><br>Saves all unsaved changes to the current profile<br>"
+                        + "(reviewing them in a dialog first). Does NOT restart the node.<br>"
+                        + "Active only while there are unsaved changes.</html>");
+        saveBtn.setEnabled(false);
+        saveBtn.addActionListener(e -> runProfileAction("Save", this::saveProfile));
+        profilePanel.add(saveBtn);
+
+        applyBtn.setToolTipText(
+                "<html>Apply<br><br>Applies the saved configuration: marks the profile as<br>"
+                        + "applied and restarts the node so the new settings take effect.<br>"
+                        + "Active only while there are saved, not yet applied changes.</html>");
+        applyBtn.setEnabled(false);
+        applyBtn.addActionListener(e -> runProfileAction("Apply", this::applyProfile));
+        profilePanel.add(applyBtn);
 
         renameProfileBtn.setToolTipText(
                 "<html>Rename Profile<br><br>Renames this profile (including its data paths).<br>"
@@ -340,18 +382,10 @@ public class NodeConfigurationPanel extends JPanel {
                 () -> renameProfile(loadedProfileName)));
         profilePanel.add(renameProfileBtn);
 
-        deleteProfileBtn.setToolTipText(
-                "<html>Delete Profile<br><br>Permanently deletes this profile, its settings<br>"
-                        + "(optionally its database files) and closes its tab.<br>"
-                        + "If the node is running it will be stopped (and not restarted).</html>");
-        deleteProfileBtn.addActionListener(e -> runProfileAction("Delete Profile",
-                () -> deleteProfile(loadedProfileName)));
-        profilePanel.add(deleteProfileBtn);
-
         resetToDefaultsBtn = new JButton();
         resetToDefaultsBtn.setToolTipText(
                 "<html>Reset to Defaults<br><br>Resets all fields in the editor to the application default values.<br>"
-                        + "Nothing is saved — use Save &amp; Apply to persist the reset settings.</html>");
+                        + "Nothing is saved — use Save to persist the reset settings.</html>");
         resetToDefaultsBtn.addActionListener(e -> runProfileAction("Reset to Defaults", this::resetToDefaults));
         profilePanel.add(resetToDefaultsBtn);
 
@@ -372,27 +406,29 @@ public class NodeConfigurationPanel extends JPanel {
 
         reloadProfileBtn = new JButton();
         reloadProfileBtn.setToolTipText(
-                "<html>Reload Profile<br><br>Re-reads the current profile file from disk (e.g. after external edits).<br>"
+                "<html>Reload Configuration<br><br>Re-reads the current profile file from disk (e.g. after external edits).<br>"
                         + "Unsaved changes in the editor are discarded.</html>");
-        reloadProfileBtn.addActionListener(e -> runProfileAction("Reload Profile", this::reloadProfile));
+        reloadProfileBtn.addActionListener(e -> runProfileAction("Reload Configuration", this::reloadProfile));
         profilePanel.add(reloadProfileBtn);
+
+        deleteProfileBtn.setToolTipText(
+                "<html>Delete Profile<br><br>Permanently deletes this profile, its settings<br>"
+                        + "(optionally its database files) and closes its tab.<br>"
+                        + "If the node is running it will be stopped (and not restarted).</html>");
+        deleteProfileBtn.addActionListener(e -> runProfileAction("Delete Profile",
+                () -> deleteProfile(loadedProfileName)));
+        profilePanel.add(deleteProfileBtn);
 
         updateProfileButtonsUI();
 
-        JButton helpBtn = new HelpButton();
         helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         helpBtn.setToolTipText("View detailed information about configuration profile management");
-        helpBtn.addActionListener(e -> showProfileHelp());
-        profilePanel.add(helpBtn); // Add help button
+        helpBtn.addActionListener(e -> showProfileHelp()); // Add help button
+        profilePanel.add(helpBtn);
 
-        JScrollPane profileScrollPane = new ResponsiveToolbarScrollPane(profilePanel, new Insets(5, 10, 0, 5));
-        profileScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
-        profileScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
-        profileScrollPane.setBorder(BorderFactory.createEmptyBorder());
-        profileScrollPane.setOpaque(false);
-        profileScrollPane.getViewport().setOpaque(false);
-        // GuiUtils.addHorizontalScrollPadding(profileScrollPane, profilePanel, new
-        // Insets(5, 10, 5, 5)); // Handled by ResponsiveToolbarScrollPane
+        // The standard responsive toolbar wrapper (shared insets/policies —
+        // identical margins to the logging profile panels' toolbar).
+        JScrollPane profileScrollPane = ConfigurationUtils.wrapProfileToolbarRow(profilePanel);
 
         // --- Search panel: the unified SearchMatchPanel shared with the
         // console's filter header — a compact, left-aligned "Search" titled
@@ -462,9 +498,15 @@ public class NodeConfigurationPanel extends JPanel {
         JScrollPane searchScroll = new ResponsiveToolbarScrollPane(searchPanelWrap, new Insets(0, 10, 0, 5), false);
         searchScroll.setBorder(new EmptyBorder(4, 0, 4, 0));
         searchRow.add(searchScroll, BorderLayout.CENTER);
-        JPanel northPanel = new JPanel(new BorderLayout());
+        // The 5px toolbar-to-search-row vgap and the NORTH/CENTER placement
+        // mirror the module logging profile panels' top area (a
+        // BorderLayout(0, 5) wrapper with the toolbar NORTH and the search
+        // row CENTER), so the toolbar row and the search row land at the same
+        // vertical positions in both tabs. (A NORTH/SOUTH pair in a plain
+        // BorderLayout would sit flush — no gap — and be 5px off.)
+        JPanel northPanel = new JPanel(new BorderLayout(0, 5));
         northPanel.add(profileScrollPane, BorderLayout.NORTH);
-        northPanel.add(searchRow, BorderLayout.SOUTH);
+        northPanel.add(searchRow, BorderLayout.CENTER);
         bodyPanel.add(northPanel, BorderLayout.NORTH);
 
         // No border around the tabbed pane itself
@@ -507,6 +549,7 @@ public class NodeConfigurationPanel extends JPanel {
         // --- Database Settings ---
         LOGGER.debug("initUI - Building Database tab");
         currentAddingTabIndex = 1;
+        databaseTabIndex = currentAddingTabIndex;
         // Tighter row gap than the other tabs: the database entries should
         // read as one continuous list.
         JPanel dbPanel = createCategoryPanel(3);
@@ -723,63 +766,10 @@ public class NodeConfigurationPanel extends JPanel {
         categoryTabbedPane.addTab("Network Constants", createScrollPane(netPanel));
         LOGGER.debug("initUI - Network tab done");
 
-        // --- Linked Profiles ---
-        LOGGER.debug("initUI - Building Linked Profiles tab");
-        linkedProfilesTabIndex = categoryTabbedPane.getTabCount();
-        currentAddingTabIndex = linkedProfilesTabIndex;
-
-        JPanel linkedPanel = createCategoryPanel();
-        addSectionHeader(linkedPanel, "Linked Profiles", true);
-        linkedLogCombo = new JComboBox<>();
-        addLinkedProfileRowWithButtons(linkedPanel, "Logger Profile:", linkedLogCombo);
-
-        addSectionHeader(linkedPanel, "Linked Database Profile Detail:", false);
-
-        autoStartDbCheck = new JCheckBox("Auto Start Database");
-        autoStopDbCheck = new JCheckBox("Auto Stop Database");
-        autoStartDbCheck.setOpaque(false);
-        autoStopDbCheck.setOpaque(false);
-
-        linkedPanel.add(autoStartDbCheck, "split 2, gapleft 10");
-        linkedPanel.add(autoStopDbCheck, "wrap, gapbottom 10");
-
-        linkedDbPanel = new JdbcProfileConfigurationPanel(confFolder, () -> {
-            if (!isProgrammaticChange) {
-                updateDirtyStatus();
-            }
-        });
-
-        // Add listener to linkedDbPanel's engineCombo to update checkbox state
-        if (linkedDbPanel != null && linkedDbPanel.getEngineCombo() instanceof JComboBox) {
-            @SuppressWarnings("unchecked")
-            JComboBox<DatabaseConfigurationPanel.DatabaseEngine> engineCombo = (JComboBox<DatabaseConfigurationPanel.DatabaseEngine>) linkedDbPanel
-                    .getEngineCombo();
-            engineCombo.addActionListener(e -> {
-                if (!isProgrammaticChange) {
-                    updateAutoDbCheckboxesState();
-                    updateDirtyStatus(); // State change might make it dirty
-                }
-            });
-        }
-
-        // Listener for autoStart/Stop checkboxes
-        ActionListener linkedCheckListener = e -> {
-            if (!isProgrammaticChange) {
-                updateDirtyStatus();
-            }
-        };
-        autoStartDbCheck.addActionListener(linkedCheckListener);
-        autoStopDbCheck.addActionListener(linkedCheckListener);
-
-        // Initial state update for autoStart/Stop checkboxes
-        updateAutoDbCheckboxesState();
-        if (linkedDbPanel != null) {
-            linkedPanel.add(linkedDbPanel, "span, growx, wrap");
-        }
-
-        finalizeCategoryPanel(linkedPanel);
-        categoryTabbedPane.addTab("Linked Profiles", createScrollPane(linkedPanel));
-        LOGGER.debug("initUI - Linked Profiles tab done");
+        // --- Linked Profiles: NO separate tab. The "Linked Database Profile"
+        //     control (checkbox + profile card + auto start/stop boxes) of the
+        //     JDBC Connection URL row (Database tab) takes over its role, and
+        //     the logging assignment is managed on the Logging tab (SSOT).
 
         // --- Content: the category tabs (search highlights matches in place) ---
         LOGGER.debug("initUI - Adding category tabs");
@@ -835,9 +825,18 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void updateProfileButtonsUI() {
-        ConfigurationUtils.configureProfileToolbar(null, saveApplyBtn, null, renameProfileBtn,
+        ConfigurationUtils.configureProfileToolbar(newProfileBtn, saveBtn, applyBtn, renameProfileBtn,
                 deleteProfileBtn, reloadProfileBtn, null, resetToDefaultsBtn,
                 copyProfileDataBtn, cloneProfileBtn);
+        // Save / Apply are tinted with their value-state colors (the "saved"
+        // and "applied" palette colors) so they read as the two halves of the
+        // save-then-apply flow instead of two identical floppy icons.
+        float iconSize = GuiConstants.getToolBarIconSize();
+        ConfigurationUtils.styleProfileIconButton(saveBtn, FontAwesome.FLOPPY_O, GuiColors.getSaved(), iconSize);
+        ConfigurationUtils.styleProfileIconButton(applyBtn, FontAwesome.CHECK_CIRCLE_O, GuiColors.getApplied(), iconSize);
+        // The help button keeps the same flat toolbar style (size, border) as
+        // the other profile-action buttons.
+        ConfigurationUtils.styleProfileIconButton(helpBtn, FontAwesome.QUESTION_CIRCLE, GuiColors.getHelpIcon(), iconSize);
     }
 
     private void refreshUIColors() {
@@ -1423,36 +1422,16 @@ public class NodeConfigurationPanel extends JPanel {
         return loadedProfileName;
     }
 
-    private void refreshLinkedProfileLists() {
-        isProgrammaticChange = true;
-
-        // Logging Profiles
-        linkedLogCombo.removeAllItems();
-        linkedLogCombo.addItem("");
-        ConfigurationUtils.fetchProfileNames(ConfigurationUtils.getNodeLoggingDir(),
-                Signum.DEFAULT_LOGGING_PROPERTIES_NAME + ".properties")
-                .forEach(linkedLogCombo::addItem);
-        if (!Signum.LOGGING_PROPERTIES_NAME.equals(Signum.DEFAULT_LOGGING_PROPERTIES_NAME)) {
-            linkedLogCombo.addItem(Signum.LOGGING_PROPERTIES_NAME);
-        }
-
-        // Apply priority selection: 1. linked, 2. active
-        String currentLinkedLog = getLinkedLoggingProfile();
-        linkedLogCombo.setSelectedItem(currentLinkedLog != null && !currentLinkedLog.isEmpty() ? currentLinkedLog
-                : Signum.LOGGING_PROPERTIES_NAME);
-        isProgrammaticChange = false;
-    }
-
     private void loadProfileLinks(String profileName) {
         isProgrammaticChange = true;
-        refreshLinkedProfileLists();
-
-        if (linkedDbPanel != null) {
-            ((JComboBox<?>) linkedDbPanel.getProfileCombo()).setSelectedItem("");
+        applyDbLinkToJdbcRow(null); // start from a clean, unlinked state
+        if (autoStartDbCheck != null) {
+            autoStartDbCheck.setSelected(true);
         }
-        linkedLogCombo.setSelectedItem("");
-        autoStartDbCheck.setSelected(true);
-        autoStopDbCheck.setSelected(true);
+        if (autoStopDbCheck != null) {
+            autoStopDbCheck.setSelected(true);
+        }
+        isProgrammaticChange = false;
 
         Path metadataPath = ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER);
         if (Files.exists(metadataPath)) {
@@ -1461,36 +1440,126 @@ public class NodeConfigurationPanel extends JPanel {
                 if (metadata.has(KEY_PROFILE_LINKS) && metadata.getAsJsonObject(KEY_PROFILE_LINKS).has(profileName)) {
                     JsonObject links = metadata.getAsJsonObject(KEY_PROFILE_LINKS).getAsJsonObject(profileName);
                     if (links.has(KEY_DATABASE)) {
-                        String dbLink = links.get(KEY_DATABASE).getAsString();
-                        if (dbLink.contains(":")) {
-                            String[] parts = dbLink.split(":", 2);
-                            ((JComboBox<DatabaseConfigurationPanel.DatabaseEngine>) linkedDbPanel.getEngineCombo())
-                                    .setSelectedItem(
-                                            DatabaseConfigurationPanel.DatabaseEngine.fromDisplayName(parts[0]));
-                            ((JComboBox<String>) linkedDbPanel.getProfileCombo())
-                                    .setSelectedItem(parts.length > 1 && !parts[1].isEmpty() ? parts[1] : "");
-                        }
+                        applyDbLinkToJdbcRow(links.get(KEY_DATABASE).getAsString());
                     }
-                    if (links.has(KEY_LOGGING))
-                        linkedLogCombo.setSelectedItem(links.get(KEY_LOGGING).getAsString());
-                    if (links.has(KEY_DB_AUTO_START))
+                    if (links.has(KEY_DB_AUTO_START) && autoStartDbCheck != null) {
                         autoStartDbCheck.setSelected(links.get(KEY_DB_AUTO_START).getAsBoolean());
-                    if (links.has(KEY_DB_AUTO_STOP))
+                    }
+                    if (links.has(KEY_DB_AUTO_STOP) && autoStopDbCheck != null) {
                         autoStopDbCheck.setSelected(links.get(KEY_DB_AUTO_STOP).getAsBoolean());
+                    }
                 }
             } catch (Exception e) {
                 LOGGER.error("Error loading profile links from JSON", e);
             }
         }
 
-        updateAutoDbCheckboxesState();
-
-        savedLinkedLog = getLinkedLoggingProfile();
         savedLinkedDb = getLinkedDbProfile();
-        savedDbAutoStart = autoStartDbCheck.isSelected();
-        savedDbAutoStop = autoStopDbCheck.isSelected();
+        savedDbAutoStart = autoStartDbCheck != null && autoStartDbCheck.isSelected();
+        savedDbAutoStop = autoStopDbCheck != null && autoStopDbCheck.isSelected();
+    }
 
-        isProgrammaticChange = false;
+    /**
+     * Syncs an {@code "Engine:Profile"} database link into the "Linked
+     * Database Profile" control of the JDBC row: when the linked profile can
+     * be materialized (engine known, profile exists), the profile card shows
+     * its full configuration — engine, profile, the database instance the
+     * node profile's saved JDBC URL points at (the first instance otherwise)
+     * and the matching user — and the checkbox is selected so the card is
+     * the active one. A {@code null} / empty / malformed value, an unknown
+     * engine or a missing profile clears the link: the card resets and the
+     * row falls back to the manual configuration. Purely UI — the caller
+     * decides whether to persist.
+     */
+    private void applyDbLinkToJdbcRow(String value) {
+        JComponent jdbcComp = propertyComponents.get(Props.DB_URL.getName());
+        if (jdbcComp == null) {
+            return; // the JDBC row is not built yet
+        }
+        JdbcProfileConfigurationPanel pp = (JdbcProfileConfigurationPanel) jdbcComp.getClientProperty("profilePanel");
+        JCheckBox cb = (JCheckBox) jdbcComp.getClientProperty("useProfileCheck");
+        if (pp == null) {
+            return;
+        }
+        isProgrammaticChange = true;
+        try {
+            if (value == null || value.isEmpty() || !value.contains(":")) {
+                // No link: the card resets to its neutral state and the row
+                // goes back to the manual configuration.
+                pp.clearLinkedProfile();
+                if (cb != null && cb.isSelected()) {
+                    cb.setSelected(false);
+                }
+                showJdbcProfileCard(jdbcComp, false);
+                return;
+            }
+            String[] parts = value.split(":", 2);
+            String profileName = parts.length > 1 ? parts[1] : "";
+            DatabaseConfigurationPanel.DatabaseEngine engine = DatabaseConfigurationPanel.DatabaseEngine
+                    .fromDisplayName(parts[0]);
+            if (engine == null) {
+                LOGGER.warn("Unknown database engine in link '{}'; the JDBC row falls back to manual mode", value);
+                pp.clearLinkedProfile();
+                if (cb != null && cb.isSelected()) {
+                    cb.setSelected(false);
+                }
+                showJdbcProfileCard(jdbcComp, false);
+                return;
+            }
+            if (profileName.isEmpty()) {
+                // Transient (an engine was picked, no profile yet): the card
+                // follows the engine; the checkbox and the saved link are left
+                // where they are until a profile is chosen.
+                pp.applyLinkedProfile(engine, "", null, null);
+                return;
+            }
+            // The card must show the configuration the node profile actually
+            // uses: the database instance (and user) matching the saved JDBC
+            // URL / username when the linked profile offers it.
+            String preferredUrl = savedProfile != null ? savedProfile.getProperty(Props.DB_URL.getName(), "") : "";
+            String preferredUser = savedProfile != null ? savedProfile.getProperty(Props.DB_USERNAME.getName(), "")
+                    : "";
+            boolean applied = pp.applyLinkedProfile(engine, profileName, preferredUrl, preferredUser);
+            if (applied) {
+                if (cb != null && !cb.isSelected()) {
+                    cb.setSelected(true);
+                }
+                showJdbcProfileCard(jdbcComp, true); // the profile card becomes the active card
+            } else {
+                LOGGER.warn("Database profile link '{}' cannot be applied (the profile is missing); "
+                        + "the JDBC row falls back to manual mode", value);
+                pp.clearLinkedProfile();
+                if (cb != null && cb.isSelected()) {
+                    cb.setSelected(false);
+                }
+                showJdbcProfileCard(jdbcComp, false);
+            }
+        } finally {
+            isProgrammaticChange = false;
+        }
+        updateAutoDbCheckboxesState();
+    }
+
+    /**
+     * Explicitly switches the JDBC row's card between the manual configuration
+     * and the profile card. Programmatic link changes call this directly
+     * (instead of relying on the checkbox's action event) so the visible card
+     * always matches the checkbox state; the listener covers user toggles.
+     */
+    private void showJdbcProfileCard(JComponent jdbcComp, boolean showProfile) {
+        JPanel cardPanel = (JPanel) jdbcComp.getClientProperty("cardPanel");
+        Component[] currentCard = (Component[]) jdbcComp.getClientProperty("currentJdbcCard");
+        JComponent profilePanel = (JComponent) jdbcComp.getClientProperty("profilePanel");
+        JComponent manualPanel = (JComponent) jdbcComp.getClientProperty("manualPanel");
+        if (cardPanel == null || currentCard == null || profilePanel == null || manualPanel == null) {
+            return;
+        }
+        currentCard[0] = showProfile ? profilePanel : manualPanel;
+        if (cardPanel.getLayout() instanceof CardLayout cardLayout) {
+            cardLayout.show(cardPanel, showProfile ? "PROFILE" : "MANUAL");
+        }
+        cardPanel.revalidate();
+        cardPanel.repaint();
     }
 
     private void saveProfileLinks(String profileName) {
@@ -1508,34 +1577,39 @@ public class NodeConfigurationPanel extends JPanel {
         }
         JsonObject allLinks = metadata.getAsJsonObject(KEY_PROFILE_LINKS);
 
+        // Preserve any pre-existing legacy logging link (KEY_LOGGING): the
+        // logging assignment is now owned by the Logging tab
+        // (LoggingAssignmentStore SSOT), so the configuration panel no longer
+        // edits it — keep the stored value untouched instead of clobbering it.
+        JsonObject existing = allLinks.has(profileName) ? allLinks.getAsJsonObject(profileName) : null;
+        String legacyLogging = (existing != null && existing.has(KEY_LOGGING))
+                ? existing.get(KEY_LOGGING).getAsString()
+                : null;
+
         JsonObject currentLinks = new JsonObject();
         String db = getLinkedDbProfile();
-        String log = (String) linkedLogCombo.getSelectedItem();
-        boolean autoStart = autoStartDbCheck.isSelected();
-        boolean autoStop = autoStopDbCheck.isSelected();
+        boolean autoStart = autoStartDbCheck != null && autoStartDbCheck.isSelected();
+        boolean autoStop = autoStopDbCheck != null && autoStopDbCheck.isSelected();
 
-        if ((db != null && !db.isEmpty()) || (log != null && !log.isEmpty())
+        if ((db != null && !db.isEmpty()) || (legacyLogging != null && !legacyLogging.isEmpty())
                 || autoStart || autoStop) {
-            if (db != null && !db.isEmpty())
+            if (db != null && !db.isEmpty()) {
                 currentLinks.addProperty(KEY_DATABASE, db);
-            if (log != null && !log.isEmpty())
-                currentLinks.addProperty(KEY_LOGGING, log);
+            }
+            if (legacyLogging != null && !legacyLogging.isEmpty()) {
+                currentLinks.addProperty(KEY_LOGGING, legacyLogging);
+            }
             currentLinks.addProperty(KEY_DB_AUTO_START, autoStart);
             currentLinks.addProperty(KEY_DB_AUTO_STOP, autoStop);
-
             allLinks.add(profileName, currentLinks);
-
-            savedLinkedLog = log != null ? log : "";
-            savedLinkedDb = db != null ? db : "";
-            savedDbAutoStart = autoStart;
-            savedDbAutoStop = autoStop;
         } else {
+            // No db link and no legacy logging to preserve: drop the entry.
             allLinks.remove(profileName);
-            savedLinkedLog = "";
-            savedLinkedDb = "";
-            savedDbAutoStart = false;
-            savedDbAutoStop = false;
         }
+
+        savedLinkedDb = (db != null && !db.isEmpty()) ? db : "";
+        savedDbAutoStart = autoStart;
+        savedDbAutoStop = autoStop;
 
         try (Writer writer = Files.newBufferedWriter(metadataPath)) {
             new GsonBuilder().setPrettyPrinting().create().toJson(metadata, writer);
@@ -1605,7 +1679,7 @@ public class NodeConfigurationPanel extends JPanel {
             if (applied == null || !applied.startsWith("SQLite:"))
                 return;
             String appliedProfile = applied.substring("SQLite:".length());
-            if (appliedProfile.isEmpty() || linkedDbPanel == null)
+            if (appliedProfile.isEmpty() || propertyComponents.get(Props.DB_URL.getName()) == null)
                 return;
             if (!getLinkedDbProfile().isEmpty())
                 return; // an explicit link is already recorded
@@ -1644,12 +1718,12 @@ public class NodeConfigurationPanel extends JPanel {
     /**
      * Links the database profile remembered during UI construction (the
      * initial {@code updateFromUrl} found the manual SQLite trio on the
-     * per-profile convention with a discoverable profile, but the Linked
-     * Profiles tab did not exist yet). Skipped when an explicit link is
-     * already recorded (e.g. by the applied-profile auto-link).
+     * per-profile convention with a discoverable profile, but the JDBC row
+     * was not registered yet). Skipped when an explicit link is already
+     * recorded (e.g. by the applied-profile auto-link).
      */
     private void linkPendingDiscoveredDatabaseProfile() {
-        if (pendingDiscoveredDbProfile == null || linkedDbPanel == null)
+        if (pendingDiscoveredDbProfile == null || propertyComponents.get(Props.DB_URL.getName()) == null)
             return;
         String pending = pendingDiscoveredDbProfile;
         pendingDiscoveredDbProfile = null;
@@ -1698,12 +1772,31 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     /**
-     * Save &amp; Apply toolbar action. Reviews the unsaved changes in a dialog
-     * (the profile name cannot be changed here - the currently loaded profile
-     * is always the target), saves them, and then asks whether to restart the
-     * node so the new configuration takes effect immediately.
+     * New Profile toolbar action: shows the shared {@link NewProfileChoiceDialog}
+     * (launch the setup wizard, or create a new empty profile) and hands the
+     * selection to the host callback wired via {@link #setNewProfileHandler}.
+     * With no host handler the button explains where profiles are created.
      */
-    private void saveAndApply() {
+    private void newProfile() {
+        if (newProfileHandler == null) {
+            JOptionPane.showMessageDialog(this,
+                    "New profiles are created from the node profile window (the \"+\" button of the profile tabs).",
+                    "New Profile", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        NewProfileChoiceDialog.Choice choice = NewProfileChoiceDialog.show(this, true);
+        if (choice != null) {
+            newProfileHandler.accept(choice);
+        }
+    }
+
+    /**
+     * Save toolbar action. Reviews the unsaved changes in a dialog (the profile
+     * name cannot be changed here - the currently loaded profile is always the
+     * target) and saves them. It does <b>not</b> apply anything — use the Apply
+     * button to restart the node with the saved configuration.
+     */
+    private void saveProfile() {
         String name = loadedProfileName;
         if (name == null) {
             return;
@@ -1716,7 +1809,9 @@ public class NodeConfigurationPanel extends JPanel {
 
         String report = getUnsavedChangesReport();
         if (report == null) {
-            return; // no unsaved changes (the button is disabled in this state)
+            JOptionPane.showMessageDialog(this, "There are no unsaved changes in profile '" + name + "'.",
+                    "Save", JOptionPane.INFORMATION_MESSAGE);
+            return;
         }
 
         ProfileSaveApplyDialog.Result result = ProfileSaveApplyDialog.show(this, name, report);
@@ -1734,20 +1829,32 @@ public class NodeConfigurationPanel extends JPanel {
         if (result != ProfileSaveApplyDialog.Result.SAVE) {
             return;
         }
-        if (!doSaveCurrentProfile()) {
-            return;
-        }
-
-        // The saved profile is always this node's own profile, so applying it
-        // means restarting this node.
-        int choice = JOptionPane.showConfirmDialog(this,
-                "Changes will take effect after restart. Would you like to apply the saved changes? It will restart the node.",
-                "Apply Changes", JOptionPane.YES_NO_OPTION, JOptionPane.INFORMATION_MESSAGE);
-        if (choice == JOptionPane.YES_OPTION) {
-            applySavedChanges();
-        } else {
+        if (doSaveCurrentProfile()) {
             JOptionPane.showMessageDialog(this, "Profile '" + name + "' saved successfully.",
                     "Success", JOptionPane.INFORMATION_MESSAGE);
+        }
+    }
+
+    /**
+     * Apply toolbar action. Applies the <b>saved</b> configuration of the loaded
+     * profile: marks it applied and restarts the node so the changes take effect.
+     * Only usable while there are saved, not yet applied changes.
+     */
+    private void applyProfile() {
+        String name = loadedProfileName;
+        if (name == null) {
+            return;
+        }
+        if ((Signum.NODE_SUBFOLDER + "-default").equals(name)) {
+            JOptionPane.showMessageDialog(this, "The system default profile template cannot be modified.",
+                    "Action Not Allowed", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        int choice = JOptionPane.showConfirmDialog(this,
+                "Apply the saved configuration of profile '" + name + "'? It will restart the node.",
+                "Apply Configuration", JOptionPane.YES_NO_OPTION, JOptionPane.INFORMATION_MESSAGE);
+        if (choice == JOptionPane.YES_OPTION) {
+            applySavedChanges();
         }
     }
 
@@ -2053,7 +2160,8 @@ public class NodeConfigurationPanel extends JPanel {
         boolean isReadOnly = Signum.NODE_SUBFOLDER.equals(selected)
                 || (Signum.NODE_SUBFOLDER + "-default").equals(selected);
         resetToDefaultsBtn.setEnabled(true); // Always enable reset to defaults
-        saveApplyBtn.setEnabled(overallDirty);
+        saveBtn.setEnabled(overallDirty && !isReadOnly);
+        applyBtn.setEnabled(!isReadOnly && hasSavedNotAppliedChanges());
         renameProfileBtn.setEnabled(!isReadOnly);
         deleteProfileBtn.setEnabled(!isReadOnly);
         cloneProfileBtn.setEnabled(!isReadOnly);
@@ -2155,9 +2263,9 @@ public class NodeConfigurationPanel extends JPanel {
      * operation runs in the background).
      */
     private void setProfileActionButtonsEnabled(boolean enabled) {
-        for (JButton button : new JButton[] { saveApplyBtn, renameProfileBtn,
+        for (JButton button : new JButton[] { newProfileBtn, saveBtn, applyBtn, renameProfileBtn,
                 deleteProfileBtn, resetToDefaultsBtn, copyProfileDataBtn, cloneProfileBtn,
-                reloadProfileBtn }) {
+                reloadProfileBtn, helpBtn }) {
             if (button != null) {
                 button.setEnabled(enabled);
             }
@@ -2243,7 +2351,11 @@ public class NodeConfigurationPanel extends JPanel {
                 "<p>Profiles allow you to maintain multiple sets of node configurations. Use the toolbar buttons to perform the following actions:</p>"
                 +
                 "<ul>" +
-                "<li><b>Save &amp; Apply</b>: Saves all unsaved changes to the current profile (reviewing them in a dialog first — you can save, discard all unsaved changes, or cancel), then asks whether to restart the node so the changes take effect immediately.</li>"
+                "<li><b>New Profile</b>: Opens the dialog to launch the setup wizard (guided database/connection/node setup) or to create a new empty profile pre-filled with the application default values.</li>"
+                +
+                "<li><b>Save</b>: Saves all unsaved changes to the current profile (reviewing them in a dialog first — you can save, discard all unsaved changes, or cancel). It does not restart the node. Active only while there are unsaved changes.</li>"
+                +
+                "<li><b>Apply</b>: Applies the saved configuration — marks the profile as applied and restarts the node so the changes take effect. Active only while there are saved, not yet applied changes.</li>"
                 +
                 "<li><b>Rename Profile</b>: Changes the name of the currently selected configuration profile.</li>"
                 +
@@ -2253,11 +2365,13 @@ public class NodeConfigurationPanel extends JPanel {
                 +
                 "<li><b>Copy Configuration</b>: Opens a dialog to select a profile and copies its configuration into the editor of the current profile. The copied values become unsaved changes you can adjust before saving.</li>"
                 +
-                "<li><b>Reload Profile</b>: Reloads the current profile file from disk (e.g. after external edits), discarding any unsaved changes in the UI.</li>"
+                "<li><b>Clone Configuration</b>: Creates a new profile from the current (unsaved, editor) effective state; the source profile is left untouched.</li>"
+                +
+                "<li><b>Reload Configuration</b>: Reloads the current profile file from disk (e.g. after external edits), discarding any unsaved changes in the UI.</li>"
                 +
                 "</ul>" +
-                "<p>New profiles are created from the <b>\"+\" tab</b> (last tab): launch the setup wizard, " +
-                "or create an empty default profile (zero overrides — every setting uses the application default).</p>" +
+                "<p>The <b>database</b> profile link is managed on the Database tab's \"Linked Database Profile\" " +
+                "control, and the <b>logging</b> profile assignment on the Logging tab.</p>" +
                 "<p>Profiles are stored as \".properties\" files within the node sub-directory of the configuration folder.</p>"
                 +
                 "</body></html>";
@@ -2326,14 +2440,36 @@ public class NodeConfigurationPanel extends JPanel {
         return !current.trim().equals(saved.trim());
     }
 
+    /**
+     * The engine of the currently <b>linked</b> database profile (the JDBC row's
+     * profile card), or {@code null} when the row is not built, the "Linked
+     * Database Profile" checkbox is not selected (manual mode), or the engine
+     * combo is unavailable.
+     */
+    private DatabaseConfigurationPanel.DatabaseEngine currentLinkedDbEngine() {
+        JComponent jdbcComp = propertyComponents.get(Props.DB_URL.getName());
+        if (jdbcComp == null) {
+            return null;
+        }
+        JCheckBox cb = (JCheckBox) jdbcComp.getClientProperty("useProfileCheck");
+        if (cb == null || !cb.isSelected()) {
+            return null; // manual mode — no linked database to auto start/stop
+        }
+        JdbcProfileConfigurationPanel pp = (JdbcProfileConfigurationPanel) jdbcComp.getClientProperty("profilePanel");
+        if (pp == null || !(pp.getEngineCombo() instanceof JComboBox<?>)) {
+            return null;
+        }
+        Object sel = ((JComboBox<?>) pp.getEngineCombo()).getSelectedItem();
+        return sel instanceof DatabaseConfigurationPanel.DatabaseEngine
+                ? (DatabaseConfigurationPanel.DatabaseEngine) sel
+                : null;
+    }
+
     private void updateAutoDbCheckboxesState() {
-        if (linkedDbPanel == null || autoStartDbCheck == null || autoStopDbCheck == null) {
+        if (autoStartDbCheck == null || autoStopDbCheck == null) {
             return;
         }
-        JComboBox<DatabaseConfigurationPanel.DatabaseEngine> engineCombo = (JComboBox<DatabaseConfigurationPanel.DatabaseEngine>) linkedDbPanel
-                .getEngineCombo();
-        DatabaseConfigurationPanel.DatabaseEngine selectedEngine = (DatabaseConfigurationPanel.DatabaseEngine) engineCombo
-                .getSelectedItem();
+        DatabaseConfigurationPanel.DatabaseEngine selectedEngine = currentLinkedDbEngine();
 
         boolean enableCheckboxes = (selectedEngine != null
                 && selectedEngine != DatabaseConfigurationPanel.DatabaseEngine.SQLITE);
@@ -2341,7 +2477,8 @@ public class NodeConfigurationPanel extends JPanel {
         autoStartDbCheck.setEnabled(enableCheckboxes);
         autoStopDbCheck.setEnabled(enableCheckboxes);
 
-        // If disabled (SQLite), ensure they are unchecked to avoid confusion.
+        // If disabled (SQLite / not linked), ensure they are unchecked to avoid
+        // confusion.
         if (!enableCheckboxes) {
             boolean wasProgrammatic = isProgrammaticChange;
             isProgrammaticChange = true;
@@ -2362,8 +2499,8 @@ public class NodeConfigurationPanel extends JPanel {
                 }
             }
 
-            if (i == linkedProfilesTabIndex && !tabDirty) {
-                tabDirty = isLinkedProfileDirty();
+            if (i == databaseTabIndex && !tabDirty) {
+                tabDirty = isDbLinkDirty();
             }
 
             String title = categoryTabbedPane.getTitleAt(i);
@@ -2377,18 +2514,31 @@ public class NodeConfigurationPanel extends JPanel {
             }
         }
         // Icon-only toolbar: the dirty marker moves from the button label to the
-        // tooltip (the category tab titles keep their "*" marker). The Save &
-        // Apply action is only usable when there is something to save.
-        saveApplyBtn.setToolTipText(overallDirty
-                ? "Save & Apply — you have unsaved changes"
-                : "Save & Apply");
-        saveApplyBtn.setEnabled(overallDirty);
+        // tooltip (the category tab titles keep their "*" marker). The two halves
+        // of the save-then-apply flow are independently usable:
+        //   Save  — only while there is something to save (unsaved changes);
+        //   Apply — only while there are saved, not yet applied changes.
+        saveBtn.setToolTipText(overallDirty
+                ? "Save — you have unsaved changes"
+                : "Save");
+        saveBtn.setEnabled(overallDirty);
+
+        boolean savedNotApplied = hasSavedNotAppliedChanges();
+        applyBtn.setToolTipText(savedNotApplied
+                ? "Apply — you have saved, not yet applied changes"
+                : "Apply");
+        applyBtn.setEnabled(savedNotApplied);
         this.overallDirty = overallDirty;
 
-        ConfigurationUtils.fixComponentSize(saveApplyBtn);
-        if (saveApplyBtn.getParent() != null) {
-            saveApplyBtn.getParent().revalidate();
-        }
+        // The Save button is an icon-only toolbar button: its size is uniform
+        // with the other toolbar icons via styleProfileIconButton (and is
+        // stable — the dirty marker lives in the tooltip, not the label).
+        // Deliberately NO fixComponentSize here: that helper sizes TEXT
+        // components (height = fontHeight + 10), which would make this button
+        // ~3px taller than its icon-only siblings, grow the whole toolbar row
+        // and offset the buttons in the same position relative to the other
+        // profile toolbars (e.g. the module logging profiles) when switching
+        // tabs.
 
         // The value-status visibility filter of the search panel depends on
         // the value states: when the flat results view is up, re-apply the
@@ -2400,11 +2550,32 @@ public class NodeConfigurationPanel extends JPanel {
         }
     }
 
-    private boolean isLinkedProfileDirty() {
-        return !savedLinkedLog.equals(getLinkedLoggingProfile()) ||
-                !savedLinkedDb.equals(getLinkedDbProfile()) ||
-                (autoStartDbCheck.isEnabled() && savedDbAutoStart != autoStartDbCheck.isSelected()) ||
-                (autoStopDbCheck.isEnabled() && savedDbAutoStop != autoStopDbCheck.isSelected());
+    /**
+     * Whether the <b>saved</b> profile (what is on disk for the loaded profile)
+     * differs from the <b>applied</b> baseline (what the node is actually
+     * running) — i.e. there are saved, not yet applied changes the Apply
+     * button can act on.
+     */
+    private boolean hasSavedNotAppliedChanges() {
+        if (savedProfile == null || appliedProfile == null) {
+            return false;
+        }
+        Set<String> keys = new HashSet<>(savedProfile.getProperties().stringPropertyNames());
+        keys.addAll(appliedProfile.getProperties().stringPropertyNames());
+        for (String key : keys) {
+            String saved = savedProfile.getProperty(key, "");
+            String applied = appliedProfile.getProperty(key, "");
+            if (!saved.trim().equals(applied.trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isDbLinkDirty() {
+        return !savedLinkedDb.equals(getLinkedDbProfile()) ||
+                (autoStartDbCheck != null && autoStartDbCheck.isEnabled() && savedDbAutoStart != autoStartDbCheck.isSelected()) ||
+                (autoStopDbCheck != null && autoStopDbCheck.isEnabled() && savedDbAutoStop != autoStopDbCheck.isSelected());
     }
 
 
@@ -2890,6 +3061,7 @@ public class NodeConfigurationPanel extends JPanel {
         Runnable jdbcOnChange = () -> {
             if (jdbcInitialized[0]) {
                 updateColor(wrapper, prop.getName(), defaultValues.get(prop.getName()));
+                updateAutoDbCheckboxesState(); // the manual card's engine may differ
                 updateDirtyStatus();
             }
         };
@@ -2902,6 +3074,25 @@ public class NodeConfigurationPanel extends JPanel {
         currentJdbcCard[0] = manualPanel;
         wrapper.add(cardPanel, "growx");
 
+        // Auto start/stop of the linked database (moved here from the former
+        // "Linked Profiles" tab — the JDBC row now owns the link details).
+        autoStartDbCheck = new JCheckBox("Auto Start Database");
+        autoStopDbCheck = new JCheckBox("Auto Stop Database");
+        autoStartDbCheck.setOpaque(false);
+        autoStopDbCheck.setOpaque(false);
+        ActionListener autoDbCheckListener = e -> {
+            if (!isProgrammaticChange) {
+                updateDirtyStatus();
+            }
+        };
+        autoStartDbCheck.addActionListener(autoDbCheckListener);
+        autoStopDbCheck.addActionListener(autoDbCheckListener);
+        JPanel autoDbRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        autoDbRow.setOpaque(false);
+        autoDbRow.add(autoStartDbCheck);
+        autoDbRow.add(autoStopDbCheck);
+        wrapper.add(autoDbRow, "span, gaptop 4");
+
         // When the manual SQLite trio follows the per-profile convention
         // (Path = ./database/SQLite) and the database profile is discoverable
         // there, link the node to it: the "Linked Database Profile" checkbox
@@ -2909,8 +3100,8 @@ public class NodeConfigurationPanel extends JPanel {
         manualPanel.setOnProfileDiscovered(profile -> {
             if (isProgrammaticChange || useProfileCheck.isSelected())
                 return;
-            if (linkedDbPanel == null) {
-                // The Linked Profiles tab is not built yet (the initial
+            if (propertyComponents.get(prop.getName()) == null) {
+                // The JDBC row is not registered yet (the initial
                 // updateFromUrl runs during initUI): remember it, the
                 // post-init auto-link pass will link it.
                 pendingDiscoveredDbProfile = profile;
@@ -2926,11 +3117,14 @@ public class NodeConfigurationPanel extends JPanel {
         ActionListener profileSyncListener = e -> {
             if (isProgrammaticChange)
                 return;
-            String engine = engineCombo.getSelectedItem().toString();
             String profile = (String) profileCombo.getSelectedItem();
-            if (useProfileCheck.isSelected() && profile != null) {
+            // A link only exists once a profile is picked; an engine-only
+            // state (right after an engine switch) persists nothing.
+            if (useProfileCheck.isSelected() && profile != null && !profile.isEmpty()) {
+                String engine = engineCombo.getSelectedItem().toString();
                 setLinkedDbProfile(engine + ":" + profile);
             }
+            updateAutoDbCheckboxesState(); // the linked card's engine may differ
         };
         engineCombo.addActionListener(profileSyncListener);
         profileCombo.addActionListener(profileSyncListener);
@@ -2943,6 +3137,7 @@ public class NodeConfigurationPanel extends JPanel {
             // layout so the row adopts the (different) card height at once.
             cardPanel.revalidate();
             cardPanel.repaint();
+            updateAutoDbCheckboxesState(); // the visible card's engine may differ
             updateDirtyStatus();
             refreshUIColors();
         });
@@ -3029,6 +3224,9 @@ public class NodeConfigurationPanel extends JPanel {
         row.inputConstraints = "split 2, growx";
         panel.add(wrapper, row.inputConstraints);
         propertyComponents.put(prop.getName(), wrapper);
+        // Initial enablement of the auto start/stop boxes follows the current
+        // (manual card's) engine.
+        updateAutoDbCheckboxesState();
 
         JButton helpBtn = new HelpButton();
         helpBtn.addActionListener(e -> showHelp(prop, labelText));
@@ -3128,150 +3326,63 @@ public class NodeConfigurationPanel extends JPanel {
         addPropertyRow(row);
     }
 
-    private void addLinkedProfileRow(JPanel panel, String labelText, JComboBox<String> combo) {
-        panel.add(new JLabel(labelText), "align label");
-        ConfigurationUtils.fixComponentSize(combo);
-        panel.add(combo, "split 2, growx, height pref!");
-
-        combo.addActionListener(e -> {
-            if (isProgrammaticChange)
-                return;
-            updateDirtyStatus();
-        });
-
-        JButton helpBtn = new HelpButton();
-        panel.add(helpBtn, "wrap");
-        panel.add(new JSeparator(), "span, growx, wrap, gaptop 2, gapbottom 2");
-    }
-
-    private void addLinkedProfileRowWithButtons(JPanel panel, String labelText, JComboBox<String> combo) {
-        panel.add(new JLabel(labelText), "align label");
-        ConfigurationUtils.fixComponentSize(combo);
-
-        combo.setRenderer(new DefaultListCellRenderer() {
-            @Override
-            public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected,
-                    boolean cellHasFocus) {
-                Component c = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-                if (isSelected || value == null)
-                    return c;
-
-                String val = value.toString();
-                String linked = getLinkedLoggingProfile();
-                String active = Signum.LOGGING_PROPERTIES_NAME;
-
-                if (val.equals(linked)) {
-                    c.setForeground(GuiColors.getSaved());
-                } else if (val.equals(active)) {
-                    c.setForeground(GuiColors.getApplied());
-                }
-                return c;
-            }
-        });
-
-        combo.addActionListener(e -> {
-            if (!isProgrammaticChange) {
-                updateDirtyStatus();
-            }
-        });
-
-        JButton refreshBtn = new JButton(IconFontSwing.buildIcon(FontAwesome.REFRESH, GuiConstants.getHelpIconSize(),
-                GuiColors.getApplied()));
-        refreshBtn.setToolTipText("Update link in profile immediately");
-        refreshBtn.addActionListener(e -> {
-            saveProfileLinks(loadedProfileName);
-            updateDirtyStatus();
-            combo.repaint();
-        });
-
-        JButton deleteBtn = new JButton(
-                IconFontSwing.buildIcon(FontAwesome.TRASH, GuiConstants.getHelpIconSize(), GuiColors.getContrastRed()));
-        deleteBtn.setToolTipText("Remove link");
-        deleteBtn.addActionListener(e -> {
-            isProgrammaticChange = true;
-            combo.setSelectedItem("");
-            isProgrammaticChange = false;
-            saveProfileLinks(loadedProfileName);
-            updateDirtyStatus();
-        });
-
-        JPanel comboPanel = new JPanel(new MigLayout("insets 0", "[grow][pref!][pref!]", "[]"));
-        comboPanel.setOpaque(false);
-        comboPanel.add(combo, "growx");
-        comboPanel.add(refreshBtn);
-        comboPanel.add(deleteBtn);
-
-        panel.add(comboPanel, "split 2, growx, height pref!");
-        panel.add(new HelpButton(), "wrap");
-        panel.add(new JSeparator(), "span, growx, wrap, gaptop 2, gapbottom 2");
-    }
-
-    private void syncDbProfileSelection(String value) {
-        JComponent jdbcComp = propertyComponents.get(Props.DB_URL.getName());
-        if (jdbcComp != null) {
-            JdbcProfileConfigurationPanel pp = (JdbcProfileConfigurationPanel) jdbcComp
-                    .getClientProperty("profilePanel");
-            JCheckBox cb = (JCheckBox) jdbcComp.getClientProperty("useProfileCheck");
-            if (pp != null && value != null && value.contains(":")) {
-                String[] parts = value.split(":", 2);
-                isProgrammaticChange = true;
-                try {
-                    ((JComboBox<?>) pp.getEngineCombo())
-                            .setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.fromDisplayName(parts[0]));
-                    ((JComboBox<?>) pp.getProfileCombo())
-                            .setSelectedItem(parts.length > 1 && !parts[1].isEmpty() ? parts[1] : "");
-                    if (cb != null)
-                        cb.setSelected(true);
-                } finally {
-                    isProgrammaticChange = false;
-                }
-            }
-        }
-    }
-
+    /**
+     * The node's <b>database</b> profile link, read from the JDBC row's
+     * "Linked Database Profile" control: {@code "Engine:Profile"} when the
+     * checkbox is selected and a profile is chosen, else the empty string
+     * (manual mode / no link).
+     */
     public String getLinkedDbProfile() {
-        if (linkedDbPanel == null)
+        JComponent jdbcComp = propertyComponents.get(Props.DB_URL.getName());
+        if (jdbcComp == null) {
             return "";
-        Object engine = ((JComboBox<?>) linkedDbPanel.getEngineCombo()).getSelectedItem();
-        Object profile = ((JComboBox<?>) linkedDbPanel.getProfileCombo()).getSelectedItem();
-        if (engine == null || profile == null || profile.toString().isEmpty())
+        }
+        JCheckBox cb = (JCheckBox) jdbcComp.getClientProperty("useProfileCheck");
+        if (cb == null || !cb.isSelected()) {
+            return ""; // manual mode — no link
+        }
+        JdbcProfileConfigurationPanel pp = (JdbcProfileConfigurationPanel) jdbcComp.getClientProperty("profilePanel");
+        if (pp == null) {
             return "";
+        }
+        Object engine = ((JComboBox<?>) pp.getEngineCombo()).getSelectedItem();
+        Object profile = ((JComboBox<?>) pp.getProfileCombo()).getSelectedItem();
+        if (engine == null || profile == null || profile.toString().isEmpty()) {
+            return "";
+        }
         return engine.toString() + ":" + profile.toString();
     }
 
+    /**
+     * The node's <b>logging</b> profile assignment, read from the SSOT
+     * ({@link LoggingAssignmentStore}) — the assignment is managed on the
+     * Logging tab. Kept for hosts (e.g. the legacy main-window panel) that
+     * still display the link.
+     */
     public String getLinkedLoggingProfile() {
-        String sel = (linkedLogCombo != null) ? (String) linkedLogCombo.getSelectedItem() : "";
-        return sel != null ? sel : "";
+        try {
+            if (loadedProfileName == null) {
+                return "";
+            }
+            Map<String, String> assignments = new LoggingAssignmentStore(confFolder).getAssignment(loadedProfileName);
+            String linked = assignments.get(ModuleIds.NODE);
+            return linked != null ? linked : "";
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     public void setLinkedDbProfile(String value) {
-        isProgrammaticChange = true;
-        try {
-            if (linkedDbPanel != null) {
-                if (value == null || value.isEmpty() || !value.contains(":")) {
-                    ((JComboBox<?>) linkedDbPanel.getProfileCombo()).setSelectedItem("");
-                } else {
-                    String[] parts = value.split(":", 2);
-                    ((JComboBox<DatabaseConfigurationPanel.DatabaseEngine>) linkedDbPanel.getEngineCombo())
-                            .setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.fromDisplayName(parts[0]));
-                    // "Engine:" (empty profile) splits to a single element —
-                    // the profile part only exists with a limited split.
-                    ((JComboBox<String>) linkedDbPanel.getProfileCombo())
-                            .setSelectedItem(parts.length > 1 && !parts[1].isEmpty() ? parts[1] : "");
-                }
-                syncDbProfileSelection(value);
-            }
-        } finally {
-            isProgrammaticChange = false;
-        }
+        applyDbLinkToJdbcRow(value);
         saveProfileLinks(loadedProfileName);
     }
 
     public void setLinkedLoggingProfile(String value) {
-        isProgrammaticChange = true;
-        linkedLogCombo.setSelectedItem(value != null ? value : "");
-        isProgrammaticChange = false;
-        saveProfileLinks(loadedProfileName);
+        try {
+            new LoggingAssignmentStore(confFolder).setAssignmentForModule(loadedProfileName, ModuleIds.NODE, value);
+        } catch (Exception e) {
+            LOGGER.error("Error setting linked logging profile", e);
+        }
     }
 
     private void addListProperty(JPanel panel, Prop<?> prop, String labelText) {

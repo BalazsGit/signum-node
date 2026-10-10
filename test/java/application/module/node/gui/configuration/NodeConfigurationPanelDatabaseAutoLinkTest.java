@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -60,8 +61,11 @@ class NodeConfigurationPanelDatabaseAutoLinkTest {
         Files.createDirectories(DB_META.getParent());
         Files.writeString(DB_META, "{\"appliedProfile\": \"SQLite:" + PROFILE + "\"}");
         // the profile must exist in the database profile area (the combo list
-        // is scanned from there)
+        // is scanned from there); the profile.json carries the very URL the
+        // node profile uses, so the linked card can select that instance
         Files.createDirectories(DB_PROFILE_DIR);
+        Files.writeString(DB_PROFILE_DIR.resolve("profile.json"),
+                "{\"DB.Url\": \"jdbc:sqlite:file:./database/SQLite/" + PROFILE + "/signum.sqlite.db\"}");
     }
 
     @AfterEach
@@ -77,7 +81,8 @@ class NodeConfigurationPanelDatabaseAutoLinkTest {
             Files.deleteIfExists(NODE_META);
         }
         Files.deleteIfExists(NODE_PROPS);
-        Files.deleteIfExists(DB_PROFILE_DIR); // created by this test, always empty
+        Files.deleteIfExists(DB_PROFILE_DIR.resolve("profile.json"));
+        Files.deleteIfExists(DB_PROFILE_DIR); // created by this test
     }
 
     @Test
@@ -146,6 +151,29 @@ class NodeConfigurationPanelDatabaseAutoLinkTest {
                 }
             });
             assertEquals(PROFILE, profileSelRef[0], "the profile card must show the linked profile name");
+
+            // the profile card is the active card of the JDBC row and its
+            // database row is materialized (the linked profile's configuration
+            // is in effect, not a half-empty card)
+            final Object[] activeCardRef = new Object[1];
+            final Object[] dbSelRef = new Object[1];
+            SwingUtilities.invokeAndWait(() -> {
+                try {
+                    javax.swing.JComponent wrapper = (javax.swing.JComponent) wrapperRef[0];
+                    Object currentCard = wrapper.getClientProperty("currentJdbcCard");
+                    activeCardRef[0] = currentCard instanceof java.awt.Component[] cards ? cards[0] : currentCard;
+                    Object pp = wrapper.getClientProperty("profilePanel");
+                    java.lang.reflect.Field dbCombo = pp.getClass().getDeclaredField("dbCombo");
+                    dbCombo.setAccessible(true);
+                    dbSelRef[0] = ((javax.swing.JComboBox<?>) dbCombo.get(pp)).getSelectedItem();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+            javax.swing.JComponent wrapper = (javax.swing.JComponent) wrapperRef[0];
+            assertSame(wrapper.getClientProperty("profilePanel"), activeCardRef[0],
+                    "the profile card must be the active card of the JDBC row");
+            assertNotNull(dbSelRef[0], "the linked profile's database instance must be selected");
 
             // the assignment is persisted into the node metadata
             String meta = Files.readString(NODE_META);

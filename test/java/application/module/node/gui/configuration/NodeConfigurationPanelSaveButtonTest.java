@@ -17,10 +17,15 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Repro test for the reported "Save & Apply button does nothing" bug in
+ * Repro test for the reported "Save button does nothing" bug in
  * {@link NodeConfigurationPanel}: drives the real button click and asserts
  * that (1) the button becomes enabled after an edit and (2) clicking it opens
  * the modal "Save Configuration" dialog.
+ *
+ * <p>The Save / Apply split: <b>Save</b> persists the unsaved changes (saved
+ * color) and is enabled only while there are unsaved changes; <b>Apply</b>
+ * (applied color) is enabled only while there are saved, not yet applied
+ * changes and is what restarts the node.</p>
  */
 @DisplayName("NodeConfigurationPanel save button repro tests")
 @SuppressWarnings("unchecked")
@@ -29,8 +34,8 @@ class NodeConfigurationPanelSaveButtonTest {
     private static final long INIT_TIMEOUT_MS = 60_000;
 
     @Test
-    @DisplayName("clicking Save & Apply after an edit opens the save dialog")
-    void saveAndApply_opensDialog() throws Exception {
+    @DisplayName("clicking Save after an edit opens the save dialog")
+    void save_opensDialog() throws Exception {
         final AtomicReference<Throwable> error = new AtomicReference<>();
         final Object[] panelRef = new Object[1];
         final Object[] ownerRef = new Object[1];
@@ -107,24 +112,31 @@ class NodeConfigurationPanelSaveButtonTest {
 
             // Let the document listeners (invokeLater) run, then check the button state.
             Thread.sleep(500);
-            final Object[] btnState = new Object[2]; // [0]=JButton, [1]=enabled
+            final Object[] btnState = new Object[3]; // [0]=JButton, [1]=enabled, [2]=apply enabled
             SwingUtilities.invokeAndWait(() -> {
                 try {
-                    Object btn = readDeclaredField(panelRef[0], "saveApplyBtn");
+                    Object btn = readDeclaredField(panelRef[0], "saveBtn");
                     btnState[0] = btn;
                     btnState[1] = ((JButton) btn).isEnabled();
+                    Object applyBtn = readDeclaredField(panelRef[0], "applyBtn");
+                    btnState[2] = ((JButton) applyBtn).isEnabled();
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
             });
-            assertNotNull(btnState[1], "saveApplyBtn must exist");
-            System.out.println("[SAVEREPRO] saveApplyBtn.isEnabled() after edit = " + btnState[1]);
-            assertTrue((Boolean) btnState[1], "Save & Apply must be enabled after a dirty edit");
+            assertNotNull(btnState[1], "saveBtn must exist");
+            System.out.println("[SAVEREPRO] saveBtn.isEnabled() after edit = " + btnState[1]
+                    + ", applyBtn.isEnabled() = " + btnState[2]);
+            assertTrue((Boolean) btnState[1], "Save must be enabled after a dirty edit");
+            // No saved-but-not-applied change yet (the edit is only unsaved), so
+            // Apply must still be inactive — the two buttons are independent.
+            assertTrue(!(Boolean) btnState[2],
+                    "Apply must stay inactive while there are only UNSAVED (not saved) changes");
 
             // Click the toolbar button. A watcher thread must catch the modal
-            // "Save Configuration" dialog (it blocks the EDT), confirm the
-            // save, and afterwards answer the "Apply Changes" restart question
-            // with No so the flow terminates cleanly.
+            // "Save Configuration" dialog (it blocks the EDT) and confirm the
+            // save; the save itself does not apply anything — the node restart
+            // question moved to the separate Apply button.
             final AtomicReference<JDialog> dialogSeen = new AtomicReference<>();
             Thread watcher = new Thread(() -> {
                 JDialog d = waitForWindow("Save Configuration", 20_000);
@@ -138,21 +150,9 @@ class NodeConfigurationPanelSaveButtonTest {
                 } else {
                     d.dispose();
                 }
-                // The save-success + apply-confirmation dialogs follow on the
-                // EDT; answer "No" to the restart question (restartAction is
-                // null in this test) and dismiss any remaining message boxes.
-                JDialog confirm = waitForWindow("Apply Changes", 20_000);
-                if (confirm != null) {
-                    JButton noBtn = findButton(confirm, "No");
-                    if (noBtn != null) {
-                        clickOnEdt(noBtn);
-                    } else {
-                        confirm.dispose();
-                    }
-                }
-                // Robustly dismiss the success (and any leftover) message boxes:
-                // keep disposing "Success"/"Error" dialogs until none remain, so
-                // the EDT is guaranteed to be released even if a box lingers.
+                // The save-success (and any leftover) message boxes follow on
+                // the EDT; robustly dismiss them until none remain, so the EDT
+                // is guaranteed to be released even if a box lingers.
                 for (int i = 0; i < 50; i++) {
                     JDialog success = waitForWindow("Success", 2_000);
                     if (success != null) {
@@ -191,7 +191,7 @@ class NodeConfigurationPanelSaveButtonTest {
             watcher.join(25_000);
             System.out.println("[SAVEREPRO] dialogSeen = " + dialogSeen.get());
             assertTrue(dialogSeen.get() != null,
-                    "clicking Save & Apply must open the Save Configuration dialog");
+                    "clicking Save must open the Save Configuration dialog");
 
             // The confirmed save must have reached disk: the edited value must
             // be present in the profile's .properties file.

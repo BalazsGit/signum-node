@@ -26,7 +26,13 @@ public class JdbcProfileConfigurationPanel extends JPanel {
     private final JTextField resultField;
     private final String confFolder;
     private final Runnable onChange;
-    private boolean isProgrammatic = false;
+    /**
+     * Depth of programmatic (non-user) updates. A depth counter — not a plain
+     * boolean — because the combo action listeners fire synchronously inside
+     * the mutating calls and their cascading refreshes must not be able to
+     * reset the guard mid-update.
+     */
+    private int programmaticDepth = 0;
     private DatabaseConfigurationUtils.DbProfile currentProfile;
 
     public JdbcProfileConfigurationPanel(String confFolder, Runnable onChange) {
@@ -107,30 +113,30 @@ public class JdbcProfileConfigurationPanel extends JPanel {
                 hostCombo.setSelectedItem(hostCombo.getItemAt(0));
             refreshProfiles();
             updateFieldVisibility();
-            if (!isProgrammatic && onChange != null)
+            if (programmaticDepth == 0 && onChange != null)
                 onChange.run();
         });
         profileCombo.addActionListener(e -> {
             refreshDatabases();
-            if (!isProgrammatic && onChange != null)
+            if (programmaticDepth == 0 && onChange != null)
                 onChange.run();
         });
         dbCombo.addActionListener(e -> {
             refreshUsers();
-            if (!isProgrammatic && onChange != null)
+            if (programmaticDepth == 0 && onChange != null)
                 onChange.run();
         });
 
         hostCombo.addActionListener(e -> {
             updatePreview();
-            if (!isProgrammatic && onChange != null)
+            if (programmaticDepth == 0 && onChange != null)
                 onChange.run();
         });
 
         javax.swing.event.DocumentListener dl = new javax.swing.event.DocumentListener() {
             private void update() {
                 updatePreview();
-                if (!isProgrammatic && onChange != null)
+                if (programmaticDepth == 0 && onChange != null)
                     onChange.run();
             }
 
@@ -158,7 +164,7 @@ public class JdbcProfileConfigurationPanel extends JPanel {
             } else {
                 passField.setText("");
             }
-            if (!isProgrammatic && onChange != null)
+            if (programmaticDepth == 0 && onChange != null)
                 onChange.run();
         });
         refreshProfiles();
@@ -185,7 +191,7 @@ public class JdbcProfileConfigurationPanel extends JPanel {
     }
 
     private void refreshProfiles() {
-        isProgrammatic = true;
+        programmaticDepth++;
         profileCombo.removeAllItems();
         profileCombo.addItem("");
         currentProfile = null;
@@ -194,12 +200,13 @@ public class JdbcProfileConfigurationPanel extends JPanel {
         if (engine != null) {
             DatabaseConfigurationUtils.getProfileNames(confFolder, engine.toString()).forEach(profileCombo::addItem);
         }
-        isProgrammatic = false;
+        if (programmaticDepth > 0)
+            programmaticDepth--;
         refreshDatabases();
     }
 
     private void refreshDatabases() {
-        isProgrammatic = true;
+        programmaticDepth++;
         dbCombo.removeAllItems();
         currentProfile = null;
         String pName = (String) profileCombo.getSelectedItem();
@@ -213,25 +220,159 @@ public class JdbcProfileConfigurationPanel extends JPanel {
                 profile.databases.forEach(dbCombo::addItem);
             }
         }
-        isProgrammatic = false;
+        dbCombo.setSelectedIndex(-1); // a re-populated list must not keep a stale "selection"
+        if (programmaticDepth > 0)
+            programmaticDepth--;
         refreshUsers();
     }
 
     private void refreshUsers() {
-        isProgrammatic = true;
+        programmaticDepth++;
         userCombo.removeAllItems();
         DatabaseConfigurationUtils.DbInstance db = (DatabaseConfigurationUtils.DbInstance) dbCombo.getSelectedItem();
         if (db != null) {
             // Add users specific to this database instance
             db.users.forEach(userCombo::addItem);
+            if (userCombo.getItemCount() > 0) {
+                // Default to the instance's first user (the listener fills the password row)
+                userCombo.setSelectedItem(userCombo.getItemAt(0));
+            }
             updateFieldsFromUrl(db.url);
         } else {
+            userCombo.setSelectedIndex(-1); // a re-populated list must not keep a stale "selection"
             portField.setText("");
             suffixField.setText("");
             passField.setText("");
         }
         updatePreview();
-        isProgrammatic = false;
+        if (programmaticDepth > 0)
+            programmaticDepth--;
+    }
+
+    /**
+     * Materializes a database profile link in this card: selects the engine,
+     * refreshes the profile list (a combo fires no event for an unchanged
+     * selection, so the list is re-scanned explicitly), selects the profile
+     * and picks the database instance the {@code preferredDbUrl} points at —
+     * falling back to the first instance — so every dependent row (database,
+     * host, port, suffix, user, password, URL preview) reflects the linked
+     * profile's real configuration instead of a half-empty card.
+     *
+     * @param engine            the link's engine; {@code null} rejects the link
+     * @param profileName       the link's profile name; an empty name keeps the
+     *                          engine selection but resets the profile/instance rows
+     * @param preferredDbUrl    the database URL to prefer in the instance list
+     *                          (e.g. the node profile's saved JDBC URL), or {@code null}
+     * @param preferredUsername the user to prefer in the instance's user list
+     *                          (e.g. the node profile's saved user), or {@code null}
+     * @return {@code true} when a non-empty profile exists and the card now shows it
+     */
+    public boolean applyLinkedProfile(DatabaseConfigurationPanel.DatabaseEngine engine, String profileName,
+            String preferredDbUrl, String preferredUsername) {
+        if (engine == null) {
+            return false;
+        }
+        programmaticDepth++;
+        try {
+            boolean engineUnchanged = engine.equals(engineCombo.getSelectedItem());
+            engineCombo.setSelectedItem(engine);
+            if (engineUnchanged) {
+                refreshProfiles(); // no event on an unchanged selection — keep the list current
+            }
+            if (profileName == null || profileName.isEmpty()) {
+                // Transient state: the engine is set, the profile/instance rows reset.
+                if (!"".equals(profileCombo.getSelectedItem())) {
+                    profileCombo.setSelectedItem("");
+                } else {
+                    refreshDatabases();
+                }
+                return false;
+            }
+            if (!comboContains(profileCombo, profileName)) {
+                return false; // unknown or deleted profile — the link cannot be materialized
+            }
+            boolean profileUnchanged = profileName.equals(profileCombo.getSelectedItem());
+            profileCombo.setSelectedItem(profileName);
+            if (profileUnchanged) {
+                refreshDatabases(); // no event on an unchanged selection — keep the instances current
+            }
+            selectDatabaseInstance(preferredDbUrl, preferredUsername);
+            return true;
+        } finally {
+            if (programmaticDepth > 0)
+                programmaticDepth--;
+        }
+    }
+
+    /**
+     * Resets the card to its neutral, unlinked state: no profile, no database
+     * instance, the dependent rows empty (the manual card takes over).
+     */
+    public void clearLinkedProfile() {
+        programmaticDepth++;
+        try {
+            if (!comboContains(profileCombo, "")) {
+                refreshProfiles(); // the list is empty — rebuild it ("" is item 0)
+            }
+            if (!"".equals(profileCombo.getSelectedItem())) {
+                profileCombo.setSelectedItem("");
+            } else if (dbCombo.getItemCount() > 0) {
+                refreshDatabases(); // the "" selection did not fire — clear the instance rows
+            }
+        } finally {
+            if (programmaticDepth > 0)
+                programmaticDepth--;
+        }
+    }
+
+    /**
+     * Fills the database row's selection gap after a link was applied: picks
+     * the instance whose URL matches {@code preferredDbUrl} when the profile
+     * offers it, otherwise the first instance — and that instance's user
+     * matching {@code preferredUsername}, otherwise the first user, so the
+     * credential rows carry the profile's real values. A selection already
+     * present (a user's pick) is kept as-is.
+     */
+    private void selectDatabaseInstance(String preferredDbUrl, String preferredUsername) {
+        if (dbCombo.getSelectedItem() != null || dbCombo.getItemCount() == 0) {
+            return;
+        }
+        DatabaseConfigurationUtils.DbInstance preferred = null;
+        String wantedUrl = preferredDbUrl != null ? preferredDbUrl.trim() : "";
+        if (!wantedUrl.isEmpty()) {
+            for (int i = 0; i < dbCombo.getItemCount(); i++) {
+                DatabaseConfigurationUtils.DbInstance db = (DatabaseConfigurationUtils.DbInstance) dbCombo.getItemAt(i);
+                if (db != null && db.url != null && wantedUrl.equalsIgnoreCase(db.url.trim())) {
+                    preferred = db;
+                    break;
+                }
+            }
+        }
+        dbCombo.setSelectedItem(preferred != null ? preferred : dbCombo.getItemAt(0));
+        // The instance's action listener repopulated the user list and selected
+        // its first user — honor the preferred username when it is offered.
+        if (userCombo.getItemCount() > 0) {
+            String wantedUser = preferredUsername != null ? preferredUsername.trim() : "";
+            if (!wantedUser.isEmpty()) {
+                for (int i = 0; i < userCombo.getItemCount(); i++) {
+                    DatabaseConfigurationUtils.DbUser user = (DatabaseConfigurationUtils.DbUser) userCombo.getItemAt(i);
+                    if (user != null && wantedUser.equalsIgnoreCase(user.username)) {
+                        userCombo.setSelectedItem(user);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /** Whether the given item is in the combo's list (JComboBox has no index lookup). */
+    private static boolean comboContains(JComboBox<?> combo, Object item) {
+        for (int i = 0; i < combo.getItemCount(); i++) {
+            if (java.util.Objects.equals(combo.getItemAt(i), item)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void updateFieldsFromUrl(String url) {

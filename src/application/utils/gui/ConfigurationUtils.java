@@ -452,6 +452,62 @@ public class ConfigurationUtils {
     }
 
     /**
+     * Uniform gap between the profile-action toolbar buttons — the SAME
+     * spacing the node profile toolbar (Start/Stop/Restart/...) uses, so the
+     * profile-action rows of every panel (node configuration, the module
+     * logging profile panels, ...) line up visually.
+     */
+    public static final int PROFILE_TOOLBAR_GAP = 5;
+
+    /**
+     * The standard top/left/bottom/right insets of a profile-action toolbar
+     * row wrapped in its responsive scroll pane (the shared
+     * {@link GuiConstants#TOOLBAR_INSETS}: top=5, left=10, bottom=2, right=5).
+     * Every profile-action toolbar in the app (node configuration, module
+     * logging profiles) must wrap its button row with these insets so the
+     * rows have identical margins.
+     */
+    public static final Insets PROFILE_TOOLBAR_INSETS = GuiConstants.TOOLBAR_INSETS;
+
+    /**
+     * Creates the profile-action toolbar ROW: a left-aligned button strip with
+     * zero internal insets and the uniform {@link #PROFILE_TOOLBAR_GAP}
+     * between buttons (the node/profile/configuration pattern).
+     *
+     * @return the row panel; add the icon buttons (styled with
+     *         {@link #styleProfileIconButton}) to it in display order
+     */
+    public static JPanel createProfileToolbarRow() {
+        net.miginfocom.swing.MigLayout layout =
+                new net.miginfocom.swing.MigLayout("insets 0, gap " + PROFILE_TOOLBAR_GAP);
+        JPanel row = new JPanel(layout);
+        row.setBorder(BorderFactory.createEmptyBorder());
+        return row;
+    }
+
+    /**
+     * Wraps a profile-action toolbar row in the STANDARD responsive scroll
+     * wrapper: the shared {@link #PROFILE_TOOLBAR_INSETS} margins, a
+     * horizontal scrollbar only when the row outgrows the window, no vertical
+     * scrollbar, and a fully transparent (borderless, non-opaque) pane — the
+     * exact wrapper the node configuration panel and the module logging
+     * profile panels use, so the toolbar rows have identical geometry
+     * (button sizes, gaps and top/bottom/side margins) everywhere.
+     *
+     * @param row the toolbar row (see {@link #createProfileToolbarRow()})
+     * @return the ready-to-add scroll pane
+     */
+    public static JScrollPane wrapProfileToolbarRow(JPanel row) {
+        ResponsiveToolbarScrollPane scroll = new ResponsiveToolbarScrollPane(row, PROFILE_TOOLBAR_INSETS);
+        scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        scroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.setOpaque(false);
+        scroll.getViewport().setOpaque(false);
+        return scroll;
+    }
+
+    /**
      * Creates a {@link JPanel} containing a visual legend for the configuration
      * status colors.
      *

@@ -14,6 +14,7 @@ import application.module.node.gui.wizard.NodeSetupWizardDialog;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiUtils;
+import application.utils.gui.NewProfileChoiceDialog;
 import application.utils.gui.TabUtils;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
@@ -257,6 +258,16 @@ public class NodePanel extends JPanel  {
             // Refresh this profile's tab icon from the SSOT whenever a state-relevant
             // condition changes (pause/resume via the panel, trim/prune via the toolbar).
             actualPanel.setTabIconRefresher(() -> updateTabIcon(profileName));
+            // The configuration tab's New Profile button offers the SAME two
+            // creation paths as the "+" tab (setup wizard / empty profile) via
+            // the shared NewProfileChoiceDialog.
+            actualPanel.getConfigurationPanel().setNewProfileHandler(choice -> {
+                if (choice == NewProfileChoiceDialog.Choice.WIZARD) {
+                    openSetupWizard();
+                } else if (choice == NewProfileChoiceDialog.Choice.EMPTY) {
+                    openEmptyDefaultProfile();
+                }
+            });
 
             // Swap in the real panel on the EDT. Re-check the placeholder state and the
             // tab index: the user may have navigated away or the tab may have been
@@ -612,19 +623,18 @@ public class NodePanel extends JPanel  {
     }
 
     /**
-     * Shows the new-profile popup anchored below the "+" button: <b>Launch Setup Wizard…</b>
-     * (guided onboarding) and <b>New Empty Default Profile</b> (fast path) — the two creation
-     * paths the old dedicated "+" tab offered as cards.
+     * Shows the shared {@link NewProfileChoiceDialog} (the same popup the
+     * configuration tab's New Profile button uses): <b>Launch Setup
+     * Wizard</b> (guided onboarding) and <b>New Empty Profile</b> (fast
+     * path), with the accept / cancel buttons for the selected one.
      */
     private void showNewProfileMenu() {
-        javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
-        javax.swing.JMenuItem wizard = new javax.swing.JMenuItem("Launch Setup Wizard…");
-        wizard.addActionListener(ev -> openSetupWizard());
-        menu.add(wizard);
-        javax.swing.JMenuItem empty = new javax.swing.JMenuItem("New Empty Default Profile");
-        empty.addActionListener(ev -> openEmptyDefaultProfile());
-        menu.add(empty);
-        menu.show(newProfileButton, 0, newProfileButton.getHeight());
+        NewProfileChoiceDialog.Choice choice = NewProfileChoiceDialog.show(this, true);
+        if (choice == NewProfileChoiceDialog.Choice.WIZARD) {
+            openSetupWizard();
+        } else if (choice == NewProfileChoiceDialog.Choice.EMPTY) {
+            openEmptyDefaultProfile();
+        }
     }
 
     /**
