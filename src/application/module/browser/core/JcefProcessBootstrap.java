@@ -64,6 +64,14 @@ public final class JcefProcessBootstrap {
      */
     private static volatile boolean engineDisabled;
 
+    /**
+     * R2: the resilience switches the guard decided for this run
+     * ({@code --disable-gpu}, {@code --single-process}) — the app handler
+     * applies them to the CEF command line (see
+     * {@code SignumSchemeRegistrar#onBeforeCommandLineProcessing}).
+     */
+    private static volatile List<String> activeSwitches = List.of();
+
     private JcefProcessBootstrap() {
         // utility class — never instantiated
     }
@@ -112,6 +120,17 @@ public final class JcefProcessBootstrap {
     }
 
     /**
+     * R2: the resilience switches decided by {@link CefGuard} for this run
+     * ({@code --disable-gpu}, {@code --single-process}) — empty when the
+     * engine runs with the standard configuration (or when this process is a
+     * JCEF subprocess: there the switches are inherited through the
+     * re-executed command line, see {@link CefGuard#resilienceSwitchesInArgs}).
+     */
+    public static List<String> activeSwitches() {
+        return activeSwitches;
+    }
+
+    /**
      * Entry point, called from {@code Launcher.main()} before any application
      * logic (logging, kernel, GUI).
      * <ul>
@@ -151,6 +170,7 @@ public final class JcefProcessBootstrap {
         // reliable protection is this pre-init decision (previous-run crash
         // scan + subprocess spawn probe), persisted in the browser settings.
         CefGuard.Result guard = CefGuard.evaluate(confPath, jcefDir.get());
+        activeSwitches = List.copyOf(guard.switches());
         if (guard.engineDisabled()) {
             engineDisabled = true;
             logger.error("The browser engine stays OFF for this run (disabled after repeated fatal CEF "

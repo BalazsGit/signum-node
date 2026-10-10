@@ -230,4 +230,27 @@ class CefGuardTest {
         assertFalse(result.engineDisabled());
         assertEquals(List.of("--lang=hu"), result.switches());
     }
+
+    @Test
+    @DisplayName("resilience switches are extracted from a raw main() argument list (subprocess inheritance)")
+    void resilienceSwitchesAreExtractedFromArgs() {
+        assertEquals(List.of(), CefGuard.resilienceSwitchesInArgs(null));
+        assertEquals(List.of(), CefGuard.resilienceSwitchesInArgs(new String[]{"--lang=hu", "--type=gpu-process"}));
+        assertEquals(List.of(CefGuard.SWITCH_DISABLE_GPU),
+                CefGuard.resilienceSwitchesInArgs(new String[]{"--disable-gpu", "--type=gpu-process"}));
+        // Both switches, in ladder order, regardless of their position in the args
+        assertEquals(List.of(CefGuard.SWITCH_DISABLE_GPU, CefGuard.SWITCH_SINGLE_PROCESS),
+                CefGuard.resilienceSwitchesInArgs(
+                        new String[]{"--type=renderer", "--single-process", "--lang=hu", "--disable-gpu"}));
+        // A value switch is never confused with a plain switch
+        assertEquals(List.of(), CefGuard.resilienceSwitchesInArgs(new String[]{"--disable-gpu-compositing"}));
+    }
+
+    @Test
+    @DisplayName("switchName strips the leading -- for CefCommandLine calls")
+    void switchNameStripsLeadingDashes() {
+        assertEquals("disable-gpu", CefGuard.switchName("--disable-gpu"));
+        assertEquals("single-process", CefGuard.switchName("--single-process"));
+        assertEquals("single-process", CefGuard.switchName("single-process"));
+    }
 }

@@ -267,6 +267,47 @@ public final class CefGuard {
         }
     }
 
+    /** The known resilience switches, in ladder order. */
+    public static List<String> resilienceSwitches() {
+        return List.of(SWITCH_DISABLE_GPU, SWITCH_SINGLE_PROCESS);
+    }
+
+    /**
+     * Extracts the resilience switches from a raw command-line argument list
+     * (e.g. the re-executed {@code main()} arguments of a JCEF subprocess).
+     * <p>
+     * This is how a JCEF subprocess inherits the switches the browser process
+     * decided on: CEF copies the browser's command line into every child
+     * process it launches, and the JCEF helper re-executes the application
+     * with those arguments.
+     *
+     * @param args a raw {@code main()} argument list (may be {@code null})
+     * @return the matching switches in ladder order (may be empty)
+     */
+    public static List<String> resilienceSwitchesInArgs(String[] args) {
+        if (args == null) {
+            return List.of();
+        }
+        List<String> found = new ArrayList<>();
+        for (String sw : resilienceSwitches()) {
+            for (String arg : args) {
+                if (sw.equals(arg)) {
+                    found.add(sw);
+                    break;
+                }
+            }
+        }
+        return found;
+    }
+
+    /**
+     * The CEF switch name without the leading {@code --} (the form
+     * {@code CefCommandLine.appendSwitch}/{@code hasSwitch} expect).
+     */
+    public static String switchName(String cefSwitch) {
+        return cefSwitch.startsWith("--") ? cefSwitch.substring(2) : cefSwitch;
+    }
+
     /**
      * D17: drops the forbidden switches from the user-provided extra args
      * (everything else is passed through untouched).
