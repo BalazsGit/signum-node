@@ -358,6 +358,16 @@ public class NodeConfigurationPanel extends JPanel {
         newProfileBtn.addActionListener(e -> runProfileAction("New Profile", this::newProfile));
         profilePanel.add(newProfileBtn);
 
+        // Clone sits right after New Profile: both are "create a profile"
+        // actions and belong next to each other.
+        cloneProfileBtn = new JButton();
+        cloneProfileBtn.setToolTipText(
+                "<html>Clone Configuration<br><br>Creates a new profile from the current (unsaved, editor) "
+                        + "effective state: only the values that differ from the default are copied.<br>"
+                        + "The new profile is not started; the source profile is left untouched.</html>");
+        cloneProfileBtn.addActionListener(e -> runProfileAction("Clone Configuration", this::cloneProfile));
+        profilePanel.add(cloneProfileBtn);
+
         saveBtn.setToolTipText(
                 "<html>Save<br><br>Saves all unsaved changes to the current profile<br>"
                         + "(reviewing them in a dialog first). Does NOT restart the node.<br>"
@@ -395,14 +405,6 @@ public class NodeConfigurationPanel extends JPanel {
                         + "Unsaved changes in the editor are discarded (with confirmation).</html>");
         copyProfileDataBtn.addActionListener(e -> runProfileAction("Copy Configuration", this::copyProfileData));
         profilePanel.add(copyProfileDataBtn);
-
-        cloneProfileBtn = new JButton();
-        cloneProfileBtn.setToolTipText(
-                "<html>Clone Configuration<br><br>Creates a new profile from the current (unsaved, editor) "
-                        + "effective state: only the values that differ from the default are copied.<br>"
-                        + "The new profile is not started; the source profile is left untouched.</html>");
-        cloneProfileBtn.addActionListener(e -> runProfileAction("Clone Configuration", this::cloneProfile));
-        profilePanel.add(cloneProfileBtn);
 
         reloadProfileBtn = new JButton();
         reloadProfileBtn.setToolTipText(

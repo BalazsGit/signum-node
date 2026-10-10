@@ -236,6 +236,14 @@ public class ModuleLoggingProfilePanel extends JPanel {
     // ── Host extension surface (see the set*/enable* methods) ──────────
     private java.util.function.Consumer<String> applyHook;
     /**
+     * Optional host override of the Apply confirmation dialog message. The core default is
+     * module-centric ("Apply profile 'X' for module 'M'?") — a host whose Apply targets a
+     * specific entity (e.g. the node tab applies to a specific NODE PROFILE, and pressing Yes
+     * restarts the node) registers a provider so the dialog names that entity and states
+     * exactly what pressing Yes will do. {@code null} = the core default message.
+     */
+    private ApplyConfirmationProvider applyConfirmationProvider;
+    /**
      * Help text shown by the Help button. {@code null} means the core shows its own
      * structured default help ({@link #buildDefaultHelpContent()}) in a compact
      * {@link HelpDialog}; a non-null supplier (registered via
@@ -286,8 +294,13 @@ public class ModuleLoggingProfilePanel extends JPanel {
         // idempotent, so hosts may still call it for clarity).
         enableSearch();
 
+        // refreshProfileList() also re-reads the applied marker, so the default
+        // selection is the module's APPLIED profile (the profile the user applied
+        // last) — the applied state is visible the moment the panel opens. With no
+        // applied profile (or a stale marker), the virtual "Default" entry (the
+        // first combo item) stays selected.
         refreshProfileList();
-        if (profileCombo.getItemCount() > 0) {
+        if (profileCombo.getItemCount() > 0 && !preselectModuleAppliedProfile()) {
             selectSilently(0);
             switchProfile();
         }
@@ -1127,6 +1140,14 @@ public class ModuleLoggingProfilePanel extends JPanel {
         newBtn.addActionListener(e -> createNewProfile());
         panel.add(newBtn);
 
+        // Clone sits right after New Profile (the node configuration order):
+        // both are "create a profile" actions and belong next to each other.
+        JButton cloneBtn = new JButton();
+        cloneBtn.setToolTipText("<html>Clone Configuration<br><br>Creates a new profile from the current "
+                + "(unsaved, editor) effective state. The source profile is left untouched.</html>");
+        cloneBtn.addActionListener(e -> cloneProfile());
+        panel.add(cloneBtn);
+
         JButton saveBtn = new JButton();
         saveBtn.setToolTipText("<html>Save<br><br>Saves the current editor state to the selected profile.<br>"
                 + "Active only while there are unsaved changes.</html>");
@@ -1135,7 +1156,8 @@ public class ModuleLoggingProfilePanel extends JPanel {
 
         JButton applyBtn = new JButton();
         applyBtn.setToolTipText("<html>Apply<br><br>Marks the selected profile as applied (requires a node restart).<br>"
-                + "Active only while there are saved, not yet applied changes.</html>");
+                + "Active while the selected profile is not the applied one or there are unsaved or saved, "
+                + "not yet applied changes (unsaved changes are saved to the profile first).</html>");
         applyBtn.addActionListener(e -> applyProfile());
         panel.add(applyBtn);
 
@@ -1154,12 +1176,6 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 + "as unsaved changes. Unsaved changes in the editor will be discarded.</html>");
         copyBtn.addActionListener(e -> copyConfiguration());
         panel.add(copyBtn);
-
-        JButton cloneBtn = new JButton();
-        cloneBtn.setToolTipText("<html>Clone Configuration<br><br>Creates a new profile from the current "
-                + "(unsaved, editor) effective state. The source profile is left untouched.</html>");
-        cloneBtn.addActionListener(e -> cloneProfile());
-        panel.add(cloneBtn);
 
         JButton reloadBtn = new JButton();
         reloadBtn.setToolTipText("<html>Reload<br><br>Re-reads the selected profile from disk (discards unsaved edits).</html>");
@@ -1262,12 +1278,13 @@ public class ModuleLoggingProfilePanel extends JPanel {
      *       unsaved (dirty) row changes;</li>
      *   <li><b>Apply</b> — for "Default" it restores the built-in defaults
      *       (always meaningful); for an on-disk profile it is usable while
-     *       the profile is NOT the applied one (assign it) or while there
-     *       are saved, not yet applied changes (activate them);</li>
+     *       the profile is NOT the applied one (assign it), while there are
+     *       saved, not yet applied changes (activate them), or while the
+     *       editor holds unsaved changes (save and apply them);</li>
      *   <li><b>Rename</b> / <b>Delete</b> — impossible for the virtual
      *       "Default" entry (no file to act on).</li>
      * </ul>
-     * New Profile, Copy, Clone, Reload, Refresh and Reset stay enabled —
+     * New Profile, Clone, Copy, Reload, Refresh and Reset stay enabled —
      * they are all meaningful with "Default" selected.
      */
     private void updateProfileActionButtons() {
@@ -1277,13 +1294,15 @@ public class ModuleLoggingProfilePanel extends JPanel {
         boolean defaultSelected = DEFAULT_PROFILE_ENTRY.equals(profileCombo.getSelectedItem());
         saveButton.setEnabled(!defaultSelected && hasUnsavedRows());
         // Apply is meaningful when the selected profile is not the applied
-        // one (assign it — including the "nothing applied yet" case) or when
-        // saved changes wait for activation.
+        // one (assign it — including the "nothing applied yet" case), when
+        // saved changes wait for activation, or when the editor holds unsaved
+        // changes — Apply then acts as Save and Apply (the editor content is
+        // persisted to the selected profile before it is applied).
         Object selected = profileCombo.getSelectedItem();
         boolean selectedIsApplied = !defaultSelected
                 && selected != null
                 && selected.toString().equals(appliedProfileName);
-        applyButton.setEnabled(defaultSelected || !selectedIsApplied || hasSavedNotAppliedRows());
+        applyButton.setEnabled(defaultSelected || !selectedIsApplied || hasUnsavedRows() || hasSavedNotAppliedRows());
         renameButton.setEnabled(!defaultSelected);
         deleteButton.setEnabled(!defaultSelected);
     }
@@ -1689,12 +1708,10 @@ public class ModuleLoggingProfilePanel extends JPanel {
             return;
         }
         boolean isDefault = DEFAULT_PROFILE_ENTRY.equals(name);
-        int result = JOptionPane.showConfirmDialog(this,
-                "Apply profile '" + name + "' for module '" + moduleId + "'?\n\n"
-                + (isDefault
-                        ? "This restores the application's built-in default configuration."
-                        : "This marks it as applied.")
-                + " A node restart is required for the change to take effect.",
+        String message = applyConfirmationProvider != null
+                ? applyConfirmationProvider.message(name, isDefault)
+                : defaultApplyMessage(name, isDefault);
+        int result = JOptionPane.showConfirmDialog(this, message,
                 "Apply Profile", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
         if (result != JOptionPane.YES_OPTION) {
             return;
@@ -1742,6 +1759,32 @@ public class ModuleLoggingProfilePanel extends JPanel {
             JOptionPane.showMessageDialog(this, "Failed to apply profile: " + e.getMessage(),
                     "Error", JOptionPane.ERROR_MESSAGE);
         }
+    }
+
+    /**
+     * The core (module-scoped) Apply confirmation message. It states EXACTLY what Apply
+     * does on a generic module tab (the node tab overrides this with a node-centric
+     * message): it only sets the MODULE-LEVEL applied marker, does NOT change any node
+     * profile's own logging assignment, and a node profile without an explicit
+     * assignment (including newly created node profiles) runs with the built-in
+     * {@code logging-default} profile.
+     *
+     * @param profileName the profile name being applied (the virtual Default entry included)
+     * @param isDefault   whether the virtual {@link #DEFAULT_PROFILE_ENTRY} entry is applied
+     * @return the confirmation dialog message
+     */
+    String defaultApplyMessage(String profileName, boolean isDefault) {
+        return "Apply logging profile '" + profileName + "' for module '" + moduleId + "'?\n\n"
+                + (isDefault
+                        ? "This restores the application's built-in default configuration as this module's applied state.\n\n"
+                        : "This marks '" + profileName + "' as the applied logging profile of this module "
+                                + "(a module-level marker).\n\n")
+                + "Note: this does NOT change any node profile's own logging assignment. Each node profile "
+                + "keeps its own assignment — set it on the node profile's \"Logging\" tab (Apply) or in this "
+                + "module's \"Assignments\" sub-tab. A node profile without an explicit assignment (including "
+                + "newly created node profiles) uses the built-in '"
+                + LoggingProfileRepository.RESERVED_PROFILE_NAME + "' profile at (re)start.\n\n"
+                + "A node restart is required for the change to take effect.";
     }
 
     private void renameProfile() {
@@ -1880,7 +1923,8 @@ public class ModuleLoggingProfilePanel extends JPanel {
                         + "Active only while there are unsaved changes."));
         content.add(HelpDialog.actionRow(FontAwesome.CHECK_CIRCLE_O, GuiColors.getApplied(), "Apply",
                 "Marks the selected profile as applied; a node restart is required for the change to take effect. "
-                        + "Active while the selected profile is not the applied one or there are saved, not yet applied changes."));
+                        + "Active while the selected profile is not the applied one or there are unsaved or "
+                        + "saved, not yet applied changes (unsaved changes are saved to the profile first)."));
         content.add(HelpDialog.actionRow(FontAwesome.PENCIL_SQUARE_O, iconColor, "Rename",
                 "Renames the selected profile."));
         content.add(HelpDialog.actionRow(FontAwesome.UNDO, iconColor, "Reset to Defaults",
@@ -1973,6 +2017,31 @@ public class ModuleLoggingProfilePanel extends JPanel {
     }
 
     /**
+     * A host override of the Apply confirmation dialog message. Called (on the EDT) with the
+     * selected profile name and whether the virtual "Default" entry is selected, right before
+     * the dialog is shown.
+     */
+    @FunctionalInterface
+    public interface ApplyConfirmationProvider {
+        String message(String profileName, boolean isDefault);
+    }
+
+    /**
+     * Registers a host override for the Apply confirmation dialog message (see
+     * {@link ApplyConfirmationProvider}). Use it when the core's module-centric default
+     * ("Apply profile 'X' for module 'M'?") would be misleading — e.g. the node tab applies
+     * to a specific node profile and pressing Yes restarts the node, which the message must
+     * state explicitly.
+     *
+     * @param provider the message provider (may be null to restore the core default)
+     * @return {@code this} for fluent chaining
+     */
+    public ModuleLoggingProfilePanel setApplyConfirmationProvider(ApplyConfirmationProvider provider) {
+        this.applyConfirmationProvider = provider;
+        return this;
+    }
+
+    /**
      * Registers an arbitrary host control rendered in a reserved strip near the toolbar (e.g. the
      * node "link to node profile" checkbox). The core does not inspect or modify the control.
      *
@@ -2060,6 +2129,31 @@ public class ModuleLoggingProfilePanel extends JPanel {
     /** @return the profile name currently marked applied for this module (null = built-in default). */
     protected String appliedProfileName() {
         return appliedProfileName;
+    }
+
+    /**
+     * Pre-selects the module's <b>applied</b> profile in the profile menu: when the
+     * applied marker (the shared module marker in {@code conf/{module}/logging/} — or a
+     * host-provided override, see {@code setAppliedProfileNameSupplier}) points to an
+     * on-disk profile listed in the menu, that entry becomes the default selection,
+     * so the applied profile is what the user sees loaded when the panel opens.
+     * <p>
+     * A missing, blank, reserved ({@code logging-default}) or stale marker (the
+     * applied profile was deleted since) selects nothing — the caller then falls
+     * back to the virtual {@link #DEFAULT_PROFILE_ENTRY} entry.
+     * </p>
+     *
+     * @return true when the applied profile was selected, false when the caller should
+     *         keep the default ("Default") selection
+     */
+    protected boolean preselectModuleAppliedProfile() {
+        String applied = appliedProfileName;
+        if (applied == null || applied.isBlank()
+                || DEFAULT_PROFILE_ENTRY.equals(applied)
+                || LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(applied)) {
+            return false;
+        }
+        return selectProfile(applied);
     }
 
     /**

@@ -31,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -240,6 +241,57 @@ class NodeLoggingPanelTest {
         assertEquals(ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY,
                 panel.getProfileCombo().getSelectedItem(),
                 "nothing applied — the virtual 'Default' entry stays selected");
+    }
+
+    @Test
+    @DisplayName("applying the virtual 'Default' profile CLEARS the node's custom assignment (no literal 'Default' in the SSOT)")
+    void applyingDefaultClearsThePerNodeAssignment() {
+        LoggingAssignmentStore store = new LoggingAssignmentStore();
+        String node = "zz-default-clear-node";
+        try {
+            store.setAssignmentForModule(node, ModuleIds.NODE, "someprofile");
+
+            final NodeLoggingPanel[] holder = new NodeLoggingPanel[1];
+            onEdt(() -> holder[0] = new NodeLoggingPanel(node, () -> { }));
+            holder[0].persistPerNodeAssignment(ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY);
+
+            // Read via a FRESH store (the app's access pattern: a new
+            // LoggingAssignmentStore per operation) — a long-lived store
+            // instance caches the ProfileData it first loaded.
+            assertNull(new LoggingAssignmentStore().getAssignment(node).get(ModuleIds.NODE),
+                    "applying the virtual 'Default' entry clears the node's assignment, so the runtime "
+                            + "falls back to the built-in logging-default");
+        } finally {
+            try {
+                store.clearAssignment(node);
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("the apply dialog message names the node profile and states the per-node scope + new-node fallback")
+    void applyMessageStatesPerNodeScope() {
+        final NodeLoggingPanel[] holder = new NodeLoggingPanel[1];
+        onEdt(() -> holder[0] = new NodeLoggingPanel("zz-msg-node", () -> { }));
+        NodeLoggingPanel panel = holder[0];
+
+        String msg = panel.nodeApplyMessage("myprofile", false);
+        assertTrue(msg.contains("node profile 'zz-msg-node'"), "the message names the bound node profile");
+        assertTrue(msg.contains("specific to node profile 'zz-msg-node'"),
+                "the message states the assignment is specific to this node profile");
+        assertTrue(msg.contains("Other node profiles keep their own assignment"),
+                "the message clarifies that other node profiles are unaffected");
+        assertTrue(msg.contains("newly created node profile")
+                        && msg.contains(LoggingProfileRepository.RESERVED_PROFILE_NAME),
+                "the message states a newly created node profile without an explicit assignment "
+                        + "uses the built-in logging-default profile");
+
+        String defMsg = panel.nodeApplyMessage(ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY, true);
+        assertTrue(defMsg.contains("CLEARS")
+                        && defMsg.contains(LoggingProfileRepository.RESERVED_PROFILE_NAME),
+                "the 'Default' message states that the node's custom assignment is cleared");
     }
 
     // ── Helpers ────────────────────────────────────────────────────────

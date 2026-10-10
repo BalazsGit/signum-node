@@ -886,6 +886,57 @@ class ModuleLoggingProfilePanelTest {
     }
 
     @Test
+    @DisplayName("the module's applied profile is pre-selected in the profile menu on construction")
+    void appliedProfilePreselectedOnConstruction() throws Exception {
+        LoggingProfileRepository repo = new LoggingProfileRepository();
+        String name = "zz-preselect-" + System.nanoTime();
+        try {
+            repo.setApplied("test-mod", null); // deterministic start: nothing applied
+            repo.create("test-mod", name, new Properties());
+            repo.setApplied("test-mod", name);
+
+            ModuleLoggingProfilePanel panel = newPanel();
+            assertEquals(name, panel.getProfileCombo().getSelectedItem(),
+                    "the module's applied profile is the default selection in the profile menu");
+        } finally {
+            try {
+                repo.setApplied("test-mod", null);
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+            try {
+                repo.delete("test-mod", name);
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("the default apply message states the module-level scope and the new-node fallback")
+    void defaultApplyMessageStatesModuleScope() {
+        ModuleLoggingProfilePanel panel = newPanel();
+
+        String msg = panel.defaultApplyMessage("myprofile", false);
+        assertTrue(msg.contains("myprofile"), "the message names the profile being applied");
+        assertTrue(msg.contains("module 'test-mod'"), "the message names the module");
+        assertTrue(msg.contains("module-level marker"),
+                "the message states that Apply only sets the module-level applied marker");
+        assertTrue(msg.contains("does NOT change any node profile's own logging assignment"),
+                "the message states that no node profile's own assignment is changed");
+        assertTrue(msg.contains("Assignments"),
+                "the message points to the 'Assignments' sub-tab for per-node assignments");
+        assertTrue(msg.contains("newly created node profiles")
+                        && msg.contains(LoggingProfileRepository.RESERVED_PROFILE_NAME),
+                "the message states that newly created node profiles without an explicit "
+                        + "assignment use the built-in logging-default profile");
+
+        String defMsg = panel.defaultApplyMessage(ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY, true);
+        assertTrue(defMsg.contains("built-in default"),
+                "the 'Default' message states that the built-in configuration is restored");
+    }
+
+    @Test
     @DisplayName("setHelpSupplier overrides the default help; null hides the Help button")
     void setHelpSupplierTogglesHelpButton() {
         ModuleLoggingProfilePanel panel = newPanel();
@@ -1239,6 +1290,41 @@ class ModuleLoggingProfilePanelTest {
             } catch (Exception ignored) {
                 // best-effort cleanup
             }
+        }
+    }
+
+    @Test
+    @DisplayName("Apply is enabled (Save and Apply) when the applied profile has unsaved editor changes")
+    void applyEnabledWithUnsavedChangesOnAppliedProfile() {
+        LoggingProfileRepository repo = new LoggingProfileRepository();
+        String a = "apply-unsaved-" + System.nanoTime();
+        try {
+            repo.setApplied("test-mod", null); // deterministic start
+            ModuleLoggingProfilePanel panel = newPanel();
+            onEdt(() -> panel.createProfileFromDefaults(a));
+            // Mark 'a' applied with a snapshot of its current (default) values:
+            // selected == applied and every row matches the baseline.
+            repo.saveAppliedSnapshot("test-mod", a, repo.loadProps("test-mod", a));
+            repo.setApplied("test-mod", a);
+
+            ModuleLoggingProfilePanel fresh = newPanel();
+            onEdt(() -> fresh.getProfileCombo().setSelectedItem(a));
+            assertFalse(findButtonByTooltip(fresh, "Apply<br>").isEnabled(),
+                    "precondition: Apply is disabled while the applied profile is selected and clean");
+            // An unsaved editor change must activate Apply — it then acts as
+            // Save and Apply (persist the edit to the profile, then apply it).
+            onEdt(() -> ((JTextField) editorAfterLabel(fresh, "test.handler")).setText("custom.handler.unsaved"));
+            assertTrue(findButtonByTooltip(fresh, "Apply<br>").isEnabled(),
+                    "Apply is enabled while the applied profile has unsaved editor changes (Save and Apply)");
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        } finally {
+            try {
+                repo.setApplied("test-mod", null); // also drops the snapshot
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+            cleanupProfiles(a);
         }
     }
 

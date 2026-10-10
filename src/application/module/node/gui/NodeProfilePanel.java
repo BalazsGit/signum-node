@@ -209,7 +209,7 @@ public class NodeProfilePanel extends JPanel {
             LOGGER.debug("Configuration tab added successfully");
 
             LOGGER.debug("Creating LoggerConfigurationPanel for profile: {}", profile.getName());
-            loggingPanel = new NodeLoggingPanel(profile.getName(), this::restartNode);
+            loggingPanel = new NodeLoggingPanel(profile.getName(), this::restartNodePreservingPreviousState);
             innerTabbedPane.addTab("Logging", loggingPanel);
             LOGGER.debug("Logging tab added successfully");
 
@@ -760,6 +760,52 @@ public class NodeProfilePanel extends JPanel {
                 infoBar.refreshData();
             }
         });
+    }
+
+    /**
+     * Apply-from-logging restart: a full restart (stop + start) ONLY when the node was
+     * previously RUNNING. A node in any other state is never started — it is only brought
+     * back to a stopped state ({@code NodeModule.stopNode} is a safe no-op when the node is
+     * already stopped or not registered, and {@code Signum.stop()} accepts the ERROR state).
+     * <p>
+     * The pre-restart <b>paused</b> state is preserved as well: a stop→start cycle clears the
+     * user pause ({@code Signum.clearPauseState}), so when the node was PAUSED_USER before the
+     * restart, a one-shot state listener re-applies {@code pauseByUser()} once the restarted
+     * node reaches RUNNING again (never blocks the EDT — the restart runs async on the
+     * lifecycle thread).
+     * </p>
+     * The generic {@link #restartNode()} used by the toolbar/console always starts (and does
+     * not restore a pause) and is intentionally left unchanged.
+     */
+    private void restartNodePreservingPreviousState() {
+        Signum node = NodeModule.getInstance().get(profile.getName());
+        if (node == null || node.getState() != Signum.State.RUNNING) {
+            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(), () ->
+                    LOGGER.info("Apply-logging restart for profile '{}': previous state {} — the node was not "
+                                    + "running, so it is not started (brought back to stopped)",
+                            profile.getName(), node == null ? "unregistered" : node.getState()));
+            NodeModule.getInstance().stopNode(profile.getName());
+            return;
+        }
+        if (node.getOperatingState() == Signum.OperatingState.PAUSED_USER) {
+            // Re-apply the user pause AFTER the restart brings the node back to RUNNING
+            // (the first RUNNING transition seen by this listener is the post-restart one —
+            // it was registered while the node was already RUNNING). On ERROR the restart
+            // failed, so the one-shot pause is dropped instead of leaking on the instance.
+            Signum.StateListener[] rePause = { null };
+            rePause[0] = (s, oldState, newState) -> {
+                if (newState == Signum.State.RUNNING) {
+                    if (s.getOperatingState() != Signum.OperatingState.PAUSED_USER) {
+                        s.pauseByUser();
+                    }
+                    s.removeStateListener(rePause[0]);
+                } else if (newState == Signum.State.ERROR) {
+                    s.removeStateListener(rePause[0]);
+                }
+            };
+            node.addStateListener(rePause[0]);
+        }
+        restartNode();
     }
 
     public NodeProfile getProfile() { return profile; }
