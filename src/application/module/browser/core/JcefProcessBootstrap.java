@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -55,6 +56,14 @@ public final class JcefProcessBootstrap {
     private static volatile boolean preinitialized;
     private static volatile String[] mainArgs = new String[0];
 
+    /**
+     * R2: whether the engine must stay off for this run (the previous runs
+     * crashed fatally even in the most degraded mode — see {@link CefGuard}).
+     * The {@link BrowserEngine} reports a clear FAILED state so the browser
+     * tab shows the reason while the rest of the application keeps running.
+     */
+    private static volatile boolean engineDisabled;
+
     private JcefProcessBootstrap() {
         // utility class — never instantiated
     }
@@ -95,6 +104,14 @@ public final class JcefProcessBootstrap {
     }
 
     /**
+     * R2: whether the engine must stay off for this run (disabled after
+     * repeated fatal CEF crashes — see {@link CefGuard}).
+     */
+    public static boolean isEngineDisabled() {
+        return engineDisabled;
+    }
+
+    /**
      * Entry point, called from {@code Launcher.main()} before any application
      * logic (logging, kernel, GUI).
      * <ul>
@@ -128,7 +145,31 @@ public final class JcefProcessBootstrap {
                     + "at initialization (run 'gradlew extractJcef' first)");
             return;
         }
+        // R2 (plan §Risk): before the engine is initialized, decide whether it
+        // can run at all and with which resilience switches — a fatal CEF event
+        // (e.g. the GPU process cannot be launched) KILLS the JVM, so the only
+        // reliable protection is this pre-init decision (previous-run crash
+        // scan + subprocess spawn probe), persisted in the browser settings.
+        CefGuard.Result guard = CefGuard.evaluate(confPath, jcefDir.get());
+        if (guard.engineDisabled()) {
+            engineDisabled = true;
+            logger.error("The browser engine stays OFF for this run (disabled after repeated fatal CEF "
+                    + "crashes) — the application continues without the browser");
+            return;
+        }
+        if (!guard.switches().isEmpty()) {
+            mainArgs = appendSwitches(mainArgs, guard.switches());
+        }
         preinitialize(confPath, jcefDir.get());
+    }
+
+    private static String[] appendSwitches(String[] base, List<String> switches) {
+        String[] combined = new String[base.length + switches.size()];
+        System.arraycopy(base, 0, combined, 0, base.length);
+        for (int i = 0; i < switches.size(); i++) {
+            combined[base.length + i] = switches.get(i);
+        }
+        return combined;
     }
 
     /**

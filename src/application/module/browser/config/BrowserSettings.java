@@ -50,6 +50,19 @@ public final class BrowserSettings {
     /** D17: {@code file://} navigation stays blocked unless the user opts out (N12, F2+). */
     private boolean blockFileUrls = true;
     private boolean showBookmarksBar = true;
+    /** R2: GPU acceleration is off (CEF {@code --disable-gpu}) — set automatically after a
+     *  fatal CEF crash, or explicitly by the user (e.g. RDP / broken GPU driver). */
+    private boolean disableGpu = false;
+    /** R2: last-resort single-process mode (CEF {@code --single-process}) — escalated
+     *  automatically when the GPU-off run still crashes (e.g. the OS blocks CEF
+     *  subprocess launches). */
+    private boolean singleProcess = false;
+    /** R2: the engine is disabled after repeated fatal crashes — the application keeps
+     *  running, the browser is unavailable. Re-enable manually (set to {@code false}). */
+    private boolean cefDisabled = false;
+    /** R2: additional CEF command-line switches (escape hatch); D17-forbidden switches
+     *  are dropped at engine start. */
+    private List<String> cefExtraArgs = new ArrayList<>();
 
     public int getVersion() {
         return version;
@@ -155,6 +168,38 @@ public final class BrowserSettings {
         this.showBookmarksBar = showBookmarksBar;
     }
 
+    public boolean isDisableGpu() {
+        return disableGpu;
+    }
+
+    public void setDisableGpu(boolean disableGpu) {
+        this.disableGpu = disableGpu;
+    }
+
+    public boolean isSingleProcess() {
+        return singleProcess;
+    }
+
+    public void setSingleProcess(boolean singleProcess) {
+        this.singleProcess = singleProcess;
+    }
+
+    public boolean isCefDisabled() {
+        return cefDisabled;
+    }
+
+    public void setCefDisabled(boolean cefDisabled) {
+        this.cefDisabled = cefDisabled;
+    }
+
+    public List<String> getCefExtraArgs() {
+        return cefExtraArgs;
+    }
+
+    public void setCefExtraArgs(List<String> cefExtraArgs) {
+        this.cefExtraArgs = cefExtraArgs;
+    }
+
     /**
      * Fills any field that gson left {@code null} (missing in the JSON) with
      * its safe default. Called by the repository after deserialization only.
@@ -186,6 +231,9 @@ public final class BrowserSettings {
         }
         if (discardMinutes <= 0) {
             discardMinutes = DEFAULT_DISCARD_MINUTES;
+        }
+        if (cefExtraArgs == null) {
+            cefExtraArgs = new ArrayList<>();
         }
     }
 }

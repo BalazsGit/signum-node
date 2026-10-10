@@ -10,6 +10,8 @@ import org.cef.CefSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
@@ -81,6 +83,18 @@ public final class BrowserEngine {
         return t;
     });
     private final Supplier<Optional<Path>> jcefDirProvider;
+
+    /**
+     * R2: invoked by the fatal watchdog when a fatal CEF event is observed
+     * shortly after READY (the escalation is already persisted — the watchdog
+     * only asks for the restart). Wired by the module from
+     * {@code ModuleContext.requestRestart()}; {@code null} when unavailable
+     * (tests) — then the watchdog only persists the escalation.
+     */
+    private volatile Runnable restartRequester;
+
+    /** R2: whether the fatal watchdog is currently observing cef.log. */
+    private volatile boolean fatalWatchdogRunning;
 
     private BrowserEngine() {
         this(JcefPathResolver::resolve);
@@ -176,6 +190,8 @@ public final class BrowserEngine {
         if (state == BrowserEngineState.SHUTTING_DOWN || state == BrowserEngineState.SHUT_DOWN) {
             return;
         }
+        // R2: the engine goes down — the fatal watchdog is no longer needed.
+        fatalWatchdogRunning = false;
         transition(BrowserEngineState.SHUTTING_DOWN);
 
         CompletableFuture<BrowserEngineState> future = initFuture;
@@ -215,6 +231,18 @@ public final class BrowserEngine {
 
     private BrowserEngineState doInit(Path browserConfDir) {
         try {
+            // R2 (plan §Risk): the engine may be disabled for this run — the
+            // previous runs crashed fatally even in the most degraded mode
+            // (see CefGuard). Fail fast with an actionable reason: the browser
+            // tab shows the error while the rest of the application keeps working.
+            if (JcefProcessBootstrap.isEngineDisabled()) {
+                failureReason = "The browser engine is disabled on this machine after repeated fatal CEF "
+                        + "crashes (the application keeps running, only the browser is unavailable). "
+                        + "Re-enable it by setting \"cefDisabled\": false in conf/browser/settings.json "
+                        + "and restarting.";
+                logger.error("Browser engine initialization failed: {}", failureReason);
+                return BrowserEngineState.FAILED;
+            }
             // 1. The native distribution must be in place (plan D1/D2).
             Optional<Path> jcefOpt = jcefDirProvider.get();
             if (jcefOpt.isEmpty()) {
@@ -253,6 +281,12 @@ public final class BrowserEngine {
             // S7 (D17): verify the renderer sandbox is actually in effect (log-only, delayed).
             SandboxVerifier.verifyAfterReady();
 
+            // R2 (plan §Risk): a fatal CEF event observed after init (e.g. the
+            // GPU process dies on this machine) will kill the JVM within
+            // seconds — escalate the persisted settings and request a restart
+            // so the next start recovers automatically.
+            startFatalWatchdog(browserConfDir);
+
             CefApp.CefVersion version = CefApp.getInstance().getVersion();
             logger.info("Browser engine ready (JCEF {})",
                     version != null ? version.toString().replace('\n', ' ') : "unknown version");
@@ -261,6 +295,83 @@ public final class BrowserEngine {
             logger.error("Browser engine initialization failed", t);
             failureReason = t.getMessage() != null ? t.getMessage() : t.toString();
             return BrowserEngineState.FAILED;
+        }
+    }
+
+    /**
+     * R2: registers the restart callback used by the fatal watchdog.
+     *
+     * @param restartRequester the restart action (e.g.
+     *                         {@code ModuleContext::requestRestart}), or
+     *                         {@code null} to clear it
+     */
+    public void setRestartRequester(Runnable restartRequester) {
+        this.restartRequester = restartRequester;
+    }
+
+    /**
+     * R2 (plan §Risk): after the engine reports READY, observes the CEF log for
+     * a short window. A fatal event seen there (e.g. {@code GPU process launch
+     * failed} → {@code FATAL: ... Goodbye.}) means the JVM is about to be
+     * killed by CEF itself — there is nothing to catch that, so the watchdog
+     * persists a resilience escalation (the next start recovers with the new
+     * settings/switches) and requests an application restart. Best effort: if
+     * CEF wins the race, the start-time guard (CefGuard) still recovers on the
+     * next manual start.
+     */
+    private void startFatalWatchdog(Path browserConfDir) {
+        if (fatalWatchdogRunning) {
+            return;
+        }
+        fatalWatchdogRunning = true;
+        Path cefLog = CefGuard.cefLog(browserConfDir.getParent());
+        final long baseline = cefLogSize(cefLog);
+        Thread watchdog = new Thread(() -> {
+            try {
+                // ~20 s window in 500 ms steps — CEF aborts a process whose GPU
+                // process failed six launches (~1 s), so this usually wins the race.
+                for (int i = 0; i < 40 && state == BrowserEngineState.READY && fatalWatchdogRunning; i++) {
+                    TimeUnit.MILLISECONDS.sleep(500);
+                    String region = CefGuard.readRegion(cefLog, baseline);
+                    if (region == null || !CefGuard.indicatesFatal(region)) {
+                        continue;
+                    }
+                    logger.error("A fatal CEF event was detected in {} right after the engine became READY — "
+                            + "the process is likely about to crash; escalating the browser settings and "
+                            + "requesting a restart...", cefLog);
+                    try {
+                        CefGuard.escalateAfterFatal(browserConfDir);
+                    } catch (RuntimeException e) {
+                        logger.error("Could not persist the CEF resilience escalation", e);
+                    }
+                    Runnable restart = restartRequester;
+                    if (restart != null) {
+                        try {
+                            restart.run();
+                        } catch (RuntimeException e) {
+                            logger.error("The restart request failed", e);
+                        }
+                    } else {
+                        logger.error("No restart requester is available — the application may crash now; the "
+                                + "next start will recover automatically with the escalated settings");
+                    }
+                    return;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                fatalWatchdogRunning = false;
+            }
+        }, "cef-fatal-watchdog");
+        watchdog.setDaemon(true);
+        watchdog.start();
+    }
+
+    private static long cefLogSize(Path log) {
+        try {
+            return Files.isRegularFile(log) ? Files.size(log) : 0L;
+        } catch (IOException e) {
+            return 0L;
         }
     }
 

@@ -70,6 +70,9 @@ public class BrowserModule implements Module {
             return;
         }
         logger.info("Starting browser engine (asynchronous)...");
+        // R2 (plan §Risk): the engine's fatal watchdog asks for an application
+        // restart when CEF is about to kill the JVM (see BrowserEngine).
+        engine.setRestartRequester(context::requestRestart);
         engine.init(browserConfDir);
     }
 

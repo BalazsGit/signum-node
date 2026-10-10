@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -70,6 +71,31 @@ class BrowserSettingsRepositoryTest {
         assertEquals(BrowserSettings.DEFAULT_HOME_PAGE, settings.getHomepage());
         assertEquals(BrowserSettings.DEFAULT_SEARCH_ENGINE_TEMPLATE, settings.getSearchEngineTemplate());
         assertTrue(settings.isBlockFileUrls());
+    }
+
+    @Test
+    @DisplayName("R2 resilience fields round-trip and default to off")
+    void resilienceFieldsRoundTrip(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("settings.json");
+        BrowserSettingsRepository repository = new BrowserSettingsRepository(file);
+
+        BrowserSettings defaults = repository.load();
+        assertFalse(defaults.isDisableGpu());
+        assertFalse(defaults.isSingleProcess());
+        assertFalse(defaults.isCefDisabled());
+        assertTrue(defaults.getCefExtraArgs().isEmpty());
+
+        BrowserSettings settings = new BrowserSettings();
+        settings.setDisableGpu(true);
+        settings.setSingleProcess(true);
+        settings.setCefExtraArgs(List.of("--lang=hu"));
+        repository.save(settings);
+
+        BrowserSettings loaded = repository.load();
+        assertTrue(loaded.isDisableGpu());
+        assertTrue(loaded.isSingleProcess());
+        assertFalse(loaded.isCefDisabled());
+        assertEquals(List.of("--lang=hu"), loaded.getCefExtraArgs());
     }
 
     @Test
