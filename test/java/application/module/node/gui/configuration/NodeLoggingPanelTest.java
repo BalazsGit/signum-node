@@ -15,7 +15,9 @@ import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JTextField;
+import javax.swing.ListCellRenderer;
 import javax.swing.SwingUtilities;
 import javax.swing.border.TitledBorder;
 import java.awt.Component;
@@ -241,6 +243,67 @@ class NodeLoggingPanelTest {
         assertEquals(ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY,
                 panel.getProfileCombo().getSelectedItem(),
                 "nothing applied — the virtual 'Default' entry stays selected");
+    }
+
+    @Test
+    @DisplayName("an unassigned node profile marks the virtual 'Default' entry as applied — the module marker never leaks into the node tab")
+    void unassignedNodeProfileMarksDefaultAsApplied() throws Exception {
+        LoggingProfileRepository repo = new LoggingProfileRepository();
+        LoggingAssignmentStore store = new LoggingAssignmentStore();
+        String profile = "zz-node-tab-no-leak-" + System.nanoTime();
+        String node = "zz-node-tab-no-leak-node";
+        String previousMarker = null;
+        boolean hadMarker = false;
+        try {
+            try {
+                previousMarker = repo.getApplied(ModuleIds.NODE);
+                hadMarker = previousMarker != null;
+            } catch (Exception ignored) {
+                // unreadable marker — treat as absent
+            }
+            // The MODULE tab shows this profile as the applied one...
+            repo.create(ModuleIds.NODE, profile, new Properties());
+            repo.setApplied(ModuleIds.NODE, profile);
+
+            final NodeLoggingPanel[] holder = new NodeLoggingPanel[1];
+            onEdt(() -> holder[0] = new NodeLoggingPanel(node, () -> { }));
+            NodeLoggingPanel panel = holder[0];
+
+            // ...but the node tab (no per-node assignment) shows the built-in default.
+            assertEquals(ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY,
+                    panel.getProfileCombo().getSelectedItem(),
+                    "an unassigned node profile keeps the virtual 'Default' entry selected — "
+                            + "the module's applied profile is NOT pre-selected");
+
+            @SuppressWarnings("unchecked")
+            ListCellRenderer<String> renderer = (ListCellRenderer<String>) panel.getProfileCombo().getRenderer();
+            JList<String> list = new JList<>();
+            JLabel defaultCell = (JLabel) renderer.getListCellRendererComponent(
+                    list, ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY, -1, false, false);
+            assertNotNull(defaultCell.getIcon(),
+                    "the virtual 'Default' entry is marked applied (the node runs with the built-in logging-default)");
+            assertEquals(GuiColors.getApplied(), defaultCell.getForeground(),
+                    "the 'Default' entry is painted with the applied color");
+            JLabel moduleAppliedCell = (JLabel) renderer.getListCellRendererComponent(list, profile, -1, false, false);
+            assertNull(moduleAppliedCell.getIcon(),
+                    "the module's applied profile is NOT marked applied on the node tab");
+        } finally {
+            try {
+                repo.setApplied(ModuleIds.NODE, hadMarker ? previousMarker : null);
+            } catch (Exception ignored) {
+                // best-effort restore
+            }
+            try {
+                repo.delete(ModuleIds.NODE, profile);
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+            try {
+                store.clearAssignment(node);
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+        }
     }
 
     @Test

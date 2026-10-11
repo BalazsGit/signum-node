@@ -1,7 +1,9 @@
 package application.module.node.profile;
 
+import application.module.logging.LoggingAssignmentStore;
 import application.module.node.props.Prop;
 import application.module.node.props.Props;
+import application.utils.config.ModuleIds;
 
 import java.util.Arrays;
 import java.util.List;
@@ -151,6 +153,10 @@ public final class ProfileCli {
 
         try {
             NodeProfile profile = NodeProfileRepository.createDefaultProfile(confRoot, name, props);
+            // Seed the logging assignment from the module's applied profile (the same
+            // rule as the GUI creation paths — SSOT: ProfileRuntimeService).
+            ProfileRuntimeService.seedDefaultLoggingAssignment(confRoot, name);
+            String logging = new LoggingAssignmentStore(confRoot).getAssignment(name).get(ModuleIds.NODE);
             System.out.println("Created profile '" + profile.getName() + "' ("
                     + profile.getProperties().size() + " properties)");
             System.out.println("  DB:    " + props.getProperty(Props.DB_URL.getName()));
@@ -158,6 +164,9 @@ public final class ProfileCli {
                     + "  P2P=" + props.getProperty(Props.P2P_PORT.getName())
                     + "  WS=" + props.getProperty(Props.API_WEBSOCKET_PORT.getName())
                     + "   (override with --api-port/--p2p-port/--ws-port)");
+            System.out.println("  Logging: " + (logging != null && !logging.isBlank()
+                    ? logging
+                    : "built-in default (no explicit assignment)"));
             return SUCCESS;
         } catch (Exception e) {
             System.err.println("Error: " + e.getMessage());

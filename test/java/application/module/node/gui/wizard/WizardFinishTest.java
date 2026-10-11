@@ -1,10 +1,13 @@
 package application.module.node.gui.wizard;
 
 import application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine;
+import application.module.logging.LoggingAssignmentStore;
+import application.module.logging.LoggingProfileRepository;
 import application.module.node.profile.NodeProfile;
 import application.module.node.profile.NodeProfileRepository;
 import application.module.node.profile.ProfileCreateDefaults;
 import application.module.node.props.Props;
+import application.utils.config.ModuleIds;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -15,6 +18,7 @@ import java.util.Comparator;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * Tests for {@link WizardFinish} — the SQLite {@code DB.Url} mapping decision at
@@ -47,6 +51,32 @@ class WizardFinishTest {
         try (Probe ignored = new Probe(name)) {
             assertEquals(name, WizardFinish.createProfile(context(name, dbUrl, name)));
             assertEquals(dbUrl, dbUrlOf(name));
+        }
+    }
+
+    @Test
+    @DisplayName("the new profile's logging assignment is seeded from the module's applied profile (snapshot)")
+    void loggingAssignmentSeededFromAppliedProfile() throws Exception {
+        // The probe runs in the real runtime conf root, so the expected seed
+        // depends on the module's CURRENT applied marker: a valid non-default
+        // marker is seeded, a missing/blank/reserved/stale one is not.
+        LoggingProfileRepository repo = new LoggingProfileRepository();
+        String applied = repo.getApplied(ModuleIds.NODE);
+        boolean expectSeed = applied != null && !applied.isBlank()
+                && !LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(applied)
+                && repo.hasProfile(ModuleIds.NODE, applied);
+
+        String name = "wizard_probe_" + System.nanoTime();
+        try (Probe ignored = new Probe(name)) {
+            WizardFinish.createProfile(context(name, null, null));
+            String seeded = new LoggingAssignmentStore().getAssignment(name).get(ModuleIds.NODE);
+            if (expectSeed) {
+                assertEquals(applied, seeded,
+                        "the new profile inherits the module's applied logging profile as its default assignment");
+            } else {
+                assertNull(seeded,
+                        "'Default' applied (or a stale marker) — no explicit assignment is seeded");
+            }
         }
     }
 

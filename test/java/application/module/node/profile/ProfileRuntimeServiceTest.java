@@ -1,6 +1,7 @@
 package application.module.node.profile;
 
 import application.module.logging.LoggingAssignmentStore;
+import application.module.logging.LoggingProfileRepository;
 import application.module.node.NodeModule;
 import application.module.node.Signum;
 import application.utils.config.ModuleIds;
@@ -593,23 +594,67 @@ class ProfileRuntimeServiceTest {
     // ── create empty default (F5: "+" tab, New Empty Default Profile) ─────
 
     @Test
-    @DisplayName("creates a zero-override profile file without a logging assignment")
+    @DisplayName("creates a zero-override profile file without a logging assignment (no module profile applied)")
     void createEmpty_CreatesZeroOverrideFileAndNoLoggingAssignment() throws IOException {
-        // Arrange — an existing profile must remain untouched.
+        // Arrange — an existing profile must remain untouched; the sandbox has no
+        // module-level applied marker (i.e. "Default" is the applied profile).
         NodeProfileRepository.createProfile(confRoot(), "mainnet", new Properties());
 
         // Act
         String created = ProfileRuntimeService.createEmptyProfile(confRoot(), "node");
 
         // Assert — the file exists, is truly empty (zero overrides), and no logging
-        // assignment is recorded (the module's built-in defaults apply).
+        // assignment is recorded while "Default" is the applied profile (the
+        // module's built-in defaults apply).
         assertEquals("node", created);
         assertTrue(Files.exists(profileFile("node")));
         NodeProfile profile = NodeProfileRepository.loadProfile(confRoot(), "node");
         assertTrue(profile.getProperties().isEmpty(), "the profile file must contain zero overrides");
         Map<String, String> assignment = new LoggingAssignmentStore(confRoot()).getAssignment("node");
         assertFalse(assignment.containsKey(ModuleIds.NODE),
-                "a fresh profile must not carry a logging assignment");
+                "while 'Default' is the applied profile no logging assignment is seeded");
+    }
+
+    @Test
+    @DisplayName("seeds the new profile with the module's applied logging profile (snapshot at creation time)")
+    void createEmpty_SeedsWithAppliedLoggingProfile() throws IOException {
+        // Arrange — an applied (on-disk) logging profile of the node module.
+        LoggingProfileRepository repo = new LoggingProfileRepository(confRoot());
+        String appliedName = "zz-seed-applied";
+        repo.create(ModuleIds.NODE, appliedName, new Properties());
+        repo.setApplied(ModuleIds.NODE, appliedName);
+        try {
+            // Act
+            String created = ProfileRuntimeService.createEmptyProfile(confRoot(), "node");
+
+            // Assert — the new profile inherits the applied profile as its
+            // default logging assignment.
+            assertEquals(appliedName,
+                    new LoggingAssignmentStore(confRoot()).getAssignment(created).get(ModuleIds.NODE),
+                    "the new profile inherits the module's applied logging profile as its default assignment");
+        } finally {
+            repo.setApplied(ModuleIds.NODE, null);
+            repo.delete(ModuleIds.NODE, appliedName);
+        }
+    }
+
+    @Test
+    @DisplayName("seeds nothing when the applied marker is stale (the applied profile was deleted)")
+    void createEmpty_StaleAppliedMarker_SeededNothing() throws IOException {
+        // Arrange — a marker pointing to a profile that does not exist.
+        LoggingProfileRepository repo = new LoggingProfileRepository(confRoot());
+        repo.setApplied(ModuleIds.NODE, "zz-never-existed");
+        try {
+            // Act
+            String created = ProfileRuntimeService.createEmptyProfile(confRoot(), "node");
+
+            // Assert — an unresolvable (stale) marker must not be seeded.
+            Map<String, String> assignment = new LoggingAssignmentStore(confRoot()).getAssignment(created);
+            assertFalse(assignment.containsKey(ModuleIds.NODE),
+                    "a stale applied marker must not be seeded as an unresolvable assignment");
+        } finally {
+            repo.setApplied(ModuleIds.NODE, null);
+        }
     }
 
     @Test

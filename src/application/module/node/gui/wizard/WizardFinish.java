@@ -6,6 +6,7 @@ import application.module.node.NodeModule;
 import application.module.node.profile.NodeProfile;
 import application.module.node.profile.NodeProfileRepository;
 import application.module.node.profile.ProfileCreateDefaults;
+import application.module.node.profile.ProfileRuntimeService;
 import application.module.node.props.Props;
 
 import java.util.Properties;
@@ -17,6 +18,12 @@ import java.util.Properties;
  * All property mapping goes through the SSOT ({@link ProfileCreateDefaults}); persistence
  * through {@link NodeProfileRepository}; the start through {@link NodeModule} (the only
  * composition root for node lifecycle).
+ * </p>
+ * <p>
+ * The wizard has no logging step of its own: the new profile's logging assignment is
+ * seeded from the node module's currently applied logging profile (a snapshot at
+ * creation time — SSOT: {@link ProfileRuntimeService#seedDefaultLoggingAssignment});
+ * while "Default" is the applied profile no assignment is written.
  * </p>
  */
 public final class WizardFinish {
@@ -72,6 +79,12 @@ public final class WizardFinish {
         }
 
         NodeProfile profile = NodeProfileRepository.createProfile(name, props);
+
+        // The new profile's logging assignment is seeded from the node module's
+        // currently applied logging profile (a snapshot at creation time; nothing
+        // is seeded while "Default" is the applied profile). Same rule as every
+        // other profile-creation path (SSOT: ProfileRuntimeService).
+        ProfileRuntimeService.seedDefaultLoggingAssignment(name);
 
         // The new node's SQLite configuration gets its companion database
         // profile immediately (the same rule the configuration panel's save

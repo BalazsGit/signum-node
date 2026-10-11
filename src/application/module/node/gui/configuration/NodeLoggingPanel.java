@@ -45,8 +45,9 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
      * The node profile this tab is bound to (e.g. {@code "mainnet"}), or {@code null} when the
      * panel is used standalone (tests) and should not record a per-node assignment. When set,
      * <b>Apply</b> persists the selection to the per-node assignment SSOT
-     * ({@code conf/node/profiles.json} via {@link LoggingAssignmentStore}) in addition to the
-     * shared module marker, so each node profile can use its own logging profile.
+     * ({@code conf/node/profiles.json} via {@link LoggingAssignmentStore}) — NOT to the
+     * shared module marker (the node tab never touches the module's applied state) —
+     * so each node profile can use its own logging profile.
      */
     private final String nodeProfileName;
 
@@ -74,7 +75,8 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
             + "dialog restarts the node for the change to take effect (the node is not started if it was not "
             + "running; a paused node is restored to the paused state after the restart). The assignment is "
             + "specific to this node profile — other node profiles keep their own assignment, and a newly "
-            + "created node profile without an explicit assignment uses the built-in 'logging-default' profile."
+            + "created node profile inherits the module's currently applied logging profile (or the built-in "
+            + "'logging-default' profile while 'Default' is the applied one) as its default assignment."
             + "</body></html>";
 
     /**
@@ -176,7 +178,9 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
         reevaluateRowStates();
 
         // The applied profile is the menu's default selection: the per-node
-        // assignment (SSOT) first, then the shared module applied marker.
+        // assignment (SSOT); without one, the virtual "Default" entry stands
+        // (the node runs with the built-in logging-default, and the shared
+        // module marker is NOT this tab's applied state).
         selectAppliedProfileByDefault();
 
         setHelpSupplier(() -> NODE_HELP_HTML);
@@ -200,8 +204,9 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
      * The node-tab Apply confirmation message. States EXACTLY what pressing Yes will do:
      * the profile is recorded as the <b>per-node</b> assignment of the bound node profile
      * (affecting ONLY that node profile — other node profiles keep their own assignment,
-     * and a newly created node profile without an explicit assignment runs with the
-     * built-in {@code logging-default} profile), then the node restarts (state-preserved).
+     * and newly created node profiles inherit the module's currently applied logging
+     * profile — or the built-in {@code logging-default} while "Default" is the applied
+     * one — as their default), then the node restarts (state-preserved).
      *
      * @param profileName the profile name being applied (the virtual Default entry included)
      * @param isDefault   whether the virtual "Default" entry is applied (clears the node's custom assignment)
@@ -218,8 +223,9 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
                         : "This records '" + profileName + "' as this node profile's assigned (applied) logging "
                                 + "profile — the profile the node uses for its logging configuration.");
         message += "\n\nThis assignment is specific to " + target + ". Other node profiles keep their own "
-                + "assignment, and a newly created node profile without an explicit assignment uses the "
-                + "built-in '" + LoggingProfileRepository.RESERVED_PROFILE_NAME + "' profile.";
+                + "assignment, and newly created node profiles inherit the module's currently applied "
+                + "logging profile (or the built-in '" + LoggingProfileRepository.RESERVED_PROFILE_NAME
+                + "' while 'Default' is the applied one) as their default.";
         message += (isBoundNodeRunning()
                 ? "\n\nPressing Yes will RESTART the node (stop + start) for the change to take effect."
                         + (isBoundNodePaused() ? " The paused state is restored after the restart." : "")
@@ -286,55 +292,61 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
     }
 
     /**
-     * The logging profile this node profile currently applies (the per-node
-     * assignment SSOT), or null to fall back to the shared module marker.
-     * Defensive: a read failure falls back to the module marker.
+     * The logging profile this node profile currently applies: the explicit
+     * per-node assignment (the SSOT in {@code conf/node/profiles.json} via
+     * {@link LoggingAssignmentStore}); when there is none (missing, blank or
+     * the reserved name), the built-in {@code logging-default} profile — an
+     * unassigned node profile runs with the built-in defaults, and the
+     * shared module applied marker must NOT leak into the node tab (it is
+     * the generic module tab's applied state only). Defensive: a read
+     * failure resolves to the built-in default as well — the runtime-true
+     * answer, never a stale marker.
      */
     private String resolveNodeAppliedProfileName() {
         try {
             String name = new LoggingAssignmentStore().getAssignment(nodeProfileName).get(ModuleIds.NODE);
-            return (name != null && !name.isBlank() && !LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(name))
-                    ? name
-                    : null;
+            if (name != null && !name.isBlank() && !LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(name)) {
+                return name;
+            }
         } catch (Exception e) {
             LOGGER.warn("Failed to read the per-node logging assignment for node profile '{}': {}",
                     nodeProfileName, e.getMessage());
-            return null;
         }
+        return LoggingProfileRepository.RESERVED_PROFILE_NAME;
     }
 
     /**
-     * Pre-selects the profile this node profile <b>applied</b> in the profile menu.
+     * Pre-selects the profile this node profile <b>applied</b> in the profile menu:
+     * the per-node assignment (the SSOT in {@code conf/node/profiles.json} via
+     * {@link LoggingAssignmentStore}) — when this panel is bound to a node profile.
      * <p>
-     * Resolution order:
-     * </p>
-     * <ol>
-     *   <li>the per-node assignment (the SSOT in {@code conf/node/profiles.json} via
-     *       {@link LoggingAssignmentStore}) — when this panel is bound to a node profile;</li>
-     *   <li>the module-level applied marker the core panel loaded
-     *       ({@link #appliedProfileName()}).</li>
-     * </ol>
-     * <p>
-     * A missing or unknown name (e.g. the applied profile was deleted since) keeps
-     * the constructor's default selection (the virtual "Default" entry). Defensive:
-     * a read failure must never break construction.
+     * Without an explicit assignment the selection is reset to the virtual
+     * "Default" entry: the node runs with the built-in {@code logging-default}
+     * profile, and the shared module applied marker is NOT this tab's applied
+     * state — the core constructor may have pre-selected the module's applied
+     * profile, so the reset is explicit (that would show a profile the node
+     * does not actually use). A missing or unknown name (e.g. the applied
+     * profile was deleted since) keeps the virtual "Default" selection.
+     * Defensive: a read failure must never break construction.
      * </p>
      */
     private void selectAppliedProfileByDefault() {
-        String name = null;
-        if (nodeProfileName != null && !nodeProfileName.isBlank()) {
-            try {
-                name = new LoggingAssignmentStore().getAssignment(nodeProfileName).get(ModuleIds.NODE);
-            } catch (Exception e) {
-                LOGGER.warn("Failed to read the per-node logging assignment for node profile '{}': {}",
-                        nodeProfileName, e.getMessage());
-            }
+        if (nodeProfileName == null || nodeProfileName.isBlank()) {
+            return; // unbound panel: the core constructor's selection stands
         }
-        if (name == null || name.isBlank()) {
-            name = appliedProfileName();
+        String name = null;
+        try {
+            name = new LoggingAssignmentStore().getAssignment(nodeProfileName).get(ModuleIds.NODE);
+        } catch (Exception e) {
+            LOGGER.warn("Failed to read the per-node logging assignment for node profile '{}': {}",
+                    nodeProfileName, e.getMessage());
         }
         if (name == null || name.isBlank() || LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(name)) {
-            return; // nothing custom applied — the virtual "Default" entry already represents it
+            // Nothing custom applied: the node runs with the built-in default.
+            // Reset the selection to the virtual "Default" entry (the core
+            // constructor may have pre-selected the shared module marker).
+            selectProfile(DEFAULT_PROFILE_ENTRY);
+            return;
         }
         if (selectProfile(name)) {
             LOGGER.info("Pre-selected applied logging profile '{}' in the profile menu (node profile '{}')",

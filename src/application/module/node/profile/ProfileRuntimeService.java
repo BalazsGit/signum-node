@@ -1,6 +1,7 @@
 package application.module.node.profile;
 
 import application.module.logging.LoggingAssignmentStore;
+import application.module.logging.LoggingProfileRepository;
 import application.module.node.NodeModule;
 import application.module.node.Signum;
 import application.module.node.props.Props;
@@ -127,9 +128,12 @@ public final class ProfileRuntimeService {
     /**
      * Creates a truly empty (zero-override) node profile: the profile file
      * contains <b>no keys at all</b>, so every setting resolves to the
-     * application's internal {@code Props} defaults. No logging assignment is
-     * written — the module falls back to its built-in logging defaults until
-     * the user assigns a logging profile.
+     * application's internal {@code Props} defaults. The logging assignment is
+     * seeded from the node module's currently applied logging profile (a
+     * snapshot at creation time — see
+     * {@link #seedDefaultLoggingAssignment(String, String)}); while "Default"
+     * is the applied profile no assignment is written and the built-in
+     * logging defaults apply until the user assigns one.
      * <p>
      * Create-only semantics (this is a <i>create</i> action, not a lifecycle
      * action): the new profile is <b>not</b> started — no {@code NodeModule}
@@ -145,12 +149,73 @@ public final class ProfileRuntimeService {
      */
     static String createEmptyProfile(String confRoot, String profileName) throws IOException {
         Objects.requireNonNull(confRoot, "confRoot");
-        // Profile file with zero overrides (validates the name). No logging
-        // assignment is recorded: the module's built-in defaults apply.
+        // Profile file with zero overrides (validates the name). The logging
+        // assignment is seeded from the module's applied profile (SSOT:
+        // seedDefaultLoggingAssignment) — nothing is seeded while "Default" is
+        // the applied profile (the built-in defaults apply instead).
         NodeProfile created = NodeProfileRepository.createProfile(confRoot, profileName, new Properties());
+        seedDefaultLoggingAssignment(confRoot, profileName);
 
         LOGGER.info("Created empty default node profile '{}'", profileName);
         return created.getName();
+    }
+
+    /**
+     * Seeds a freshly created node profile with the node module's currently
+     * APPLIED logging profile as its default logging assignment (default
+     * conf root). See {@link #seedDefaultLoggingAssignment(String, String)}.
+     *
+     * @param profileName the freshly created node profile to seed
+     * @throws IOException on persistence failure
+     */
+    public static void seedDefaultLoggingAssignment(String profileName) throws IOException {
+        seedDefaultLoggingAssignment(NodeProfile.CONF_ROOT, profileName);
+    }
+
+    /**
+     * Seeds a freshly created node profile with the node module's currently
+     * APPLIED logging profile as its default logging assignment.
+     * <p>
+     * The seed is a <b>snapshot</b> of the module-level applied marker
+     * ({@code conf/node/logging/profile.json}) taken at creation time: a later
+     * module-level Apply does <b>not</b> propagate to profiles that already
+     * exist, and the seeded profile keeps the assigned profile until it is
+     * changed on the profile's "Logging" tab (or via the module's
+     * "Assignments" sub-tab / CLI).
+     * </p>
+     * <p>
+     * No assignment is recorded — and the profile runs with the built-in
+     * {@code logging-default} until it is explicitly assigned — when the
+     * module has no explicit applied profile (the marker is missing/blank or
+     * the reserved default, i.e. "Default" is the applied one) or when the
+     * marker is stale (the applied profile was deleted since).
+     * </p>
+     * <p>
+     * Creation-time seeding only: <b>existing</b> profiles are never touched.
+     * </p>
+     *
+     * @param confRoot    the runtime conf root (e.g. {@code conf} or a test sandbox dir)
+     * @param profileName the freshly created node profile to seed
+     * @throws IOException on persistence failure
+     */
+    static void seedDefaultLoggingAssignment(String confRoot, String profileName) throws IOException {
+        Objects.requireNonNull(confRoot, "confRoot");
+        Objects.requireNonNull(profileName, "profileName");
+        LoggingProfileRepository repo = new LoggingProfileRepository(confRoot);
+        String applied = repo.getApplied(ModuleIds.NODE);
+        if (applied == null || applied.isBlank()
+                || LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(applied)) {
+            return; // "Default" is the applied profile — there is nothing to seed
+        }
+        if (!repo.hasProfile(ModuleIds.NODE, applied)) {
+            // Stale marker (the applied profile was deleted since): seeding it
+            // would record an unresolvable assignment — the built-in default applies.
+            LOGGER.warn("The applied logging profile '{}' of module '{}' no longer exists — no logging "
+                    + "assignment is seeded for new node profile '{}'", applied, ModuleIds.NODE, profileName);
+            return;
+        }
+        new LoggingAssignmentStore(confRoot).setAssignmentForModule(profileName, ModuleIds.NODE, applied);
+        LOGGER.info("Seeded node profile '{}' with the applied logging profile '{}'", profileName, applied);
     }
 
     // ── Rename ──────────────────────────────────────────────────────────
