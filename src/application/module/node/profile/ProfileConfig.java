@@ -33,6 +33,16 @@ import java.util.stream.Collectors;
  * <p>
  * The legacy {@link ProfileEntry} fields are marked deprecated but retained for
  * backward-compatible JSON parsing (old profiles.json files may still contain them).
+ * </p>
+ * <p>
+ * <b>Reload-on-write:</b> {@code load()} caches the parsed document per instance,
+ * and several long-lived instances may exist at once (the GUI's app-lifetime
+ * tab-order instance, per-operation {@code LoggingAssignmentStore} instances,
+ * CLI). Every mutating method therefore starts from a fresh disk read
+ * ({@link #reload()}) so a save can never serialize a stale snapshot and
+ * silently discard writes made by another instance (e.g. a creation-time
+ * logging seed written moments before a tab-order save).
+ * </p>
  */
 public class ProfileConfig {
 
@@ -233,6 +243,19 @@ public class ProfileConfig {
     }
 
     /**
+     * Discards the in-memory cache and re-reads the configuration from disk
+     * (see the class javadoc "Reload-on-write"). Every mutating method starts
+     * with this so concurrent writers (other {@link ProfileConfig} instances
+     * with their own caches) are never clobbered by a stale snapshot.
+     *
+     * @return the freshly loaded data
+     */
+    public synchronized ProfileData reload() {
+        profileData = null;
+        return load();
+    }
+
+    /**
      * Saves the current profile data to disk, creating the parent directory if it does not
      * yet exist (e.g. a fresh {@code conf/node/} tree). Without this, the first write silently
      * failed when the SSOT file's directory was not present.
@@ -269,7 +292,7 @@ public class ProfileConfig {
      */
     @Deprecated(forRemoval = true)
     public void setAutoStart(String profileName, boolean autoStart) {
-        ProfileData data = load();
+        ProfileData data = reload();
         ProfileEntry entry = data.getProfiles().computeIfAbsent(profileName, k -> new ProfileEntry());
         entry.setAutoStart(autoStart);
         try {
@@ -294,7 +317,7 @@ public class ProfileConfig {
      */
     @Deprecated(forRemoval = true)
     public void setEnabled(String profileName, boolean enabled) {
-        ProfileData data = load();
+        ProfileData data = reload();
         ProfileEntry entry = data.getProfiles().computeIfAbsent(profileName, k -> new ProfileEntry());
         entry.setEnabled(enabled);
         try {
@@ -358,7 +381,10 @@ public class ProfileConfig {
      * @param tabOrder Ordered list of profile names representing the desired tab display order
      */
     public void setTabOrder(List<String> tabOrder) {
-        ProfileData data = load();
+        // Reload-on-write: a stale in-memory snapshot must not be persisted —
+        // it would discard concurrent writes (e.g. a creation-time logging
+        // seed) from the other ProfileConfig instances sharing this file.
+        ProfileData data = reload();
         data.setTabOrder(tabOrder);
         try {
             save();
@@ -386,7 +412,7 @@ public class ProfileConfig {
      * @param loggingProfile the logging profile name, or null to clear
      */
     public void setLoggingProfile(String profileName, String loggingProfile) {
-        ProfileData data = load();
+        ProfileData data = reload();
         if (loggingProfile == null) {
             // null clears the association: drop the field, and remove the entry
             // when nothing else is left on it — a stale EMPTY entry must not
@@ -429,7 +455,7 @@ public class ProfileConfig {
      * @param loggingPresets map of module ID to logging profile name, or null to clear
      */
     public void setLoggingPresets(String profileName, Map<String, String> loggingPresets) {
-        ProfileData data = load();
+        ProfileData data = reload();
         if (loggingPresets == null) {
             // null clears the association: drop the field, and remove the entry
             // when nothing else is left on it (see setLoggingProfile).
