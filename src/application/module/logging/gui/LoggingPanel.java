@@ -46,6 +46,9 @@ public class LoggingPanel extends JPanel {
     /** moduleId → the tab component, for idempotent add / removal. */
     private final Map<String, JComponent> moduleTabs = new ConcurrentHashMap<>();
 
+    /** moduleId → the module tab's Assignments panel (disposed with the tab / module). */
+    private final Map<String, AssignmentPanel> assignmentPanels = new ConcurrentHashMap<>();
+
     private final Consumer<ModuleLoggingProvider> addListener;
     private final Consumer<String> removeListener;
 
@@ -94,7 +97,17 @@ public class LoggingPanel extends JPanel {
     private JComponent buildModuleTab(ModuleLoggingProvider provider) {
         JTabbedPane inner = new JTabbedPane();
         inner.addTab("Logging Profiles", new ModuleLoggingProfilePanel(context, provider));
-        inner.addTab("Assignments", new AssignmentPanel(context, provider));
+        AssignmentPanel assignmentsPanel = new AssignmentPanel(context, provider);
+        assignmentPanels.put(provider.getModuleId(), assignmentsPanel);
+        inner.addTab("Assignments", assignmentsPanel);
+        // Re-scan the assignments table when the sub-tab is activated — covers
+        // changes made outside the push channel (e.g. another process / CLI).
+        // The refresh is skipped while the table has unsaved row edits.
+        inner.addChangeListener(e -> {
+            if (inner.getSelectedComponent() == assignmentsPanel) {
+                assignmentsPanel.refreshIfSafe();
+            }
+        });
         return inner;
     }
 
@@ -109,14 +122,24 @@ public class LoggingPanel extends JPanel {
             }
             LOGGER.info("Removed logging tab for module '{}'", moduleId);
         });
+        AssignmentPanel assignmentsPanel = assignmentPanels.remove(moduleId);
+        if (assignmentsPanel != null) {
+            assignmentsPanel.dispose();
+        }
     }
 
     /**
-     * Removes the registry listeners. Call during module shutdown to avoid leaks.
+     * Removes the registry listeners and disposes every module tab's
+     * Assignments panel (push-listener unsubscribe). Call during module
+     * shutdown to avoid leaks.
      */
     public void dispose() {
         LoggingModuleRegistry registry = LoggingModuleRegistry.getInstance();
         registry.removeRegisteredListener(addListener);
         registry.removeUnregisteredListener(removeListener);
+        for (AssignmentPanel panel : assignmentPanels.values()) {
+            panel.dispose();
+        }
+        assignmentPanels.clear();
     }
 }

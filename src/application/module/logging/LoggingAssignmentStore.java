@@ -18,6 +18,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Single source of truth for <b>node-profile → logging-profile</b> assignments.
@@ -59,6 +60,15 @@ public final class LoggingAssignmentStore {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(LoggingAssignmentStore.class);
 
+    /**
+     * Process-wide push listeners for node-profile / assignment changes
+     * (the BookmarkStore-style change notification). Fired synchronously on
+     * the writing thread (EDT or CLI), so listeners must be non-blocking —
+     * e.g. dispatch their refresh to the EDT via
+     * {@link javax.swing.SwingUtilities#invokeLater}.
+     */
+    private static final List<Runnable> PROFILE_CHANGE_LISTENERS = new CopyOnWriteArrayList<>();
+
     private final String confRoot;
     private final ProfileConfig profileConfig;
 
@@ -83,6 +93,50 @@ public final class LoggingAssignmentStore {
         // The canonical SSOT file is conf/node/profiles.json (matches ProfileConfig's default path).
         Path ssotFile = PathUtils.resolvePath(confRoot).resolve(ModuleIds.NODE).resolve("profiles.json");
         this.profileConfig = new ProfileConfig(ssotFile);
+    }
+
+    // ── Change notification (push) ─────────────────────────────────────
+
+    /**
+     * Registers a push listener notified after any node-profile or logging-assignment
+     * change (create / rename / delete of a node profile, or an assignment write).
+     * <p>
+     * The listener runs <b>synchronously on the writing thread</b> — it must return
+     * quickly (dispatch UI refreshes to the EDT). A throwing listener is caught,
+     * logged, and removed: one broken listener must not silence the others.
+     * </p>
+     *
+     * @param listener the listener to register (null is ignored)
+     */
+    public static void addProfileChangeListener(Runnable listener) {
+        if (listener != null && !PROFILE_CHANGE_LISTENERS.contains(listener)) {
+            PROFILE_CHANGE_LISTENERS.add(listener);
+        }
+    }
+
+    /**
+     * Unregisters a previously registered push listener (no-op if unknown).
+     *
+     * @param listener the listener to remove
+     */
+    public static void removeProfileChangeListener(Runnable listener) {
+        PROFILE_CHANGE_LISTENERS.remove(listener);
+    }
+
+    /**
+     * Notifies every registered listener that the node-profile / assignment state
+     * changed. Called by the store's writers and by the node-profile lifecycle
+     * operations (see {@code NodeProfileRepository}).
+     */
+    public static void fireProfileChanged() {
+        for (Runnable listener : PROFILE_CHANGE_LISTENERS) {
+            try {
+                listener.run();
+            } catch (Exception e) {
+                LOGGER.warn("A logging profile-change listener failed — removing it: {}", e.getMessage());
+                PROFILE_CHANGE_LISTENERS.remove(listener);
+            }
+        }
     }
 
     // ── Read (canonical first, legacy fallback) ────────────────────────
@@ -155,6 +209,7 @@ public final class LoggingAssignmentStore {
     public void setAssignment(String nodeProfileName, Map<String, String> assignments) {
         if (assignments == null || assignments.isEmpty()) {
             profileConfig.setLoggingPresets(nodeProfileName, null);
+            fireProfileChanged();
             return;
         }
         Map<String, String> cleaned = new LinkedHashMap<>();
@@ -165,6 +220,7 @@ public final class LoggingAssignmentStore {
         }
         profileConfig.setLoggingPresets(nodeProfileName, cleaned.isEmpty() ? null : cleaned);
         LOGGER.info("Set logging assignment for node profile '{}' -> {}", nodeProfileName, cleaned);
+        fireProfileChanged();
     }
 
     /**
@@ -213,6 +269,7 @@ public final class LoggingAssignmentStore {
         setAssignment(newName, assignment);
         clearAssignment(oldName);
         LOGGER.info("Re-keyed logging assignment for renamed profile '{}' -> '{}'", oldName, newName);
+        fireProfileChanged(); // the row identity (node profile name) changed
     }
 
     /**

@@ -1,10 +1,13 @@
 package application.module.logging.gui;
 
 import application.api.ModuleContext;
+import application.module.logging.LoggingAssignmentStore;
 import application.utils.logging.ModuleLoggingProfile;
 import application.utils.logging.ModuleLoggingProvider;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -13,6 +16,8 @@ import javax.swing.SwingUtilities;
 import javax.swing.table.TableCellEditor;
 import java.awt.Component;
 import java.awt.Container;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -34,12 +39,54 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("AssignmentPanel Tests")
 class AssignmentPanelTest {
 
+    /** Sandbox conf root for the push-refresh tests (never the real {@code conf/}). */
+    @TempDir
+    Path tempConf;
+
+    /** The push-refresh test's sandbox-bound panel (null outside those tests). */
+    private AssignmentPanel pushPanel;
+
+    @AfterEach
+    void disposePushPanel() {
+        if (pushPanel != null) {
+            onEdt(pushPanel::dispose);
+            pushPanel = null;
+        }
+    }
+
     private static void onEdt(Runnable action) {
         try {
             SwingUtilities.invokeAndWait(action);
         } catch (Exception e) {
             throw new AssertionError(e);
         }
+    }
+
+    /** Creates the push-refresh test's panel bound to the sandbox conf root. */
+    private AssignmentPanel newPushPanel() {
+        final AssignmentPanel[] holder = new AssignmentPanel[1];
+        onEdt(() -> holder[0] = new AssignmentPanel(new NoOpContext(), new TestProvider("node"), tempConf.toString()));
+        pushPanel = holder[0];
+        return holder[0];
+    }
+
+    /** Writes a node profile file the way the Node module's repository does. */
+    private void writeNodeProfile(String name) throws IOException {
+        Path dir = tempConf.resolve("node").resolve("profiles");
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve(name + ".properties"), "n=1\n");
+    }
+
+    private int pushRowCount() {
+        final int[] rows = new int[1];
+        onEdt(() -> rows[0] = pushPanel.model().getRowCount());
+        return rows[0];
+    }
+
+    private String pushCell(int row, int col) {
+        final Object[] value = new Object[1];
+        onEdt(() -> value[0] = pushPanel.model().getValueAt(row, col));
+        return String.valueOf(value[0]);
     }
 
     private static AssignmentPanel newPanel() {
@@ -157,6 +204,97 @@ class AssignmentPanelTest {
                 renderOnEdt(table, 0, 0);
         assertFalse(refreshed.getText().endsWith(" *"),
                 "Refresh re-baselines the row â€” no star; got \"" + refreshed.getText() + "\"");
+    }
+
+    @Test
+    @DisplayName("a newly created node profile appears in the table via the push notification")
+    void newNodeProfileAppearsViaPush() throws IOException {
+        newPushPanel();
+        assertEquals(0, pushRowCount(), "the table starts empty for a fresh conf root");
+
+        // A new node profile appears on disk and the store fires the push.
+        writeNodeProfile("push-node");
+        LoggingAssignmentStore.fireProfileChanged();
+        onEdt(() -> { }); // pump the EDT: the queued refresh runs
+
+        assertEquals(1, pushRowCount(), "the new node profile row must appear without a manual refresh");
+        assertEquals("push-node", pushCell(0, 0), "the row holds the node profile name");
+        assertEquals("(default)", pushCell(0, 1), "an unassigned profile shows the (default) sentinel");
+    }
+
+    @Test
+    @DisplayName("an assignment change updates the matching row via the push notification")
+    void assignmentChangeUpdatesRowViaPush() throws IOException {
+        newPushPanel();
+        writeNodeProfile("push-node");
+        LoggingAssignmentStore.fireProfileChanged();
+        onEdt(() -> { });
+        assertEquals("(default)", pushCell(0, 1));
+
+        new LoggingAssignmentStore(tempConf.toString())
+                .setAssignmentForModule("push-node", "node", "verbose"); // fires the push
+        onEdt(() -> { });
+
+        assertEquals("verbose", pushCell(0, 1), "the assigned logging profile must appear in the row");
+    }
+
+    @Test
+    @DisplayName("the push refresh never clobbers an unsaved row edit (manual Refresh re-scans)")
+    void pushRefreshSkipsUnsavedRows() throws IOException {
+        newPushPanel();
+        writeNodeProfile("push-node");
+        LoggingAssignmentStore.fireProfileChanged();
+        onEdt(() -> { });
+        assertEquals(1, pushRowCount());
+
+        // A pending (unsaved) cell edit; remember the baseline value.
+        final Object[] baseline = new Object[1];
+        onEdt(() -> {
+            baseline[0] = pushPanel.model().getValueAt(0, 1);
+            pushPanel.model().setValueAt("pending-profile", 0, 1);
+        });
+
+        writeNodeProfile("push-node-2");
+        LoggingAssignmentStore.fireProfileChanged();
+        onEdt(() -> { });
+
+        assertEquals(1, pushRowCount(),
+                "the automatic refresh must skip the table while it has unsaved changes");
+        assertEquals("pending-profile", pushCell(0, 1), "the pending cell edit must not be clobbered");
+
+        // The manual Refresh stays the explicit unconditional re-scan.
+        onEdt(() -> findButton(pushPanel, "Refresh").doClick());
+        assertEquals(2, pushRowCount(), "the manual refresh re-scans and picks up the new profile");
+        assertEquals(String.valueOf(baseline[0]), pushCell(0, 1),
+                "the manual refresh re-baselines the cell from the store");
+    }
+
+    @Test
+    @DisplayName("refreshIfSafe re-scans when no row is unsaved (the sub-tab activation path)")
+    void refreshIfSafeRescansWhenClean() throws IOException {
+        newPushPanel();
+        assertEquals(0, pushRowCount());
+
+        writeNodeProfile("push-node"); // no push — the activation re-scan must catch it
+        onEdt(pushPanel::refreshIfSafe);
+
+        assertEquals(1, pushRowCount(), "refreshIfSafe must re-scan a clean table");
+    }
+
+    @Test
+    @DisplayName("dispose unsubscribes the panel from the push notification")
+    void disposeStopsPushRefresh() throws IOException {
+        AssignmentPanel disposed = newPushPanel();
+        onEdt(disposed::dispose);
+        pushPanel = null; // disposePushPanel() must not dispose twice
+
+        writeNodeProfile("push-node");
+        LoggingAssignmentStore.fireProfileChanged();
+        onEdt(() -> { }); // pump the EDT: a queued refresh would run here
+
+        final int[] rows = new int[1];
+        onEdt(() -> rows[0] = disposed.model().getRowCount());
+        assertEquals(0, rows[0], "a disposed (unsubscribed) panel must not refresh on the push");
     }
 
     /** Renders the given cell with the column's own renderer (on the EDT) and returns the component. */

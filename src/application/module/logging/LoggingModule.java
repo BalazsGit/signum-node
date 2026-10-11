@@ -64,7 +64,11 @@ public class LoggingModule implements Module {
 
     @Override
     public void stop() {
-        // The LoggingPanel's registry listeners are removed in its dispose(); no further cleanup here.
+        // Remove the LoggingPanel's registry listeners and unsubscribe the
+        // Assignments panels' profile-change push listeners.
+        if (loggingPanel != null) {
+            loggingPanel.dispose();
+        }
         LOGGER.info("Logging Module stopped.");
     }
 

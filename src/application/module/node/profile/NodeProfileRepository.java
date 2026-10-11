@@ -249,6 +249,9 @@ public final class NodeProfileRepository {
             toWrite.store(writer, "Node profile: " + profileName);
         }
         LOGGER.info("Created node profile '{}' ({} entries)", profileName, toWrite.size());
+        // Push: a new node profile appeared (the Logging module's Assignments
+        // table and friends re-scan via this notification).
+        LoggingAssignmentStore.fireProfileChanged();
         Properties copy = new Properties();
         copy.putAll(toWrite);
         return new NodeProfile.Builder(profileName)
@@ -318,6 +321,10 @@ public final class NodeProfileRepository {
         Files.move(from, to, StandardCopyOption.REPLACE_EXISTING);
         updateProfileConfig(confRoot, oldName, newName);
         LOGGER.info("Renamed node profile '{}' -> '{}'", oldName, newName);
+        // Push: the row identity (node profile name) changed. (updateProfileConfig
+        // may already have fired via LoggingAssignmentStore.renameAssignment when
+        // an assignment existed — the refresh is idempotent.)
+        LoggingAssignmentStore.fireProfileChanged();
     }
 
     /**
@@ -349,6 +356,9 @@ public final class NodeProfileRepository {
         Files.delete(file);
         clearProfileConfig(confRoot, profileName);
         LOGGER.info("Deleted node profile '{}'", profileName);
+        // Push: a node profile disappeared (a profile without an assignment does
+        // not trigger the store's own change notification).
+        LoggingAssignmentStore.fireProfileChanged();
     }
 
     /**

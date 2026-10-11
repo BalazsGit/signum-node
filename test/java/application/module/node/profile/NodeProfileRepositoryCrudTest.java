@@ -1,5 +1,6 @@
 package application.module.node.profile;
 
+import application.module.logging.LoggingAssignmentStore;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -10,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -238,6 +240,52 @@ class NodeProfileRepositoryCrudTest {
             assertNotNull(NodeProfileRepository.checkProfileName("  ", null));
             assertNotNull(NodeProfileRepository.checkProfileName("bad name!", null));
             assertNotNull(NodeProfileRepository.checkProfileName(null, null));
+        }
+    }
+
+    @Nested
+    @DisplayName("profile-change push notification")
+    class PushNotificationTests {
+
+        @Test
+        @DisplayName("createProfile fires the LoggingAssignmentStore profile-change notification")
+        void create_FiresNotification() throws IOException {
+            AtomicInteger fired = new AtomicInteger();
+            LoggingAssignmentStore.addProfileChangeListener(fired::incrementAndGet);
+            try {
+                NodeProfileRepository.createProfile(confRoot(), "push-node-a", new Properties());
+                assertEquals(1, fired.get(), "creating a node profile must fire the notification");
+            } finally {
+                LoggingAssignmentStore.removeProfileChangeListener(fired::incrementAndGet);
+            }
+        }
+
+        @Test
+        @DisplayName("renameProfile fires the LoggingAssignmentStore profile-change notification")
+        void rename_FiresNotification() throws IOException {
+            NodeProfileRepository.createProfile(confRoot(), "push-node-a", new Properties());
+            AtomicInteger fired = new AtomicInteger();
+            LoggingAssignmentStore.addProfileChangeListener(fired::incrementAndGet);
+            try {
+                NodeProfileRepository.renameProfile(confRoot(), "push-node-a", "push-node-b");
+                assertTrue(fired.get() >= 1, "renaming a node profile must fire the notification");
+            } finally {
+                LoggingAssignmentStore.removeProfileChangeListener(fired::incrementAndGet);
+            }
+        }
+
+        @Test
+        @DisplayName("deleteProfile fires the LoggingAssignmentStore profile-change notification")
+        void delete_FiresNotification() throws IOException {
+            NodeProfileRepository.createProfile(confRoot(), "push-node-a", new Properties());
+            AtomicInteger fired = new AtomicInteger();
+            LoggingAssignmentStore.addProfileChangeListener(fired::incrementAndGet);
+            try {
+                NodeProfileRepository.deleteProfile(confRoot(), "push-node-a");
+                assertEquals(1, fired.get(), "deleting a node profile must fire the notification");
+            } finally {
+                LoggingAssignmentStore.removeProfileChangeListener(fired::incrementAndGet);
+            }
         }
     }
 }

@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -167,5 +168,57 @@ class LoggingAssignmentStoreTest {
     void resolveEffectiveForModule_noAssignmentFallsBackToDefault() {
         assertEquals("logging-default", store.resolveEffectiveForModule("mainnet", ModuleIds.NODE));
         assertEquals("logging-default", store.resolveEffectiveForModule("no-such-profile", ModuleIds.NODE));
+    }
+
+    // ── Push change notification ───────────────────────────────────────
+
+    @Test
+    @DisplayName("setAssignment fires the profile-change push notification (synchronously)")
+    void setAssignment_firesProfileChangeListener() {
+        AtomicInteger fired = new AtomicInteger();
+        LoggingAssignmentStore.addProfileChangeListener(fired::incrementAndGet);
+        try {
+            store.setAssignment("mainnet", Map.of("node", "standard"));
+            assertEquals(1, fired.get(), "an assignment write must fire the notification once");
+
+            store.clearAssignment("mainnet");
+            assertEquals(2, fired.get(), "clearing the assignment must fire the notification too");
+        } finally {
+            LoggingAssignmentStore.removeProfileChangeListener(fired::incrementAndGet);
+        }
+    }
+
+    @Test
+    @DisplayName("a removed profile-change listener is not notified anymore")
+    void removeProfileChangeListener_stopsNotifications() {
+        AtomicInteger fired = new AtomicInteger();
+        Runnable listener = fired::incrementAndGet;
+        LoggingAssignmentStore.addProfileChangeListener(listener);
+        LoggingAssignmentStore.removeProfileChangeListener(listener);
+
+        store.setAssignment("mainnet", Map.of("node", "standard"));
+        assertEquals(0, fired.get(), "a removed listener must not be notified");
+    }
+
+    @Test
+    @DisplayName("a throwing profile-change listener is removed without silencing the others")
+    void throwingProfileChangeListener_isRemovedOthersStillNotified() {
+        AtomicInteger fired = new AtomicInteger();
+        Runnable broken = () -> {
+            throw new IllegalStateException("boom");
+        };
+        LoggingAssignmentStore.addProfileChangeListener(broken);
+        LoggingAssignmentStore.addProfileChangeListener(fired::incrementAndGet);
+        try {
+            store.setAssignment("mainnet", Map.of("node", "standard"));
+            assertEquals(1, fired.get(), "the surviving listener must still be notified");
+
+            // The broken listener was removed — firing again must not throw.
+            LoggingAssignmentStore.fireProfileChanged();
+            assertEquals(2, fired.get());
+        } finally {
+            LoggingAssignmentStore.removeProfileChangeListener(broken);
+            LoggingAssignmentStore.removeProfileChangeListener(fired::incrementAndGet);
+        }
     }
 }

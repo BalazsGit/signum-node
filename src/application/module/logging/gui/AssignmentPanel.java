@@ -20,6 +20,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
+import javax.swing.SwingUtilities;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableCellEditor;
@@ -46,6 +47,13 @@ import java.util.Set;
  * {@link LoggingAssignmentStore} (SSOT: {@code conf/node/profiles.json}) and require a
  * node restart to take effect (plan §4.5/2).
  * </p>
+ * <p>
+ * The table is kept up to date by a push: the panel subscribes to the
+ * {@link LoggingAssignmentStore#fireProfileChanged() profile-change notification}, so a
+ * newly created node profile (or any assignment / rename / delete) appears without a
+ * manual re-scan. The automatic refresh never clobbers pending (unsaved) row edits —
+ * the Refresh button remains the explicit unconditional re-scan.
+ * </p>
  *
  * @see LoggingPanel
  * @see ModuleLoggingProfilePanel
@@ -60,7 +68,16 @@ public class AssignmentPanel extends JPanel {
 
     private final ModuleContext context;
     private final String moduleId;
-    private final LoggingAssignmentStore store;
+    /**
+     * The configuration root the panel is bound to (null = the standard runtime
+     * root). The panel never holds a long-lived {@link LoggingAssignmentStore}
+     * instance: its {@code ProfileConfig} cache would go stale after a write by
+     * another instance (the node Logging tab, the CLI, the creation-time seed)
+     * and the table would keep showing outdated assignments. A fresh store is
+     * created per operation (the same per-call convention the rest of the app
+     * uses, e.g. the node Logging tab).
+     */
+    private final String confRoot;
     private final JTable table;
     private final DefaultTableModel model;
     private final List<String> options = new ArrayList<>();
@@ -74,13 +91,37 @@ public class AssignmentPanel extends JPanel {
     private final Map<String, String> baselineValues = new LinkedHashMap<>();
 
     /**
-     * Creates a module-scoped assignments panel.
+     * The push listener that re-scans the table when a node profile or an
+     * assignment changes (creation via the "+" tab / wizard / CLI, an
+     * assignment write, a rename or a delete — see
+     * {@link LoggingAssignmentStore#fireProfileChanged()}). The refresh is
+     * dispatched to the EDT and skipped while the table holds unsaved
+     * changes (the manual Refresh button stays the explicit re-scan).
+     */
+    private final Runnable changeListener = () ->
+            SwingUtilities.invokeLater(() -> refreshIfSafe());
+
+    /**
+     * Creates a module-scoped assignments panel (standard runtime conf root).
      *
      * @param context  the host module context (used for the restart request); may be null
      * @param provider the module's logging provider (module id); must not be null
      * @throws IllegalArgumentException if {@code provider} is null
      */
     public AssignmentPanel(ModuleContext context, ModuleLoggingProvider provider) {
+        this(context, provider, null);
+    }
+
+    /**
+     * Creates a module-scoped assignments panel bound to a specific configuration
+     * root (test hook; {@code null} = the standard runtime root).
+     *
+     * @param context  the host module context (used for the restart request); may be null
+     * @param provider the module's logging provider (module id); must not be null
+     * @param confRoot the base configuration root, or null for the standard root
+     * @throws IllegalArgumentException if {@code provider} is null
+     */
+    AssignmentPanel(ModuleContext context, ModuleLoggingProvider provider, String confRoot) {
         // Defensive icon-font registration (the app registers it at startup in
         // AppearanceModule#init; this covers standalone/test construction).
         IconFontSwing.register(FontAwesome.getIconFont());
@@ -90,7 +131,7 @@ public class AssignmentPanel extends JPanel {
         }
         this.context = context;
         this.moduleId = provider.getModuleId();
-        this.store = new LoggingAssignmentStore();
+        this.confRoot = confRoot;
         setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
 
         collectOptions();
@@ -146,6 +187,63 @@ public class AssignmentPanel extends JPanel {
         add(toolbar, BorderLayout.SOUTH);
 
         refresh();
+        // Push: a new node profile (or any assignment change) must appear in
+        // this table without a manual re-scan (subscribe once per panel).
+        LoggingAssignmentStore.addProfileChangeListener(changeListener);
+    }
+
+    /**
+     * Re-scans the node profiles and their assignments on disk — but only when
+     * no row holds an unsaved change, so an automatic (push) refresh never
+     * clobbers a pending edit. The manual Refresh button performs the
+     * unconditional {@link #refresh()} instead.
+     * <p>
+     * Must be called on the EDT.
+     * </p>
+     */
+    public void refreshIfSafe() {
+        if (hasUnsavedRows()) {
+            LOGGER.debug("Skipping automatic assignments refresh — the table has unsaved changes");
+            return;
+        }
+        refresh();
+    }
+
+    /**
+     * Whether any row's logging-profile cell differs from the persisted baseline
+     * (a pending, unsaved edit).
+     *
+     * @return true when at least one row is unsaved
+     */
+    boolean hasUnsavedRows() {
+        for (int row = 0; row < model.getRowCount(); row++) {
+            if (isRowUnsaved(row)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Unsubscribes from the profile-change push notification. Called when the
+     * module tab is removed or the Logging module shuts down.
+     */
+    public void dispose() {
+        LoggingAssignmentStore.removeProfileChangeListener(changeListener);
+    }
+
+    /**
+     * The table model (test hook for reading rows back).
+     *
+     * @return the table model (never null)
+     */
+    DefaultTableModel model() {
+        return model;
+    }
+
+    /** A fresh store bound to this panel's configuration root (see the field's javadoc). */
+    private LoggingAssignmentStore store() {
+        return confRoot != null ? new LoggingAssignmentStore(confRoot) : new LoggingAssignmentStore();
     }
 
     /**
@@ -168,7 +266,7 @@ public class AssignmentPanel extends JPanel {
         model.setRowCount(0);
         List<String> profiles;
         try {
-            profiles = store.listNodeProfiles();
+            profiles = store().listNodeProfiles();
         } catch (Exception e) {
             LOGGER.warn("Failed to list node profiles: {}", e.getMessage());
             profiles = List.of();
@@ -176,7 +274,7 @@ public class AssignmentPanel extends JPanel {
         for (String profile : profiles) {
             Map<String, String> assignment;
             try {
-                assignment = store.getAssignment(profile);
+                assignment = store().getAssignment(profile);
             } catch (Exception e) {
                 assignment = Map.of();
             }
@@ -213,7 +311,7 @@ public class AssignmentPanel extends JPanel {
         for (int row = 0; row < model.getRowCount(); row++) {
             String profile = (String) model.getValueAt(row, 0);
             try {
-                String value = store.getAssignment(profile).get(moduleId);
+                String value = store().getAssignment(profile).get(moduleId);
                 baselineValues.put(profile, value != null ? value : DEFAULT);
             } catch (Exception e) {
                 baselineValues.put(profile, DEFAULT);
@@ -234,7 +332,7 @@ public class AssignmentPanel extends JPanel {
         }
         String profile = (String) model.getValueAt(row, 0);
         try {
-            store.setAssignmentForModule(profile, moduleId, null);
+            store().setAssignmentForModule(profile, moduleId, null);
         } catch (Exception e) {
             JOptionPane.showMessageDialog(this,
                     "Failed to delete the assignment for '" + profile + "': " + e.getMessage(),
@@ -252,7 +350,7 @@ public class AssignmentPanel extends JPanel {
             String loggingProfile = (String) model.getValueAt(row, 1);
             String value = (loggingProfile == null || DEFAULT.equals(loggingProfile)) ? null : loggingProfile;
             try {
-                store.setAssignmentForModule(profile, moduleId, value);
+                store().setAssignmentForModule(profile, moduleId, value);
             } catch (Exception e) {
                 JOptionPane.showMessageDialog(this,
                         "Failed to save assignment for '" + profile + "': " + e.getMessage(),
