@@ -913,27 +913,43 @@ class ModuleLoggingProfilePanelTest {
     }
 
     @Test
-    @DisplayName("the default apply message states the module-level scope and the new-node fallback")
+    @DisplayName("the default apply message is a compact three-part statement (effect + restart question)")
     void defaultApplyMessageStatesModuleScope() {
         ModuleLoggingProfilePanel panel = newPanel();
 
         String msg = panel.defaultApplyMessage("myprofile", false);
-        assertTrue(msg.contains("myprofile"), "the message names the profile being applied");
-        assertTrue(msg.contains("module 'test-mod'"), "the message names the module");
-        assertTrue(msg.contains("module-level marker"),
-                "the message states that Apply only sets the module-level applied marker");
-        assertTrue(msg.contains("does NOT change any node profile's own logging assignment"),
-                "the message states that no node profile's own assignment is changed");
-        assertTrue(msg.contains("Assignments"),
-                "the message points to the 'Assignments' sub-tab for per-node assignments");
-        assertTrue(msg.contains("newly created node profiles")
-                        && msg.contains(LoggingProfileRepository.RESERVED_PROFILE_NAME),
-                "the message states that newly created node profiles without an explicit "
-                        + "assignment use the built-in logging-default profile");
+        assertTrue(msg.contains("'myprofile'"), "the message names the profile being applied");
+        assertTrue(msg.contains("'test-mod' module"), "the message names the module");
+        assertTrue(msg.contains("newly created node profiles will be linked to 'myprofile' by default"),
+                "the message states that newly created node profiles are linked to the applied profile");
+        assertTrue(msg.contains("the module-level applied profile is checked when a node profile is created"),
+                "the message states that the module-level applied profile is checked at creation time");
+        assertTrue(msg.contains("Existing node profiles are not changed"),
+                "the message states that existing node profiles are entirely untouched");
+        assertTrue(msg.contains("profiles with their own assignment keep it"),
+                "the message states that existing per-node assignments are kept");
+        assertTrue(msg.contains("profiles without an assignment keep running on the built-in '"
+                + LoggingProfileRepository.RESERVED_PROFILE_NAME + "'"),
+                "the message states that unassigned existing profiles keep running on the built-in default");
+        assertFalse(msg.contains("without their own assignment will run on it"),
+                "unassigned EXISTING profiles must NOT be stated to run on the applied profile");
+        assertTrue(msg.contains("take effect after a restart"),
+                "the message states that the change takes effect after a restart");
+        assertTrue(msg.contains("Would you like to apply the changes and restart the application?"),
+                "the message ends with the apply + restart question");
 
         String defMsg = panel.defaultApplyMessage(ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY, true);
-        assertTrue(defMsg.contains("built-in default"),
-                "the 'Default' message states that the built-in configuration is restored");
+        assertTrue(defMsg.contains("reset to the built-in '" + LoggingProfileRepository.RESERVED_PROFILE_NAME + "'"),
+                "the 'Default' message states that the built-in logging profile is restored");
+        assertTrue(defMsg.contains("Newly created node profiles will have no logging assignment, as before"),
+                "the 'Default' message states that new node profiles get no assignment, as before");
+        assertTrue(defMsg.contains("Existing node profiles are not changed"),
+                "the 'Default' message states that existing node profiles are entirely untouched");
+        assertTrue(defMsg.contains("profiles without an assignment keep running on the built-in '"
+                + LoggingProfileRepository.RESERVED_PROFILE_NAME + "'"),
+                "the 'Default' message states that unassigned existing profiles keep running on the built-in default");
+        assertTrue(defMsg.contains("Would you like to apply the changes and restart the application?"),
+                "the 'Default' message ends with the apply + restart question");
     }
 
     @Test

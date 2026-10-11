@@ -1762,29 +1762,39 @@ public class ModuleLoggingProfilePanel extends JPanel {
     }
 
     /**
-     * The core (module-scoped) Apply confirmation message. It states EXACTLY what Apply
-     * does on a generic module tab (the node tab overrides this with a node-centric
-     * message): it only sets the MODULE-LEVEL applied marker, does NOT change any node
-     * profile's own logging assignment, and a node profile without an explicit
-     * assignment (including newly created node profiles) runs with the built-in
-     * {@code logging-default} profile.
+     * The core (module-scoped) Apply confirmation message — a compact, unambiguous
+     * three-part statement (the node tab overrides this with a node-centric message):
+     * <b>what happens</b> (the module's applied logging profile is set/reset),
+     * <b>the effect on node profiles</b> (only <i>newly created</i> profiles are
+     * checked against the module-level applied profile at creation time — their
+     * default assignment is bound to it, or left absent when "Default" is applied;
+     * <i>existing</i> profiles are entirely untouched: those with their own
+     * assignment keep it, and those without an assignment keep running on the
+     * built-in default), and <b>when it takes effect</b> (after the restart that
+     * the YES answer triggers via {@link ModuleContext#requestRestart()}).
      *
      * @param profileName the profile name being applied (the virtual Default entry included)
      * @param isDefault   whether the virtual {@link #DEFAULT_PROFILE_ENTRY} entry is applied
      * @return the confirmation dialog message
      */
     String defaultApplyMessage(String profileName, boolean isDefault) {
-        return "Apply logging profile '" + profileName + "' for module '" + moduleId + "'?\n\n"
-                + (isDefault
-                        ? "This restores the application's built-in default configuration as this module's applied state.\n\n"
-                        : "This marks '" + profileName + "' as the applied logging profile of this module "
-                                + "(a module-level marker).\n\n")
-                + "Note: this does NOT change any node profile's own logging assignment. Each node profile "
-                + "keeps its own assignment — set it on the node profile's \"Logging\" tab (Apply) or in this "
-                + "module's \"Assignments\" sub-tab. A node profile without an explicit assignment (including "
-                + "newly created node profiles) uses the built-in '"
-                + LoggingProfileRepository.RESERVED_PROFILE_NAME + "' profile at (re)start.\n\n"
-                + "A node restart is required for the change to take effect.";
+        String defaultName = LoggingProfileRepository.RESERVED_PROFILE_NAME;
+        String newlyCreated = isDefault
+                ? "Newly created node profiles will have no logging assignment, as before (the built-in '"
+                        + defaultName + "' applies to them)"
+                : "newly created node profiles will be linked to '" + profileName + "' by default (the module-level "
+                        + "applied profile is checked when a node profile is created)";
+        String existing = "Existing node profiles are not changed: profiles with their own assignment keep it, and "
+                + "profiles without an assignment keep running on the built-in '" + defaultName + "'.";
+        return (isDefault
+                ? "The applied logging profile of the '" + moduleId + "' module will be reset to the built-in '"
+                        + defaultName + "'.\n\n"
+                        + newlyCreated + ".\n\n"
+                : "The '" + profileName + "' logging profile will be applied to the '" + moduleId + "' module.\n\n"
+                        + newlyCreated + ".\n\n")
+                + existing + "\n\n"
+                + "This will take effect after a restart. Would you like to apply the changes and restart the "
+                + "application?";
     }
 
     private void renameProfile() {
