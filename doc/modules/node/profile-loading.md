@@ -343,7 +343,7 @@ wizard is a headless-testable state machine (`NodeSetupWizardController`) drivin
 canonical step chain:
 
 ```
-database-selection → database-installation → database-connection → node-configuration → logging-profile → summary
+database-selection → database-installation → database-connection → node-configuration → summary
 ```
 
 | Step | Behaviour |
@@ -352,11 +352,18 @@ database-selection → database-installation → database-connection → node-co
 | `database-installation` | **Only when needed** ("ha szükséges"): embeds the existing Database-module engine panel (SSOT — version selection, **Download** with progress, extract, **Initialize**, my.ini/postgres config). An already-installed engine (`DatabaseConfigurationUtils.isDatabaseInstalled`, i.e. `database/<engine>/` non-empty) pre-selects "Skip". Blocks Next while not installed and not skipped. |
 | `database-connection` | host / port / user / password / db name (+ TCP test) — persisted into the profile via the `ProfileCreateDefaults` SSOT at finish. |
 | `node-configuration` | Suggested name (SSOT `ProfileNameSuggester`, `_NN` auto-suffix on taken names), testnet, ports (per-profile band by default or custom). |
-| `logging-profile` | Preset assignment (SSOT `LoggingAssignmentStore` → `conf/node/profiles.json`). |
 | `summary` | Read-only review + conflict pre-check (SSOT `ProfileConflictDetector`, same as runtime arbitration) + "start immediately". |
 
+The wizard has no logging step: every profile-creation path (wizard, `+` tab "New Empty
+Default Profile", CLI `profile create`) seeds the new profile's logging assignment from
+the node module's currently **applied** logging profile (a snapshot taken at creation
+time, SSOT `ProfileRuntimeService.seedDefaultLoggingAssignment` → `LoggingAssignmentStore`
+→ `conf/node/profiles.json`); while "Default" is the applied profile no assignment is
+written (the built-in `logging-default` applies until the user assigns one). Existing
+profiles are never touched by this seeding.
+
 Finish goes through `WizardFinish.createProfile(...)` → `NodeProfileRepository.createProfile`
-→ logging assignment → optional `NodeModule.startNode(name)` → `NodePanel.addProfileTab`.
+→ logging seed (applied profile) → optional `NodeModule.startNode(name)` → `NodePanel.addProfileTab`.
 
 ### CLI (headless)
 
@@ -376,6 +383,46 @@ Right-click a profile tab → **Rename…** (SSOT validation: pattern / reserved
 `ProfileNameSuggester`-based suggestion) or **Delete…** (confirmation; extra warning when
 the node is RUNNING — it is stopped first). Both delegate to the public
 `NodePanel.renameProfileTab` / `removeProfileTab` APIs (repository SSOT).
+
+### Node Logging Tab (per-node assignment display)
+
+The node profile's **Logging** tab (`NodeLoggingPanel`) shows the <b>per-node
+assignment</b> as the applied state — never the module-level applied marker. An
+<b>unassigned</b> node profile therefore keeps the virtual **"Default"** entry selected
+AND marked as applied: the node really runs with the built-in `logging-default` profile,
+and the module's applied profile (its seed source at creation time) is not painted as
+this node's applied profile. Applying a profile on this tab records the per-node
+assignment (SSOT `LoggingAssignmentStore` → `conf/node/profiles.json`) and restarts the
+node; applying the virtual **Default** entry clears the assignment (the node falls back
+to the built-in `logging-default`).
+
+### Logging Module — Assignments Table (auto-refresh)
+
+The Logging module's **Assignments** sub-tab (`AssignmentPanel`) lists the
+node-profile → logging-profile associations and is kept up to date by a **push**:
+it subscribes to the `LoggingAssignmentStore.fireProfileChanged()` notification,
+fired by the store's assignment writers and by the node-profile lifecycle
+(`NodeProfileRepository` create / rename / delete) — so a newly created node profile
+appears in the table without a manual re-scan. The table is also re-scanned when the
+sub-tab is activated (covers out-of-process changes, e.g. the CLI). The automatic
+refresh is skipped while the table holds unsaved row edits (the manual **Refresh**
+button remains the explicit unconditional re-scan). The panel never holds a
+long-lived `LoggingAssignmentStore` instance (its `ProfileConfig` cache would go
+stale after a write by another instance) — a fresh store is created per operation,
+the same per-call convention the rest of the app uses.
+
+**`profiles.json` reload-on-write (stale-cache clobber protection).** Several
+`ProfileConfig` instances share `conf/node/profiles.json` at once — each caches
+its parsed document after the first read (the GUI's app-lifetime tab-order
+instance in `NodePanel` is the classic one). Before the fix, any save from a
+stale instance serialized its old snapshot and silently discarded concurrent
+writes: e.g. creating a node profile (seed writes the new profile's logging
+assignment) and then the GUI's `addProfileTab` tab-order save would **wipe the
+just-seeded assignment** (the node ran with the built-in default despite the
+creation-time seed). Every `ProfileConfig` mutating method
+(`setTabOrder`, `setLoggingProfile`, `setLoggingPresets`, `setAutoStart`,
+`setEnabled`) now starts with `reload()` (discard cache + re-read from disk),
+so a save can never clobber another instance's writes.
 
 ---
 

@@ -71,3 +71,10 @@ result
 # CEF runtime logs created by the focus repro at the project root
 /jcef.log
 /vulkan.d3d12.cache
+
+# Dev scratch (headless test runner + repro scripts, session-local)
+/scratch_test_runner/
+/init_cp.gradle
+
+# Runtime module-level applied-profile marker (written by the Logging module's Apply)
+/conf/node/logging/profile.json
