@@ -5,28 +5,35 @@ import org.junit.jupiter.api.Test;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
+import javax.swing.JLabel;
 import javax.swing.JTabbedPane;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.GraphicsEnvironment;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 /**
  * Regression test for the "empty space under the JDBC URL preview" report:
- * switching the DB.Url row from the tall manual card to the shorter linked
- * profile card (and back) must resize the card to the ACTIVE card's height.
+ * switching the DB.Url row between manual mode (tall engine-aware fields) and
+ * linked mode (short profile card) must resize the row to the MODE's height.
  *
- * Root cause: the card holder is a CardLayout panel whose default
- * getMinimumSize() is the max of ALL cards' minimums; the manual card's
- * minimum kept the MigLayout row inflated after the switch. The card panel
- * now overrides getPreferredSize/getMinimumSize to track the current card.
+ * The legacy root cause was a CardLayout card holder whose default
+ * getMinimumSize() was the max of ALL cards' minimums; the unified
+ * {@link JdbcConfigurationPanel} removes the outer holder (visibility is
+ * driven by the mode instead of card switching), but its internal
+ * SQLite/remote field group is a CardLayout that still overrides
+ * getPreferredSize/getMinimumSize to track the current card — this test
+ * guards both layers against a dead-space regression.
  */
 class NodeConfigurationPanelJdbcCardHeightTest {
 
@@ -45,11 +52,13 @@ class NodeConfigurationPanelJdbcCardHeightTest {
 
     @Test
     void jdbcRowResizesToActiveCard() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         registerFontAwesome();
         Path props = Path.of("conf", "node", "profiles", PROFILE + ".properties");
-        boolean propsExisted = Files.exists(props);
+        boolean propsExisted = Files.exists(props) && Files.size(props) > 0;
         if (!propsExisted) {
             Files.createDirectories(props.getParent());
+            Files.deleteIfExists(props); // an empty leftover of a crashed run
             Files.writeString(props,
                     "DB.Url=jdbc:sqlite:file:./database/SQLite/" + PROFILE + "/signum.sqlite.db" + System.lineSeparator());
         }
@@ -75,41 +84,57 @@ class NodeConfigurationPanelJdbcCardHeightTest {
         try {
             JComponent wrapper = awaitJdbcWrapper(panel);
             assertNotNull(wrapper, "the DB.Url row wrapper must exist");
-            JComponent card = (JComponent) wrapper.getComponent(1);
+            JComponent jdbcPanel = (JComponent) wrapper.getClientProperty("profilePanel");
+            assertNotNull(jdbcPanel, "the unified JDBC panel must exist");
 
             // Select the Database tab so the row is laid out at its real
             // width (hidden-tab measurements happen at the default 80x30).
             selectDatabaseTab(panel);
             settle();
 
-            JComponent manual = visibleCardChild(card, true);
-            JComponent profile = visibleCardChild(card, false);
             JCheckBox checkbox = findCheckbox(wrapper);
             assertNotNull(checkbox, "the 'Linked Database Profile' checkbox must exist");
 
-            // 1. Manual card: the card panel must fit the manual content.
-            assertEquals(manual, currentCard(card), "the manual card must be active initially");
-            int manualCardH = card.getHeight();
-            assertEquals(maxVisibleBottom(manual), manualCardH,
-                    "the card must be sized to the manual card's content (no dead space)");
+            // 1. Manual mode: the panel must fit the manual content.
+            final Object[] state0 = new Object[1];
+            SwingUtilities.invokeAndWait(() -> state0[0] = ((JdbcConfigurationPanel) jdbcPanel).isLinkedMode());
+            assertTrue(!(Boolean) state0[0], "the JDBC row must start in manual mode (no database link recorded)");
+            int manualH = jdbcPanel.getHeight();
+            assertEquals(visibleBottom(jdbcPanel), manualH,
+                    "the panel must be sized to the manual content (no dead space)");
 
-            // 2. Switch to the linked profile card.
+            // 2. Switch to the linked profile mode.
             SwingUtilities.invokeAndWait(checkbox::doClick);
             settle();
-            assertEquals(profile, currentCard(card), "the profile card must be active after the check");
-            int profileCardH = card.getHeight();
-            assertTrue(profileCardH < manualCardH,
-                    "the card must shrink for the shorter profile card (was " + manualCardH + ", now " + profileCardH + ")");
-            assertEquals(maxVisibleBottom(profile), profileCardH,
-                    "the card must be sized to the profile card's content (no dead space under the JDBC URL preview)");
+            final Object[] linked = new Object[2];
+            SwingUtilities.invokeAndWait(() -> {
+                JdbcConfigurationPanel j = (JdbcConfigurationPanel) jdbcPanel;
+                linked[0] = j.isLinkedMode();
+                linked[1] = j.getProfileName();
+            });
+            assertTrue((Boolean) linked[0], "the JDBC row must switch to linked mode after the check");
+            assertNotNull(linked[1], "the linked mode must resolve a profile name");
+            int linkedH = jdbcPanel.getHeight();
+            // The unified panel keeps one row per slot: the linked mode
+            // replaces the Path field with the (slightly taller) Profile
+            // select, so the heights stay in lockstep — the mode switch is
+            // proven by the row SET changing, not by a height drop.
+            assertTrue(rowLabelVisible(jdbcPanel, "Profile:"),
+                    "the linked mode must show the Profile row");
+            assertFalse(rowLabelVisible(jdbcPanel, "Path:"),
+                    "the linked mode must hide the Path row");
+            assertEquals(visibleBottom(jdbcPanel), linkedH,
+                    "the panel must be sized to the linked content (no dead space under the JDBC URL preview)");
 
-            // 3. Switch back: the card must grow back to the manual height.
+            // 3. Switch back: the panel must grow back to the manual height.
             SwingUtilities.invokeAndWait(checkbox::doClick);
             settle();
-            assertEquals(manual, currentCard(card), "the manual card must be active after the uncheck");
-            assertEquals(manualCardH, card.getHeight(), "the card must grow back to the manual card's height");
-            assertEquals(maxVisibleBottom(manual), card.getHeight(),
-                    "the card must again fit the manual card's content");
+            final Object[] state2 = new Object[1];
+            SwingUtilities.invokeAndWait(() -> state2[0] = ((JdbcConfigurationPanel) jdbcPanel).isLinkedMode());
+            assertTrue(!(Boolean) state2[0], "the JDBC row must be back in manual mode after the uncheck");
+            assertEquals(manualH, jdbcPanel.getHeight(), "the panel must grow back to the manual mode's height");
+            assertEquals(visibleBottom(jdbcPanel), jdbcPanel.getHeight(),
+                    "the panel must again fit the manual content");
         } finally {
             SwingUtilities.invokeAndWait(owner::dispose);
             if (!propsExisted)
@@ -207,35 +232,25 @@ class NodeConfigurationPanelJdbcCardHeightTest {
         return out[0];
     }
 
-    /** The manual (JdbcManualConfigurationPanel) or the anonymous profile card. */
-    private static JComponent visibleCardChild(JComponent card, boolean manual) throws Exception {
-        JComponent[] out = new JComponent[1];
+    /** Whether a row label starting with the given base text is visible. */
+    private static boolean rowLabelVisible(JComponent panel, String baseText) throws Exception {
+        final boolean[] out = new boolean[1];
         SwingUtilities.invokeAndWait(() -> {
-            for (Component c : card.getComponents()) {
-                if (c instanceof JComponent jc && (jc instanceof JdbcManualConfigurationPanel) == manual)
-                    out[0] = jc;
-            }
+            for (Component c : panel.getComponents())
+                if (c instanceof JLabel l && l.isVisible() && l.getText().startsWith(baseText)) {
+                    out[0] = true;
+                    return;
+                }
         });
         return out[0];
     }
 
-    /** The visible card of the CardLayout holder (the active one). */
-    private static Component currentCard(JComponent card) throws Exception {
-        Component[] out = new Component[1];
-        SwingUtilities.invokeAndWait(() -> {
-            for (Component c : card.getComponents())
-                if (c.isVisible() && c.getHeight() > 0)
-                    out[0] = c;
-        });
-        return out[0];
-    }
-
-    /** Max (y + height) of the visible direct children of a card. */
-    private static int maxVisibleBottom(Container card) throws Exception {
+    /** Max (y + height) of the visible direct children of a panel. */
+    private static int visibleBottom(Container panel) throws Exception {
         int[] out = new int[1];
         SwingUtilities.invokeAndWait(() -> {
             int bottom = 0;
-            for (Component c : card.getComponents()) {
+            for (Component c : panel.getComponents()) {
                 if (c.isVisible())
                     bottom = Math.max(bottom, c.getY() + c.getHeight());
             }

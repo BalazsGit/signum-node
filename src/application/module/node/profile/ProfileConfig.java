@@ -29,6 +29,12 @@ import java.util.stream.Collectors;
  *       assignment map (the JSON key is retained for compatibility with existing files)</li>
  *   <li>{@code tabOrder} — user-defined GUI tab display order</li>
  *   <li>{@code maxConcurrentNodes} — global limit on parallel running nodes</li>
+ *   <li>{@code databaseProfileLink} — the server-engine (MariaDB/PostgreSQL) linked
+ *       database profile assignment ({@code "Engine:<profile>"}); the SQLite assignment
+ *       is derived from the node profile's {@code DB.Url} and is not stored here</li>
+ *   <li>{@code databaseAutoStart} / {@code databaseAutoStop} — whether the linked
+ *       database profile is started/stopped with the node (server engines only;
+ *       {@code null} = not set)</li>
  * </ul>
  * <p>
  * The legacy {@link ProfileEntry} fields are marked deprecated but retained for
@@ -123,6 +129,28 @@ public class ProfileConfig {
         /** Per-module logging profile assignments (e.g., {"node": "myprofile", "database": "quiet"}). Optional. */
         private Map<String, String> loggingPresets;
 
+        /**
+         * Linked database profile assignment for a server engine
+         * ({@code "MariaDB:<profile>"} / {@code "PostgreSQL:<profile>"}). Optional.
+         * The SQLite (file-based) assignment is derived from the node profile's
+         * {@code DB.Url} convention path and is deliberately not stored here.
+         */
+        private String databaseProfileLink;
+
+        /**
+         * Whether the linked database profile is started together with the node.
+         * Server engines only (SQLite is an embedded engine — N/A).
+         * {@code null} = not set.
+         */
+        private Boolean databaseAutoStart;
+
+        /**
+         * Whether the linked database profile is stopped together with the node.
+         * Server engines only (SQLite is an embedded engine — N/A).
+         * {@code null} = not set.
+         */
+        private Boolean databaseAutoStop;
+
         public ProfileEntry() {
         }
 
@@ -199,6 +227,42 @@ public class ProfileConfig {
         public void setLoggingPresets(Map<String, String> loggingPresets) {
             this.loggingPresets = loggingPresets;
         }
+
+        /**
+         * Gets the linked database profile assignment (server engines).
+         * @return the link value ({@code "Engine:<profile>"}), or null if not set
+         */
+        public String getDatabaseProfileLink() { return databaseProfileLink; }
+
+        /**
+         * Sets the linked database profile assignment (server engines).
+         * @param databaseProfileLink the link value, or null to clear
+         */
+        public void setDatabaseProfileLink(String databaseProfileLink) { this.databaseProfileLink = databaseProfileLink; }
+
+        /**
+         * Gets the database auto-start setting.
+         * @return true/false when set, null when not set
+         */
+        public Boolean getDatabaseAutoStart() { return databaseAutoStart; }
+
+        /**
+         * Sets the database auto-start setting.
+         * @param databaseAutoStart true/false, or null to clear
+         */
+        public void setDatabaseAutoStart(Boolean databaseAutoStart) { this.databaseAutoStart = databaseAutoStart; }
+
+        /**
+         * Gets the database auto-stop setting.
+         * @return true/false when set, null when not set
+         */
+        public Boolean getDatabaseAutoStop() { return databaseAutoStop; }
+
+        /**
+         * Sets the database auto-stop setting.
+         * @param databaseAutoStop true/false, or null to clear
+         */
+        public void setDatabaseAutoStop(Boolean databaseAutoStop) { this.databaseAutoStop = databaseAutoStop; }
     }
 
     public ProfileConfig() {
@@ -478,13 +542,125 @@ public class ProfileConfig {
     }
 
     /**
-     * Whether the legacy entry carries no logging association at all (neither the
-     * legacy loggingProfile nor the canonical loggingPresets map) — such an empty
-     * entry may be removed from profiles.json on a clear.
+     * Gets the linked database profile assignment (server engines) for a profile.
+     *
+     * @param profileName the node profile name
+     * @return the link value ({@code "Engine:<profile>"}), or null if not set
+     */
+    public String getDatabaseProfileLink(String profileName) {
+        ProfileData data = load();
+        ProfileEntry entry = data.getProfiles().get(profileName);
+        return entry != null ? entry.getDatabaseProfileLink() : null;
+    }
+
+    /**
+     * Sets and persists the linked database profile assignment (server engines)
+     * for a profile. The SQLite (file-based) assignment is never stored — it is
+     * derived from the node profile's {@code DB.Url}.
+     *
+     * @param profileName the node profile name
+     * @param link        the link value ({@code "Engine:<profile>"}), or null to clear
+     */
+    public void setDatabaseProfileLink(String profileName, String link) {
+        String value = (link == null || link.trim().isEmpty()) ? null : link.trim();
+        ProfileData data = reload();
+        ProfileEntry entry = data.getProfiles().get(profileName);
+        if (entry != null) {
+            entry.setDatabaseProfileLink(value);
+            if (isEffectivelyEmpty(entry)) {
+                data.getProfiles().remove(profileName);
+            }
+        } else if (value != null) {
+            data.getProfiles().computeIfAbsent(profileName, k -> new ProfileEntry())
+                    .setDatabaseProfileLink(value);
+        } else {
+            return; // nothing to set and nothing to clear
+        }
+        try {
+            save();
+        } catch (IOException e) {
+            LOGGER.error("Failed to save database profile link for {}", profileName, e);
+        }
+    }
+
+    /**
+     * Gets the database auto-start setting for a profile.
+     *
+     * @param profileName the node profile name
+     * @return true/false when set, null when not set
+     */
+    public Boolean getDatabaseAutoStart(String profileName) {
+        ProfileData data = load();
+        ProfileEntry entry = data.getProfiles().get(profileName);
+        return entry != null ? entry.getDatabaseAutoStart() : null;
+    }
+
+    /**
+     * Sets and persists the database auto-start setting for a profile.
+     *
+     * @param profileName the node profile name
+     * @param value       true/false, or null to clear
+     */
+    public void setDatabaseAutoStart(String profileName, Boolean value) {
+        setDatabaseBooleanFlag(profileName, value, true);
+    }
+
+    /**
+     * Gets the database auto-stop setting for a profile.
+     *
+     * @param profileName the node profile name
+     * @return true/false when set, null when not set
+     */
+    public Boolean getDatabaseAutoStop(String profileName) {
+        ProfileData data = load();
+        ProfileEntry entry = data.getProfiles().get(profileName);
+        return entry != null ? entry.getDatabaseAutoStop() : null;
+    }
+
+    /**
+     * Sets and persists the database auto-stop setting for a profile.
+     *
+     * @param profileName the node profile name
+     * @param value       true/false, or null to clear
+     */
+    public void setDatabaseAutoStop(String profileName, Boolean value) {
+        setDatabaseBooleanFlag(profileName, value, false);
+    }
+
+    /** Shared read-modify-write for the nullable auto-start/auto-stop flags. */
+    private void setDatabaseBooleanFlag(String profileName, Boolean value, boolean startFlag) {
+        if (value == null
+                && (startFlag ? getDatabaseAutoStart(profileName) : getDatabaseAutoStop(profileName)) == null) {
+            return; // nothing to set and nothing to clear
+        }
+        ProfileData data = reload();
+        ProfileEntry entry = data.getProfiles().computeIfAbsent(profileName, k -> new ProfileEntry());
+        if (startFlag) {
+            entry.setDatabaseAutoStart(value);
+        } else {
+            entry.setDatabaseAutoStop(value);
+        }
+        if (isEffectivelyEmpty(entry)) {
+            data.getProfiles().remove(profileName);
+        }
+        try {
+            save();
+        } catch (IOException e) {
+            LOGGER.error("Failed to save database auto-{} setting for {}", startFlag ? "start" : "stop", profileName, e);
+        }
+    }
+
+    /**
+     * Whether the legacy entry carries no association at all (logging, database
+     * link, database auto-start/auto-stop) — such an empty entry may be removed
+     * from profiles.json on a clear.
      */
     private static boolean isEffectivelyEmpty(ProfileEntry entry) {
         return entry.getLoggingProfile() == null
-                && (entry.getLoggingPresets() == null || entry.getLoggingPresets().isEmpty());
+                && (entry.getLoggingPresets() == null || entry.getLoggingPresets().isEmpty())
+                && (entry.getDatabaseProfileLink() == null || entry.getDatabaseProfileLink().isEmpty())
+                && entry.getDatabaseAutoStart() == null
+                && entry.getDatabaseAutoStop() == null;
     }
 
     /**

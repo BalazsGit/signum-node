@@ -12,6 +12,8 @@ import application.module.node.profile.ProfileCreateDefaults;
 import application.module.node.profile.ProfileDiffCalculator;
 import application.module.node.profile.ProfileNameSuggester;
 import application.module.node.profile.ProfileRuntimeService;
+import application.module.node.profile.ProfileConfig;
+import application.module.node.profile.SqliteDatabasePaths;
 import application.module.database.gui.DatabaseConfigurationPanel;
 import application.module.database.utils.DatabaseConfigurationUtils;
 import application.module.node.Constants;
@@ -26,6 +28,7 @@ import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
+import application.utils.gui.HelpDialog;
 import application.utils.gui.NewProfileChoiceDialog;
 import application.utils.gui.ResponsiveToolbarScrollPane;
 import application.utils.gui.SearchMatchLabel;
@@ -113,8 +116,17 @@ public class NodeConfigurationPanel extends JPanel {
     // merged into the JDBC row — that control takes over its role)
     private JCheckBox autoStartDbCheck;
     private JCheckBox autoStopDbCheck;
+    /** The DB engine's Auto Start/Stop row (server engines only — hidden for SQLite). */
+    private JPanel autoDbRow;
 
     private String savedLinkedDb = "";
+    /**
+     * The database link the node runs (or will run) with — the applied
+     * baseline of the link element in the JDBC row's tuple color coding.
+     * Set on load (== {@code savedLinkedDb}, the loaded-file philosophy) and
+     * refreshed by Apply, alongside {@code appliedProfile}.
+     */
+    private String appliedLinkedDb = "";
     private boolean savedDbAutoStart = false;
     private boolean savedDbAutoStop = false;
 
@@ -206,12 +218,6 @@ public class NodeConfigurationPanel extends JPanel {
     private JButton resetToDefaultsBtn;
     private String runningProfileName;
     private String loadedProfileName;
-    /**
-     * A database profile discovered while the UI was still being built (the
-     * initial {@code updateFromUrl} runs before the JDBC link controls
-     * exist) — linked by the post-init auto-link pass.
-     */
-    private String pendingDiscoveredDbProfile;
     private int currentAddingTabIndex = -1;
     /** The category tab index of the Database tab (hosts the JDBC link row). */
     private int databaseTabIndex = -1;
@@ -318,9 +324,6 @@ public class NodeConfigurationPanel extends JPanel {
                 LOGGER.debug("NodeConfigurationPanel - async loadProfileLinks START for: {}", loadedProfileName);
                 loadProfileLinks(loadedProfileName);
                 LOGGER.debug("NodeConfigurationPanel - async loadProfileLinks DONE");
-
-                autoLinkAppliedDatabaseProfile();
-                linkPendingDiscoveredDatabaseProfile();
             } catch (Exception e) {
                 LOGGER.error("NodeConfigurationPanel - async init FAILED", e);
             }
@@ -377,8 +380,8 @@ public class NodeConfigurationPanel extends JPanel {
         profilePanel.add(saveBtn);
 
         applyBtn.setToolTipText(
-                "<html>Apply<br><br>Applies the saved configuration: marks the profile as<br>"
-                        + "applied and restarts the node so the new settings take effect.<br>"
+                "<html>Apply<br><br>Applies the saved changes: marks the profile as applied<br>"
+                        + "and restarts the node so they take effect.<br>"
                         + "Active only while there are saved, not yet applied changes.</html>");
         applyBtn.setEnabled(false);
         applyBtn.addActionListener(e -> runProfileAction("Apply", this::applyProfile));
@@ -425,7 +428,8 @@ public class NodeConfigurationPanel extends JPanel {
 
         helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         helpBtn.setToolTipText("View detailed information about configuration profile management");
-        helpBtn.addActionListener(e -> showProfileHelp()); // Add help button
+        helpBtn.addActionListener(e -> HelpDialog.show(this, "Node Configuration Profiles",
+                buildConfigurationHelpContent()));
         profilePanel.add(helpBtn);
 
         // The standard responsive toolbar wrapper (shared insets/policies —
@@ -1424,232 +1428,310 @@ public class NodeConfigurationPanel extends JPanel {
         return loadedProfileName;
     }
 
+    /**
+     * Loads the per-profile database assignment and the DB auto start/stop
+     * flags, in the storage model:
+     * <ul>
+     *   <li><b>server engines</b> (MariaDB/PostgreSQL): the explicit link is
+     *       stored in {@code profiles.json} (a server URL cannot tell which
+     *       database profile it belongs to), and so are the auto start/stop
+     *       flags;</li>
+     *   <li><b>SQLite</b> (file-based): the link is <b>derived</b> from the
+     *       saved {@code DB.Url} convention path inside
+     *       {@link JdbcConfigurationPanel#loadInitial} — it is never stored;
+     *       the auto start/stop flags are N/A (embedded engine);</li>
+     *   <li>the legacy per-profile database keys of the node metadata
+     *       ({@code profile.json} {@code profileLinks.<p>.{database,
+     *       dbAutoStart,dbAutoStop}}) are migrated once and dropped.</li>
+     * </ul>
+     * Afterwards the deterministic initial-link resolution populates the JDBC
+     * row and the row's colors/dirty state are re-settled against the
+     * baselines (this method runs asynchronously after the initial property
+     * load, so without the settle the load-time colors would stay stale).
+     */
     private void loadProfileLinks(String profileName) {
         isProgrammaticChange = true;
-        applyDbLinkToJdbcRow(null); // start from a clean, unlinked state
-        if (autoStartDbCheck != null) {
-            autoStartDbCheck.setSelected(true);
-        }
-        if (autoStopDbCheck != null) {
-            autoStopDbCheck.setSelected(true);
-        }
-        isProgrammaticChange = false;
-
-        Path metadataPath = ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER);
-        if (Files.exists(metadataPath)) {
-            try (Reader reader = Files.newBufferedReader(metadataPath)) {
-                JsonObject metadata = JsonParser.parseReader(reader).getAsJsonObject();
-                if (metadata.has(KEY_PROFILE_LINKS) && metadata.getAsJsonObject(KEY_PROFILE_LINKS).has(profileName)) {
-                    JsonObject links = metadata.getAsJsonObject(KEY_PROFILE_LINKS).getAsJsonObject(profileName);
-                    if (links.has(KEY_DATABASE)) {
-                        applyDbLinkToJdbcRow(links.get(KEY_DATABASE).getAsString());
-                    }
-                    if (links.has(KEY_DB_AUTO_START) && autoStartDbCheck != null) {
-                        autoStartDbCheck.setSelected(links.get(KEY_DB_AUTO_START).getAsBoolean());
-                    }
-                    if (links.has(KEY_DB_AUTO_STOP) && autoStopDbCheck != null) {
-                        autoStopDbCheck.setSelected(links.get(KEY_DB_AUTO_STOP).getAsBoolean());
-                    }
-                }
-            } catch (Exception e) {
-                LOGGER.error("Error loading profile links from JSON", e);
-            }
-        }
-
-        savedLinkedDb = getLinkedDbProfile();
-        savedDbAutoStart = autoStartDbCheck != null && autoStartDbCheck.isSelected();
-        savedDbAutoStop = autoStopDbCheck != null && autoStopDbCheck.isSelected();
-    }
-
-    /**
-     * Syncs an {@code "Engine:Profile"} database link into the "Linked
-     * Database Profile" control of the JDBC row: when the linked profile can
-     * be materialized (engine known, profile exists), the profile card shows
-     * its full configuration — engine, profile, the database instance the
-     * node profile's saved JDBC URL points at (the first instance otherwise)
-     * and the matching user — and the checkbox is selected so the card is
-     * the active one. A {@code null} / empty / malformed value, an unknown
-     * engine or a missing profile clears the link: the card resets and the
-     * row falls back to the manual configuration. Purely UI — the caller
-     * decides whether to persist.
-     */
-    private void applyDbLinkToJdbcRow(String value) {
-        JComponent jdbcComp = propertyComponents.get(Props.DB_URL.getName());
-        if (jdbcComp == null) {
-            return; // the JDBC row is not built yet
-        }
-        JdbcProfileConfigurationPanel pp = (JdbcProfileConfigurationPanel) jdbcComp.getClientProperty("profilePanel");
-        JCheckBox cb = (JCheckBox) jdbcComp.getClientProperty("useProfileCheck");
-        if (pp == null) {
-            return;
-        }
-        isProgrammaticChange = true;
         try {
-            if (value == null || value.isEmpty() || !value.contains(":")) {
-                // No link: the card resets to its neutral state and the row
-                // goes back to the manual configuration.
-                pp.clearLinkedProfile();
-                if (cb != null && cb.isSelected()) {
-                    cb.setSelected(false);
+            String savedUrl = savedProfile.getProperty(Props.DB_URL.getName(), getSafeDefault(Props.DB_URL));
+            boolean sqliteUrl = savedUrl != null && savedUrl.toLowerCase(Locale.ROOT).startsWith("jdbc:sqlite:");
+
+            ProfileConfig profileConfig = new ProfileConfig();
+            String dbLink = profileConfig.getDatabaseProfileLink(profileName);
+            Boolean autoStart = profileConfig.getDatabaseAutoStart(profileName);
+            Boolean autoStop = profileConfig.getDatabaseAutoStop(profileName);
+
+            // One-time legacy migration: conf/node/profile.json used to carry
+            // the database link + auto start/stop per profile.
+            Path metadataPath = ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER);
+            if (Files.exists(metadataPath)) {
+                try (Reader reader = Files.newBufferedReader(metadataPath)) {
+                    JsonObject metadata = JsonParser.parseReader(reader).getAsJsonObject();
+                    if (metadata.has(KEY_PROFILE_LINKS) && metadata.getAsJsonObject(KEY_PROFILE_LINKS).has(profileName)) {
+                        JsonObject links = metadata.getAsJsonObject(KEY_PROFILE_LINKS).getAsJsonObject(profileName);
+                        boolean legacyRemoved = false;
+                        if (dbLink == null && links.has(KEY_DATABASE)) {
+                            String legacyLink = links.get(KEY_DATABASE).getAsString();
+                            // A legacy SQLite link was derivable (or stale)
+                            // anyway — drop it; a server link is migrated.
+                            if (!sqliteUrl && !legacyLink.regionMatches(true, 0, "SQLite:", 0, "SQLite:".length())) {
+                                profileConfig.setDatabaseProfileLink(profileName, legacyLink);
+                                dbLink = legacyLink;
+                            }
+                            legacyRemoved = true;
+                        }
+                        if (!sqliteUrl) {
+                            if (autoStart == null && links.has(KEY_DB_AUTO_START)) {
+                                autoStart = links.get(KEY_DB_AUTO_START).getAsBoolean();
+                                profileConfig.setDatabaseAutoStart(profileName, autoStart);
+                                legacyRemoved = true;
+                            }
+                            if (autoStop == null && links.has(KEY_DB_AUTO_STOP)) {
+                                autoStop = links.get(KEY_DB_AUTO_STOP).getAsBoolean();
+                                profileConfig.setDatabaseAutoStop(profileName, autoStop);
+                                legacyRemoved = true;
+                            }
+                        } else if (links.has(KEY_DB_AUTO_START) || links.has(KEY_DB_AUTO_STOP)) {
+                            // SQLite: the flags are N/A — drop the stale ones.
+                            legacyRemoved = true;
+                        }
+                        if (legacyRemoved) {
+                            removeLegacyDatabaseLinkKeys(metadata, profileName);
+                            writeNodeMetadata(metadata);
+                        }
+                    }
+                } catch (Exception e) {
+                    LOGGER.error("Error loading legacy profile links from JSON", e);
                 }
-                showJdbcProfileCard(jdbcComp, false);
-                return;
             }
-            String[] parts = value.split(":", 2);
-            String profileName = parts.length > 1 ? parts[1] : "";
-            DatabaseConfigurationPanel.DatabaseEngine engine = DatabaseConfigurationPanel.DatabaseEngine
-                    .fromDisplayName(parts[0]);
-            if (engine == null) {
-                LOGGER.warn("Unknown database engine in link '{}'; the JDBC row falls back to manual mode", value);
-                pp.clearLinkedProfile();
-                if (cb != null && cb.isSelected()) {
-                    cb.setSelected(false);
-                }
-                showJdbcProfileCard(jdbcComp, false);
-                return;
+            if (autoStartDbCheck != null) {
+                autoStartDbCheck.setSelected(Boolean.TRUE.equals(autoStart));
             }
-            if (profileName.isEmpty()) {
-                // Transient (an engine was picked, no profile yet): the card
-                // follows the engine; the checkbox and the saved link are left
-                // where they are until a profile is chosen.
-                pp.applyLinkedProfile(engine, "", null, null);
-                return;
+            if (autoStopDbCheck != null) {
+                autoStopDbCheck.setSelected(Boolean.TRUE.equals(autoStop));
             }
-            // The card must show the configuration the node profile actually
-            // uses: the database instance (and user) matching the saved JDBC
-            // URL / username when the linked profile offers it.
-            String preferredUrl = savedProfile != null ? savedProfile.getProperty(Props.DB_URL.getName(), "") : "";
-            String preferredUser = savedProfile != null ? savedProfile.getProperty(Props.DB_USERNAME.getName(), "")
-                    : "";
-            boolean applied = pp.applyLinkedProfile(engine, profileName, preferredUrl, preferredUser);
-            if (applied) {
-                if (cb != null && !cb.isSelected()) {
-                    cb.setSelected(true);
+
+            JdbcConfigurationPanel jdbc = jdbcPanel();
+            if (jdbc != null) {
+                // The single, deterministic initial-link resolution (explicit
+                // link > SQLite convention derivation > manual) — see
+                // JdbcConfigurationPanel#loadInitial. Server engines pass the
+                // recorded assignment; for a SQLite URL the link is derived
+                // from the properties inside the panel, so nothing is passed.
+                jdbc.loadInitial(sqliteUrl ? null : dbLink, savedUrl,
+                        savedProfile.getProperty(Props.DB_USERNAME.getName(), getSafeDefault(Props.DB_USERNAME)),
+                        savedProfile.getProperty(Props.DB_PASSWORD.getName(), getSafeDefault(Props.DB_PASSWORD)));
+                JComponent wrapper = propertyComponents.get(Props.DB_URL.getName());
+                if (wrapper != null) {
+                    JCheckBox cb = (JCheckBox) wrapper.getClientProperty("useProfileCheck");
+                    if (cb != null) {
+                        cb.setSelected(jdbc.isLinkedMode());
+                    }
                 }
-                showJdbcProfileCard(jdbcComp, true); // the profile card becomes the active card
-            } else {
-                LOGGER.warn("Database profile link '{}' cannot be applied (the profile is missing); "
-                        + "the JDBC row falls back to manual mode", value);
-                pp.clearLinkedProfile();
-                if (cb != null && cb.isSelected()) {
-                    cb.setSelected(false);
-                }
-                showJdbcProfileCard(jdbcComp, false);
             }
         } finally {
             isProgrammaticChange = false;
+        }
+
+        updateAutoDbCheckboxesState();
+        savedLinkedDb = getLinkedDbProfile();
+        // The applied baseline of the link element: the link of the profile
+        // the node actually runs with (derived for SQLite, recorded for
+        // server engines) — not the loaded profile's effective link.
+        appliedLinkedDb = databaseLinkOfAppliedProfile();
+        savedDbAutoStart = autoStartDbCheck != null && autoStartDbCheck.isSelected();
+        savedDbAutoStop = autoStopDbCheck != null && autoStopDbCheck.isSelected();
+        refreshUIColors();
+    }
+
+    /** The unified JDBC panel of the DB.Url row (or {@code null} before the row is built). */
+    private JdbcConfigurationPanel jdbcPanel() {
+        JComponent wrapper = propertyComponents.get(Props.DB_URL.getName());
+        return wrapper == null ? null : (JdbcConfigurationPanel) wrapper.getClientProperty("profilePanel");
+    }
+
+    /**
+     * The database link of the applied (the node's running baseline) profile:
+     * derived from its {@code DB.Url} for SQLite, the recorded assignment
+     * ({@code profiles.json}) for server engines — the applied baseline of
+     * the JDBC row's link element.
+     */
+    private String databaseLinkOfAppliedProfile() {
+        NodeProfile applied = appliedProfile != null ? appliedProfile : savedProfile;
+        if (applied == null) {
+            return "";
+        }
+        String url = applied.getProperty(Props.DB_URL.getName(), getSafeDefault(Props.DB_URL));
+        return databaseLinkOf(url, applied.getName());
+    }
+
+    /**
+     * The database link a profile's {@code DB.Url} names: the convention
+     * derivation for SQLite (the profile must exist), the recorded assignment
+     * for server engines, empty when none applies.
+     */
+    private String databaseLinkOf(String url, String profileName) {
+        if (url != null && url.toLowerCase(Locale.ROOT).startsWith("jdbc:sqlite:")) {
+            SqliteDatabasePaths.SqliteUrlParts parts = SqliteDatabasePaths.splitUrl(url);
+            if (parts != null) {
+                String derived = SqliteDatabasePaths.deriveProfileName(parts.dir());
+                if (derived != null && Files.isDirectory(SqliteDatabasePaths.profileDir(derived))) {
+                    return "SQLite:" + derived;
+                }
+            }
+            return "";
+        }
+        String link = profileName == null ? null : new ProfileConfig().getDatabaseProfileLink(profileName);
+        return link == null ? "" : link;
+    }
+
+    /**
+     * Removes the legacy per-profile database keys (link + auto start/stop)
+     * from the node metadata's {@code profileLinks} object (the legacy
+     * logging key and the top-level applied marker stay).
+     *
+     * @return {@code true} when something was removed
+     */
+    private static boolean removeLegacyDatabaseLinkKeys(JsonObject metadata, String profileName) {
+        if (!metadata.has(KEY_PROFILE_LINKS)) {
+            return false;
+        }
+        JsonObject linksMap = metadata.getAsJsonObject(KEY_PROFILE_LINKS);
+        if (!linksMap.has(profileName)) {
+            return false;
+        }
+        JsonObject links = linksMap.getAsJsonObject(profileName);
+        boolean removed = false;
+        for (String key : new String[] { KEY_DATABASE, KEY_DB_AUTO_START, KEY_DB_AUTO_STOP }) {
+            if (links.has(key)) {
+                links.remove(key);
+                removed = true;
+            }
+        }
+        if (links.size() == 0) {
+            linksMap.remove(profileName);
+        }
+        return removed;
+    }
+
+    /** Writes the node metadata object back to {@code conf/node/profile.json}. */
+    private void writeNodeMetadata(JsonObject metadata) {
+        try (Writer writer = Files.newBufferedWriter(
+                ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER))) {
+            new GsonBuilder().setPrettyPrinting().create().toJson(metadata, writer);
+        } catch (Exception e) {
+            LOGGER.error("Error saving node metadata", e);
+        }
+    }
+
+    /**
+     * The host-side half of a link change (the panel's
+     * {@link JdbcConfigurationPanel.LinkChangeListener}): keeps the "Linked
+     * Database Profile" checkbox in sync with the panel's mode (the panel may
+     * auto-unlink itself, e.g. an unmaterializable link at load) and persists the
+     * effective link into the node metadata — unless the change is
+     * programmatic (the initial load pass persists nothing).
+     */
+    private void onJdbcLinkChanged(JdbcConfigurationPanel panel, JdbcConfigurationPanel.JdbcState state) {
+        JComponent wrapper = propertyComponents.get(Props.DB_URL.getName());
+        if (wrapper != null) {
+            JCheckBox cb = (JCheckBox) wrapper.getClientProperty("useProfileCheck");
+            if (cb != null && cb.isSelected() != panel.isLinkedMode()) {
+                isProgrammaticChange = true;
+                try {
+                    cb.setSelected(panel.isLinkedMode());
+                } finally {
+                    isProgrammaticChange = false;
+                }
+            }
+        }
+        if (!isProgrammaticChange) {
+            saveDatabaseAssignment(loadedProfileName);
         }
         updateAutoDbCheckboxesState();
     }
 
     /**
-     * Explicitly switches the JDBC row's card between the manual configuration
-     * and the profile card. Programmatic link changes call this directly
-     * (instead of relying on the checkbox's action event) so the visible card
-     * always matches the checkbox state; the listener covers user toggles.
+     * Persists the current per-profile database assignment into
+     * {@code profiles.json}:
+     * <ul>
+     *   <li><b>server engines</b>: the effective link (empty in manual mode)
+     *       is recorded — it is the only way to know which database profile a
+     *       server URL belongs to;</li>
+     *   <li><b>SQLite</b> (file-based): nothing is recorded — the assignment
+     *       is derived from the {@code DB.Url} convention path; the auto
+     *       start/stop flags are N/A and cleared (embedded engine);</li>
+     *   <li>server engines: the DB auto start/stop flags are recorded.</li>
+     * </ul>
+     * The legacy per-profile database keys of the node metadata are removed
+     * for good (the legacy logging key and the applied marker stay).
+     * <p>
+     * This never moves the saved-link baseline ({@code savedLinkedDb}): a link
+     * change is an <b>unsaved</b> (dirty) change until the profile is
+     * explicitly saved — the baseline is updated on load, on the explicit
+     * save, and on apply only.
      */
-    private void showJdbcProfileCard(JComponent jdbcComp, boolean showProfile) {
-        JPanel cardPanel = (JPanel) jdbcComp.getClientProperty("cardPanel");
-        Component[] currentCard = (Component[]) jdbcComp.getClientProperty("currentJdbcCard");
-        JComponent profilePanel = (JComponent) jdbcComp.getClientProperty("profilePanel");
-        JComponent manualPanel = (JComponent) jdbcComp.getClientProperty("manualPanel");
-        if (cardPanel == null || currentCard == null || profilePanel == null || manualPanel == null) {
-            return;
-        }
-        currentCard[0] = showProfile ? profilePanel : manualPanel;
-        if (cardPanel.getLayout() instanceof CardLayout cardLayout) {
-            cardLayout.show(cardPanel, showProfile ? "PROFILE" : "MANUAL");
-        }
-        cardPanel.revalidate();
-        cardPanel.repaint();
-    }
-
-    private void saveProfileLinks(String profileName) {
-        Path metadataPath = ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER);
-        JsonObject metadata = new JsonObject();
-        if (Files.exists(metadataPath)) {
-            try (Reader reader = Files.newBufferedReader(metadataPath)) {
-                metadata = JsonParser.parseReader(reader).getAsJsonObject();
-            } catch (Exception e) {
-                /* start new if corrupt */ }
-        }
-
-        if (!metadata.has(KEY_PROFILE_LINKS)) {
-            metadata.add(KEY_PROFILE_LINKS, new JsonObject());
-        }
-        JsonObject allLinks = metadata.getAsJsonObject(KEY_PROFILE_LINKS);
-
-        // Preserve any pre-existing legacy logging link (KEY_LOGGING): the
-        // logging assignment is now owned by the Logging tab
-        // (LoggingAssignmentStore SSOT), so the configuration panel no longer
-        // edits it — keep the stored value untouched instead of clobbering it.
-        JsonObject existing = allLinks.has(profileName) ? allLinks.getAsJsonObject(profileName) : null;
-        String legacyLogging = (existing != null && existing.has(KEY_LOGGING))
-                ? existing.get(KEY_LOGGING).getAsString()
-                : null;
-
-        JsonObject currentLinks = new JsonObject();
-        String db = getLinkedDbProfile();
+    private void saveDatabaseAssignment(String profileName) {
+        JdbcConfigurationPanel jdbc = jdbcPanel();
+        boolean sqlite = jdbc == null || jdbc.getEngine() == DatabaseConfigurationPanel.DatabaseEngine.SQLITE;
         boolean autoStart = autoStartDbCheck != null && autoStartDbCheck.isSelected();
         boolean autoStop = autoStopDbCheck != null && autoStopDbCheck.isSelected();
 
-        if ((db != null && !db.isEmpty()) || (legacyLogging != null && !legacyLogging.isEmpty())
-                || autoStart || autoStop) {
-            if (db != null && !db.isEmpty()) {
-                currentLinks.addProperty(KEY_DATABASE, db);
-            }
-            if (legacyLogging != null && !legacyLogging.isEmpty()) {
-                currentLinks.addProperty(KEY_LOGGING, legacyLogging);
-            }
-            currentLinks.addProperty(KEY_DB_AUTO_START, autoStart);
-            currentLinks.addProperty(KEY_DB_AUTO_STOP, autoStop);
-            allLinks.add(profileName, currentLinks);
+        ProfileConfig profileConfig = new ProfileConfig();
+        String db = (sqlite || !jdbc.isLinkedMode()) ? null : jdbc.getLink();
+        profileConfig.setDatabaseProfileLink(profileName, db);
+        if (sqlite) {
+            profileConfig.setDatabaseAutoStart(profileName, null);
+            profileConfig.setDatabaseAutoStop(profileName, null);
         } else {
-            // No db link and no legacy logging to preserve: drop the entry.
-            allLinks.remove(profileName);
+            profileConfig.setDatabaseAutoStart(profileName, autoStart);
+            profileConfig.setDatabaseAutoStop(profileName, autoStop);
         }
 
-        savedLinkedDb = (db != null && !db.isEmpty()) ? db : "";
+        // One-time legacy cleanup: the node metadata's database keys are gone
+        // for good (the legacy logging key + the applied marker stay).
+        Path metadataPath = ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER);
+        if (Files.exists(metadataPath)) {
+            try (Reader reader = Files.newBufferedReader(metadataPath)) {
+                JsonObject metadata = JsonParser.parseReader(reader).getAsJsonObject();
+                if (removeLegacyDatabaseLinkKeys(metadata, profileName)) {
+                    writeNodeMetadata(metadata);
+                }
+            } catch (Exception e) {
+                LOGGER.error("Error cleaning up legacy profile links", e);
+            }
+        }
+
         savedDbAutoStart = autoStart;
         savedDbAutoStop = autoStop;
-
-        try (Writer writer = Files.newBufferedWriter(metadataPath)) {
-            new GsonBuilder().setPrettyPrinting().create().toJson(metadata, writer);
-        } catch (Exception e) {
-            LOGGER.error("Error saving profile links to JSON", e);
-        }
     }
 
     /**
      * Automatically creates (or updates) the SQLite database profile matching the
      * manual (non-linked) SQLite configuration: every new SQLite database setting
      * creates a new SQLite database profile in the database module's profile area
-     * ({@code ./database/SQLite/<profile>/profile.json}). Linked configurations are
-     * skipped because they already reference an existing profile, and an
-     * incomplete SQLite trio (any of the Profile / Path / DB-file fields empty)
-     * creates nothing — the profile is only created when every field is filled.
+     * ({@code ./database/SQLite/<profile>/profile.json}). The profile name is
+     * derived from the configuration's directory
+     * ({@link SqliteDatabasePaths#deriveProfileName}) — a linkable name, never a
+     * free UI input. Linked configurations are skipped because they already
+     * reference an existing profile, and a configuration without a derivable
+     * profile name (e.g. the convention base itself or a foreign path) or
+     * without a database file creates nothing.
      */
     private void autoCreateSqliteDatabaseProfile(Properties props) {
         try {
             String dbUrl = props.getProperty(Props.DB_URL.getName());
             if (dbUrl == null || !dbUrl.startsWith("jdbc:sqlite:"))
                 return;
-            JComponent jdbcComp = propertyComponents.get(Props.DB_URL.getName());
-            if (jdbcComp == null)
+            JdbcConfigurationPanel p = jdbcPanel();
+            if (p == null || p.isLinkedMode())
                 return;
-            JCheckBox useProfileCheck = (JCheckBox) jdbcComp.getClientProperty("useProfileCheck");
-            if (useProfileCheck != null && useProfileCheck.isSelected())
-                return;
-            JdbcManualConfigurationPanel mp = (JdbcManualConfigurationPanel) jdbcComp
-                    .getClientProperty("manualPanel");
-            if (mp == null)
-                return;
-            String profileName = mp.getSqliteProfile();
-            String basePath = mp.getSqlitePath();
-            String dbFile = mp.getSqliteFile();
-            if (profileName.isEmpty() || basePath.isEmpty() || dbFile.isEmpty()) {
-                // Incomplete trio: there is no well-formed profile to create
-                // (the composed URL would not even carry a profile folder).
+            SqliteDatabasePaths.SqliteUrlParts parts = SqliteDatabasePaths.splitUrl(dbUrl);
+            if (parts == null || parts.fileName().isEmpty())
+                return; // no well-formed file to anchor the profile to
+            String profileName = SqliteDatabasePaths.deriveProfileName(parts.dir());
+            if (profileName == null) {
+                // No derivable profile name: the path is not under the
+                // per-profile convention — nothing to create (custom path).
                 return;
             }
             if (!DatabaseConfigurationUtils.isValidProfileName(profileName)) {
@@ -1663,80 +1745,6 @@ public class NodeConfigurationPanel extends JPanel {
                     profileName, dbUrl);
         } catch (Exception e) {
             LOGGER.warn("Failed to auto-create SQLite database profile", e);
-        }
-    }
-
-    /**
-     * On load (i.e. application start-up), if the database module has an
-     * <b>applied</b> SQLite profile and this node profile uses the matching SQLite
-     * database without an explicit database link recorded yet, record the
-     * assignment: the "Linked Database Profile" checkbox is selected, the node-to-
-     * database profile link is persisted, and the UI shows the linked profile name
-     * with only the relevant fields.
-     */
-    private void autoLinkAppliedDatabaseProfile() {
-        try {
-            String applied = ConfigurationUtils.loadAppliedProfile(
-                    ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.DATABASE_SUBFOLDER));
-            if (applied == null || !applied.startsWith("SQLite:"))
-                return;
-            String appliedProfile = applied.substring("SQLite:".length());
-            if (appliedProfile.isEmpty() || propertyComponents.get(Props.DB_URL.getName()) == null)
-                return;
-            if (!getLinkedDbProfile().isEmpty())
-                return; // an explicit link is already recorded
-            String dbUrl = savedProfile.getProperty(Props.DB_URL.getName(), getSafeDefault(Props.DB_URL));
-            if (dbUrl == null || !dbUrl.startsWith("jdbc:sqlite:"))
-                return;
-            if (!dbUrlMatchesSqliteProfile(appliedProfile, dbUrl))
-                return;
-            setLinkedDbProfile(DatabaseConfigurationPanel.DatabaseEngine.SQLITE + ":" + appliedProfile);
-            LOGGER.info("Auto-linked applied database profile 'SQLite:{}' to node profile '{}'",
-                    appliedProfile, loadedProfileName);
-        } catch (Exception e) {
-            LOGGER.warn("Auto-link of applied database profile failed", e);
-        }
-    }
-
-    /**
-     * Whether the given SQLite JDBC URL points at the database of the named database
-     * profile (the per-profile default URL, or any file inside the profile's data
-     * directory).
-     */
-    private static boolean dbUrlMatchesSqliteProfile(String profileName, String dbUrl) {
-        if (ProfileCreateDefaults.isPerProfileSqliteUrl(profileName, dbUrl))
-            return true;
-        String path = dbUrl.substring("jdbc:sqlite:".length());
-        if (path.startsWith("file:"))
-            path = path.substring(5);
-        int paramIdx = path.indexOf('?');
-        if (paramIdx != -1)
-            path = path.substring(0, paramIdx);
-        String normalized = path.replace('\\', '/').replaceAll("^\\./", "").replaceAll("/+$", "");
-        return normalized.startsWith("database/SQLite/" + profileName + "/")
-                || normalized.equals("database/SQLite/" + profileName);
-    }
-
-    /**
-     * Links the database profile remembered during UI construction (the
-     * initial {@code updateFromUrl} found the manual SQLite trio on the
-     * per-profile convention with a discoverable profile, but the JDBC row
-     * was not registered yet). Skipped when an explicit link is already
-     * recorded (e.g. by the applied-profile auto-link).
-     */
-    private void linkPendingDiscoveredDatabaseProfile() {
-        if (pendingDiscoveredDbProfile == null || propertyComponents.get(Props.DB_URL.getName()) == null)
-            return;
-        String pending = pendingDiscoveredDbProfile;
-        pendingDiscoveredDbProfile = null;
-        try {
-            if (getLinkedDbProfile().isEmpty()) {
-                setLinkedDbProfile(DatabaseConfigurationPanel.DatabaseEngine.SQLITE + ":" + pending);
-                LOGGER.info("Auto-linked discovered database profile 'SQLite:{}' to node profile '{}'",
-                        pending, loadedProfileName);
-            }
-        } catch (Exception e) {
-            LOGGER.warn("Auto-link of discovered database profile failed", e);
         }
     }
 
@@ -1760,8 +1768,20 @@ public class NodeConfigurationPanel extends JPanel {
             } finally {
                 isProgrammaticChange = false;
             }
-            saveProfileLinks(loadedProfileName);
+            saveDatabaseAssignment(loadedProfileName);
             autoCreateSqliteDatabaseProfile(propsToSave);
+            // The auto-created database profile may make the (manual) SQLite
+            // URL linkable now: re-derive the automatic SQLite link so the
+            // checkbox follows the properties (the link callback syncs the
+            // checkbox and the persistence).
+            JdbcConfigurationPanel jdbc = jdbcPanel();
+            if (jdbc != null) {
+                jdbc.rediscoverSqliteLink();
+                // The explicit save moves the saved-link baseline to the final
+                // effective link (the link-change persistence alone never does
+                // — a link change is unsaved until the profile is saved).
+                savedLinkedDb = getLinkedDbProfile();
+            }
             updateDirtyStatus();
             refreshUIColors();
             return true;
@@ -1873,6 +1893,9 @@ public class NodeConfigurationPanel extends JPanel {
         // from "saved" (on disk, not yet applied) to "applied".
         this.appliedProfile = new NodeProfile(loadedProfileName);
         this.appliedProfile.setProperties(copyProperties(this.savedProfile.getProperties()));
+        // The link the node runs with after the restart — the applied
+        // baseline of the JDBC row's link element (mirrors appliedProfile).
+        this.appliedLinkedDb = getLinkedDbProfile();
         refreshUIColors();
         if (restartAction != null) {
             restartAction.run();
@@ -2119,26 +2142,79 @@ public class NodeConfigurationPanel extends JPanel {
     private void reloadFromDisk() {
         Path targetFile = ConfigurationUtils.resolveNodeProfilePath(loadedProfileName);
         if (Files.exists(targetFile)) {
-            Properties loaded = new Properties();
             try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
+                Properties loaded = new Properties();
                 isProgrammaticChange = true;
-                loaded.load(in);
-                savedProfile = new NodeProfile(loadedProfileName);
-                savedProfile.setProperties(loaded);
-                // A reload re-loads the profile into the editor: the
-                // freshly loaded values are again the applied baseline
-                // (the editor now mirrors the file on disk).
-                appliedProfile = new NodeProfile(loadedProfileName);
-                appliedProfile.setProperties(copyProperties(loaded));
-                updateUIFromProperties(loaded);
+                try {
+                    loaded.load(in);
+                    savedProfile = new NodeProfile(loadedProfileName);
+                    savedProfile.setProperties(loaded);
+                    // A reload re-loads the profile into the editor: the
+                    // freshly loaded values are again the applied baseline
+                    // (the editor now mirrors the file on disk).
+                    appliedProfile = new NodeProfile(loadedProfileName);
+                    appliedProfile.setProperties(copyProperties(loaded));
+                    updateUIFromProperties(loaded);
+                } finally {
+                    isProgrammaticChange = false;
+                }
+                // Re-derive the JDBC row from disk exactly like the initial
+                // load: fresh database-profile discovery, the deterministic
+                // link resolution (explicit link > SQLite convention >
+                // manual) with the "Linked Database Profile" checkbox
+                // following it, and the baselines (saved + applied link)
+                // reset to the reloaded values. The panel's remembered
+                // per-engine / per-profile working states are discarded —
+                // nothing of the pre-reload UI state may survive.
+                JdbcConfigurationPanel jdbc = jdbcPanel();
+                if (jdbc != null) {
+                    jdbc.resetWorkingState();
+                }
+                loadProfileLinks(loadedProfileName);
                 updateDirtyStatus();
-                refreshUIColors();
-                isProgrammaticChange = false;
             } catch (Exception e) {
                 JOptionPane.showMessageDialog(this, "Error reloading profile: " + e.getMessage(), "Error",
                         JOptionPane.ERROR_MESSAGE);
             }
         }
+    }
+
+    /**
+     * Node (re)start synchronization: once the node (re)starts it runs with
+     * the profile file on disk — the db.URL section, the value-state
+     * coloring and the Apply button's state must reflect that without a
+     * manual Reload. With no unsaved editor changes this is a full reload
+     * from disk (exactly the Reload button's refresh); while the user is
+     * mid-edit the unsaved work is left untouched and only the applied
+     * baseline (what the node now runs with) is re-anchored to the
+     * on-disk state.
+     */
+    public void onNodeRestarted() {
+        if (loadedProfileName == null) {
+            return;
+        }
+        if (!hasUnsavedChanges()) {
+            reloadFromDisk();
+            return;
+        }
+        // Unsaved editor changes exist: only re-anchor the applied baseline
+        // to the on-disk state — never discard the user's work.
+        Path targetFile = ConfigurationUtils.resolveNodeProfilePath(loadedProfileName);
+        if (!Files.exists(targetFile)) {
+            return;
+        }
+        try (FileInputStream in = new FileInputStream(targetFile.toFile())) {
+            Properties disk = new Properties();
+            disk.load(in);
+            this.appliedProfile = new NodeProfile(loadedProfileName);
+            this.appliedProfile.setProperties(copyProperties(disk));
+        } catch (Exception e) {
+            LOGGER.warn("Could not refresh the applied baseline after the node restart", e);
+            return;
+        }
+        this.appliedLinkedDb = databaseLinkOfAppliedProfile();
+        refreshUIColors();
+        updateDirtyStatus();
     }
 
     private void resetToDefaults() {
@@ -2347,38 +2423,85 @@ public class NodeConfigurationPanel extends JPanel {
         });
     }
 
-    private void showProfileHelp() {
-        String message = "<html><body style='width: 400px'>" +
-                "<h2>Node Configuration Profiles</h2>" +
-                "<p>Profiles allow you to maintain multiple sets of node configurations. Use the toolbar buttons to perform the following actions:</p>"
-                +
-                "<ul>" +
-                "<li><b>New Profile</b>: Opens the dialog to launch the setup wizard (guided database/connection/node setup) or to create a new empty profile pre-filled with the application default values.</li>"
-                +
-                "<li><b>Save</b>: Saves all unsaved changes to the current profile (reviewing them in a dialog first — you can save, discard all unsaved changes, or cancel). It does not restart the node. Active only while there are unsaved changes.</li>"
-                +
-                "<li><b>Apply</b>: Applies the saved configuration — marks the profile as applied and restarts the node so the changes take effect. Active only while there are saved, not yet applied changes.</li>"
-                +
-                "<li><b>Rename Profile</b>: Changes the name of the currently selected configuration profile.</li>"
-                +
-                "<li><b>Delete Profile</b>: Permanently deletes the selected profile — its node is stopped (if running, and not restarted), the profile settings are removed (optionally its SQLite database data) and its tab is closed.</li>"
-                +
-                "<li><b>Reset to Defaults</b>: Resets all current settings to their application default values without saving.</li>"
-                +
-                "<li><b>Copy Configuration</b>: Opens a dialog to select a profile and copies its configuration into the editor of the current profile. The copied values become unsaved changes you can adjust before saving.</li>"
-                +
-                "<li><b>Clone Configuration</b>: Creates a new profile from the current (unsaved, editor) effective state; the source profile is left untouched.</li>"
-                +
-                "<li><b>Reload Configuration</b>: Reloads the current profile file from disk (e.g. after external edits), discarding any unsaved changes in the UI.</li>"
-                +
-                "</ul>" +
-                "<p>The <b>database</b> profile link is managed on the Database tab's \"Linked Database Profile\" " +
-                "control, and the <b>logging</b> profile assignment on the Logging tab.</p>" +
-                "<p>Profiles are stored as \".properties\" files within the node sub-directory of the configuration folder.</p>"
-                +
-                "</body></html>";
-
-        JOptionPane.showMessageDialog(this, message, "About Configuration Profiles", JOptionPane.INFORMATION_MESSAGE);
+    /**
+     * Builds the structured help content shown by the profile toolbar's Help
+     * button, rendered in the compact {@link HelpDialog} (the same pattern as
+     * the module logging profile panels): a sectioned paragraph, the value-state
+     * row-color legend with the palette's real state colors, and the toolbar
+     * actions with their actual icons and colors (the same icon + color pairing
+     * as the toolbar itself — see {@link #updateProfileButtonsUI} and
+     * {@link ConfigurationUtils#configureProfileToolbar}).
+     */
+    private JComponent buildConfigurationHelpContent() {
+        Color iconColor = GuiColors.getButtonIcon();
+        JComponent content = HelpDialog.content();
+        content.add(HelpDialog.title("Node Configuration Profiles"));
+        content.add(Box.createVerticalStrut(10));
+        content.add(HelpDialog.paragraph(
+                "Profiles allow you to maintain multiple sets of node configurations. Use the "
+                        + "toolbar buttons to perform the following actions:"));
+        content.add(HelpDialog.separator());
+        content.add(HelpDialog.heading("Row colors"));
+        content.add(HelpDialog.legendRow(GuiColors.getUnsaved(), "Unsaved",
+                "The value has been modified in the UI and matches neither the values loaded from "
+                        + "the profile nor the values saved in the configuration file. Unsaved rows "
+                        + "are marked with a trailing <b>*</b> on their label."));
+        content.add(HelpDialog.legendRow(GuiColors.getSaved(), "Saved",
+                "Saved in the currently loaded profile on disk, but differs from the values the "
+                        + "profile loaded into the editor (the applied baseline) — saved, but not "
+                        + "yet applied."));
+        content.add(HelpDialog.legendRow(GuiColors.getApplied(), "Applied",
+                "Matches exactly the values loaded from the currently loaded profile — the baseline "
+                        + "this node runs (or will run) with. Note that most changes require a "
+                        + "restart to take effect."));
+        content.add(Box.createVerticalStrut(8));
+        content.add(HelpDialog.paragraph(
+                "The <b>\u201CShow values\u201D</b> boxes filter rows by these states, and the "
+                        + "<b>Search</b> box filters rows by label, key or value."));
+        content.add(HelpDialog.separator());
+        content.add(HelpDialog.heading("Toolbar actions"));
+        content.add(HelpDialog.actionRow(FontAwesome.FILE_O, iconColor, "New Profile",
+                "Opens the dialog to launch the setup wizard (guided database/connection/node setup) "
+                        + "or to create a new empty profile pre-filled with the application default "
+                        + "values."));
+        content.add(HelpDialog.actionRow(FontAwesome.FLOPPY_O, GuiColors.getSaved(), "Save",
+                "Saves all unsaved changes to the current profile (reviewing them in a dialog first "
+                        + "— you can save, discard all unsaved changes, or cancel). It does not "
+                        + "restart the node. Active only while there are unsaved changes."));
+        content.add(HelpDialog.actionRow(FontAwesome.CHECK_CIRCLE_O, GuiColors.getApplied(),
+                "Apply",
+                "Applies the saved configuration — marks the profile as applied and restarts the "
+                        + "node so the changes take effect. Active only while there are saved, not "
+                        + "yet applied changes."));
+        content.add(HelpDialog.actionRow(FontAwesome.PENCIL_SQUARE_O, iconColor, "Rename Profile",
+                "Changes the name of the currently selected configuration profile."));
+        content.add(HelpDialog.actionRow(FontAwesome.UNDO, iconColor, "Reset to Defaults",
+                "Resets all current settings to their application default values without saving."));
+        content.add(HelpDialog.actionRow(FontAwesome.CLIPBOARD, iconColor, "Copy Configuration",
+                "Opens a dialog to select a profile and copies its configuration into the editor of "
+                        + "the current profile. The copied values become unsaved changes you can "
+                        + "adjust before saving."));
+        content.add(HelpDialog.actionRow(FontAwesome.FILES_O, iconColor, "Clone Configuration",
+                "Creates a new profile from the current (unsaved, editor) effective state; the "
+                        + "source profile is left untouched."));
+        content.add(HelpDialog.actionRow(FontAwesome.RECYCLE, iconColor, "Reload Configuration",
+                "Reloads the current profile file from disk (e.g. after external edits), discarding "
+                        + "any unsaved changes in the UI."));
+        content.add(HelpDialog.actionRow(FontAwesome.TRASH_O, GuiColors.getContrastRed(),
+                "Delete Profile",
+                "Permanently deletes the selected profile — its node is stopped (if running, and "
+                        + "not restarted), the profile settings are removed (optionally its SQLite "
+                        + "database data) and its tab is closed."));
+        content.add(HelpDialog.actionRow(FontAwesome.QUESTION_CIRCLE, iconColor, "Help",
+                "Shows this help."));
+        content.add(HelpDialog.separator());
+        content.add(HelpDialog.paragraph(
+                "The <b>database</b> profile link is managed on the Database tab's "
+                        + "\u201CLinked Database Profile\u201D control, and the <b>logging</b> "
+                        + "profile assignment on the Logging tab.<br><br>"
+                        + "Profiles are stored as \".properties\" files within the node "
+                        + "sub-directory of the configuration folder."));
+        return content;
     }
 
     private boolean hasUnsavedChanges() {
@@ -2428,8 +2551,11 @@ public class NodeConfigurationPanel extends JPanel {
             dirty = !val.trim().equals(saved.trim());
         }
 
-        if (!dirty && Props.DB_URL.getName().equals(row.prop.getName())) {
-            dirty = isComponentDirty(Props.DB_USERNAME) || isComponentDirty(Props.DB_PASSWORD);
+        if (Props.DB_URL.getName().equals(row.prop.getName())) {
+            // The JDBC row is dirty when any of its effective values
+            // (URL / username / password) differs from the saved ones —
+            // the tuple model (the link itself is isDbLinkDirty's job).
+            return jdbcValuesDirty();
         }
 
         return dirty;
@@ -2443,51 +2569,22 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     /**
-     * The engine of the currently <b>linked</b> database profile (the JDBC row's
-     * profile card), or {@code null} when the row is not built, the "Linked
-     * Database Profile" checkbox is not selected (manual mode), or the engine
-     * combo is unavailable.
+     * The DB engine's Auto Start/Stop row: visible for server engines only.
+     * SQLite is an embedded engine — there is no separate database engine to
+     * start or stop, so the row is N/A and hidden there (its flags are not
+     * tracked either — see {@link #isDbLinkDirty()}).
      */
-    private DatabaseConfigurationPanel.DatabaseEngine currentLinkedDbEngine() {
-        JComponent jdbcComp = propertyComponents.get(Props.DB_URL.getName());
-        if (jdbcComp == null) {
-            return null;
-        }
-        JCheckBox cb = (JCheckBox) jdbcComp.getClientProperty("useProfileCheck");
-        if (cb == null || !cb.isSelected()) {
-            return null; // manual mode — no linked database to auto start/stop
-        }
-        JdbcProfileConfigurationPanel pp = (JdbcProfileConfigurationPanel) jdbcComp.getClientProperty("profilePanel");
-        if (pp == null || !(pp.getEngineCombo() instanceof JComboBox<?>)) {
-            return null;
-        }
-        Object sel = ((JComboBox<?>) pp.getEngineCombo()).getSelectedItem();
-        return sel instanceof DatabaseConfigurationPanel.DatabaseEngine
-                ? (DatabaseConfigurationPanel.DatabaseEngine) sel
-                : null;
-    }
-
     private void updateAutoDbCheckboxesState() {
         if (autoStartDbCheck == null || autoStopDbCheck == null) {
             return;
         }
-        DatabaseConfigurationPanel.DatabaseEngine selectedEngine = currentLinkedDbEngine();
-
-        boolean enableCheckboxes = (selectedEngine != null
-                && selectedEngine != DatabaseConfigurationPanel.DatabaseEngine.SQLITE);
-
-        autoStartDbCheck.setEnabled(enableCheckboxes);
-        autoStopDbCheck.setEnabled(enableCheckboxes);
-
-        // If disabled (SQLite / not linked), ensure they are unchecked to avoid
-        // confusion.
-        if (!enableCheckboxes) {
-            boolean wasProgrammatic = isProgrammaticChange;
-            isProgrammaticChange = true;
-            autoStartDbCheck.setSelected(false);
-            autoStopDbCheck.setSelected(false);
-            isProgrammaticChange = wasProgrammatic;
+        JdbcConfigurationPanel p = jdbcPanel();
+        boolean sqlite = p == null || p.getEngine() == DatabaseConfigurationPanel.DatabaseEngine.SQLITE;
+        if (autoDbRow != null) {
+            autoDbRow.setVisible(!sqlite);
         }
+        autoStartDbCheck.setEnabled(true);
+        autoStopDbCheck.setEnabled(true);
     }
 
     private void updateDirtyStatus() {
@@ -2527,8 +2624,11 @@ public class NodeConfigurationPanel extends JPanel {
 
         boolean savedNotApplied = hasSavedNotAppliedChanges();
         applyBtn.setToolTipText(savedNotApplied
-                ? "Apply — you have saved, not yet applied changes"
-                : "Apply");
+                ? "<html>Apply<br><br>Applies the saved changes: marks the profile as applied<br>"
+                        + "and restarts the node so they take effect.</html>"
+                : "<html>Apply<br><br>Applies the saved changes: marks the profile as applied<br>"
+                        + "and restarts the node so they take effect.<br>"
+                        + "Active only while there are saved, not yet applied changes.</html>");
         applyBtn.setEnabled(savedNotApplied);
         this.overallDirty = overallDirty;
 
@@ -2575,9 +2675,12 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private boolean isDbLinkDirty() {
+        // The auto start/stop flags only count while their row is visible
+        // (server engines — for SQLite the row is hidden and the flags are
+        // N/A, so a stale checkbox state must not mark the row dirty).
         return !savedLinkedDb.equals(getLinkedDbProfile()) ||
-                (autoStartDbCheck != null && autoStartDbCheck.isEnabled() && savedDbAutoStart != autoStartDbCheck.isSelected()) ||
-                (autoStopDbCheck != null && autoStopDbCheck.isEnabled() && savedDbAutoStop != autoStopDbCheck.isSelected());
+                (autoStartDbCheck != null && autoStartDbCheck.isVisible() && savedDbAutoStart != autoStartDbCheck.isSelected()) ||
+                (autoStopDbCheck != null && autoStopDbCheck.isVisible() && savedDbAutoStop != autoStopDbCheck.isSelected());
     }
 
 
@@ -2621,23 +2724,15 @@ public class NodeConfigurationPanel extends JPanel {
                 String pass = props.getProperty(Props.DB_PASSWORD.getName(),
                         defaultValues.get(Props.DB_PASSWORD.getName()));
 
-                JdbcManualConfigurationPanel mp = (JdbcManualConfigurationPanel) comp.getClientProperty("manualPanel");
-                if (mp != null) {
-                    mp.updateFromUrl(val);
-                    mp.setCredentials(user, pass);
-                }
-                JCheckBox useProfileCheck = (JCheckBox) comp.getClientProperty("useProfileCheck");
-                if (useProfileCheck != null && useProfileCheck.isSelected()) {
-                    useProfileCheck.setSelected(false);
-                    JPanel cardPanel = (JPanel) comp.getClientProperty("cardPanel");
-                    ((CardLayout) cardPanel.getLayout()).show(cardPanel, "MANUAL");
-                    // keep the card panel's "current card" tracking in sync
-                    // (it sizes itself to the shown card only)
-                    Component[] currentCard = (Component[]) comp.getClientProperty("currentJdbcCard");
-                    if (currentCard != null)
-                        currentCard[0] = (Component) comp.getClientProperty("manualPanel");
-                    cardPanel.revalidate();
-                    cardPanel.repaint();
+                // A programmatic load into manual mode (no link callback);
+                // the link recorded in the metadata is preserved by the host.
+                JdbcConfigurationPanel p = jdbcPanel();
+                if (p != null) {
+                    p.forceManual(val, user, pass);
+                    JCheckBox useProfileCheck = (JCheckBox) comp.getClientProperty("useProfileCheck");
+                    if (useProfileCheck != null && useProfileCheck.isSelected()) {
+                        useProfileCheck.setSelected(false);
+                    }
                 }
                 updateColor(comp, key, defaultValues.get(key));
                 continue;
@@ -2924,53 +3019,6 @@ public class NodeConfigurationPanel extends JPanel {
         addPropertyRow(row);
     }
 
-    private void parseJdbcUrl(String url, JComboBox<DatabaseConfigurationPanel.DatabaseEngine> engineCombo,
-            JTextField hostField, JTextField portField, JTextField dbNameField, JTextField postfixField) {
-        if (url == null || url.isEmpty())
-            return;
-
-        if (url.startsWith("jdbc:sqlite:")) {
-            engineCombo.setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.SQLITE);
-            hostField.setText("");
-            portField.setText("");
-            dbNameField.setText(url.substring("jdbc:sqlite:".length()));
-            postfixField.setText("");
-            return;
-        }
-
-        Matcher matcher = DatabaseConfigurationUtils.JDBC_URL_PATTERN.matcher(url);
-        if (matcher.find()) {
-            String engine = matcher.group(1);
-            if ("mariadb".equalsIgnoreCase(engine)) {
-                engineCombo.setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.MARIADB);
-            } else if ("postgresql".equalsIgnoreCase(engine)) {
-                engineCombo.setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.POSTGRESQL);
-            }
-            hostField.setText(matcher.group(2));
-            portField.setText(matcher.group(3) != null ? matcher.group(3) : "");
-            dbNameField.setText(matcher.group(4));
-            postfixField.setText(matcher.group(5) != null ? matcher.group(5) : "");
-        }
-    }
-
-    private String buildJdbcUrl(DatabaseConfigurationPanel.DatabaseEngine engine, String host, String port,
-            String dbName, String postfix) {
-        if (engine == DatabaseConfigurationPanel.DatabaseEngine.SQLITE) {
-            return "jdbc:sqlite:" + dbName;
-        }
-        String protocol = engine == DatabaseConfigurationPanel.DatabaseEngine.MARIADB ? "mariadb"
-                : (engine == DatabaseConfigurationPanel.DatabaseEngine.POSTGRESQL ? "postgresql" : "");
-        StringBuilder sb = new StringBuilder("jdbc:").append(protocol).append("://").append(host);
-        if (port != null && !port.trim().isEmpty()) {
-            sb.append(":").append(port.trim());
-        }
-        sb.append("/").append(dbName);
-        if (postfix != null && !postfix.trim().isEmpty()) {
-            sb.append(postfix.trim());
-        }
-        return sb.toString();
-    }
-
     private void addJdbcUrlProperty(JPanel panel, Prop<String> prop, String labelText) {
         // Label — with the exact property key rendered below the name
         // (unified key style, see SearchMatchLabel#setKeyText).
@@ -2988,93 +3036,25 @@ public class NodeConfigurationPanel extends JPanel {
         useProfileCheck.setOpaque(false);
         wrapper.add(useProfileCheck, "wrap");
 
-        CardLayout cardLayout = new CardLayout();
-        // The card currently shown (this JDK's CardLayout has no public
-        // "current card" accessor): the panel sizes itself to the CURRENT
-        // card only (CardLayout's default preferred size is the max of ALL
-        // cards, which left a large dead area under the shorter profile card
-        // in linked mode).
-        final Component[] currentJdbcCard = { null };
-        JPanel cardPanel = new JPanel(cardLayout) {
-            @Override
-            public Dimension getPreferredSize() {
-                Component current = currentJdbcCard[0];
-                if (current instanceof JComponent jc) {
-                    int containerWidth = getWidth();
-                    if (containerWidth > 50) {
-                        // MigLayout computes its preferred size from the
-                        // component's CURRENT bounds: measure the card at the
-                        // container's real width so the wrapped labels (the
-                        // SQLite note, the JDBC URL preview) wrap at the real
-                        // width instead of the narrow default component width
-                        // that inflated the row and left several dead lines
-                        // under the last entry. setSize stores the bounds only
-                        // (no doLayout — no re-entrance into the layout pass).
-                        jc.setSize(containerWidth, jc.getPreferredSize().height);
-                        Dimension cardPref = jc.getPreferredSize();
-                        return new Dimension(containerWidth, cardPref.height);
-                    }
-                    return jc.getPreferredSize();
-                }
-                return super.getPreferredSize();
-            }
-
-            @Override
-            public Dimension getMinimumSize() {
-                // CardLayout's default minimum size is the max of ALL cards'
-                // minimums: with the shorter profile card active, the manual
-                // card's minimum kept the row inflated and left a dead area
-                // under the JDBC URL preview (MigLayout rows never shrink
-                // below the cell minimum). Track the CURRENT card only, same
-                // rule as getPreferredSize above.
-                Component current = currentJdbcCard[0];
-                if (current instanceof JComponent jc) {
-                    return jc.getMinimumSize();
-                }
-                return super.getMinimumSize();
-            }
-        };
-        cardPanel.setOpaque(false);
-        // Settle pass: during the FIRST layout pass the row's height is
-        // measured while the card still has a stale (narrow) width, so the
-        // wrapped labels (the SQLite note, the URL preview) look several
-        // lines taller than at the real width — the dead space under the
-        // last entry. Once the card has a real width, re-run the parent's
-        // layout ONCE so the row adopts the true (shorter) height. The
-        // re-validation fires only when the measured height differs from
-        // the settled one, so a pure height-settle resize cannot retrigger
-        // it (no layout oscillation).
-        final int[] settledCardHeight = { -1 };
-        cardPanel.addComponentListener(new java.awt.event.ComponentAdapter() {
-            @Override
-            public void componentResized(java.awt.event.ComponentEvent e) {
-                if (getWidth() < 50 || currentJdbcCard[0] == null || getParent() == null) {
-                    return;
-                }
-                Dimension measured = getPreferredSize();
-                if (settledCardHeight[0] < 0 || measured.height != settledCardHeight[0]) {
-                    settledCardHeight[0] = measured.height;
-                    javax.swing.SwingUtilities.invokeLater(() -> getParent().revalidate());
-                }
-            }
-        });
-
         final boolean[] jdbcInitialized = { false };
         Runnable jdbcOnChange = () -> {
             if (jdbcInitialized[0]) {
                 updateColor(wrapper, prop.getName(), defaultValues.get(prop.getName()));
-                updateAutoDbCheckboxesState(); // the manual card's engine may differ
+                updateAutoDbCheckboxesState(); // the panel's engine may differ
                 updateDirtyStatus();
             }
         };
 
-        JdbcManualConfigurationPanel manualPanel = new JdbcManualConfigurationPanel(jdbcOnChange, loadedProfileName);
-        JdbcProfileConfigurationPanel profilePanel = new JdbcProfileConfigurationPanel(confFolder, jdbcOnChange);
+        // The unified, mode-aware JDBC editor (manual + linked in one panel —
+        // no CardLayout cards and no settle hacks: the panel sizes to its own
+        // visible rows).
+        JdbcConfigurationPanel jdbcPanel = new JdbcConfigurationPanel(confFolder, jdbcOnChange,
+                this::onJdbcLinkChanged);
+        wrapper.add(jdbcPanel, "growx");
 
-        cardPanel.add(manualPanel, "MANUAL");
-        cardPanel.add(profilePanel, "PROFILE");
-        currentJdbcCard[0] = manualPanel;
-        wrapper.add(cardPanel, "growx");
+        // The panel is the single "card" of the row (the client-property
+        // contract the auto-link integration test reads).
+        final Component[] currentJdbcCard = { jdbcPanel };
 
         // Auto start/stop of the linked database (moved here from the former
         // "Linked Profiles" tab — the JDBC row now owns the link details).
@@ -3089,124 +3069,53 @@ public class NodeConfigurationPanel extends JPanel {
         };
         autoStartDbCheck.addActionListener(autoDbCheckListener);
         autoStopDbCheck.addActionListener(autoDbCheckListener);
-        JPanel autoDbRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        autoDbRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         autoDbRow.setOpaque(false);
         autoDbRow.add(autoStartDbCheck);
         autoDbRow.add(autoStopDbCheck);
         wrapper.add(autoDbRow, "span, gaptop 4");
 
-        // When the manual SQLite trio follows the per-profile convention
-        // (Path = ./database/SQLite) and the database profile is discoverable
-        // there, link the node to it: the "Linked Database Profile" checkbox
-        // turns on and the profile card takes over with the loaded profile.
-        manualPanel.setOnProfileDiscovered(profile -> {
-            if (isProgrammaticChange || useProfileCheck.isSelected())
-                return;
-            if (propertyComponents.get(prop.getName()) == null) {
-                // The JDBC row is not registered yet (the initial
-                // updateFromUrl runs during initUI): remember it, the
-                // post-init auto-link pass will link it.
-                pendingDiscoveredDbProfile = profile;
-                return;
-            }
-            setLinkedDbProfile(DatabaseConfigurationPanel.DatabaseEngine.SQLITE + ":" + profile);
-        });
-
-        JComboBox<?> engineCombo = (JComboBox<?>) profilePanel.getEngineCombo();
-        JComboBox<?> profileCombo = (JComboBox<?>) profilePanel.getProfileCombo();
-
-        // Add sync listener to profile panel
-        ActionListener profileSyncListener = e -> {
+        // The host's "Linked Database Profile" checkbox drives the panel's
+        // link mode; the panel may auto-unlink itself (e.g. an unmaterializable
+        // link at load) — onJdbcLinkChanged keeps the checkbox in sync.
+        useProfileCheck.addActionListener(e -> {
             if (isProgrammaticChange)
                 return;
-            String profile = (String) profileCombo.getSelectedItem();
-            // A link only exists once a profile is picked; an engine-only
-            // state (right after an engine switch) persists nothing.
-            if (useProfileCheck.isSelected() && profile != null && !profile.isEmpty()) {
-                String engine = engineCombo.getSelectedItem().toString();
-                setLinkedDbProfile(engine + ":" + profile);
-            }
-            updateAutoDbCheckboxesState(); // the linked card's engine may differ
-        };
-        engineCombo.addActionListener(profileSyncListener);
-        profileCombo.addActionListener(profileSyncListener);
-
-        useProfileCheck.addActionListener(e -> {
-            currentJdbcCard[0] = useProfileCheck.isSelected() ? profilePanel : manualPanel;
-            settledCardHeight[0] = -1; // the other card measures at a different height
-            cardLayout.show(cardPanel, useProfileCheck.isSelected() ? "PROFILE" : "MANUAL");
-            // The card panel sizes itself to the current card — re-run the
-            // layout so the row adopts the (different) card height at once.
-            cardPanel.revalidate();
-            cardPanel.repaint();
-            updateAutoDbCheckboxesState(); // the visible card's engine may differ
+            jdbcPanel.requestLinkMode(useProfileCheck.isSelected());
+            updateAutoDbCheckboxesState(); // the panel's engine may differ
             updateDirtyStatus();
             refreshUIColors();
         });
 
-        wrapper.putClientProperty("manualPanel", manualPanel);
-        wrapper.putClientProperty("profilePanel", profilePanel);
-        wrapper.putClientProperty("cardPanel", cardPanel);
+        // Client-property contract (the auto-link integration test reads
+        // these): the JDBC panel is the single card of the row.
+        wrapper.putClientProperty("profilePanel", jdbcPanel);
         wrapper.putClientProperty("useProfileCheck", useProfileCheck);
         wrapper.putClientProperty("currentJdbcCard", currentJdbcCard);
 
-        // Register sub-components for coloring and dirty status tracking
-        wrapper.putClientProperty("engineCombo", manualPanel.getEngineCombo());
-        wrapper.putClientProperty("hostField", manualPanel.getHostField());
-        wrapper.putClientProperty("portField", manualPanel.getPortField());
-        wrapper.putClientProperty("dbNameField", manualPanel.getDbNameField());
-        wrapper.putClientProperty("suffixField", manualPanel.getSuffixField());
-        wrapper.putClientProperty("userField", manualPanel.getUserField());
-        wrapper.putClientProperty("passField", manualPanel.getPassField());
-        wrapper.putClientProperty("sqlProfileField", manualPanel.getSqlProfileField());
-        wrapper.putClientProperty("sqlPathField", manualPanel.getSqlPathField());
-        wrapper.putClientProperty("sqlFileField", manualPanel.getSqlFileField());
-        wrapper.putClientProperty("sqlProfileLabel", manualPanel.getSqlProfileLabel());
-        wrapper.putClientProperty("sqlPathLabel", manualPanel.getSqlPathLabel());
-        wrapper.putClientProperty("sqlFileLabel", manualPanel.getSqlFileLabel());
-
-        wrapper.putClientProperty("engineLabel", manualPanel.getEngineLabel());
-        wrapper.putClientProperty("hostLabel", manualPanel.getHostLabel());
-        wrapper.putClientProperty("portLabel", manualPanel.getPortLabel());
-        wrapper.putClientProperty("dbNameLabel", manualPanel.getDbNameLabel());
-        wrapper.putClientProperty("suffixLabel", manualPanel.getSuffixLabel());
-        wrapper.putClientProperty("userLabel", manualPanel.getUserLabel());
-        wrapper.putClientProperty("passLabel", manualPanel.getPassLabel());
-
-        // Register profile panel components for sub-coloring
-        wrapper.putClientProperty("pEngineCombo", profilePanel.getEngineCombo());
-        wrapper.putClientProperty("pProfileCombo", profilePanel.getProfileCombo());
-        wrapper.putClientProperty("pDbCombo", profilePanel.getDbCombo());
-        wrapper.putClientProperty("pHostCombo", profilePanel.getHostField());
-        wrapper.putClientProperty("pPortField", profilePanel.getPortField());
-        wrapper.putClientProperty("pSuffixField", profilePanel.getSuffixField());
-        wrapper.putClientProperty("pUserCombo", profilePanel.getUserCombo());
-        wrapper.putClientProperty("pPassField", profilePanel.getPassField());
-        wrapper.putClientProperty("pEngineLabel", profilePanel.getEngineLabel());
-        wrapper.putClientProperty("pProfileLabel", profilePanel.getProfileLabel());
-        wrapper.putClientProperty("pDbLabel", profilePanel.getDbLabel());
-        wrapper.putClientProperty("pHostLabel", profilePanel.getHostLabel());
-        wrapper.putClientProperty("pPortLabel", profilePanel.getPortLabel());
-        wrapper.putClientProperty("pSuffixLabel", profilePanel.getSuffixLabel());
-        wrapper.putClientProperty("pUserLabel", profilePanel.getUserLabel());
-        wrapper.putClientProperty("pPassLabel", profilePanel.getPassLabel());
-
-        wrapper.putClientProperty("resultLabel", manualPanel.getResultField());
-
         // Populate valueSuppliers and propertyComponents for DB_URL, DB_USERNAME,
         // DB_PASSWORD early
-        // to prevent NullPointerException when manualPanel.updateFromUrl/setCredentials
-        // trigger the onChange callback, which calls updateColor.
+        // to prevent NullPointerException when the initial load triggers the
+        // onChange callback, which calls updateColor.
         valueSuppliers.put(Props.DB_USERNAME.getName(),
-                () -> useProfileCheck.isSelected() ? profilePanel.getUsername() : manualPanel.getUsername());
+                () -> {
+                    JdbcConfigurationPanel p = jdbcPanel();
+                    return p != null ? p.getUsername() : "";
+                });
         valueSuppliers.put(Props.DB_PASSWORD.getName(),
-                () -> useProfileCheck.isSelected() ? profilePanel.getPassword() : manualPanel.getPassword());
+                () -> {
+                    JdbcConfigurationPanel p = jdbcPanel();
+                    return p != null ? p.getPassword() : "";
+                });
         valueSuppliers.put(prop.getName(), // This is Props.DB_URL
-                () -> useProfileCheck.isSelected() ? profilePanel.getJdbcUrl() : manualPanel.getJdbcUrl());
+                () -> {
+                    JdbcConfigurationPanel p = jdbcPanel();
+                    return p != null ? p.getJdbcUrl() : "";
+                });
 
-        // Register separate components for DB_USERNAME and DB_PASSWORD
-        propertyComponents.put(Props.DB_USERNAME.getName(), (JComponent) manualPanel.getUserField());
-        propertyComponents.put(Props.DB_PASSWORD.getName(), (JComponent) manualPanel.getPassField());
+        // Register the editable credential components for search/highlight
+        propertyComponents.put(Props.DB_USERNAME.getName(), (JComponent) jdbcPanel.getUserEditComponent());
+        propertyComponents.put(Props.DB_PASSWORD.getName(), (JComponent) jdbcPanel.getPassField());
 
         String savedValue = savedProfile.getProperty(prop.getName(), getSafeDefault(prop));
         String savedUser = savedProfile.getProperty(Props.DB_USERNAME.getName(),
@@ -3215,8 +3124,7 @@ public class NodeConfigurationPanel extends JPanel {
                 getSafeDefault(Props.DB_PASSWORD));
 
         jdbcInitialized[0] = true;
-        manualPanel.updateFromUrl(savedValue);
-        manualPanel.setCredentials(savedUser, savedPass);
+        jdbcPanel.loadManual(savedValue, savedUser, savedPass);
 
         defaultValues.put(prop.getName(), getSafeDefault(prop));
         defaultValues.put(Props.DB_USERNAME.getName(), getSafeDefault(Props.DB_USERNAME));
@@ -3335,24 +3243,8 @@ public class NodeConfigurationPanel extends JPanel {
      * (manual mode / no link).
      */
     public String getLinkedDbProfile() {
-        JComponent jdbcComp = propertyComponents.get(Props.DB_URL.getName());
-        if (jdbcComp == null) {
-            return "";
-        }
-        JCheckBox cb = (JCheckBox) jdbcComp.getClientProperty("useProfileCheck");
-        if (cb == null || !cb.isSelected()) {
-            return ""; // manual mode — no link
-        }
-        JdbcProfileConfigurationPanel pp = (JdbcProfileConfigurationPanel) jdbcComp.getClientProperty("profilePanel");
-        if (pp == null) {
-            return "";
-        }
-        Object engine = ((JComboBox<?>) pp.getEngineCombo()).getSelectedItem();
-        Object profile = ((JComboBox<?>) pp.getProfileCombo()).getSelectedItem();
-        if (engine == null || profile == null || profile.toString().isEmpty()) {
-            return "";
-        }
-        return engine.toString() + ":" + profile.toString();
+        JdbcConfigurationPanel p = jdbcPanel();
+        return p != null ? p.getLink() : "";
     }
 
     /**
@@ -3375,8 +3267,12 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     public void setLinkedDbProfile(String value) {
-        applyDbLinkToJdbcRow(value);
-        saveProfileLinks(loadedProfileName);
+        JdbcConfigurationPanel p = jdbcPanel();
+        if (p == null) {
+            return;
+        }
+        p.applyLink(value, p.getJdbcUrl(), p.getUsername());
+        saveDatabaseAssignment(loadedProfileName);
     }
 
     public void setLinkedLoggingProfile(String value) {
@@ -3730,6 +3626,70 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     /**
+     * The saved (profile-on-disk) JDBC tuple: (link, url, username, password).
+     */
+    private JdbcConfigurationPanel.JdbcState savedJdbcState() {
+        return new JdbcConfigurationPanel.JdbcState(savedLinkedDb,
+                savedProfile.getProperty(Props.DB_URL.getName(), getSafeDefault(Props.DB_URL)),
+                savedProfile.getProperty(Props.DB_USERNAME.getName(), getSafeDefault(Props.DB_USERNAME)),
+                savedProfile.getProperty(Props.DB_PASSWORD.getName(), getSafeDefault(Props.DB_PASSWORD)));
+    }
+
+    /**
+     * The applied (the loaded baseline the node runs with) JDBC tuple:
+     * (link, url, username, password).
+     */
+    private JdbcConfigurationPanel.JdbcState appliedJdbcState() {
+        return new JdbcConfigurationPanel.JdbcState(appliedLinkedDb,
+                appliedProfile.getProperty(Props.DB_URL.getName(), getSafeDefault(Props.DB_URL)),
+                appliedProfile.getProperty(Props.DB_USERNAME.getName(), getSafeDefault(Props.DB_USERNAME)),
+                appliedProfile.getProperty(Props.DB_PASSWORD.getName(), getSafeDefault(Props.DB_PASSWORD)));
+    }
+
+    /**
+     * Whether the JDBC row's effective values (URL / username / password)
+     * differ from the saved ones — the row-level (not link) dirty signal.
+     */
+    private boolean jdbcValuesDirty() {
+        JdbcConfigurationPanel p = jdbcPanel();
+        if (p == null) {
+            return false;
+        }
+        JdbcConfigurationPanel.JdbcState current = p.getState();
+        JdbcConfigurationPanel.JdbcState saved = savedJdbcState();
+        return !current.url().equals(saved.url()) || !current.username().equals(saved.username())
+                || !current.password().equals(saved.password());
+    }
+
+    /**
+     * The value status of the JDBC row's effective values against the saved
+     * and applied baselines (url/username/password — the link element is the
+     * Profile row's own comparison).
+     */
+    private ValueStatus jdbcRowStatus() {
+        JdbcConfigurationPanel p = jdbcPanel();
+        if (p == null) {
+            return ValueStatus.UNSAVED;
+        }
+        JdbcConfigurationPanel.JdbcState current = p.getState();
+        JdbcConfigurationPanel.JdbcState saved = savedJdbcState();
+        JdbcConfigurationPanel.JdbcState applied = appliedJdbcState();
+        JdbcConfigurationPanel.JdbcState curVals = new JdbcConfigurationPanel.JdbcState("", current.url(),
+                current.username(), current.password());
+        JdbcConfigurationPanel.JdbcState savedVals = new JdbcConfigurationPanel.JdbcState("", saved.url(),
+                saved.username(), saved.password());
+        JdbcConfigurationPanel.JdbcState appliedVals = new JdbcConfigurationPanel.JdbcState("", applied.url(),
+                applied.username(), applied.password());
+        if (curVals.equals(appliedVals)) {
+            return ValueStatus.APPLIED;
+        }
+        if (curVals.equals(savedVals)) {
+            return ValueStatus.SAVED;
+        }
+        return ValueStatus.UNSAVED;
+    }
+
+    /**
      * Resolves the value-level state ({@link ValueStatus}) of the given row's
      * component, mirroring the value resolution and comparison that
      * {@link #updateColor} performs for the color coding — so the search-panel
@@ -3742,6 +3702,12 @@ public class NodeConfigurationPanel extends JPanel {
         JComponent comp = row.input;
         String key = row.prop.getName();
         String defaultValue = defaultValues.get(key);
+
+        // The JDBC row uses the tuple value-state model (JdbcState) — the same
+        // model its color coding uses, so the search filter never disagrees.
+        if (comp instanceof JPanel && Props.DB_URL.getName().equals(key)) {
+            return jdbcRowStatus();
+        }
 
         JComponent target = comp;
         if (comp instanceof JScrollPane && ((JScrollPane) comp).getViewport().getView() instanceof JTextArea) {
@@ -3824,8 +3790,13 @@ public class NodeConfigurationPanel extends JPanel {
         }
 
         if (comp instanceof JPanel && Props.DB_URL.getName().equals(propName)) {
-            JComponent resultComp = (JComponent) comp.getClientProperty("resultLabel");
-            target = resultComp != null ? resultComp : target;
+            // The JDBC row is colored by the panel's tuple value-state model
+            // (JdbcState baselines) — the URL-segment comparison is gone.
+            JdbcConfigurationPanel p = jdbcPanel();
+            if (p != null) {
+                p.setBaselines(savedJdbcState(), appliedJdbcState());
+                p.refreshColors();
+            }
             Supplier<String> supplier = valueSuppliers.get(propName);
             String supplierVal = supplier != null ? supplier.get() : "";
             value = supplierVal != null ? supplierVal.trim() : "";
@@ -3864,11 +3835,6 @@ public class NodeConfigurationPanel extends JPanel {
 
         Color color = valueStatus(comp instanceof JCheckBox, value, savedValue, applied).color();
 
-        // Detailed sub-component coloring and asterisk logic for JDBC URL panel
-        if (comp instanceof JPanel && Props.DB_URL.getName().equals(propName)) {
-            updateJdbcSubComponents(comp, savedValue, applied);
-        }
-
         PropertyRow row = allPropertyRows.stream()
                 .filter(r -> r.prop != null && r.prop.getName().equals(propName))
                 .findFirst()
@@ -3880,6 +3846,8 @@ public class NodeConfigurationPanel extends JPanel {
                         || "1".equals(savedValue) || "on".equalsIgnoreCase(savedValue);
                 boolean valBool = "true".equalsIgnoreCase(value);
                 isDirty = (valBool != savedBool);
+            } else if (comp instanceof JPanel && Props.DB_URL.getName().equals(propName)) {
+                isDirty = jdbcValuesDirty();
             } else {
                 isDirty = !value.equals(savedValue);
             }
@@ -3894,148 +3862,6 @@ public class NodeConfigurationPanel extends JPanel {
         } else {
             target.setForeground(color);
         }
-    }
-
-    private void updateJdbcSubComponents(JComponent panel, String savedUrl, String appliedUrl) {
-        JCheckBox useProfileCheck = (JCheckBox) panel.getClientProperty("useProfileCheck");
-        boolean useProfile = useProfileCheck != null && useProfileCheck.isSelected();
-
-        JComponent engineCombo = (JComponent) panel.getClientProperty(useProfile ? "pEngineCombo" : "engineCombo");
-        JComponent hostField = (JComponent) panel.getClientProperty(useProfile ? "pHostCombo" : "hostField");
-        JComponent portField = (JComponent) panel.getClientProperty(useProfile ? "pPortField" : "portField");
-        JComponent dbNameField = (JComponent) panel.getClientProperty(useProfile ? "pDbCombo" : "dbNameField");
-        JComponent suffixField = (JComponent) panel.getClientProperty(useProfile ? "pSuffixField" : "suffixField");
-        JComponent userField = (JComponent) panel.getClientProperty(useProfile ? "pUserCombo" : "userField");
-        JComponent passField = (JComponent) panel.getClientProperty(useProfile ? "pPassField" : "passField");
-
-        JLabel engineLabel = (JLabel) panel.getClientProperty(useProfile ? "pEngineLabel" : "engineLabel");
-        JLabel hostLabel = (JLabel) panel.getClientProperty(useProfile ? "pHostLabel" : "hostLabel");
-        JLabel portLabel = (JLabel) panel.getClientProperty(useProfile ? "pPortLabel" : "portLabel");
-        JLabel dbNameLabel = (JLabel) panel.getClientProperty(useProfile ? "pDbLabel" : "dbLabel");
-        JLabel suffixLabel = (JLabel) panel.getClientProperty(useProfile ? "pSuffixLabel" : "suffixLabel");
-        JLabel userLabel = (JLabel) panel.getClientProperty(useProfile ? "pUserLabel" : "userLabel");
-        JLabel passLabel = (JLabel) panel.getClientProperty(useProfile ? "pPassLabel" : "passLabel");
-
-        Map<String, String> savedParts = getJdbcUrlParts(savedUrl);
-        Map<String, String> appliedParts = getJdbcUrlParts(appliedUrl);
-
-        String engineVal = "";
-        if (engineCombo instanceof JComboBox) {
-            Object sel = ((JComboBox<?>) engineCombo).getSelectedItem();
-            engineVal = sel != null ? sel.toString() : "";
-        }
-        updateJdbcPart(engineCombo, engineLabel, "Engine:", engineVal,
-                savedParts.get("engine"), appliedParts.get("engine"));
-
-        String hostVal = getCompValue(hostField);
-        updateJdbcPart(hostField, hostLabel, "Host:", hostVal, savedParts.get("host"), appliedParts.get("host"));
-
-        String portVal = getCompValue(portField);
-        updateJdbcPart(portField, portLabel, "Port:", portVal, savedParts.get("port"), appliedParts.get("port"));
-
-        String dbVal = getCompValue(dbNameField);
-        updateJdbcPart(dbNameField, dbNameLabel, "Database:", dbVal, savedParts.get("dbName"),
-                appliedParts.get("dbName"));
-
-        String suffixVal = getCompValue(suffixField);
-        updateJdbcPart(suffixField, suffixLabel, "Suffix:", suffixVal, savedParts.get("suffix"),
-                appliedParts.get("suffix"));
-
-        String userKey = Props.DB_USERNAME.getName();
-        String passKey = Props.DB_PASSWORD.getName();
-
-        String userVal = getCompValue(userField);
-        updateJdbcPart(userField, userLabel, "Username:", userVal,
-                savedProfile.getProperty(userKey, getSafeDefault(Props.DB_USERNAME)),
-                appliedProfile.getProperty(userKey, getSafeDefault(Props.DB_USERNAME)));
-
-        String passVal = "";
-        if (passField instanceof JPasswordField) {
-            passVal = new String(((JPasswordField) passField).getPassword());
-        }
-        updateJdbcPart(passField, passLabel, "Password:", passVal,
-                savedProfile.getProperty(passKey, getSafeDefault(Props.DB_PASSWORD)),
-                appliedProfile.getProperty(passKey, getSafeDefault(Props.DB_PASSWORD)));
-
-        // SQLite trio (manual mode): color profile/path/file by the composed
-        // URL's status against the saved/applied URLs.
-        if (!useProfile) {
-            JdbcManualConfigurationPanel mp = (JdbcManualConfigurationPanel) panel
-                    .getClientProperty("manualPanel");
-            JComponent sqlProfile = (JComponent) panel.getClientProperty("sqlProfileField");
-            if (mp != null && sqlProfile != null && mp.isSqliteSelected()) {
-                String current = mp.getJdbcUrl();
-                updateJdbcPart(sqlProfile, (JLabel) panel.getClientProperty("sqlProfileLabel"), "Profile:",
-                        current, savedUrl, appliedUrl);
-                updateJdbcPart((JComponent) panel.getClientProperty("sqlPathField"),
-                        (JLabel) panel.getClientProperty("sqlPathLabel"), "Path:",
-                        current, savedUrl, appliedUrl);
-                updateJdbcPart((JComponent) panel.getClientProperty("sqlFileField"),
-                        (JLabel) panel.getClientProperty("sqlFileLabel"), "DB file:",
-                        current, savedUrl, appliedUrl);
-            }
-        }
-    }
-
-    private String getCompValue(JComponent comp) {
-        if (comp instanceof javax.swing.text.JTextComponent)
-            return ((javax.swing.text.JTextComponent) comp).getText();
-        if (comp instanceof JComboBox) {
-            Object sel = ((JComboBox<?>) comp).getSelectedItem();
-            return sel != null ? sel.toString() : "";
-        }
-        return "";
-    }
-
-    private void updateJdbcPart(JComponent input, JLabel label, String baseText, String current, String saved,
-            String applied) {
-        if (input == null)
-            return;
-        current = current != null ? current.trim() : "";
-        saved = saved != null ? saved.trim() : "";
-        applied = applied != null ? applied.trim() : "";
-
-        Color c;
-        if (current.equals(applied))
-            c = GuiColors.getApplied();
-        else if (current.equals(saved))
-            c = GuiColors.getSaved();
-        else
-            c = GuiColors.getUnsaved();
-
-        input.setForeground(c);
-        if (label != null) {
-            label.setText(current.equals(saved) ? baseText : baseText + " *");
-        }
-    }
-
-    private Map<String, String> getJdbcUrlParts(String url) {
-        Map<String, String> parts = new HashMap<>();
-        parts.put("engine", "");
-        parts.put("host", "");
-        parts.put("port", "");
-        parts.put("dbName", "");
-        parts.put("suffix", "");
-        if (url == null || url.isEmpty())
-            return parts;
-        if (url.startsWith("jdbc:sqlite:")) {
-            parts.put("engine", "SQLite");
-            parts.put("dbName", url.substring("jdbc:sqlite:".length()));
-        } else {
-            Matcher matcher = DatabaseConfigurationUtils.JDBC_URL_PATTERN.matcher(url);
-            if (matcher.find()) {
-                String proto = matcher.group(1);
-                if ("mariadb".equalsIgnoreCase(proto))
-                    parts.put("engine", "MariaDB");
-                else if ("postgresql".equalsIgnoreCase(proto))
-                    parts.put("engine", "PostgreSQL");
-                parts.put("host", matcher.group(2));
-                parts.put("port", matcher.group(3) != null ? matcher.group(3) : "");
-                parts.put("dbName", matcher.group(4));
-                parts.put("suffix", matcher.group(5) != null ? matcher.group(5) : "");
-            }
-        }
-        return parts;
     }
 
     private void showColorLegendHelp() {

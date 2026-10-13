@@ -956,6 +956,16 @@ public class NodeProfilePanel extends JPanel {
         if (consolePanel != null) {
             consolePanel.onNodeStateChanged(oldState, newState);
         }
+
+        // A (re)start transition to RUNNING: the node now runs with the
+        // profile file on disk — the configuration panel re-anchors its
+        // applied baseline to it (a full reload while it has no unsaved
+        // changes), so the db.URL section and the value-state coloring
+        // reflect the freshly applied state without a manual Reload.
+        if (newState == Signum.State.RUNNING && oldState != Signum.State.RUNNING
+                && configurationPanel != null) {
+            configurationPanel.onNodeRestarted();
+        }
     }
 
     /**
