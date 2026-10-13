@@ -52,10 +52,10 @@ class NodeConfigurationPanelAppliedBaselineTest {
     }
 
     @Test
-    @DisplayName("valueStatus: APPLIED takes precedence over SAVED")
-    void valueStatus_appliedBeatsSaved() throws Exception {
-        assertEquals("APPLIED", valueStatus(false, "99", "44", "99"),
-                "a value matching the applied baseline is APPLIED even when it differs from the saved file");
+    @DisplayName("valueStatus: a dirty edit is UNSAVED even when it matches the applied baseline")
+    void valueStatus_unsavedBeatsApplied() throws Exception {
+        assertEquals("UNSAVED", valueStatus(false, "99", "44", "99"),
+                "a value differing from the saved file is UNSAVED even when it matches the applied baseline (unsaved-first)");
     }
 
     @Test

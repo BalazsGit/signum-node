@@ -157,6 +157,23 @@ public class JdbcConfigurationPanel extends JPanel {
     private String savedUrl = "";
     private String savedUsername = "";
     private String savedPassword = "";
+    /**
+     * The manual (possibly UNSAVED) values remembered when the link was turned
+     * ON, so a later turn-OFF restores the user's edits instead of the saved
+     * baseline — a link toggle must not discard unsaved work (the values keep
+     * their unsaved state). {@code null} until the first user link toggle.
+     */
+    private String manualBeforeLinkUrl;
+    private String manualBeforeLinkUser;
+    private String manualBeforeLinkPass;
+    private boolean hasManualBeforeLink = false;
+    /**
+     * Whether the user edited a manual-mode field since the last load
+     * ({@link #loadInitial}). A link toggle preserves the (unsaved) manual
+     * values only when this is set — otherwise it restores the saved
+     * (loaded) baseline, so a clean row is never turned into a spurious edit.
+     */
+    private boolean manualEditedSinceLoad = false;
     private DbProfile currentProfile;
     private JdbcState savedState = new JdbcState("", "", "", "");
     private JdbcState appliedState = new JdbcState("", "", "", "");
@@ -501,17 +518,18 @@ public class JdbcConfigurationPanel extends JPanel {
                 return;
             }
             manualFieldsTouched = true;
+            manualEditedSinceLoad = true;
             refreshSqliteFiles(Path.of(pathField.getText().trim()),
                     (String) dbCombo.getSelectedItem(), true);
             fireChange();
         });
 
-        textChanges(databaseField, this::fireChange);
-        textChanges(hostField, this::fireChange);
-        textChanges(portField, this::fireChange);
-        textChanges(suffixField, this::fireChange);
-        textChanges(userField, this::fireChange);
-        textChanges(passField, this::fireChange);
+        textChanges(databaseField, this::markManualEdit);
+        textChanges(hostField, this::markManualEdit);
+        textChanges(portField, this::markManualEdit);
+        textChanges(suffixField, this::markManualEdit);
+        textChanges(userField, this::markManualEdit);
+        textChanges(passField, this::markManualEdit);
         textChanges((JTextField) profileCombo.getEditor().getEditorComponent(), () -> {
             if (isProgrammatic() || !linked) {
                 return;
@@ -529,6 +547,7 @@ public class JdbcConfigurationPanel extends JPanel {
             }
             if (isSqlite()) {
                 manualFieldsTouched = true;
+                manualEditedSinceLoad = true;
             }
             fireChange();
         });
@@ -584,6 +603,19 @@ public class JdbcConfigurationPanel extends JPanel {
         if (onChange != null) {
             onChange.run();
         }
+    }
+
+    /**
+     * Marks a manual-mode field as user-edited (so a later link toggle
+     * preserves its unsaved value) and notifies the host of the change. The
+     * host notification still fires during programmatic updates (as before);
+     * only the "edited since load" mark is user-only.
+     */
+    private void markManualEdit() {
+        if (!isProgrammatic()) {
+            manualEditedSinceLoad = true;
+        }
+        fireChange();
     }
 
     /** Refreshes the preview text and notifies the host of an effective link change. */
@@ -695,6 +727,14 @@ public class JdbcConfigurationPanel extends JPanel {
         programmaticDepth++;
         try {
             if (newLinked) {
+                // Remember the manual (possibly UNSAVED) values we are leaving:
+                // a later unlink must restore them, not the saved baseline — a
+                // link toggle must not discard the user's dirty edits (they
+                // keep their unsaved state in the manual fields).
+                manualBeforeLinkUrl = getJdbcUrl();
+                manualBeforeLinkUser = getUsername();
+                manualBeforeLinkPass = getPassword();
+                hasManualBeforeLink = true;
                 refreshProfileList();
                 if (!isSqlite() && profileCombo.getItemCount() == 0) {
                     // No database profile for this engine: the link cannot
@@ -708,11 +748,26 @@ public class JdbcConfigurationPanel extends JPanel {
                     refreshInstanceList();
                 }
             } else {
-                // Restore the property-derived baseline (never the effective
-                // linked values): the Path must always derive from the
-                // profile's properties.
+                // Restore the manual fields. When the user edited a manual
+                // field since the last load (unsaved work), preserve those
+                // values (captured on the last link-ON) instead of resetting
+                // to the saved baseline — a link toggle must not discard the
+                // user's dirty edits. Otherwise restore the saved (loaded)
+                // baseline as before. loadManual rewrites the manual-restore
+                // baseline, so it is backed up and restored — the saved
+                // baseline must not drift to the (possibly dirty) values.
+                boolean dirty = hasManualBeforeLink && manualEditedSinceLoad;
+                String url = dirty ? manualBeforeLinkUrl : savedUrl;
+                String user = dirty ? manualBeforeLinkUser : savedUsername;
+                String pass = dirty ? manualBeforeLinkPass : savedPassword;
                 setLinkedInternal(false);
-                loadManual(savedUrl, savedUsername, savedPassword);
+                String savedUrlBackup = savedUrl;
+                String savedUserBackup = savedUsername;
+                String savedPassBackup = savedPassword;
+                loadManual(url, user, pass);
+                savedUrl = savedUrlBackup;
+                savedUsername = savedUserBackup;
+                savedPassword = savedPassBackup;
             }
         } finally {
             programmaticDepth--;
@@ -800,6 +855,8 @@ public class JdbcConfigurationPanel extends JPanel {
         this.savedUrl = url == null ? "" : url.trim();
         this.savedUsername = username == null ? "" : username.trim();
         this.savedPassword = password == null ? "" : password.trim();
+        hasManualBeforeLink = false;
+        manualEditedSinceLoad = false;
         String explicit = explicitLink == null ? "" : explicitLink.trim();
         if (explicit.contains(":")) {
             int idx = explicit.indexOf(':');
@@ -842,6 +899,8 @@ public class JdbcConfigurationPanel extends JPanel {
         engineSnapshots.clear();
         profileSnapshots.clear();
         lastProfileLink = "";
+        hasManualBeforeLink = false;
+        manualEditedSinceLoad = false;
     }
 
     /**
@@ -1434,16 +1493,24 @@ public class JdbcConfigurationPanel extends JPanel {
                 statusOfValue(getPassword(), appliedState.password(), savedState.password()));
     }
 
-    /** The value-state of a single per-row value ({@code current == applied > saved}). */
+    /**
+     * The value-state of a single per-row value, with the unsaved-first
+     * priority {@code UNSAVED > SAVED > APPLIED} (matching the shared
+     * {@code RowStateResolver}): UNSAVED when it differs from the saved value,
+     * SAVED when it equals the saved value but differs from the applied value,
+     * otherwise APPLIED.
+     */
     private static ValueState statusOfValue(String current, String applied, String saved) {
         String c = current == null ? "" : current;
-        if (c.equals(applied == null ? "" : applied)) {
-            return ValueState.APPLIED;
+        String s = saved == null ? "" : saved;
+        String a = applied == null ? "" : applied;
+        if (!c.equals(s)) {
+            return ValueState.UNSAVED;
         }
-        if (c.equals(saved == null ? "" : saved)) {
+        if (!c.equals(a)) {
             return ValueState.SAVED;
         }
-        return ValueState.UNSAVED;
+        return ValueState.APPLIED;
     }
 
     /** The engine a baseline URL belongs to (display name), or {@code null}. */
@@ -1477,13 +1544,13 @@ public class JdbcConfigurationPanel extends JPanel {
     /** The value-state of the link element alone (the Profile row). */
     private ValueState statusOfLink() {
         String link = getLink();
-        if (link.equals(appliedState.link())) {
-            return ValueState.APPLIED;
+        if (!link.equals(savedState.link())) {
+            return ValueState.UNSAVED;
         }
-        if (link.equals(savedState.link())) {
+        if (!link.equals(appliedState.link())) {
             return ValueState.SAVED;
         }
-        return ValueState.UNSAVED;
+        return ValueState.APPLIED;
     }
 
     private void paint(JComponent input, JLabel label, ValueState state) {

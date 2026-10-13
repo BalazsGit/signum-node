@@ -1727,7 +1727,12 @@ public class ModuleLoggingProfilePanel extends JPanel {
                     repo.setApplied(moduleId, null);
                 }
             } else {
-                saveCurrentProfile();
+                // Apply restarts the node with the profile's SAVED (on-disk)
+                // configuration — it must NOT persist the dirty editor state:
+                // Save is what persists, and a dirty value stays UNSAVED after
+                // Apply (mirroring the node configuration's apply, which marks
+                // the saved values as applied and restarts without saving the
+                // dirty editor).
                 // The shared module marker is only the GENERIC tab's applied
                 // state: the node tab (a host with an applied-profile override)
                 // records its per-node assignment in the apply hook, so the
@@ -1736,9 +1741,11 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 if (appliedProfileNameSupplier == null) {
                     repo.setApplied(moduleId, name);
                 }
-                // Persist the applied-state snapshot: these values are what the
-                // runtime uses from now on (the row-state "applied" baseline).
-                repo.saveAppliedSnapshot(moduleId, name, collectEditorProps());
+                // Persist the applied-state snapshot from the profile's on-disk
+                // (saved) values — these are what the runtime uses after the
+                // restart, so the row-state "applied" baseline tracks the disk,
+                // not the (possibly dirty) editor.
+                repo.saveAppliedSnapshot(moduleId, name, repo.loadProps(moduleId, name));
             }
             refreshAppliedMarker();
             reevaluateRowStates();

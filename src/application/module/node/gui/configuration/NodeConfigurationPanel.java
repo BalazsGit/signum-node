@@ -2149,11 +2149,13 @@ public class NodeConfigurationPanel extends JPanel {
                     loaded.load(in);
                     savedProfile = new NodeProfile(loadedProfileName);
                     savedProfile.setProperties(loaded);
-                    // A reload re-loads the profile into the editor: the
-                    // freshly loaded values are again the applied baseline
-                    // (the editor now mirrors the file on disk).
-                    appliedProfile = new NodeProfile(loadedProfileName);
-                    appliedProfile.setProperties(copyProperties(loaded));
+                    // A reload re-reads the file into the editor and the saved
+                    // baseline only. It must NOT move the applied baseline: the
+                    // running node keeps its configuration until a restart, so a
+                    // value that was "saved, not yet applied" stays SAVED (yellow)
+                    // after a reload instead of silently turning APPLIED (green).
+                    // The applied baseline is re-anchored only on a restart
+                    // (onNodeRestarted) or when the user Applies.
                     updateUIFromProperties(loaded);
                 } finally {
                     isProgrammaticChange = false;
@@ -2193,12 +2195,15 @@ public class NodeConfigurationPanel extends JPanel {
         if (loadedProfileName == null) {
             return;
         }
+        // A restart (re)loads the on-disk configuration into the node. When
+        // there is no unsaved work the editor is refreshed too (a full reload
+        // from disk — exactly the Reload button's refresh); while the user is
+        // mid-edit the unsaved work is left untouched. In BOTH cases the
+        // applied baseline — the one thing that moves on a restart — is
+        // re-anchored to the on-disk state (what the node now runs with).
         if (!hasUnsavedChanges()) {
             reloadFromDisk();
-            return;
         }
-        // Unsaved editor changes exist: only re-anchor the applied baseline
-        // to the on-disk state — never discard the user's work.
         Path targetFile = ConfigurationUtils.resolveNodeProfilePath(loadedProfileName);
         if (!Files.exists(targetFile)) {
             return;
@@ -3587,10 +3592,13 @@ public class NodeConfigurationPanel extends JPanel {
     /**
      * Resolves the value-level state of a configuration value against the
      * saved (profile-on-disk) and applied (the values loaded from the profile
-     * into the editor — the baseline the node runs with) values:
-     * {@link ValueStatus#APPLIED} (green) when it equals the applied value,
-     * {@link ValueStatus#SAVED} (yellow) when it equals the saved value,
-     * otherwise {@link ValueStatus#UNSAVED} (normal text color). Boolean
+     * into the editor — the baseline the node runs with) values, with the
+     * unsaved-first priority {@code UNSAVED > SAVED > APPLIED} (matching the
+     * shared {@code RowStateResolver}): {@link ValueStatus#UNSAVED} (normal
+     * text color) when it differs from the saved value, {@link ValueStatus#SAVED}
+     * (yellow) when it equals the saved value but differs from the applied
+     * value, otherwise {@link ValueStatus#APPLIED} (green). A dirty edit
+     * always reads UNSAVED, even if the runtime happens to match it. Boolean
      * properties compare parsed booleans, all other values compare as trimmed
      * strings — the exact rules the color coding uses.
      */
@@ -3599,24 +3607,24 @@ public class NodeConfigurationPanel extends JPanel {
             boolean savedBool = parseValueBool(saved);
             boolean appliedBool = parseValueBool(applied);
             boolean valBool = parseValueBool(value);
-            if (valBool == appliedBool) {
-                return ValueStatus.APPLIED;
+            if (valBool != savedBool) {
+                return ValueStatus.UNSAVED;
             }
-            if (valBool == savedBool) {
+            if (valBool != appliedBool) {
                 return ValueStatus.SAVED;
             }
-            return ValueStatus.UNSAVED;
+            return ValueStatus.APPLIED;
         }
         String v = value == null ? "" : value.trim();
         String a = applied == null ? "" : applied.trim();
         String s = saved == null ? "" : saved.trim();
-        if (v.equals(a)) {
-            return ValueStatus.APPLIED;
+        if (!v.equals(s)) {
+            return ValueStatus.UNSAVED;
         }
-        if (v.equals(s)) {
+        if (!v.equals(a)) {
             return ValueStatus.SAVED;
         }
-        return ValueStatus.UNSAVED;
+        return ValueStatus.APPLIED;
     }
 
     /** @return true when the value parses as a boolean "on" state */
@@ -3664,7 +3672,9 @@ public class NodeConfigurationPanel extends JPanel {
     /**
      * The value status of the JDBC row's effective values against the saved
      * and applied baselines (url/username/password — the link element is the
-     * Profile row's own comparison).
+     * Profile row's own comparison), with the unsaved-first priority
+     * {@code UNSAVED > SAVED > APPLIED} (matching {@link #valueStatus} and the
+     * row's own per-value color coding).
      */
     private ValueStatus jdbcRowStatus() {
         JdbcConfigurationPanel p = jdbcPanel();
@@ -3680,13 +3690,13 @@ public class NodeConfigurationPanel extends JPanel {
                 saved.username(), saved.password());
         JdbcConfigurationPanel.JdbcState appliedVals = new JdbcConfigurationPanel.JdbcState("", applied.url(),
                 applied.username(), applied.password());
-        if (curVals.equals(appliedVals)) {
-            return ValueStatus.APPLIED;
+        if (!curVals.equals(savedVals)) {
+            return ValueStatus.UNSAVED;
         }
-        if (curVals.equals(savedVals)) {
+        if (!curVals.equals(appliedVals)) {
             return ValueStatus.SAVED;
         }
-        return ValueStatus.UNSAVED;
+        return ValueStatus.APPLIED;
     }
 
     /**

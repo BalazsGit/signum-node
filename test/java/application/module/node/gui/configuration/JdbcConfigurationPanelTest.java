@@ -646,12 +646,10 @@ class JdbcConfigurationPanelTest {
             String firstMaria = DatabaseConfigurationUtils.getProfileNames(".", "MariaDB").get(0);
             assertEquals("MariaDB:" + firstMaria, panel.getLink(),
                     "no recorded MariaDB profile: the first available is picked");
-            // the host persists the (server) link into the saved baseline
-            onEdt(() -> {
-                panel.setBaselines(panel.getState(),
-                        new JdbcConfigurationPanel.JdbcState("SQLite:" + PROFILE, PROFILE_URL, "", ""));
-                return null;
-            });
+            // A link change is an unsaved (dirty) change: the host persists the
+            // assignment but does NOT move the saved/applied baselines (only
+            // load, save, and apply do). The baselines therefore stay at the
+            // loaded state, so the restored profile comes back clean.
 
             // MariaDB -> SQLite: the recorded SQLite profile must be restored
             // — not the by-product fallback pick of the MariaDB phase — and
