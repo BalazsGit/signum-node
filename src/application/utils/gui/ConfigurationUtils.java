@@ -18,7 +18,9 @@ import jiconfont.swing.IconFontSwing;
 
 import javax.swing.*;
 import java.io.FileInputStream;
+import javax.swing.border.Border;
 import javax.swing.border.EmptyBorder;
+import javax.swing.border.TitledBorder;
 import java.awt.*;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -39,18 +41,334 @@ import java.util.stream.Stream;
 public class ConfigurationUtils {
 
     /**
-     * Styles input components consistently using the global label font and standard
-     * padding.
+     * THE single, uniformly adjustable gap between an input field and the
+     * action icon sitting next to it — the list editors' "+" add button and
+     * per-item trash icon, the "Show Password" check box (the configuration
+     * password row and the JDBC section's password slot) and the logging
+     * profile rows' trash icon. Every one of these field-adjacent icon gaps
+     * reads from this constant, so the distance is uniform across the
+     * configuration and logging panels and tunable in exactly one place.
+     */
+    public static final int INPUT_ACTION_GAP = 4;
+
+    /**
+     * Styles input components consistently using the global label font and the
+     * unified one-line control metrics.
+     * <p>
+     * For text inputs (fields / password fields) this is THE single place the
+     * regular configuration input's look is defined — the SAME policy the
+     * selects use, so a text field and a select of the same row render
+     * identically (and the db.URL section's fields no longer differ from
+     * every other configuration field):
+     * <ul>
+     *   <li><b>border</b>: the L&F's own slim field border (the same 1px
+     *       border the regular inputs carry) — no extra chrome,</li>
+     *   <li><b>height</b>: padded to {@link #standardControlHeight()} — the
+     *       plain combo's MEASURED height, so the field grows with the font
+     *       exactly like the selects (re-call this after a font / L&F change
+     *       to re-derive the padding from the new metrics),</li>
+     *   <li><b>left margin</b>: the plain combo's value-text x
+     *       ({@link #plainComboTextX()}) — the same text start the state-aware
+     *       editable selects align to.</li>
+     * </ul>
      *
      * @param comp The component to style.
      */
     public static void styleInputComponent(JComponent comp) {
         comp.setFont(UIManager.getFont("Label.font"));
         if (comp instanceof JTextField || comp instanceof JPasswordField) {
-            comp.setBorder(BorderFactory.createCompoundBorder(
-                    UIManager.getBorder("TextField.border"),
-                    BorderFactory.createEmptyBorder(2, 6, 2, 6)));
+            Border fieldBorder = UIManager.getBorder("TextField.border");
+            // Measure the field's natural height with the L&F border ALONE,
+            // then pad the difference to the standard (the bottom edge takes
+            // the rounding remainder) — measured, not modeled, so any L&F's
+            // border / font interplay lands exactly.
+            comp.setBorder(fieldBorder);
+            int naturalH = comp.getPreferredSize().height;
+            int extra = Math.max(0, standardControlHeight() - naturalH);
+            int top = extra / 2;
+            int bottom = extra - top;
+            int fieldLeft = fieldBorder == null ? 0 : fieldBorder.getBorderInsets(comp).left;
+            int left = Math.max(0, plainComboTextX() - fieldLeft);
+            comp.setBorder(BorderFactory.createCompoundBorder(fieldBorder,
+                    BorderFactory.createEmptyBorder(top, left, bottom, 6)));
         }
+    }
+
+    /**
+     * Where a plain (non-editable) combo of the current L&F starts its value
+     * text: the combo border's left inset plus the renderer cell's left
+     * margin — probed on throwaway components (one item, so its preferred
+     * height is the real one-line value height).
+     * <p>
+     * THE single place that text-start margin is defined: the editable
+     * selects ({@link #styleComboEditor}), the text inputs
+     * ({@link #styleInputComponent}) and the JDBC section's frameless URL
+     * preview all align their text to it.
+     */
+    public static int plainComboTextX() {
+        JComboBox<Object> plain = new JComboBox<>(new Object[]{ "X" });
+        Border plainBorder = plain.getBorder();
+        int plainBorderLeft = plainBorder == null ? 0 : plainBorder.getBorderInsets(plain).left;
+        @SuppressWarnings("unchecked")
+        ListCellRenderer<Object> probeRenderer = plain.getRenderer() != null
+                ? (ListCellRenderer<Object>) plain.getRenderer()
+                : new DefaultListCellRenderer();
+        java.awt.Component probeCell = probeRenderer.getListCellRendererComponent(
+                new JList<>(new String[0]), "X", 0, false, false);
+        return plainBorderLeft + (probeCell instanceof JComponent jc ? jc.getInsets().left : 0);
+    }
+
+    /**
+     * Styles the EDITOR text field of an editable combo. With the Metal L&F the
+     * combo's editor component is a panel WRAPPING the text field, so
+     * {@link #styleInputComponent} applied to the editor component never
+     * reaches the text field itself (default font / border would remain).
+     * <p>
+     * The field carries NO border of its own: the combo's own L&F border
+     * already frames the whole control, exactly like a regular
+     * (non-editable) combo — the field's own bevel would read as a stray
+     * inner frame (lines around the text, a vertical line by the dropdown
+     * arrow) that the built-in combos do not have.
+     * <p>
+     * The left padding is computed so the text starts at the SAME x as the
+     * value text of a regular combo of the current L&F. Both x offsets are
+     * MEASURED for real (a fixed assumption like "the renderer adds 2 px"
+     * indents the editable text further than the built-in combos):
+     * <ul>
+     *   <li>the TARGET is the plain combo's border left inset plus its
+     *       renderer cell's left margin (that is where Basic L&Fs place the
+     *       displayed value label),</li>
+     *   <li>the CURRENT position of the editor text field is found by laying
+     *       the combo out off-screen and walking the field's x up to the
+     *       combo (the L&F decides where the editor sits — inside the combo
+     *       border, behind a wrapper panel, ...) plus the field's own border
+     *       insets.</li>
+     * </ul>
+     * The difference is absorbed by the empty border's left inset. (The field
+     * has no L&F border at all, so its own insets are 0 and the current x is
+     * simply the field's layout offset; the clamp to 0 covers an exotic L&F
+     * that places the editor deeper than the plain combo's text.)
+     * <p>
+     * The top / bottom padding is computed so the combo's own preferred
+     * HEIGHT equals the plain combo's preferred height EXACTLY (an editable
+     * combo's height is driven by its editor field, a plain combo's by its
+     * value renderer — the two do not necessarily agree): the missing pixels
+     * are MEASURED and split over both edges (the bottom edge takes the
+     * rounding remainder), with one correction pass for an L&F that absorbs
+     * part of the padding.
+     */
+    public static void styleComboEditor(JComboBox<?> combo) {
+        JComponent editorComponent = (JComponent) combo.getEditor().getEditorComponent();
+        editorComponent.setFont(UIManager.getFont("Label.font"));
+        JTextField textField = findEditorTextField(editorComponent);
+        if (textField == null) {
+            return;
+        }
+        textField.setFont(UIManager.getFont("Label.font"));
+        // TARGET: where a plain (non-editable) combo of this L&F starts its
+        // value text — the shared, single-place measurement (the text inputs
+        // of {@link #styleInputComponent} align to the very same x).
+        int targetX = plainComboTextX();
+        // CURRENT: no field border (see above) → the field's own insets are 0
+        // and its x (walked up to the combo, under the L&F's own layout) IS
+        // where its text starts.
+        textField.setBorder(null);
+        combo.setSize(200, 30);
+        combo.doLayout();
+        int currentX = xRelativeTo(combo, textField);
+        // LEFT: the empty border pads the text up to the plain combo's text
+        // x (and provides the regular input's right look). Clamped: a layout
+        // offset deeper than the target (an exotic L&F) just gets 0.
+        int left = Math.max(0, targetX - currentX);
+        // TOP / BOTTOM: an editable combo's height is driven by its editor
+        // field, while a plain combo's is driven by its value renderer — the
+        // two do not necessarily agree (a font override in particular makes
+        // the field shorter, so the editable combo renders LOWER than its
+        // non-editable siblings). Pad the field vertically so the combo's
+        // OWN preferred height equals the plain combo's — measured, not
+        // modeled, so every L&F's border / button / renderer interplay is
+        // handled as-is — and EXACTLY: the missing pixels are computed from
+        // the measured shortfall and split over both edges (the bottom edge
+        // takes the rounding remainder). The former grow-until-reached loop
+        // broke at the first padding that reached the target and could
+        // overshoot by a pixel or two, so editable selects rendered TALLER
+        // than their plain siblings. Where the L&F drives the height from
+        // something the field cannot influence, the math just lands short by
+        // that fixed offset — the field cannot do more.
+        // the SINGLE standard height (one-place definition — the plain
+        // combo above has one item, so it measures exactly this value)
+        int plainH = standardControlHeight();
+        textField.setBorder(BorderFactory.createEmptyBorder(0, left, 0, 6));
+        combo.setPreferredSize(null);
+        int base = combo.getPreferredSize().height;
+        int top = 0;
+        int bottom = 0;
+        int delta = plainH - base;
+        if (delta > 0) {
+            top = delta / 2;
+            bottom = delta - top;
+        }
+        textField.setBorder(BorderFactory.createEmptyBorder(top, left, bottom, 6));
+        combo.setPreferredSize(null);
+        int h = combo.getPreferredSize().height;
+        if (h < plainH) {
+            // an L&F that absorbed part of the padding (a wrapper inset, a
+            // fixed arrow-button height, ...) — add the missing pixels to
+            // the bottom edge and re-measure once
+            bottom += plainH - h;
+            textField.setBorder(BorderFactory.createEmptyBorder(top, left, bottom, 6));
+            combo.setPreferredSize(null);
+        }
+        // leave the preferred size UNSET: the reads above cached a size
+        // measured at the (possibly empty) creation-time model — the panel
+        // must compute the width from the live model at layout time.
+        combo.setPreferredSize(null);
+    }
+
+    /**
+     * THE standard one-line control height of the current L&F — the
+     * preferred height of a plain, non-editable, one-item combo, measured
+     * LIVE, so a font / L&F change is picked up on the next call.
+     * <p>
+     * This is the SINGLE place the "standard combo height" is defined:
+     * both the editable dropdowns ({@link #styleComboEditor}) and the
+     * compact titled boxes ({@link #unifyTitledBoxHeights}) are unified
+     * against this one value — if the standard metric ever changes, only
+     * this method is touched, no caller and no panel is.
+     *
+     * @return the standard one-line control height in pixels (EDT)
+     */
+    public static int standardControlHeight() {
+        // one item, so its preferred HEIGHT is the real one-line value
+        // height (an empty model measures as border-only)
+        return new JComboBox<>(new Object[]{"X"}).getPreferredSize().height;
+    }
+
+    /**
+     * Unifies the preferred HEIGHT of a group of compact titled boxes
+     * ({@link TitledBorder} panels — e.g. the "Show values" checkbox group
+     * and the "Search" box of the configuration's search row) so the boxes of
+     * one row are the same height and track the standard control height — the
+     * box-level counterpart of {@link #styleComboEditor}, which unifies the
+     * dropdowns the same way.
+     * <p>
+     * The unified height is the LARGEST of
+     * <ul>
+     *   <li>each box's own natural preferred height — measured with ALL of
+     *       its children temporarily VISIBLE, so a child that is hidden at
+     *       build time but shown later (the search match counter and chevron
+     *       buttons) can never outgrow the box and get clipped;</li>
+     *   <li>{@link #standardControlHeight()} — the standard one-line control
+     *       height the dropdowns are unified to (the single place it is
+     *       defined).</li>
+     * </ul>
+     * A box shorter than the unified height is padded with a BOTTOM
+     * EmptyBorder INSIDE its TitledBorder (the L&F's TitledBorder ignores
+     * the inner border's top inset — the title owns the top edge — but
+     * counts its bottom inset, so all padding goes there): the box's WIDTH
+     * keeps growing with its content, and the box's border remains a plain
+     * {@link TitledBorder}. A box that is naturally taller (e.g. a wrapped
+     * checkbox row) is kept as-is — nothing is ever clipped.
+     * <p>
+     * The heights are MEASURED at the call, so a font or L&F change that
+     * rebuilds the panel unifies the boxes again with the new metrics — the
+     * boxes change identically to the dropdowns.
+     *
+     * @param boxes the titled boxes of one row to unify (EDT)
+     */
+    public static void unifyTitledBoxHeights(JComponent... boxes) {
+        if (boxes == null || boxes.length == 0) {
+            return;
+        }
+        // the SINGLE standard height — see standardControlHeight
+        int target = standardControlHeight();
+        int[] natural = new int[boxes.length];
+        for (int i = 0; i < boxes.length; i++) {
+            // the padding decision uses the box's CURRENT natural height
+            // (hidden children included in neither) — the TARGET must cover
+            // the all-children-visible height, so a later-shown child (the
+            // search chevrons) can never outgrow the unified height.
+            natural[i] = boxes[i].getPreferredSize().height;
+            int allVisible = naturalHeightWithAllChildrenVisible(boxes[i]);
+            if (allVisible > target) {
+                target = allVisible;
+            }
+        }
+        for (int i = 0; i < boxes.length; i++) {
+            int extra = target - natural[i];
+            if (extra <= 0) {
+                continue;
+            }
+            // ALL the padding goes on the BOTTOM: a TitledBorder's own insets
+            // computation ignores the inner border's TOP inset (the title owns
+            // the top edge) but does count bottom / left / right — measured,
+            // not modeled, on the L&F's TitledBorder.
+            Border inner = BorderFactory.createEmptyBorder(0, 0, extra, 0);
+            Border border = boxes[i].getBorder();
+            if (border instanceof TitledBorder titled) {
+                titled.setBorder(BorderFactory.createCompoundBorder(titled.getBorder(), inner));
+            } else {
+                boxes[i].setBorder(BorderFactory.createCompoundBorder(border, inner));
+            }
+        }
+    }
+
+    /**
+     * The box's natural preferred height with EVERY child visible — the
+     * height a child that starts hidden (the search match counter and
+     * chevrons) would demand once shown. The original visibilities are
+     * restored.
+     */
+    private static int naturalHeightWithAllChildrenVisible(JComponent box) {
+        if (!(box instanceof java.awt.Container container)) {
+            return box.getPreferredSize().height;
+        }
+        List<java.awt.Component> hidden = new ArrayList<>();
+        for (java.awt.Component child : container.getComponents()) {
+            if (!child.isVisible()) {
+                hidden.add(child);
+            }
+        }
+        try {
+            for (java.awt.Component child : hidden) {
+                child.setVisible(true);
+            }
+            return box.getPreferredSize().height;
+        } finally {
+            for (java.awt.Component child : hidden) {
+                child.setVisible(false);
+            }
+        }
+    }
+
+    /**
+     * The x of {@code child} relative to {@code root} (walking the parent
+     * chain) — for a component laid out inside {@code root}.
+     */
+    private static int xRelativeTo(JComponent root, JComponent child) {
+        int x = 0;
+        for (JComponent k = child; k != null && k != root; k = k.getParent() instanceof JComponent p ? p : null) {
+            x += k.getBounds().x;
+        }
+        return x;
+    }
+
+    /**
+     * The text field of a combo editor (the editor component itself with the
+     * Basic L&F, its child text field with the Metal one).
+     */
+    private static JTextField findEditorTextField(JComponent c) {
+        if (c instanceof JTextField tf) {
+            return tf;
+        }
+        if (c instanceof java.awt.Container cont) {
+            for (java.awt.Component child : cont.getComponents()) {
+                if (child instanceof JTextField tf) {
+                    return tf;
+                }
+            }
+        }
+        return null;
     }
 
     /**
@@ -83,15 +401,33 @@ public class ConfigurationUtils {
     /**
      * Calculates and sets a fixed height for a component based on font metrics and
      * standard icon sizes to ensure consistent UI layout across different systems.
+     * <p>
+     * One-line controls are the exception: they size themselves from the LIVE
+     * metrics — a plain combo's natural height IS {@link #standardControlHeight()}
+     * (the very metric a plain combo measures), an editable one is padded to that
+     * same value by {@link #styleComboEditor} and a text input by
+     * {@link #styleInputComponent}. Pinning them would freeze the control at the
+     * font size it was built with (a later font growth would clip its text
+     * instead of growing the control), so for those only stale pins are cleared.
+     * <p>
+     * Containers are the second exception: a panel input (the db.URL section's
+     * wrapper) keeps its NATURAL multi-line height — pinning it to a one-line
+     * height squashes its whole content (the section's fields disappear).
      *
      * @param comp The component whose size should be fixed.
      */
     public static void fixComponentSize(JComponent comp) {
         comp.setPreferredSize(null);
         comp.setMinimumSize(null);
+        comp.setMaximumSize(null);
 
-        // Calculate target height based on font metrics to ensure it scales with font
-        // size
+        if (comp instanceof JPanel
+                || comp instanceof JComboBox
+                || comp instanceof JTextField || comp instanceof JPasswordField) {
+            return;
+        }
+
+        // Buttons / checkboxes: the font-metric pin (unchanged).
         Font font = comp.getFont() != null ? comp.getFont() : UIManager.getFont("Label.font");
         FontMetrics fm = comp.getFontMetrics(font);
         int fontHeight = fm.getHeight();
@@ -449,6 +785,7 @@ public class ConfigurationUtils {
         button.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
         button.setOpaque(false);
         button.setContentAreaFilled(false);
+        button.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
     }
 
     /**

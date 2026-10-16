@@ -2,6 +2,7 @@ package application.module.node.gui.configuration;
 
 import application.module.database.gui.DatabaseConfigurationPanel;
 import application.module.database.utils.DatabaseConfigurationUtils;
+import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -9,14 +10,17 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
+import javax.swing.border.Border;
 import javax.swing.border.EmptyBorder;
 import java.awt.Component;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -24,6 +28,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -249,6 +254,58 @@ class JdbcConfigurationPanelTest {
     }
 
     @Test
+    @DisplayName("the editable combos are styled like the configuration's unified dropdowns")
+    void editableCombosAreStyledLikeUnifiedDropdowns() throws Exception {
+        JdbcConfigurationPanel panel = onEdt(() -> buildPanel(linkChanges));
+        onEdt(() -> {
+            // manual mode: both the Profile and the DB-file combo are editable
+            panel.loadInitial(null, "jdbc:sqlite:file:./elsewhere/other.db", "", "");
+            return null;
+        });
+        final Object[] results = new Object[1];
+        onEdt(() -> {
+            List<String> errors = new ArrayList<>();
+            // the SINGLE standard height — the one place it is defined
+            int plainH = ConfigurationUtils.standardControlHeight();
+            checkEditableCombo(errors, "Profile", (JComboBox<?>) panel.getProfileComboComponent(), plainH);
+            checkEditableCombo(errors, "DB file", (JComboBox<?>) panel.getDbFileComboComponent(), plainH);
+            results[0] = errors;
+            return null;
+        });
+        @SuppressWarnings("unchecked")
+        List<String> errors = (List<String>) results[0];
+        assertTrue(errors.isEmpty(),
+                "the db.url section's editable combos must be styled like every other dropdown: " + errors);
+    }
+
+    /** One editable combo of the db.url section: no L&F editor border, unified height. */
+    private static void checkEditableCombo(List<String> errors, String name, JComboBox<?> combo, int plainH) {
+        JComponent editor = (JComponent) combo.getEditor().getEditorComponent();
+        JTextField field = null;
+        if (editor instanceof JTextField tf) {
+            field = tf;
+        } else if (editor instanceof java.awt.Container cont) {
+            for (Component child : cont.getComponents()) {
+                if (child instanceof JTextField tf) {
+                    field = tf;
+                }
+            }
+        }
+        if (field == null) {
+            errors.add(name + ": no editor text field found");
+            return;
+        }
+        if (!(field.getBorder() instanceof EmptyBorder)) {
+            errors.add(name + ": the editor field must carry no L&F border (got: " + field.getBorder() + ")");
+        }
+        int h = combo.getPreferredSize().height;
+        if (h != plainH) {
+            errors.add(name + ": the combo's preferred height must equal the plain combo's (combo H=" + h
+                    + ", plain H=" + plainH + ")");
+        }
+    }
+
+    @Test
     @DisplayName("rediscoverSqliteLink re-derives the link from a convention URL (manual rows only)")
     void rediscoverSqliteLink() throws Exception {
         JdbcConfigurationPanel panel = onEdt(() -> buildPanel(linkChanges));
@@ -311,7 +368,7 @@ class JdbcConfigurationPanelTest {
     }
 
     @Test
-    @DisplayName("requestLinkMode notifies the listener; unlinking restores the loaded baseline")
+    @DisplayName("requestLinkMode notifies the listener and composes unlinked URLs from the manual inputs")
     void linkModeToggleNotifiesAndPreservesValues() throws Exception {
         JdbcConfigurationPanel panel = onEdt(() -> buildPanel(linkChanges));
         int before = linkChanges.size();
@@ -330,14 +387,112 @@ class JdbcConfigurationPanelTest {
             return null;
         });
         assertFalse(panel.isLinkedMode(), "the link must turn off");
-        // The panel was never loaded with property values, so the manual-mode
-        // restore baseline is the default path — the linked URL (the fixture
-        // profile's database) must NOT leak into the manual fields.
+        // The untouched manual Path and DB-file defaults remain independent
+        // from the linked profile's database directory.
         assertEquals("jdbc:sqlite:file:./database/SQLite/signum.sqlite.db", panel.getJdbcUrl(),
-                "unlinking must restore the loaded baseline, not the linked URL");
+                "unlinking must compose the URL from the manual inputs, not the linked profile path");
         assertNotEquals(urlWhileLinked, panel.getJdbcUrl(),
-                "the linked URL must differ from the restored baseline here");
+                "the linked URL must differ from the manual URL here");
         assertTrue(linkChanges.size() > before2, "the unlink must be notified too");
+    }
+
+    @Test
+    @DisplayName("link toggles keep the profile, manual path, and DB-file inputs independent")
+    void linkTogglePreservesUnsavedProfileAndDbFile() throws Exception {
+        String profileName = "jdbc-link-toggle-" + System.nanoTime();
+        Path profileDir = Path.of("database", "SQLite", profileName);
+        Path firstFile = profileDir.resolve("a-initial.db");
+        Files.createDirectories(profileDir);
+        Files.createFile(firstFile);
+        try {
+            JdbcConfigurationPanel panel = onEdt(() -> buildPanel(linkChanges));
+            onEdt(() -> {
+                panel.loadInitial("SQLite:" + PROFILE, PROFILE_URL, "", "");
+                JdbcConfigurationPanel.JdbcState baseline = panel.getState();
+                panel.setBaselines(baseline, baseline);
+                ((JComboBox<?>) panel.getProfileComboComponent()).setSelectedItem(profileName);
+                JComboBox<?> dbCombo = (JComboBox<?>) panel.getDbFileComboComponent();
+                dbCombo.getEditor().setItem("z-unsaved.db");
+                return null;
+            });
+
+            String expectedUrl = "jdbc:sqlite:file:./database/SQLite/" + profileName + "/z-unsaved.db";
+            String manualUrl = "jdbc:sqlite:file:./database/SQLite/z-unsaved.db";
+            String manualPath = onEdt(() -> comboText((JComboBox<?>) panel.getPathFieldComponent()));
+            assertEquals(profileName, panel.getProfileName(), "the new profile selection is currently unsaved");
+            assertEquals(expectedUrl, panel.getJdbcUrl(), "the selected DB file forms the current URL");
+            assertFalse(onEdt(() -> comboContains((JComboBox<?>) panel.getDbFileComboComponent(), "z-unsaved.db")),
+                    "a custom current DB-file value must stay in the editor, not be added to the dropdown options");
+
+            onEdt(() -> {
+                panel.requestLinkMode(false);
+                return null;
+            });
+            assertFalse(panel.isLinkedMode());
+            assertEquals(manualUrl, panel.getJdbcUrl(),
+                    "manual mode must compose the independent Path and DB file, not use the linked profile path");
+            assertEquals(manualPath, onEdt(() -> comboText((JComboBox<?>) panel.getPathFieldComponent())),
+                    "unlinking must not copy the linked profile path into the manual Path field");
+            assertEquals(profileName,
+                    onEdt(() -> ((JComboBox<?>) panel.getProfileComboComponent()).getSelectedItem()),
+                    "unlinking must not discard the current profile selection");
+            assertEquals("z-unsaved.db",
+                    onEdt(() -> comboText((JComboBox<?>) panel.getDbFileComboComponent())),
+                    "unlinking must not discard the current DB-file selection");
+            assertFalse(onEdt(() -> comboContains((JComboBox<?>) panel.getDbFileComboComponent(), "z-unsaved.db")),
+                    "unlinking must not add the current DB-file value to the option list");
+
+            onEdt(() -> {
+                panel.requestLinkMode(true);
+                return null;
+            });
+            assertTrue(panel.isLinkedMode());
+            assertEquals(profileName, panel.getProfileName(),
+                    "relinking must restore the selected profile instead of the first SQLite profile");
+            assertEquals(manualPath, onEdt(() -> comboText((JComboBox<?>) panel.getPathFieldComponent())),
+                    "relinking must not change the independent manual Path field");
+            assertEquals("z-unsaved.db",
+                    onEdt(() -> comboText((JComboBox<?>) panel.getDbFileComboComponent())),
+                    "relinking must preserve the DB-file editor value even when options are refreshed");
+            assertEquals(expectedUrl, panel.getJdbcUrl(),
+                    "relinking must restore the unsaved DB-file selection");
+        } finally {
+            Files.deleteIfExists(firstFile);
+            Files.deleteIfExists(profileDir);
+        }
+    }
+
+    @Test
+    @DisplayName("manual SQLite Path is a styled editable dropdown with directory suggestions")
+    void manualPathIsAnEditableDropdown() throws Exception {
+        JdbcConfigurationPanel panel = onEdt(() -> buildPanel(linkChanges));
+        onEdt(() -> {
+            panel.loadInitial(null, "jdbc:sqlite:file:./database/SQLite/custom-location/custom.db", "", "");
+            return null;
+        });
+
+        JComboBox<?> pathCombo = onEdt(() -> (JComboBox<?>) panel.getPathFieldComponent());
+        assertTrue(onEdt(pathCombo::isEditable), "the Path input must accept arbitrary user-entered paths");
+        assertEquals("./database/SQLite/custom-location", onEdt(() -> comboText(pathCombo)),
+                "a custom current Path must remain in the editor");
+        assertTrue(onEdt(() -> comboContains(pathCombo, "./database/SQLite")),
+                "the dropdown should suggest the standard SQLite directory");
+        assertFalse(onEdt(() -> comboContains(pathCombo, "./database/SQLite/custom-location")),
+                "an arbitrary current Path must not be injected into the suggestion list");
+    }
+
+    private static String comboText(JComboBox<?> combo) {
+        Object editorValue = combo.getEditor().getItem();
+        return editorValue == null ? "" : editorValue.toString().trim();
+    }
+
+    private static boolean comboContains(JComboBox<?> combo, Object wanted) {
+        for (int i = 0; i < combo.getItemCount(); i++) {
+            if (wanted.equals(combo.getItemAt(i))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Test
@@ -527,7 +682,7 @@ class JdbcConfigurationPanelTest {
     }
 
     @Test
-    @DisplayName("the JDBC URL preview is a plain selectable text, not a bordered field")
+    @DisplayName("the JDBC URL preview is a read-only selectable text WITHOUT a text-box frame")
     void previewIsPlainSelectableText() throws Exception {
         JdbcConfigurationPanel panel = onEdt(() -> buildPanel(linkChanges));
         onEdt(() -> {
@@ -542,9 +697,13 @@ class JdbcConfigurationPanelTest {
         JTextField field = (JTextField) out[0];
         assertFalse(field.isEditable(), "the preview must not be editable");
         assertFalse(field.isOpaque(), "the preview must not paint a field background");
-        assertTrue(field.getBorder() instanceof EmptyBorder,
-                "the preview must carry no bordered field rectangle (only padding); got "
-                        + field.getBorder());
+        // The requirement: the URL must stay selectable but must NOT sit in a
+        // text-box-like frame — the L&F field border is gone (empty border),
+        // while the unified one-line height of the regular inputs is kept.
+        assertTrue(field.getBorder() instanceof javax.swing.border.EmptyBorder,
+                "the preview must NOT carry the L&F text-box frame; got " + field.getBorder());
+        assertEquals(ConfigurationUtils.standardControlHeight(), field.getPreferredSize().height,
+                "the preview must share the standard one-line height of the regular inputs");
     }
 
     @Test
@@ -595,6 +754,128 @@ class JdbcConfigurationPanelTest {
             assertTrue(panel.isLinkedMode(),
                     "no profile for the new engine: the checkbox still stays on");
             assertEquals("", panel.getLink(), "a link exists only with a profile");
+        } finally {
+            if (mariaCreated) {
+                Files.deleteIfExists(mariaDir.resolve("profile.json"));
+                Files.deleteIfExists(mariaDir);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("every one-line control of the section shares the standard height (unified, font-derived)")
+    void allOneLineControlsShareTheStandardHeight() throws Exception {
+        JdbcConfigurationPanel panel = onEdt(() -> buildPanel(linkChanges));
+        onEdt(() -> {
+            panel.loadInitial("SQLite:" + PROFILE, PROFILE_URL, "", "");
+            return null;
+        });
+        final Object[] out = new Object[2];
+        onEdt(() -> {
+            out[0] = panel;
+            out[1] = Integer.valueOf(ConfigurationUtils.standardControlHeight());
+            return null;
+        });
+        JdbcConfigurationPanel p = (JdbcConfigurationPanel) out[0];
+        int standard = (Integer) out[1];
+        List<String> errors = new ArrayList<>();
+        checkHeight(errors, "engine select", p.getEngineComboComponent(), standard);
+        checkHeight(errors, "profile select", p.getProfileComboComponent(), standard);
+        checkHeight(errors, "db file select", p.getDbFileComboComponent(), standard);
+        checkHeight(errors, "database field", p.getDatabaseField(), standard);
+        checkHeight(errors, "host field", p.getHostField(), standard);
+        checkHeight(errors, "port field", p.getPortField(), standard);
+        checkHeight(errors, "suffix field", p.getSuffixField(), standard);
+        checkHeight(errors, "username field", p.getUserEditComponent(), standard);
+        checkHeight(errors, "password field", p.getPassField(), standard);
+        checkHeight(errors, "preview field", p.getPreviewField(), standard);
+        assertTrue(errors.isEmpty(),
+                "all one-line controls must share the standard one-line height (standard H="
+                        + standard + "): " + errors);
+    }
+
+    private static void checkHeight(List<String> errors, String name, JComponent comp, int standard) {
+        int h = comp.getPreferredSize().height;
+        if (h != standard) {
+            errors.add(name + " H=" + h);
+        }
+    }
+
+    @Test
+    @DisplayName("the JDBC URL preview is selectable text WITHOUT a text-box frame (no L&F field border)")
+    void previewIsFramelessButSelectable() throws Exception {
+        JdbcConfigurationPanel panel = onEdt(() -> buildPanel(linkChanges));
+        onEdt(() -> {
+            panel.loadInitial("SQLite:" + PROFILE, PROFILE_URL, "", "");
+            return null;
+        });
+        final Object[] out = new Object[3];
+        onEdt(() -> {
+            JTextField preview = (JTextField) panel.getPreviewField();
+            out[0] = preview.getBorder();
+            out[1] = preview.isEditable();
+            out[2] = preview.isOpaque();
+            return null;
+        });
+        Border border = (Border) out[0];
+        assertNotNull(border, "the preview keeps an (empty) border for its text insets");
+        assertTrue(border instanceof EmptyBorder,
+                "the preview must NOT carry the L&F text-box frame (the field border) — its border must be empty, got "
+                        + border.getClass().getName());
+        assertFalse((Boolean) out[1], "the preview stays read-only (it is a preview, not an input)");
+        // A non-editable text field is still fully selectable/copyable.
+        assertFalse(((JTextField) panel.getPreviewField()).isEditable());
+        assertFalse((Boolean) out[2], "the preview has no field background (transparent)");
+        // The preview text still aligns with the real inputs' text start
+        // (the shared plain-combo text margin — only the FRAME is gone).
+        onEdt(() -> {
+            EmptyBorder eb = (EmptyBorder) panel.getPreviewField().getBorder();
+            int left = eb.getBorderInsets(panel.getPreviewField()).left;
+            int plainComboTextX = ConfigurationUtils.plainComboTextX();
+            assertTrue(left >= plainComboTextX - 2 && left <= plainComboTextX + 2,
+                    "the preview text must start at the unified text margin (left=" + left + ", margin=" + plainComboTextX + ")");
+            return null;
+        });
+    }
+
+    @Test
+    @DisplayName("linked server mode shows the instance select (not an empty text field) and the derived host/port")
+    void linkedServerShowsTheInstanceSelectAndDerivedFields() throws Exception {
+        Path mariaDir = Path.of("database", "MariaDB", PROFILE);
+        boolean mariaCreated = false;
+        try {
+            if (!Files.exists(mariaDir.resolve("profile.json"))) {
+                Files.createDirectories(mariaDir);
+                Files.writeString(mariaDir.resolve("profile.json"),
+                        "{\"databases\":[{\"name\":\"appdb\",\"url\":\"" + MARIADB_URL + "\","
+                                + "\"users\":[{\"username\":\"alice\",\"password\":\"secret\"}]}]}");
+                mariaCreated = true;
+            }
+            JdbcConfigurationPanel panel = onEdt(() -> buildPanel(linkChanges));
+            onEdt(() -> {
+                panel.loadInitial("MariaDB:" + PROFILE, MARIADB_URL, "alice", "secret");
+                return null;
+            });
+            assertTrue(panel.isLinkedMode(), "the materializing recorded link must be linked");
+            // The db row must show the INSTANCE SELECT (the FILE card) with the
+            // profile's instance — an empty manual text field used to be shown
+            // instead, so the section's input "did not appear" for linked
+            // server profiles.
+            JComponent dbCombo = panel.getDbFileComboComponent();
+            JComponent databaseField = panel.getDatabaseField();
+            assertTrue(dbCombo.isVisible(),
+                    "the linked server mode must show the instance select");
+            assertFalse(databaseField.isVisible(),
+                    "the manual database text field must be hidden in linked mode");
+            // The read-only host/port rows mirror the selected instance's URL
+            // (AD-03) — they used to keep the construction-time values
+            // (the section looked empty / stale for linked server profiles).
+            assertEquals("db.example", ((JTextField) panel.getHostField()).getText(),
+                    "the host row must derive from the selected instance's URL");
+            assertEquals("3306", ((JTextField) panel.getPortField()).getText(),
+                    "the port row must derive from the selected instance's URL");
+            assertEquals(MARIADB_URL, panel.getJdbcUrl());
+            assertEquals("alice", panel.getUsername());
         } finally {
             if (mariaCreated) {
                 Files.deleteIfExists(mariaDir.resolve("profile.json"));

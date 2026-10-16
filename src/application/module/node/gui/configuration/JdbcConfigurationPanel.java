@@ -14,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.swing.*;
+import javax.swing.border.Border;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -118,7 +119,7 @@ public class JdbcConfigurationPanel extends JPanel {
     private final JComboBox<DatabaseConfigurationPanel.DatabaseEngine> engineCombo;
     /** The linked database profile (declared field — part of the test contract). */
     private final JComboBox<String> profileCombo;
-    private final JTextField pathField;
+    private final JComboBox<String> pathCombo;
     /** The DB file (SQLite) / database instance (linked server) select. */
     private final JComboBox<Object> dbCombo;
     private final JTextField databaseField;
@@ -148,32 +149,10 @@ public class JdbcConfigurationPanel extends JPanel {
     private String originalUsername = "";
     private String originalPassword = "";
     private boolean manualFieldsTouched = false;
-    /**
-     * The property-derived values the panel was loaded with (the manual-mode
-     * restore baseline): {@link #requestLinkMode(boolean)} turning the link
-     * off restores these — the Path and the credentials always come from the
-     * profile's properties, never from the effective (linked) values.
-     */
+    /** Property-derived baseline retained for untouched manual configurations. */
     private String savedUrl = "";
     private String savedUsername = "";
     private String savedPassword = "";
-    /**
-     * The manual (possibly UNSAVED) values remembered when the link was turned
-     * ON, so a later turn-OFF restores the user's edits instead of the saved
-     * baseline — a link toggle must not discard unsaved work (the values keep
-     * their unsaved state). {@code null} until the first user link toggle.
-     */
-    private String manualBeforeLinkUrl;
-    private String manualBeforeLinkUser;
-    private String manualBeforeLinkPass;
-    private boolean hasManualBeforeLink = false;
-    /**
-     * Whether the user edited a manual-mode field since the last load
-     * ({@link #loadInitial}). A link toggle preserves the (unsaved) manual
-     * values only when this is set — otherwise it restores the saved
-     * (loaded) baseline, so a clean row is never turned into a spurious edit.
-     */
-    private boolean manualEditedSinceLoad = false;
     private DbProfile currentProfile;
     private JdbcState savedState = new JdbcState("", "", "", "");
     private JdbcState appliedState = new JdbcState("", "", "", "");
@@ -194,7 +173,6 @@ public class JdbcConfigurationPanel extends JPanel {
      */
     private final Map<DatabaseConfigurationPanel.DatabaseEngine, EngineSnapshot> engineSnapshots =
             new EnumMap<>(DatabaseConfigurationPanel.DatabaseEngine.class);
-
     /** The engine the panel showed before the most recent engine change. */
     private DatabaseConfigurationPanel.DatabaseEngine lastEngine = DatabaseConfigurationPanel.DatabaseEngine.SQLITE;
 
@@ -238,7 +216,9 @@ public class JdbcConfigurationPanel extends JPanel {
         engineCombo.setSelectedItem(DatabaseConfigurationPanel.DatabaseEngine.SQLITE);
         profileCombo = new JComboBox<>();
         profileCombo.setEditable(true);
-        pathField = new JTextField("./database/SQLite");
+        pathCombo = new JComboBox<>();
+        pathCombo.setEditable(true);
+        pathCombo.getEditor().setItem("./database/SQLite");
         dbCombo = new JComboBox<>();
         dbCombo.setEditable(true);
         databaseField = new JTextField();
@@ -274,14 +254,15 @@ public class JdbcConfigurationPanel extends JPanel {
 
         dbSlot = slot("FILE", dbCombo, "TEXT", databaseField);
         userSlot = slot("FIELD", userField, "COMBO", userCombo);
-        passSlot = new JPanel(new MigLayout("insets 0, fillx, gap 4", "[grow][]"));
+        passSlot = new JPanel(new MigLayout("insets 0, fillx, gap " + ConfigurationUtils.INPUT_ACTION_GAP,
+                "[grow][]"));
         passSlot.setOpaque(false);
         passSlot.add(passField, "growx");
         passSlot.add(showPass);
 
         style(engineCombo);
         style(profileCombo);
-        style(pathField);
+        style(pathCombo);
         style(dbCombo);
         style(databaseField);
         style(hostField);
@@ -291,10 +272,18 @@ public class JdbcConfigurationPanel extends JPanel {
         style(userCombo);
         style(passField);
         stylePreviewText(previewField);
+        // The EDITABLE combos get the same editor unification (no inner L&F
+        // field border, plain-combo text margin and preferred height) as the
+        // configuration's state-aware dropdowns — so the db.url section's
+        // dropdowns behave exactly like every other one. (engineCombo and
+        // userCombo are non-editable and keep the L&F's own chrome.)
+        ConfigurationUtils.styleComboEditor(profileCombo);
+        ConfigurationUtils.styleComboEditor(pathCombo);
+        ConfigurationUtils.styleComboEditor(dbCombo);
 
         addRow(engineLabel, engineCombo);
         addRow(profileLabel, profileCombo);
-        addRow(pathLabel, pathField);
+        addRow(pathLabel, pathCombo);
         addRow(dbLabel, dbSlot);
         addRow(hostLabel, hostField);
         addRow(portLabel, portField);
@@ -305,6 +294,7 @@ public class JdbcConfigurationPanel extends JPanel {
 
         installListeners();
         installStateRenderers();
+        refreshSqlitePathOptions();
         applyModeVisibility();
     }
 
@@ -342,15 +332,63 @@ public class JdbcConfigurationPanel extends JPanel {
     }
 
     /**
-     * The composed-URL preview is a plain selectable text part, not an input
-     * field: it carries the input padding but no field chrome — no border,
-     * transparent background. It stays selectable (non-editable).
+     * The composed-URL preview: selectable/copyable but read-only — NO
+     * text-box frame around it (the requirement: the URL must stay
+     * selectable WITHOUT looking like an input field). It keeps the unified
+     * input metrics (the same font, the same one-line height and the same
+     * left text margin as the other rows, so the preview text aligns exactly
+     * with the fields' text), but its border is EMPTY — there is no L&F
+     * field border to draw a box around the URL. The field stays
+     * non-editable (so it can never be typed into) while remaining fully
+     * selectable and copyable, and transparent (no field background).
      */
     private static void stylePreviewText(JTextField field) {
-        ConfigurationUtils.styleInputComponent(field);
+        // Unified font + one-line height + left text margin — derived the
+        // SAME way as the real text inputs, but with an EMPTY border: the
+        // L&F border is only used to MEASURE the natural height (and to
+        // align the left inset with the plain-combo text x), never to paint.
+        // Its vertical insets are CARRIED INTO the empty border, so the
+        // frameless preview keeps exactly the unified one-line height.
+        field.setFont(UIManager.getFont("Label.font"));
+        Border fieldBorder = UIManager.getBorder("TextField.border");
+        field.setBorder(fieldBorder);
+        int naturalH = field.getPreferredSize().height;
+        int extra = Math.max(0, ConfigurationUtils.standardControlHeight() - naturalH);
+        int top = extra / 2;
+        int bottom = extra - top;
+        java.awt.Insets bi = fieldBorder == null ? new java.awt.Insets(0, 0, 0, 0) : fieldBorder.getBorderInsets(field);
+        int fieldLeft = bi.left;
+        int left = Math.max(0, ConfigurationUtils.plainComboTextX() - fieldLeft);
+        field.setBorder(BorderFactory.createEmptyBorder(bi.top + top, fieldLeft + left, bi.bottom + bottom, 6));
         field.setEditable(false);
         field.setOpaque(false);
-        field.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
+    }
+
+    /**
+     * Re-applies the one-line control unification (the unified border /
+     * height of every text input and the editor padding of the editable
+     * selects) from the LIVE metrics — the call the host's
+     * {@code updateUI()} makes after an L&F / font change, so the section's
+     * controls re-derive their heights from the NEW font exactly like the
+     * rest of the configuration.
+     */
+    public void reunifyControlStyles() {
+        style(engineCombo);
+        style(profileCombo);
+        style(pathCombo);
+        style(dbCombo);
+        style(databaseField);
+        style(hostField);
+        style(portField);
+        style(suffixField);
+        style(userField);
+        style(userCombo);
+        style(passField);
+        stylePreviewText(previewField);
+        ConfigurationUtils.styleComboEditor(profileCombo);
+        ConfigurationUtils.styleComboEditor(pathCombo);
+        ConfigurationUtils.styleComboEditor(dbCombo);
+        revalidate();
     }
 
     private void showSlot(JPanel slot, String card) {
@@ -471,7 +509,7 @@ public class JdbcConfigurationPanel extends JPanel {
                 // The manual Path's *.db files — manual SQLite only (in linked
                 // mode the DB file select belongs to the profile).
                 if (isSqlite() && !linked) {
-                    refreshSqliteFiles(Path.of(pathField.getText().trim()),
+                    refreshSqliteFiles(Path.of(pathSelection()),
                             (String) dbCombo.getSelectedItem(), true);
                 }
                 fireChange();
@@ -513,13 +551,12 @@ public class JdbcConfigurationPanel extends JPanel {
             fireLinkChanged();
         });
 
-        textChanges(pathField, () -> {
+        textChanges((JTextField) pathCombo.getEditor().getEditorComponent(), () -> {
             if (isProgrammatic()) {
                 return;
             }
             manualFieldsTouched = true;
-            manualEditedSinceLoad = true;
-            refreshSqliteFiles(Path.of(pathField.getText().trim()),
+            refreshSqliteFiles(Path.of(pathSelection()),
                     (String) dbCombo.getSelectedItem(), true);
             fireChange();
         });
@@ -546,8 +583,9 @@ public class JdbcConfigurationPanel extends JPanel {
                 return;
             }
             if (isSqlite()) {
-                manualFieldsTouched = true;
-                manualEditedSinceLoad = true;
+                if (!linked) {
+                    manualFieldsTouched = true;
+                }
             }
             fireChange();
         });
@@ -560,8 +598,20 @@ public class JdbcConfigurationPanel extends JPanel {
                 refreshUserList();
             }
             if (isSqlite()) {
-                manualFieldsTouched = true;
+                if (!linked) {
+                    manualFieldsTouched = true;
+                }
             }
+            fireChange();
+        });
+
+        pathCombo.addActionListener(e -> {
+            if (isProgrammatic() || linked || !isSqlite()) {
+                return;
+            }
+            manualFieldsTouched = true;
+            refreshSqliteFiles(Path.of(pathSelection()),
+                    sqliteFileSelection(), true);
             fireChange();
         });
 
@@ -612,9 +662,6 @@ public class JdbcConfigurationPanel extends JPanel {
      * only the "edited since load" mark is user-only.
      */
     private void markManualEdit() {
-        if (!isProgrammatic()) {
-            manualEditedSinceLoad = true;
-        }
         fireChange();
     }
 
@@ -661,15 +708,17 @@ public class JdbcConfigurationPanel extends JPanel {
 
         // Path: manual SQLite only.
         pathLabel.setVisible(!linked && sqlite);
-        pathField.setVisible(!linked && sqlite);
+        pathCombo.setVisible(!linked && sqlite);
 
         // DB file (SQLite) vs. Database text field (manual server): one row
-        // that exists in EVERY mode (linked mode picks the file/instance from
-        // the profile), so the label stays visible; the text follows the
-        // engine.
+        // that exists in EVERY mode — the select (FILE card) whenever the
+        // profile (or the path) supplies the list: linked mode (the profile's
+        // *.db files / instance list) and manual SQLite (the path's *.db
+        // files); the free-form text field (TEXT card) only for a manual
+        // server URL.
         dbLabel.setVisible(true);
         dbLabel.setText(sqlite ? "DB file:" : "Database:");
-        showSlot(dbSlot, sqlite ? "FILE" : "TEXT");
+        showSlot(dbSlot, (sqlite || linked) ? "FILE" : "TEXT");
 
         // Host/Port/Suffix: server engines only; read-only when linked
         // (derived from the instance URL — AD-03).
@@ -714,60 +763,60 @@ public class JdbcConfigurationPanel extends JPanel {
      * Requests a link-mode toggle (the host's "Linked Database Profile"
      * checkbox). Turning the link on materializes it from the current engine +
      * profile selection (a server engine without any database profile rejects
-     * the link — a link exists only with a profile). Turning it off restores
-     * the property-derived values the panel was loaded with — the Path and
-     * the credentials always come from the profile's properties, never from
-     * the effective (linked) values.
+     * the link — a link exists only with a profile). Turning it off changes
+     * only the URL composition mode: the manual Path, Profile and DB-file
+     * inputs remain independent and keep their current values. Re-enabling
+     * the link restores the linked profile path while retaining the selected
+     * profile and DB file.
      */
     public void requestLinkMode(boolean newLinked) {
         if (newLinked == linked) {
             applyModeVisibility();
             return;
         }
+        boolean enableLink = newLinked;
+        String selectedProfile = getProfileName();
+        String selectedSqliteFile = isSqlite() ? sqliteFileSelection() : "";
         programmaticDepth++;
         try {
-            if (newLinked) {
-                // Remember the manual (possibly UNSAVED) values we are leaving:
-                // a later unlink must restore them, not the saved baseline — a
-                // link toggle must not discard the user's dirty edits (they
-                // keep their unsaved state in the manual fields).
-                manualBeforeLinkUrl = getJdbcUrl();
-                manualBeforeLinkUser = getUsername();
-                manualBeforeLinkPass = getPassword();
-                hasManualBeforeLink = true;
+            if (enableLink && !isSqlite() && profileCombo.getItemCount() == 0) {
                 refreshProfileList();
-                if (!isSqlite() && profileCombo.getItemCount() == 0) {
-                    // No database profile for this engine: the link cannot
-                    // exist — stay in manual mode.
+                if (profileCombo.getItemCount() == 0) {
                     LOGGER.warn("No {} database profile available — the link stays off", getEngine());
-                } else {
-                    if (profileCombo.getSelectedItem() == null && profileCombo.getItemCount() > 0) {
-                        profileCombo.setSelectedItem(profileCombo.getItemAt(0));
-                    }
-                    setLinkedInternal(true);
-                    refreshInstanceList();
+                    enableLink = false;
                 }
-            } else {
-                // Restore the manual fields. When the user edited a manual
-                // field since the last load (unsaved work), preserve those
-                // values (captured on the last link-ON) instead of resetting
-                // to the saved baseline — a link toggle must not discard the
-                // user's dirty edits. Otherwise restore the saved (loaded)
-                // baseline as before. loadManual rewrites the manual-restore
-                // baseline, so it is backed up and restored — the saved
-                // baseline must not drift to the (possibly dirty) values.
-                boolean dirty = hasManualBeforeLink && manualEditedSinceLoad;
-                String url = dirty ? manualBeforeLinkUrl : savedUrl;
-                String user = dirty ? manualBeforeLinkUser : savedUsername;
-                String pass = dirty ? manualBeforeLinkPass : savedPassword;
+            }
+            if (enableLink) {
+                refreshProfileList();
+                if (profileCombo.getSelectedItem() == null && profileCombo.getItemCount() > 0) {
+                    profileCombo.setSelectedItem(profileCombo.getItemAt(0));
+                }
+                setLinkedInternal(true);
+                if (isSqlite() && !selectedProfile.isEmpty()) {
+                    profileCombo.setEditable(true);
+                    if (!comboContains(profileCombo, selectedProfile)) {
+                        profileCombo.addItem(selectedProfile);
+                    }
+                    profileCombo.setSelectedItem(selectedProfile);
+                }
+                refreshInstanceList();
+                if (isSqlite() && !selectedSqliteFile.isEmpty()) {
+                    selectSqliteFile(selectedSqliteFile);
+                }
+            } else if (!newLinked) {
+                if (isSqlite() && !selectedProfile.isEmpty()
+                        && !comboContains(profileCombo, selectedProfile)) {
+                    profileCombo.addItem(selectedProfile);
+                    profileCombo.setSelectedItem(selectedProfile);
+                }
                 setLinkedInternal(false);
-                String savedUrlBackup = savedUrl;
-                String savedUserBackup = savedUsername;
-                String savedPassBackup = savedPassword;
-                loadManual(url, user, pass);
-                savedUrl = savedUrlBackup;
-                savedUsername = savedUserBackup;
-                savedPassword = savedPassBackup;
+                if (isSqlite()) {
+                    // The mode toggle changes only the URL's directory source:
+                    // manual mode always uses the independent Path input, never
+                    // the hidden linked-profile directory.
+                    manualFieldsTouched = true;
+                    refreshSqliteFiles(Path.of(pathSelection()), selectedSqliteFile, false);
+                }
             }
         } finally {
             programmaticDepth--;
@@ -841,7 +890,7 @@ public class JdbcConfigurationPanel extends JPanel {
      * </ol>
      * <p>
      * The given (property-derived) values are also remembered as the
-     * manual-mode restore baseline ({@link #requestLinkMode(boolean)}).
+     * untouched manual-mode baseline.
      * </p>
      *
      * @param explicitLink the recorded {@code "Engine:Profile"} link (server
@@ -855,8 +904,6 @@ public class JdbcConfigurationPanel extends JPanel {
         this.savedUrl = url == null ? "" : url.trim();
         this.savedUsername = username == null ? "" : username.trim();
         this.savedPassword = password == null ? "" : password.trim();
-        hasManualBeforeLink = false;
-        manualEditedSinceLoad = false;
         String explicit = explicitLink == null ? "" : explicitLink.trim();
         if (explicit.contains(":")) {
             int idx = explicit.indexOf(':');
@@ -899,8 +946,6 @@ public class JdbcConfigurationPanel extends JPanel {
         engineSnapshots.clear();
         profileSnapshots.clear();
         lastProfileLink = "";
-        hasManualBeforeLink = false;
-        manualEditedSinceLoad = false;
     }
 
     /**
@@ -973,7 +1018,8 @@ public class JdbcConfigurationPanel extends JPanel {
                     }
                     file = parts.fileName();
                 }
-                pathField.setText(dir);
+                setPathSelection(dir);
+                refreshSqlitePathOptions();
                 refreshSqliteFiles(Path.of(dir), file, false);
             } else {
                 Matcher m = DatabaseConfigurationUtils.JDBC_URL_PATTERN.matcher(originalUrl);
@@ -1002,6 +1048,7 @@ public class JdbcConfigurationPanel extends JPanel {
     public void forceManual(String url, String username, String password) {
         programmaticDepth++;
         try {
+            profileSnapshots.clear();
             if (linked) {
                 setLinkedInternal(false);
             }
@@ -1179,7 +1226,7 @@ public class JdbcConfigurationPanel extends JPanel {
             if (!manualFieldsTouched && !originalUrl.isEmpty()) {
                 return originalUrl;
             }
-            String path = pathField.getText().trim();
+            String path = pathSelection();
             if (path.isEmpty()) {
                 path = ".";
             }
@@ -1257,6 +1304,7 @@ public class JdbcConfigurationPanel extends JPanel {
     /** Re-scans the database profiles of the current engine into the select. */
     public void refreshProfiles() {
         refreshProfileList();
+        refreshSqlitePathOptions();
         refreshInstanceList();
         applyModeVisibility();
         updatePreviewText();
@@ -1284,6 +1332,7 @@ public class JdbcConfigurationPanel extends JPanel {
     private void refreshInstanceList() {
         programmaticDepth++;
         try {
+            String selectedSqliteFile = isSqlite() ? sqliteFileSelection() : "";
             currentProfile = null;
             dbCombo.removeAllItems();
             String profileName = getProfileName();
@@ -1310,6 +1359,9 @@ public class JdbcConfigurationPanel extends JPanel {
                     }
                     files.add(ProfileCreateDefaults.DEFAULT_SQLITE_FILE_NAME);
                     files.forEach(dbCombo::addItem);
+                    if (!selectedSqliteFile.isEmpty()) {
+                        setSqliteFileSelection(selectedSqliteFile);
+                    }
                 } else if (currentProfile != null) {
                     currentProfile.databases.forEach(dbCombo::addItem);
                 }
@@ -1334,6 +1386,33 @@ public class JdbcConfigurationPanel extends JPanel {
             programmaticDepth--;
         }
         syncPasswordFromUser();
+        syncDerivedInstanceFields();
+    }
+
+    /**
+     * Linked server mode: the read-only Host/Port/Suffix rows mirror the
+     * selected instance's URL (AD-03) — without this they would keep the
+     * construction-time / last-manual values while the instance select holds
+     * the real ones (the section looked empty / stale for linked server
+     * profiles).
+     */
+    private void syncDerivedInstanceFields() {
+        DbInstance instance = selectedInstance();
+        if (!linked || isSqlite() || instance == null || instance.url == null) {
+            return;
+        }
+        Matcher m = DatabaseConfigurationUtils.JDBC_URL_PATTERN.matcher(instance.url);
+        if (!m.find()) {
+            return;
+        }
+        programmaticDepth++;
+        try {
+            hostField.setText(m.group(2));
+            portField.setText(m.group(3) != null ? m.group(3) : "");
+            suffixField.setText(m.group(5) != null ? m.group(5) : "");
+        } finally {
+            programmaticDepth--;
+        }
     }
 
     /**
@@ -1346,7 +1425,7 @@ public class JdbcConfigurationPanel extends JPanel {
             SqliteDatabasePaths.SqliteUrlParts parts = SqliteDatabasePaths.splitUrl(preferredUrl);
             String wanted = parts != null ? parts.fileName() : "";
             if (!wanted.isEmpty() && comboContains(dbCombo, wanted)) {
-                dbCombo.setSelectedItem(wanted);
+                setSqliteFileSelection(wanted);
             } else if (dbCombo.getItemCount() > 0 && dbCombo.getSelectedItem() == null) {
                 dbCombo.setSelectedItem(dbCombo.getItemAt(0));
             }
@@ -1401,14 +1480,56 @@ public class JdbcConfigurationPanel extends JPanel {
                 dbCombo.addItem(ProfileCreateDefaults.DEFAULT_SQLITE_FILE_NAME);
             }
             String w = wanted == null ? "" : wanted.trim();
-            if (!w.isEmpty() && comboContains(dbCombo, w)) {
-                dbCombo.setSelectedItem(w);
+            if (!w.isEmpty()) {
+                setSqliteFileSelection(w);
             } else if (autoSelectFirst && dbCombo.getItemCount() > 0 && dbCombo.getSelectedItem() == null) {
                 dbCombo.setSelectedItem(dbCombo.getItemAt(0));
             }
         } finally {
             programmaticDepth--;
         }
+    }
+
+    private void selectSqliteFile(String fileName) {
+        if (fileName == null || fileName.isBlank()) {
+            return;
+        }
+        setSqliteFileSelection(fileName);
+    }
+
+    private void setSqliteFileSelection(String fileName) {
+        dbCombo.setSelectedItem(fileName);
+        dbCombo.getEditor().setItem(fileName);
+    }
+
+    private void refreshSqlitePathOptions() {
+        String current = pathSelection();
+        programmaticDepth++;
+        try {
+            pathCombo.removeAllItems();
+            pathCombo.addItem("./database/SQLite");
+            for (String profile : DatabaseConfigurationUtils.getProfileNames(confFolder, "SQLite")) {
+                pathCombo.addItem("./database/SQLite/" + profile);
+            }
+            setPathSelection(current);
+        } finally {
+            programmaticDepth--;
+        }
+    }
+
+    private String pathSelection() {
+        if (pathCombo.isEditable() && pathCombo.getEditor() != null) {
+            Object value = pathCombo.getEditor().getItem();
+            if (value != null) {
+                return value.toString().trim();
+            }
+        }
+        Object selected = pathCombo.getSelectedItem();
+        return selected == null ? "" : selected.toString().trim();
+    }
+
+    private void setPathSelection(String path) {
+        pathCombo.getEditor().setItem(path == null ? "" : path);
     }
 
     private static boolean comboContains(JComboBox<?> combo, Object item) {
@@ -1455,8 +1576,9 @@ public class JdbcConfigurationPanel extends JPanel {
         paint(engineCombo, engineLabel,
                 statusOfValue(getEngine() == null ? "" : getEngine().toString(),
                         engineOfUrl(appliedState.url()), engineOfUrl(savedState.url())));
-        paint(pathField, pathLabel,
-                statusOfValue(dirOfUrl(getJdbcUrl()), dirOfUrl(appliedState.url()), dirOfUrl(savedState.url())));
+        paint(pathCombo, pathLabel, linked ? ValueState.APPLIED
+                : statusOfValue(SqliteDatabasePaths.normalize(pathSelection()),
+                        dirOfUrl(appliedState.url()), dirOfUrl(savedState.url())));
         // SQLite: the file select is the row's value; server engines: the
         // selected instance IS the URL.
         paint(dbCombo, dbLabel, isSqlite()
@@ -1495,10 +1617,11 @@ public class JdbcConfigurationPanel extends JPanel {
 
     /**
      * The value-state of a single per-row value, with the unsaved-first
-     * priority {@code UNSAVED > SAVED > APPLIED} (matching the shared
-     * {@code RowStateResolver}): UNSAVED when it differs from the saved value,
-     * SAVED when it equals the saved value but differs from the applied value,
-     * otherwise APPLIED.
+     * priority {@code UNSAVED > SAVED > APPLIED} (this section's 3-state
+     * display projection of the shared 4-state value model — a dirty row is
+     * plain UNSAVED here): UNSAVED when it differs from the saved value,
+     * SAVED when it equals the saved value but differs from the applied
+     * value, otherwise APPLIED.
      */
     private static ValueState statusOfValue(String current, String applied, String saved) {
         String c = current == null ? "" : current;
@@ -1569,7 +1692,20 @@ public class JdbcConfigurationPanel extends JPanel {
                 color = GuiColors.getUnsaved();
                 break;
         }
-        input.setForeground(color);
+        // An editable combo's visible text lives in the editor's field — the
+        // combo's own foreground does not reach it (same convention as the
+        // host's state-aware editable selects). Both are painted: the combo's
+        // foreground stays the component-level state (and the source an L&F-
+        // recreated editor field inherits from), the editor's the visible one.
+        JComponent target = input;
+        if (input instanceof JComboBox<?> combo && combo.isEditable() && combo.getEditor() != null
+                && combo.getEditor().getEditorComponent() instanceof JComponent editor) {
+            target = editor;
+        }
+        target.setForeground(color);
+        if (target != input) {
+            input.setForeground(color);
+        }
         if (label != null) {
             // The * marker signals an UNSAVED change only — an applied (green)
             // or a saved value carries no star.
@@ -1625,6 +1761,10 @@ public class JdbcConfigurationPanel extends JPanel {
                 p -> p,
                 () -> profileOfLink(appliedState.link()),
                 () -> profileOfLink(savedState.link()));
+        installStateRenderer(pathCombo,
+                p -> SqliteDatabasePaths.normalize(p),
+                () -> dirOfUrl(appliedState.url()),
+                () -> dirOfUrl(savedState.url()));
         installStateRenderer(dbCombo,
                 item -> item instanceof DbInstance d ? (d.url == null ? "" : d.url.trim())
                         : (item instanceof String s ? s : null),
@@ -1661,7 +1801,7 @@ public class JdbcConfigurationPanel extends JPanel {
             }
         } else {
             String dir = dirOfUrl(state.url());
-            String current = SqliteDatabasePaths.normalize(pathField.getText().trim());
+            String current = SqliteDatabasePaths.normalize(pathSelection());
             if (current.isEmpty() || !dir.equals(current)) {
                 return null;
             }
@@ -1699,9 +1839,34 @@ public class JdbcConfigurationPanel extends JPanel {
         return profileCombo;
     }
 
+    /** The independent manual SQLite path input. */
+    public JComponent getPathFieldComponent() {
+        return pathCombo;
+    }
+
     /** The SQLite DB file / server instance select (for hosts and tests). */
     public JComponent getDbFileComboComponent() {
         return dbCombo;
+    }
+
+    /** The manual-server database name field (the db row's text card). */
+    public JComponent getDatabaseField() {
+        return databaseField;
+    }
+
+    /** The host field (manual: editable; linked: the instance's derived value). */
+    public JComponent getHostField() {
+        return hostField;
+    }
+
+    /** The port field (manual: editable; linked: the instance's derived value). */
+    public JComponent getPortField() {
+        return portField;
+    }
+
+    /** The URL suffix field (manual: editable; linked: the instance's derived value). */
+    public JComponent getSuffixField() {
+        return suffixField;
     }
 
     /**
@@ -1724,4 +1889,3 @@ public class JdbcConfigurationPanel extends JPanel {
         return trimPhantomRowGap(super.getMinimumSize());
     }
 }
-

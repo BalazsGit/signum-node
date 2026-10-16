@@ -405,6 +405,8 @@ public class ColorSettingsPanel extends JPanel {
                 "Color used to indicate settings that are currently active/applied in configuration panels.");
         descriptions.put("saved",
                 "Color used to indicate settings that are saved in the configuration file but may not be currently applied.");
+        descriptions.put("unsavedApplied",
+                "Color used to indicate settings that match the running node but have not yet been saved to the profile file.");
 
         // Peer Metrics
         descriptions.put("peer.disconnected", "Color for peers that are currently disconnected.");

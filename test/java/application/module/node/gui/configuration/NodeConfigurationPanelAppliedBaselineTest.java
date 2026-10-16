@@ -25,9 +25,9 @@ import org.junit.jupiter.api.Test;
  * the node starts (falling back to the application defaults) and drifting
  * from the file's string form afterwards.
  * <p>
- * Covered: (1) the {@code valueStatus} SSOT resolves a value equal to the
- * loaded/applied baseline as APPLIED (and the rest of the saved/applied/
- * unsaved semantics), and (2) the panel initializes its applied baseline as
+ * Covered: (1) the {@code valueStatus} SSOT resolves the four value states
+ * (SAVED_APPLIED / UNSAVED_APPLIED / SAVED / UNSAVED) of the 2×2
+ * saved/applied matrix, and (2) the panel initializes its applied baseline as
  * the profile's loaded properties, and {@code loadAppliedProperties()} does
  * not disturb it.
  * </p>
@@ -41,21 +41,21 @@ class NodeConfigurationPanelAppliedBaselineTest {
     private static final Path META_FILE = Path.of("conf", "node", "profiles.json");
 
     @Test
-    @DisplayName("valueStatus: a value equal to the loaded (applied) baseline is APPLIED")
-    void valueStatus_loadedValueIsApplied() throws Exception {
+    @DisplayName("valueStatus: a freshly loaded value (current == saved == applied) is SAVED_APPLIED")
+    void valueStatus_loadedValueIsSavedApplied() throws Exception {
         // The reported scenario: the profile is loaded into the editor, so
-        // current == saved == applied — it must resolve to APPLIED (before the
-        // fix the applied baseline was empty/defaults, so this came out
-        // SAVED).
-        assertEquals("APPLIED", valueStatus(false, "44", "44", "44"),
+        // current == saved == applied — it must resolve to SAVED_APPLIED
+        // (before the fix the applied baseline was empty/defaults, so this
+        // came out SAVED).
+        assertEquals("SAVED_APPLIED", valueStatus(false, "44", "44", "44"),
                 "a freshly loaded profile value equals the applied baseline");
     }
 
     @Test
-    @DisplayName("valueStatus: a dirty edit is UNSAVED even when it matches the applied baseline")
-    void valueStatus_unsavedBeatsApplied() throws Exception {
-        assertEquals("UNSAVED", valueStatus(false, "99", "44", "99"),
-                "a value differing from the saved file is UNSAVED even when it matches the applied baseline (unsaved-first)");
+    @DisplayName("valueStatus: a dirty edit matching only the applied baseline is UNSAVED_APPLIED (never 'saved')")
+    void valueStatus_unsavedBeatsSaved() throws Exception {
+        assertEquals("UNSAVED_APPLIED", valueStatus(false, "99", "44", "99"),
+                "a value differing from the saved file but matching the applied baseline is UNSAVED_APPLIED (unsaved-first)");
     }
 
     @Test
@@ -75,10 +75,10 @@ class NodeConfigurationPanelAppliedBaselineTest {
     @Test
     @DisplayName("valueStatus: checkbox values compare parsed booleans")
     void valueStatus_checkboxBooleanComparison() throws Exception {
-        assertEquals("APPLIED", valueStatus(true, "true", "yes", "1"),
+        assertEquals("SAVED_APPLIED", valueStatus(true, "true", "yes", "1"),
                 "boolean spellings of the same on-state all compare equal (loaded=yes, applied=1)");
-        assertEquals("UNSAVED", valueStatus(true, "false", "true", "true"),
-                "a toggled-off checkbox differs from the on-state baseline");
+        assertEquals("UNSAVED_APPLIED", valueStatus(true, "off", "on", "false"),
+                "a toggled-off checkbox differing from the saved on-state but matching the applied off-state");
     }
 
     @Test

@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -131,13 +132,18 @@ class NodeConfigurationPanelUnsavedFilterTest {
             }
         }
 
-        // Find a clean row with a plain text field (outside the DB section,
-        // whose URL row aggregates the credential rows' dirty state).
+        // Find a clean row with an editable text input (a plain text field or
+        // the editor of a state-aware editable select — the regular input
+        // rows of the 4-state value model), outside the DB section, whose URL
+        // row aggregates the credential rows' dirty state.
         Object cleanRow = null;
         JTextField cleanField = null;
         for (Object row : readRows(panel)) {
             Object input = readField(row, "input");
-            if (input instanceof JTextField field && !isRowDirty(panel, row)
+            JTextField field = input instanceof JTextField tf ? tf
+                    : input instanceof JComboBox<?> cb && cb.isEditable()
+                            && cb.getEditor().getEditorComponent() instanceof JTextField ef ? ef : null;
+            if (field != null && !isRowDirty(panel, row)
                     && !propName(row).toLowerCase(Locale.ROOT).contains("db")) {
                 cleanRow = row;
                 cleanField = field;
@@ -145,7 +151,7 @@ class NodeConfigurationPanelUnsavedFilterTest {
             }
         }
         if (cleanRow == null) {
-            out.add("test premise not met: no clean plain-text row available to edit");
+            out.add("test premise not met: no clean editable-text row available to edit");
             return;
         }
         String original = cleanField.getText();
@@ -374,6 +380,22 @@ class NodeConfigurationPanelUnsavedFilterTest {
         if (row != searchBox.getParent() || statusIndex < 0 || searchIndex < 0 || statusIndex > searchIndex) {
             out.add("the \"Show values\" box must be a direct neighbor placed BEFORE the \"Search\" box "
                     + "(status parent: " + row + ", search parent: " + searchBox.getParent() + ")");
+            return;
+        }
+
+        // The two boxes must share the SAME unified height — preferred and
+        // laid out — tracking the standard combo height exactly like the
+        // dropdowns (ConfigurationUtils#unifyTitledBoxHeights).
+        if (statusPanel.getPreferredSize().height != searchBox.getPreferredSize().height) {
+            out.add("the \"Show values\" and \"Search\" boxes must have the same unified preferred height "
+                    + "(show-values pref H=" + statusPanel.getPreferredSize().height
+                    + ", search pref H=" + searchBox.getPreferredSize().height + ")");
+            return;
+        }
+        if (statusPanel.getHeight() != searchBox.getHeight()) {
+            out.add("the \"Show values\" and \"Search\" boxes must have the same laid-out height "
+                    + "(show-values H=" + statusPanel.getHeight()
+                    + ", search H=" + searchBox.getHeight() + ")");
             return;
         }
 

@@ -7,6 +7,7 @@ import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
@@ -176,7 +177,21 @@ public final class HelpDialog {
      * bold action name, and the wrapped description underneath.
      */
     public static JComponent actionRow(FontAwesome icon, Color color, String name, String description) {
-        JLabel glyph = new JLabel(IconFontSwing.buildIcon(icon, GuiConstants.getButtonIconSize(), color));
+        return actionRow(IconFontSwing.buildIcon(icon, GuiConstants.getButtonIconSize(), color),
+                name, description);
+    }
+
+    /**
+     * The custom-glyph variant of {@link #actionRow(FontAwesome, Color, String, String)}:
+     * for actions whose icon is NOT a FontAwesome code (e.g. the hand-drawn
+     * {@link SyncGlyphIcon} double circular arrow — the bundled FontAwesome 4.7
+     * predates the "sync" icon).
+     *
+     * @return a toolbar-action row: the given glyph, the bold action name, and the wrapped
+     * description underneath.
+     */
+    public static JComponent actionRow(Icon icon, String name, String description) {
+        JLabel glyph = new JLabel(icon);
         JLabel nameLabel = new JLabel(name);
         nameLabel.setFont(nameLabel.getFont().deriveFont(Font.BOLD));
         return row(glyph, nameLabel, description);

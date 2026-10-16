@@ -455,7 +455,7 @@ class NodeConfigurationPanelDatabaseAutoLinkTest {
         return (Boolean) out[0];
     }
 
-    /** Reads a plain text row's field value from the EDT. */
+    /** Reads a value row's current text from the EDT (plain field or state-aware select editor). */
     private static String fieldText(NodeConfigurationPanel panel, String key) throws Exception {
         final Object[] out = new Object[1];
         SwingUtilities.invokeAndWait(() -> {
@@ -464,8 +464,7 @@ class NodeConfigurationPanelDatabaseAutoLinkTest {
                 f.setAccessible(true);
                 @SuppressWarnings("unchecked")
                 Map<String, javax.swing.JComponent> comps = (Map<String, javax.swing.JComponent>) f.get(panel);
-                javax.swing.JComponent c = comps.get(key);
-                out[0] = c instanceof javax.swing.JTextField ? ((javax.swing.JTextField) c).getText() : null;
+                out[0] = editableText(comps.get(key)).getText();
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -473,7 +472,7 @@ class NodeConfigurationPanelDatabaseAutoLinkTest {
         return (String) out[0];
     }
 
-    /** Types into a plain text row's field on the EDT (commits as an unsaved change). */
+    /** Types into a value row's editor on the EDT (commits as an unsaved change). */
     private static void setFieldText(NodeConfigurationPanel panel, String key, String value) throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             try {
@@ -481,11 +480,23 @@ class NodeConfigurationPanelDatabaseAutoLinkTest {
                 f.setAccessible(true);
                 @SuppressWarnings("unchecked")
                 Map<String, javax.swing.JComponent> comps = (Map<String, javax.swing.JComponent>) f.get(panel);
-                ((javax.swing.JTextField) comps.get(key)).setText(value);
+                editableText(comps.get(key)).setText(value);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
         });
+    }
+
+    /** The editor text field of a value row (plain field or state-aware select). */
+    private static javax.swing.JTextField editableText(javax.swing.JComponent c) {
+        if (c instanceof javax.swing.JTextField tf) {
+            return tf;
+        }
+        if (c instanceof javax.swing.JComboBox<?> cb && cb.isEditable()
+                && cb.getEditor().getEditorComponent() instanceof javax.swing.JTextField ef) {
+            return ef;
+        }
+        throw new AssertionError("no editable text input for component: " + c);
     }
 }
 

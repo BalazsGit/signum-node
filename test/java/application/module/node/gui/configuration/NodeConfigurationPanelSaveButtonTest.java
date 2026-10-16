@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import javax.swing.JButton;
 import javax.swing.JDialog;
+import javax.swing.JComboBox;
 import javax.swing.JFrame;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
@@ -82,7 +83,9 @@ class NodeConfigurationPanelSaveButtonTest {
             }
             assertNotNull(ready[0], "the panel UI must finish initializing");
 
-            // Pick a plain text-field row and edit it.
+            // Pick an editable text row (a plain text field or the editor of a
+            // state-aware editable select — the regular input rows of the
+            // 4-state value model) and edit it.
             final Object[] editInfo = new Object[2]; // [0]=row, [1]=JTextField
             final AtomicReference<String> newValue = new AtomicReference<>();
             SwingUtilities.invokeAndWait(() -> {
@@ -90,7 +93,10 @@ class NodeConfigurationPanelSaveButtonTest {
                     List<Object> rows = (List<Object>) readDeclaredField(panelRef[0], "allPropertyRows");
                     for (Object row : rows) {
                         Object input = readField(row, "input");
-                        if (input instanceof JTextField tf) {
+                        JTextField tf = input instanceof JTextField f ? f
+                                : input instanceof JComboBox<?> cb && cb.isEditable()
+                                        && cb.getEditor().getEditorComponent() instanceof JTextField ef ? ef : null;
+                        if (tf != null) {
                             editInfo[0] = row;
                             editInfo[1] = tf;
                             tf.requestFocusInWindow();
@@ -108,7 +114,7 @@ class NodeConfigurationPanelSaveButtonTest {
                     throw new RuntimeException(e);
                 }
             });
-            assertNotNull(editInfo[1], "a text field row must exist to edit");
+            assertNotNull(editInfo[1], "an editable-text row must exist to edit");
 
             // Let the document listeners (invokeLater) run, then check the button state.
             Thread.sleep(500);
@@ -125,8 +131,6 @@ class NodeConfigurationPanelSaveButtonTest {
                 }
             });
             assertNotNull(btnState[1], "saveBtn must exist");
-            System.out.println("[SAVEREPRO] saveBtn.isEnabled() after edit = " + btnState[1]
-                    + ", applyBtn.isEnabled() = " + btnState[2]);
             assertTrue((Boolean) btnState[1], "Save must be enabled after a dirty edit");
             // No saved-but-not-applied change yet (the edit is only unsaved), so
             // Apply must still be inactive — the two buttons are independent.
@@ -189,7 +193,6 @@ class NodeConfigurationPanelSaveButtonTest {
                 throw new IllegalStateException("the save click was not dispatched to the EDT");
             }
             watcher.join(25_000);
-            System.out.println("[SAVEREPRO] dialogSeen = " + dialogSeen.get());
             assertTrue(dialogSeen.get() != null,
                     "clicking Save must open the Save Configuration dialog");
 

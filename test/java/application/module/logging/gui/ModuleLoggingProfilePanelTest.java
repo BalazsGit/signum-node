@@ -1,5 +1,6 @@
 package application.module.logging.gui;
 
+import application.module.appearance.AppearanceModule;
 import application.module.logging.LoggingProfileRepository;
 import application.utils.gui.ComboSearchHighlightRenderer;
 import application.utils.gui.GuiColors;
@@ -24,10 +25,14 @@ import javax.swing.JTextField;
 import javax.swing.Timer;
 import javax.swing.ListCellRenderer;
 import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
 import javax.swing.border.TitledBorder;
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Cursor;
+import java.awt.Font;
 import java.awt.GraphicsEnvironment;
 import java.awt.KeyboardFocusManager;
 import java.awt.Window;
@@ -55,7 +60,7 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
  * inspection are pumped on the EDT, mirroring {@code LoggingPanelTest}/{@code NodeLoggingPanelTest}).
  * <p>
  * Verifies the icon-only CRUD toolbar (top, no header text), the search row (profile
- * selector left of the search, above the "Logger levels" frame), the per-key value-typed
+ * selector right of the search, above the "Logger levels" frame), the per-key value-typed
  * editor rows, and the host extension points ({@code setLinkControl}, {@code setApplyHook}).
  * </p>
  */
@@ -314,13 +319,20 @@ class ModuleLoggingProfilePanelTest {
     }
 
     @Test
-    @DisplayName("value-typed editors: log level â†’ combo, other â†’ text field")
+    @DisplayName("level rows are CLASSIC (non-editable) combos over the fixed level list; other rows EDITABLE combos (their baselines)")
     void valueTypedEditors() {
         ModuleLoggingProfilePanel panel = newPanel();
-        assertInstanceOf(JComboBox.class, editorAfterLabel(panel, "test.level"),
+        JComboBox<?> levelEditor = assertInstanceOf(JComboBox.class, editorAfterLabel(panel, "test.level"),
                 "a log-level key must use a combo editor");
-        assertInstanceOf(JTextField.class, editorAfterLabel(panel, "test.handler"),
-                "a non-level key must use a text-field editor");
+        assertFalse(levelEditor.isEditable(),
+                "the log-level editor is a classic (non-editable) dropdown over the predefined level list");
+        assertEquals(9, levelEditor.getItemCount(), "the level dropdown offers the fixed LOG_LEVELS list");
+        assertEquals("INFO", String.valueOf(levelEditor.getSelectedItem()),
+                "the template row's default level (INFO) is selected");
+        JComboBox<?> handlerEditor = assertInstanceOf(JComboBox.class, editorAfterLabel(panel, "test.handler"),
+                "a non-level key must use an editable combo too (no plain text field)");
+        assertTrue(handlerEditor.isEditable(),
+                "the non-level editor is an editable combo (no predefined value list, only the state baselines)");
     }
 
     @Test
@@ -335,7 +347,7 @@ class ModuleLoggingProfilePanelTest {
     }
 
     @Test
-    @DisplayName("the top area is laid out: icon toolbar on top, profile selector left of the search")
+    @DisplayName("the top area is laid out: icon toolbar on top, profile selector right of Show values and the search")
     void topAreaIsLaidOut() {
         ModuleLoggingProfilePanel panel = newPanel();
         onEdt(() -> {
@@ -354,8 +366,9 @@ class ModuleLoggingProfilePanelTest {
         assertNotNull(apply, "the Apply button is present");
         assertTrue(apply.getWidth() > 0 && apply.getHeight() > 0,
                 "the Apply button must be laid out, got " + apply.getWidth() + "x" + apply.getHeight());
-        // The profile selector sits on the SAME row, to the LEFT of the search
-        // box, at its natural width (it must not stretch across the row).
+        // The profile selector sits on the SAME row, to the RIGHT of the
+        // search box, at its natural width (it must not stretch across the
+        // row).
         JComboBox<String> profile = panel.getProfileCombo();
         assertTrue(profile.getWidth() > 0 && profile.getHeight() > 0,
                 "the profile combo must be laid out, got " + profile.getWidth() + "x" + profile.getHeight());
@@ -363,30 +376,38 @@ class ModuleLoggingProfilePanelTest {
         assertNotNull(search, "the search box is present after enableSearch");
         int profileX = horizontalPosition(panel, profile);
         int searchX = horizontalPosition(panel, search);
-        assertTrue(profileX + profile.getWidth() <= searchX,
-                "the profile selector must sit to the LEFT of the search box (profile x=" + profileX
-                        + " width=" + profile.getWidth() + ", search x=" + searchX + ")");
+        assertTrue(searchX + search.getWidth() <= profileX,
+                "the profile selector must sit to the RIGHT of the search box (search x=" + searchX
+                        + " width=" + search.getWidth() + ", profile x=" + profileX + ")");
         assertTrue(Math.abs(verticalPosition(panel, profile) - verticalPosition(panel, search)) <= 24,
                 "the profile selector must sit on the SAME row as the search box (profile y="
                         + verticalPosition(panel, profile) + ", search y=" + verticalPosition(panel, search) + ")");
 
         // The search row carries the node configuration panel's search-row
-        // left margin: the profile box starts 10px right of the "Logger
-        // levels" frame (the frame runs flush, like the configuration tab's
-        // tab area).
+        // left margin: the row's FIRST box (the "Show values" filter) starts
+        // 10px right of the "Logger levels" frame (the frame runs flush,
+        // like the configuration tab's tab area).
         Container frame = findTitledContainer(panel, "Logger levels");
         assertNotNull(frame, "the 'Logger levels' titled frame is present");
         Container profileBox = findTitledContainer(panel, "Profile");
         assertNotNull(profileBox, "the 'Profile' titled box is present");
-        assertEquals(horizontalPosition(panel, profileBox) - horizontalPosition(panel, frame), 10,
-                "the profile box must start 10px right of the 'Logger levels' frame (the configuration panel's search-row left margin)");
+        Container firstBox = findTitledContainer(panel, "Show values");
+        assertNotNull(firstBox, "the 'Show values' titled box is present (the search row's first box)");
+        assertEquals(horizontalPosition(panel, firstBox) - horizontalPosition(panel, frame), 10,
+                "the search row's first box must start 10px right of the 'Logger levels' frame (the configuration panel's search-row left margin)");
         assertEquals(verticalPosition(panel, profileBox), verticalPosition(panel, search),
                 "the profile box and the search box must top-align on the same row");
-        // ONE uniform gap between the profile box and the search box.
-        int gap = horizontalPosition(panel, search)
-                - (horizontalPosition(panel, profileBox) + profileBox.getWidth());
-        assertEquals(ModuleLoggingProfilePanel.ROW_GAP, gap,
-                "the gap between the profile box and the search box must be the uniform ROW_GAP");
+        // The search-row order: the "Show values" box, the live search box
+        // and the profile selector (directly to the RIGHT of the search box —
+        // the requirement) — every neighbor separated by the uniform ROW_GAP.
+        Container showValuesBox = findTitledContainer(panel, "Show values");
+        assertNotNull(showValuesBox, "the 'Show values' titled box is present");
+        int searchToProfileGap = horizontalPosition(panel, profileBox)
+                - (horizontalPosition(panel, search) + search.getWidth());
+        assertEquals(ModuleLoggingProfilePanel.ROW_GAP, searchToProfileGap,
+                "the profile box must sit DIRECTLY to the right of the search box with the uniform ROW_GAP");
+        assertTrue(horizontalPosition(panel, showValuesBox) + showValuesBox.getWidth() <= horizontalPosition(panel, search),
+                "the 'Show values' box must sit to the LEFT of the search box (row order: Show values, Search, Profile)");
         // Uniform heights: every box of the row is stretched to the same height.
         assertEquals(search.getHeight(), profileBox.getHeight(),
                 "the profile box and the search box must have the SAME height");
@@ -404,47 +425,84 @@ class ModuleLoggingProfilePanelTest {
     }
 
     @Test
-    @DisplayName("the 'Show values' row-state filter (Unsaved/Saved/Applied) is on by default, all boxes selected")
+    @DisplayName("the 'Show values' row-state filter (the shared four-state model) is on by default, all boxes selected")
     void showValuesFilterIsOnByDefault() {
         ModuleLoggingProfilePanel panel = newPanel();
         Container box = findTitledContainer(panel, "Show values");
         assertNotNull(box, "the 'Show values' titled box is present");
         List<JCheckBox> checks = findAll(box, JCheckBox.class);
-        assertEquals(3, checks.size(), "one checkbox per row state; got=" + checks.size());
-        assertEquals("Unsaved values", checks.get(0).getText());
-        assertEquals("Saved values", checks.get(1).getText());
-        assertEquals("Applied values", checks.get(2).getText());
+        assertEquals(4, checks.size(), "one checkbox per row state (the shared four-state model); got=" + checks.size());
+        // the SAME labels, order and colors as the node configuration
+        // panel's "Show values" box
+        assertEquals("Unsaved", checks.get(0).getText());
+        assertEquals("Unsaved Applied", checks.get(1).getText());
+        assertEquals("Saved", checks.get(2).getText());
+        assertEquals("Saved Applied", checks.get(3).getText());
         for (JCheckBox check : checks) {
             assertTrue(check.isSelected(), "every state filter is selected by default: " + check.getText());
         }
         assertEquals(GuiColors.getUnsaved(), checks.get(0).getForeground(), "the unsaved box is the unsaved color");
-        assertEquals(GuiColors.getSaved(), checks.get(1).getForeground(), "the saved box is the saved color");
-        assertEquals(GuiColors.getApplied(), checks.get(2).getForeground(), "the applied box is the applied color");
+        assertEquals(GuiColors.getUnsavedApplied(), checks.get(1).getForeground(),
+                "the unsaved applied box is the unsaved applied color");
+        assertEquals(GuiColors.getSaved(), checks.get(2).getForeground(), "the saved box is the saved color");
+        assertEquals(GuiColors.getApplied(), checks.get(3).getForeground(), "the saved applied box is the applied color");
+        // The SAME "Detailed Color Legend" help button the node configuration
+        // panel's "Show values" box carries (its legend follows the shared
+        // four-state model).
+        List<JButton> buttons = findAll(box, JButton.class);
+        assertEquals(1, buttons.size(), "the 'Show values' box carries the color-legend help button");
+        assertEquals("Detailed Color Legend", buttons.get(0).getToolTipText(),
+                "the help button opens the detailed color legend");
     }
 
     @Test
-    @DisplayName("the search sits ABOVE the 'Logger levels' frame; the add-key row is at the top inside it")
+    @DisplayName("the search sits above logger levels and the add-key section follows the configured rows")
     void searchAboveLoggerLevelsFrame() {
         ModuleLoggingProfilePanel panel = newPanel();
         onEdt(() -> {
             panel.enableSearch();
-            panel.setSize(900, 600);
+            panel.setSize(900, 280);
             layoutRecursively(panel);
         });
         Container titled = findTitledContainer(panel, "Logger levels");
         assertNotNull(titled, "the 'Logger levels' titled frame is present");
-        // The add-key row sits at the TOP INSIDE the frame, the level rows below.
-        JButton addKey = findButton(panel, "Add key");
-        assertNotNull(addKey, "the 'Add key' button is present");
+        // The add-key section (the flat "+" — no text button, no "+" character)
+        // stays inside the frame but follows the configured level rows.
+        JButton addKey = findButtonByTooltip(panel, "Add key");
+        assertNotNull(addKey, "the add-key '+' button is present");
         assertTrue(titled.isAncestorOf(addKey),
                 "the add-key row must sit INSIDE the 'Logger levels' frame");
         JScrollPane gridScroll = findFirst(titled, JScrollPane.class);
-        assertNotNull(gridScroll, "the row grid scroll is inside the frame");
+        assertNotNull(gridScroll, "the logger rows and add section must be vertically scrollable");
         assertNull(gridScroll.getBorder(),
-                "the grid scroll must not add its own inner frame (the outer 'Logger levels' border is the only frame)");
-        assertTrue(addKey.getY() < gridScroll.getY(),
-                "the add-key row must be at the TOP of the frame (add-key y=" + addKey.getY()
-                        + ", grid y=" + gridScroll.getY() + ")");
+                "the scroll pane must not add a second frame inside the outer 'Logger levels' border");
+        assertEquals(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER, gridScroll.getHorizontalScrollBarPolicy(),
+                "the logger editor must not introduce a horizontal scrollbar");
+        assertTrue(gridScroll.getVerticalScrollBar().getMaximum()
+                        > gridScroll.getVerticalScrollBar().getVisibleAmount(),
+                "the short editor viewport must expose a vertical scrollbar for the add section");
+        // The add section is below the configured rows.
+        JButton firstTrash = findButtonByTooltip(panel, "Remove key '");
+        assertNotNull(firstTrash, "the level rows carry their 'Remove key' trash icon");
+        assertTrue(verticalPosition(titled, addKey) > verticalPosition(titled, firstTrash),
+                "the add-key section must follow the configured rows (add-key y=" + verticalPosition(titled, addKey)
+                        + ", first level row y=" + verticalPosition(titled, firstTrash) + ")");
+        JTextField keyInput = findAddKeyInput(panel);
+        JTextField valueInput = findKeyValueInput(panel);
+        JCheckBox levelBox = findAddKeyLevelBox(panel);
+        assertTrue(horizontalPosition(titled, levelBox) > horizontalPosition(titled, keyInput),
+                "the log-level checkbox must be in the right column with the value input");
+        assertTrue(verticalPosition(titled, levelBox) > verticalPosition(titled, valueInput),
+                "the log-level checkbox must sit below the initial-value field");
+        assertTrue(horizontalPosition(titled, levelBox) <= horizontalPosition(titled, valueInput),
+                "the log-level checkbox must be left-aligned with the initial-value field");
+        assertTrue(horizontalPosition(titled, valueInput) > horizontalPosition(titled, keyInput),
+                "the initial-value field must sit in the right column beside the key column");
+        assertEquals(verticalPosition(titled, keyInput), verticalPosition(titled, valueInput),
+                "the key and initial-value input fields must align on the same baseline");
+        // The add-key input starts EMPTY by default.
+        assertTrue(findAddKeyInput(panel).getText().isEmpty(),
+                "the add-key input must be empty by default");
         // The search box is NOT inside the frame â€” it sits on the search row ABOVE it.
         Component search = findFirst(panel, SearchMatchPanel.class);
         assertNotNull(search, "the search box is present after enableSearch");
@@ -460,13 +518,13 @@ class ModuleLoggingProfilePanelTest {
     void removeKeyIcon() {
         ModuleLoggingProfilePanel panel = newPanel();
 
-        // Add a user key through the "Add key" row.
+        // Add a user key through the "+ add key" row.
         final String userKey = "com.example.MyApp.level";
         onEdt(() -> {
             JTextField keyInput = findAddKeyInput(panel);
             assertNotNull(keyInput, "the add-key input is present");
             keyInput.setText(userKey);
-            findButton(panel, "Add key").doClick();
+            findButtonByTooltip(panel, "Add key").doClick();
         });
 
         // The user-added row: enabled trash icon, and clicking it removes the row.
@@ -488,15 +546,114 @@ class ModuleLoggingProfilePanelTest {
         assertFalse(builtInRemove.isEnabled(), "a provider default row cannot be removed");
     }
 
-    /** The "Add key" row's key input (the JTextField sibling of the "Add key" button). */
+    @Test
+    @DisplayName("the add-key row: key + initial-value inputs and a 'log level' checkbox; the one '+' adds either kind")
+    void addKeyRowAddsTextAndLevelValues() {
+        ModuleLoggingProfilePanel panel = newPanel();
+
+        // The row's parts: the key input, the initial-value input, the "log
+        // level" value-type checkbox, and the single "+" button.
+        JTextField keyInput = findAddKeyInput(panel);
+        assertNotNull(keyInput, "the add-key key input is present");
+        assertNotNull(findKeyValueInput(panel), "the add-key row carries the initial-value input");
+        JCheckBox levelBox = findAddKeyLevelBox(panel);
+        assertNotNull(levelBox, "the add-key row carries the value-type checkbox");
+        assertEquals("log level", levelBox.getText(), "the value-type checkbox is labeled 'log level'");
+        assertFalse(levelBox.isSelected(), "plain text is the default value kind");
+
+        // Text mode (the default): key + typed value, ONE "+" press.
+        final String textKey = "com.example.TextInfo";
+        onEdt(() -> {
+            keyInput.setText(textKey);
+            findKeyValueInput(panel).setText("some free text");
+            findButtonByTooltip(panel, "Add key").doClick();
+        });
+        JComboBox<?> textCombo = assertInstanceOf(JComboBox.class, editorAfterLabel(panel, textKey),
+                "the text-mode key added its row (editable text combo)");
+        assertTrue(textCombo.isEditable(), "a text-mode key's editor is the editable (text) combo");
+        assertEquals("some free text", panel.editorValueOf(textKey),
+                "the typed initial value is the row's value");
+        assertTrue(keyInput.getText().isEmpty(), "the key input resets after adding");
+
+        // Log-level mode: check the box, ONE "+" press — a log-level row.
+        final String levelKey = "com.example.MyApp.extra";
+        onEdt(() -> {
+            levelBox.setSelected(true);
+            keyInput.setText(levelKey);
+            findAddKeyLevelCombo(panel).setSelectedItem("FINE");
+            findButtonByTooltip(panel, "Add key").doClick();
+        });
+        JComboBox<?> levelCombo = assertInstanceOf(JComboBox.class, editorAfterLabel(panel, levelKey),
+                "the level-mode key added its row (the non-editable level combo)");
+        assertFalse(levelCombo.isEditable(),
+                "a log-level-mode key's editor is the NON-editable level combo (the level rows' dropdown)");
+        assertEquals("FINE", levelCombo.getSelectedItem(), "the selected initial level is the row's value");
+        assertEquals("FINE", panel.editorValueOf(levelKey));
+    }
+
+    /** The add-key row's value-type checkbox. */
+    private static JCheckBox findAddKeyLevelBox(Container root) {
+        return findCheckBox(root, "log level");
+    }
+
+    /** The add-key row's initial-value input (the text field inside the row's value cell). */
+    private static JTextField findKeyValueInput(Container root) {
+        return findTextFieldByTooltip(root, "The key's initial value (plain text)");
+    }
+
+    /** The add-key row's initial-value combo (the level dropdown inside the row's value cell). */
+    @SuppressWarnings("unchecked")
+    private static JComboBox<String> findAddKeyLevelCombo(Container root) {
+        return findComboByTooltip(root, "The key's initial log level");
+    }
+
+    /** The "add key" row's key input. */
     private static JTextField findAddKeyInput(Container root) {
-        JButton addBtn = findButton(root, "Add key");
-        if (addBtn == null) {
-            return null;
+        return findTextFieldByTooltip(root,
+                "Type a key (e.g. com.example.MyApp.level), then press '+' (or Enter) to add it");
+    }
+
+    private static JTextField findTextFieldByTooltip(Container root, String tooltip) {
+        for (Component child : root.getComponents()) {
+            if (child instanceof JTextField field && tooltip.equals(field.getToolTipText())) {
+                return field;
+            }
+            if (child instanceof Container container) {
+                JTextField found = findTextFieldByTooltip(container, tooltip);
+                if (found != null) {
+                    return found;
+                }
+            }
         }
-        for (Component child : addBtn.getParent().getComponents()) {
-            if (child instanceof JTextField) {
-                return (JTextField) child;
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static JComboBox<String> findComboByTooltip(Container root, String tooltip) {
+        for (Component child : root.getComponents()) {
+            if (child instanceof JComboBox<?> combo && tooltip.equals(combo.getToolTipText())) {
+                return (JComboBox<String>) combo;
+            }
+            if (child instanceof Container container) {
+                JComboBox<String> found = findComboByTooltip(container, tooltip);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static JCheckBox findCheckBox(Container root, String text) {
+        for (Component child : root.getComponents()) {
+            if (child instanceof JCheckBox check && text.equals(check.getText())) {
+                return check;
+            }
+            if (child instanceof Container container) {
+                JCheckBox found = findCheckBox(container, text);
+                if (found != null) {
+                    return found;
+                }
             }
         }
         return null;
@@ -547,35 +704,81 @@ class ModuleLoggingProfilePanelTest {
     }
 
     @Test
-    @DisplayName("a search hit inside a combo's selected value is banded via the swapped renderer, restored on clear")
+    @DisplayName("a search hit inside a non-editable combo's selected value is banded by a renderer swap, cleared on clear")
     void searchMatchInComboSelectedValueIsBanded() {
         ModuleLoggingProfilePanel panel = newPanel();
         onEdt(panel::enableSearch);
         List<SearchMatchPanel> searches = findAll(panel, SearchMatchPanel.class);
         assertFalse(searches.isEmpty(), "the search box is present after enableSearch");
 
-        // The level rows are non-editable combos; "warn" occurs only in the
-        // SELECTED value ("WARNING") of the common-logger template rows.
+        // The level rows are CLASSIC (non-editable) combos; "warn" occurs only
+        // in the selected value ("WARNING") of the common-logger template rows.
         JComponent hikariEditor = editorAfterLabel(panel, "com.zaxxer.hikari.level");
         JComboBox<?> hikariCombo = assertInstanceOf(JComboBox.class, hikariEditor, "the hikari row is a combo");
-        javax.swing.ListCellRenderer<?> originalRenderer = hikariCombo.getRenderer();
+        assertFalse(hikariCombo.isEditable(), "the level rows are classic (non-editable) combos");
+        assertEquals("WARNING", String.valueOf(hikariCombo.getSelectedItem()),
+                "the template row's default level is WARNING");
+
+        // A non-editable combo has no text component a document highlight
+        // could live in — the band is painted by a swapped-in
+        // ComboSearchHighlightRenderer.
+        final ListCellRenderer<?>[] originalRef = new ListCellRenderer<?>[1];
+        onEdt(() -> originalRef[0] = hikariCombo.getRenderer());
+        assertNotNull(originalRef[0], "the level combo has an original renderer");
 
         onEdt(() -> searches.get(0).setSearchText("warn"));
-        assertInstanceOf(ComboSearchHighlightRenderer.class, hikariCombo.getRenderer(),
-                "the matched combo's selected value is rendered by the band-painting renderer");
-        ComboSearchHighlightRenderer bandRenderer = (ComboSearchHighlightRenderer) hikariCombo.getRenderer();
-        // The band is re-resolved per item: the selected value is banded, the
-        // non-matching dropdown items are not (they are not visible).
-        JList<String> popup = new JList<>(new String[] {"WARNING", "INFO"});
-        bandRenderer.getListCellRendererComponent(popup, "WARNING", 0, false, false);
-        assertTrue(bandRenderer.hasHighlight(), "the selected value carries the band range");
-        bandRenderer.getListCellRendererComponent(popup, "INFO", 1, false, false);
-        assertFalse(bandRenderer.hasHighlight(), "a non-matching dropdown item is not banded");
+        final boolean[] bandedRef = new boolean[1];
+        onEdt(() -> {
+            ComboSearchHighlightRenderer bandRenderer =
+                    assertInstanceOf(ComboSearchHighlightRenderer.class, hikariCombo.getRenderer(),
+                            "the search swaps the non-editable combo's renderer for the band-painting one");
+            // Resolve the band in the selected value's cell: "WARN"ing.
+            java.awt.Component cell = bandRenderer.getListCellRendererComponent(
+                    new JList<>(new String[]{"WARNING"}), "WARNING", 0, false, false);
+            bandedRef[0] = cell instanceof SearchMatchLabel label && label.hasHighlight();
+        });
+        assertTrue(bandedRef[0], "the matched occurrence in the selected value carries the search band");
 
-        // Clearing the search restores the combo's original renderer.
+        // Clearing the search restores the original renderer (the band is gone).
         onEdt(() -> searches.get(0).setSearchText(""));
-        assertSame(originalRenderer, hikariCombo.getRenderer(),
-                "the combo's original renderer is restored when the search clears");
+        assertSame(originalRef[0], hikariCombo.getRenderer(),
+                "the band renderer is swapped back to the original when the search clears");
+    }
+
+    /**
+     * The text component carrying the value of the given row: a plain text
+     * field, or the EDITOR TEXT of the row's editable combo (the non-level
+     * rows' editors are editable combos; the level rows are classic,
+     * non-editable combos whose value lives in the selection).
+     */
+    private static JTextField rowEditorText(ModuleLoggingProfilePanel panel, String label) {
+        JComponent editor = editorAfterLabel(panel, label);
+        assertNotNull(editor, "the row '" + label + "' has an editor");
+        if (editor instanceof JTextField textField) {
+            return textField;
+        }
+        if (editor instanceof JComboBox<?> combo) {
+            return editorTextFieldOf((JComponent) combo.getEditor().getEditorComponent());
+        }
+        throw new AssertionError("row '" + label + "' has no text editor: " + editor);
+    }
+
+    /** The first JTextField inside the given component tree (a combo's editor text, may be null). */
+    private static JTextField editorTextFieldOf(JComponent component) {
+        if (component instanceof JTextField textField) {
+            return textField;
+        }
+        if (component instanceof Container) {
+            for (Component child : component.getComponents()) {
+                if (child instanceof JComponent) {
+                    JTextField found = editorTextFieldOf((JComponent) child);
+                    if (found != null) {
+                        return found;
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     /** The first JTextField whose text equals the given text (may be null). */
@@ -683,7 +886,10 @@ class ModuleLoggingProfilePanelTest {
         assertNotNull(findButtonByTooltip(panel, "Delete<br>").getIcon(), "Delete icon present");
         assertNotNull(findButtonByTooltip(panel, "Refresh<br>").getIcon(), "Refresh icon present");
         assertNotNull(findButtonByTooltip(panel, "Reset to Defaults<br>").getIcon(), "Reset icon present");
-        assertNotNull(findButtonByTooltip(panel, "Reload<br>").getIcon(), "Reload icon present");
+        // The standalone Reload button is GONE — its function is merged into
+        // the Refresh one.
+        assertNull(findButtonByTooltip(panel, "Reload"),
+                "the standalone Reload button is gone (its function is merged into Refresh)");
         // The help (question mark) is an icon in the SAME style/size as the others.
         JButton help = findButtonByTooltip(panel, "Help<br>");
         assertNotNull(help, "the Help button is present");
@@ -691,6 +897,33 @@ class ModuleLoggingProfilePanelTest {
         assertEquals(findButtonByTooltip(panel, "Apply<br>").getIcon().getIconWidth(),
                 help.getIcon().getIconWidth(),
                 "the Help glyph uses the same icon size as the other toolbar glyphs");
+    }
+
+    @Test
+    @DisplayName("the logging toolbar help button shares hover behavior and adapts to font size changes")
+    void toolbarHelpButtonAdaptsToFontSize() {
+        ModuleLoggingProfilePanel panel = newPanel();
+        JButton help = findButtonByTooltip(panel, "Help<br>");
+        assertNotNull(help);
+        assertEquals(Cursor.HAND_CURSOR, help.getCursor().getType(),
+                "the help button must use the same hand cursor as other profile toolbar actions");
+
+        Font originalFont = UIManager.getFont("Button.font");
+        assertNotNull(originalFont);
+        int[] iconWidths = new int[2];
+        onEdt(() -> {
+            try {
+                iconWidths[0] = help.getIcon().getIconWidth();
+                UIManager.put("Button.font", originalFont.deriveFont(originalFont.getSize2D() + 6f));
+                panel.updateUI();
+                iconWidths[1] = help.getIcon().getIconWidth();
+            } finally {
+                UIManager.put("Button.font", originalFont);
+                panel.updateUI();
+            }
+        });
+        assertTrue(iconWidths[1] > iconWidths[0],
+                "the toolbar glyph size must grow when the UI font size grows");
     }
 
     @Test
@@ -751,14 +984,14 @@ class ModuleLoggingProfilePanelTest {
             try {
                 ModuleLoggingProfilePanel panel = new ModuleLoggingProfilePanel(new TestProvider());
                 JComponent handler = editorAfterLabel(panel, "test.handler");
-                assertInstanceOf(JTextField.class, handler, "the handler row is a text field");
+                assertInstanceOf(JComboBox.class, handler, "the handler row is an editable combo (the node configuration pattern)");
                 JFrame frame = new JFrame("logging-focus-test-owner");
                 frame.setLayout(new BorderLayout());
                 frame.add(panel);
                 frame.setSize(700, 600);
                 frame.setVisible(true);
                 refs[0] = frame;
-                refs[1] = handler;
+                refs[1] = editorTextFieldOf((JComponent) ((JComboBox<?>) handler).getEditor().getEditorComponent());
             } catch (Throwable t) {
                 error.set(t);
             }
@@ -876,7 +1109,6 @@ class ModuleLoggingProfilePanelTest {
         assertTrue(findButtonByTooltip(panel, "New Profile<br>").isEnabled());
         assertTrue(findButtonByTooltip(panel, "Apply<br>").isEnabled());
         assertTrue(findButtonByTooltip(panel, "Refresh<br>").isEnabled());
-        assertTrue(findButtonByTooltip(panel, "Reload<br>").isEnabled());
         assertTrue(findButtonByTooltip(panel, "Reset to Defaults<br>").isEnabled());
 
         // The Help button shows the core's generic help out of the box (no host supplier).
@@ -1011,6 +1243,8 @@ class ModuleLoggingProfilePanelTest {
         assertNotNull(text, "the Help dialog was captured");
         assertTrue(text.contains("Logging Profile Help"), "the dialog title (got: " + text + ")");
         assertTrue(text.contains("Row colors"), "the default help explains the row colors");
+        assertTrue(text.contains("Unsaved Applied"),
+                "the default help explains all four row states, including unsaved changes matching the applied baseline");
         assertTrue(text.contains("Toolbar actions"), "the default help lists the toolbar actions");
         assertTrue(text.contains("Apply"), "the default help explains Apply");
         assertTrue(text.contains("Delete"), "the default help explains Delete");
@@ -1143,7 +1377,7 @@ class ModuleLoggingProfilePanelTest {
         String b = "dirty-switch-b-" + System.nanoTime();
         onEdt(() -> panel.createProfileFromDefaults(a));
         try {
-            JTextField handler = assertInstanceOf(JTextField.class, editorAfterLabel(panel, "test.handler"));
+            JTextField handler = rowEditorText(panel, "test.handler");
             onEdt(() -> handler.setText("unsaved.handler.value"));
             // Switch away: the editor state of 'a' must be kept in memory.
             onEdt(() -> panel.createProfileFromDefaults(b));
@@ -1155,7 +1389,7 @@ class ModuleLoggingProfilePanelTest {
             assertEquals(GuiColors.getUnsaved(), starred.getForeground(),
                     "the restored row is colored unsaved");
             assertEquals("unsaved.handler.value",
-                    ((JTextField) editorAfterLabel(panel, "test.handler *")).getText(),
+                    rowEditorText(panel, "test.handler *").getText(),
                     "the unsaved edit is restored on the switch back");
             // The combo renderer marks the dirty profile with the trailing star.
             ListCellRenderer<? super String> renderer = panel.getProfileCombo().getRenderer();
@@ -1177,7 +1411,7 @@ class ModuleLoggingProfilePanelTest {
         onEdt(() -> panel.createProfileFromDefaults(a));
         try {
             // Give 'a' a distinctive value on one row and save it.
-            onEdt(() -> ((JTextField) editorAfterLabel(panel, "test.handler")).setText("custom.handler.a"));
+            onEdt(() -> rowEditorText(panel, "test.handler").setText("custom.handler.a"));
             onEdt(findButtonByTooltip(panel, "Save<br>")::doClick);
             // Profile 'b' on disk defines ONLY test.level (no test.handler at all).
             Properties partial = new Properties();
@@ -1191,7 +1425,7 @@ class ModuleLoggingProfilePanelTest {
             onEdt(findButtonByTooltip(panel, "Refresh<br>")::doClick);
             onEdt(() -> panel.getProfileCombo().setSelectedItem(b));
             assertEquals("java.util.logging.ConsoleHandler",
-                    ((JTextField) editorAfterLabel(panel, "test.handler")).getText(),
+                    rowEditorText(panel, "test.handler").getText(),
                     "a key missing from the profile loads the application default, not the previous profile's value");
             assertEquals("FINE",
                     ((JComboBox<?>) editorAfterLabel(panel, "test.level")).getSelectedItem(),
@@ -1199,7 +1433,7 @@ class ModuleLoggingProfilePanelTest {
             // Switch back: 'a's saved value comes back.
             onEdt(() -> panel.getProfileCombo().setSelectedItem(a));
             assertEquals("custom.handler.a",
-                    ((JTextField) editorAfterLabel(panel, "test.handler")).getText(),
+                    rowEditorText(panel, "test.handler").getText(),
                     "switching back restores 'a's saved value");
         } finally {
             cleanupProfiles(a, b);
@@ -1218,7 +1452,7 @@ class ModuleLoggingProfilePanelTest {
             onEdt(() -> panel.createProfileFromDefaults(a));
             try {
                 // Save a custom value in 'a' (nothing is applied: baseline = defaults).
-                onEdt(() -> ((JTextField) editorAfterLabel(panel, "test.handler")).setText("custom.handler.a"));
+                onEdt(() -> rowEditorText(panel, "test.handler").setText("custom.handler.a"));
                 onEdt(findButtonByTooltip(panel, "Save<br>")::doClick);
                 assertEquals(GuiColors.getSaved(), labelWithText(panel, "test.handler").getForeground(),
                         "a saved value that is not applied is colored saved (yellow)");
@@ -1254,7 +1488,7 @@ class ModuleLoggingProfilePanelTest {
             onEdt(() -> panel.createProfileFromDefaults(a));
             // Save a custom value, then apply 'a' WITH a snapshot of the pre-edit
             // values (a runtime that still uses the old values).
-            onEdt(() -> ((JTextField) editorAfterLabel(panel, "test.handler")).setText("custom.handler.a"));
+            onEdt(() -> rowEditorText(panel, "test.handler").setText("custom.handler.a"));
             onEdt(findButtonByTooltip(panel, "Save<br>")::doClick);
             Properties snapshot = new Properties();
             snapshot.setProperty("test.handler", "java.util.logging.ConsoleHandler");
@@ -1276,6 +1510,99 @@ class ModuleLoggingProfilePanelTest {
         } finally {
             try {
                 repo.setApplied("test-mod", null); // also drops the snapshot
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+            cleanupProfiles(a);
+        }
+    }
+
+    @Test
+    @DisplayName("an applied profile without a legacy snapshot uses its saved values as the applied baseline")
+    void appliedProfileWithoutSnapshotUsesSavedValues() throws Exception {
+        LoggingProfileRepository repo = new LoggingProfileRepository();
+        String name = "applied-without-snapshot-" + System.nanoTime();
+        Properties values = new Properties();
+        values.setProperty("test.handler", "custom.handler");
+        values.setProperty("test.level", "WARNING");
+        try {
+            repo.create("test-mod", name, values);
+            repo.setApplied("test-mod", name);
+            assertFalse(repo.hasAppliedSnapshot("test-mod", name),
+                    "the test profile starts without an applied-state snapshot");
+
+            ModuleLoggingProfilePanel panel = newPanel();
+
+            assertEquals(name, panel.getProfileCombo().getSelectedItem(),
+                    "the applied profile is selected on construction");
+            assertEquals(GuiColors.getApplied(), labelWithText(panel, "test.handler").getForeground(),
+                    "the loaded saved handler value is shown as saved and applied");
+            assertEquals(GuiColors.getApplied(), labelWithText(panel, "test.level").getForeground(),
+                    "the loaded saved level value is shown as saved and applied");
+            assertFalse(allLabels(panel).stream().anyMatch(label -> label.endsWith(" *")),
+                    "loading an applied profile without a legacy snapshot must not create unsaved rows");
+        } finally {
+            repo.setApplied("test-mod", null);
+            cleanupProfiles(name);
+        }
+    }
+
+    @Test
+    @DisplayName("a global font change must not affect the computed row-state coloring (and updateUI re-applies it)")
+    void fontChangePreservesRowStateColors() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
+        LoggingProfileRepository repo = new LoggingProfileRepository();
+        String a = "font-color-a-" + System.nanoTime();
+        try {
+            repo.setApplied("test-mod", null); // deterministic start: nothing applied
+            ModuleLoggingProfilePanel panel = newPanel();
+            onEdt(() -> panel.createProfileFromDefaults(a));
+            // Make the handler row dirty: the label + editor get the unsaved color.
+            onEdt(() -> rowEditorText(panel, "test.handler").setText("custom.handler.a"));
+            SearchMatchLabel dirtyLabel = labelWithText(panel, "test.handler *");
+            assertNotNull(dirtyLabel, "the dirty row label carries the unsaved star");
+            assertEquals(GuiColors.getUnsaved(), dirtyLabel.getForeground(),
+                    "the dirty row label is the unsaved color before the font change");
+
+            // === The global font size change, exactly as the appearance panel
+            // performs it: new Label.font + a full UI tree update. ===
+            Font before = UIManager.getFont("Label.font");
+            assertNotNull(before, "Label.font must be defined");
+            onEdt(() -> {
+                AppearanceModule.updateCommonFontKeys(
+                        new Font(before.getFamily(), before.getStyle(), before.getSize() + 3));
+                SwingUtilities.updateComponentTreeUI(panel);
+            });
+            try {
+                // The dirty row's state color must survive the font change —
+                // updateUI() re-computed the states and re-applied the
+                // CURRENT palette colors.
+                SearchMatchLabel afterLabel = labelWithText(panel, "test.handler *");
+                assertNotNull(afterLabel, "the dirty row label still carries the unsaved star after the font change");
+                assertEquals(GuiColors.getUnsaved(), afterLabel.getForeground(),
+                        "the row keeps its computed state color after a font size change");
+
+                // Proof of the RE-COLORING path: simulate the lost color
+                // (sentinel) and let the panel refresh its UI once more —
+                // updateUI must restore the state color.
+                onEdt(() -> afterLabel.setForeground(Color.MAGENTA));
+                assertEquals(Color.MAGENTA, afterLabel.getForeground());
+                onEdt(panel::updateUI);
+                SearchMatchLabel refreshed = labelWithText(panel, "test.handler *");
+                assertNotNull(refreshed, "the dirty row label is still there after the UI refresh");
+                assertEquals(GuiColors.getUnsaved(), refreshed.getForeground(),
+                        "a UI refresh must re-apply the row's state color");
+            } finally {
+                onEdt(() -> {
+                    AppearanceModule.updateCommonFontKeys(before);
+                    SwingUtilities.updateComponentTreeUI(panel);
+                });
+            }
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        } finally {
+            try {
+                repo.setApplied("test-mod", null);
             } catch (Exception ignored) {
                 // best-effort cleanup
             }
@@ -1329,7 +1656,7 @@ class ModuleLoggingProfilePanelTest {
                     "precondition: Apply is disabled while the applied profile is selected and clean");
             // An unsaved editor change must activate Apply — it then acts as
             // Save and Apply (persist the edit to the profile, then apply it).
-            onEdt(() -> ((JTextField) editorAfterLabel(fresh, "test.handler")).setText("custom.handler.unsaved"));
+            onEdt(() -> rowEditorText(fresh, "test.handler").setText("custom.handler.unsaved"));
             assertTrue(findButtonByTooltip(fresh, "Apply<br>").isEnabled(),
                     "Apply is enabled while the applied profile has unsaved editor changes (Save and Apply)");
         } catch (Exception e) {
@@ -1391,7 +1718,7 @@ class ModuleLoggingProfilePanelTest {
                         + newBtn.getToolTipText());
 
         // Change a value in the editor — the new profile must NOT carry THAT.
-        JTextField handler = assertInstanceOf(JTextField.class, editorAfterLabel(panel, "test.handler"));
+        JTextField handler = rowEditorText(panel, "test.handler");
         onEdt(() -> handler.setText("custom.handler"));
 
         String name = "created-from-defaults-" + System.nanoTime();

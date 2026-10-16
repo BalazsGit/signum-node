@@ -127,13 +127,17 @@ class NodeLoggingPanelTest {
     }
 
     @Test
-    @DisplayName("value-typed editor: level keys → combo, non-level keys → text field")
+    @DisplayName("the File Level editor is a CLASSIC (non-editable) level combo; the other editors EDITABLE combos: no plain text fields")
     void valueTypedEditor() {
         NodeLoggingPanel panel = newPanel();
-        assertInstanceOf(JComboBox.class, editorForLabel(panel, "File Level"), "File Level should be a combo");
-        assertInstanceOf(JTextField.class, editorForLabel(panel, "File Size Limit (bytes)"), "limit should be a text field");
-        assertInstanceOf(JTextField.class, editorForLabel(panel, "File Count"), "count should be a text field");
-        assertInstanceOf(JTextField.class, editorForLabel(panel, "Log File Pattern"), "pattern should be a text field");
+        JComboBox<?> fileLevel = assertInstanceOf(JComboBox.class, editorForLabel(panel, "File Level"), "File Level should be a combo");
+        assertFalse(fileLevel.isEditable(), "the File Level editor is a classic (non-editable) combo over the predefined level list");
+        JComboBox<?> limit = assertInstanceOf(JComboBox.class, editorForLabel(panel, "File Size Limit (bytes)"), "limit should be an editable combo (no plain text field)");
+        assertTrue(limit.isEditable(), "the File Size Limit editor is an editable combo");
+        JComboBox<?> count = assertInstanceOf(JComboBox.class, editorForLabel(panel, "File Count"), "count should be an editable combo (no plain text field)");
+        assertTrue(count.isEditable(), "the File Count editor is an editable combo");
+        JComboBox<?> pattern = assertInstanceOf(JComboBox.class, editorForLabel(panel, "Log File Pattern"), "pattern should be an editable combo (no plain text field)");
+        assertTrue(pattern.isEditable(), "the Log File Pattern editor is an editable combo");
     }
 
     @Test
@@ -334,6 +338,48 @@ class NodeLoggingPanelTest {
     }
 
     @Test
+    @DisplayName("the per-node assigned profile values are applied-colored regardless of a stale shared snapshot")
+    void assignedProfileUsesItsSavedValuesAsAppliedBaseline() throws Exception {
+        LoggingAssignmentStore store = new LoggingAssignmentStore();
+        LoggingProfileRepository repository = new LoggingProfileRepository();
+        String node = "zz-applied-snapshot-node-" + System.nanoTime();
+        String profile = "zz-applied-snapshot-profile-" + System.nanoTime();
+        Properties values = new Properties();
+        values.setProperty("java.util.logging.FileHandler.level", "WARNING");
+        Properties staleSnapshot = new Properties();
+        staleSnapshot.setProperty("java.util.logging.FileHandler.level", "INFO");
+        try {
+            repository.create(ModuleIds.NODE, profile, values);
+            repository.saveAppliedSnapshot(ModuleIds.NODE, profile, staleSnapshot);
+            store.setAssignmentForModule(node, ModuleIds.NODE, profile);
+            final NodeLoggingPanel[] holder = new NodeLoggingPanel[1];
+            onEdt(() -> holder[0] = new NodeLoggingPanel(node, () -> { }));
+
+            assertEquals(profile, new LoggingAssignmentStore().getAssignment(node).get(ModuleIds.NODE),
+                    "the selected profile is recorded as this node's assignment");
+            assertEquals("INFO",
+                    repository.loadAppliedSnapshot(ModuleIds.NODE, profile)
+                            .getProperty("java.util.logging.FileHandler.level"),
+                    "the shared snapshot is left untouched by a per-node assignment");
+            JComboBox<?> fileLevel = assertInstanceOf(JComboBox.class, editorForLabel(holder[0], "File Level"));
+            assertEquals(GuiColors.getApplied(), fileLevel.getForeground(),
+                    "the assigned profile's saved WARNING value matches its per-node applied baseline, "
+                            + "regardless of the stale shared INFO snapshot");
+        } finally {
+            try {
+                store.clearAssignment(node);
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+            try {
+                repository.delete(ModuleIds.NODE, profile);
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+        }
+    }
+
+    @Test
     @DisplayName("the apply dialog message names the node profile and states the per-node scope + new-node fallback")
     void applyMessageStatesPerNodeScope() {
         final NodeLoggingPanel[] holder = new NodeLoggingPanel[1];
@@ -411,8 +457,8 @@ class NodeLoggingPanelTest {
         final NodeLoggingPanel[] holder = new NodeLoggingPanel[1];
         onEdt(() -> {
             NodeLoggingPanel p = new NodeLoggingPanel(() -> { }); // already on the EDT
-            JComponent editor = editorForLabel(p, "File Count"); // text field, default "1"
-            ((JTextField) editor).setText("2");
+            JComponent editor = editorForLabel(p, "File Count"); // editable combo, default "1"
+            editorText(editor).setText("2");
             holder[0] = p;
         });
         JLabel label = findLabel(holder[0], "File Count");
@@ -426,18 +472,18 @@ class NodeLoggingPanelTest {
         final JCheckBox[] boxHolder = new JCheckBox[1];
         onEdt(() -> {
             NodeLoggingPanel p = new NodeLoggingPanel(() -> { }); // already on the EDT
-            ((JTextField) editorForLabel(p, "File Count")).setText("2"); // make it unsaved
+            editorText(editorForLabel(p, "File Count")).setText("2"); // make it unsaved
             panelHolder[0] = p;
-            boxHolder[0] = findCheckBox(p, "Unsaved values");
+            boxHolder[0] = findCheckBox(p, "Unsaved");
         });
-        assertNotNull(boxHolder[0], "the 'Unsaved values' filter checkbox is present");
+        assertNotNull(boxHolder[0], "the 'Unsaved' filter checkbox is present");
 
         final JCheckBox box = boxHolder[0];
         // doClick() (a simulated user click) — a programmatic setSelected does
         // not fire the ActionEvent that drives the row re-render.
         onEdt(box::doClick); // uncheck → hide unsaved rows
         assertFalse(hasLabel(panelHolder[0], "File Count"),
-                "the unsaved row is hidden while 'Unsaved values' is off");
+                "the unsaved row is hidden while 'Unsaved' is off");
 
         onEdt(box::doClick); // check again → show them
         assertTrue(hasLabel(panelHolder[0], "File Count"),
@@ -465,8 +511,39 @@ class NodeLoggingPanelTest {
         return allLabels(root).stream().anyMatch(t2 -> text.equals(t2) || (text + " *").equals(t2));
     }
 
+    /** The text component carrying a row editor's value (a plain field, or the EDITOR TEXT of an editable combo). */
+    private static JTextField editorText(JComponent editor) {
+        if (editor instanceof JTextField textField) {
+            return textField;
+        }
+        if (editor instanceof JComboBox<?> combo) {
+            JComponent editorComponent = (JComponent) combo.getEditor().getEditorComponent();
+            JTextField textField = editorTextComponent(editorComponent);
+            assertNotNull(textField, "the combo's editor text is present");
+            return textField;
+        }
+        throw new AssertionError("no text editor: " + editor);
+    }
+
+    private static JTextField editorTextComponent(JComponent component) {
+        if (component instanceof JTextField textField) {
+            return textField;
+        }
+        if (component instanceof Container) {
+            for (Component child : component.getComponents()) {
+                if (child instanceof JComponent) {
+                    JTextField found = editorTextComponent((JComponent) child);
+                    if (found != null) {
+                        return found;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     @Test
-    @DisplayName("search row: Profile / Search / Show values are left-aligned with uniform gaps and equal heights")
+    @DisplayName("search row: Show values / Search / Profile are left-aligned with uniform gaps and equal heights")
     void searchRowAlignment() {
         NodeLoggingPanel panel = newPanel();
         onEdt(() -> {
@@ -485,21 +562,28 @@ class NodeLoggingPanelTest {
         assertNotNull(levelsFrame, "the 'Logger levels' titled frame is present");
 
         // The search row carries the node configuration panel's search-row
-        // left margin: the row's first box starts 10px right of the
-        // "Logger levels" frame (the frame runs flush, like the configuration
-        // tab's tab area).
-        assertEquals(horizontalPosition(panel, profileBox) - horizontalPosition(panel, levelsFrame), 10,
-                "the profile box must start 10px right of the 'Logger levels' frame (the configuration panel's search-row left margin)");
+        // left margin: the row's FIRST box (the "Show values" filter) starts
+        // 10px right of the "Logger levels" frame (the frame runs flush,
+        // like the configuration tab's tab area).
+        assertEquals(horizontalPosition(panel, showValues) - horizontalPosition(panel, levelsFrame), 10,
+                "the search row's first box must start 10px right of the 'Logger levels' frame (the configuration panel's search-row left margin)");
 
-        // Uniform gaps between all three boxes (Profile ↔ Search ↔ Show values).
-        int profileToSearch = horizontalPosition(panel, searchBox)
-                - (horizontalPosition(panel, profileBox) + profileBox.getWidth());
-        int searchToShowValues = horizontalPosition(panel, showValues)
+        // The row order: the "Show values" state filter first, the
+        // "Search" box second, and the profile selector THIRD — directly
+        // to the RIGHT of the "Search" box (the requirement).
+        assertTrue(horizontalPosition(panel, showValues) < horizontalPosition(panel, searchBox)
+                        && horizontalPosition(panel, searchBox) < horizontalPosition(panel, profileBox),
+                "the search row order must be Show values, Search, Profile (Profile sits to the RIGHT of Search)");
+
+        // Uniform gaps between all three boxes (Show values ↔ Search ↔ Profile).
+        int showValuesToSearch = horizontalPosition(panel, searchBox)
+                - (horizontalPosition(panel, showValues) + showValues.getWidth());
+        int searchToProfile = horizontalPosition(panel, profileBox)
                 - (horizontalPosition(panel, searchBox) + searchBox.getWidth());
-        assertEquals(profileToSearch, searchToShowValues,
-                "the gaps between Profile/Search/Show values must be uniform (profile→search="
-                        + profileToSearch + ", search→show-values=" + searchToShowValues + ")");
-        assertEquals(4, profileToSearch, "the gap must be the row's uniform 4px gap");
+        assertEquals(showValuesToSearch, searchToProfile,
+                "the gaps between Show values/Search/Profile must be uniform (show-values→search="
+                        + showValuesToSearch + ", search→profile=" + searchToProfile + ")");
+        assertEquals(4, showValuesToSearch, "the gap must be the row's uniform 4px gap");
 
         // Uniform heights across all three boxes.
         assertEquals(profileBox.getHeight(), searchBox.getHeight(),

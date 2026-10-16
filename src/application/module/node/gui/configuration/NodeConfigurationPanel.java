@@ -30,6 +30,9 @@ import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
 import application.utils.gui.HelpDialog;
 import application.utils.gui.NewProfileChoiceDialog;
+import application.utils.gui.FlatPlusButton;
+import application.utils.gui.FlatIconButton;
+import application.utils.gui.PlusGlyphIcon;
 import application.utils.gui.ResponsiveToolbarScrollPane;
 import application.utils.gui.SearchMatchLabel;
 import application.utils.gui.SearchMatchPanel;
@@ -46,8 +49,6 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.Highlighter;
 import javax.swing.text.JTextComponent;
-import javax.swing.text.SimpleAttributeSet;
-import javax.swing.text.StyleConstants;
 import java.awt.*;
 import java.awt.geom.Rectangle2D;
 import java.io.FileInputStream;
@@ -74,6 +75,52 @@ public class NodeConfigurationPanel extends JPanel {
     private static final Logger LOGGER = LoggerFactory.getLogger(NodeConfigurationPanel.class);
     private final Map<String, Supplier<String>> valueSuppliers = new HashMap<>();
     private final Map<String, JComponent> propertyComponents = new HashMap<>();
+
+    /**
+     * The editable, state-aware select menus of the value rows, keyed by the
+     * combo itself: every regular input row is an EDITABLE select whose editor
+     * text is the row's current value and whose dropdown model is rebuilt on
+     * every state change ({@link #rebuildStateAwareComboModel}) with the
+     * current value plus exactly the baseline values the state keeps
+     * selectable ({@link ProfileValueState#dropdownBaselines}). The mapped
+     * value carries the row's property and the fixed option catalog (selects
+     * with one) or a {@code null} catalog for free-form value rows.
+     */
+    private final Map<JComboBox<String>, StateAwareCombo> stateAwareCombos = new HashMap<>();
+
+    /**
+     * The state-aware selects whose dropdown is currently being rebuilt — the
+     * re-entrancy guard of {@link #rebuildStateAwareComboModel} (the combo's
+     * own event chain must not re-trigger a rebuild for a select that is
+     * mid-rebuild).
+     */
+    private final Set<JComboBox<?>> rebuildingCombos = new HashSet<>();
+
+    /**
+     * The property and the fixed option catalog (may be {@code null} — no
+     * catalog, only the state-driven current/saved/applied entries) of one
+     * state-aware select.
+     */
+    private record StateAwareCombo(Prop<?> prop, String[] options) {
+    }
+
+    /**
+     * Per-item editors for the list-typed properties, keyed by property name. A
+     * list value is shown as one single-line field per stored item (each with a
+     * trash icon) plus an "add" row; its value (de)serializes by the property's
+     * on-disk delimiter (',' for the Jetty DoS whitelists, ';' otherwise).
+     */
+    private final Map<String, ListEditor> listEditors = new HashMap<>();
+
+    /**
+     * The multi-line list input components (the PK-conversion wrapper around
+     * the pkChecks list editor — the bare editors are already {@link ListEditor}
+     * instances) that must NOT be pinned to a one-line height by
+     * {@link ConfigurationUtils#fixComponentSize} in {@link #updateUI()}: that
+     * call caps the component's MAXIMUM size, which would squash a
+     * multi-item list to a single line after an L&F change.
+     */
+    private final Set<JComponent> multilineInputs = new HashSet<>();
 
     /**
      * The value search highlight currently shown on each value component
@@ -182,12 +229,13 @@ public class NodeConfigurationPanel extends JPanel {
      * Value-status visibility checkboxes of the search panel (moved here from
      * the bottom legend row, which listed them as plain color boxes). Each
      * one is colored with its value-level state color and is selected by
-     * default. While all three are selected everything is visible (tabbed
+     * default. While all four are selected everything is visible (tabbed
      * view); when any of them is not selected, the rows of the deselected
      * state(s) are neither listed nor displayed (flat results view, combined
      * with the search text when it is not empty).
      */
     private JCheckBox showUnsavedBox;
+    private JCheckBox showUnsavedAppliedBox;
     private JCheckBox showSavedBox;
     private JCheckBox showAppliedBox;
     /**
@@ -301,7 +349,7 @@ public class NodeConfigurationPanel extends JPanel {
         this.newProfileBtn = new JButton();
         this.saveBtn = new JButton();
         this.applyBtn = new JButton();
-        this.helpBtn = new HelpButton();
+        this.helpBtn = new JButton();
         
         LOGGER.debug("NodeConfigurationPanel - calling loadAppliedProperties()");
         loadAppliedProperties();
@@ -426,8 +474,8 @@ public class NodeConfigurationPanel extends JPanel {
 
         updateProfileButtonsUI();
 
-        helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        helpBtn.setToolTipText("View detailed information about configuration profile management");
+        helpBtn.setToolTipText("<html>Help<br><br>Explains profile management, configuration value states, "
+                + "and the actions available in this toolbar.</html>");
         helpBtn.addActionListener(e -> HelpDialog.show(this, "Node Configuration Profiles",
                 buildConfigurationHelpContent()));
         profilePanel.add(helpBtn);
@@ -462,17 +510,27 @@ public class NodeConfigurationPanel extends JPanel {
         statusPanel = new CheckboxGroupPanel("Show values");
         statusPanel.setChangeListener(button -> applySearch(searchMatchPanel.getSearchText(), true));
 
-        showUnsavedBox = statusPanel.addCheckbox("Unsaved values", GuiColors.getUnsaved(), true);
+        // Compact labels (no trailing "value(s)"): the pane title "Show values"
+        // already says what is being filtered, so the boxes save the space.
+        showUnsavedBox = statusPanel.addCheckbox("Unsaved", GuiColors.getUnsaved(), true);
         showUnsavedBox.setToolTipText(
-                "Show / hide the values that have unsaved changes. Combined with the search text when it is not empty.");
+                "Show / hide the values that match neither the saved profile file nor the running node. "
+                        + "Combined with the search text when it is not empty.");
 
-        showSavedBox = statusPanel.addCheckbox("Saved values", GuiColors.getSaved(), true);
+        showUnsavedAppliedBox = statusPanel.addCheckbox("Unsaved Applied",
+                GuiColors.getUnsavedApplied(), true);
+        showUnsavedAppliedBox.setToolTipText(
+                "Show / hide the values that differ from the saved profile file but match exactly what "
+                        + "the running node is using.");
+
+        showSavedBox = statusPanel.addCheckbox("Saved", GuiColors.getSaved(), true);
         showSavedBox.setToolTipText(
-                "Show / hide the values that are saved in the profile but differ from the running node.");
+                "Show / hide the values that are saved in the profile file but differ from the running node.");
 
-        showAppliedBox = statusPanel.addCheckbox("Applied values", GuiColors.getApplied(), true);
+        showAppliedBox = statusPanel.addCheckbox("Saved Applied", GuiColors.getApplied(), true);
         showAppliedBox.setToolTipText(
-                "Show / hide the values that match exactly what the running node is using.");
+                "Show / hide the values that are saved in the profile file AND match exactly what the "
+                        + "running node is using.");
 
         JButton colorHelpBtn = new HelpButton();
         colorHelpBtn.setToolTipText("Detailed Color Legend");
@@ -496,6 +554,11 @@ public class NodeConfigurationPanel extends JPanel {
         // hugging the box's content.
         JPanel searchPanelWrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         searchPanelWrap.setOpaque(false);
+        // Unify the two boxes' heights (tracking the standard combo height,
+        // measured with all search children shown) so the row stays even
+        // when the font / L&F changes — the box-level counterpart of the
+        // dropdown unification of styleComboEditor.
+        ConfigurationUtils.unifyTitledBoxHeights(statusPanel, searchMatchPanel);
         // The two compact titled boxes sit side by side (like the console
         // filter header's search + filter boxes): the value-status filter
         // box first, the search box second.
@@ -823,26 +886,113 @@ public class NodeConfigurationPanel extends JPanel {
             allPropertyRows.forEach(row -> {
                 if (row.input != null) {
                     ConfigurationUtils.styleInputComponent(row.input);
-                    ConfigurationUtils.fixComponentSize(row.input);
+                    if (row.input instanceof JComboBox cb && cb.isEditable()) {
+                        // An L&F change replaces the combo's editor component —
+                        // the padding styleComboEditor computed for the old
+                        // editor is gone, so re-pad: the editable select would
+                        // otherwise revert to the new L&F's natural (shorter)
+                        // height and render lower than the plain selects.
+                        ConfigurationUtils.styleComboEditor(cb);
+                    }
+                    // The multi-line list inputs (the per-item list editor and
+                    // its PK-conversion wrapper) are NOT pinned to a one-line
+                    // height: fixComponentSize caps the component's MAXIMUM
+                    // size, which would squash a multi-item list to a single
+                    // line.
+                    if (!(row.input instanceof ListEditor) && !multilineInputs.contains(row.input)) {
+                        ConfigurationUtils.fixComponentSize(row.input);
+                    }
                 }
             });
         }
+        // The list editors' own combos (item rows + add row) live INSIDE the
+        // editor panel, so the row loop above never reaches their editors —
+        // re-pad them explicitly after an L&F change (the same plain-vs-
+        // editable height unification as at construction). (Guarded: this
+        // method also runs from the super constructor, before the subclass
+        // fields exist — the same reason the row loop above is guarded.)
+        if (listEditors != null) {
+            for (ListEditor le : listEditors.values()) {
+                ConfigurationUtils.styleComboEditor(le.addField);
+                le.installAddEnterAction();
+                for (JComboBox<String> item : le.itemFields) {
+                    ConfigurationUtils.styleComboEditor(item);
+                }
+                le.refreshInputWidths();
+            }
+        }
+        // The db.URL section's fields live INSIDE the JDBC panel (the row's
+        // input is the wrapper, so the row loop above never reaches them) —
+        // re-derive their unified border / height / editor padding from the
+        // new metrics, so a font growth moves them exactly like the rest of
+        // the configuration. (Guarded: this method also runs from the super
+        // constructor, before the subclass fields exist.)
+        if (propertyComponents != null) {
+            JdbcConfigurationPanel jdbc = jdbcPanel();
+            if (jdbc != null) {
+                jdbc.reunifyControlStyles();
+            }
+        }
+        // Re-apply the value-state COLOR coding after the re-style: a font /
+        // L&F change replaces the UI delegates, and every EDITABLE combo's
+        // editor component is recreated by the new delegate — the
+        // updateColor() foreground set on the old editor (and, with some
+        // delegates, on plain text inputs) is gone, so the unsaved / applied
+        // colors would silently disappear until the next edit. Refreshing the
+        // colors LAST (after every re-style above) re-sets them on the NEW
+        // editor components, the list-editor item fields and the JDBC
+        // section, and re-resolves the dirty-label asterisks. (Guarded:
+        // this method also runs from the super constructor, before the
+        // profiles are loaded.)
+        if (propertyComponents != null && savedProfile != null && appliedProfile != null) {
+            refreshUIColors();
+            // updateComponentTreeUI refreshes this panel before it refreshes
+            // descendant combo-box UIs. Their editors are recreated after the
+            // synchronous color pass above, so re-apply colors once the full
+            // tree update has completed.
+            SwingUtilities.invokeLater(() -> {
+                if (propertyComponents != null && savedProfile != null && appliedProfile != null) {
+                    refreshUIColors();
+                }
+            });
+        }
+        refreshStatusFilterColors();
         updateProfileButtonsUI();
+    }
+
+    /**
+     * Re-sets the "Show values" checkbox colors from the CURRENT palette —
+     * the state colors are theme-dependent palette values, so a theme
+     * change must refresh them (a font-only change is a no-op). (Guarded:
+     * this method also runs from the super constructor, before the boxes
+     * exist.)
+     */
+    private void refreshStatusFilterColors() {
+        if (showUnsavedBox == null) {
+            return;
+        }
+        showUnsavedBox.setForeground(GuiColors.getUnsaved());
+        showUnsavedAppliedBox.setForeground(GuiColors.getUnsavedApplied());
+        showSavedBox.setForeground(GuiColors.getSaved());
+        showAppliedBox.setForeground(GuiColors.getApplied());
     }
 
     private void updateProfileButtonsUI() {
         ConfigurationUtils.configureProfileToolbar(newProfileBtn, saveBtn, applyBtn, renameProfileBtn,
                 deleteProfileBtn, reloadProfileBtn, null, resetToDefaultsBtn,
                 copyProfileDataBtn, cloneProfileBtn);
+        float iconSize = GuiConstants.getToolBarIconSize();
+        ConfigurationUtils.styleProfileIconButton(reloadProfileBtn, FontAwesome.REFRESH,
+                GuiColors.getButtonIcon(), iconSize);
         // Save / Apply are tinted with their value-state colors (the "saved"
         // and "applied" palette colors) so they read as the two halves of the
         // save-then-apply flow instead of two identical floppy icons.
-        float iconSize = GuiConstants.getToolBarIconSize();
         ConfigurationUtils.styleProfileIconButton(saveBtn, FontAwesome.FLOPPY_O, GuiColors.getSaved(), iconSize);
         ConfigurationUtils.styleProfileIconButton(applyBtn, FontAwesome.CHECK_CIRCLE_O, GuiColors.getApplied(), iconSize);
         // The help button keeps the same flat toolbar style (size, border) as
         // the other profile-action buttons.
-        ConfigurationUtils.styleProfileIconButton(helpBtn, FontAwesome.QUESTION_CIRCLE, GuiColors.getHelpIcon(), iconSize);
+        ConfigurationUtils.styleProfileIconButton(helpBtn, FontAwesome.QUESTION_CIRCLE, GuiColors.getButtonIcon(),
+                iconSize);
     }
 
     private void refreshUIColors() {
@@ -856,7 +1006,7 @@ public class NodeConfigurationPanel extends JPanel {
      * While a query is active (or a value-status visibility checkbox is not
      * selected) the tabbed pane is hidden and every matching row (from every
      * tab) is listed flat in the search-results card with its matching
-     * substring highlighted; an empty query together with all three
+     * substring highlighted; an empty query together with all four
      * visibility checkboxes selected brings the tabbed view back. With a
      * non-empty query the search UI (highlighting, match counter, chevron
      * navigation) is active; in the filter-only case (query empty, a status
@@ -872,7 +1022,7 @@ public class NodeConfigurationPanel extends JPanel {
 
         String query = text == null ? "" : text.trim();
         // The search-panel visibility checkboxes act as a value-status
-        // filter: while all three are selected every row is visible (tabbed
+        // filter: while all four are selected every row is visible (tabbed
         // view); when any of them is off only the rows whose state is still
         // selected are listed (when that filter is inactive the state is
         // irrelevant). The query keeps only the text matches (when it is
@@ -916,7 +1066,11 @@ public class NodeConfigurationPanel extends JPanel {
                 if (row.extra != null) {
                     searchResultsPanel.add(row.extra, row.extraConstraints);
                 }
-                searchResultsPanel.add(row.help, row.helpConstraints);
+                // The JDBC row carries its ? icon INSIDE the row's input
+                // wrapper (the checkbox row) — its row.help is null.
+                if (row.help != null) {
+                    searchResultsPanel.add(row.help, row.helpConstraints);
+                }
                 searchResultsPanel.add(row.separator, row.separatorConstraints);
             }
             contentCardLayout.show(contentContainer, "SEARCH");
@@ -1048,7 +1202,9 @@ public class NodeConfigurationPanel extends JPanel {
         if (row.extra != null) {
             row.extraIndex = row.originalParent.getComponentZOrder(row.extra);
         }
-        row.helpIndex = row.originalParent.getComponentZOrder(row.help);
+        if (row.help != null) {
+            row.helpIndex = row.originalParent.getComponentZOrder(row.help);
+        }
         row.separatorIndex = row.originalParent.getComponentZOrder(row.separator);
         JTextComponent value = rowValueTextComponent(row);
         if (value != null) {
@@ -1957,8 +2113,7 @@ public class NodeConfigurationPanel extends JPanel {
                 if (newValue == null)
                     newValue = "";
 
-                boolean isList = (row.input instanceof JScrollPane) ||
-                        (row.input instanceof JPanel && Props.NODE_PK_CHECKS.getName().equals(row.prop.getName()));
+                boolean isList = listEditors.containsKey(row.prop.getName());
 
                 String displaySaved = savedValue;
                 String displayNew = newValue;
@@ -2443,8 +2598,10 @@ public class NodeConfigurationPanel extends JPanel {
         content.add(HelpDialog.title("Node Configuration Profiles"));
         content.add(Box.createVerticalStrut(10));
         content.add(HelpDialog.paragraph(
-                "Profiles allow you to maintain multiple sets of node configurations. Use the "
-                        + "toolbar buttons to perform the following actions:"));
+                "A node configuration profile is a set of settings for one node profile. The selected profile "
+                        + "is edited here; Save writes changes to its configuration file, while Apply selects "
+                        + "it for the node and restarts the node when required. Use the toolbar buttons to "
+                        + "manage profiles and review their state."));
         content.add(HelpDialog.separator());
         content.add(HelpDialog.heading("Row colors"));
         content.add(HelpDialog.legendRow(GuiColors.getUnsaved(), "Unsaved",
@@ -2489,7 +2646,7 @@ public class NodeConfigurationPanel extends JPanel {
         content.add(HelpDialog.actionRow(FontAwesome.FILES_O, iconColor, "Clone Configuration",
                 "Creates a new profile from the current (unsaved, editor) effective state; the "
                         + "source profile is left untouched."));
-        content.add(HelpDialog.actionRow(FontAwesome.RECYCLE, iconColor, "Reload Configuration",
+        content.add(HelpDialog.actionRow(FontAwesome.REFRESH, iconColor, "Reload Configuration",
                 "Reloads the current profile file from disk (e.g. after external edits), discarding "
                         + "any unsaved changes in the UI."));
         content.add(HelpDialog.actionRow(FontAwesome.TRASH_O, GuiColors.getContrastRed(),
@@ -2498,10 +2655,15 @@ public class NodeConfigurationPanel extends JPanel {
                         + "not restarted), the profile settings are removed (optionally its SQLite "
                         + "database data) and its tab is closed."));
         content.add(HelpDialog.actionRow(FontAwesome.QUESTION_CIRCLE, iconColor, "Help",
-                "Shows this help."));
+                "Opens this guide to profile actions, value-state colors and profile assignments."));
         content.add(HelpDialog.separator());
         content.add(HelpDialog.paragraph(
-                "The <b>database</b> profile link is managed on the Database tab's "
+                "The <b>Unsaved</b> state means the editor value differs from both the saved file and the "
+                        + "loaded profile baseline; <b>Saved</b> means the value is saved but differs from "
+                        + "that baseline; <b>Applied</b> means it matches the loaded profile value. "
+                        + "The search field matches property names, keys and values, while the Show values "
+                        + "checkboxes filter rows by state.<br><br>"
+                        + "The <b>database</b> profile link is managed on the Database tab's "
                         + "\u201CLinked Database Profile\u201D control, and the <b>logging</b> "
                         + "profile assignment on the Logging tab.<br><br>"
                         + "Profiles are stored as \".properties\" files within the node "
@@ -2543,10 +2705,8 @@ public class NodeConfigurationPanel extends JPanel {
             return (savedBool != valBool);
         }
 
-        // List property detection: either a JScrollPane or our special JPanel wrapper
-        // for PK checks
-        boolean isList = (row.input instanceof JScrollPane) ||
-                (row.input instanceof JPanel && Props.NODE_PK_CHECKS.getName().equals(row.prop.getName()));
+        // List property detection: the row has a per-item editor (addListProperty).
+        boolean isList = listEditors.containsKey(row.prop.getName());
 
         if (isList) {
             String normalizedVal = normalizeListValue(val, "\n");
@@ -2712,16 +2872,6 @@ public class NodeConfigurationPanel extends JPanel {
             String key = entry.getKey();
             JComponent comp = entry.getValue();
 
-            // Unwrap JPanel for PK checks to access the actual scroll pane
-            if (comp instanceof JPanel && Props.NODE_PK_CHECKS.getName().equals(key)) {
-                for (Component inner : ((JPanel) comp).getComponents()) {
-                    if (inner instanceof JScrollPane) {
-                        comp = (JComponent) inner;
-                        break;
-                    }
-                }
-            }
-
             if (comp instanceof JPanel && Props.DB_URL.getName().equals(key)) {
                 String val = props.getProperty(key, defaultValues.get(key));
                 String user = props.getProperty(Props.DB_USERNAME.getName(),
@@ -2750,6 +2900,13 @@ public class NodeConfigurationPanel extends JPanel {
             if (val == null)
                 val = "";
 
+            ListEditor editor = listEditors.get(key);
+            if (editor != null) {
+                editor.setItems(splitList(val));
+                updateColor(comp, key, defaultValues.get(key));
+                continue;
+            }
+
             if (comp instanceof JCheckBox) {
                 boolean isSelected = "true".equalsIgnoreCase(val) || "yes".equalsIgnoreCase(val) || "1".equals(val)
                         || "on".equalsIgnoreCase(val);
@@ -2758,21 +2915,6 @@ public class NodeConfigurationPanel extends JPanel {
                 ((JComboBox<?>) comp).setSelectedItem(val);
             } else if (comp instanceof javax.swing.text.JTextComponent) {
                 ((javax.swing.text.JTextComponent) comp).setText(val);
-            } else if (comp instanceof JScrollPane) {
-                JViewport viewport = ((JScrollPane) comp).getViewport();
-                Component view = viewport.getView();
-                if (view instanceof JTextArea) {
-                    String[] items = val.split(";");
-                    StringBuilder sb = new StringBuilder();
-                    for (String item : items) {
-                        if (!item.trim().isEmpty()) {
-                            if (sb.length() > 0)
-                                sb.append("\n");
-                            sb.append(item.trim());
-                        }
-                    }
-                    ((JTextArea) view).setText(sb.toString());
-                }
             }
             updateColor(comp, key, defaultValues.get(key));
         }
@@ -2915,43 +3057,31 @@ public class NodeConfigurationPanel extends JPanel {
                 updateDirtyStatus();
             });
         } else if (options != null) {
-            JComboBox<String> comboBox = new JComboBox<>(options);
-            comboBox.setPrototypeDisplayValue("Prototype");
-            comboBox.setSelectedItem(savedValue);
-            comboBox.setEditable(editable);
-            // If current value is not in options (e.g. custom), add it or handle gracefully
-            if (comboBox.getSelectedItem() == null && savedValue != null) {
-                comboBox.setEditable(true);
+            JComboBox<String> comboBox;
+            if (savedValue != null && Arrays.asList(options).contains(savedValue)) {
+                // The ORIGINAL non-editable select: the fixed option catalog.
+                // Every dropdown entry is colored by its own value state
+                // (applied green, saved yellow, the current value in the row's
+                // own state — see the renderer).
+                comboBox = new JComboBox<>(options);
+                comboBox.setPrototypeDisplayValue("Prototype");
                 comboBox.setSelectedItem(savedValue);
+                valueSuppliers.put(prop.getName(), () -> (String) comboBox.getSelectedItem());
+            } else {
+                // The saved value is not in the fixed options (a custom value):
+                // the select joins the state-aware value model — editable, with
+                // the option catalog plus the state's baseline values in its
+                // dropdown, exactly like the regular input rows.
+                comboBox = createStateAwareValueCombo(prop, savedValue, options);
+                valueSuppliers.put(prop.getName(), () -> stateAwareComboText(comboBox));
             }
             ConfigurationUtils.fixComponentSize(comboBox);
             inputComponent = comboBox;
-            valueSuppliers.put(prop.getName(), () -> (String) comboBox.getSelectedItem());
-
-            comboBox.setRenderer(new DefaultListCellRenderer() {
-                @Override
-                public Component getListCellRendererComponent(JList<?> list, Object value, int index,
-                        boolean isSelected, boolean cellHasFocus) {
-                    Component c = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-                    String savedVal = savedProfile.getProperty(prop.getName());
-                    if (savedVal == null)
-                        savedVal = getSafeDefault(prop);
-
-                    String applied = appliedProfile.getProperty(prop.getName());
-                    boolean hasApplied = appliedProfile.getProperties().containsKey(prop.getName());
-                    if (applied == null)
-                        applied = getSafeDefault(prop);
-
-                    if (hasApplied && value != null && value.toString().trim().equals(applied.trim())) {
-                        c.setForeground(GuiColors.getApplied());
-                    } else if (value != null && value.toString().trim().equals(savedVal.trim())) {
-                        c.setForeground(GuiColors.getSaved());
-                    } else {
-                        c.setForeground(GuiColors.getUnsaved());
-                    }
-                    return c;
-                }
-            });
+            if (!comboBox.isEditable()) {
+                // the state-aware factory already wired the renderer of the editable case
+                comboBox.setRenderer(stateAwareItemRenderer(prop,
+                        () -> (String) comboBox.getSelectedItem()));
+            }
             comboBox.addActionListener(e -> {
                 if (isProgrammaticChange)
                     return;
@@ -2959,43 +3089,14 @@ public class NodeConfigurationPanel extends JPanel {
                 updateDirtyStatus();
             });
         } else {
-            JTextField textField = new JTextField(savedValue);
-            ConfigurationUtils.styleInputComponent(textField);
-
-            // Fix dimensions to match standard text fields
-            ConfigurationUtils.fixComponentSize(textField);
-
-            inputComponent = textField;
-            valueSuppliers.put(prop.getName(), textField::getText);
-            textField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-
-                public void insertUpdate(javax.swing.event.DocumentEvent e) {
-                    if (isProgrammaticChange)
-                        return;
-                    SwingUtilities.invokeLater(() -> {
-                        updateColor(textField, prop.getName(), getSafeDefault(prop));
-                        updateDirtyStatus();
-                    });
-                }
-
-                public void removeUpdate(javax.swing.event.DocumentEvent e) {
-                    if (isProgrammaticChange)
-                        return;
-                    SwingUtilities.invokeLater(() -> {
-                        updateColor(textField, prop.getName(), getSafeDefault(prop));
-                        updateDirtyStatus();
-                    });
-                }
-
-                public void changedUpdate(javax.swing.event.DocumentEvent e) {
-                    if (isProgrammaticChange)
-                        return;
-                    SwingUtilities.invokeLater(() -> {
-                        updateColor(textField, prop.getName(), getSafeDefault(prop));
-                        updateDirtyStatus();
-                    });
-                }
-            });
+            // A regular input row is an EDITABLE select (not a plain text
+            // field): its editor text is the row's current value (styled
+            // exactly like the former text field) and its dropdown carries the
+            // state's baseline values (the saved and/or applied value), so the
+            // user can pick a baseline back in one click.
+            JComboBox<String> comboBox = createStateAwareValueCombo(prop, savedValue, null);
+            inputComponent = comboBox;
+            valueSuppliers.put(prop.getName(), () -> stateAwareComboText(comboBox));
         }
 
         updateColor(inputComponent, prop.getName(), getSafeDefault(prop));
@@ -3024,6 +3125,259 @@ public class NodeConfigurationPanel extends JPanel {
         addPropertyRow(row);
     }
 
+    /**
+     * The EDITABLE, state-aware select that is the input of every regular
+     * value row (and of a select whose saved value is not in its fixed
+     * options): the editor text is the row's current value (styled exactly
+     * like the former plain text field) and the dropdown model is rebuilt on
+     * every state change by {@link #rebuildStateAwareComboModel} with the
+     * option catalog (selects with one, {@code null} for free-form value
+     * rows) plus exactly the baseline values the row's state keeps
+     * selectable. The dropdown entries are colored per item by
+     * {@link #stateAwareItemRenderer} and the row's own value coloring stays
+     * driven by the editor text (the value supplier reads it too).
+     */
+    private JComboBox<String> createStateAwareValueCombo(Prop<?> prop, String savedValue, String[] options) {
+        JComboBox<String> comboBox = new JComboBox<>(new String[0]);
+        comboBox.setEditable(true);
+        stateAwareCombos.put(comboBox, new StateAwareCombo(prop, options));
+        JComponent editorComponent = (JComponent) comboBox.getEditor().getEditorComponent();
+        // the editor TEXT FIELD (wrapped by a panel with the Metal L&F) is
+        // styled like a regular input, with the same left margin as the
+        // regular (non-editable) selects.
+        ConfigurationUtils.styleComboEditor(comboBox);
+        // The editor text is the row's current value — seed it with the
+        // (default-resolved) saved value, exactly like the former plain text
+        // fields did. Flagged: the seed fires document events that must not
+        // queue a refresh. (Without an explicit seed the initial rebuild's
+        // model swap would leave the editor EMPTY — before the typed-text
+        // restore existed, that swap silently left it at the model's first
+        // entry, which happened to be the saved baseline, and that accident
+        // is what used to fill the inputs on load.)
+        boolean prevFlag = isProgrammaticChange;
+        isProgrammaticChange = true;
+        try {
+            if (savedValue != null && !savedValue.trim().isEmpty()) {
+                comboBox.getEditor().setItem(savedValue);
+            }
+            rebuildStateAwareComboModel(comboBox, prop, savedValue);
+        } finally {
+            isProgrammaticChange = prevFlag;
+        }
+        comboBox.setRenderer(stateAwareItemRenderer(prop, () -> stateAwareComboText(comboBox)));
+        // The editor text IS the value — track its changes exactly like the old
+        // plain text fields did. The L&F alone is not reliable for this: the
+        // Metal editor's text field is NOT the editor component, so Swing does
+        // not propagate typed (or programmatically set) characters to an action
+        // event synchronously — the dirty state and colors would lag the typing.
+        javax.swing.text.JTextComponent editorText = findEditorText(editorComponent);
+        if (editorText != null) {
+            javax.swing.event.DocumentListener listener = new javax.swing.event.DocumentListener() {
+                @Override
+                public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                    onEditorTextChange(comboBox, prop);
+                }
+
+                @Override
+                public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                    onEditorTextChange(comboBox, prop);
+                }
+
+                @Override
+                public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                }
+            };
+            editorText.getDocument().addDocumentListener(listener);
+        }
+        comboBox.addActionListener(e -> {
+            if (isProgrammaticChange)
+                return;
+            updateColor(comboBox, prop.getName(), getSafeDefault(prop));
+            updateDirtyStatus();
+        });
+        return comboBox;
+    }
+
+    /**
+     * The color / dirty-state refresh for a state-aware select's typed text —
+     * the document-listener twin of the combo's action listener (selections
+     * arrive through the action, typing through the document).
+     * <p>The refresh is DEFERRED: the listener runs inside a document-change
+     * notification, and the model rebuild touches the editor text (the L&F
+     * reconfigures the editor on every model swap) — mutating a document while
+     * its own notification is in flight is forbidden by Swing ("Attempt to
+     * mutate in notification"). Deferred, the refresh settles after the
+     * pending document events (exactly like the old plain text fields did).
+     */
+    private void onEditorTextChange(JComboBox<String> comboBox, Prop<?> prop) {
+        if (isProgrammaticChange)
+            return;
+        SwingUtilities.invokeLater(() -> {
+            // Flagged: the refresh rebuilds the dropdown (a model swap, and the
+            // typed-text restore after it, both touch the editor text) — the
+            // restore's own document events must not reschedule this refresh
+            // again (an endless deferred cycle).
+            isProgrammaticChange = true;
+            try {
+                updateColor(comboBox, prop.getName(), getSafeDefault(prop));
+                updateDirtyStatus();
+            } finally {
+                isProgrammaticChange = false;
+            }
+        });
+    }
+
+    /**
+     * The text component of a combo editor (the editor component itself with
+     * the Basic L&F, its child text field with the Metal one — the editor
+     * component there is a panel wrapping the field).
+     */
+    private static javax.swing.text.JTextComponent findEditorText(JComponent c) {
+        if (c instanceof javax.swing.text.JTextComponent t) {
+            return t;
+        }
+        if (c instanceof java.awt.Container cont) {
+            for (java.awt.Component child : cont.getComponents()) {
+                if (child instanceof javax.swing.text.JTextComponent t) {
+                    return t;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The current (live) text of an editable state-aware combo — what the
+     * user typed or selected into the editor, the row's current value
+     * (trimmed, empty string for a null editor item).
+     */
+    private static String stateAwareComboText(JComboBox<String> comboBox) {
+        // During an L&F update (updateUI) the combo's UI is swapped and the
+        // editor's client-property is briefly NULL — fall back to the selected
+        // item so renderers and size computations cannot NPE in that window.
+        var editor = comboBox.getEditor();
+        Object item = editor != null ? editor.getItem() : comboBox.getSelectedItem();
+        return item == null ? "" : item.toString().trim();
+    }
+
+    /**
+     * Rebuilds the dropdown of one state-aware select from the row's current
+     * 4-state ({@link ProfileValueState}): the option catalog (when the row
+     * has one) is always present, the row's current value is always part of
+     * the model (the dropdown is never empty) and the baseline entries are
+     * exactly {@link ProfileValueState#dropdownBaselines} — the saved value
+     * (SAVED / UNSAVED_APPLIED / UNSAVED), the applied value (UNSAVED), or
+     * none (SAVED_APPLIED).
+     */
+    private void rebuildStateAwareComboModel(JComboBox<String> comboBox, Prop<?> prop, String savedValue) {
+        // Re-entrancy guard: the combo's own event chain (editor text change,
+        // model selection change) can re-trigger this rebuild while a rebuild
+        // for the same combo is already in flight — the in-flight rebuild has
+        // (or is about to have) the correct items, so a nested one is
+        // redundant. Without the guard the chain (setSelectedItem → editor
+        // setText → document listener → updateColor → rebuild) never settles.
+        if (rebuildingCombos.contains(comboBox)) {
+            return;
+        }
+        rebuildingCombos.add(comboBox);
+        try {
+            String current = stateAwareComboText(comboBox);
+            String saved = savedValue == null ? getSafeDefault(prop) : savedValue;
+            String applied = appliedProfile.getProperty(prop.getName());
+            if (applied == null)
+                applied = getSafeDefault(prop);
+            LinkedHashSet<String> items = new LinkedHashSet<>();
+            StateAwareCombo info = stateAwareCombos.get(comboBox);
+            String[] options = info == null ? null : info.options();
+            if (options != null) {
+                for (String option : options)
+                    items.add(option);
+            }
+            if (!current.isEmpty())
+                items.add(current);
+            for (String baseline : ProfileValueState.dropdownBaselines(false, current, saved, applied)) {
+                items.add(baseline);
+            }
+            // Every editor / model touch below is PROGRAMMATIC, so it runs
+            // flagged: the restore fires document events (and the pre-swap
+            // selection can fire the combo's action), and neither may schedule
+            // a refresh of its own. Without the flag, the INITIAL rebuild of
+            // every row (empty editor, before the load fills the values) would
+            // queue a deferred refresh that paints the row UNSAVED — the empty
+            // editor against the saved baseline — and sticks the dirty star on
+            // every tab (a reported regression: the JDBC tests match their tab
+            // by the EXACT unmarked title).
+            boolean prevFlag = isProgrammaticChange;
+            isProgrammaticChange = true;
+            try {
+                // Keep the (typed) current value as the editor item before
+                // swapping the model; when the user has typed something that is
+                // not among the entries the selection simply drops (the editor
+                // text stays as typed).
+                String typed = comboBox.getEditor().getItem() instanceof String s ? s : "";
+                if (!typed.isEmpty()) {
+                    comboBox.setSelectedItem(typed);
+                } else {
+                    comboBox.setSelectedIndex(-1);
+                }
+                comboBox.setModel(new DefaultComboBoxModel<>(items.toArray(new String[0])));
+                // Keep the model selection in sync with the editor text.
+                // Restoring only the text leaves the model selected on its
+                // first item; a later UI-delegate refresh can then overwrite
+                // the editor with that unrelated value.
+                comboBox.setSelectedItem(typed);
+                // An emptied input stays EMPTY (it is an unsaved value, not a
+                // reason to fill a baseline back in).
+                if (!typed.equals(stateAwareComboText(comboBox))) {
+                    comboBox.getEditor().setItem(typed);
+                }
+            } finally {
+                isProgrammaticChange = prevFlag;
+            }
+        } finally {
+            rebuildingCombos.remove(comboBox);
+        }
+    }
+
+    /**
+     * The dropdown renderer of the state-aware (and the original non-editable)
+     * selects: every entry is colored by the state of its OWN value — the
+     * entry equal to the row's current value displays the row's own state
+     * (gray for unsaved-but-applied, the state that is not visible on the
+     * row's label/input itself), an applied baseline green only when it is
+     * also saved (otherwise gray unsaved-applied), a saved baseline yellow,
+     * everything else normal text color.
+     */
+    /**
+     * When sizing a non-editable combo's DISPLAY area the L&F invokes the
+     * renderer with a NULL list (BasicComboBoxUI.getDisplaySize), and this
+     * JDK's DefaultListCellRenderer does not tolerate that (NPE) — a shared
+     * throwaway list stands in; the renderer overwrites the colors it would
+     * copy from the list for every value entry anyway.
+     */
+    private static final JList<?> RENDERER_FALLBACK_LIST = new JList<>(new String[0]);
+
+    private DefaultListCellRenderer stateAwareItemRenderer(Prop<?> prop, Supplier<String> currentValue) {
+        return new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                    boolean isSelected, boolean cellHasFocus) {
+                Component c = super.getListCellRendererComponent(
+                        list == null ? RENDERER_FALLBACK_LIST : list, value, index, isSelected, cellHasFocus);
+                if (value instanceof String) {
+                    String saved = savedProfile.getProperty(prop.getName());
+                    if (saved == null)
+                        saved = getSafeDefault(prop);
+                    String applied = appliedProfile.getProperty(prop.getName());
+                    if (applied == null)
+                        applied = getSafeDefault(prop);
+                    c.setForeground(itemStatus((String) value, currentValue.get(), saved, applied).color());
+                }
+                return c;
+            }
+        };
+    }
+
     private void addJdbcUrlProperty(JPanel panel, Prop<String> prop, String labelText) {
         // Label — with the exact property key rendered below the name
         // (unified key style, see SearchMatchLabel#setKeyText).
@@ -3034,12 +3388,27 @@ public class NodeConfigurationPanel extends JPanel {
         row.labelConstraints = "align label, aligny top";
         panel.add(label, row.labelConstraints);
 
-        JPanel wrapper = new JPanel(new MigLayout("insets 0, fillx, gap 2", "[grow]", "[]5[]"));
+        // Two columns: the checkbox row is [Linked Database Profile][?] —
+        // when a question-mark help icon follows a check box, the two must
+        // sit on the SAME row, the ? vertically centered on that row (its
+        // MigLayout default center alignment). The editor + auto start/stop
+        // rows span both columns.
+        JPanel wrapper = new JPanel(new MigLayout("insets 0, fillx, gap 2", "[grow][]", "[]5[]"));
         wrapper.setOpaque(false);
 
         JCheckBox useProfileCheck = new JCheckBox("Linked Database Profile");
         useProfileCheck.setOpaque(false);
-        wrapper.add(useProfileCheck, "wrap");
+        wrapper.add(useProfileCheck);
+
+        // The row's ? help icon lives in the checkbox row (NOT in the
+        // separate help column): on a tall JDBC card the help column would
+        // span the whole section and the ? could not be centered on the
+        // checkbox row alone. Row model: row.help stays null (search view
+        // and restore skip null parts) — the button travels inside the
+        // wrapper with the row.
+        JButton helpBtn = new HelpButton();
+        helpBtn.addActionListener(e -> showHelp(prop, labelText));
+        wrapper.add(helpBtn, "wrap");
 
         final boolean[] jdbcInitialized = { false };
         Runnable jdbcOnChange = () -> {
@@ -3055,7 +3424,7 @@ public class NodeConfigurationPanel extends JPanel {
         // visible rows).
         JdbcConfigurationPanel jdbcPanel = new JdbcConfigurationPanel(confFolder, jdbcOnChange,
                 this::onJdbcLinkChanged);
-        wrapper.add(jdbcPanel, "growx");
+        wrapper.add(jdbcPanel, "span 2, growx");
 
         // The panel is the single "card" of the row (the client-property
         // contract the auto-link integration test reads).
@@ -3078,7 +3447,7 @@ public class NodeConfigurationPanel extends JPanel {
         autoDbRow.setOpaque(false);
         autoDbRow.add(autoStartDbCheck);
         autoDbRow.add(autoStopDbCheck);
-        wrapper.add(autoDbRow, "span, gaptop 4");
+        wrapper.add(autoDbRow, "span 2, gaptop 4");
 
         // The host's "Linked Database Profile" checkbox drives the panel's
         // link mode; the panel may auto-unlink itself (e.g. an unmaterializable
@@ -3136,18 +3505,20 @@ public class NodeConfigurationPanel extends JPanel {
         defaultValues.put(Props.DB_PASSWORD.getName(), getSafeDefault(Props.DB_PASSWORD));
 
         row.input = wrapper;
-        row.inputConstraints = "split 2, growx";
+        // The trailing "wrap" is load-bearing: this row has NO help button
+        // in the OUTER grid (the ? travels inside the wrapper's checkbox
+        // row), so the help column is still free on the input row — without
+        // the wrap, the next component (the row separator, "span") would
+        // land in that free column (a short line to the RIGHT of the JDBC
+        // card, beside "Path:") instead of dropping to its own full-width
+        // row under the "JDBC URL:" preview.
+        row.inputConstraints = "split 2, growx, wrap";
         panel.add(wrapper, row.inputConstraints);
         propertyComponents.put(prop.getName(), wrapper);
         // Initial enablement of the auto start/stop boxes follows the current
         // (manual card's) engine.
         updateAutoDbCheckboxesState();
 
-        JButton helpBtn = new HelpButton();
-        helpBtn.addActionListener(e -> showHelp(prop, labelText));
-        row.help = helpBtn;
-        row.helpConstraints = "wrap, aligny top";
-        panel.add(helpBtn, row.helpConstraints);
         row.separator = new JSeparator();
         row.separatorConstraints = "span, growx, wrap, gaptop 2, gapbottom 2";
         panel.add(row.separator, row.separatorConstraints);
@@ -3221,13 +3592,14 @@ public class NodeConfigurationPanel extends JPanel {
         row.helpConstraints = "wrap";
         panel.add(helpBtn, row.helpConstraints);
 
-        // Show/Hide Checkbox
+        // Show/Hide Checkbox — the distance from the row's icons/field is
+        // the uniform field-to-action-icon gap (INPUT_ACTION_GAP).
         JCheckBox showPass = new JCheckBox("Show Password");
         showPass.addActionListener(e -> {
             passwordField.setEchoChar(showPass.isSelected() ? (char) 0 : defaultEchoChar);
         });
         row.extra = showPass;
-        row.extraConstraints = "skip 1, wrap";
+        row.extraConstraints = "skip 1, wrap, gapleft " + ConfigurationUtils.INPUT_ACTION_GAP;
         panel.add(showPass, row.extraConstraints);
 
         row.separator = new JSeparator();
@@ -3302,59 +3674,29 @@ public class NodeConfigurationPanel extends JPanel {
         if (savedValue == null) {
             savedValue = getSafeDefault(prop);
         }
-        defaultValues.put(prop.getName(), normalizeListValue(getSafeDefault(prop), ";"));
-        // Split by semicolon and join with newlines for display
-        String[] items = savedValue.split(";");
-        StringBuilder sb = new StringBuilder();
-        for (String item : items) {
-            String p = item.trim();
-            if (!p.isEmpty()) {
-                if (sb.length() > 0)
-                    sb.append("\n");
-                sb.append(p);
-            }
-        }
-
-        JTextArea textArea = new JTextArea(sb.toString());
-        textArea.setRows(4);
-        JScrollPane scrollPane = new JScrollPane(textArea);
-        scrollPane.getVerticalScrollBar().setUnitIncrement(16);
-
-        textArea.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
-            public void insertUpdate(javax.swing.event.DocumentEvent e) {
-                if (isProgrammaticChange)
-                    return;
-                SwingUtilities.invokeLater(() -> {
-                    updateColor(textArea, prop.getName(), getSafeDefault(prop));
-                    updateDirtyStatus();
-                });
-            }
-
-            public void removeUpdate(javax.swing.event.DocumentEvent e) {
-                if (isProgrammaticChange)
-                    return;
-                SwingUtilities.invokeLater(() -> {
-                    updateColor(textArea, prop.getName(), getSafeDefault(prop));
-                    updateDirtyStatus();
-                });
-            }
-
-            public void changedUpdate(javax.swing.event.DocumentEvent e) {
-                if (isProgrammaticChange)
-                    return;
-                SwingUtilities.invokeLater(() -> {
-                    updateColor(textArea, prop.getName(), getSafeDefault(prop));
-                    updateDirtyStatus();
-                });
-            }
-        });
-        updateColor(textArea, prop.getName(), getSafeDefault(prop));
+        defaultValues.put(prop.getName(), serializeListValue(getSafeDefault(prop), prop.getName()));
+        // Per-item editor: one editable COMBO per stored item, stacked one below
+        // the other (each with a trash icon; the dropdown offers the item's
+        // baseline values from the saved / applied sets), plus a final "add" row
+        // (editable combo + flat '+' button styled like the new-profile toolbar
+        // button). Emptying an item input removes that item. Every item is
+        // colored by its own state (unsaved/saved/applied) and the row reads
+        // DIRTY whenever the item set differs from saved.
+        ListEditor editor = new ListEditor(prop.getName());
+        listEditors.put(prop.getName(), editor);
+        editor.onChange = () -> {
+            updateColor(editor, prop.getName(), getSafeDefault(prop));
+            updateDirtyStatus();
+        };
+        editor.setItems(splitList(savedValue));
+        updateColor(editor, prop.getName(), getSafeDefault(prop));
 
         boolean isPkCheck = Props.NODE_PK_CHECKS.getName().equals(prop.getName());
+        JComponent valueComponent;
         if (isPkCheck) {
             JPanel wrapper = new JPanel(new BorderLayout());
             wrapper.setOpaque(false);
-            wrapper.add(scrollPane, BorderLayout.CENTER);
+            wrapper.add(editor, BorderLayout.CENTER);
 
             JButton convertBtn = new JButton(
                     IconFontSwing.buildIcon(FontAwesome.MAGIC, GuiConstants.getHelpIconSize(),
@@ -3364,40 +3706,50 @@ public class NodeConfigurationPanel extends JPanel {
             convertBtn.setFocusPainted(false);
             convertBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
             convertBtn.setToolTipText("Analyze/Convert Public Keys");
-            convertBtn.addActionListener(e -> showPkConversionDialog(textArea));
+            convertBtn.addActionListener(e -> showPkConversionDialog(editor));
 
             JPanel btnContainer = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
             btnContainer.setOpaque(false);
             btnContainer.add(convertBtn);
             wrapper.add(btnContainer, BorderLayout.SOUTH);
 
-            panel.add(wrapper, "split 2, growx, hmin 80");
-            propertyComponents.put(prop.getName(), wrapper); // Store wrapper for visibility handling
+            valueComponent = wrapper;
+            // exempt from the one-line height pin in updateUI() — see multilineInputs
+            multilineInputs.add(wrapper);
         } else {
-            panel.add(scrollPane, "split 2, growx, hmin 80");
-            propertyComponents.put(prop.getName(), scrollPane);
+            valueComponent = editor;
         }
-        row.inputConstraints = "split 2, growx, hmin 80";
+        // No growx: unlike the single-value inputs, the list editor must
+        // occupy only as much horizontal space as it needs (its widest row)
+        // instead of stretching to the column width. The wmin keeps an EMPTY
+        // list from collapsing to a stub, and the height pref! (the regular
+        // inputs' own constraint) pins the row to the editor's own preferred
+        // height — an empty list must not leave a blank strip above the add
+        // row (the former hmin 80 floor). The trailing "wrap" is load-bearing
+        // (no help button in the OUTER grid): without it the next component
+        // (the "span" row separator) would land in the still-free help
+        // column — a short line to the RIGHT of the editor — instead of
+        // dropping to its own full-width row.
+        panel.add(valueComponent, "split 2, wmin 280, height pref!, align left, wrap");
+        propertyComponents.put(prop.getName(), valueComponent);
+        row.inputConstraints = "split 2, wmin 280, height pref!, align left, wrap";
 
-        // Help Button
-        JButton helpBtn = new HelpButton();
-        helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        helpBtn.setToolTipText("Click for more info");
-        helpBtn.addActionListener(e -> showHelp(prop, labelText));
-        row.help = helpBtn;
-        row.helpConstraints = "wrap, aligny top";
-        panel.add(helpBtn, row.helpConstraints);
+        // The "?" info icon travels INSIDE the editor's FIRST item row (right
+        // of that row's trash icon, the uniform gap) — its row.help stays
+        // null (the search-results view and the row restore never see a
+        // separate help column for list rows).
+        editor.helpAction = () -> showHelp(prop, labelText);
         row.separator = new JSeparator();
         row.separatorConstraints = "span, growx, wrap, gaptop 2, gapbottom 2";
         panel.add(row.separator, row.separatorConstraints);
 
-        row.input = propertyComponents.get(prop.getName());
+        row.input = valueComponent;
         addPropertyRow(row);
 
-        valueSuppliers.put(prop.getName(), () -> normalizeListValue(textArea.getText(), "\n"));
+        valueSuppliers.put(prop.getName(), () -> serializeListValue(editor.getJoinedValue(), prop.getName()));
     }
 
-    private void showPkConversionDialog(JTextArea textArea) {
+    private void showPkConversionDialog(ListEditor editor) {
         JPanel panel = new JPanel(new MigLayout("fill, insets 5", "[grow]", "[][][grow]"));
 
         // --- Header with help text ---
@@ -3438,7 +3790,7 @@ public class NodeConfigurationPanel extends JPanel {
 
         // Analyze current config
         StringBuilder analysis = new StringBuilder("--- Current Configuration Analysis ---\n");
-        String content = textArea.getText();
+        String content = editor.getJoinedValue();
         String[] lines = content.split("\n");
         Pattern pkPattern = Pattern.compile("[0-9a-fA-F]{16}");
 
@@ -3518,11 +3870,7 @@ public class NodeConfigurationPanel extends JPanel {
                         "Add to Configuration", JOptionPane.YES_NO_OPTION);
 
                 if (choice == JOptionPane.YES_OPTION) {
-                    String currentText = textArea.getText();
-                    if (!currentText.isEmpty() && !currentText.endsWith("\n")) {
-                        textArea.append("\n");
-                    }
-                    textArea.append(hex);
+                    editor.addItem(hex);
                 }
 
             } catch (Exception ex) {
@@ -3554,20 +3902,36 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     /**
-     * The three value-level states that drive the row color coding and the
-     * search-panel visibility checkboxes.
+     * The four value-level states that drive the row color coding and the
+     * search-panel visibility checkboxes. The state of a value is the relation
+     * between the THREE values the profile editor tracks for every input —
+     * current (the editor value), saved (the profile file) and applied (the
+     * init-loaded baseline the node runs with; all three identical at
+     * initialization) — and the derivation's SSOT is the headless
+     * {@link ProfileValueState} (2×2 matrix over saved/applied agreement).
      */
     private enum ValueStatus {
-        UNSAVED(GuiColors.getUnsaved()), SAVED(GuiColors.getSaved()), APPLIED(GuiColors.getApplied());
+        UNSAVED, UNSAVED_APPLIED, SAVED, SAVED_APPLIED;
 
-        private final Color color;
-
-        ValueStatus(Color color) {
-            this.color = color;
+        /**
+         * The palette color of this state — read LIVE from the palette on
+         * every call (never cached): the state colors are theme-dependent
+         * GUI color constants, so a theme / appearance change must refresh
+         * them to the new palette values while the font and the computed
+         * state itself are left untouched.
+         */
+        public Color color() {
+            return switch (this) {
+                case UNSAVED -> GuiColors.getUnsaved();
+                case UNSAVED_APPLIED -> GuiColors.getUnsavedApplied();
+                case SAVED -> GuiColors.getSaved();
+                case SAVED_APPLIED -> GuiColors.getApplied();
+            };
         }
 
-        public Color color() {
-            return color;
+        /** @param state the headless resolved state (same names) */
+        static ValueStatus fromState(ProfileValueState.State state) {
+            return ValueStatus.valueOf(state.name());
         }
     }
 
@@ -3591,46 +3955,35 @@ public class NodeConfigurationPanel extends JPanel {
 
     /**
      * Resolves the value-level state of a configuration value against the
-     * saved (profile-on-disk) and applied (the values loaded from the profile
-     * into the editor — the baseline the node runs with) values, with the
-     * unsaved-first priority {@code UNSAVED > SAVED > APPLIED} (matching the
-     * shared {@code RowStateResolver}): {@link ValueStatus#UNSAVED} (normal
-     * text color) when it differs from the saved value, {@link ValueStatus#SAVED}
-     * (yellow) when it equals the saved value but differs from the applied
-     * value, otherwise {@link ValueStatus#APPLIED} (green). A dirty edit
-     * always reads UNSAVED, even if the runtime happens to match it. Boolean
-     * properties compare parsed booleans, all other values compare as trimmed
-     * strings — the exact rules the color coding uses.
+     * saved (profile-on-disk) and applied (the init-loaded baseline the node
+     * runs with) values — the 2×2 matrix (current vs. saved, current vs.
+     * applied), delegated to the headless {@link ProfileValueState} SSOT:
+     * {@link ValueStatus#UNSAVED} (normal text color) when the value differs
+     * from BOTH baselines, {@link ValueStatus#UNSAVED_APPLIED} (gray) when it
+     * differs from the saved file but matches the applied baseline,
+     * {@link ValueStatus#SAVED} (yellow) when it equals the saved file but
+     * differs from the applied baseline, otherwise
+     * {@link ValueStatus#SAVED_APPLIED} (green). A dirty edit is never
+     * "saved" even when the runtime happens to match it. Boolean properties
+     * compare parsed booleans, all other values compare as trimmed strings —
+     * the exact rules the color coding uses.
      */
     private static ValueStatus valueStatus(boolean isCheckbox, String value, String saved, String applied) {
-        if (isCheckbox) {
-            boolean savedBool = parseValueBool(saved);
-            boolean appliedBool = parseValueBool(applied);
-            boolean valBool = parseValueBool(value);
-            if (valBool != savedBool) {
-                return ValueStatus.UNSAVED;
-            }
-            if (valBool != appliedBool) {
-                return ValueStatus.SAVED;
-            }
-            return ValueStatus.APPLIED;
-        }
-        String v = value == null ? "" : value.trim();
-        String a = applied == null ? "" : applied.trim();
-        String s = saved == null ? "" : saved.trim();
-        if (!v.equals(s)) {
-            return ValueStatus.UNSAVED;
-        }
-        if (!v.equals(a)) {
-            return ValueStatus.SAVED;
-        }
-        return ValueStatus.APPLIED;
+        return ValueStatus.fromState(ProfileValueState.resolve(isCheckbox, value, saved, applied));
     }
 
-    /** @return true when the value parses as a boolean "on" state */
-    private static boolean parseValueBool(String s) {
-        return "true".equalsIgnoreCase(s) || "yes".equalsIgnoreCase(s)
-                || "1".equals(s) || "on".equalsIgnoreCase(s);
+    /**
+     * The display state of one select dropdown item for the value coloring:
+     * every item displays the state of its OWN value — the item equal to the
+     * row's current value displays the row's own state (making the gray
+     * UNSAVED_APPLIED state visible in the dropdown), an applied value green
+     * only when it is also saved (otherwise gray unsaved-applied), a saved
+     * value yellow, everything else unsaved (normal) — see
+     * {@link ProfileValueState#itemState}.
+     */
+    private static ValueStatus itemStatus(String item, String current, String saved, String applied) {
+        return ValueStatus.fromState(ProfileValueState.itemState(false, item,
+                ProfileValueState.resolve(false, current, saved, applied), current, saved, applied));
     }
 
     /**
@@ -3672,9 +4025,8 @@ public class NodeConfigurationPanel extends JPanel {
     /**
      * The value status of the JDBC row's effective values against the saved
      * and applied baselines (url/username/password — the link element is the
-     * Profile row's own comparison), with the unsaved-first priority
-     * {@code UNSAVED > SAVED > APPLIED} (matching {@link #valueStatus} and the
-     * row's own per-value color coding).
+     * Profile row's own comparison), with the same 2×2 matrix as
+     * {@link #valueStatus} (matching the row's own per-value color coding).
      */
     private ValueStatus jdbcRowStatus() {
         JdbcConfigurationPanel p = jdbcPanel();
@@ -3690,13 +4042,18 @@ public class NodeConfigurationPanel extends JPanel {
                 saved.username(), saved.password());
         JdbcConfigurationPanel.JdbcState appliedVals = new JdbcConfigurationPanel.JdbcState("", applied.url(),
                 applied.username(), applied.password());
-        if (!curVals.equals(savedVals)) {
-            return ValueStatus.UNSAVED;
+        boolean eqSaved = curVals.equals(savedVals);
+        boolean eqApplied = curVals.equals(appliedVals);
+        if (eqSaved && eqApplied) {
+            return ValueStatus.SAVED_APPLIED;
         }
-        if (!curVals.equals(appliedVals)) {
+        if (eqSaved) {
             return ValueStatus.SAVED;
         }
-        return ValueStatus.APPLIED;
+        if (eqApplied) {
+            return ValueStatus.UNSAVED_APPLIED;
+        }
+        return ValueStatus.UNSAVED;
     }
 
     /**
@@ -3719,21 +4076,16 @@ public class NodeConfigurationPanel extends JPanel {
             return jdbcRowStatus();
         }
 
-        JComponent target = comp;
-        if (comp instanceof JScrollPane && ((JScrollPane) comp).getViewport().getView() instanceof JTextArea) {
-            target = (JComponent) ((JScrollPane) comp).getViewport().getView();
-        } else if (comp instanceof JPanel && Props.NODE_PK_CHECKS.getName().equals(key)) {
-            for (Component inner : ((JPanel) comp).getComponents()) {
-                if (inner instanceof JScrollPane) {
-                    Component view = ((JScrollPane) inner).getViewport().getView();
-                    if (view instanceof JTextArea) {
-                        target = (JComponent) view;
-                        break;
-                    }
-                }
-            }
+        // List properties compare as item sets (order-insensitive, de-duplicated).
+        ListEditor editor = listEditors.get(key);
+        if (editor != null) {
+            String cur = normalizeListValue(editor.getJoinedValue(), "\n");
+            String saved = normalizeListValue(savedProfile.getProperty(key, defaultValue), ";");
+            String applied = normalizeListValue(appliedProfile.getProperty(key, defaultValue), ";");
+            return valueStatus(false, cur, saved, applied);
         }
 
+        JComponent target = comp;
         String value = "";
         if (comp instanceof JPanel && Props.DB_URL.getName().equals(key)) {
             Supplier<String> supplier = valueSuppliers.get(key);
@@ -3742,15 +4094,19 @@ public class NodeConfigurationPanel extends JPanel {
         } else if (comp instanceof JCheckBox) {
             value = String.valueOf(((JCheckBox) comp).isSelected());
         } else if (comp instanceof JComboBox) {
-            Object item = ((JComboBox<?>) comp).getSelectedItem();
-            value = item == null ? "" : item.toString();
-        } else if (target instanceof javax.swing.text.JTextComponent) {
-            value = ((javax.swing.text.JTextComponent) target).getText();
-            if (target instanceof JTextArea) {
-                value = normalizeListValue(value, "\n");
+            JComboBox<?> comboBox = (JComboBox<?>) comp;
+            if (comboBox.isEditable()) {
+                // State-aware editable select: the CURRENT value is the editor
+                // text (typed or picked), not the selected model item.
+                value = stateAwareCombos.containsKey(comboBox)
+                        ? stateAwareComboText((JComboBox<String>) comboBox)
+                        : String.valueOf(comboBox.getSelectedItem());
             } else {
-                value = value.trim();
+                Object item = comboBox.getSelectedItem();
+                value = item == null ? "" : item.toString();
             }
+        } else if (target instanceof javax.swing.text.JTextComponent) {
+            value = ((javax.swing.text.JTextComponent) target).getText().trim();
         }
         String savedValue = savedProfile.getProperty(key, defaultValue);
         String applied = appliedProfile.getProperty(key, defaultValue);
@@ -3760,10 +4116,6 @@ public class NodeConfigurationPanel extends JPanel {
             applied = "";
         savedValue = savedValue.trim();
         applied = applied.trim();
-        if (target instanceof JTextArea) {
-            savedValue = normalizeListValue(savedValue, ";");
-            applied = normalizeListValue(applied, ";");
-        }
         return valueStatus(comp instanceof JCheckBox, value, savedValue, applied);
     }
 
@@ -3772,32 +4124,26 @@ public class NodeConfigurationPanel extends JPanel {
         switch (rowStatus(row)) {
             case UNSAVED:
                 return showUnsavedBox.isSelected();
+            case UNSAVED_APPLIED:
+                return showUnsavedAppliedBox.isSelected();
             case SAVED:
                 return showSavedBox.isSelected();
-            case APPLIED:
+            case SAVED_APPLIED:
             default:
                 return showAppliedBox.isSelected();
         }
     }
 
     private void updateColor(JComponent comp, String propName, String defaultValue) {
+        // List properties are colored per-item (each item field by its own state).
+        ListEditor editor = listEditors.get(propName);
+        if (editor != null) {
+            colorListEditor(propName, defaultValue, editor);
+            return;
+        }
+
         String value = "";
         JComponent target = comp;
-
-        // Unwrap wrappers for lists and special components
-        if (comp instanceof JScrollPane && ((JScrollPane) comp).getViewport().getView() instanceof JTextArea) {
-            target = (JComponent) ((JScrollPane) comp).getViewport().getView();
-        } else if (comp instanceof JPanel && Props.NODE_PK_CHECKS.getName().equals(propName)) {
-            for (Component inner : ((JPanel) comp).getComponents()) {
-                if (inner instanceof JScrollPane) {
-                    Component view = ((JScrollPane) inner).getViewport().getView();
-                    if (view instanceof JTextArea) {
-                        target = (JComponent) view;
-                        break;
-                    }
-                }
-            }
-        }
 
         if (comp instanceof JPanel && Props.DB_URL.getName().equals(propName)) {
             // The JDBC row is colored by the panel's tuple value-state model
@@ -3825,25 +4171,34 @@ public class NodeConfigurationPanel extends JPanel {
         if (comp instanceof JCheckBox) {
             value = String.valueOf(((JCheckBox) comp).isSelected());
         } else if (comp instanceof JComboBox) {
-            Object item = ((JComboBox<?>) comp).getSelectedItem();
-            value = item == null ? "" : item.toString();
-            if (((JComboBox<?>) comp).isEditable()) {
-                target = (JComponent) ((JComboBox<?>) comp).getEditor().getEditorComponent();
+            JComboBox<?> comboBox = (JComboBox<?>) comp;
+            if (comboBox.isEditable()) {
+                // State-aware editable select: the CURRENT value is the editor
+                // text (typed or picked), not the selected model item.
+                target = (JComponent) comboBox.getEditor().getEditorComponent();
+                value = stateAwareCombos.containsKey(comboBox)
+                        ? stateAwareComboText((JComboBox<String>) comboBox)
+                        : String.valueOf(comboBox.getSelectedItem());
+            } else {
+                Object item = comboBox.getSelectedItem();
+                value = item == null ? "" : item.toString();
             }
         } else if (target instanceof javax.swing.text.JTextComponent) {
-            value = ((javax.swing.text.JTextComponent) target).getText();
-            if (target instanceof JTextArea) {
-                value = normalizeListValue(value, "\n");
-                savedValue = normalizeListValue(savedValue, ";");
-                applied = normalizeListValue(applied, ";");
-            } else {
-                value = value.trim();
-                savedValue = savedValue.trim();
-                applied = applied.trim();
-            }
+            value = ((javax.swing.text.JTextComponent) target).getText().trim();
+            savedValue = savedValue.trim();
+            applied = applied.trim();
         }
 
         Color color = valueStatus(comp instanceof JCheckBox, value, savedValue, applied).color();
+        // The state-aware select's dropdown follows the state: rebuild its
+        // selectable baseline entries (saved / applied) after every
+        // re-resolution so they can never disagree with the row color.
+        if (comp instanceof JComboBox<?> comboBox && stateAwareCombos.containsKey(comboBox)) {
+            StateAwareCombo info = stateAwareCombos.get(comboBox);
+            if (info != null) {
+                rebuildStateAwareComboModel((JComboBox<String>) comboBox, info.prop(), savedValue);
+            }
+        }
 
         PropertyRow row = allPropertyRows.stream()
                 .filter(r -> r.prop != null && r.prop.getName().equals(propName))
@@ -3864,35 +4219,59 @@ public class NodeConfigurationPanel extends JPanel {
             row.label.setText(isDirty ? row.labelText + " *" : row.labelText);
         }
 
-        if (target instanceof JTextPane) {
-            JTextPane pane = (JTextPane) target;
-            SimpleAttributeSet attrs = new SimpleAttributeSet();
-            StyleConstants.setForeground(attrs, color);
-            pane.getStyledDocument().setCharacterAttributes(0, pane.getText().length(), attrs, true);
-        } else {
-            target.setForeground(color);
+        target.setForeground(color);
+    }
+
+    /**
+     * Recolors a list property: the row label gets the DIRTY asterisk when the
+     * current item set differs from the saved one, and every item field is
+     * colored by its own state (the 2×2 saved/applied matrix of
+     * {@link ValueStatus}), not a single uniform color for the whole list.
+     */
+    private void colorListEditor(String propName, String defaultValue, ListEditor editor) {
+        String savedValue = savedProfile.getProperty(propName, defaultValue);
+        String applied = appliedProfile.getProperty(propName, defaultValue);
+        String value = normalizeListValue(editor.getJoinedValue(), "\n");
+        String savedNorm = normalizeListValue(savedValue, ";");
+
+        PropertyRow row = allPropertyRows.stream()
+                .filter(r -> r.prop != null && r.prop.getName().equals(propName))
+                .findFirst()
+                .orElse(null);
+        if (row != null && row.label != null) {
+            boolean isDirty = !value.equals(savedNorm);
+            row.label.setText(isDirty ? row.labelText + " *" : row.labelText);
         }
+
+        // The ordered (profile-order) saved / applied item lists back the
+        // per-item dropdown baselines (row i pairs with the i-th saved and
+        // the i-th applied item) — a membership-only set would lose the
+        // order the pairing needs.
+        editor.refreshItemColors(splitList(savedValue), splitList(applied));
     }
 
     private void showColorLegendHelp() {
         String msg = "<html><body style='width: 350px'>" +
                 "<h3>Color Coding Legend</h3>" +
-                "<p>The configuration values are color-coded to indicate their current status:</p>" +
+                "<p>The configuration values are color-coded to indicate their current status. Each value is compared " +
+                "against the profile file (SAVED) and the baseline this node runs with (APPLIED):</p>" +
                 "<ul>" +
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getUnsaved())
                 + "'>\u25A0 Unsaved Values:</font></b> " +
-                "These values have been modified in the UI and match neither the values loaded from the profile " +
-                "nor the values saved in the configuration file. " +
-                "Properties with unsaved changes are marked with an asterisk (*).</li>" +
+                "These values differ from BOTH the profile file and the applied baseline — they are new, " +
+                "not-yet-saved changes. Properties with unsaved changes are marked with an asterisk (*).</li>" +
+                "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getUnsavedApplied())
+                + "'>\u25A0 Unsaved and Applied Values:</font></b> " +
+                "These values differ from the profile file but match exactly the applied baseline — the running " +
+                "node already uses them, they are only missing from the saved file.</li>" +
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getSaved())
                 + "'>\u25A0 Saved Values:</font></b> " +
-                "These values are saved in the currently loaded profile on disk, but they differ from the values " +
-                "the profile loaded into the editor (the applied baseline) — saved, but not yet applied.</li>" +
+                "These values are saved in the currently loaded profile on disk, but they differ from the applied " +
+                "baseline — saved, but not yet applied (a restart or apply is needed to take effect).</li>" +
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getApplied())
-                + "'>\u25A0 Applied Values:</font></b> " +
-                "These values match exactly the values loaded from the currently loaded profile — the baseline " +
-                "this node runs (or will run) with. Note that most changes require a restart to take effect.</li>"
-                +
+                + "'>\u25A0 Saved and Applied Values:</font></b> " +
+                "These values are saved in the profile file AND match exactly the applied baseline — this node " +
+                "already runs with them.</li>" +
                 "</ul>" +
                 "</body></html>";
         JOptionPane.showMessageDialog(this, msg, "Color Legend", JOptionPane.INFORMATION_MESSAGE);
@@ -3930,16 +4309,66 @@ public class NodeConfigurationPanel extends JPanel {
         }
     }
 
+    /**
+     * Canonical comparison form of a list value (order-insensitive, de-duplicated):
+     * items joined by ';'. The parse is robust to every list delimiter (comma,
+     * semicolon, newline) — the {@code delimiter} argument is kept for signature
+     * compatibility and no longer controls the split.
+     */
     private String normalizeListValue(String value, String delimiter) {
+        return String.join(";", listItems(value));
+    }
+
+    /**
+     * The list properties whose on-disk value is a comma-separated list (the Jetty
+     * DoS IP whitelists, Jetty's format). Every other list property is
+     * semicolon-separated (the {@code getStringList} format).
+     */
+    private static boolean isCommaListProperty(String propName) {
+        return Props.JETTY_API_DOS_FILTER_IP_WHITELIST.getName().equals(propName)
+                || Props.JETTY_P2P_DOS_FILTER_IP_WHITELIST.getName().equals(propName);
+    }
+
+    /**
+     * Parses a list value into trimmed, de-duplicated, sorted items. Robust to any
+     * of the list delimiters (comma, semicolon, newline), so the same items compare
+     * equal regardless of which delimiter stored or edits them.
+     */
+    private static List<String> listItems(String value) {
         if (value == null || value.isEmpty()) {
-            return "";
+            return new ArrayList<>();
         }
-        return Arrays.stream(value.split(delimiter))
+        return Arrays.stream(value.split("[,;\\n]"))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
                 .distinct()
                 .sorted()
-                .collect(Collectors.joining(";"));
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Ordered parse of a list value into its items (trimmed, non-empty), preserving
+     * the stored order and duplicates — used to populate the per-item editor fields
+     * so they read exactly as saved. Robust to any list delimiter (comma, semicolon,
+     * newline). Unlike {@link #listItems} it does not sort or de-duplicate.
+     */
+    private static List<String> splitList(String value) {
+        if (value == null || value.isEmpty()) {
+            return new ArrayList<>();
+        }
+        return Arrays.stream(value.split("[,;\\n]"))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Serialized form of a list value for SAVING: items joined by the property's
+     * on-disk delimiter (',' for the Jetty DoS whitelists, ';' otherwise), so the
+     * stored value keeps the exact format the runtime (Jetty / getStringList) expects.
+     */
+    private String serializeListValue(String value, String propName) {
+        return String.join(isCommaListProperty(propName) ? "," : ";", listItems(value));
     }
 
     private void initHelpTexts() {
@@ -4727,6 +5156,512 @@ public class NodeConfigurationPanel extends JPanel {
             this.labelText = labelText;
             this.originalParent = originalParent;
             this.tabIndex = tabIndex;
+        }
+    }
+
+    /**
+     * Per-item editor for a list-typed property: one single-line field per stored
+     * item (each with a trash icon) plus an "add" row (empty field + '+'). Emptying
+     * an item's field removes that item; every item is colored by its own state and
+     * the row is DIRTY when the item set differs from the saved one.
+     */
+    private final class ListEditor extends JPanel {
+        private final String propName;
+        private final JPanel itemsPanel;
+        private final JComboBox<String> addField;
+        private final FlatPlusButton addButton;
+        private final List<JComboBox<String>> itemFields = new ArrayList<>();
+        private int inputColumnWidth;
+
+        /**
+         * The row's "?" info button: it sits INSIDE the FIRST item row, right
+         * of that row's trash icon (the uniform {@code INPUT_ACTION_GAP}),
+         * instead of a separate help column — so it always shares the first
+         * item row's line and alignment. The help action is registered by
+         * the host row builder ({@link #helpAction}).
+         */
+        private final HelpButton helpBtn = new HelpButton();
+        private Runnable helpAction;
+
+        /**
+         * The fixed width of the row's icon columns (the trash icons and the
+         * add row's "+" share the SAME column, so every input field and every
+         * icon lines up in columns across the item rows and the add row).
+         */
+        private final int iconColumnWidth;
+
+        /** The item baselines feeding the per-item (and add-row) dropdowns —
+         *  rebuilt on every recolor by {@link #refreshItemColors}. Ordered
+         *  LISTS in profile order: an item row's dropdown offers the saved /
+         *  applied items at THAT row's position (row i ↔ the i-th saved and
+         *  i-th applied item) — never the whole lists. */
+        private final List<String> savedItems = new ArrayList<>();
+        private final List<String> appliedItems = new ArrayList<>();
+
+        /** Invoked on every structural change (add/remove) and item edit. */
+        private Runnable onChange;
+
+        ListEditor(String propName) {
+            super(new BorderLayout());
+            this.propName = propName;
+            setOpaque(false);
+
+            // The "?" info button of the whole list row (it is added to the
+            // FIRST item row, right of that row's trash icon).
+            helpBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            helpBtn.setToolTipText("Click for more info");
+            helpBtn.addActionListener(e -> {
+                if (helpAction != null) {
+                    helpAction.run();
+                }
+            });
+            // The trash / plus action columns are fixed-width and shared by
+            // every row. Their width includes the uniform input-to-action gap
+            // plus the wider icon, so both icons line up without expanding
+            // the input column when the first row also carries the help icon.
+            // The prototypes mirror the REAL (flat, borderless) row buttons:
+            // a trash icon with no margin and no border plus the flat "+",
+            // so the measured width is exactly the glyphs' own width (the
+            // icon column stays as narrow as the icons are).
+            JButton trashProto = new FlatIconButton();
+            trashProto.setIcon(IconFontSwing.buildIcon(FontAwesome.TRASH,
+                    GuiConstants.getHelpIconSize(), GuiColors.getContrastRed()));
+            FlatPlusButton plusProto = new FlatPlusButton();
+            plusProto.setIcon(rowPlusIcon());
+            iconColumnWidth = Math.max(trashProto.getPreferredSize().width,
+                    Math.max(plusProto.getPreferredSize().width, helpBtn.getPreferredSize().width));
+            int actionColumnWidth = iconColumnWidth + ConfigurationUtils.INPUT_ACTION_GAP;
+
+            // All item and add-row controls share this one grid, so layout
+            // rounding cannot move the plus away from the trash column.
+            itemsPanel = new JPanel(new MigLayout("insets 0, fillx",
+                    "[grow][" + actionColumnWidth + "px, grow 0]["
+                            + actionColumnWidth + "px, grow 0]", "[]"));
+            itemsPanel.setOpaque(false);
+            add(itemsPanel, BorderLayout.CENTER);
+
+            // The add row: the same editable, state-styled input as the item
+            // rows (no plain text box) and a flat "+" that reads exactly like
+            // the node-profile toolbar's "create a new profile" button (the
+            // thin plus glyph + the rounded rollover highlight of
+            // NodePanel#NewProfileButton).
+            addField = new JComboBox<>(new String[0]);
+            addField.setEditable(true);
+            addField.setPrototypeDisplayValue("Prototype");
+            // same input styling (font / border / left margin) as the regular selects
+            ConfigurationUtils.styleComboEditor(addField);
+            refreshInputWidths();
+            // the baseline entries of the dropdown carry the same per-item
+            // state coloring as the item rows' dropdowns
+            addField.setRenderer(listItemRenderer());
+            addField.setToolTipText("Type an item, then press '+' (or Enter) to add it");
+
+            addButton = new FlatPlusButton();
+            addButton.setIcon(rowPlusIcon());
+            addButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            addButton.setToolTipText("Add item");
+
+            addButton.addActionListener(e -> addItem(stateAwareComboText(addField)));
+            installAddEnterAction();
+            rebuildItems();
+        }
+
+        private void installAddEnterAction() {
+            javax.swing.text.JTextComponent addEditorText =
+                    findEditorText((JComponent) addField.getEditor().getEditorComponent());
+            if (addEditorText instanceof javax.swing.JTextField textField) {
+                String enterAction = "addListItem";
+                textField.getInputMap().put(javax.swing.KeyStroke.getKeyStroke("ENTER"), enterAction);
+                textField.getActionMap().put(enterAction, new javax.swing.AbstractAction() {
+                    @Override
+                    public void actionPerformed(java.awt.event.ActionEvent e) {
+                        addItem(stateAwareComboText(addField));
+                    }
+                });
+            }
+        }
+
+        /** The current items (trimmed, non-empty), in display order. */
+        List<String> getItems() {
+            return itemFields.stream()
+                    .map(NodeConfigurationPanel::stateAwareComboText)
+                    .filter(s -> !s.isEmpty())
+                    .toList();
+        }
+
+        /** Newline-joined form (a neutral separator; {@link #serializeListValue} re-normalizes). */
+        String getJoinedValue() {
+            return String.join("\n", getItems());
+        }
+
+        /** Bulk-load items (e.g. on profile load). Does not fire the change hook. */
+        void setItems(List<String> values) {
+            isProgrammaticChange = true;
+            try {
+                itemFields.clear();
+                for (String v : values) {
+                    itemFields.add(makeItemCombo(v));
+                }
+                rebuildItems();
+            } finally {
+                isProgrammaticChange = false;
+            }
+        }
+
+        /** Append an item (from the "add" row or the PK-conversion dialog). No-op if empty. */
+        void addItem(String raw) {
+            String value = raw == null ? "" : raw.trim();
+            if (value.isEmpty()) {
+                return;
+            }
+            isProgrammaticChange = true;
+            try {
+                itemFields.add(makeItemCombo(value));
+                rebuildItems();
+                addField.getEditor().setItem("");
+            } finally {
+                isProgrammaticChange = false;
+            }
+            fireChange();
+        }
+
+        /** Remove one item row. No-op if the field is not in the list. */
+        void removeItem(JComboBox<String> field) {
+            if (!itemFields.remove(field)) {
+                return;
+            }
+            isProgrammaticChange = true;
+            try {
+                rebuildItems();
+            } finally {
+                isProgrammaticChange = false;
+            }
+            fireChange();
+        }
+
+        /** Recolors every item by its own state (the 2×2 saved/applied matrix)
+         *  and rebuilds the per-item (and add-row) dropdown baselines. */
+        void refreshItemColors(List<String> saved, List<String> applied) {
+            this.savedItems.clear();
+            this.savedItems.addAll(saved);
+            this.appliedItems.clear();
+            this.appliedItems.addAll(applied);
+            isProgrammaticChange = true;
+            try {
+                for (JComboBox<String> combo : itemFields) {
+                    rebuildItemComboModel(combo);
+                    javax.swing.text.JTextComponent text =
+                            findEditorText((JComponent) combo.getEditor().getEditorComponent());
+                    if (text != null) {
+                        text.setForeground(statusOf(stateAwareComboText(combo)).color());
+                    }
+                }
+                rebuildAddComboModel();
+            } finally {
+                isProgrammaticChange = false;
+            }
+        }
+
+        /** The 2×2 membership state of one item line against the saved / applied sets. */
+        private ValueStatus statusOf(String line) {
+            if (line.isEmpty()) {
+                return ValueStatus.SAVED_APPLIED;
+            }
+            boolean inSaved = savedItems.contains(line);
+            boolean inApplied = appliedItems.contains(line);
+            if (inSaved && inApplied) {
+                return ValueStatus.SAVED_APPLIED;
+            }
+            if (inSaved) {
+                return ValueStatus.SAVED;
+            }
+            if (inApplied) {
+                return ValueStatus.UNSAVED_APPLIED;
+            }
+            return ValueStatus.UNSAVED;
+        }
+
+        /**
+         * One item row's EDITABLE combo: the editor text is the item's current
+         * value (styled exactly like every other value input) and the dropdown
+         * offers the item's OWN baseline values (the saved / applied items at
+         * this row's position, colored by their state) so an edited item can
+         * be reverted by selecting its baseline back.
+         */
+        private JComboBox<String> makeItemCombo(String value) {
+            JComboBox<String> combo = new JComboBox<>(new String[0]);
+            combo.setEditable(true);
+            combo.setPrototypeDisplayValue("Prototype");
+            combo.getEditor().setItem(value);
+            JComponent editorComponent = (JComponent) combo.getEditor().getEditorComponent();
+            // same input styling (font / border / left margin) as the regular selects
+            ConfigurationUtils.styleComboEditor(combo);
+            combo.setRenderer(listItemRenderer());
+            // The editor text IS the value — track its changes through a
+            // DocumentListener (the L&F alone is not reliable, the same quirk
+            // as the state-aware value combos — see createStateAwareValueCombo).
+            javax.swing.text.JTextComponent editorText = findEditorText(editorComponent);
+            if (editorText != null) {
+                editorText.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+                    public void insertUpdate(javax.swing.event.DocumentEvent e) {
+                        onItemComboChange(combo);
+                    }
+
+                    public void removeUpdate(javax.swing.event.DocumentEvent e) {
+                        onItemComboChange(combo);
+                    }
+
+                    public void changedUpdate(javax.swing.event.DocumentEvent e) {
+                    }
+                });
+            }
+            combo.addActionListener(e -> {
+                if (isProgrammaticChange) {
+                    return;
+                }
+                fireChange();
+            });
+            rebuildItemComboModel(combo);
+            setInputWidth(combo);
+            return combo;
+        }
+
+        private void refreshInputWidths() {
+            JComboBox<String> prototype = new JComboBox<>(new String[0]);
+            prototype.setEditable(true);
+            prototype.setPrototypeDisplayValue("Prototype");
+            ConfigurationUtils.styleComboEditor(prototype);
+            inputColumnWidth = prototype.getPreferredSize().width;
+            setInputWidth(addField);
+            itemFields.forEach(this::setInputWidth);
+        }
+
+        private void setInputWidth(JComboBox<String> combo) {
+            java.awt.Dimension preferred = combo.getPreferredSize();
+            java.awt.Dimension minimum = combo.getMinimumSize();
+            combo.setPreferredSize(new java.awt.Dimension(inputColumnWidth, preferred.height));
+            combo.setMinimumSize(new java.awt.Dimension(inputColumnWidth, minimum.height));
+        }
+
+        /**
+         * Rebuilds one item combo's dropdown: the item's current value (when
+         * non-empty) plus the item's OWN baseline values — the saved item
+         * and the applied item the profiles list at this row's position
+         * (each kept when it differs from the current one, so an edited
+         * item can be reverted by selecting its baseline back).
+         */
+        private void rebuildItemComboModel(JComboBox<String> combo) {
+            if (rebuildingCombos.contains(combo)) {
+                return;
+            }
+            rebuildingCombos.add(combo);
+            try {
+                String current = stateAwareComboText(combo);
+                LinkedHashSet<String> items = new LinkedHashSet<>();
+                if (!current.isEmpty()) {
+                    items.add(current);
+                }
+                // ONLY this row's own baseline values: the saved and the
+                // applied item listed at this row's POSITION in the profiles
+                // (row i ↔ the i-th saved / applied item) — the other rows'
+                // items are not this row's baseline (they used to pollute
+                // every dropdown with the whole lists).
+                int position = itemFields.indexOf(combo);
+                addOwnBaseline(items, position, savedItems, current);
+                addOwnBaseline(items, position, appliedItems, current);
+                // Flagged like the value combos' rebuild: the swap and the
+                // restore below touch the editor text, and their document
+                // events must not fire the item's change handler (a spurious
+                // "cleared input" would delete the row — see
+                // rebuildStateAwareComboModel).
+                boolean prevFlag = isProgrammaticChange;
+                isProgrammaticChange = true;
+                try {
+                    // Keep the (typed) current value as the editor item before
+                    // swapping the model; when it is not among the entries the
+                    // selection drops (the editor text stays as typed).
+                    String typed = combo.getEditor().getItem() instanceof String s ? s : "";
+                    if (!typed.isEmpty()) {
+                        combo.setSelectedItem(typed);
+                    } else {
+                        combo.setSelectedIndex(-1);
+                    }
+                    combo.setModel(new DefaultComboBoxModel<>(items.toArray(new String[0])));
+                    // The model swap makes the L&F reconfigure the editor to
+                    // the new model's first entry (a model change selects
+                    // index 0) — restore the typed text the swap clobbered.
+                    if (!typed.equals(stateAwareComboText(combo))) {
+                        combo.getEditor().setItem(typed);
+                    }
+                } finally {
+                    isProgrammaticChange = prevFlag;
+                }
+            } finally {
+                rebuildingCombos.remove(combo);
+            }
+        }
+
+        /**
+         * Adds the row's own baseline at one position (the i-th saved /
+         * applied item) when it exists and differs from the current value.
+         */
+        private void addOwnBaseline(LinkedHashSet<String> items, int position, List<String> baselines, String current) {
+            if (position >= 0 && position < baselines.size() && !baselines.get(position).equals(current)) {
+                items.add(baselines.get(position));
+            }
+        }
+
+        /**
+         * The add row's dropdown: the baseline items (the saved / applied
+         * sets) — a removed item can be re-added by selecting it instead of
+         * retyping it.
+         */
+        private void rebuildAddComboModel() {
+            if (rebuildingCombos.contains(addField)) {
+                return;
+            }
+            rebuildingCombos.add(addField);
+            try {
+                LinkedHashSet<String> items = new LinkedHashSet<>();
+                items.addAll(savedItems);
+                items.addAll(appliedItems);
+                // Flagged like the value combos' rebuild: the swap and the
+                // restore below touch the editor text, and their events must
+                // not fire the add-row's action (would ADD the clobbered text).
+                boolean prevFlag = isProgrammaticChange;
+                isProgrammaticChange = true;
+                try {
+                    // Keep the (typed) text before the swap — the L&F
+                    // reconfigures the editor on every model change (would
+                    // overwrite the text).
+                    String typed = addField.getEditor().getItem() instanceof String s ? s : "";
+                    if (!typed.isEmpty()) {
+                        addField.setSelectedItem(typed);
+                    } else {
+                        addField.setSelectedIndex(-1);
+                    }
+                    addField.setModel(new DefaultComboBoxModel<>(items.toArray(new String[0])));
+                    // The model swap makes the L&F reconfigure the editor to
+                    // the new model's first entry (a model change selects
+                    // index 0) — restore the typed text the swap clobbered.
+                    if (!typed.equals(stateAwareComboText(addField))) {
+                        addField.getEditor().setItem(typed);
+                    }
+                } finally {
+                    isProgrammaticChange = prevFlag;
+                }
+            } finally {
+                rebuildingCombos.remove(addField);
+            }
+        }
+
+        /**
+         * The per-item dropdown renderer (shared by the item rows' and the
+         * add row's combos): EVERY entry is colored by the state of its OWN
+         * value — the same 2×2 membership state ({@link #statusOf}) the item
+         * editor text uses, so the two can never disagree: in both sets
+         * applied (green), in the saved set only saved (yellow), in the
+         * applied set only unsaved-applied (gray), in neither unsaved (normal
+         * text color).
+         */
+        private DefaultListCellRenderer listItemRenderer() {
+            return new DefaultListCellRenderer() {
+                @Override
+                public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                        boolean isSelected, boolean cellHasFocus) {
+                    Component c = super.getListCellRendererComponent(
+                            list == null ? RENDERER_FALLBACK_LIST : list, value, index,
+                            isSelected, cellHasFocus);
+                    if (value instanceof String s) {
+                        c.setForeground(statusOf(s).color());
+                    }
+                    return c;
+                }
+            };
+        }
+
+        private void onItemComboChange(JComboBox<String> combo) {
+            if (isProgrammaticChange) {
+                return;
+            }
+            // DEFERRED refresh: the listener runs inside a document-change
+            // notification, and the recolor path touches the editor text (the
+            // L&F reconfigures the editor on every model swap) — same rule as
+            // onEditorTextChange (no mutating a document in its own
+            // notification).
+            SwingUtilities.invokeLater(() -> {
+                if (stateAwareComboText(combo).isEmpty()) {
+                    // "Clearing the string deletes it": an emptied item input is removed.
+                    removeItem(combo);
+                } else {
+                    fireChange();
+                }
+            });
+        }
+
+        private void rebuildItems() {
+            itemsPanel.removeAll();
+            for (int i = 0; i < itemFields.size(); i++) {
+                // "wrap" is mandatory: MigLayout's implicit flow is
+                // HORIZONTAL — without it the item rows would sit side by
+                // side (a reported regression) instead of stacking one under
+                // the other (regression-asserted by the list-editor test).
+                addItemRow(itemFields.get(i), i == 0);
+            }
+            itemsPanel.add(addField, "growx");
+            itemsPanel.add(addButton, "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP
+                    + ", w " + iconColumnWidth + "!, growx");
+            itemsPanel.add(rowColumnSpacer(), "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP + ", wrap");
+            itemsPanel.revalidate();
+            itemsPanel.repaint();
+        }
+
+        /**
+         * The rows' "+" glyph: the SAME size as the rows' trash glyph
+         * ({@code GuiConstants#getHelpIconSize()}, font-relative), so every
+         * row icon of every list editor carries the same size and weight.
+         */
+        private PlusGlyphIcon rowPlusIcon() {
+            return new PlusGlyphIcon(Math.round(GuiConstants.getHelpIconSize()));
+        }
+
+        private void addItemRow(JComboBox<String> combo, boolean firstRow) {
+            itemsPanel.add(combo, "growx");
+            FlatIconButton removeBtn = new FlatIconButton();
+            removeBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.TRASH,
+                    GuiConstants.getHelpIconSize(), GuiColors.getContrastRed()));
+            removeBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            removeBtn.setToolTipText("Remove this item");
+            removeBtn.addActionListener(e -> removeItem(combo));
+            itemsPanel.add(removeBtn, "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP
+                    + ", w " + iconColumnWidth + "!, growx");
+            if (firstRow) {
+                itemsPanel.add(helpBtn, "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP + ", wrap");
+            } else {
+                itemsPanel.add(rowColumnSpacer(), "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP + ", wrap");
+            }
+        }
+
+        /**
+         * The invisible 0×0 placeholder that reserves a fixed-width icon
+         * column of the rows' shared 3-column grid on the rows that carry no
+         * icon there (every item row but the first: the help icon column,
+         * the add row: both icon columns but the "+" one). Without it the
+         * column would collapse and the row's input would be WIDER than the
+         * other rows' inputs, the icons would no longer line up in columns
+         * and the input-to-icon gaps would no longer be uniform.
+         */
+        private JComponent rowColumnSpacer() {
+            JPanel spacer = new JPanel(null);
+            spacer.setOpaque(false);
+            spacer.setPreferredSize(new java.awt.Dimension(0, 0));
+            return spacer;
+        }
+
+        private void fireChange() {
+            if (onChange != null) {
+                onChange.run();
+            }
         }
     }
 }

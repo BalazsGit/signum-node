@@ -151,6 +151,18 @@ public final class LoggingProfileRepository {
         return getLoggingDir(moduleId).resolve(APPLIED_SNAPSHOT_DIR).resolve(profileName + ".json");
     }
 
+    /**
+     * Returns whether an applied-state snapshot exists for the profile.
+     *
+     * @param moduleId module identifier
+     * @param profileName profile name
+     * @return true when the snapshot file exists
+     */
+    public boolean hasAppliedSnapshot(String moduleId, String profileName) {
+        return profileName != null && !profileName.isBlank()
+                && Files.exists(getAppliedSnapshotPath(moduleId, profileName));
+    }
+
     // ── Discovery ──────────────────────────────────────────────────────
 
     /**

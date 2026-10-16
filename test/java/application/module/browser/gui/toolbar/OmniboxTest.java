@@ -212,6 +212,14 @@ class OmniboxTest {
         assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display");
         javax.swing.LookAndFeel previous = javax.swing.UIManager.getLookAndFeel();
         JFrame frame = new JFrame("OmniboxTest-font");
+        // Capture the ORIGINAL UIManager font keys BEFORE the try: the puts
+        // below are global defaults that OUTLIVE the L&F restore in the
+        // finally — leaking the bigger font resizes every later test's
+        // controls (regression: the editable-combo height tests of the
+        // configuration utilities ran with this leaked font and failed).
+        java.awt.Font base = javax.swing.UIManager.getFont("Label.font");
+        java.awt.Font baseTextField = javax.swing.UIManager.getFont("TextField.font");
+        java.awt.Font baseButton = javax.swing.UIManager.getFont("Button.font");
         try {
             com.formdev.flatlaf.FlatDarkLaf.setup();
             SecurityIcon icon = new SecurityIcon(url -> {
@@ -231,9 +239,11 @@ class OmniboxTest {
             // all on the EDT): the UIManager font keys are updated, then
             // FlatLaf.updateUI() refreshes every component, then the
             // appearance listeners run (NavigationToolbar#refreshIconSizes).
-            java.awt.Font base = javax.swing.UIManager.getFont("Label.font");
+            // the appearance simulation's bigger font (see the capture
+            // before the try): the puts below are global defaults
+            java.awt.Font biggerBase = javax.swing.UIManager.getFont("Label.font");
             javax.swing.plaf.FontUIResource bigger = new javax.swing.plaf.FontUIResource(
-                    base.getFamily(), base.getStyle(), base.getSize() + 4);
+                    biggerBase.getFamily(), biggerBase.getStyle(), biggerBase.getSize() + 4);
             javax.swing.SwingUtilities.invokeAndWait(() -> {
                 javax.swing.UIManager.put("TextField.font", bigger);
                 javax.swing.UIManager.put("Label.font", bigger);
@@ -278,6 +288,14 @@ class OmniboxTest {
         } finally {
             frame.dispose();
             javax.swing.UIManager.setLookAndFeel(previous);
+            // The L&F restore alone does NOT undo the UIManager.put()s above —
+            // restore the font keys too, or every later test in the JVM
+            // measures controls with the leaked bigger font.
+            javax.swing.SwingUtilities.invokeAndWait(() -> {
+                javax.swing.UIManager.put("Label.font", base);
+                javax.swing.UIManager.put("TextField.font", baseTextField);
+                javax.swing.UIManager.put("Button.font", baseButton);
+            });
         }
     }
 

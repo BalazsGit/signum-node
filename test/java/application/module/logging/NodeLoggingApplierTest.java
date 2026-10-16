@@ -17,6 +17,7 @@ import java.io.IOException;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -75,8 +76,8 @@ class NodeLoggingApplierTest {
     }
 
     @Test
-    @DisplayName("applying persists the applied-state snapshot for the effective profile")
-    void applyForNodeProfile_persistsAppliedSnapshot() throws IOException {
+    @DisplayName("applying a per-node logger level does not write a shared profile snapshot")
+    void applyForNodeProfile_doesNotPersistSharedSnapshot() throws IOException {
         LoggingProfileRepository repo = new LoggingProfileRepository(tempDir.toString());
         java.util.Properties props = new java.util.Properties();
         props.setProperty("node.level", "WARNING");
@@ -88,14 +89,10 @@ class NodeLoggingApplierTest {
 
         NodeLoggingApplier.applyForNodeProfile(tempDir.toString(), PROFILE, MODULE);
 
-        java.util.Properties snapshot = repo.loadAppliedSnapshot(MODULE, "custom");
-        assertEquals("WARNING", snapshot.getProperty("node.level"),
-                "the snapshot stores the applied values (node.level)");
-        assertEquals("java.util.logging.FileHandler", snapshot.getProperty("node.handler"),
-                "the snapshot stores the applied values (node.handler)");
-        assertTrue(repo.getAppliedSnapshotPath(MODULE, "custom")
-                .toString().endsWith("applied" + java.io.File.separator + "custom.json"),
-                "the snapshot lives under the module's applied/ directory");
+        assertEquals(LogLevel.WARN, NodeLoggerRegistry.get(MODULE, PROFILE).getLogLevel(),
+                "the assigned node.level is still applied to its profile logger");
+        assertFalse(repo.hasAppliedSnapshot(MODULE, "custom"),
+                "per-node application must not alter the shared profile's applied baseline");
     }
 
     @Test

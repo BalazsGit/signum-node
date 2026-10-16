@@ -5,6 +5,14 @@ package application.utils.logging;
  * row's three reference baselines (headless — UI concerns such as the state
  * colors live in the GUI layer).
  * <p>
+ * The four states are the EXACT model of the node profile configuration's
+ * value states ({@code ProfileValueState.State}): every value is compared
+ * against the saved AND the applied baseline, a 2×2 matrix over
+ * (current = saved, current = applied). The logging profile editor therefore
+ * behaves logically exactly like the node profile configuration editor —
+ * the same four states, the same state derivation and the same state
+ * coloring.
+ * <p>
  * The three baselines (see {@link RowStateResolver}):
  * </p>
  * <ul>
@@ -19,12 +27,15 @@ package application.utils.logging;
  */
 public enum RowState {
 
-    /** The editor value differs from the saved content: a dirty, not yet saved edit. */
+    /** The editor value differs from BOTH the saved content and the applied baseline: a dirty, not yet saved edit. */
     UNSAVED,
+
+    /** The editor value differs from the saved content but matches the applied baseline. */
+    UNSAVED_APPLIED,
 
     /** The editor value matches the saved content but not the applied baseline: saved, not yet activated. */
     SAVED,
 
     /** The value matches both the saved content and the applied baseline: what the runtime currently uses. */
-    APPLIED
+    SAVED_APPLIED
 }

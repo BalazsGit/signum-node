@@ -5,10 +5,15 @@ import application.module.logging.LoggingProfileRepository;
 import application.utils.gui.CheckboxGroupPanel;
 import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.ComboSearchHighlightRenderer;
+import application.utils.gui.FlatIconButton;
+import application.utils.gui.FlatPlusButton;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
+import application.utils.gui.HelpButton;
 import application.utils.gui.HelpDialog;
 import application.utils.gui.NewProfileChoiceDialog;
+import application.utils.gui.PlusGlyphIcon;
+import application.utils.gui.ResponsiveToolbarScrollPane;
 import application.utils.gui.SearchMatchLabel;
 import application.utils.gui.SearchMatchNavigator;
 import application.utils.gui.SearchMatchPanel;
@@ -20,9 +25,11 @@ import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import net.miginfocom.swing.MigLayout;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
+import javax.swing.DefaultComboBoxModel;
 import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
@@ -42,6 +49,7 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.text.BadLocationException;
 import java.awt.BorderLayout;
+import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
@@ -53,6 +61,7 @@ import java.awt.KeyboardFocusManager;
 import java.awt.LayoutManager2;
 import java.awt.Point;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -66,21 +75,32 @@ import javax.swing.text.JTextComponent;
  * <p>
  * Instantiated once per registered logging provider (Node, Database, …) and shown as a tab in
  * the {@link LoggingPanel}. The layout (top to bottom): the icon-only CRUD toolbar
- * (New / Save / Apply / Rename / Delete / Refresh / Reset / Reload / Help), the search row
- * (the profile selector at its natural width, the live row search box, the "Show values"
- * row-state filter — the Unsaved / Saved / Applied visibility checkboxes — and the reserved
- * host strip), and the "Logger levels" frame — the add-key row at its top and the configured
- * level rows below it.
+ * (New / Save / Apply / Rename / Delete / Refresh / Reset / Help — the Refresh is the
+ * merged reload + refresh action), the search row
+ * (the "Show values" row-state filter — the Unsaved / Saved / Applied visibility
+ * checkboxes plus the color-legend help button — the profile selector at its natural
+ * width DIRECTLY TO THE LEFT of the live row search box, and the reserved host strip),
+ * and the "Logger levels" frame — the configured level rows followed by an
+ * add-key section (key input on the left; initial-value input and a left-aligned
+ * "log level" checkbox below it in the right column, with the flat "+" — the
+ * node configuration list editors' plus — beside the input).
+ * The log-level rows use a CLASSIC — non-editable — combo over the
+ * predefined level list, every other row an EDITABLE combo whose dropdown offers
+ * only the row's state-based baselines, every value painted by its own row state).
  * </p>
  * <p>
  * <h3>Row states</h3>
- * Every row carries a derived {@link RowState} with the three-baseline
- * semantics ({@link RowStateResolver}): <b>unsaved</b> (the editor value
- * differs from the selected profile's saved content — a dirty edit),
- * <b>saved</b> (equals the saved content but not the applied/runtime
- * baseline) and <b>applied</b> (equals both). The state colors the row
- * (label + editor), feeds the "Show values" visibility filter, and — for
- * unsaved rows — adds the trailing {@code " *"} star to the label. The
+ * Every row carries a derived {@link RowState} with the SHARED four-state
+ * model (the same 2×2 matrix and the same state colors the node profile
+ * configuration editor uses, see {@link RowStateResolver}): <b>unsaved</b>
+ * (the editor value differs from the selected profile's saved content AND
+ * the applied baseline — a dirty edit), <b>unsaved applied</b> (differs from
+ * the saved content but matches the applied/runtime baseline), <b>saved</b>
+ * (equals the saved content but not the applied baseline) and <b>saved
+ * applied</b> (equals both). The state colors the row
+ * (label + editor), feeds the "Show values" visibility filter (one checkbox
+ * per state), and — for the dirty states — adds the trailing {@code " *"}
+ * star to the label. The
  * live search (enabled by default) matches the label, the key and the
  * displayed value (match bands + chevron/Enter navigation — the node
  * configuration panel's behavior).
@@ -124,7 +144,9 @@ public class ModuleLoggingProfilePanel extends JPanel {
     private final String moduleId;
 
     private JComboBox<String> profileCombo;
-    /** key → editor (a {@code JComboBox} for log levels, a {@code JTextField} otherwise); insertion order preserved. */
+    /** key → editor (a CLASSIC — non-editable — {@code JComboBox} over the fixed
+     *  {@link #LOG_LEVELS} for log-level rows, an EDITABLE {@code JComboBox} whose
+     *  dropdown offers the row's state-based baselines otherwise); insertion order preserved. */
     private final Map<String, JComponent> rowEditors = new LinkedHashMap<>();
     /** key → the human-readable label shown in the editor (may equal the key). */
     private final Map<String, String> rowLabels = new LinkedHashMap<>();
@@ -132,15 +154,43 @@ public class ModuleLoggingProfilePanel extends JPanel {
     private final Map<String, JLabel> rowLabelComponents = new LinkedHashMap<>();
     /** key → the application default value of the row (also the value shown for the virtual "Default" profile). */
     private final Map<String, String> rowDefaults = new LinkedHashMap<>();
+    /** key → the SAVED (on-disk) baseline value of the row (kept for the value combos' per-item dropdown coloring). */
+    private final Map<String, String> rowSavedValues = new LinkedHashMap<>();
+    /** key → the APPLIED (runtime) baseline value of the row (kept for the value combos' per-item dropdown coloring). */
+    private final Map<String, String> rowAppliedValues = new LinkedHashMap<>();
+    /** The rows whose editor is a log-level combo (the fixed {@link #LOG_LEVELS} dropdown). */
+    private final Set<String> levelRowKeys = new HashSet<>();
+    /**
+     * Guards programmatic editor / model updates (profile loads, baseline
+     * model rebuilds): while set, the editor change handlers must NOT run —
+     * the L&F fires the combo's own events on model swaps too.
+     */
+    private boolean isProgrammaticChange;
     /** Keys registered by the host via {@link #addExtraField} — built-in rows, not removable. */
     private final Set<String> hostExtraKeys = new HashSet<>();
 
     /** The editor row grid; held so rows can be re-rendered for search / dynamic add-key. */
     private JPanel editorGrid;
+    /** The add-key row's key input (created ONCE, persistent across re-renders — typed text must survive). */
+    private JTextField keyInput;
+    /** The add-key row's value cell: a CardLayout holding the text input and the level combo. */
+    private JPanel keyValueCell;
+    /** The add-key row's initial-value input (the plain text mode). */
+    private JTextField keyValueInput;
+    /** The add-key row's initial-value combo (the log-level mode — the classic non-editable level dropdown). */
+    private JComboBox<String> keyLevelInput;
+    /** The add-key row's value-type checkbox: selected = the added row's value is a log level, unselected = plain text. */
+    private JCheckBox keyLevelTypeBox;
+    /** The add-key row's flat "+" button (the node-configuration list editors' plus) — the ONE add button for both value kinds. */
+    private FlatPlusButton addKeyButton;
+    /** The fixed width of the rows' action-icon column (the trash icons and the add row's "+" share it). */
+    private int actionColumnWidth;
     /** Live row filter (unified search box); added to the search row by the constructor ({@link #enableSearch()}). */
     private SearchMatchPanel searchPanel;
-    /** The search-row filter box: the search box and the "Show values" state filter; hosts may add extra controls. */
+    /** The search-row filter box: the "Show values" state filter; hosts may add extra controls. */
     private JPanel filterBox;
+    /** The search-row box holding the live search box — sits directly LEFT of the profile selector. */
+    private JPanel searchBoxHolder;
     /** The shared match-navigation state of the row search (chevron/Enter stepping). */
     private final SearchMatchNavigator searchNav = new SearchMatchNavigator();
     /** The keys of the currently visible rows matching the query (navigation order). */
@@ -206,12 +256,22 @@ public class ModuleLoggingProfilePanel extends JPanel {
 
     /**
      * The "Show values" state-visibility filter: one checkbox per
-     * {@link RowState}, all selected by default (the shared
-     * {@link CheckboxGroupPanel} pattern). Rendered on the search row, to the
-     * right of the search box (see {@link #buildStatusFilter()}).
+     * {@link RowState} plus the color-legend help button, all selected by
+     * default (the shared {@link CheckboxGroupPanel} pattern — the same box
+     * the node configuration panel's search row carries). Rendered on the
+     * search row to the LEFT of the search box (the Search box sits to its
+     * right, mirroring the node configuration panel's search row; see
+     * {@link #buildStatusFilter()}).
      */
     private final CheckboxGroupPanel statusPanel = new CheckboxGroupPanel("Show values");
+    /**
+     * The "Profile" titled box of the search row (kept as a field so the
+     * constructor can height-unify it with the search and "Show values"
+     * boxes — the node configuration panel's search-row logic).
+     */
+    private JComponent profileSelectorPanel;
     private JCheckBox showUnsavedBox;
+    private JCheckBox showUnsavedAppliedBox;
     private JCheckBox showSavedBox;
     private JCheckBox showAppliedBox;
     /** The profile currently marked applied for this module (null = fall back to the built-in default). */
@@ -221,6 +281,13 @@ public class ModuleLoggingProfilePanel extends JPanel {
     private JPanel linkStrip;
     /** Help button; created in the constructor, showing the core's structured default help (see {@link #buildDefaultHelpContent()}) until a host overrides it. */
     private JButton helpButton;
+    private JButton toolbarNewButton;
+    private JButton toolbarCloneButton;
+    private JButton toolbarRenameButton;
+    private JButton toolbarResetButton;
+    private JButton toolbarCopyButton;
+    private JButton toolbarRefreshButton;
+    private JButton toolbarDeleteButton;
 
     /**
      * Save / Rename / Delete only make sense for an on-disk profile — the virtual
@@ -299,6 +366,12 @@ public class ModuleLoggingProfilePanel extends JPanel {
         // last) — the applied state is visible the moment the panel opens. With no
         // applied profile (or a stale marker), the virtual "Default" entry (the
         // first combo item) stays selected.
+        // The same box-height unification the node configuration panel's search
+        // row applies (ConfigurationUtils#unifyTitledBoxHeights — the standard
+        // combo height, measured with all search children shown): the three
+        // boxes of this row (Profile / Search / Show values) stay even when the
+        // font / L&F changes.
+        ConfigurationUtils.unifyTitledBoxHeights(profileSelectorPanel, searchPanel, statusPanel);
         refreshProfileList();
         if (profileCombo.getItemCount() > 0 && !preselectModuleAppliedProfile()) {
             selectSilently(0);
@@ -328,57 +401,127 @@ public class ModuleLoggingProfilePanel extends JPanel {
     }
 
     /**
-     * The search row: [profile selector (natural width)] [search box + extra
-     * filters] [reserved host strip] — ONE left-aligned strip: every box
-     * separated by the SAME uniform gap ({@link #ROW_GAP}), every box
-     * stretched to the SAME height. The strip carries the node configuration
+     * The search row: ["Show values" filter + live search box + profile
+     * selector + extra filters] [reserved host strip] — ONE left-aligned
+     * strip: every box separated by the SAME uniform gap
+     * ({@link #ROW_GAP}), every box stretched to the SAME height. The strip
+     * carries the node configuration
      * panel's search-row margins (10px left, 5px right, 4px top/bottom), so it sits 10px right of the "Logger levels" frame (the node configuration
      * panel's tab area runs flush, like the rows of its property tabs).
      */
     private JComponent buildSearchRow() {
-        JPanel row = new JPanel(new LeftFlow(ROW_GAP));
+        // The EXACT structure of the node configuration panel's search row:
+        // a left-flow strip of boxes inside the same responsive toolbar
+        // scroll wrapper — the wrapper's content insets (0, 10, 0, 5) plus
+        // its 4px top/bottom border are the SAME margins the row always had
+        // (10px left, 5px right, 4px top/bottom), and when the window narrows
+        // past the strip's content width a horizontal scrollbar appears below
+        // it (instead of a plain panel clipping the overflow).
+        JPanel row = new JPanel(new BorderLayout());
         row.setOpaque(false);
-        // The SAME margins as the node configuration panel's search row: its
-        // scroll wrapper carries Insets(0, 10, 0, 5) plus the wrapper's 4px
-        // top/bottom clearance — the combined 10/5 side and 4/4 vertical
-        // margins land the row exactly where the configuration tab's search
-        // row sits.
-        row.setBorder(new EmptyBorder(4, 10, 4, 5));
-        row.add(buildProfileSelector());
+        JPanel strip = new JPanel(new LeftFlow(ROW_GAP));
+        strip.setOpaque(false);
 
-        // The live search box (added at index 0 by the constructor, see
-        // enableSearch) and the "Show values" state-visibility filter sit to
-        // the RIGHT of the profile selector.
+        // The row order: the "Show values" state-visibility filter FIRST
+        // (buildStatusFilter), the live search box SECOND (added to its
+        // holder by enableSearch) and the profile selector THIRD — directly
+        // to the RIGHT of the search box (the requirement: the profile
+        // selector sits next to the Search, on its right).
         filterBox = new JPanel(new LeftFlow(ROW_GAP));
         filterBox.setOpaque(false);
-        row.add(filterBox);
+        strip.add(filterBox);
         buildStatusFilter();
+
+        searchBoxHolder = new JPanel(new LeftFlow(ROW_GAP));
+        searchBoxHolder.setOpaque(false);
+        strip.add(searchBoxHolder);
+
+        profileSelectorPanel = buildProfileSelector();
+        strip.add(profileSelectorPanel);
 
         // Reserved host strip (e.g. the node "link to node profile" checkbox).
         linkStrip = new JPanel(new LeftFlow(ROW_GAP));
         linkStrip.setOpaque(false);
-        row.add(linkStrip);
+        strip.add(linkStrip);
+        // The same responsive toolbar scroll wrapper the configuration panel's
+        // search row (and the profile toolbar rows) use.
+        JScrollPane rowScroll = new ResponsiveToolbarScrollPane(strip, new Insets(0, 10, 0, 5), false);
+        rowScroll.setBorder(new EmptyBorder(4, 0, 4, 0));
+        row.add(rowScroll, BorderLayout.CENTER);
         return row;
     }
 
     /**
      * Builds the "Show values" state-visibility filter (rendered on the
-     * search row, to the right of the search box). Each checkbox toggles the
-     * visibility of rows in the corresponding {@link RowState}; toggling
-     * re-renders the rows.
+     * search row, to the LEFT of the search box — the Search box sits to
+     * its right, mirroring the node configuration panel's search row). Each
+     * checkbox toggles the visibility of rows in the corresponding
+     * {@link RowState}; toggling re-renders the rows.
      */
     private void buildStatusFilter() {
         statusPanel.setChangeListener(button -> reevaluateRowStates());
-        showUnsavedBox = statusPanel.addCheckbox("Unsaved values", GuiColors.getUnsaved(), true);
+        // The SAME labels, order and colors as the node configuration
+        // panel's "Show values" box (compact — the box title already says
+        // what is filtered): one checkbox per state of the shared four-state
+        // model, in the shared model's order.
+        showUnsavedBox = statusPanel.addCheckbox("Unsaved", GuiColors.getUnsaved(), true);
         showUnsavedBox.setToolTipText(
-                "Show / hide the values that differ from the selected profile's saved content (dirty edits).");
-        showSavedBox = statusPanel.addCheckbox("Saved values", GuiColors.getSaved(), true);
+                "Show / hide the values that differ from the selected profile's saved content AND from "
+                        + "the applied baseline (dirty edits).");
+        showUnsavedAppliedBox = statusPanel.addCheckbox("Unsaved Applied",
+                GuiColors.getUnsavedApplied(), true);
+        showUnsavedAppliedBox.setToolTipText(
+                "Show / hide the values that differ from the selected profile's saved content but match "
+                        + "exactly what this module's runtime is currently using.");
+        showSavedBox = statusPanel.addCheckbox("Saved", GuiColors.getSaved(), true);
         showSavedBox.setToolTipText(
-                "Show / hide the values that are saved in the selected profile but are not what is currently loaded into the editor.");
-        showAppliedBox = statusPanel.addCheckbox("Applied values", GuiColors.getApplied(), true);
+                "Show / hide the values that are saved in the selected profile but differ from the "
+                        + "applied baseline (an apply is needed to take effect).");
+        showAppliedBox = statusPanel.addCheckbox("Saved Applied", GuiColors.getApplied(), true);
         showAppliedBox.setToolTipText(
-                "Show / hide the values the runtime is currently using (the applied baseline).");
+                "Show / hide the values that are saved in the selected profile AND match exactly the "
+                        + "applied baseline (what the runtime currently uses).");
+        // The color-legend help button — the same "Detailed Color Legend"
+        // button the node configuration panel's "Show values" box carries
+        // (the legend itself follows the shared four-state model).
+        JButton colorHelpBtn = new HelpButton();
+        colorHelpBtn.setToolTipText("Detailed Color Legend");
+        colorHelpBtn.addActionListener(e -> showColorLegendHelp());
+        statusPanel.add(colorHelpBtn);
         filterBox.add(statusPanel);
+    }
+
+    /**
+     * The "Show values" box's color-legend help — the same dialog the node
+     * configuration panel shows from its legend button: the shared
+     * four-state model (each value compared against the saved profile
+     * content AND the applied baseline).
+     */
+    private void showColorLegendHelp() {
+        String msg = "<html><body style='width: 350px'>" +
+                "<h3>Color Coding Legend</h3>" +
+                "<p>The logger rows are color-coded to indicate their current status. Each value is compared " +
+                "against the selected profile's saved content (SAVED) and the baseline this module runs with (APPLIED):</p>" +
+                "<ul>" +
+                "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getUnsaved())
+                + "'>\u25A0 Unsaved Values:</font></b> " +
+                "These values differ from the selected profile's saved content AND from the applied " +
+                "baseline — they are new, not-yet-saved (dirty) edits.</li>" +
+                "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getUnsavedApplied())
+                + "'>\u25A0 Unsaved Applied Values:</font></b> " +
+                "These values differ from the selected profile's saved content but match exactly the " +
+                "applied baseline — dirty edits the runtime already runs with.</li>" +
+                "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getSaved())
+                + "'>\u25A0 Saved Values:</font></b> " +
+                "These values are saved in the selected profile, but they differ from the applied " +
+                "baseline — saved, but not yet applied (an apply is needed to take effect).</li>" +
+                "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getApplied())
+                + "'>\u25A0 Saved and Applied Values:</font></b> " +
+                "These values are saved in the profile AND match exactly the applied baseline — the " +
+                "runtime already runs with them.</li>" +
+                "</ul>" +
+                "</body></html>";
+        JOptionPane.showMessageDialog(this, msg, "Color Legend", JOptionPane.INFORMATION_MESSAGE);
     }
 
     private JComponent buildProfileSelector() {
@@ -458,6 +601,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
         // The grid is re-rendered by renderEditorRows(); the initial render happens here.
         editorGrid = new JPanel(new GridLayout(0, 2, 6, 4));
         editorGrid.setOpaque(false);
+        buildAddKeyControls();
         renderEditorRows();
 
         // The live search box lives on the search row ABOVE this frame (the
@@ -479,65 +623,202 @@ public class ModuleLoggingProfilePanel extends JPanel {
         searchPanel.setEnterListener(() -> navigateSearch(true));
         searchPanel.setChevronsVisible(false);
 
-        // The titled frame wraps the level editor ONLY: the add-key row at
-        // the TOP inside the border, the already-added level rows (the
-        // scrolling grid) BELOW it. (The grid sits at the TOP of its own
-        // wrapper: a raw GridLayout inside the viewport stretches its (few)
-        // remaining rows to fill the whole vertical space when the search
-        // filters them — the wrapper gives the grid its preferred (text)
-        // height only, so an input field always keeps its size fitted to
-        // the text.)
-        JPanel wrap = new JPanel(new BorderLayout(0, 4));
+        // The single outer titled border is the only frame; the borderless
+        // scroll pane lets every row, including the add section, remain
+        // reachable in a short window.
+        JPanel wrap = new JPanel(new BorderLayout());
         wrap.setOpaque(false);
         wrap.setBorder(BorderFactory.createTitledBorder("Logger levels"));
-        wrap.add(buildAddKeyRow(), BorderLayout.NORTH);
-        JPanel gridWrap = new JPanel(new BorderLayout());
+        JPanel gridWrap = new JPanel(new MigLayout("insets 0, fillx", "[grow]", "[]8[]"));
         gridWrap.setOpaque(false);
-        gridWrap.add(editorGrid, BorderLayout.NORTH);
+        gridWrap.add(editorGrid, "growx, top, wrap");
+        gridWrap.add(buildAddKeyRowCell(), "growx, top");
         JScrollPane scroll = new JScrollPane(gridWrap);
-        // No inner frame around the grid — the single outer "Logger levels"
-        // titled border is the only frame here.
         scroll.setBorder(null);
+        scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
         wrap.add(scroll, BorderLayout.CENTER);
         return wrap;
     }
 
     /**
-     * The "+ add key" row: sits at the TOP INSIDE the "Logger levels" frame,
-     * the already-added level rows follow below it in the grid.
+     * Creates the add-key row's controls ONCE (persistent across re-renders —
+     * typed text must survive a row re-render): the key input, the initial
+     * VALUE input (a plain text field or, while the "log level" checkbox is
+     * selected, the non-editable level combo) and the flat "+" button — the
+     * node-configuration list editors' plus (no text label, no leading
+     * "+" character). The ONE "+" button adds the key with the value kind
+     * the checkbox selected.
      */
-    private JComponent buildAddKeyRow() {
-        JPanel addRowPanel = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
-        addRowPanel.setOpaque(false);
-        JTextField keyInput = new JTextField(20);
-        JButton addBtn = new JButton("Add key");
-        addBtn.addActionListener(e -> {
-            String key = keyInput.getText().trim();
-            if (!key.isEmpty() && !rowEditors.containsKey(key)) {
-                addRow(key, key, "INFO");
-                keyInput.setText("");
-            }
-        });
-        addRowPanel.add(new JLabel("+"));
-        addRowPanel.add(keyInput);
-        addRowPanel.add(addBtn);
-        return addRowPanel;
+    private void buildAddKeyControls() {
+        keyInput = new JTextField();
+        // The SAME unified input metrics as the value fields below (font /
+        // border / height / left margin) — the add-key input must read as
+        // just another row's input, nothing shorter or taller.
+        ConfigurationUtils.styleInputComponent(keyInput);
+        keyInput.setToolTipText("Type a key (e.g. com.example.MyApp.level), then press '+' (or Enter) to add it");
+        keyInput.addActionListener(e -> addKeyButton.doClick()); // Enter key
+
+        // The key's INITIAL VALUE: two editors share one cell — the plain
+        // text input (the default) or, while the "log level" checkbox is
+        // selected, the classic non-editable level combo (the same dropdown
+        // the log-level rows use).
+        keyValueInput = new JTextField();
+        ConfigurationUtils.styleInputComponent(keyValueInput);
+        keyValueInput.setToolTipText("The key's initial value (plain text)");
+        keyValueInput.addActionListener(e -> addKeyButton.doClick()); // Enter key
+        keyLevelInput = new JComboBox<>(LOG_LEVELS);
+        keyLevelInput.setSelectedItem("INFO");
+        keyLevelInput.setToolTipText("The key's initial log level");
+        keyValueCell = new JPanel(new CardLayout());
+        keyValueCell.setOpaque(false);
+        keyValueCell.add(keyValueInput, "text");
+        keyValueCell.add(keyLevelInput, "level");
+
+        keyLevelTypeBox = new JCheckBox("log level");
+        keyLevelTypeBox.setToolTipText(
+                "Log level value<br><br>Selected: the key's value is a predefined log level (INFO, FINE, ...); "
+                        + "unselected: a plain text value.");
+        keyLevelTypeBox.addActionListener(e -> showKeyValueEditor(keyLevelTypeBox.isSelected()));
+
+        addKeyButton = new FlatPlusButton();
+        addKeyButton.setIcon(new PlusGlyphIcon(Math.round(GuiConstants.getHelpIconSize())));
+        addKeyButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        addKeyButton.setToolTipText("Add key");
+        addKeyButton.addActionListener(e -> addKeyFromRow());
+    }
+
+    /** Shows the value editor of the add-key row the "log level" checkbox selected. */
+    private void showKeyValueEditor(boolean level) {
+        if (keyValueCell != null) {
+            ((CardLayout) keyValueCell.getLayout()).show(keyValueCell, level ? "level" : "text");
+        }
+    }
+
+    /**
+     * Adds the key from the add-key row: the initial value is the level
+     * combo's selection while the "log level" checkbox is selected, the
+     * typed plain text otherwise. The row's editor kind follows the value
+     * itself ({@link #makeEditor}: a level value gets the non-editable
+     * level combo, anything else the editable text combo). After adding the
+     * key and value inputs reset; the checkbox keeps its state (the mode
+     * applies to the next add as well).
+     */
+    private void addKeyFromRow() {
+        String key = keyInput.getText().trim();
+        if (key.isEmpty() || rowEditors.containsKey(key)) {
+            return;
+        }
+        String value = keyLevelTypeBox.isSelected()
+                ? String.valueOf(keyLevelInput.getSelectedItem())
+                : keyValueInput.getText().trim();
+        addRow(key, key, value);
+        keyInput.setText("");
+        keyValueInput.setText("");
+        keyLevelInput.setSelectedItem("INFO");
+    }
+
+    /**
+     * The add-key section sits below the configured rows. The key input is on
+     * the left; the initial value and its value-type checkbox are on the right,
+     * with the checkbox left-aligned below the input and the add action beside it.
+     */
+    private JComponent buildAddKeyRowCell() {
+        JPanel addSection = new JPanel(new GridLayout(1, 2, 6, 0));
+        addSection.setOpaque(false);
+
+        JPanel keyColumn = new JPanel(new MigLayout("insets 0, fillx", "[grow]", "[]2[]2[]"));
+        keyColumn.setOpaque(false);
+        JLabel keyLabel = new JLabel("Key");
+        keyLabel.setLabelFor(keyInput);
+        keyColumn.add(keyLabel, "wrap");
+        keyColumn.add(keyInput, "growx");
+
+        JPanel valueColumn = new JPanel(new MigLayout("insets 0, fillx",
+                "[grow][" + actionColumnWidth() + "px, grow 0]", "[]2[]2[]"));
+        valueColumn.setOpaque(false);
+        JLabel valueLabel = new JLabel("Initial value");
+        valueLabel.setLabelFor(keyValueCell);
+        valueColumn.add(valueLabel, "span 2, wrap");
+        valueColumn.add(keyValueCell, "growx");
+        valueColumn.add(addKeyButton, "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP
+                + ", w " + actionColumnWidth() + "!, growx, wrap");
+        valueColumn.add(keyLevelTypeBox, "span 2, alignx left");
+
+        addSection.add(keyColumn, "growx");
+        addSection.add(valueColumn, "growx");
+        return addSection;
+    }
+
+    /**
+     * The fixed width of the rows' action-icon column: the WIDER of the
+     * (flat, borderless) trash icon button and the flat "+" (measured once,
+     * from prototypes that mirror the real buttons' exact footprint). Every
+     * row shares the column, so the input-to-icon margin is identical on the
+     * add row and the level rows and the icons line up in a column.
+     */
+    private int actionColumnWidth() {
+        if (actionColumnWidth == 0) {
+            JButton protoTrash = new FlatIconButton();
+            protoTrash.setIcon(IconFontSwing.buildIcon(FontAwesome.TRASH,
+                    GuiConstants.getHelpIconSize(), GuiColors.getContrastRed()));
+            FlatPlusButton protoPlus = new FlatPlusButton();
+            protoPlus.setIcon(new PlusGlyphIcon(Math.round(GuiConstants.getHelpIconSize())));
+            actionColumnWidth = Math.max(protoTrash.getPreferredSize().width,
+                    protoPlus.getPreferredSize().width);
+        }
+        return actionColumnWidth;
     }
 
     private void addRow(String label, String key, String defaultValue) {
         String display = (label != null && !label.isBlank()) ? label : key;
-        JComponent editor = makeEditor(defaultValue);
+        JComponent editor = makeEditor(key, defaultValue);
         rowEditors.put(key, editor);
         rowLabels.put(key, display);
         rowDefaults.put(key, defaultValue == null ? "" : defaultValue);
+        if (isLogLevel(defaultValue)) {
+            levelRowKeys.add(key);
+        }
         addEditorChangeListener(key, editor);
         renderEditorRows();
     }
 
     /** Registers the "editor changed → re-evaluate derived row state" listener. */
     private void addEditorChangeListener(String key, JComponent editor) {
-        if (editor instanceof JComboBox) {
-            ((JComboBox<?>) editor).addActionListener(e -> handleEditorValueChange(key));
+        if (editor instanceof JComboBox<?> combo) {
+            combo.addActionListener(e -> {
+                if (isProgrammaticChange) {
+                    return;
+                }
+                handleEditorValueChange(key);
+            });
+            // The editor text IS the value of an editable combo — track its
+            // changes through a DocumentListener (plain typing changes the
+            // editor item without firing the combo's action).
+            JComponent editorComponent = (JComponent) combo.getEditor().getEditorComponent();
+            JTextField textField = editorTextField(editorComponent);
+            if (textField != null) {
+                textField.getDocument().addDocumentListener(new DocumentListener() {
+                    @Override
+                    public void insertUpdate(DocumentEvent e) {
+                        if (!isProgrammaticChange) {
+                            handleEditorValueChange(key);
+                        }
+                    }
+
+                    @Override
+                    public void removeUpdate(DocumentEvent e) {
+                        if (!isProgrammaticChange) {
+                            handleEditorValueChange(key);
+                        }
+                    }
+
+                    @Override
+                    public void changedUpdate(DocumentEvent e) {
+                    }
+                });
+            }
         } else if (editor instanceof JTextField textField) {
             textField.getDocument().addDocumentListener(new DocumentListener() {
                 @Override
@@ -560,18 +841,23 @@ public class ModuleLoggingProfilePanel extends JPanel {
 
     /**
      * Recomputes the {@link RowState} of every row (no UI updates — the
-     * caller re-renders or restyles) with the three-baseline model
-     * ({@link RowStateResolver}):
+     * caller re-renders or restyles) with the SHARED four-state model
+     * (the SAME 2×2 matrix the node profile configuration editor uses,
+     * see {@link RowStateResolver}):
      * <ul>
-     * <li><b>Unsaved</b> — the editor value differs from the selected
-     *     profile's saved (on-disk) content: a dirty, not yet saved edit
-     *     (while the virtual Default entry is selected, anything deviating
-     *     from the built-in default, since Default cannot be saved).</li>
-     * <li><b>Saved</b> — otherwise, the editor value differs from the
-     *     applied (runtime) baseline: it was saved but is not what the
-     *     runtime currently uses.</li>
-     * <li><b>Applied</b> — otherwise: the value matches both the saved
-     *     content and the applied baseline.</li>
+     * <li><b>Unsaved</b> — the editor value differs from BOTH the selected
+     *     profile's saved (on-disk) content and the applied (runtime)
+     *     baseline: a dirty, not yet saved edit (while the virtual Default
+     *     entry is selected, anything deviating from the built-in default,
+     *     since Default cannot be saved).</li>
+     * <li><b>Unsaved Applied</b> — the editor value differs from the saved
+     *     content but matches the applied baseline: a dirty edit the
+     *     runtime already runs with.</li>
+     * <li><b>Saved</b> — the editor value matches the saved content but
+     *     differs from the applied baseline: it was saved but is not what
+     *     the runtime currently uses.</li>
+     * <li><b>Saved Applied</b> — the value matches both the saved content
+     *     and the applied baseline: what the runtime currently uses.</li>
      * </ul>
      * A key the profile does not define falls back to the built-in default
      * as BOTH the saved and the applied reference, so a missing key's value
@@ -580,6 +866,8 @@ public class ModuleLoggingProfilePanel extends JPanel {
      */
     protected void recomputeRowStates() {
         rowStates.clear();
+        rowSavedValues.clear();
+        rowAppliedValues.clear();
         String selected = selectedProfileName();
         boolean selectedIsDefault = DEFAULT_PROFILE_ENTRY.equals(selected);
         Properties selectedProps = selectedIsDefault ? new Properties() : loadProfilePropsSafely(selected);
@@ -612,6 +900,11 @@ public class ModuleLoggingProfilePanel extends JPanel {
             }
 
             rowStates.put(key, RowStateResolver.resolve(value, saved, applied));
+            // The baselines stay available for the value combos' per-item
+            // dropdown coloring (each entry is judged against THIS row's
+            // saved / applied value).
+            rowSavedValues.put(key, saved);
+            rowAppliedValues.put(key, applied);
         }
     }
 
@@ -625,6 +918,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
      */
     protected void reevaluateRowStates() {
         recomputeRowStates();
+        rebuildValueComboModels();
         renderEditorRows();
         updateProfileActionButtons();
     }
@@ -632,14 +926,16 @@ public class ModuleLoggingProfilePanel extends JPanel {
     /**
      * @return true when the row's current editor value differs from the
      *         selected profile's saved content — i.e. it has a
-     *         pending (unsaved) change (exactly the rows computed as
-     *         {@link RowState#UNSAVED} by {@link #recomputeRowStates()}).
-     *         Such rows are shown with a trailing {@code " *"} star on their
-     *         label (the same convention the node configuration panel uses
-     *         for its unsaved values).
+     *         pending (unsaved) change (the rows computed as
+     *         {@link RowState#UNSAVED} or {@link RowState#UNSAVED_APPLIED}
+     *         by {@link #recomputeRowStates()} — both states are dirty with
+     *         respect to the saved content). Such rows are shown with a
+     *         trailing {@code " *"} star on their label (the same convention
+     *         the node configuration panel uses for its unsaved values).
      */
     protected boolean isRowUnsaved(String key) {
-        return rowStates.get(key) == RowState.UNSAVED;
+        RowState state = rowStates.get(key);
+        return state == RowState.UNSAVED || state == RowState.UNSAVED_APPLIED;
     }
 
     /**
@@ -710,14 +1006,19 @@ public class ModuleLoggingProfilePanel extends JPanel {
         }
         return switch (state) {
             case UNSAVED -> showUnsavedBox.isSelected();
+            case UNSAVED_APPLIED -> showUnsavedAppliedBox.isSelected();
             case SAVED -> showSavedBox.isSelected();
-            case APPLIED -> showAppliedBox.isSelected();
+            case SAVED_APPLIED -> showAppliedBox.isSelected();
         };
     }
 
     /**
      * Colors the row's label and editor with the row state's color (a row
-     * without a computed state keeps its default colors).
+     * without a computed state keeps its default colors). For the editable
+     * value combos the EDITOR TEXT is colored as well — a font / L&F change
+     * replaces the editor's UI delegate (resetting its foreground to the
+     * plain text color), so the state color must be re-applied to the text
+     * on every restyle (updateUI → re-render → here).
      */
     protected void styleRow(String key, JLabel label, JComponent editor) {
         RowState state = rowStates.get(key);
@@ -727,18 +1028,86 @@ public class ModuleLoggingProfilePanel extends JPanel {
         Color color = stateColor(state);
         label.setForeground(color);
         editor.setForeground(color);
+        if (editor instanceof JComboBox<?> combo && combo.isEditable()) {
+            JTextField textField = editorTextField((JComponent) combo.getEditor().getEditorComponent());
+            if (textField != null) {
+                textField.setForeground(color);
+            }
+        }
+    }
+
+    /** The (first) text field inside the given component tree (a combo's editor text, may be null). */
+    private static JTextField editorTextField(JComponent component) {
+        if (component instanceof JTextField textField) {
+            return textField;
+        }
+        if (component instanceof Container) {
+            for (Component child : component.getComponents()) {
+                if (child instanceof JComponent) {
+                    JTextField found = editorTextField((JComponent) child);
+                    if (found != null) {
+                        return found;
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     /**
      * The legend color of a row state (the GUI mapping of the headless
-     * {@link RowState} — the palette stays the SSOT for the state colors).
+     * {@link RowState} — the SAME palette mapping the node profile
+     * configuration editor uses for its value states; the palette stays the
+     * SSOT for the state colors, read live so a theme change refreshes them).
      */
     private static Color stateColor(RowState state) {
         return switch (state) {
             case UNSAVED -> GuiColors.getUnsaved();
+            case UNSAVED_APPLIED -> GuiColors.getUnsavedApplied();
             case SAVED -> GuiColors.getSaved();
-            case APPLIED -> GuiColors.getApplied();
+            case SAVED_APPLIED -> GuiColors.getApplied();
         };
+    }
+
+    /**
+     * Re-applies the value-state color coding after an appearance change —
+     * the requirement: changing the font size, font family or any other
+     * appearance setting must never affect the coloring derived from the
+     * computed row state. A font / L&F change replaces the UI delegates of
+     * every component (and any recreated editor would lose the state
+     * foreground), so the row states are re-computed and re-applied with
+     * the CURRENT palette colors: when only the font changed the state
+     * colors come back untouched, and when the theme changed the state
+     * colors are refreshed to the new theme's palette values (the state
+     * mapping itself is never lost).
+     * <p>
+     * (Guarded: this method also runs from the super constructor, before
+     * the profile machinery is ready.)
+     */
+    @Override
+    public void updateUI() {
+        super.updateUI();
+        if (helpButton != null) {
+            updateProfileToolbarUI();
+        }
+        if (profileCombo != null && editorGrid != null && !rowEditors.isEmpty()) {
+            reevaluateRowStates();
+            refreshStatusFilterColors();
+        }
+    }
+
+    /**
+     * Re-sets the "Show values" checkbox colors from the CURRENT palette —
+     * the state colors are theme-dependent palette values, so a theme
+     * change must refresh them (a font-only change is a no-op).
+     */
+    private void refreshStatusFilterColors() {
+        if (showUnsavedBox != null) {
+            showUnsavedBox.setForeground(GuiColors.getUnsaved());
+            showUnsavedAppliedBox.setForeground(GuiColors.getUnsavedApplied());
+            showSavedBox.setForeground(GuiColors.getSaved());
+            showAppliedBox.setForeground(GuiColors.getApplied());
+        }
     }
 
     protected void renderEditorRows() {
@@ -782,11 +1151,16 @@ public class ModuleLoggingProfilePanel extends JPanel {
             editorGrid.add(lbl);
             // The value cell: the editor plus the per-row "Remove key" trash
             // icon at the end of the row (the key-specific tooltip says what
-            // the icon does; built-in rows carry a disabled icon).
-            JPanel valueCell = new JPanel(new BorderLayout());
+            // the icon does; built-in rows carry a disabled icon). The SAME
+            // 2-column grid as the add row (fixed-width icon column + the
+            // uniform gap), so every input field and icon lines up in
+            // columns from the add row down through the level rows.
+            JPanel valueCell = new JPanel(new MigLayout("insets 0, fillx",
+                    "[grow][" + actionColumnWidth() + "px, grow 0]", "[]"));
             valueCell.setOpaque(false);
-            valueCell.add(entry.getValue(), BorderLayout.CENTER);
-            valueCell.add(buildRemoveKeyButton(key), BorderLayout.EAST);
+            valueCell.add(entry.getValue(), "growx");
+            valueCell.add(buildRemoveKeyButton(key), "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP
+                    + ", w " + actionColumnWidth() + "!, growx");
             editorGrid.add(valueCell);
         }
         editorGrid.revalidate();
@@ -809,11 +1183,9 @@ public class ModuleLoggingProfilePanel extends JPanel {
      */
     private JButton buildRemoveKeyButton(String key) {
         boolean removable = isKeyRemovable(key);
-        JButton removeBtn = new JButton(IconFontSwing.buildIcon(FontAwesome.TRASH,
+        FlatIconButton removeBtn = new FlatIconButton();
+        removeBtn.setIcon(IconFontSwing.buildIcon(FontAwesome.TRASH,
                 GuiConstants.getHelpIconSize(), GuiColors.getContrastRed()));
-        removeBtn.setContentAreaFilled(false);
-        removeBtn.setBorderPainted(false);
-        removeBtn.setFocusPainted(false);
         removeBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         removeBtn.setEnabled(removable);
         removeBtn.setToolTipText(removable
@@ -909,8 +1281,9 @@ public class ModuleLoggingProfilePanel extends JPanel {
 
     /**
      * @return true when the query is in the row's visible text: the label,
-     *         the key, the value of a text field, or the selection of a
-     *         non-editable combo. Non-text inputs without a displayed value
+     *         the key, the value of a text field, or the displayed value of
+     *         a combo (its editor text when editable, its selection
+     *         otherwise). Non-text inputs without a displayed value
      *         are deliberately NOT searched — only what the user can see
      *         can be a match.
      */
@@ -923,11 +1296,20 @@ public class ModuleLoggingProfilePanel extends JPanel {
         if (editor instanceof JTextField textField) {
             return textField.getText().toLowerCase(Locale.ROOT).contains(lowerQuery);
         }
-        if (editor instanceof JComboBox<?> comboBox && !comboBox.isEditable()) {
-            Object selected = comboBox.getSelectedItem();
-            return selected != null && selected.toString().toLowerCase(Locale.ROOT).contains(lowerQuery);
+        if (editor instanceof JComboBox<?> comboBox) {
+            String text = comboBox.isEditable()
+                    ? editableComboText(comboBox)
+                    : (comboBox.getSelectedItem() == null ? "" : comboBox.getSelectedItem().toString());
+            return text.toLowerCase(Locale.ROOT).contains(lowerQuery);
         }
         return false;
+    }
+
+    /** The displayed text of an editable combo (its editor text field, the row's actual value). */
+    private static String editableComboText(JComboBox<?> combo) {
+        JComponent editorComponent = (JComponent) combo.getEditor().getEditorComponent();
+        JTextField textField = editorTextField(editorComponent);
+        return textField == null ? "" : textField.getText();
     }
 
     /**
@@ -955,11 +1337,19 @@ public class ModuleLoggingProfilePanel extends JPanel {
             }
         }
         JComponent editor = rowEditors.get(key);
+        // The value band lives in the row's visible text: a plain text
+        // field, or the EDITOR TEXT of an editable value combo.
+        JTextField valueField = null;
         if (editor instanceof JTextField textField) {
-            int idx = textField.getText().toLowerCase(Locale.ROOT).indexOf(lowerQuery);
+            valueField = textField;
+        } else if (editor instanceof JComboBox<?> combo && combo.isEditable()) {
+            valueField = editorTextField((JComponent) combo.getEditor().getEditorComponent());
+        }
+        if (valueField != null) {
+            int idx = valueField.getText().toLowerCase(Locale.ROOT).indexOf(lowerQuery);
             if (idx >= 0) {
                 try {
-                    textField.getHighlighter().addHighlight(idx, idx + lowerQuery.length(),
+                    valueField.getHighlighter().addHighlight(idx, idx + lowerQuery.length(),
                             active ? SearchValueHighlight.PAINTER_ACTIVE : SearchValueHighlight.PAINTER);
                 } catch (BadLocationException ignored) {
                     // the value changed between the lookup and the paint — nothing to band
@@ -1017,11 +1407,16 @@ public class ModuleLoggingProfilePanel extends JPanel {
         originalComboRenderers.clear();
     }
 
-    /** Removes the value-text match bands from every text field row. */
+    /** Removes the value-text match bands from every row's value input. */
     private void clearValueHighlights() {
         for (JComponent editor : rowEditors.values()) {
             if (editor instanceof JTextField textField) {
                 textField.getHighlighter().removeAllHighlights();
+            } else if (editor instanceof JComboBox<?> combo && combo.isEditable()) {
+                JTextField textField = editorTextField((JComponent) combo.getEditor().getEditorComponent());
+                if (textField != null) {
+                    textField.getHighlighter().removeAllHighlights();
+                }
             }
         }
     }
@@ -1108,13 +1503,133 @@ public class ModuleLoggingProfilePanel extends JPanel {
         viewport.setViewPosition(new Point(position.x, targetY));
     }
 
-    private JComponent makeEditor(String defaultValue) {
-        if (isLogLevel(defaultValue)) {
+    /**
+     * The row's editor. A CLASSIC (non-editable) combo wherever the value is
+     * chosen from a PREDEFINED list — the log-level rows carry the fixed
+     * {@link #LOG_LEVELS} dropdown — and an EDITABLE combo only where there
+     * is no predefined value: the editor text is the current value and the
+     * dropdown offers only the row's state-based baseline values (the current
+     * value + the saved + the applied value, rebuilt on every state
+     * recomputation — see {@link #rebuildValueComboModels()}), exactly the
+     * node configuration panel's value-input semantics. EVERY dropdown entry
+     * is painted by the state of its OWN value ({@link #valueCellRenderer(String)}).
+     */
+    private JComponent makeEditor(String key, String defaultValue) {
+        String value = defaultValue == null ? "" : defaultValue;
+        if (isLogLevel(value)) {
+            // The value is chosen from the predefined LOG_LEVELS list — a
+            // classic, NON-editable dropdown (no free text entry).
             JComboBox<String> combo = new JComboBox<>(LOG_LEVELS);
-            combo.setSelectedItem(defaultValue);
+            combo.setSelectedItem(canonicalLogLevel(value));
+            combo.setRenderer(valueCellRenderer(key));
             return combo;
         }
-        return new JTextField(defaultValue == null ? "" : defaultValue);
+        // No predefined value list: editable combo, the editor text IS the value.
+        JComboBox<String> combo = new JComboBox<>(new String[0]);
+        combo.setEditable(true);
+        combo.getEditor().setItem(value);
+        // the same input styling (font / border / left margin) as every other value input
+        ConfigurationUtils.styleComboEditor(combo);
+        combo.setRenderer(valueCellRenderer(key));
+        return combo;
+    }
+
+    /** The canonical (predefined, uppercase) form of a log level for the fixed
+     *  {@link #LOG_LEVELS} dropdown's selection (case-insensitive match; the
+     *  value itself when no predefined level matches). */
+    private static String canonicalLogLevel(String value) {
+        for (String level : LOG_LEVELS) {
+            if (level.equalsIgnoreCase(value)) {
+                return level;
+            }
+        }
+        return value;
+    }
+
+    /**
+     * The row's dropdown renderer: EVERY entry is painted by the state of
+     * ITS OWN value against this row's saved / applied baselines — the
+     * shared four-state model, exactly the node configuration panel's
+     * value-combo dropdown semantics (an entry equal to both baselines is
+     * "saved applied", an entry equal to the row's dirty current value is
+     * "unsaved", and so on). The palette is read live, so a theme or font
+     * change refreshes the colors without any cached state.
+     */
+    private ListCellRenderer<String> valueCellRenderer(String key) {
+        return (list, value, index, isSelected, cellHasFocus) -> {
+            String text = value == null ? "" : value;
+            JLabel cell = new JLabel(text);
+            cell.setOpaque(true);
+            if (isSelected) {
+                cell.setBackground(list.getSelectionBackground());
+                cell.setForeground(list.getSelectionForeground());
+            } else {
+                cell.setBackground(list.getBackground());
+                RowState state = RowStateResolver.resolve(text,
+                        rowSavedValues.getOrDefault(key, ""),
+                        rowAppliedValues.getOrDefault(key, ""));
+                cell.setForeground(stateColor(state));
+            }
+            return cell;
+        };
+    }
+
+    /**
+     * Rebuilds the dropdown baselines of the NON-level editable combos (the
+     * level rows keep the fixed LOG_LEVELS model): the current value plus
+     * the row's saved and applied baselines — an edited value can be
+     * reverted by selecting its baseline back. Guarded: the model swap
+     * touches the editor text, and its document events must not fire the
+     * row's change handler.
+     */
+    private void rebuildValueComboModels() {
+        for (Map.Entry<String, JComponent> entry : rowEditors.entrySet()) {
+            if (!levelRowKeys.contains(entry.getKey())
+                    && entry.getValue() instanceof JComboBox<?> combo && combo.isEditable()) {
+                @SuppressWarnings("unchecked")
+                JComboBox<String> valueCombo = (JComboBox<String>) combo;
+                rebuildValueComboModel(valueCombo, entry.getKey());
+            }
+        }
+    }
+
+    private void rebuildValueComboModel(JComboBox<String> combo, String key) {
+        String current = editorValueOf(key);
+        if (current == null) {
+            current = "";
+        }
+        LinkedHashSet<String> items = new LinkedHashSet<>();
+        if (!current.isBlank()) {
+            items.add(current);
+        }
+        String saved = rowSavedValues.getOrDefault(key, "");
+        String applied = rowAppliedValues.getOrDefault(key, "");
+        if (!saved.isBlank() && !saved.equals(current)) {
+            items.add(saved);
+        }
+        if (!applied.isBlank() && !applied.equals(current)) {
+            items.add(applied);
+        }
+        boolean prevFlag = isProgrammaticChange;
+        isProgrammaticChange = true;
+        try {
+            // Keep the (typed) text before the swap — the L&F reconfigures
+            // the editor on every model change (would overwrite the text).
+            JComponent editorComponent = (JComponent) combo.getEditor().getEditorComponent();
+            JTextField textField = editorTextField(editorComponent);
+            String typed = textField == null ? "" : textField.getText();
+            if (!typed.isEmpty()) {
+                combo.setSelectedItem(typed);
+            } else {
+                combo.setSelectedIndex(-1);
+            }
+            combo.setModel(new DefaultComboBoxModel<>(items.toArray(new String[0])));
+            if (textField != null && !typed.equals(textField.getText())) {
+                textField.setText(typed);
+            }
+        } finally {
+            isProgrammaticChange = prevFlag;
+        }
     }
 
     private String currentFilter() {
@@ -1134,19 +1649,19 @@ public class ModuleLoggingProfilePanel extends JPanel {
         JPanel panel = ConfigurationUtils.createProfileToolbarRow();
 
         // Icon-only: the tooltip carries the function description (on hover).
-        JButton newBtn = new JButton();
-        newBtn.setToolTipText("<html>New Profile<br><br>Creates a new profile initialized with the "
-                + "application default values.</html>");
-        newBtn.addActionListener(e -> createNewProfile());
-        panel.add(newBtn);
+        toolbarNewButton = new JButton();
+        toolbarNewButton.setToolTipText("<html>New Profile<br><br>Creates a new logging profile initialized "
+                + "with the application default values for this module's logger settings.</html>");
+        toolbarNewButton.addActionListener(e -> createNewProfile());
+        panel.add(toolbarNewButton);
 
         // Clone sits right after New Profile (the node configuration order):
         // both are "create a profile" actions and belong next to each other.
-        JButton cloneBtn = new JButton();
-        cloneBtn.setToolTipText("<html>Clone Configuration<br><br>Creates a new profile from the current "
+        toolbarCloneButton = new JButton();
+        toolbarCloneButton.setToolTipText("<html>Clone Configuration<br><br>Creates a new profile from the current "
                 + "(unsaved, editor) effective state. The source profile is left untouched.</html>");
-        cloneBtn.addActionListener(e -> cloneProfile());
-        panel.add(cloneBtn);
+        toolbarCloneButton.addActionListener(e -> cloneProfile());
+        panel.add(toolbarCloneButton);
 
         JButton saveBtn = new JButton();
         saveBtn.setToolTipText("<html>Save<br><br>Saves the current editor state to the selected profile.<br>"
@@ -1161,71 +1676,79 @@ public class ModuleLoggingProfilePanel extends JPanel {
         applyBtn.addActionListener(e -> applyProfile());
         panel.add(applyBtn);
 
-        JButton renameBtn = new JButton();
-        renameBtn.setToolTipText("<html>Rename<br><br>Renames the selected profile.</html>");
-        renameBtn.addActionListener(e -> renameProfile());
-        panel.add(renameBtn);
+        toolbarRenameButton = new JButton();
+        toolbarRenameButton.setToolTipText("<html>Rename<br><br>Changes the name of the selected on-disk "
+                + "logging profile. The built-in Default profile cannot be renamed.</html>");
+        toolbarRenameButton.addActionListener(e -> renameProfile());
+        panel.add(toolbarRenameButton);
 
-        JButton resetBtn = new JButton();
-        resetBtn.setToolTipText("<html>Reset to Defaults<br><br>Sets every row back to the module's default value (not saved until you Save).</html>");
-        resetBtn.addActionListener(e -> resetToDefaults());
-        panel.add(resetBtn);
+        toolbarResetButton = new JButton();
+        toolbarResetButton.setToolTipText("<html>Reset to Defaults<br><br>Replaces every logger setting in "
+                + "the editor with this module's defaults. The changes are not saved until you choose Save.</html>");
+        toolbarResetButton.addActionListener(e -> resetToDefaults());
+        panel.add(toolbarResetButton);
 
-        JButton copyBtn = new JButton();
-        copyBtn.setToolTipText("<html>Copy Configuration<br><br>Copies another profile's values into this editor<br>"
+        toolbarCopyButton = new JButton();
+        toolbarCopyButton.setToolTipText("<html>Copy Configuration<br><br>Copies another logging profile's "
+                + "values into this editor<br>"
                 + "as unsaved changes. Unsaved changes in the editor will be discarded.</html>");
-        copyBtn.addActionListener(e -> copyConfiguration());
-        panel.add(copyBtn);
+        toolbarCopyButton.addActionListener(e -> copyConfiguration());
+        panel.add(toolbarCopyButton);
 
-        JButton reloadBtn = new JButton();
-        reloadBtn.setToolTipText("<html>Reload<br><br>Re-reads the selected profile from disk (discards unsaved edits).</html>");
-        reloadBtn.addActionListener(e -> discardAndReload());
-        panel.add(reloadBtn);
-
-        JButton refreshBtn = new JButton();
-        refreshBtn.setToolTipText("<html>Refresh<br><br>Re-scans the profiles on disk.</html>");
-        refreshBtn.addActionListener(e -> {
+        // The MERGED Reload + Refresh action: it re-scans the profiles on
+        // disk AND re-reads the selected profile from disk (the standalone
+        // Reload button was merged into this one).
+        toolbarRefreshButton = new JButton();
+        toolbarRefreshButton.setToolTipText("<html>Refresh<br><br>Re-scans the logging profiles on disk and "
+                + "re-reads the selected profile<br>"
+                + "(discards unsaved edits).</html>");
+        toolbarRefreshButton.addActionListener(e -> {
             refreshProfileList();
             discardAndReload();
         });
-        panel.add(refreshBtn);
+        panel.add(toolbarRefreshButton);
 
-        JButton deleteBtn = new JButton();
-        deleteBtn.setToolTipText("<html>Delete<br><br>Deletes the selected profile.</html>");
-        deleteBtn.addActionListener(e -> deleteProfile());
-        panel.add(deleteBtn);
+        toolbarDeleteButton = new JButton();
+        toolbarDeleteButton.setToolTipText("<html>Delete<br><br>Permanently deletes the selected on-disk "
+                + "logging profile. The built-in Default profile cannot be deleted.</html>");
+        toolbarDeleteButton.addActionListener(e -> deleteProfile());
+        panel.add(toolbarDeleteButton);
 
         helpButton = new JButton();
-        helpButton.setToolTipText("<html>Help<br><br>Shows the profile editor help (module hosts may customize it).</html>");
+        helpButton.setToolTipText("<html>Help<br><br>Explains logging profiles, logger levels, row colors, "
+                + "and the actions available in this toolbar.</html>");
         // Enabled out of the box: the core shows its own structured default help
         // (buildDefaultHelpContent); a host overrides the text via setHelpSupplier.
         helpButton.addActionListener(e -> showHelp());
-        // The question mark is an icon in the SAME flat style as the other
-        // toolbar glyphs (same size, color, hover-grow) — no text.
-        ConfigurationUtils.styleProfileIconButton(helpButton, FontAwesome.QUESTION_CIRCLE,
-                GuiColors.getButtonIcon(), GuiConstants.getToolBarIconSize());
         panel.add(helpButton);
 
         // Keep references to the buttons whose validity depends on the SELECTED
         // profile / the current row states.
         this.saveButton = saveBtn;
         this.applyButton = applyBtn;
-        this.renameButton = renameBtn;
-        this.deleteButton = deleteBtn;
+        this.renameButton = toolbarRenameButton;
+        this.deleteButton = toolbarDeleteButton;
 
         // Icon toolbar (same look as the node configuration panel): one glyph
-        // per action, sized consistently.
-        ConfigurationUtils.configureProfileToolbar(
-                newBtn, saveBtn, applyBtn, renameBtn, deleteBtn, reloadBtn, refreshBtn, resetBtn, copyBtn, cloneBtn);
-        // Save / Apply are tinted with their value-state colors (the "saved"
-        // and "applied" palette colors) — the same convention as the node
-        // configuration panel.
-        ConfigurationUtils.styleProfileIconButton(saveBtn, FontAwesome.FLOPPY_O, GuiColors.getSaved(),
-                GuiConstants.getToolBarIconSize());
-        ConfigurationUtils.styleProfileIconButton(applyBtn, FontAwesome.CHECK_CIRCLE_O, GuiColors.getApplied(),
-                GuiConstants.getToolBarIconSize());
+        // per action, sized consistently. (No Reload button: its function is
+        // merged into the Refresh one.)
+        updateProfileToolbarUI();
 
         return ConfigurationUtils.wrapProfileToolbarRow(panel);
+    }
+
+    private void updateProfileToolbarUI() {
+        ConfigurationUtils.configureProfileToolbar(toolbarNewButton, saveButton, applyButton, toolbarRenameButton,
+                toolbarDeleteButton, null, toolbarRefreshButton, toolbarResetButton, toolbarCopyButton,
+                toolbarCloneButton);
+        float iconSize = GuiConstants.getToolBarIconSize();
+        ConfigurationUtils.styleProfileIconButton(saveButton, FontAwesome.FLOPPY_O, GuiColors.getSaved(), iconSize);
+        ConfigurationUtils.styleProfileIconButton(applyButton, FontAwesome.CHECK_CIRCLE_O, GuiColors.getApplied(),
+                iconSize);
+        ConfigurationUtils.styleProfileIconButton(toolbarRefreshButton, FontAwesome.REFRESH,
+                GuiColors.getButtonIcon(), iconSize);
+        ConfigurationUtils.styleProfileIconButton(helpButton, FontAwesome.QUESTION_CIRCLE,
+                GuiColors.getButtonIcon(), iconSize);
     }
 
     // ── Data loading / saving ──────────────────────────────────────────
@@ -1284,7 +1807,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
      *   <li><b>Rename</b> / <b>Delete</b> — impossible for the virtual
      *       "Default" entry (no file to act on).</li>
      * </ul>
-     * New Profile, Clone, Copy, Reload, Refresh and Reset stay enabled —
+     * New Profile, Clone, Copy, Refresh and Reset stay enabled —
      * they are all meaningful with "Default" selected.
      */
     private void updateProfileActionButtons() {
@@ -1310,11 +1833,12 @@ public class ModuleLoggingProfilePanel extends JPanel {
     /**
      * @return {@code true} when at least one row has an unsaved (dirty)
      *         change — the value differs from the selected profile's
-     *         saved content.
+     *         saved content (the UNSAVED and UNSAVED_APPLIED states of the
+     *         shared four-state model).
      */
     private boolean hasUnsavedRows() {
         for (RowState state : rowStates.values()) {
-            if (state == RowState.UNSAVED) {
+            if (state == RowState.UNSAVED || state == RowState.UNSAVED_APPLIED) {
                 return true;
             }
         }
@@ -1322,13 +1846,14 @@ public class ModuleLoggingProfilePanel extends JPanel {
     }
 
     /**
-     * @return {@code true} when at least one row is saved in the selected
-     *         profile but differs from the applied (runtime) baseline — a
-     *         saved, not yet applied change.
+     * @return {@code true} when at least one row differs from the applied
+     *         (runtime) baseline — a saved-not-yet-applied (SAVED) or a
+     *         dirty edit the runtime does not run with (UNSAVED_APPLIED),
+     *         so an apply would change what the runtime uses.
      */
     private boolean hasSavedNotAppliedRows() {
         for (RowState state : rowStates.values()) {
-            if (state == RowState.SAVED) {
+            if (state == RowState.SAVED || state == RowState.UNSAVED_APPLIED) {
                 return true;
             }
         }
@@ -1496,11 +2021,12 @@ public class ModuleLoggingProfilePanel extends JPanel {
     }
 
     /**
-     * Re-reads the applied (runtime) baseline: the applied-state snapshot
-     * ({@code conf/{module}/logging/applied/{appliedProfile}.json}) of the
-     * currently applied profile. A missing snapshot (or a missing key in it)
-     * leaves the key out — the row derivation then falls back to the
-     * built-in default for it.
+     * Re-reads the applied baseline. A host-provided profile name represents
+     * a per-owner assignment (e.g. one node profile), so its own saved profile
+     * values are the baseline; a shared snapshot cannot accurately represent
+     * independent owners. The generic module panel uses its applied snapshot
+     * when present, with saved profile values as the legacy fallback.
+     * Missing keys fall back to built-in defaults.
      */
     private void refreshAppliedBaseline() {
         appliedValues.clear();
@@ -1508,8 +2034,12 @@ public class ModuleLoggingProfilePanel extends JPanel {
             return;
         }
         try {
-            Properties snapshot = repo.loadAppliedSnapshot(moduleId, appliedProfileName);
-            for (String key : rowKeys()) {
+            Properties snapshot = appliedProfileNameSupplier != null
+                    ? repo.loadProps(moduleId, appliedProfileName)
+                    : repo.hasAppliedSnapshot(moduleId, appliedProfileName)
+                            ? repo.loadAppliedSnapshot(moduleId, appliedProfileName)
+                            : repo.loadProps(moduleId, appliedProfileName);
+            for (String key : snapshot.stringPropertyNames()) {
                 String value = snapshot.getProperty(key);
                 if (value != null) {
                     appliedValues.put(key, value);
@@ -1741,11 +2271,13 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 if (appliedProfileNameSupplier == null) {
                     repo.setApplied(moduleId, name);
                 }
-                // Persist the applied-state snapshot from the profile's on-disk
-                // (saved) values — these are what the runtime uses after the
-                // restart, so the row-state "applied" baseline tracks the disk,
-                // not the (possibly dirty) editor.
-                repo.saveAppliedSnapshot(moduleId, name, repo.loadProps(moduleId, name));
+                // Only the generic module tab owns the shared applied
+                // snapshot. A host override represents an owner-specific
+                // assignment (e.g. one node profile), which must not overwrite
+                // the shared profile baseline.
+                if (appliedProfileNameSupplier == null) {
+                    repo.saveAppliedSnapshot(moduleId, name, repo.loadProps(moduleId, name));
+                }
             }
             refreshAppliedMarker();
             reevaluateRowStates();
@@ -1915,26 +2447,33 @@ public class ModuleLoggingProfilePanel extends JPanel {
         content.add(HelpDialog.title("Logging Profile Help"));
         content.add(Box.createVerticalStrut(10));
         content.add(HelpDialog.paragraph(
-                "Each row is a <b>key/value entry</b> of this module's logging profile. "
-                        + "Rows with a log level are dropdowns; the others are free text."));
+                "This panel edits the logging profile assigned to the current module. Each row is a "
+                        + "<b>key/value setting</b> consumed by that module's logging configuration. "
+                        + "Logger level rows use the supported level dropdown; other settings accept text. "
+                        + "Save writes the profile, and Apply marks it as the module's applied profile "
+                        + "(a node restart may be required for runtime changes)."));
         content.add(HelpDialog.separator());
         content.add(HelpDialog.heading("Row colors"));
         content.add(HelpDialog.legendRow(GuiColors.getUnsaved(), "Unsaved",
                 "The value differs from the selected profile's saved content (a dirty edit). Unsaved rows are "
                         + "marked with a trailing <b>*</b> on their label."));
+        content.add(HelpDialog.legendRow(GuiColors.getUnsavedApplied(), "Unsaved Applied",
+                "The edited value differs from the selected profile's saved content but matches the applied "
+                        + "baseline. It is still an unsaved edit."));
         content.add(HelpDialog.legendRow(GuiColors.getSaved(), "Saved",
-                "Saved in the selected profile, but not what the runtime is currently using."));
+                "Saved in the selected profile, but differs from the applied baseline."));
         content.add(HelpDialog.legendRow(GuiColors.getApplied(), "Applied",
-                "What the runtime is currently using (the applied baseline — "
-                        + "the applied profile's snapshot)."));
+                "The value matches both the selected profile's saved content and the applied baseline."));
         content.add(Box.createVerticalStrut(8));
         content.add(HelpDialog.paragraph(
-                "The <b>\u201CShow values\u201D</b> boxes filter rows by these states, and the "
-                        + "<b>Search</b> box filters rows by label, key or value."));
+                "The <b>\u201CShow values\u201D</b> checkboxes show or hide rows by state. The "
+                        + "<b>Search</b> box matches the logger label, setting key or value. A key's "
+                        + "dropdown contains that row's available baseline values; selecting one changes "
+                        + "the editor value but does not save it."));
         content.add(HelpDialog.separator());
         content.add(HelpDialog.heading("Toolbar actions"));
         content.add(HelpDialog.actionRow(FontAwesome.FILE_O, iconColor, "New Profile",
-                "Creates a new profile initialized with the application default values."));
+                "Creates a new logging profile initialized with this module's default logger settings."));
         content.add(HelpDialog.actionRow(FontAwesome.FLOPPY_O, GuiColors.getSaved(), "Save",
                 "Saves the current editor state to the selected profile. "
                         + "Active only while there are unsaved changes."));
@@ -1943,38 +2482,66 @@ public class ModuleLoggingProfilePanel extends JPanel {
                         + "Active while the selected profile is not the applied one or there are unsaved or "
                         + "saved, not yet applied changes (unsaved changes are saved to the profile first)."));
         content.add(HelpDialog.actionRow(FontAwesome.PENCIL_SQUARE_O, iconColor, "Rename",
-                "Renames the selected profile."));
+                "Renames the selected on-disk profile. The built-in Default entry cannot be renamed."));
         content.add(HelpDialog.actionRow(FontAwesome.UNDO, iconColor, "Reset to Defaults",
-                "Sets every row back to the module's default value (not saved until you Save)."));
+                "Replaces every editor value with this module's default. The changes remain unsaved until Save."));
         content.add(HelpDialog.actionRow(FontAwesome.CLIPBOARD, iconColor, "Copy Configuration",
-                "Copies another profile's values into this editor as unsaved changes."));
+                "Copies another profile's values into this editor as unsaved changes; current unsaved edits "
+                        + "are discarded."));
         content.add(HelpDialog.actionRow(FontAwesome.FILES_O, iconColor, "Clone Configuration",
                 "Creates a new profile from the current (unsaved, editor) effective state."));
-        content.add(HelpDialog.actionRow(FontAwesome.RECYCLE, iconColor, "Reload",
-                "Re-reads the selected profile from disk (discards unsaved edits)."));
         content.add(HelpDialog.actionRow(FontAwesome.REFRESH, iconColor, "Refresh",
-                "Re-scans the profiles on disk."));
+                "Re-scans the profiles on disk and re-reads the selected profile (discards unsaved edits)."));
         content.add(HelpDialog.actionRow(FontAwesome.TRASH_O, GuiColors.getContrastRed(), "Delete",
-                "Deletes the selected profile (destructive)."));
+                "Permanently deletes the selected on-disk profile. The built-in Default entry cannot be deleted."));
         content.add(HelpDialog.actionRow(FontAwesome.QUESTION_CIRCLE, iconColor, "Help",
-                "Shows this help."));
+                "Opens this guide to logging settings, row states and profile actions."));
         return content;
     }
 
-    private static void setEditorValue(JComponent editor, String value) {
-        if (editor instanceof JComboBox) {
-            ((JComboBox<?>) editor).setSelectedItem(value);
-        } else if (editor instanceof JTextField) {
-            ((JTextField) editor).setText(value);
+    private void setEditorValue(JComponent editor, String value) {
+        // Guarded: setting the value touches the editor (the editable combos'
+        // document listeners would fire the row's change handler for a
+        // programmatic load).
+        boolean prev = isProgrammaticChange;
+        isProgrammaticChange = true;
+        try {
+            if (editor instanceof JComboBox<?> combo) {
+                combo.setSelectedItem(value);
+                if (combo.isEditable()) {
+                    // The model event only fires when the selection CHANGES —
+                    // loading the already-selected value would leave a typed
+                    // editor text untouched. Set the editor text DIRECTLY so
+                    // the visible value always equals the loaded one.
+                    JComponent editorComponent = (JComponent) combo.getEditor().getEditorComponent();
+                    JTextField textField = editorTextField(editorComponent);
+                    if (textField != null && !value.equals(textField.getText())) {
+                        textField.setText(value);
+                    }
+                }
+            } else if (editor instanceof JTextField textField) {
+                textField.setText(value);
+            }
+        } finally {
+            isProgrammaticChange = prev;
         }
     }
 
     private static String editorValue(JComponent editor) {
-        if (editor instanceof JComboBox) {
-            Object v = ((JComboBox<?>) editor).getSelectedItem();
+        if (editor instanceof JComboBox<?> combo) {
+            // The row's value is what is DISPLAYED: for an editable combo the
+            // (possibly typed) editor text — the model's selection may lag
+            // behind (typed text is not a model entry, and a no-op
+            // setSelectedItem leaves the text untouched).
+            if (combo.isEditable()) {
+                JComponent editorComponent = (JComponent) combo.getEditor().getEditorComponent();
+                JTextField textField = editorTextField(editorComponent);
+                return textField == null ? "" : textField.getText();
+            }
+            Object v = combo.getSelectedItem();
             return v == null ? null : v.toString();
-        } else if (editor instanceof JTextField) {
-            return ((JTextField) editor).getText();
+        } else if (editor instanceof JTextField textField) {
+            return textField.getText();
         }
         return null;
     }
@@ -2125,13 +2692,12 @@ public class ModuleLoggingProfilePanel extends JPanel {
     public ModuleLoggingProfilePanel enableSearch() {
         // Add the search box to the search row (FlowLayout/LeftFlow would
         // force-show a hidden child on the next layout pass, so "enabled" =
-        // "present"). It is inserted at index 0 so it always sits directly to
-        // the right of the profile selector, ahead of any host-added filters
-        // registered in the filter box.
-        if (searchPanel != null && searchPanel.getParent() == null) {
-            filterBox.add(searchPanel, 0);
-            filterBox.revalidate();
-            filterBox.repaint();
+        // "present"). It lands in the search box holder — directly to the
+        // LEFT of the profile selector (the selector sits at its right).
+        if (searchPanel != null && searchPanel.getParent() == null && searchBoxHolder != null) {
+            searchBoxHolder.add(searchPanel);
+            searchBoxHolder.revalidate();
+            searchBoxHolder.repaint();
         }
         return this;
     }

@@ -148,25 +148,6 @@ class NodeConfigurationPanelDeleteButtonTest {
                 });
                 Thread.sleep(200);
             }
-            if (configPanelRef[0] == null) {
-                SwingUtilities.invokeAndWait(() -> {
-                    try {
-                        NodePanel gui = (NodePanel) panelRef[0];
-                        java.lang.reflect.Field tbField = NodePanel.class
-                                .getDeclaredField("profileTabbedPane");
-                        tbField.setAccessible(true);
-                        javax.swing.JTabbedPane tb = (javax.swing.JTabbedPane) tbField.get(gui);
-                        System.out.println("[DELETEREPRO] tabCount=" + tb.getTabCount());
-                        for (int i = 0; i < tb.getTabCount(); i++) {
-                            System.out.println("[DELETEREPRO]   tab " + i + ": " + tb.getTitleAt(i)
-                                    + " selected=" + (i == tb.getSelectedIndex())
-                                    + " component=" + tb.getComponentAt(i).getClass().getSimpleName());
-                        }
-                    } catch (Exception ignore) {
-                        // diagnostics only
-                    }
-                });
-            }
             assertNotNull(configPanelRef[0],
                     "the profile tab must load its configuration panel for " + TEST_PROFILE);
 
@@ -180,8 +161,6 @@ class NodeConfigurationPanelDeleteButtonTest {
                 }
             });
             assertTrue(btnRef[0] instanceof JButton, "deleteProfileBtn must be a JButton");
-            System.out.println("[DELETEREPRO] deleteProfileBtn.isEnabled() = "
-                    + ((JButton) btnRef[0]).isEnabled());
 
             // Click the toolbar button. A watcher thread must catch the modal
             // "Delete Profile" dialog (it blocks the EDT) and confirm the
@@ -242,7 +221,6 @@ class NodeConfigurationPanelDeleteButtonTest {
                 throw new IllegalStateException("the delete click was not dispatched to the EDT");
             }
             watcher.join(90_000);
-            System.out.println("[DELETEREPRO] dialogSeen = " + dialogSeen.get());
             assertTrue(dialogSeen.get() != null,
                     "clicking Delete Profile must open the Delete Profile dialog");
             assertFalse(error.get() != null, "the delete chain must not report an error: "

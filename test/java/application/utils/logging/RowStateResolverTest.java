@@ -8,47 +8,50 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Unit tests for {@link RowStateResolver} (the headless, pure derivation of a
- * logging-profile row's {@link RowState} from its three reference values).
+ * logging-profile row's {@link RowState} from its three reference values —
+ * the SAME four-state 2×2 matrix the node profile configuration's value
+ * state resolver uses).
  */
 @DisplayName("RowStateResolver Tests")
 class RowStateResolverTest {
 
-    // ------------------------ Priority order ------------------------
+    // ------------------------ The four-state matrix ------------------------
 
     @Nested
-    @DisplayName("State derivation (priority: UNSAVED > SAVED > APPLIED)")
+    @DisplayName("State derivation (the shared 2x2 matrix over saved/applied)")
     class DerivationTests {
 
         @Test
-        @DisplayName("editor == saved == applied → APPLIED")
-        void appliedWhenAllThreeMatch() {
-            assertEquals(RowState.APPLIED, RowStateResolver.resolve("INFO", "INFO", "INFO"));
+        @DisplayName("editor == saved == applied → SAVED_APPLIED")
+        void savedAppliedWhenAllThreeMatch() {
+            assertEquals(RowState.SAVED_APPLIED, RowStateResolver.resolve("INFO", "INFO", "INFO"));
         }
 
         @Test
-        @DisplayName("editor != saved → UNSAVED (even when editor == applied)")
-        void unsavedWhenEditorDiffersFromSaved() {
-            assertEquals(RowState.UNSAVED, RowStateResolver.resolve("FINE", "INFO", "FINE"));
+        @DisplayName("editor != saved ∧ editor != applied → UNSAVED")
+        void unsavedWhenEditorDiffersFromBothBaselines() {
             assertEquals(RowState.UNSAVED, RowStateResolver.resolve("FINE", "INFO", "INFO"));
+            assertEquals(RowState.UNSAVED, RowStateResolver.resolve("FINE", "INFO", "CONFIG"));
         }
 
         @Test
-        @DisplayName("editor == saved != applied → SAVED (saved, not yet activated)")
+        @DisplayName("editor != saved ∧ editor == applied → UNSAVED_APPLIED (a dirty edit the runtime runs with)")
+        void unsavedAppliedWhenEditorDiffersFromSavedButMatchesApplied() {
+            assertEquals(RowState.UNSAVED_APPLIED, RowStateResolver.resolve("FINE", "INFO", "FINE"));
+        }
+
+        @Test
+        @DisplayName("editor == saved ∧ editor != applied → SAVED (saved, not yet activated)")
         void savedWhenEditorMatchesSavedButNotApplied() {
             assertEquals(RowState.SAVED, RowStateResolver.resolve("FINE", "FINE", "INFO"));
         }
 
         @Test
-        @DisplayName("saved and applied both differ from the editor → UNSAVED")
-        void unsavedWinsOverBothBaselines() {
-            assertEquals(RowState.UNSAVED, RowStateResolver.resolve("FINE", "INFO", "CONFIG"));
-        }
-
-        @Test
-        @DisplayName("the comparison is exact (no trimming): stray whitespace is a real edit")
-        void comparisonIsExact() {
-            assertEquals(RowState.UNSAVED, RowStateResolver.resolve("INFO ", "INFO", "INFO"));
-            assertEquals(RowState.UNSAVED, RowStateResolver.resolve("INFO", "INFO ", "INFO"));
+        @DisplayName("the comparison is normalized (trimmed): stray surrounding whitespace is not an edit")
+        void comparisonIsTrimmed() {
+            assertEquals(RowState.SAVED_APPLIED, RowStateResolver.resolve("INFO ", "INFO", "INFO"));
+            assertEquals(RowState.SAVED_APPLIED, RowStateResolver.resolve("INFO", "INFO ", "INFO"));
+            assertEquals(RowState.UNSAVED, RowStateResolver.resolve("FINE ", "INFO", "INFO"));
         }
     }
 
@@ -59,30 +62,31 @@ class RowStateResolverTest {
     class NormalizationTests {
 
         @Test
-        @DisplayName("normalize: null → empty string, other values pass through")
+        @DisplayName("normalize: null → empty string, other values are trimmed")
         void normalizeNullToEmpty() {
             assertEquals("", RowStateResolver.normalize(null));
             assertEquals("INFO", RowStateResolver.normalize("INFO"));
             assertEquals("", RowStateResolver.normalize(""));
+            assertEquals("INFO", RowStateResolver.normalize("  INFO  "));
         }
 
         @Test
-        @DisplayName("all-null values read as equal → APPLIED")
-        void allNullIsApplied() {
-            assertEquals(RowState.APPLIED, RowStateResolver.resolve(null, null, null));
+        @DisplayName("all-null values read as equal → SAVED_APPLIED")
+        void allNullIsSavedApplied() {
+            assertEquals(RowState.SAVED_APPLIED, RowStateResolver.resolve(null, null, null));
         }
 
         @Test
         @DisplayName("null and empty are the same state")
         void nullEqualsEmpty() {
-            assertEquals(RowState.APPLIED, RowStateResolver.resolve(null, "", ""));
-            assertEquals(RowState.APPLIED, RowStateResolver.resolve("", null, null));
+            assertEquals(RowState.SAVED_APPLIED, RowStateResolver.resolve(null, "", ""));
+            assertEquals(RowState.SAVED_APPLIED, RowStateResolver.resolve("", null, null));
         }
 
         @Test
-        @DisplayName("a null editor value against a non-null saved baseline is UNSAVED")
-        void nullEditorAgainstSavedIsUnsaved() {
-            assertEquals(RowState.UNSAVED, RowStateResolver.resolve(null, "INFO", null));
+        @DisplayName("a null editor value against a non-null saved baseline is dirty (UNSAVED_APPLIED: it matches the empty applied baseline)")
+        void nullEditorAgainstSavedIsUnsavedApplied() {
+            assertEquals(RowState.UNSAVED_APPLIED, RowStateResolver.resolve(null, "INFO", null));
         }
 
         @Test

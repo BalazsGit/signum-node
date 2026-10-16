@@ -3,22 +3,28 @@ package application.utils.logging;
 /**
  * Pure, headless derivation of a logging-profile row's {@link RowState}.
  * <p>
- * The derivation compares the row's three values with the priority
- * {@code UNSAVED > SAVED > APPLIED}:
+ * The derivation is the SAME 2×2 matrix the node profile configuration
+ * editor uses ({@code ProfileValueState}): the row's editor value is
+ * compared against the saved (on-disk) baseline AND the applied (runtime)
+ * baseline:
  * </p>
  * <pre>
- *   1) editor != saved    → UNSAVED (a dirty, not yet saved edit)
- *   2) editor != applied  → SAVED   (saved, but not what the runtime uses)
- *   3) otherwise          → APPLIED (the runtime's current value)
+ *   editor != saved ∧ editor != applied → UNSAVED          (dirty, not yet saved)
+ *   editor != saved ∧ editor = applied  → UNSAVED_APPLIED  (dirty, but matches the runtime)
+ *   editor = saved ∧ editor != applied  → SAVED            (saved, not yet activated)
+ *   editor = saved ∧ editor = applied   → SAVED_APPLIED    (what the runtime currently uses)
  * </pre>
+ * <p>
+ * The normalization is the one the whole state model compares with
+ * (the same rules as the configuration editor's resolver): a null value
+ * reads as the empty string, so "no value" and "empty value" are the same
+ * state, and values are compared after trimming — stray surrounding
+ * whitespace is a formatting artifact, not an edit.
+ * </p>
  * <p>
  * The resolver is deliberately dumb about WHERE the baselines come from:
  * the caller resolves each baseline (disk content, applied snapshot, editor
- * value) and passes the three values in. Values are compared after
- * {@link #normalize(String)} — a null value reads as the empty string, so
- * "no value" and "empty value" are the same state. The comparison is
- * otherwise exact (no trimming): a value with stray whitespace is a real
- * edit, not a formatting artifact.
+ * value) and passes the three values in.
  * </p>
  *
  * @see RowState
@@ -30,7 +36,9 @@ public final class RowStateResolver {
     }
 
     /**
-     * Derives the row state from the row's three values.
+     * Derives the row state from the row's three values — the 2×2 matrix of
+     * the class javadoc (the same derivation the node profile
+     * configuration's value-state resolver performs).
      *
      * @param editorValue  the value currently in the row's editor (may be null)
      * @param savedValue   the selected profile's saved (on-disk) value for the row (may be null)
@@ -41,23 +49,30 @@ public final class RowStateResolver {
         String editor = normalize(editorValue);
         String saved = normalize(savedValue);
         String applied = normalize(appliedValue);
-        if (!editor.equals(saved)) {
-            return RowState.UNSAVED;
+        boolean eqSaved = editor.equals(saved);
+        boolean eqApplied = editor.equals(applied);
+        if (eqSaved && eqApplied) {
+            return RowState.SAVED_APPLIED;
         }
-        if (!editor.equals(applied)) {
+        if (eqSaved) {
             return RowState.SAVED;
         }
-        return RowState.APPLIED;
+        if (eqApplied) {
+            return RowState.UNSAVED_APPLIED;
+        }
+        return RowState.UNSAVED;
     }
 
     /**
-     * Normalizes a row value for comparison: a null value reads as the empty
-     * string (the two are the same state — "no value").
+     * Normalizes a row value for comparison (the same normalization the
+     * configuration editor's state resolver uses): a null value reads as the
+     * empty string (the two are the same state — "no value") and surrounding
+     * whitespace is trimmed.
      *
      * @param value the value to normalize (may be null)
      * @return the normalized value (never null)
      */
     public static String normalize(String value) {
-        return value == null ? "" : value;
+        return value == null ? "" : value.trim();
     }
 }

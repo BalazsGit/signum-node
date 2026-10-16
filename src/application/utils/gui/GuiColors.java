@@ -31,6 +31,17 @@ public final class GuiColors {
         return ColorPaletteManager.getColor("saved");
     }
 
+    /**
+     * Gets the color for "unsaved and applied" values: the value differs from the
+     * saved profile content but matches exactly the applied (running) baseline —
+     * a gray, distinctly separate state from plain unsaved (normal text color).
+     *
+     * @return The color for unsaved-and-applied elements.
+     */
+    public static Color getUnsavedApplied() {
+        return ColorPaletteManager.getColor("unsavedApplied");
+    }
+
     public static Color getPeerDisconnected() {
         return ColorPaletteManager.getColor("peer.disconnected");
     }
