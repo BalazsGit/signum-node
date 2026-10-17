@@ -283,7 +283,7 @@ class ProfileRuntimeServiceTest {
     }
 
     @Test
-    @DisplayName("rename re-points profile.json appliedProfile + profileLinks when they match the old name")
+    @DisplayName("rename migrates legacy metadata into profiles.json and re-points its profile key")
     void rename_UpdatesAppliedProfileWhenItMatches() throws IOException {
         // Arrange
         NodeProfileRepository.createProfile(confRoot(), "mainnet", new Properties());
@@ -292,16 +292,17 @@ class ProfileRuntimeServiceTest {
         // Act
         ProfileRuntimeService.renameProfile(confRoot(), "mainnet", "mainnet2", null);
 
-        // Assert — appliedProfile re-pointed, profileLinks entry moved, content preserved
-        String json = Files.readString(profileJson());
+        // Assert — legacy metadata is canonicalized before the profile is renamed.
+        String json = Files.readString(profilesJson());
         assertTrue(json.contains("\"appliedProfile\": \"mainnet2\""));
         assertTrue(json.contains("\"mainnet2\""));
         assertTrue(json.contains("\"db1\""));
         assertFalse(json.contains("\"mainnet\""));
+        assertFalse(Files.exists(profileJson()));
     }
 
     @Test
-    @DisplayName("rename leaves profile.json appliedProfile untouched when it differs")
+    @DisplayName("rename leaves a different canonical applied profile untouched")
     void rename_LeavesAppliedProfileWhenDifferent() throws IOException {
         // Arrange
         NodeProfileRepository.createProfile(confRoot(), "mainnet", new Properties());
@@ -311,8 +312,9 @@ class ProfileRuntimeServiceTest {
         // Act
         ProfileRuntimeService.renameProfile(confRoot(), "mainnet", "mainnet2", null);
 
-        // Assert — the file is untouched (original text/format preserved)
-        assertEquals("{\"appliedProfile\" : \"other\"}", Files.readString(profileJson()).trim());
+        // Assert — the legacy marker is migrated without being changed by this rename.
+        assertEquals("other", new ProfileConfig(profilesJson()).load().getAppliedProfile());
+        assertFalse(Files.exists(profileJson()));
     }
 
     @Test
@@ -540,7 +542,7 @@ class ProfileRuntimeServiceTest {
     }
 
     @Test
-    @DisplayName("delete strips profile.json appliedProfile + profileLinks entries naming the profile")
+    @DisplayName("delete removes the deleted profile's canonical metadata and applied marker")
     void delete_StripsProfileJsonMetadata() throws IOException {
         // Arrange
         NodeProfileRepository.createProfile(confRoot(), "mainnet", new Properties());
@@ -552,11 +554,12 @@ class ProfileRuntimeServiceTest {
         ProfileRuntimeService.deleteProfile(confRoot(), "mainnet", false);
 
         // Assert — the deleted profile's entries are gone, the other profile's link survives
-        String json = Files.readString(profileJson());
+        String json = Files.readString(profilesJson());
         assertFalse(json.contains("appliedProfile"));
         assertFalse(json.contains("db1"));
         assertTrue(json.contains("\"other\""));
         assertTrue(json.contains("db2"));
+        assertFalse(Files.exists(profileJson()));
     }
 
     @Test
@@ -722,4 +725,3 @@ class ProfileRuntimeServiceTest {
         Files.writeString(profileJson(), json);
     }
 }
-

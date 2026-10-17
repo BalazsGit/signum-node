@@ -31,6 +31,10 @@ public final class GuiColors {
         return ColorPaletteManager.getColor("saved");
     }
 
+    public static Color getSavedInit() {
+        return ColorPaletteManager.getColor("savedInit");
+    }
+
     /**
      * Gets the color for "unsaved and applied" values: the value differs from the
      * saved profile content but matches exactly the applied (running) baseline —

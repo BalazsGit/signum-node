@@ -81,7 +81,7 @@ class LoggingAssignmentStoreTest {
     }
 
     @Test
-    @DisplayName("legacy profileLinks (mechanism 3) is read-migrated to the node module")
+    @DisplayName("legacy profileLinks migrate into profiles.json on read")
     void legacyProfileLinks_readMigrated() throws IOException {
         Path nodeDir = tempDir.resolve(ModuleIds.NODE);
         Files.createDirectories(nodeDir);
@@ -90,10 +90,14 @@ class LoggingAssignmentStoreTest {
 
         Map<String, String> got = store.getAssignment("mainnet");
         assertEquals("verbose", got.get(ModuleIds.NODE));
+        assertFalse(Files.exists(nodeDir.resolve("profile.json")),
+                "fully migrated legacy metadata is removed");
+        assertTrue(Files.readString(nodeDir.resolve("profiles.json")).contains("\"verbose\""),
+                "the canonical file contains the migrated logging assignment");
     }
 
     @Test
-    @DisplayName("canonical assignment takes precedence over legacy sources")
+    @DisplayName("canonical assignment takes precedence over a migrated legacy value")
     void canonical_precedenceOverLegacy() throws IOException {
         // Legacy says "verbose"
         Path nodeDir = tempDir.resolve(ModuleIds.NODE);

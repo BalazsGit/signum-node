@@ -41,8 +41,6 @@ import application.utils.io.PathUtils;
 import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
 
-import com.google.gson.*;
-
 import java.awt.event.ActionListener;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -53,8 +51,6 @@ import java.awt.*;
 import java.awt.geom.Rectangle2D;
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.io.Reader;
-import java.io.Writer;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Files;
@@ -147,12 +143,6 @@ public class NodeConfigurationPanel extends JPanel {
 
     static final Highlighter.HighlightPainter SEARCH_MATCH_PAINTER_ACTIVE =
             SearchValueHighlight.PAINTER_ACTIVE;
-
-    private static final String KEY_PROFILE_LINKS = "profileLinks";
-    private static final String KEY_DATABASE = "database";
-    private static final String KEY_LOGGING = "logging";
-    private static final String KEY_DB_AUTO_START = "dbAutoStart";
-    private static final String KEY_DB_AUTO_STOP = "dbAutoStop";
 
     private final Map<String, String> helpTexts = new HashMap<>();
     private final Map<String, String> defaultValues = new HashMap<>();
@@ -1552,6 +1542,7 @@ public class NodeConfigurationPanel extends JPanel {
         }
         ComboSearchHighlightRenderer renderer = new ComboSearchHighlightRenderer();
         renderer.setBand(query, color);
+        renderer.setDelegateRenderer(comboBox.getRenderer());
         comboBox.setRenderer(renderer);
         comboBox.repaint();
     }
@@ -1596,9 +1587,8 @@ public class NodeConfigurationPanel extends JPanel {
      *       saved {@code DB.Url} convention path inside
      *       {@link JdbcConfigurationPanel#loadInitial} — it is never stored;
      *       the auto start/stop flags are N/A (embedded engine);</li>
-     *   <li>the legacy per-profile database keys of the node metadata
-     *       ({@code profile.json} {@code profileLinks.<p>.{database,
-     *       dbAutoStart,dbAutoStop}}) are migrated once and dropped.</li>
+     *   <li>legacy node metadata is migrated centrally into {@code profiles.json}
+     *       before these values are read.</li>
      * </ul>
      * Afterwards the deterministic initial-link resolution populates the JDBC
      * row and the row's colors/dirty state are re-settled against the
@@ -1616,49 +1606,6 @@ public class NodeConfigurationPanel extends JPanel {
             Boolean autoStart = profileConfig.getDatabaseAutoStart(profileName);
             Boolean autoStop = profileConfig.getDatabaseAutoStop(profileName);
 
-            // One-time legacy migration: conf/node/profile.json used to carry
-            // the database link + auto start/stop per profile.
-            Path metadataPath = ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER);
-            if (Files.exists(metadataPath)) {
-                try (Reader reader = Files.newBufferedReader(metadataPath)) {
-                    JsonObject metadata = JsonParser.parseReader(reader).getAsJsonObject();
-                    if (metadata.has(KEY_PROFILE_LINKS) && metadata.getAsJsonObject(KEY_PROFILE_LINKS).has(profileName)) {
-                        JsonObject links = metadata.getAsJsonObject(KEY_PROFILE_LINKS).getAsJsonObject(profileName);
-                        boolean legacyRemoved = false;
-                        if (dbLink == null && links.has(KEY_DATABASE)) {
-                            String legacyLink = links.get(KEY_DATABASE).getAsString();
-                            // A legacy SQLite link was derivable (or stale)
-                            // anyway — drop it; a server link is migrated.
-                            if (!sqliteUrl && !legacyLink.regionMatches(true, 0, "SQLite:", 0, "SQLite:".length())) {
-                                profileConfig.setDatabaseProfileLink(profileName, legacyLink);
-                                dbLink = legacyLink;
-                            }
-                            legacyRemoved = true;
-                        }
-                        if (!sqliteUrl) {
-                            if (autoStart == null && links.has(KEY_DB_AUTO_START)) {
-                                autoStart = links.get(KEY_DB_AUTO_START).getAsBoolean();
-                                profileConfig.setDatabaseAutoStart(profileName, autoStart);
-                                legacyRemoved = true;
-                            }
-                            if (autoStop == null && links.has(KEY_DB_AUTO_STOP)) {
-                                autoStop = links.get(KEY_DB_AUTO_STOP).getAsBoolean();
-                                profileConfig.setDatabaseAutoStop(profileName, autoStop);
-                                legacyRemoved = true;
-                            }
-                        } else if (links.has(KEY_DB_AUTO_START) || links.has(KEY_DB_AUTO_STOP)) {
-                            // SQLite: the flags are N/A — drop the stale ones.
-                            legacyRemoved = true;
-                        }
-                        if (legacyRemoved) {
-                            removeLegacyDatabaseLinkKeys(metadata, profileName);
-                            writeNodeMetadata(metadata);
-                        }
-                    }
-                } catch (Exception e) {
-                    LOGGER.error("Error loading legacy profile links from JSON", e);
-                }
-            }
             if (autoStartDbCheck != null) {
                 autoStartDbCheck.setSelected(Boolean.TRUE.equals(autoStart));
             }
@@ -1741,50 +1688,11 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     /**
-     * Removes the legacy per-profile database keys (link + auto start/stop)
-     * from the node metadata's {@code profileLinks} object (the legacy
-     * logging key and the top-level applied marker stay).
-     *
-     * @return {@code true} when something was removed
-     */
-    private static boolean removeLegacyDatabaseLinkKeys(JsonObject metadata, String profileName) {
-        if (!metadata.has(KEY_PROFILE_LINKS)) {
-            return false;
-        }
-        JsonObject linksMap = metadata.getAsJsonObject(KEY_PROFILE_LINKS);
-        if (!linksMap.has(profileName)) {
-            return false;
-        }
-        JsonObject links = linksMap.getAsJsonObject(profileName);
-        boolean removed = false;
-        for (String key : new String[] { KEY_DATABASE, KEY_DB_AUTO_START, KEY_DB_AUTO_STOP }) {
-            if (links.has(key)) {
-                links.remove(key);
-                removed = true;
-            }
-        }
-        if (links.size() == 0) {
-            linksMap.remove(profileName);
-        }
-        return removed;
-    }
-
-    /** Writes the node metadata object back to {@code conf/node/profile.json}. */
-    private void writeNodeMetadata(JsonObject metadata) {
-        try (Writer writer = Files.newBufferedWriter(
-                ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER))) {
-            new GsonBuilder().setPrettyPrinting().create().toJson(metadata, writer);
-        } catch (Exception e) {
-            LOGGER.error("Error saving node metadata", e);
-        }
-    }
-
-    /**
      * The host-side half of a link change (the panel's
      * {@link JdbcConfigurationPanel.LinkChangeListener}): keeps the "Linked
      * Database Profile" checkbox in sync with the panel's mode (the panel may
      * auto-unlink itself, e.g. an unmaterializable link at load) and persists the
-     * effective link into the node metadata — unless the change is
+     * effective link into profiles.json — unless the change is
      * programmatic (the initial load pass persists nothing).
      */
     private void onJdbcLinkChanged(JdbcConfigurationPanel panel, JdbcConfigurationPanel.JdbcState state) {
@@ -1818,9 +1726,6 @@ public class NodeConfigurationPanel extends JPanel {
      *       start/stop flags are N/A and cleared (embedded engine);</li>
      *   <li>server engines: the DB auto start/stop flags are recorded.</li>
      * </ul>
-     * The legacy per-profile database keys of the node metadata are removed
-     * for good (the legacy logging key and the applied marker stay).
-     * <p>
      * This never moves the saved-link baseline ({@code savedLinkedDb}): a link
      * change is an <b>unsaved</b> (dirty) change until the profile is
      * explicitly saved — the baseline is updated on load, on the explicit
@@ -1841,20 +1746,6 @@ public class NodeConfigurationPanel extends JPanel {
         } else {
             profileConfig.setDatabaseAutoStart(profileName, autoStart);
             profileConfig.setDatabaseAutoStop(profileName, autoStop);
-        }
-
-        // One-time legacy cleanup: the node metadata's database keys are gone
-        // for good (the legacy logging key + the applied marker stay).
-        Path metadataPath = ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER);
-        if (Files.exists(metadataPath)) {
-            try (Reader reader = Files.newBufferedReader(metadataPath)) {
-                JsonObject metadata = JsonParser.parseReader(reader).getAsJsonObject();
-                if (removeLegacyDatabaseLinkKeys(metadata, profileName)) {
-                    writeNodeMetadata(metadata);
-                }
-            } catch (Exception e) {
-                LOGGER.error("Error cleaning up legacy profile links", e);
-            }
         }
 
         savedDbAutoStart = autoStart;
@@ -2042,7 +1933,7 @@ public class NodeConfigurationPanel extends JPanel {
      */
     private void applySavedChanges() {
         ConfigurationUtils.updateAppliedProfile(
-                ConfigurationUtils.getProfileMetadataPath(confFolder, Signum.NODE_SUBFOLDER),
+                getProfilesConfigPath(),
                 loadedProfileName);
         // The freshly saved values are now the applied baseline: the node
         // restarts with them, so the editor's value-status coloring turns them
@@ -2849,8 +2740,8 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
 
-    private Path getProfileMetadataPath() {
-        return PathUtils.resolvePath(confFolder).resolve(Signum.NODE_SUBFOLDER).resolve("profile.json");
+    private Path getProfilesConfigPath() {
+        return PathUtils.resolvePath(confFolder).resolve(Signum.NODE_SUBFOLDER).resolve("profiles.json");
     }
 
     private Properties getPropertiesFromUI() {

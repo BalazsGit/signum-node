@@ -25,7 +25,7 @@ import java.util.function.Supplier;
  * Thin, node-specific adapter over the generic {@link ModuleLoggingProfilePanel}.
  *
  * <p>Owns ONLY the node concerns and delegates all generic logging-profile editing to the core
- * (including the live row search and the "Show values" unsaved/saved/applied row-state filter —
+ * (including the live row search and the "Show values" logging row-state filter —
  * both core features of the {@link ModuleLoggingProfilePanel}): the File Handler rows, the
  * apply→restart hook, the optional "link to node profile" control and the node help text.
  * All storage goes through the shared
@@ -64,11 +64,16 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
             + "the value differs from the selected profile's saved content. Unsaved rows are additionally "
             + "marked with a trailing <b>*</b> star on their label (the same convention as the node configuration panel).</li>"
             + "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getSaved()) + "'>\u25A0 Saved:</font> "
-            + "saved in the selected profile, but not what the runtime is currently using.</li>"
+            + "saved in the selected profile, changed since this profile editor initialized, and not what the "
+            + "assigned profile is currently using.</li>"
+            + "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getSavedInit()) + "'>\u25A0 Saved Init:</font> "
+            + "matches both the selected profile's saved values and the values captured when this editor "
+            + "initialized, but differs from this node profile's assigned logging baseline.</li>"
             + "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getApplied()) + "'>\u25A0 Applied:</font> "
             + "what the runtime is currently using (the applied profile's values).</li>"
             + "</ul>"
-            + "The \u201CShow values\u201D boxes filter rows by these states."
+            + "The \u201CShow values\u201D boxes filter rows by these states. Saved Init dropdown options are "
+            + "use the configured Saved Init font color while keeping the normal dropdown background."
             + "<br><br>"
             + "<b>Apply</b> records this profile as the active logging profile for <i>this</i> node profile "
             + "(any unsaved changes are saved to the profile first). Pressing <b>Yes</b> in the confirmation "

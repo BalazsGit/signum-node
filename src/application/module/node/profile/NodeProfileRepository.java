@@ -451,6 +451,7 @@ public final class NodeProfileRepository {
             config.setLoggingProfile(oldName, null);
             // Canonical logging assignment (SSOT: LoggingAssignmentStore)
             new LoggingAssignmentStore(confRoot).renameAssignment(oldName, newName);
+            config.renameProfileMetadata(oldName, newName);
         } catch (Exception e) {
             LOGGER.warn("Failed to update profiles.json after rename '{}' -> '{}'", oldName, newName, e);
         }
@@ -473,6 +474,7 @@ public final class NodeProfileRepository {
             if (store.isManaged(name)) {
                 store.clearAssignment(name);
             }
+            config.removeProfileMetadata(name);
         } catch (Exception e) {
             LOGGER.warn("Failed to update profiles.json after delete '{}'", name, e);
         }

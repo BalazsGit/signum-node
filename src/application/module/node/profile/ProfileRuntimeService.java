@@ -6,9 +6,6 @@ import application.module.node.NodeModule;
 import application.module.node.Signum;
 import application.module.node.props.Props;
 import application.utils.config.ModuleIds;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -251,8 +248,7 @@ public final class ProfileRuntimeService {
  *       runs under the new name.</li>
      *   <li><b>Meta operations (atomic file moves):</b> the profile file + tab order + logging
      *       association ({@link NodeProfileRepository#renameProfile}), the {@code DB.Url}
-     *       rewrite + SQLite data-dir move (SQLite only — a server-DB URL is left untouched),
-     *       and the {@code profile.json} {@code appliedProfile} when it points at the old name.</li>
+     *       rewrite + SQLite data-dir move (SQLite only — a server-DB URL is left untouched).</li>
      *   <li><b>GUI reinitialization hook:</b> {@code onMetaRenamed} is invoked (on the calling
      *       thread, AFTER the meta operations succeeded and BEFORE the restart) — the caller
      *       uses it to rebuild the profile tab's panel under the new name.</li>
@@ -313,7 +309,6 @@ public final class ProfileRuntimeService {
         // 2) Meta operations (atomic file moves) — nothing is renamed before these run.
         NodeProfileRepository.renameProfile(confRoot, oldProfileName, newProfileName);
         rewriteSqliteDatabasePath(confRoot, oldProfileName, newProfileName);
-        repointProfileJsonMetadata(confRoot, oldProfileName, newProfileName);
 
         // 3) The meta operations succeeded → the caller rebuilds the GUI (it marshals the EDT).
         if (onMetaRenamed != null) {
@@ -425,49 +420,6 @@ public final class ProfileRuntimeService {
     }
 
     /**
-     * Re-points the {@code profile.json} metadata that names the old profile after a rename:
-     * <ul>
-     *   <li>{@code appliedProfile} — when it points at the old name;</li>
-     *   <li>{@code profileLinks.<oldName>} — the per-profile links object (linked database
-     *       profile, auto-start/stop, legacy linked logging) is moved to the new name, so a
-     *       renamed profile keeps its DB association.</li>
-     * </ul>
-     * The file is rewritten only when something changed (untouched files keep their format).
-     */
-    static void repointProfileJsonMetadata(String confRoot, String oldName, String newName) {
-        Path profileJson = Paths.get(confRoot, NodeProfile.MODULE_ID, "profile.json");
-        if (!Files.exists(profileJson)) {
-            return;
-        }
-        JsonObject metadata;
-        try (Reader reader = Files.newBufferedReader(profileJson, StandardCharsets.UTF_8)) {
-            metadata = JsonParser.parseReader(reader).getAsJsonObject();
-        } catch (Exception e) {
-            LOGGER.warn("Failed to read profile.json after rename '{}' -> '{}'", oldName, newName, e);
-            return;
-        }
-        boolean changed = false;
-        if (metadata.has("appliedProfile") && oldName.equals(metadata.get("appliedProfile").getAsString())) {
-            metadata.addProperty("appliedProfile", newName);
-            changed = true;
-        }
-        if (metadata.has("profileLinks") && metadata.getAsJsonObject("profileLinks").has(oldName)) {
-            JsonObject links = metadata.getAsJsonObject("profileLinks");
-            links.add(newName, links.remove(oldName));
-            changed = true;
-        }
-        if (!changed) {
-            return;
-        }
-        try (Writer writer = Files.newBufferedWriter(profileJson, StandardCharsets.UTF_8)) {
-            new GsonBuilder().setPrettyPrinting().create().toJson(metadata, writer);
-            LOGGER.info("Re-pointed profile.json metadata after rename '{}' -> '{}'", oldName, newName);
-        } catch (Exception e) {
-            LOGGER.warn("Failed to update profile.json after rename '{}' -> '{}'", oldName, newName, e);
-        }
-    }
-
-    /**
      * Re-applies the user pause after a rename restart: waits (bounded) for the restarted node
      * to reach RUNNING, then pauses it — the stop/start cycle clears the pause state, so the
      * pause must be applied afterwards. Failures are logged only (the rename has succeeded).
@@ -531,8 +483,7 @@ public final class ProfileRuntimeService {
      *       since a deleted profile must never leave a ghost under its dead name.</li>
      *   <li><b>Meta operations:</b> the profile file + tab order + logging association
      *       ({@link NodeProfileRepository#deleteProfile} — which also clears the canonical
-     *       logging assignments) and the {@code profile.json} {@code appliedProfile} /
-     *       {@code profileLinks} entries that name the deleted profile.</li>
+     *       logging, database-link and applied-profile metadata.</li>
      *   <li><b>Optional data deletion:</b> the per-profile SQLite data directory, but only when
      *       {@code deleteData} is set AND the profile actually uses its per-profile SQLite
      *       database (SSOT: {@link ProfileCreateDefaults#isPerProfileSqliteUrl}) — a server-DB
@@ -589,7 +540,6 @@ public final class ProfileRuntimeService {
         // 3) Meta operations: profile file + tab order + logging assignment
         //    (SSOT: NodeProfileRepository — also clears the canonical logging assignments).
         NodeProfileRepository.deleteProfile(confRoot, profileName);
-        stripProfileJsonMetadata(confRoot, profileName);
 
         // 4) Optional: the per-profile SQLite data directory.
         boolean dataDeleted = deleteData && perProfileSqlite;
@@ -666,46 +616,4 @@ public final class ProfileRuntimeService {
         LOGGER.info("Deleted SQLite data directory for profile '{}': {}", profileName, dir);
     }
 
-    /**
-     * Removes the {@code profile.json} metadata that names a deleted profile:
-     * <ul>
-     *   <li>{@code appliedProfile} — removed when it points at the deleted profile
-     *       (it would reference a profile that no longer exists);</li>
-     *   <li>{@code profileLinks.<name>} — the deleted profile's links object (linked database
-     *       profile, auto-start/stop, legacy linked logging) is removed, so a linked database
-     *       profile is no longer associated (or auto-started) for a profile that is gone.</li>
-     * </ul>
-     * The file is rewritten only when something changed (untouched files keep their format).
-     */
-    static void stripProfileJsonMetadata(String confRoot, String profileName) {
-        Path profileJson = Paths.get(confRoot, NodeProfile.MODULE_ID, "profile.json");
-        if (!Files.exists(profileJson)) {
-            return;
-        }
-        JsonObject metadata;
-        try (Reader reader = Files.newBufferedReader(profileJson, StandardCharsets.UTF_8)) {
-            metadata = JsonParser.parseReader(reader).getAsJsonObject();
-        } catch (Exception e) {
-            LOGGER.warn("Failed to read profile.json after delete '{}'", profileName, e);
-            return;
-        }
-        boolean changed = false;
-        if (metadata.has("appliedProfile") && profileName.equals(metadata.get("appliedProfile").getAsString())) {
-            metadata.remove("appliedProfile");
-            changed = true;
-        }
-        if (metadata.has("profileLinks") && metadata.getAsJsonObject("profileLinks").has(profileName)) {
-            metadata.getAsJsonObject("profileLinks").remove(profileName);
-            changed = true;
-        }
-        if (!changed) {
-            return;
-        }
-        try (Writer writer = Files.newBufferedWriter(profileJson, StandardCharsets.UTF_8)) {
-            new GsonBuilder().setPrettyPrinting().create().toJson(metadata, writer);
-            LOGGER.info("Stripped profile.json metadata after delete '{}'", profileName);
-        } catch (Exception e) {
-            LOGGER.warn("Failed to update profile.json after delete '{}'", profileName, e);
-        }
-    }
 }

@@ -2,24 +2,23 @@ package application.utils.logging;
 
 /**
  * The per-row value state of a logging-profile row, derived relative to the
- * row's three reference baselines (headless — UI concerns such as the state
+ * row's reference baselines (headless — UI concerns such as the state
  * colors live in the GUI layer).
  * <p>
- * The four states are the EXACT model of the node profile configuration's
- * value states ({@code ProfileValueState.State}): every value is compared
- * against the saved AND the applied baseline, a 2×2 matrix over
- * (current = saved, current = applied). The logging profile editor therefore
- * behaves logically exactly like the node profile configuration editor —
- * the same four states, the same state derivation and the same state
- * coloring.
+ * The four shared states are the EXACT model of the node profile
+ * configuration's value states ({@code ProfileValueState.State}). The logging
+ * profile editor adds {@link #SAVED_INIT} to distinguish values that still
+ * match their saved value when the editor initialized from values saved later.
  * <p>
- * The three baselines (see {@link RowStateResolver}):
+ * The references (see {@link RowStateResolver}):
  * </p>
  * <ul>
  *   <li><b>saved</b> — the selected profile's on-disk content (a missing key
  *       falls back to the built-in default);</li>
- *   <li><b>applied</b> — the value the runtime is currently using (the
- *       applied snapshot; a missing key falls back to the built-in default);</li>
+ *   <li><b>applied</b> — the comparison baseline; in the module logging editor
+ *       this is a dummy state and does not describe running nodes;</li>
+ *   <li><b>init</b> — the value captured from the profile when its logging
+ *       editor initializes;</li>
  *   <li><b>editor</b> — the value currently in the row's editor.</li>
  * </ul>
  *
@@ -27,15 +26,18 @@ package application.utils.logging;
  */
 public enum RowState {
 
-    /** The editor value differs from BOTH the saved content and the applied baseline: a dirty, not yet saved edit. */
+    /** The editor value differs from BOTH the saved content and applied comparison baseline: a dirty edit. */
     UNSAVED,
 
-    /** The editor value differs from the saved content but matches the applied baseline. */
+    /** The editor value differs from saved but matches the applied comparison baseline. */
     UNSAVED_APPLIED,
 
-    /** The editor value matches the saved content but not the applied baseline: saved, not yet activated. */
+    /** The editor value matches saved, but differs from init and the applied comparison baseline. */
     SAVED,
 
-    /** The value matches both the saved content and the applied baseline: what the runtime currently uses. */
+    /** The editor value matches its saved and module-initialized values, but not the applied comparison baseline. */
+    SAVED_INIT,
+
+    /** The value matches both saved content and the applied comparison baseline. */
     SAVED_APPLIED
 }

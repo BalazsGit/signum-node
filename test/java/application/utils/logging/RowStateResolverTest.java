@@ -47,6 +47,15 @@ class RowStateResolverTest {
         }
 
         @Test
+        @DisplayName("editor == saved == init != applied → SAVED_INIT")
+        void savedInitWhenValuesStillMatchInitialization() {
+            assertEquals(RowState.SAVED_INIT, RowStateResolver.resolve("FINE", "FINE", "INFO", "FINE"));
+            assertEquals(RowState.SAVED, RowStateResolver.resolve("FINE", "FINE", "INFO", "CONFIG"));
+            assertEquals(RowState.SAVED_APPLIED, RowStateResolver.resolve("FINE", "FINE", "FINE", "INFO"));
+            assertEquals(RowState.SAVED, RowStateResolver.resolve("FINE", "FINE", "INFO"));
+        }
+
+        @Test
         @DisplayName("the comparison is normalized (trimmed): stray surrounding whitespace is not an edit")
         void comparisonIsTrimmed() {
             assertEquals(RowState.SAVED_APPLIED, RowStateResolver.resolve("INFO ", "INFO", "INFO"));

@@ -338,33 +338,32 @@ class NodeLoggingPanelTest {
     }
 
     @Test
-    @DisplayName("the per-node assigned profile values are applied-colored regardless of a stale shared snapshot")
+    @DisplayName("the per-node assigned profile values are applied-colored regardless of a shared baseline")
     void assignedProfileUsesItsSavedValuesAsAppliedBaseline() throws Exception {
         LoggingAssignmentStore store = new LoggingAssignmentStore();
         LoggingProfileRepository repository = new LoggingProfileRepository();
-        String node = "zz-applied-snapshot-node-" + System.nanoTime();
-        String profile = "zz-applied-snapshot-profile-" + System.nanoTime();
+        String node = "zz-applied-baseline-node-" + System.nanoTime();
+        String profile = "zz-applied-baseline-profile-" + System.nanoTime();
         Properties values = new Properties();
         values.setProperty("java.util.logging.FileHandler.level", "WARNING");
-        Properties staleSnapshot = new Properties();
-        staleSnapshot.setProperty("java.util.logging.FileHandler.level", "INFO");
+        Properties sharedBaseline = new Properties();
+        sharedBaseline.setProperty("java.util.logging.FileHandler.level", "INFO");
         try {
             repository.create(ModuleIds.NODE, profile, values);
-            repository.saveAppliedSnapshot(ModuleIds.NODE, profile, staleSnapshot);
+            repository.rememberAppliedBaseline(ModuleIds.NODE, profile, sharedBaseline);
             store.setAssignmentForModule(node, ModuleIds.NODE, profile);
             final NodeLoggingPanel[] holder = new NodeLoggingPanel[1];
             onEdt(() -> holder[0] = new NodeLoggingPanel(node, () -> { }));
 
             assertEquals(profile, new LoggingAssignmentStore().getAssignment(node).get(ModuleIds.NODE),
                     "the selected profile is recorded as this node's assignment");
-            assertEquals("INFO",
-                    repository.loadAppliedSnapshot(ModuleIds.NODE, profile)
+            assertEquals("INFO", repository.loadAppliedBaseline(ModuleIds.NODE, profile)
                             .getProperty("java.util.logging.FileHandler.level"),
-                    "the shared snapshot is left untouched by a per-node assignment");
+                    "the shared module-level baseline is not overwritten by a per-node assignment");
             JComboBox<?> fileLevel = assertInstanceOf(JComboBox.class, editorForLabel(holder[0], "File Level"));
             assertEquals(GuiColors.getApplied(), fileLevel.getForeground(),
                     "the assigned profile's saved WARNING value matches its per-node applied baseline, "
-                            + "regardless of the stale shared INFO snapshot");
+                            + "regardless of the module-level INFO baseline");
         } finally {
             try {
                 store.clearAssignment(node);
@@ -373,6 +372,71 @@ class NodeLoggingPanelTest {
             }
             try {
                 repository.delete(ModuleIds.NODE, profile);
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("Saved Init is visible and highlighted in node-profile logging dropdowns")
+    void savedInitIsShownForNodeProfileAndHighlightedInDropdown() throws Exception {
+        LoggingAssignmentStore store = new LoggingAssignmentStore();
+        LoggingProfileRepository repository = new LoggingProfileRepository();
+        String node = "zz-saved-init-node-" + System.nanoTime();
+        String appliedProfile = "zz-saved-init-applied-" + System.nanoTime();
+        String savedProfile = "zz-saved-init-saved-" + System.nanoTime();
+        Properties appliedValues = new Properties();
+        appliedValues.setProperty("java.util.logging.FileHandler.level", "INFO");
+        Properties savedValues = new Properties();
+        savedValues.setProperty("java.util.logging.FileHandler.level", "WARNING");
+        try {
+            repository.create(ModuleIds.NODE, appliedProfile, appliedValues);
+            repository.create(ModuleIds.NODE, savedProfile, savedValues);
+            store.setAssignmentForModule(node, ModuleIds.NODE, appliedProfile);
+
+            final NodeLoggingPanel[] holder = new NodeLoggingPanel[1];
+            onEdt(() -> {
+                holder[0] = new NodeLoggingPanel(node, () -> { });
+                holder[0].getProfileCombo().setSelectedItem(savedProfile);
+            });
+            NodeLoggingPanel panel = holder[0];
+
+            JCheckBox savedInitFilter = findCheckBox(panel, "Saved Init");
+            assertNotNull(savedInitFilter, "the node-profile logging filter includes Saved Init");
+            assertTrue(savedInitFilter.isVisible(), "the node-profile Saved Init filter is visible");
+
+            JComboBox<?> fileLevel = assertInstanceOf(JComboBox.class, editorForLabel(panel, "File Level"));
+            @SuppressWarnings("unchecked")
+            ListCellRenderer<Object> renderer = (ListCellRenderer<Object>) fileLevel.getRenderer();
+            JLabel warningOption = (JLabel) renderer.getListCellRendererComponent(
+                    new JList<>(), "WARNING", -1, false, false);
+            assertEquals(GuiColors.getSavedInit(), warningOption.getForeground(),
+                    "the saved init level uses the Saved Init font color in the dropdown");
+            assertEquals(new JList<>().getBackground(), warningOption.getBackground(),
+                    "the Saved Init option keeps the normal dropdown background");
+            JList<String> options = new JList<>();
+            JLabel selectedWarning = (JLabel) renderer.getListCellRendererComponent(
+                    options, "WARNING", -1, true, false);
+            assertEquals(GuiColors.getSavedInit(), selectedWarning.getForeground(),
+                    "hovering a Saved Init level preserves its state font color");
+            assertEquals(options.getSelectionBackground(), selectedWarning.getBackground(),
+                    "hovering keeps the normal selection background");
+            assertEquals(GuiColors.getSavedInit(), findLabel(panel, "File Level").getForeground(),
+                    "the current row also reflects its Saved Init state");
+        } finally {
+            try {
+                store.clearAssignment(node);
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+            try {
+                repository.delete(ModuleIds.NODE, appliedProfile);
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+            try {
+                repository.delete(ModuleIds.NODE, savedProfile);
             } catch (Exception ignored) {
                 // best-effort cleanup
             }

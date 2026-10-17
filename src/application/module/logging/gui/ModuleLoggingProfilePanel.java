@@ -29,6 +29,7 @@ import net.miginfocom.swing.MigLayout;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
+import javax.swing.BoxLayout;
 import javax.swing.DefaultComboBoxModel;
 import javax.swing.Icon;
 import javax.swing.JButton;
@@ -40,6 +41,7 @@ import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.JViewport;
 import javax.swing.ListCellRenderer;
@@ -90,14 +92,15 @@ import javax.swing.text.JTextComponent;
  * </p>
  * <p>
  * <h3>Row states</h3>
- * Every row carries a derived {@link RowState} with the SHARED four-state
- * model (the same 2×2 matrix and the same state colors the node profile
- * configuration editor uses, see {@link RowStateResolver}): <b>unsaved</b>
+ * Every row carries a derived {@link RowState} with the shared four-state
+ * model plus the logging-only Saved Init state (see
+ * {@link RowStateResolver}): <b>unsaved</b>
  * (the editor value differs from the selected profile's saved content AND
  * the applied baseline — a dirty edit), <b>unsaved applied</b> (differs from
- * the saved content but matches the applied/runtime baseline), <b>saved</b>
- * (equals the saved content but not the applied baseline) and <b>saved
- * applied</b> (equals both). The state colors the row
+ * the saved content but matches the applied baseline), <b>saved</b>
+ * (equals saved but not init or applied), <b>saved init</b> (equals saved and
+ * init but not the applied comparison value) and <b>saved applied</b> (equals
+ * saved and applied). The state colors the row
  * (label + editor), feeds the "Show values" visibility filter (one checkbox
  * per state), and — for the dirty states — adds the trailing {@code " *"}
  * star to the label. The
@@ -156,7 +159,9 @@ public class ModuleLoggingProfilePanel extends JPanel {
     private final Map<String, String> rowDefaults = new LinkedHashMap<>();
     /** key → the SAVED (on-disk) baseline value of the row (kept for the value combos' per-item dropdown coloring). */
     private final Map<String, String> rowSavedValues = new LinkedHashMap<>();
-    /** key → the APPLIED (runtime) baseline value of the row (kept for the value combos' per-item dropdown coloring). */
+    /** key → the INIT snapshot value of the row (kept for per-item dropdown coloring). */
+    private final Map<String, String> rowInitValues = new LinkedHashMap<>();
+    /** key → the APPLIED comparison baseline value of the row (kept for per-item dropdown coloring). */
     private final Map<String, String> rowAppliedValues = new LinkedHashMap<>();
     /** The rows whose editor is a log-level combo (the fixed {@link #LOG_LEVELS} dropdown). */
     private final Set<String> levelRowKeys = new HashSet<>();
@@ -203,14 +208,14 @@ public class ModuleLoggingProfilePanel extends JPanel {
     private final Map<JComboBox<?>, ListCellRenderer<?>> originalComboRenderers = new LinkedHashMap<>();
     /** key → the row's derived state (rebuilt by {@link #recomputeRowStates()}). */
     private final Map<String, RowState> rowStates = new LinkedHashMap<>();
+    private boolean legacyAppliedSnapshotsCleaned;
+    /** Per-profile immutable properties captured when this module editor initializes. */
+    private final Map<String, Properties> initProfileValues = new LinkedHashMap<>();
 
     /**
-     * The applied (runtime) baseline: key → the value the runtime is currently
-     * using for this module's applied profile (read from the applied-state
-     * snapshot {@code conf/{module}/logging/applied/{profile}.json}). Rebuilt
-     * by {@link #refreshAppliedBaseline()} whenever the applied profile
-     * changes; empty when nothing is applied — a missing key then falls back
-     * to the built-in default, exactly like a missing profile key.
+     * The applied comparison baseline: key → the values associated with the
+     * selected applied profile. In the generic module panel it is a dummy
+     * comparison reference, not the live logging state of any node.
      */
     private final Map<String, String> appliedValues = new LinkedHashMap<>();
 
@@ -273,6 +278,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
     private JCheckBox showUnsavedBox;
     private JCheckBox showUnsavedAppliedBox;
     private JCheckBox showSavedBox;
+    private JCheckBox showSavedInitBox;
     private JCheckBox showAppliedBox;
     /** The profile currently marked applied for this module (null = fall back to the built-in default). */
     private String appliedProfileName;
@@ -323,8 +329,8 @@ public class ModuleLoggingProfilePanel extends JPanel {
     /**
      * Creates a generic per-module logging profile editor WITHOUT a host {@link ModuleContext}.
      * The Apply action persists via the repository and then invokes the hook registered through
-     * {@link #setApplyHook}; if none is set it only marks the profile applied and informs the user
-     * that a restart is required. Use this constructor for host panels that own their own
+     * {@link #setApplyHook}; if none is set it only marks the profile applied and informs the user.
+     * Use this constructor for host panels that own their own
      * restart/apply behaviour (e.g. the node tab).
      *
      * @param provider the module's logging provider (id, defaults); must not be null
@@ -460,10 +466,8 @@ public class ModuleLoggingProfilePanel extends JPanel {
      */
     private void buildStatusFilter() {
         statusPanel.setChangeListener(button -> reevaluateRowStates());
-        // The SAME labels, order and colors as the node configuration
-        // panel's "Show values" box (compact — the box title already says
-        // what is filtered): one checkbox per state of the shared four-state
-        // model, in the shared model's order.
+        // The first four states use the node configuration panel's shared
+        // model; Saved Init distinguishes unchanged initial profile values.
         showUnsavedBox = statusPanel.addCheckbox("Unsaved", GuiColors.getUnsaved(), true);
         showUnsavedBox.setToolTipText(
                 "Show / hide the values that differ from the selected profile's saved content AND from "
@@ -472,18 +476,21 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 GuiColors.getUnsavedApplied(), true);
         showUnsavedAppliedBox.setToolTipText(
                 "Show / hide the values that differ from the selected profile's saved content but match "
-                        + "exactly what this module's runtime is currently using.");
+                        + "this view's applied baseline.");
         showSavedBox = statusPanel.addCheckbox("Saved", GuiColors.getSaved(), true);
         showSavedBox.setToolTipText(
-                "Show / hide the values that are saved in the selected profile but differ from the "
-                        + "applied baseline (an apply is needed to take effect).");
+                "Show / hide values saved since module initialization that differ from both the init "
+                        + "snapshot and the comparison-only applied baseline.");
+        showSavedInitBox = statusPanel.addCheckbox("Saved Init", GuiColors.getSavedInit(), true);
+        showSavedInitBox.setToolTipText(
+                "Show / hide values that match the saved profile and its initialization snapshot, "
+                        + "but differ from this view's applied baseline.");
         showAppliedBox = statusPanel.addCheckbox("Saved Applied", GuiColors.getApplied(), true);
         showAppliedBox.setToolTipText(
                 "Show / hide the values that are saved in the selected profile AND match exactly the "
-                        + "applied baseline (what the runtime currently uses).");
-        // The color-legend help button — the same "Detailed Color Legend"
-        // button the node configuration panel's "Show values" box carries
-        // (the legend itself follows the shared four-state model).
+                        + "applied baseline.");
+        // The color-legend help button — its legend covers the shared states
+        // and the logging-profile Saved Init state.
         JButton colorHelpBtn = new HelpButton();
         colorHelpBtn.setToolTipText("Detailed Color Legend");
         colorHelpBtn.addActionListener(e -> showColorLegendHelp());
@@ -494,14 +501,34 @@ public class ModuleLoggingProfilePanel extends JPanel {
     /**
      * The "Show values" box's color-legend help — the same dialog the node
      * configuration panel shows from its legend button: the shared
-     * four-state model (each value compared against the saved profile
-     * content AND the applied baseline).
+     * four-state model plus the logging-profile Saved Init comparison.
      */
     private void showColorLegendHelp() {
+        String baselineScope = appliedBaselineScopeDescription();
+        boolean moduleScope = appliedProfileNameSupplier == null;
+        String comparison = moduleScope
+                ? "against the selected profile's saved content, its module-init snapshot, and this view's "
+                        + "applied comparison baseline. "
+                : "against the selected profile's saved content, this editor's initialization snapshot, and "
+                        + "this node profile's assigned logging baseline. ";
+        String savedDescription = moduleScope
+                ? "These values differ from both the module-init snapshot and the applied comparison baseline; "
+                        + "they were saved after this module editor initialized."
+                : "These values were saved after this editor initialized and differ from this node profile's "
+                        + "assigned logging baseline.";
+        String savedInitScope = moduleScope
+                ? "the module-init snapshot but differ from the module's comparison-only applied reference."
+                : "this profile editor's initialization snapshot but differ from this node profile's assigned "
+                        + "logging baseline.";
+        String savedInitDescription = "<li><b><font color='"
+                + ConfigurationUtils.toHex(GuiColors.getSavedInit())
+                + "'>\u25A0 Saved Init Values:</font></b> "
+                + "These values still match the saved profile and " + savedInitScope + "</li>";
         String msg = "<html><body style='width: 350px'>" +
                 "<h3>Color Coding Legend</h3>" +
                 "<p>The logger rows are color-coded to indicate their current status. Each value is compared " +
-                "against the selected profile's saved content (SAVED) and the baseline this module runs with (APPLIED):</p>" +
+                comparison +
+                baselineScope + "</p>" +
                 "<ul>" +
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getUnsaved())
                 + "'>\u25A0 Unsaved Values:</font></b> " +
@@ -510,18 +537,27 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getUnsavedApplied())
                 + "'>\u25A0 Unsaved Applied Values:</font></b> " +
                 "These values differ from the selected profile's saved content but match exactly the " +
-                "applied baseline — dirty edits the runtime already runs with.</li>" +
+                "applied baseline — they are still unsaved edits.</li>" +
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getSaved())
                 + "'>\u25A0 Saved Values:</font></b> " +
-                "These values are saved in the selected profile, but they differ from the applied " +
-                "baseline — saved, but not yet applied (an apply is needed to take effect).</li>" +
+                savedDescription + "</li>" +
+                savedInitDescription +
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getApplied())
                 + "'>\u25A0 Saved and Applied Values:</font></b> " +
                 "These values are saved in the profile AND match exactly the applied baseline — the " +
-                "runtime already runs with them.</li>" +
+                "profile and applied reference agree.</li>" +
                 "</ul>" +
                 "</body></html>";
         JOptionPane.showMessageDialog(this, msg, "Color Legend", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private String appliedBaselineScopeDescription() {
+        if (appliedProfileNameSupplier == null) {
+            return "In the module logging view the applied state is a dummy comparison reference only: it does "
+                    + "not represent or change the logging configuration of any running node profile. Applying "
+                    + "a profile uses that profile's module-init values as this reference.";
+        }
+        return "In this node-profile view it is the logging profile assigned to that node profile.";
     }
 
     private JComponent buildProfileSelector() {
@@ -841,36 +877,39 @@ public class ModuleLoggingProfilePanel extends JPanel {
 
     /**
      * Recomputes the {@link RowState} of every row (no UI updates — the
-     * caller re-renders or restyles) with the SHARED four-state model
-     * (the SAME 2×2 matrix the node profile configuration editor uses,
-     * see {@link RowStateResolver}):
+     * caller re-renders or restyles) with the shared four-state model and
+     * the logging-profile initialization comparison:
      * <ul>
      * <li><b>Unsaved</b> — the editor value differs from BOTH the selected
-     *     profile's saved (on-disk) content and the applied (runtime)
+     *     profile's saved (on-disk) content and the applied
      *     baseline: a dirty, not yet saved edit (while the virtual Default
      *     entry is selected, anything deviating from the built-in default,
      *     since Default cannot be saved).</li>
      * <li><b>Unsaved Applied</b> — the editor value differs from the saved
-     *     content but matches the applied baseline: a dirty edit the
-     *     runtime already runs with.</li>
+     *     content but matches the applied baseline: a dirty edit matching
+     *     the current applied reference.</li>
      * <li><b>Saved</b> — the editor value matches the saved content but
-     *     differs from the applied baseline: it was saved but is not what
-     *     the runtime currently uses.</li>
+     * differs from both the init snapshot and applied baseline.</li>
+     * <li><b>Saved Init</b> — the editor value matches saved and the init
+     *     snapshot but differs from the applied baseline.</li>
      * <li><b>Saved Applied</b> — the value matches both the saved content
-     *     and the applied baseline: what the runtime currently uses.</li>
+     *     and the applied baseline.</li>
      * </ul>
      * A key the profile does not define falls back to the built-in default
-     * as BOTH the saved and the applied reference, so a missing key's value
-     * never reads as "added". Invoked on every editor value change and
+     * for saved, init, and applied references. The virtual Default entry
+     * retains the original four-state resolver because it has no profile
+     * snapshot. Invoked on every editor value change and
      * before every full re-render.
      */
     protected void recomputeRowStates() {
         rowStates.clear();
         rowSavedValues.clear();
+        rowInitValues.clear();
         rowAppliedValues.clear();
         String selected = selectedProfileName();
         boolean selectedIsDefault = DEFAULT_PROFILE_ENTRY.equals(selected);
         Properties selectedProps = selectedIsDefault ? new Properties() : loadProfilePropsSafely(selected);
+        Properties selectedInitProps = selectedIsDefault ? new Properties() : initSnapshotFor(selected);
 
         for (String key : rowKeys()) {
             String value = editorValueOf(key);
@@ -891,19 +930,30 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 saved = inProfile != null ? inProfile : def;
             }
 
-            // The applied (runtime) baseline: what the runtime currently
-            // uses (the applied-state snapshot; a key the baseline does not
-            // define falls back to the built-in default).
+            String init;
+            if (selectedIsDefault) {
+                init = def;
+            } else {
+                String fromInit = selectedInitProps.getProperty(key);
+                init = fromInit != null ? fromInit : def;
+            }
+
+            // In the generic module panel this is a comparison-only
+            // reference. Node-hosted panels use their per-node baseline.
             String applied = appliedValues.get(key);
             if (applied == null) {
                 applied = def;
             }
 
-            rowStates.put(key, RowStateResolver.resolve(value, saved, applied));
+            RowState state = !selectedIsDefault
+                    ? RowStateResolver.resolve(value, saved, applied, init)
+                    : RowStateResolver.resolve(value, saved, applied);
+            rowStates.put(key, state);
             // The baselines stay available for the value combos' per-item
             // dropdown coloring (each entry is judged against THIS row's
             // saved / applied value).
             rowSavedValues.put(key, saved);
+            rowInitValues.put(key, init);
             rowAppliedValues.put(key, applied);
         }
     }
@@ -1008,6 +1058,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
             case UNSAVED -> showUnsavedBox.isSelected();
             case UNSAVED_APPLIED -> showUnsavedAppliedBox.isSelected();
             case SAVED -> showSavedBox.isSelected();
+            case SAVED_INIT -> showSavedInitBox.isSelected();
             case SAVED_APPLIED -> showAppliedBox.isSelected();
         };
     }
@@ -1065,6 +1116,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
             case UNSAVED -> GuiColors.getUnsaved();
             case UNSAVED_APPLIED -> GuiColors.getUnsavedApplied();
             case SAVED -> GuiColors.getSaved();
+            case SAVED_INIT -> GuiColors.getSavedInit();
             case SAVED_APPLIED -> GuiColors.getApplied();
         };
     }
@@ -1106,6 +1158,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
             showUnsavedBox.setForeground(GuiColors.getUnsaved());
             showUnsavedAppliedBox.setForeground(GuiColors.getUnsavedApplied());
             showSavedBox.setForeground(GuiColors.getSaved());
+            showSavedInitBox.setForeground(GuiColors.getSavedInit());
             showAppliedBox.setForeground(GuiColors.getApplied());
         }
     }
@@ -1386,6 +1439,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
             bandRenderer = existing;
         } else {
             bandRenderer = new ComboSearchHighlightRenderer();
+            bandRenderer.setDelegateRenderer(comboBox.getRenderer());
             comboBox.setRenderer(bandRenderer);
         }
         bandRenderer.setBand(lowerQuery, color);
@@ -1509,7 +1563,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
      * {@link #LOG_LEVELS} dropdown — and an EDITABLE combo only where there
      * is no predefined value: the editor text is the current value and the
      * dropdown offers only the row's state-based baseline values (the current
-     * value + the saved + the applied value, rebuilt on every state
+     * value + the saved + init + applied values, rebuilt on every state
      * recomputation — see {@link #rebuildValueComboModels()}), exactly the
      * node configuration panel's value-input semantics. EVERY dropdown entry
      * is painted by the state of its OWN value ({@link #valueCellRenderer(String)}).
@@ -1548,28 +1602,25 @@ public class ModuleLoggingProfilePanel extends JPanel {
 
     /**
      * The row's dropdown renderer: EVERY entry is painted by the state of
-     * ITS OWN value against this row's saved / applied baselines — the
-     * shared four-state model, exactly the node configuration panel's
-     * value-combo dropdown semantics (an entry equal to both baselines is
-     * "saved applied", an entry equal to the row's dirty current value is
-     * "unsaved", and so on). The palette is read live, so a theme or font
-     * change refreshes the colors without any cached state.
+     * ITS OWN value against this row's saved / init / applied baselines.
+     * Each state color is applied to the text while preserving the normal
+     * dropdown background.
      */
     private ListCellRenderer<String> valueCellRenderer(String key) {
         return (list, value, index, isSelected, cellHasFocus) -> {
             String text = value == null ? "" : value;
             JLabel cell = new JLabel(text);
             cell.setOpaque(true);
-            if (isSelected) {
-                cell.setBackground(list.getSelectionBackground());
-                cell.setForeground(list.getSelectionForeground());
-            } else {
-                cell.setBackground(list.getBackground());
-                RowState state = RowStateResolver.resolve(text,
-                        rowSavedValues.getOrDefault(key, ""),
-                        rowAppliedValues.getOrDefault(key, ""));
-                cell.setForeground(stateColor(state));
-            }
+            cell.setBackground(isSelected ? list.getSelectionBackground() : list.getBackground());
+            RowState state = !DEFAULT_PROFILE_ENTRY.equals(selectedProfileName())
+                    ? RowStateResolver.resolve(text,
+                            rowSavedValues.getOrDefault(key, ""),
+                            rowAppliedValues.getOrDefault(key, ""),
+                            rowInitValues.getOrDefault(key, ""))
+                    : RowStateResolver.resolve(text,
+                            rowSavedValues.getOrDefault(key, ""),
+                            rowAppliedValues.getOrDefault(key, ""));
+            cell.setForeground(stateColor(state));
             return cell;
         };
     }
@@ -1577,7 +1628,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
     /**
      * Rebuilds the dropdown baselines of the NON-level editable combos (the
      * level rows keep the fixed LOG_LEVELS model): the current value plus
-     * the row's saved and applied baselines — an edited value can be
+     * the row's saved, init, and applied baselines — an edited value can be
      * reverted by selecting its baseline back. Guarded: the model swap
      * touches the editor text, and its document events must not fire the
      * row's change handler.
@@ -1603,9 +1654,13 @@ public class ModuleLoggingProfilePanel extends JPanel {
             items.add(current);
         }
         String saved = rowSavedValues.getOrDefault(key, "");
+        String init = rowInitValues.getOrDefault(key, "");
         String applied = rowAppliedValues.getOrDefault(key, "");
         if (!saved.isBlank() && !saved.equals(current)) {
             items.add(saved);
+        }
+        if (!DEFAULT_PROFILE_ENTRY.equals(selectedProfileName()) && !init.isBlank() && !init.equals(current)) {
+            items.add(init);
         }
         if (!applied.isBlank() && !applied.equals(current)) {
             items.add(applied);
@@ -1670,9 +1725,12 @@ public class ModuleLoggingProfilePanel extends JPanel {
         panel.add(saveBtn);
 
         JButton applyBtn = new JButton();
-        applyBtn.setToolTipText("<html>Apply<br><br>Marks the selected profile as applied (requires a node restart).<br>"
+        applyBtn.setToolTipText("<html>Apply<br><br>Marks the selected profile as applied for this view. "
+                + "In the module logging view this changes only the comparison reference and default "
+                + "selection for newly created node profiles; it does not change logging in any running "
+                + "node profile.<br>"
                 + "Active while the selected profile is not the applied one or there are unsaved or saved, "
-                + "not yet applied changes (unsaved changes are saved to the profile first).</html>");
+                + "not yet applied changes. Apply does not save unsaved editor changes; use Save first.</html>");
         applyBtn.addActionListener(e -> applyProfile());
         panel.add(applyBtn);
 
@@ -1762,6 +1820,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
             LOGGER.warn("Failed to list profiles for '{}': {}", moduleId, e.getMessage());
             profiles = List.of();
         }
+        updateInitSnapshots(profiles);
 
         // The model rebuild must not trigger the action listener (the
         // guarded, explicit switch happens afterwards, in the caller).
@@ -1794,6 +1853,33 @@ public class ModuleLoggingProfilePanel extends JPanel {
         updateProfileActionButtons();
     }
 
+    private void updateInitSnapshots(List<String> profiles) {
+        Set<String> availableProfiles = new HashSet<>(profiles);
+        initProfileValues.keySet().retainAll(availableProfiles);
+        for (String name : profiles) {
+            if (!initProfileValues.containsKey(name)) {
+                initProfileValues.put(name, copyProperties(repo.loadProps(moduleId, name)));
+            }
+        }
+    }
+
+    private Properties initSnapshotFor(String profileName) {
+        Properties snapshot = initProfileValues.get(profileName);
+        if (snapshot == null) {
+            snapshot = copyProperties(repo.loadProps(moduleId, profileName));
+            initProfileValues.put(profileName, snapshot);
+        }
+        return copyProperties(snapshot);
+    }
+
+    private static Properties copyProperties(Properties properties) {
+        Properties copy = new Properties();
+        if (properties != null) {
+            copy.putAll(properties);
+        }
+        return copy;
+    }
+
     /**
      * Enables / disables the state-dependent toolbar buttons:
      * <ul>
@@ -1802,8 +1888,9 @@ public class ModuleLoggingProfilePanel extends JPanel {
      *   <li><b>Apply</b> — for "Default" it restores the built-in defaults
      *       (always meaningful); for an on-disk profile it is usable while
      *       the profile is NOT the applied one (assign it), while there are
-     *       saved, not yet applied changes (activate them), or while the
-     *       editor holds unsaved changes (save and apply them);</li>
+     *       saved changes differ from the init/applied comparison references,
+     *       or while the editor holds unsaved changes (which Apply does not
+     *       save);</li>
      *   <li><b>Rename</b> / <b>Delete</b> — impossible for the virtual
      *       "Default" entry (no file to act on).</li>
      * </ul>
@@ -1847,13 +1934,13 @@ public class ModuleLoggingProfilePanel extends JPanel {
 
     /**
      * @return {@code true} when at least one row differs from the applied
-     *         (runtime) baseline — a saved-not-yet-applied (SAVED) or a
-     *         dirty edit the runtime does not run with (UNSAVED_APPLIED),
-     *         so an apply would change what the runtime uses.
+     *         baseline — a saved (SAVED / SAVED_INIT) or dirty (UNSAVED_APPLIED) value
+     *         whose applied state is not represented by the current baseline.
      */
     private boolean hasSavedNotAppliedRows() {
         for (RowState state : rowStates.values()) {
-            if (state == RowState.SAVED || state == RowState.UNSAVED_APPLIED) {
+            if (state == RowState.SAVED || state == RowState.SAVED_INIT
+                    || state == RowState.UNSAVED_APPLIED) {
                 return true;
             }
         }
@@ -1894,8 +1981,8 @@ public class ModuleLoggingProfilePanel extends JPanel {
             String value = source == null ? null : source.getProperty(key);
             setEditorValue(rowEditors.get(key), value != null ? value : defaultRowValue(key));
         }
-        // The applied (runtime) baseline is module-level (the applied
-        // snapshot) — loading a different profile into the editor does not
+        // The applied baseline is module-level — loading a different profile
+        // into the editor does not
         // change it.
         reevaluateRowStates();
         profileCombo.repaint();
@@ -1999,6 +2086,10 @@ public class ModuleLoggingProfilePanel extends JPanel {
      * baseline for the resolved profile.
      */
     private void refreshAppliedMarker() {
+        if (!legacyAppliedSnapshotsCleaned) {
+            repo.cleanupLegacyAppliedSnapshots(moduleId);
+            legacyAppliedSnapshotsCleaned = true;
+        }
         String overridden = null;
         if (appliedProfileNameSupplier != null) {
             try {
@@ -2021,11 +2112,11 @@ public class ModuleLoggingProfilePanel extends JPanel {
     }
 
     /**
-     * Re-reads the applied baseline. A host-provided profile name represents
-     * a per-owner assignment (e.g. one node profile), so its own saved profile
-     * values are the baseline; a shared snapshot cannot accurately represent
-     * independent owners. The generic module panel uses its applied snapshot
-     * when present, with saved profile values as the legacy fallback.
+     * Re-reads the applied comparison baseline. A host-provided profile name
+     * represents a per-owner assignment (e.g. one node profile), so its own
+     * saved profile values are the baseline. The generic module panel uses
+     * the selected profile's immutable init values when module-level Apply is
+     * used; after startup, its saved values seed the comparison reference.
      * Missing keys fall back to built-in defaults.
      */
     private void refreshAppliedBaseline() {
@@ -2034,19 +2125,17 @@ public class ModuleLoggingProfilePanel extends JPanel {
             return;
         }
         try {
-            Properties snapshot = appliedProfileNameSupplier != null
+            Properties baseline = appliedProfileNameSupplier != null
                     ? repo.loadProps(moduleId, appliedProfileName)
-                    : repo.hasAppliedSnapshot(moduleId, appliedProfileName)
-                            ? repo.loadAppliedSnapshot(moduleId, appliedProfileName)
-                            : repo.loadProps(moduleId, appliedProfileName);
-            for (String key : snapshot.stringPropertyNames()) {
-                String value = snapshot.getProperty(key);
+                    : repo.loadAppliedBaseline(moduleId, appliedProfileName);
+            for (String key : baseline.stringPropertyNames()) {
+                String value = baseline.getProperty(key);
                 if (value != null) {
                     appliedValues.put(key, value);
                 }
             }
         } catch (Exception e) {
-            LOGGER.warn("Failed to read the applied snapshot for '{}': {}", appliedProfileName, e.getMessage());
+            LOGGER.warn("Failed to read the applied values for '{}': {}", appliedProfileName, e.getMessage());
         }
     }
 
@@ -2241,7 +2330,12 @@ public class ModuleLoggingProfilePanel extends JPanel {
         String message = applyConfirmationProvider != null
                 ? applyConfirmationProvider.message(name, isDefault)
                 : defaultApplyMessage(name, isDefault);
-        int result = JOptionPane.showConfirmDialog(this, message,
+        boolean optionalRestart = appliedProfileNameSupplier == null && applyHook == null && context != null;
+        JCheckBox restartOption = new JCheckBox("Restart application after applying", false);
+        Object confirmationContent = optionalRestart
+                ? createApplyConfirmationContent(message, restartOption)
+                : message;
+        int result = JOptionPane.showConfirmDialog(this, confirmationContent,
                 "Apply Profile", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
         if (result != JOptionPane.YES_OPTION) {
             return;
@@ -2249,15 +2343,14 @@ public class ModuleLoggingProfilePanel extends JPanel {
         try {
             if (isDefault) {
                 // Clearing the marker makes the module fall back to the built-in
-                // defaults — no profile file is read or written (and the
-                // repository drops the stale applied snapshot). The node tab
+                // defaults — no profile file is read or written. The node tab
                 // (a host with an applied-profile override) records its
                 // per-node choice in the apply hook instead.
                 if (appliedProfileNameSupplier == null) {
                     repo.setApplied(moduleId, null);
                 }
             } else {
-                // Apply restarts the node with the profile's SAVED (on-disk)
+                // If restarted, Apply uses the profile's SAVED (on-disk)
                 // configuration — it must NOT persist the dirty editor state:
                 // Save is what persists, and a dirty value stays UNSAVED after
                 // Apply (mirroring the node configuration's apply, which marks
@@ -2271,12 +2364,13 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 if (appliedProfileNameSupplier == null) {
                     repo.setApplied(moduleId, name);
                 }
-                // Only the generic module tab owns the shared applied
-                // snapshot. A host override represents an owner-specific
-                // assignment (e.g. one node profile), which must not overwrite
-                // the shared profile baseline.
+                // A host override represents an owner-specific assignment
+                // (e.g. one node profile), which must not overwrite the shared
+                // module-level comparison reference. The generic module
+                // Apply uses the profile's init values, never its later saved
+                // values, as that reference.
                 if (appliedProfileNameSupplier == null) {
-                    repo.saveAppliedSnapshot(moduleId, name, repo.loadProps(moduleId, name));
+                    repo.rememberAppliedBaseline(moduleId, name, initSnapshotFor(name));
                 }
             }
             refreshAppliedMarker();
@@ -2289,9 +2383,10 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 refreshAppliedMarker();
                 reevaluateRowStates();
             } else if (context != null) {
-                context.requestRestart();
-            } else {
-                JOptionPane.showMessageDialog(this, "Profile '" + name + "' marked as applied.\nA node restart is required.",
+                requestRestartAfterApply(optionalRestart, restartOption.isSelected());
+            } else if (context == null && applyHook == null) {
+                JOptionPane.showMessageDialog(this, "Profile '" + name + "' marked as applied.\n"
+                                + "This is the default for newly created node profiles; existing profiles are unchanged.",
                         "Applied", JOptionPane.INFORMATION_MESSAGE);
             }
         } catch (Exception e) {
@@ -2300,17 +2395,42 @@ public class ModuleLoggingProfilePanel extends JPanel {
         }
     }
 
+    JComponent createApplyConfirmationContent(String message, JCheckBox restartOption) {
+        JTextArea messageArea = new JTextArea(message, 12, 52);
+        messageArea.setEditable(false);
+        messageArea.setFocusable(false);
+        messageArea.setLineWrap(true);
+        messageArea.setWrapStyleWord(true);
+        messageArea.setOpaque(false);
+        messageArea.setBorder(null);
+
+        JPanel content = new JPanel();
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+        content.setOpaque(false);
+        content.add(messageArea);
+        content.add(Box.createVerticalStrut(8));
+        restartOption.setAlignmentX(Component.LEFT_ALIGNMENT);
+        content.add(restartOption);
+        return content;
+    }
+
+    void requestRestartAfterApply(boolean restartOptionShown, boolean restartSelected) {
+        if (context != null && (!restartOptionShown || restartSelected)) {
+            context.requestRestart();
+        }
+    }
+
     /**
      * The core (module-scoped) Apply confirmation message — a compact, unambiguous
      * three-part statement (the node tab overrides this with a node-centric message):
-     * <b>what happens</b> (the module's applied logging profile is set/reset),
+     * <b>what happens</b> (the module-level default marker is set/reset),
      * <b>the effect on node profiles</b> (only <i>newly created</i> profiles are
      * checked against the module-level applied profile at creation time — their
      * default assignment is bound to it, or left absent when "Default" is applied;
      * <i>existing</i> profiles are entirely untouched: those with their own
      * assignment keep it, and those without an assignment keep running on the
-     * built-in default), and <b>when it takes effect</b> (after the restart that
-     * the YES answer triggers via {@link ModuleContext#requestRestart()}).
+     * built-in default), and <b>when it takes effect</b> (new profiles use the
+     * marker when they are created; existing profiles are not affected).
      *
      * @param profileName the profile name being applied (the virtual Default entry included)
      * @param isDefault   whether the virtual {@link #DEFAULT_PROFILE_ENTRY} entry is applied
@@ -2326,14 +2446,19 @@ public class ModuleLoggingProfilePanel extends JPanel {
         String existing = "Existing node profiles are not changed: profiles with their own assignment keep it, and "
                 + "profiles without an assignment keep running on the built-in '" + defaultName + "'.";
         return (isDefault
-                ? "The applied logging profile of the '" + moduleId + "' module will be reset to the built-in '"
+                ? "The module-level applied-profile marker for the '" + moduleId
+                        + "' module will be reset to the built-in '"
                         + defaultName + "'.\n\n"
                         + newlyCreated + ".\n\n"
-                : "The '" + profileName + "' logging profile will be applied to the '" + moduleId + "' module.\n\n"
+                : "The module-level applied-profile marker for the '" + moduleId
+                        + "' module will be set to '"
+                        + profileName + "'.\n\n"
                         + newlyCreated + ".\n\n")
                 + existing + "\n\n"
-                + "This will take effect after a restart. Would you like to apply the changes and restart the "
-                + "application?";
+                + "This marker is used as the default selection when a node profile is created. The "
+                + "module-level applied state is a comparison reference only; it does not change logging for "
+                + "any running node profile. Existing node profiles and their assignments are unaffected. "
+                + "Restarting the application is optional and can be selected below. Would you like to proceed?";
     }
 
     private void renameProfile() {
@@ -2360,6 +2485,10 @@ public class ModuleLoggingProfilePanel extends JPanel {
             dirtyProfiles.remove(oldName);
             currentProfileName = newName;
             repo.rename(moduleId, oldName, newName);
+            Properties initSnapshot = initProfileValues.remove(oldName);
+            if (initSnapshot != null) {
+                initProfileValues.put(newName, initSnapshot);
+            }
             // refreshProfileList() re-reads the applied marker (the repository
             // follows the rename) before re-loading the editor.
             refreshProfileList();
@@ -2389,6 +2518,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
             profileWorkspace.remove(name);
             dirtyProfiles.remove(name);
             repo.delete(moduleId, name);
+            initProfileValues.remove(name);
             refreshProfileList();
             if (profileCombo.getItemCount() > 0) {
                 selectSilently(0);
@@ -2450,8 +2580,9 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 "This panel edits the logging profile assigned to the current module. Each row is a "
                         + "<b>key/value setting</b> consumed by that module's logging configuration. "
                         + "Logger level rows use the supported level dropdown; other settings accept text. "
-                        + "Save writes the profile, and Apply marks it as the module's applied profile "
-                        + "(a node restart may be required for runtime changes)."));
+                        + "Save writes the profile. Module-level Apply updates only a comparison/default-selection "
+                        + "marker and does not change logging for any running node profile. Restart is optional. "
+                        + appliedBaselineScopeDescription()));
         content.add(HelpDialog.separator());
         content.add(HelpDialog.heading("Row colors"));
         content.add(HelpDialog.legendRow(GuiColors.getUnsaved(), "Unsaved",
@@ -2461,9 +2592,13 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 "The edited value differs from the selected profile's saved content but matches the applied "
                         + "baseline. It is still an unsaved edit."));
         content.add(HelpDialog.legendRow(GuiColors.getSaved(), "Saved",
-                "Saved in the selected profile, but differs from the applied baseline."));
+                "Saved after module initialization; differs from both the init snapshot and the applied "
+                        + "comparison baseline."));
+        content.add(HelpDialog.legendRow(GuiColors.getSavedInit(), "Saved Init",
+                "Matches the saved profile and its module-init snapshot, but differs from the comparison-only "
+                        + "applied reference."));
         content.add(HelpDialog.legendRow(GuiColors.getApplied(), "Applied",
-                "The value matches both the selected profile's saved content and the applied baseline."));
+                "The value matches the selected profile's saved content and the applied comparison baseline."));
         content.add(Box.createVerticalStrut(8));
         content.add(HelpDialog.paragraph(
                 "The <b>\u201CShow values\u201D</b> checkboxes show or hide rows by state. The "
@@ -2478,9 +2613,11 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 "Saves the current editor state to the selected profile. "
                         + "Active only while there are unsaved changes."));
         content.add(HelpDialog.actionRow(FontAwesome.CHECK_CIRCLE_O, GuiColors.getApplied(), "Apply",
-                "Marks the selected profile as applied; a node restart is required for the change to take effect. "
+                "In the module logging view this changes only the comparison/default-selection marker; it does "
+                        + "not change the logging configuration of any running node profile. It sets the new "
+                        + "profile's init values as the comparison reference. Restart is optional. "
                         + "Active while the selected profile is not the applied one or there are unsaved or "
-                        + "saved, not yet applied changes (unsaved changes are saved to the profile first)."));
+                        + "saved, not yet applied changes. Apply does not save unsaved editor changes."));
         content.add(HelpDialog.actionRow(FontAwesome.PENCIL_SQUARE_O, iconColor, "Rename",
                 "Renames the selected on-disk profile. The built-in Default entry cannot be renamed."));
         content.add(HelpDialog.actionRow(FontAwesome.UNDO, iconColor, "Reset to Defaults",
@@ -2590,7 +2727,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
      * {@code setApplied}); receives the applied profile name. Hosts use it to trigger a restart
      * (e.g. node {@code restartNode}). If none is set, Apply falls back to
      * {@link ModuleContext#requestRestart()} when a context is present, otherwise it only marks
-     * the profile applied and informs the user that a restart is required.
+     * the profile applied and informs the user.
      *
      * @param applyHook the apply callback (may be null to clear)
      * @return {@code this} for fluent chaining
@@ -2669,14 +2806,32 @@ public class ModuleLoggingProfilePanel extends JPanel {
      * module marker (e.g. the node tab passes its per-node effective
      * profile, so the row-state "applied" baseline and the combo's applied
      * marker follow the node's own assignment). A null supplier (or a
-     * null/blank result) falls back to the module marker.
+     * null/blank result) falls back to the module marker. Saved Init remains
+     * available in either scope; only the applied baseline differs.
      *
      * @param supplier the applied-profile name supplier (may be null)
      * @return {@code this} for fluent chaining
      */
     public ModuleLoggingProfilePanel setAppliedProfileNameSupplier(java.util.function.Supplier<String> supplier) {
         this.appliedProfileNameSupplier = supplier;
+        if (showSavedInitBox != null) {
+            showSavedBox.setToolTipText(supplier == null
+                    ? "Show / hide values saved since module initialization that differ from both the init "
+                            + "snapshot and the comparison-only applied baseline."
+                    : "Show / hide values saved since this editor initialized that differ from this node profile's "
+                            + "assigned logging baseline.");
+            showSavedInitBox.setToolTipText(supplier == null
+                    ? "Show / hide values that match the saved profile and its module-init snapshot, but differ "
+                            + "from the module's comparison-only applied baseline."
+                    : "Show / hide values that match the saved profile and this editor's initialization snapshot, "
+                            + "but differ from this node profile's assigned logging baseline.");
+            statusPanel.revalidate();
+            statusPanel.repaint();
+        }
         refreshAppliedMarker();
+        if (editorGrid != null) {
+            reevaluateRowStates();
+        }
         return this;
     }
 

@@ -1,5 +1,6 @@
 package application.module.logging.gui;
 
+import application.api.ModuleContext;
 import application.module.appearance.AppearanceModule;
 import application.module.logging.LoggingProfileRepository;
 import application.utils.gui.ComboSearchHighlightRenderer;
@@ -37,6 +38,8 @@ import java.awt.GraphicsEnvironment;
 import java.awt.KeyboardFocusManager;
 import java.awt.Window;
 import java.awt.event.KeyEvent;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -425,19 +428,20 @@ class ModuleLoggingProfilePanelTest {
     }
 
     @Test
-    @DisplayName("the 'Show values' row-state filter (the shared four-state model) is on by default, all boxes selected")
+    @DisplayName("the 'Show values' row-state filter includes Saved Init and is on by default")
     void showValuesFilterIsOnByDefault() {
         ModuleLoggingProfilePanel panel = newPanel();
         Container box = findTitledContainer(panel, "Show values");
         assertNotNull(box, "the 'Show values' titled box is present");
         List<JCheckBox> checks = findAll(box, JCheckBox.class);
-        assertEquals(4, checks.size(), "one checkbox per row state (the shared four-state model); got=" + checks.size());
-        // the SAME labels, order and colors as the node configuration
-        // panel's "Show values" box
+        assertEquals(5, checks.size(), "the module logging panel has the shared four states plus Saved Init");
+        // The first four labels/colors are shared with node configuration;
+        // Saved Init is unique to module logging profiles.
         assertEquals("Unsaved", checks.get(0).getText());
         assertEquals("Unsaved Applied", checks.get(1).getText());
         assertEquals("Saved", checks.get(2).getText());
-        assertEquals("Saved Applied", checks.get(3).getText());
+        assertEquals("Saved Init", checks.get(3).getText());
+        assertEquals("Saved Applied", checks.get(4).getText());
         for (JCheckBox check : checks) {
             assertTrue(check.isSelected(), "every state filter is selected by default: " + check.getText());
         }
@@ -445,7 +449,12 @@ class ModuleLoggingProfilePanelTest {
         assertEquals(GuiColors.getUnsavedApplied(), checks.get(1).getForeground(),
                 "the unsaved applied box is the unsaved applied color");
         assertEquals(GuiColors.getSaved(), checks.get(2).getForeground(), "the saved box is the saved color");
-        assertEquals(GuiColors.getApplied(), checks.get(3).getForeground(), "the saved applied box is the applied color");
+        assertEquals(GuiColors.getSavedInit(), checks.get(3).getForeground(),
+                "the saved init box uses its own pale-yellow color");
+        assertEquals(new Color(240, 220, 100), GuiColors.getSavedInit(),
+                "Saved Init uses the slightly darker pale-yellow default palette color");
+        assertEquals(GuiColors.getApplied(), checks.get(4).getForeground(),
+                "the saved applied box is the applied color");
         // The SAME "Detailed Color Legend" help button the node configuration
         // panel's "Show values" box carries (its legend follows the shared
         // four-state model).
@@ -453,6 +462,54 @@ class ModuleLoggingProfilePanelTest {
         assertEquals(1, buttons.size(), "the 'Show values' box carries the color-legend help button");
         assertEquals("Detailed Color Legend", buttons.get(0).getToolTipText(),
                 "the help button opens the detailed color legend");
+    }
+
+    @Test
+    @DisplayName("Saved Init colors the init baseline in logging value dropdowns and changes to Saved after save")
+    void savedInitColorsDropdownBaselineAndTransitionsAfterSave() throws Exception {
+        LoggingProfileRepository repo = new LoggingProfileRepository();
+        String name = "saved-init-dropdown-" + System.nanoTime();
+        Properties initial = new Properties();
+        initial.setProperty("test.handler", "initial.handler");
+        initial.setProperty("test.level", "INFO");
+        repo.create("test-mod", name, initial);
+        repo.setApplied("test-mod", null);
+        try {
+            ModuleLoggingProfilePanel panel = newPanel();
+            onEdt(() -> panel.getProfileCombo().setSelectedItem(name));
+            assertEquals(GuiColors.getSavedInit(), labelWithText(panel, "test.handler").getForeground(),
+                    "untouched saved values that match init but not the applied comparison are Saved Init");
+
+            JTextField editor = rowEditorText(panel, "test.handler");
+            onEdt(() -> editor.setText("edited.handler"));
+            assertEquals(GuiColors.getUnsaved(), labelWithText(panel, "test.handler *").getForeground(),
+                    "editing the value makes the row unsaved");
+
+            @SuppressWarnings("unchecked")
+            ListCellRenderer<Object> renderer =
+                    (ListCellRenderer<Object>) ((JComboBox<?>) editorAfterLabel(panel, "test.handler *"))
+                            .getRenderer();
+            Component initOption = renderer.getListCellRendererComponent(
+                    new JList<>(), "initial.handler", 0, false, false);
+            assertEquals(GuiColors.getSavedInit(), initOption.getForeground(),
+                    "the init value in the dropdown uses the Saved Init font color");
+            assertEquals(new JList<>().getBackground(), initOption.getBackground(),
+                    "the Saved Init dropdown option keeps the normal dropdown background");
+            JList<String> options = new JList<>();
+            Component selectedInitOption = renderer.getListCellRendererComponent(
+                    options, "initial.handler", 0, true, false);
+            assertEquals(GuiColors.getSavedInit(), selectedInitOption.getForeground(),
+                    "hovering a Saved Init dropdown option preserves its state font color");
+            assertEquals(options.getSelectionBackground(), selectedInitOption.getBackground(),
+                    "hovering keeps the normal selection background");
+
+            onEdt(findButtonByTooltip(panel, "Save<br>")::doClick);
+            assertEquals(GuiColors.getSaved(), labelWithText(panel, "test.handler").getForeground(),
+                    "after saving a changed value, it is Saved rather than Saved Init");
+        } finally {
+            repo.setApplied("test-mod", null);
+            cleanupProfiles(name);
+        }
     }
 
     @Test
@@ -1145,12 +1202,12 @@ class ModuleLoggingProfilePanelTest {
     }
 
     @Test
-    @DisplayName("the default apply message is a compact three-part statement (effect + restart question)")
+    @DisplayName("the default apply message explains module-default scope and restart")
     void defaultApplyMessageStatesModuleScope() {
         ModuleLoggingProfilePanel panel = newPanel();
 
         String msg = panel.defaultApplyMessage("myprofile", false);
-        assertTrue(msg.contains("'myprofile'"), "the message names the profile being applied");
+        assertTrue(msg.contains("'myprofile'"), "the message names the selected profile");
         assertTrue(msg.contains("'test-mod' module"), "the message names the module");
         assertTrue(msg.contains("newly created node profiles will be linked to 'myprofile' by default"),
                 "the message states that newly created node profiles are linked to the applied profile");
@@ -1165,10 +1222,14 @@ class ModuleLoggingProfilePanelTest {
                 "the message states that unassigned existing profiles keep running on the built-in default");
         assertFalse(msg.contains("without their own assignment will run on it"),
                 "unassigned EXISTING profiles must NOT be stated to run on the applied profile");
-        assertTrue(msg.contains("take effect after a restart"),
-                "the message states that the change takes effect after a restart");
-        assertTrue(msg.contains("Would you like to apply the changes and restart the application?"),
-                "the message ends with the apply + restart question");
+        assertTrue(msg.contains("This marker is used as the default selection when a node profile is created"),
+                "the message explains that the module marker is used for new profiles");
+        assertTrue(msg.contains("Existing node profiles and their assignments are unaffected"),
+                "the message clarifies that current node profiles are not changed");
+        assertTrue(msg.contains("Restarting the application is optional"),
+                "the message states that restarting is optional");
+        assertTrue(msg.contains("Would you like to proceed?"),
+                "the message asks whether to apply the profile");
 
         String defMsg = panel.defaultApplyMessage(ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY, true);
         assertTrue(defMsg.contains("reset to the built-in '" + LoggingProfileRepository.RESERVED_PROFILE_NAME + "'"),
@@ -1180,8 +1241,53 @@ class ModuleLoggingProfilePanelTest {
         assertTrue(defMsg.contains("profiles without an assignment keep running on the built-in '"
                 + LoggingProfileRepository.RESERVED_PROFILE_NAME + "'"),
                 "the 'Default' message states that unassigned existing profiles keep running on the built-in default");
-        assertTrue(defMsg.contains("Would you like to apply the changes and restart the application?"),
-                "the 'Default' message ends with the apply + restart question");
+        assertTrue(defMsg.contains("Restarting the application is optional"),
+                "the 'Default' message states that restarting is optional");
+        assertTrue(defMsg.contains("Would you like to proceed?"),
+                "the 'Default' message asks whether to apply the profile");
+    }
+
+    @Test
+    @DisplayName("module Apply exposes an unchecked optional restart control")
+    void applyConfirmationHasOptionalRestartControl() {
+        ModuleLoggingProfilePanel panel = newPanel();
+        JCheckBox restartOption = new JCheckBox("Restart application after applying", false);
+        final JComponent[] content = new JComponent[1];
+        onEdt(() -> content[0] = panel.createApplyConfirmationContent("Apply this profile?", restartOption));
+
+        assertNotNull(content[0], "the confirmation content is created");
+        assertFalse(restartOption.isSelected(), "restart is not selected by default");
+        assertTrue(SwingUtilities.isDescendingFrom(restartOption, content[0]),
+                "the restart option is included in the confirmation content");
+    }
+
+    @Test
+    @DisplayName("Apply requests restart only when the optional restart control is selected")
+    void applyRestartIsOptional() {
+        AtomicInteger restartRequests = new AtomicInteger();
+        ModuleContext context = new ModuleContext() {
+            @Override
+            public Path getConfigDirectory() {
+                return Path.of(".");
+            }
+
+            @Override
+            public void requestRestart() {
+                restartRequests.incrementAndGet();
+            }
+
+            @Override
+            public void shutdown() {
+            }
+        };
+        final ModuleLoggingProfilePanel[] holder = new ModuleLoggingProfilePanel[1];
+        onEdt(() -> holder[0] = new ModuleLoggingProfilePanel(context, new TestProvider()));
+
+        onEdt(() -> holder[0].requestRestartAfterApply(true, false));
+        assertEquals(0, restartRequests.get(), "an unchecked optional restart does not restart the application");
+
+        onEdt(() -> holder[0].requestRestartAfterApply(true, true));
+        assertEquals(1, restartRequests.get(), "a selected optional restart requests an application restart");
     }
 
     @Test
@@ -1446,6 +1552,9 @@ class ModuleLoggingProfilePanelTest {
         LoggingProfileRepository repo = new LoggingProfileRepository();
         try {
             repo.setApplied("test-mod", null); // deterministic start: nothing applied
+            Path legacySnapshotDir = repo.getLoggingDir("test-mod").resolve("applied");
+            Files.createDirectories(legacySnapshotDir);
+            Files.writeString(legacySnapshotDir.resolve("legacy.json"), "{}");
             ModuleLoggingProfilePanel panel = newPanel();
             String a = "saved-not-applied-a-" + System.nanoTime();
             String b = "saved-not-applied-b-" + System.nanoTime();
@@ -1478,38 +1587,42 @@ class ModuleLoggingProfilePanelTest {
     }
 
     @Test
-    @DisplayName("the applied-state snapshot drives the applied baseline (applied = snapshot values)")
-    void appliedSnapshotDrivesRowStates() {
+    @DisplayName("the module applied baseline is held in memory, independently from later saves")
+    void appliedBaselineDrivesRowStatesWithoutSnapshots() {
         LoggingProfileRepository repo = new LoggingProfileRepository();
-        String a = "applied-snapshot-a-" + System.nanoTime();
+        String a = "applied-baseline-a-" + System.nanoTime();
         try {
             repo.setApplied("test-mod", null); // deterministic start: nothing applied
             ModuleLoggingProfilePanel panel = newPanel();
-            onEdt(() -> panel.createProfileFromDefaults(a));
-            // Save a custom value, then apply 'a' WITH a snapshot of the pre-edit
-            // values (a runtime that still uses the old values).
-            onEdt(() -> rowEditorText(panel, "test.handler").setText("custom.handler.a"));
-            onEdt(findButtonByTooltip(panel, "Save<br>")::doClick);
-            Properties snapshot = new Properties();
-            snapshot.setProperty("test.handler", "java.util.logging.ConsoleHandler");
-            snapshot.setProperty("test.level", "INFO");
-            repo.saveAppliedSnapshot("test-mod", a, snapshot);
+            Properties applied = new Properties();
+            applied.setProperty("test.handler", "java.util.logging.ConsoleHandler");
+            applied.setProperty("test.level", "INFO");
+            repo.create("test-mod", a, applied);
             repo.setApplied("test-mod", a);
+            repo.rememberAppliedBaseline("test-mod", a, applied);
 
-            // A fresh panel re-reads the marker: the snapshot is the applied baseline.
+            Properties saved = new Properties();
+            saved.setProperty("test.handler", "custom.handler.a");
+            saved.setProperty("test.level", "INFO");
+            repo.saveProps("test-mod", a, saved);
+
+            // A fresh panel in the same process reads the in-memory applied
+            // values, not the profile file that was saved afterwards.
             ModuleLoggingProfilePanel fresh = newPanel();
             onEdt(() -> fresh.getProfileCombo().setSelectedItem(a));
-            assertEquals(GuiColors.getSaved(),
+            assertEquals(GuiColors.getSavedInit(),
                     labelWithText(fresh, "test.handler").getForeground(),
-                    "a saved value that differs from the applied snapshot is colored saved (yellow)");
+                    "a saved value that matches the fresh panel's init snapshot but differs from applied is Saved Init");
             assertEquals(GuiColors.getApplied(),
                     labelWithText(fresh, "test.level").getForeground(),
-                    "a value matching the applied snapshot is colored applied (green)");
+                    "a value matching applied values is colored applied (green)");
+            assertFalse(Files.exists(repo.getLoggingDir("test-mod").resolve("applied")),
+                    "opening the panel removes legacy JSON snapshots and creates no replacement directory");
         } catch (Exception e) {
             throw new AssertionError(e);
         } finally {
             try {
-                repo.setApplied("test-mod", null); // also drops the snapshot
+                repo.setApplied("test-mod", null);
             } catch (Exception ignored) {
                 // best-effort cleanup
             }
@@ -1518,8 +1631,8 @@ class ModuleLoggingProfilePanelTest {
     }
 
     @Test
-    @DisplayName("an applied profile without a legacy snapshot uses its saved values as the applied baseline")
-    void appliedProfileWithoutSnapshotUsesSavedValues() throws Exception {
+    @DisplayName("an applied profile uses its saved values as the initial applied baseline")
+    void appliedProfileUsesSavedValuesAsInitialBaseline() throws Exception {
         LoggingProfileRepository repo = new LoggingProfileRepository();
         String name = "applied-without-snapshot-" + System.nanoTime();
         Properties values = new Properties();
@@ -1528,9 +1641,6 @@ class ModuleLoggingProfilePanelTest {
         try {
             repo.create("test-mod", name, values);
             repo.setApplied("test-mod", name);
-            assertFalse(repo.hasAppliedSnapshot("test-mod", name),
-                    "the test profile starts without an applied-state snapshot");
-
             ModuleLoggingProfilePanel panel = newPanel();
 
             assertEquals(name, panel.getProfileCombo().getSelectedItem(),
@@ -1540,7 +1650,7 @@ class ModuleLoggingProfilePanelTest {
             assertEquals(GuiColors.getApplied(), labelWithText(panel, "test.level").getForeground(),
                     "the loaded saved level value is shown as saved and applied");
             assertFalse(allLabels(panel).stream().anyMatch(label -> label.endsWith(" *")),
-                    "loading an applied profile without a legacy snapshot must not create unsaved rows");
+                    "loading an applied profile must not create unsaved rows");
         } finally {
             repo.setApplied("test-mod", null);
             cleanupProfiles(name);
@@ -1645,10 +1755,8 @@ class ModuleLoggingProfilePanelTest {
             repo.setApplied("test-mod", null); // deterministic start
             ModuleLoggingProfilePanel panel = newPanel();
             onEdt(() -> panel.createProfileFromDefaults(a));
-            // Mark 'a' applied with a snapshot of its current (default) values:
-            // selected == applied and every row matches the baseline.
-            repo.saveAppliedSnapshot("test-mod", a, repo.loadProps("test-mod", a));
             repo.setApplied("test-mod", a);
+            repo.rememberAppliedBaseline("test-mod", a, repo.loadProps("test-mod", a));
 
             ModuleLoggingProfilePanel fresh = newPanel();
             onEdt(() -> fresh.getProfileCombo().setSelectedItem(a));
@@ -1663,7 +1771,7 @@ class ModuleLoggingProfilePanelTest {
             throw new AssertionError(e);
         } finally {
             try {
-                repo.setApplied("test-mod", null); // also drops the snapshot
+                repo.setApplied("test-mod", null);
             } catch (Exception ignored) {
                 // best-effort cleanup
             }
@@ -1680,10 +1788,8 @@ class ModuleLoggingProfilePanelTest {
             repo.setApplied("test-mod", null); // deterministic start
             ModuleLoggingProfilePanel panel = newPanel();
             onEdt(() -> panel.createProfileFromDefaults(a));
-            // Mark 'a' applied with a snapshot of its current (default) values:
-            // selected == applied and every row matches the baseline.
-            repo.saveAppliedSnapshot("test-mod", a, repo.loadProps("test-mod", a));
             repo.setApplied("test-mod", a);
+            repo.rememberAppliedBaseline("test-mod", a, repo.loadProps("test-mod", a));
 
             ModuleLoggingProfilePanel fresh = newPanel();
             onEdt(() -> fresh.getProfileCombo().setSelectedItem(a));
@@ -1693,7 +1799,7 @@ class ModuleLoggingProfilePanelTest {
             throw new AssertionError(e);
         } finally {
             try {
-                repo.setApplied("test-mod", null); // also drops the snapshot
+                repo.setApplied("test-mod", null);
             } catch (Exception ignored) {
                 // best-effort cleanup
             }

@@ -6,14 +6,9 @@ import application.utils.config.ConfigPaths;
 import application.utils.config.ModuleIds;
 import application.utils.config.PropertiesProfileLoader;
 import application.utils.io.PathUtils;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.Reader;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -30,15 +25,12 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *   <li><b>Canonical (this store's writer):</b> {@code ProfileConfig.loggingPresets}
  *       in {@code conf/node/profiles.json} — a per-module map, e.g.
  *       {@code {"node":"myprofile","database":"quiet"}}.</li>
- *   <li><b>Legacy link:</b> {@code profileLinks.<profile>.logging} in
- *       {@code conf/node/profile.json}.</li>
  * </ol>
  *
  * <p>
  * This store is the <b>only writer</b>: all writes go to mechanism 1
- * ({@link ProfileConfig#setLoggingPresets}). Reads prefer the canonical map and only
- * fall back to the legacy mechanism (2) for backward compatibility with
- * existing {@code conf/} trees that have not yet been migrated.
+ * ({@link ProfileConfig#setLoggingPresets}). Legacy {@code profileLinks} entries are
+ * migrated into the canonical map by {@link ProfileConfig} on first read.
  * </p>
  *
  * <p>
@@ -51,12 +43,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * @see LoggingProfileRepository
  */
 public final class LoggingAssignmentStore {
-
-    /** JSON key for the profile-links object in {@code profile.json}. */
-    static final String PROFILE_LINKS_KEY = "profileLinks";
-
-    /** JSON key for the linked logging profile within a profile-link entry. */
-    static final String LINKED_LOGGING_KEY = "logging";
 
     private static final Logger LOGGER = LoggerFactory.getLogger(LoggingAssignmentStore.class);
 
@@ -139,37 +125,20 @@ public final class LoggingAssignmentStore {
         }
     }
 
-    // ── Read (canonical first, legacy fallback) ────────────────────────
+    // ── Read ───────────────────────────────────────────────────────────
 
     /**
      * Returns the logging-profile assignment for a node profile.
      * <p>
-     * Resolution order:
-     * <ol>
-     *   <li>Canonical {@code ProfileConfig.loggingPresets} map (preferred).</li>
-     *   <li>Legacy {@code profileLinks.<profile>.logging} in {@code conf/node/profile.json}
-     *       (mapped to the {@code node} module id).</li>
-     * </ol>
-     * </p>
+     * Any legacy {@code profileLinks} entry is migrated to the canonical
+     * {@code ProfileConfig.loggingPresets} map as part of the read.
      *
      * @param nodeProfileName Node profile name (e.g. {@code "mainnet"})
      * @return Unmodifiable map of module id → logging profile name; empty if unset (never null)
      */
     public Map<String, String> getAssignment(String nodeProfileName) {
         Map<String, String> canonical = profileConfig.getLoggingPresets(nodeProfileName);
-        if (canonical != null && !canonical.isEmpty()) {
-            return canonical;
-        }
-
-        // Legacy fallback: profileLinks.<profile>.logging (conf/node/profile.json)
-        String linked = readLegacyLinkedLogging(nodeProfileName);
-        if (linked != null && !linked.isBlank()) {
-            Map<String, String> migrated = new LinkedHashMap<>();
-            migrated.put(ModuleIds.NODE, linked);
-            return migrated;
-        }
-
-        return Map.of();
+        return canonical != null ? canonical : Map.of();
     }
 
     /**
@@ -320,29 +289,4 @@ public final class LoggingAssignmentStore {
         return matches;
     }
 
-    // ── Legacy readers ─────────────────────────────────────────────────
-
-    private String readLegacyLinkedLogging(String nodeProfileName) {
-        Path profileJson = PathUtils.resolvePath(confRoot).resolve(ModuleIds.NODE).resolve("profile.json");
-        if (!Files.exists(profileJson)) {
-            return null;
-        }
-        try (Reader reader = Files.newBufferedReader(profileJson, StandardCharsets.UTF_8)) {
-            JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
-            if (root == null || !root.has(PROFILE_LINKS_KEY)) {
-                return null;
-            }
-            JsonObject links = root.getAsJsonObject(PROFILE_LINKS_KEY);
-            if (links == null || !links.has(nodeProfileName)) {
-                return null;
-            }
-            JsonObject entry = links.getAsJsonObject(nodeProfileName);
-            if (entry != null && entry.has(LINKED_LOGGING_KEY)) {
-                return entry.get(LINKED_LOGGING_KEY).getAsString();
-            }
-        } catch (Exception e) {
-            LOGGER.debug("Failed to read legacy profileLinks for '{}': {}", nodeProfileName, e.getMessage());
-        }
-        return null;
-    }
 }

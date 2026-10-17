@@ -8,12 +8,17 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Unit tests for the {@link ProfileConfig} reload-on-write contract: every
@@ -70,5 +75,86 @@ class ProfileConfigTest {
             repo.setApplied(ModuleIds.NODE, null);
             repo.delete(ModuleIds.NODE, appliedName);
         }
+    }
+
+    @Test
+    @DisplayName("legacy node metadata migrates to profiles.json and is removed after a successful save")
+    void legacyMetadata_migratesToCanonicalFile() throws IOException {
+        Path nodeDir = tempDir.resolve("node");
+        Files.createDirectories(nodeDir);
+        Files.writeString(nodeDir.resolve("profile.json"),
+                "{\"appliedProfile\":\"mainnet\",\"profileLinks\":{\"mainnet\":{"
+                        + "\"logging\":\"verbose\",\"database\":\"MariaDB:db1\","
+                        + "\"dbAutoStart\":true,\"dbAutoStop\":false}}}");
+        Path profilesJson = nodeDir.resolve("profiles.json");
+
+        ProfileConfig config = new ProfileConfig(profilesJson);
+        assertEquals("mainnet", config.load().getAppliedProfile());
+        assertEquals(Map.of(ModuleIds.NODE, "verbose"), config.getLoggingPresets("mainnet"));
+        assertEquals("MariaDB:db1", config.getDatabaseProfileLink("mainnet"));
+        assertEquals(Boolean.TRUE, config.getDatabaseAutoStart("mainnet"));
+        assertEquals(Boolean.FALSE, config.getDatabaseAutoStop("mainnet"));
+        assertFalse(Files.exists(nodeDir.resolve("profile.json")));
+        assertTrue(Files.exists(profilesJson));
+    }
+
+    @Test
+    @DisplayName("canonical profile metadata wins over conflicting legacy fields")
+    void legacyMetadata_doesNotOverrideCanonicalValues() throws IOException {
+        Path nodeDir = tempDir.resolve("node");
+        Files.createDirectories(nodeDir);
+        Path profilesJson = nodeDir.resolve("profiles.json");
+        Files.writeString(profilesJson,
+                "{\"appliedProfile\":\"canonical\",\"profiles\":{\"mainnet\":{"
+                        + "\"loggingPresets\":{\"node\":\"standard\"},"
+                        + "\"databaseProfileLink\":\"PostgreSQL:canonical\","
+                        + "\"databaseAutoStart\":false,\"databaseAutoStop\":true}}}");
+        Files.writeString(nodeDir.resolve("profile.json"),
+                "{\"appliedProfile\":\"legacy\",\"profileLinks\":{\"mainnet\":{"
+                        + "\"logging\":\"verbose\",\"database\":\"MariaDB:legacy\","
+                        + "\"dbAutoStart\":true,\"dbAutoStop\":false}}}");
+
+        ProfileConfig config = new ProfileConfig(profilesJson);
+        assertEquals("canonical", config.load().getAppliedProfile());
+        assertEquals(Map.of(ModuleIds.NODE, "standard"), config.getLoggingPresets("mainnet"));
+        assertEquals("PostgreSQL:canonical", config.getDatabaseProfileLink("mainnet"));
+        assertEquals(Boolean.FALSE, config.getDatabaseAutoStart("mainnet"));
+        assertEquals(Boolean.TRUE, config.getDatabaseAutoStop("mainnet"));
+        assertFalse(Files.exists(nodeDir.resolve("profile.json")));
+    }
+
+    @Test
+    @DisplayName("legacy server links and auto flags are discarded for a SQLite node profile")
+    void legacyMetadata_discardsDatabaseLinksForSqliteProfiles() throws IOException {
+        Path nodeDir = tempDir.resolve("node");
+        Path profileDir = nodeDir.resolve("profiles");
+        Files.createDirectories(profileDir);
+        Files.writeString(profileDir.resolve("mainnet.properties"),
+                "DB.Url=jdbc:sqlite:file:./database/SQLite/mainnet/signum.sqlite.db");
+        Path legacy = nodeDir.resolve("profile.json");
+        Files.writeString(legacy,
+                "{\"profileLinks\":{\"mainnet\":{\"database\":\"MariaDB:stale\","
+                        + "\"dbAutoStart\":true,\"dbAutoStop\":true}}}");
+
+        ProfileConfig config = new ProfileConfig(nodeDir.resolve("profiles.json"));
+        assertNull(config.getDatabaseProfileLink("mainnet"));
+        assertNull(config.getDatabaseAutoStart("mainnet"));
+        assertNull(config.getDatabaseAutoStop("mainnet"));
+        assertFalse(Files.exists(legacy));
+    }
+
+    @Test
+    @DisplayName("unknown legacy metadata is retained instead of being discarded")
+    void legacyMetadata_retainsUnknownFields() throws IOException {
+        Path nodeDir = tempDir.resolve("node");
+        Files.createDirectories(nodeDir);
+        Path legacy = nodeDir.resolve("profile.json");
+        Files.writeString(legacy,
+                "{\"appliedProfile\":\"mainnet\",\"futureOption\":{\"enabled\":true}}");
+
+        ProfileConfig config = new ProfileConfig(nodeDir.resolve("profiles.json"));
+        assertEquals("mainnet", config.load().getAppliedProfile());
+        assertTrue(Files.exists(legacy));
+        assertTrue(Files.readString(legacy).contains("futureOption"));
     }
 }

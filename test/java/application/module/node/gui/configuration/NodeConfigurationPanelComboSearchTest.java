@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.Insets;
@@ -21,6 +22,7 @@ import javax.swing.JComboBox;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.ListCellRenderer;
 import javax.swing.SwingUtilities;
 
 import application.utils.gui.ComboSearchHighlightRenderer;
@@ -189,7 +191,14 @@ class NodeConfigurationPanelComboSearchTest {
                             && (keyText == null || !containsIgnoreCase(keyText, query)),
                             "the query must occur only in the configured select value");
 
-                    Object originalRenderer = combo.getRenderer();
+                    @SuppressWarnings("unchecked")
+                    ListCellRenderer<Object> originalRenderer =
+                            (ListCellRenderer<Object>) combo.getRenderer();
+                    JList<Object> rendererList = new JList<>();
+                    Component originalSelectedCell = originalRenderer.getListCellRendererComponent(
+                            rendererList, combo.getSelectedItem(), -1, true, false);
+                    Color expectedSelectedForeground = originalSelectedCell.getForeground();
+                    Color expectedSelectedBackground = originalSelectedCell.getBackground();
                     SearchMatchPanel searchPanel =
                             (SearchMatchPanel) readDeclaredField(panelRef[0], "searchMatchPanel");
 
@@ -203,6 +212,18 @@ class NodeConfigurationPanelComboSearchTest {
                     if (!(combo.getRenderer() instanceof ComboSearchHighlightRenderer)) {
                         out.add("the matching select must be rendered by the band renderer (got: "
                                 + combo.getRenderer().getClass().getSimpleName() + ")");
+                    } else {
+                        @SuppressWarnings("unchecked")
+                        ListCellRenderer<Object> bandRenderer =
+                                (ListCellRenderer<Object>) combo.getRenderer();
+                        Component selectedCell = bandRenderer.getListCellRendererComponent(
+                                rendererList, combo.getSelectedItem(), -1, true, false);
+                        if (!expectedSelectedForeground.equals(selectedCell.getForeground())) {
+                            out.add("search highlighting must preserve the selected value's state font color");
+                        }
+                        if (!expectedSelectedBackground.equals(selectedCell.getBackground())) {
+                            out.add("search highlighting must preserve the normal selected background");
+                        }
                     }
 
                     // 2. Clearing the search restores the original renderer.

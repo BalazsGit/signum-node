@@ -6,7 +6,6 @@ import application.utils.logging.ModuleLoggingProvider;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -213,86 +212,44 @@ class LoggingProfileRepositoryTest {
         }
     }
 
-    @Nested
-    @DisplayName("Applied-state snapshot")
-    class AppliedSnapshotTests {
+    @Test
+    @DisplayName("in-memory applied values remain distinct from saved edits")
+    void appliedBaselineRemainsInMemoryAfterSavedEdit() throws IOException {
+        Properties applied = new Properties();
+        applied.setProperty("node.level", "INFO");
+        Properties saved = new Properties();
+        saved.setProperty("node.level", "WARNING");
+        repo.create(MODULE, "custom", applied);
+        repo.setApplied(MODULE, "custom");
+        repo.rememberAppliedBaseline(MODULE, "custom", applied);
 
-        @Test
-        @DisplayName("save then load round-trips the applied values (file under applied/)")
-        void saveThenLoad_roundTrips() throws IOException {
-            Properties values = new Properties();
-            values.setProperty("node.level", "WARNING");
-            values.setProperty("node.handler", "java.util.logging.FileHandler");
-            repo.saveAppliedSnapshot(MODULE, "custom", values);
+        repo.saveProps(MODULE, "custom", saved);
 
-            assertTrue(Files.exists(repo.getAppliedSnapshotPath(MODULE, "custom")));
-            Path snapshotPath = repo.getAppliedSnapshotPath(MODULE, "custom");
-            assertTrue(snapshotPath.toString().endsWith("applied" + java.io.File.separator + "custom.json"),
-                    "the snapshot lives under the module's applied/ directory");
-            Properties loaded = repo.loadAppliedSnapshot(MODULE, "custom");
-            assertEquals("WARNING", loaded.getProperty("node.level"));
-            assertEquals("java.util.logging.FileHandler", loaded.getProperty("node.handler"));
-        }
+        assertEquals("INFO", new LoggingProfileRepository(tempDir.toString())
+                .loadAppliedBaseline(MODULE, "custom").getProperty("node.level"));
+        assertEquals("WARNING", repo.loadProps(MODULE, "custom").getProperty("node.level"));
+        assertFalse(Files.exists(repo.getLoggingDir(MODULE).resolve("applied")),
+                "applied baselines must not be persisted under an applied/ directory");
+        repo.setApplied(MODULE, null);
+    }
 
-        @Test
-        @DisplayName("a missing snapshot reads as empty Properties (callers fall back to defaults)")
-        void missingSnapshot_readsAsEmpty() {
-            assertTrue(repo.loadAppliedSnapshot(MODULE, "never-applied").isEmpty());
-            assertTrue(repo.loadAppliedSnapshot(MODULE, null).isEmpty());
-            assertTrue(repo.loadAppliedSnapshot(MODULE, "").isEmpty());
-        }
+    @Test
+    @DisplayName("legacy applied JSON snapshots are removed without touching other files")
+    void cleanupLegacyAppliedSnapshots() throws IOException {
+        Path appliedDir = repo.getLoggingDir(MODULE).resolve("applied");
+        Files.createDirectories(appliedDir);
+        Path legacySnapshot = appliedDir.resolve("custom.json");
+        Path unrelated = appliedDir.resolve("keep.txt");
+        Files.writeString(legacySnapshot, "{}");
+        Files.writeString(unrelated, "keep");
 
-        @Test
-        @DisplayName("a corrupt snapshot reads as empty Properties (defensive)")
-        void corruptSnapshot_readsAsEmpty() throws IOException {
-            Path file = repo.getAppliedSnapshotPath(MODULE, "bad");
-            Files.createDirectories(file.getParent());
-            Files.writeString(file, "{ not json", java.nio.charset.StandardCharsets.UTF_8);
+        repo.cleanupLegacyAppliedSnapshots(MODULE);
 
-            assertTrue(repo.loadAppliedSnapshot(MODULE, "bad").isEmpty());
-        }
-
-        @Test
-        @DisplayName("the reserved profile name cannot be snapshotted")
-        void reservedName_isRejected() {
-            assertThrows(IllegalArgumentException.class, () -> repo.saveAppliedSnapshot(
-                    MODULE, LoggingProfileRepository.RESERVED_PROFILE_NAME, new Properties()));
-        }
-
-        @Test
-        @DisplayName("deleting a profile removes its snapshot")
-        void delete_removesSnapshot() throws IOException {
-            repo.saveProps(MODULE, "custom", new Properties());
-            repo.saveAppliedSnapshot(MODULE, "custom", new Properties());
-            assertTrue(Files.exists(repo.getAppliedSnapshotPath(MODULE, "custom")));
-
-            repo.delete(MODULE, "custom");
-
-            assertFalse(Files.exists(repo.getAppliedSnapshotPath(MODULE, "custom")));
-        }
-
-        @Test
-        @DisplayName("renaming a profile moves its snapshot")
-        void rename_movesSnapshot() throws IOException {
-            repo.saveProps(MODULE, "old", new Properties());
-            repo.saveAppliedSnapshot(MODULE, "old", new Properties());
-
-            repo.rename(MODULE, "old", "new");
-
-            assertFalse(Files.exists(repo.getAppliedSnapshotPath(MODULE, "old")));
-            assertTrue(Files.exists(repo.getAppliedSnapshotPath(MODULE, "new")));
-        }
-
-        @Test
-        @DisplayName("clearing the applied profile drops the stale snapshot")
-        void clearingApplied_dropsSnapshot() throws IOException {
-            repo.setApplied(MODULE, "custom");
-            repo.saveAppliedSnapshot(MODULE, "custom", new Properties());
-
-            repo.setApplied(MODULE, null);
-
-            assertFalse(Files.exists(repo.getAppliedSnapshotPath(MODULE, "custom")));
-        }
+        assertFalse(Files.exists(legacySnapshot));
+        assertTrue(Files.exists(unrelated));
+        Files.delete(unrelated);
+        repo.cleanupLegacyAppliedSnapshots(MODULE);
+        assertFalse(Files.exists(appliedDir), "an empty legacy directory should also be removed");
     }
 
     static final class TestProvider extends ModuleLoggingProvider {

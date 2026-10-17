@@ -1,16 +1,25 @@
 package application.module.node.profile;
 
+import application.module.node.props.Props;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Reader;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +34,7 @@ import java.util.stream.Collectors;
  * now only manages cross-profile configuration that does not belong in individual
  * profile files:
  * <ul>
+ *   <li>{@code appliedProfile} — the last applied node-profile marker</li>
  *   <li>{@code loggingPresets} — node profile name → per-module logging profile
  *       assignment map (the JSON key is retained for compatibility with existing files)</li>
  *   <li>{@code tabOrder} — user-defined GUI tab display order</li>
@@ -67,6 +77,7 @@ public class ProfileConfig {
     public static class ProfileData {
         private String version = "1.0";
         private int maxConcurrentNodes = 1;
+        private String appliedProfile;
         /** User-defined tab order for profile tabs in the NodePanel GUI. Null means default (filesystem) order. */
         private List<String> tabOrder;
         private Map<String, ProfileEntry> profiles = new LinkedHashMap<>();
@@ -77,6 +88,14 @@ public class ProfileConfig {
 
         public int getMaxConcurrentNodes() {
             return maxConcurrentNodes;
+        }
+
+        public String getAppliedProfile() {
+            return appliedProfile;
+        }
+
+        public void setAppliedProfile(String appliedProfile) {
+            this.appliedProfile = appliedProfile;
         }
 
         public List<String> getTabOrder() {
@@ -303,7 +322,156 @@ public class ProfileConfig {
             }
         }
 
+        migrateLegacyMetadata();
         return profileData;
+    }
+
+    /**
+     * Migrates the former node/profile.json metadata into this canonical document.
+     * The legacy file is deleted only after profiles.json has been saved and every
+     * recognized legacy field has been migrated; unknown fields are retained.
+     */
+    private void migrateLegacyMetadata() {
+        Path legacyPath = configPath.resolveSibling("profile.json");
+        if (!Files.isRegularFile(legacyPath)) {
+            return;
+        }
+
+        JsonObject legacy;
+        try (Reader reader = Files.newBufferedReader(legacyPath, StandardCharsets.UTF_8)) {
+            legacy = JsonParser.parseReader(reader).getAsJsonObject();
+        } catch (Exception e) {
+            LOGGER.error("Could not read legacy node profile metadata from {}", legacyPath, e);
+            return;
+        }
+
+        boolean changed = false;
+        JsonElement appliedProfile = legacy.get("appliedProfile");
+        if (appliedProfile != null && appliedProfile.isJsonPrimitive()
+                && appliedProfile.getAsJsonPrimitive().isString()) {
+            if (profileData.getAppliedProfile() == null || profileData.getAppliedProfile().isBlank()) {
+                profileData.setAppliedProfile(appliedProfile.getAsString());
+            }
+            legacy.remove("appliedProfile");
+            changed = true;
+        }
+
+        JsonElement profileLinks = legacy.get("profileLinks");
+        if (profileLinks != null && profileLinks.isJsonObject()) {
+            JsonObject linksByProfile = profileLinks.getAsJsonObject();
+            Iterator<Map.Entry<String, JsonElement>> linkIterator = linksByProfile.entrySet().iterator();
+            while (linkIterator.hasNext()) {
+                Map.Entry<String, JsonElement> profileLink = linkIterator.next();
+                if (!profileLink.getValue().isJsonObject()) {
+                    continue;
+                }
+                JsonObject links = profileLink.getValue().getAsJsonObject();
+                ProfileEntry entry = profileData.getProfiles().computeIfAbsent(
+                        profileLink.getKey(), key -> new ProfileEntry());
+                changed |= migrateLegacyLoggingLink(entry, links);
+                changed |= migrateLegacyDatabaseLinks(entry, links, isSqliteProfile(profileLink.getKey()));
+                if (links.size() == 0) {
+                    linkIterator.remove();
+                    changed = true;
+                }
+            }
+            if (linksByProfile.size() == 0) {
+                legacy.remove("profileLinks");
+                changed = true;
+            }
+        }
+
+        if (!changed) {
+            return;
+        }
+
+        try {
+            save();
+            if (legacy.size() == 0) {
+                Files.deleteIfExists(legacyPath);
+                LOGGER.info("Migrated legacy node profile metadata to {}", configPath);
+            } else {
+                try (Writer writer = Files.newBufferedWriter(legacyPath, StandardCharsets.UTF_8)) {
+                    new GsonBuilder().setPrettyPrinting().create().toJson(legacy, writer);
+                }
+                LOGGER.warn("Migrated recognized node metadata to {}; retained unknown fields in {}",
+                        configPath, legacyPath);
+            }
+        } catch (IOException e) {
+            LOGGER.error("Failed to persist migrated node profile metadata from {}", legacyPath, e);
+        }
+    }
+
+    private static boolean migrateLegacyLoggingLink(ProfileEntry entry, JsonObject links) {
+        JsonElement legacyLogging = links.get("logging");
+        if (legacyLogging == null || !legacyLogging.isJsonPrimitive()
+                || !legacyLogging.getAsJsonPrimitive().isString()) {
+            return false;
+        }
+
+        Map<String, String> assignments = new LinkedHashMap<>();
+        if (entry.getLoggingPresets() != null) {
+            assignments.putAll(entry.getLoggingPresets());
+        }
+        assignments.putIfAbsent("node", legacyLogging.getAsString());
+        entry.setLoggingPresets(assignments);
+        links.remove("logging");
+        return true;
+    }
+
+    private boolean migrateLegacyDatabaseLinks(ProfileEntry entry, JsonObject links, boolean sqliteProfile) {
+        boolean changed = false;
+        JsonElement database = links.get("database");
+        boolean sqliteLink = database != null && database.isJsonPrimitive()
+                && database.getAsJsonPrimitive().isString()
+                && database.getAsString().regionMatches(true, 0, "SQLite:", 0, "SQLite:".length());
+        if (database != null && database.isJsonPrimitive() && database.getAsJsonPrimitive().isString()) {
+            if (!sqliteLink && !sqliteProfile && (entry.getDatabaseProfileLink() == null
+                    || entry.getDatabaseProfileLink().isBlank())) {
+                entry.setDatabaseProfileLink(database.getAsString());
+            }
+            links.remove("database");
+            changed = true;
+        }
+
+        if (sqliteLink || sqliteProfile) {
+            changed |= links.remove("dbAutoStart") != null;
+            changed |= links.remove("dbAutoStop") != null;
+            return changed;
+        }
+
+        JsonElement autoStart = links.get("dbAutoStart");
+        if (autoStart != null && autoStart.isJsonPrimitive() && autoStart.getAsJsonPrimitive().isBoolean()) {
+            if (entry.getDatabaseAutoStart() == null) {
+                entry.setDatabaseAutoStart(autoStart.getAsBoolean());
+            }
+            links.remove("dbAutoStart");
+            changed = true;
+        }
+        JsonElement autoStop = links.get("dbAutoStop");
+        if (autoStop != null && autoStop.isJsonPrimitive() && autoStop.getAsJsonPrimitive().isBoolean()) {
+            if (entry.getDatabaseAutoStop() == null) {
+                entry.setDatabaseAutoStop(autoStop.getAsBoolean());
+            }
+            links.remove("dbAutoStop");
+            changed = true;
+        }
+        return changed;
+    }
+
+    private boolean isSqliteProfile(String profileName) {
+        Path nodeDirectory = configPath.getParent();
+        Path confRoot = nodeDirectory != null ? nodeDirectory.getParent() : null;
+        if (confRoot == null) {
+            return false;
+        }
+        NodeProfile profile = NodeProfileRepository.loadProfile(confRoot.toString(), profileName);
+        if (profile == null) {
+            return false;
+        }
+        String databaseUrl = profile.getProperty(Props.DB_URL.getName());
+        return databaseUrl != null && databaseUrl.regionMatches(true, 0,
+                "jdbc:sqlite:", 0, "jdbc:sqlite:".length());
     }
 
     /**
@@ -335,6 +503,65 @@ public class ProfileConfig {
         try (FileWriter writer = new FileWriter(configPath.toFile())) {
             gson.toJson(profileData, writer);
             LOGGER.debug("Saved profiles config to {}", configPath);
+        }
+    }
+
+    /**
+     * Renames metadata associated with a node profile while preserving all
+     * canonical logging and database assignments.
+     */
+    public void renameProfileMetadata(String oldName, String newName) {
+        ProfileData data = reload();
+        ProfileEntry oldEntry = data.getProfiles().remove(oldName);
+        if (oldEntry != null) {
+            ProfileEntry newEntry = data.getProfiles().computeIfAbsent(newName, key -> new ProfileEntry());
+            mergeProfileEntry(newEntry, oldEntry);
+        }
+        if (oldName.equals(data.getAppliedProfile())) {
+            data.setAppliedProfile(newName);
+        }
+        try {
+            save();
+        } catch (IOException e) {
+            LOGGER.error("Failed to rename profile metadata '{}' to '{}'", oldName, newName, e);
+        }
+    }
+
+    /**
+     * Removes metadata associated with a deleted node profile.
+     */
+    public void removeProfileMetadata(String profileName) {
+        ProfileData data = reload();
+        data.getProfiles().remove(profileName);
+        if (profileName.equals(data.getAppliedProfile())) {
+            data.setAppliedProfile(null);
+        }
+        try {
+            save();
+        } catch (IOException e) {
+            LOGGER.error("Failed to remove profile metadata for '{}'", profileName, e);
+        }
+    }
+
+    private static void mergeProfileEntry(ProfileEntry target, ProfileEntry source) {
+        if (target.getLoggingProfile() == null) {
+            target.setLoggingProfile(source.getLoggingProfile());
+        }
+        if (target.getLoggingPresets() == null || target.getLoggingPresets().isEmpty()) {
+            target.setLoggingPresets(source.getLoggingPresets());
+        } else if (source.getLoggingPresets() != null) {
+            Map<String, String> merged = new LinkedHashMap<>(source.getLoggingPresets());
+            merged.putAll(target.getLoggingPresets());
+            target.setLoggingPresets(merged);
+        }
+        if (target.getDatabaseProfileLink() == null || target.getDatabaseProfileLink().isBlank()) {
+            target.setDatabaseProfileLink(source.getDatabaseProfileLink());
+        }
+        if (target.getDatabaseAutoStart() == null) {
+            target.setDatabaseAutoStart(source.getDatabaseAutoStart());
+        }
+        if (target.getDatabaseAutoStop() == null) {
+            target.setDatabaseAutoStop(source.getDatabaseAutoStop());
         }
     }
 

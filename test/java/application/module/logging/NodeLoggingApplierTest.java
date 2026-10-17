@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -91,8 +92,8 @@ class NodeLoggingApplierTest {
 
         assertEquals(LogLevel.WARN, NodeLoggerRegistry.get(MODULE, PROFILE).getLogLevel(),
                 "the assigned node.level is still applied to its profile logger");
-        assertFalse(repo.hasAppliedSnapshot(MODULE, "custom"),
-                "per-node application must not alter the shared profile's applied baseline");
+        assertFalse(Files.exists(repo.getLoggingDir(MODULE).resolve("applied")),
+                "per-node application must not create shared applied snapshot files");
     }
 
     @Test

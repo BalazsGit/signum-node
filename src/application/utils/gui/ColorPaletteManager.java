@@ -93,6 +93,7 @@ public final class ColorPaletteManager {
         Map<String, Color> colors = new ConcurrentHashMap<>();
         colors.put("applied", new Color(0, 128, 0));
         colors.put("saved", Color.YELLOW);
+        colors.put("savedInit", new Color(240, 220, 100));
         colors.put("unsavedApplied", new Color(128, 128, 128));
         colors.put("peer.disconnected", Color.YELLOW);
         colors.put("peer.outdated.version", Color.ORANGE);

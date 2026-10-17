@@ -41,6 +41,7 @@ class NodeConfigurationPanelDatabaseAutoLinkTest {
     private static final Path NODE_PROPS = Path.of("conf", "node", "profiles", PROFILE + ".properties");
     private static final Path DB_META = Path.of("conf", "database", "profile.json");
     private static final Path NODE_META = Path.of("conf", "node", "profile.json");
+    private static final Path NODE_PROFILES_META = Path.of("conf", "node", "profiles.json");
     private static final Path DB_PROFILE_DIR = Path.of("database", "SQLite", PROFILE);
     private static final long INIT_TIMEOUT_MS = 30_000;
 
@@ -48,6 +49,8 @@ class NodeConfigurationPanelDatabaseAutoLinkTest {
     private boolean dbMetaExisted;
     private byte[] nodeMetaBackup;
     private boolean nodeMetaExisted;
+    private byte[] nodeProfilesMetaBackup;
+    private boolean nodeProfilesMetaExisted;
 
     @BeforeEach
     void setUp() throws IOException {
@@ -55,6 +58,8 @@ class NodeConfigurationPanelDatabaseAutoLinkTest {
         dbMetaBackup = dbMetaExisted ? Files.readAllBytes(DB_META) : null;
         nodeMetaExisted = Files.exists(NODE_META);
         nodeMetaBackup = nodeMetaExisted ? Files.readAllBytes(NODE_META) : null;
+        nodeProfilesMetaExisted = Files.exists(NODE_PROFILES_META);
+        nodeProfilesMetaBackup = nodeProfilesMetaExisted ? Files.readAllBytes(NODE_PROFILES_META) : null;
 
         // the node profile carries the per-profile SQLite URL
         Files.createDirectories(NODE_PROPS.getParent());
@@ -82,6 +87,11 @@ class NodeConfigurationPanelDatabaseAutoLinkTest {
             Files.write(NODE_META, nodeMetaBackup);
         } else {
             Files.deleteIfExists(NODE_META);
+        }
+        if (nodeProfilesMetaExisted) {
+            Files.write(NODE_PROFILES_META, nodeProfilesMetaBackup);
+        } else {
+            Files.deleteIfExists(NODE_PROFILES_META);
         }
         Files.deleteIfExists(NODE_PROPS);
         Files.deleteIfExists(DB_PROFILE_DIR.resolve("profile.json"));
@@ -159,10 +169,10 @@ class NodeConfigurationPanelDatabaseAutoLinkTest {
                     "the materialized JDBC URL must point at the linked profile's database");
 
             // The file-based assignment is derivable from the properties
-            // alone, so it must NOT be persisted to the node metadata
+            // alone, so it must NOT be persisted to the node profile metadata
             // (server-engine links are the only ones persisted).
-            String meta = nodeMetaExisted ? Files.readString(NODE_META) : "";
-            assertFalse(meta.contains("\"database\""),
+            String meta = Files.exists(NODE_PROFILES_META) ? Files.readString(NODE_PROFILES_META) : "";
+            assertFalse(meta.contains("\"databaseProfileLink\""),
                     "a SQLite assignment is derived from the properties and must not be persisted");
         } finally {
             SwingUtilities.invokeAndWait(() -> {
@@ -499,4 +509,3 @@ class NodeConfigurationPanelDatabaseAutoLinkTest {
         throw new AssertionError("no editable text input for component: " + c);
     }
 }
-
