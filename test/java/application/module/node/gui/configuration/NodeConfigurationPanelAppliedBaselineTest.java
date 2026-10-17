@@ -3,15 +3,22 @@ package application.module.node.gui.configuration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import java.awt.Component;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicReference;
 
+import javax.swing.JComponent;
+import javax.swing.JComboBox;
 import javax.swing.JFrame;
+import javax.swing.JList;
+import javax.swing.ListCellRenderer;
 import javax.swing.SwingUtilities;
+import javax.swing.text.JTextComponent;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -135,6 +142,21 @@ class NodeConfigurationPanelAppliedBaselineTest {
                     Object appliedAfter = readDeclaredField(panelRef[0], "appliedProfile");
                     appliedAfterReloadHook[0] = ((application.module.node.profile.NodeProfile) appliedAfter)
                             .getProperties();
+
+                    JComponent valueInput = propertyInput((NodeConfigurationPanel) panelRef[0], "node.valueSuffix");
+                    assertNotNull(valueInput, "the profile value editor is available");
+                    assertEquals("Status: Saved Applied", valueInput.getToolTipText(),
+                            "the current configuration value exposes its state on hover");
+                    if (valueInput instanceof JComboBox<?> combo && combo.isEditable()) {
+                        JTextComponent editorText = findTextComponent(
+                                (Component) combo.getEditor().getEditorComponent());
+                        assertNotNull(editorText, "the editable select exposes its text field");
+                        assertEquals("Status: Saved Applied", editorText.getToolTipText(),
+                                "the visible editable-select text exposes its state on hover");
+                        assertEquals("Status: Saved Applied",
+                                renderedTooltip(combo.getRenderer(), combo.getEditor().getItem()),
+                                "the dropdown option exposes its own state on hover");
+                    }
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
@@ -186,5 +208,37 @@ class NodeConfigurationPanelAppliedBaselineTest {
             }
         }
         throw new AssertionError("field not found: " + name);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static JComponent propertyInput(NodeConfigurationPanel panel, String propertyName) throws Exception {
+        List<NodeConfigurationPanel.PropertyRow> rows =
+                (List<NodeConfigurationPanel.PropertyRow>) readDeclaredField(panel, "allPropertyRows");
+        return rows.stream()
+                .filter(row -> row.prop != null && propertyName.equals(row.prop.getName()))
+                .map(row -> row.input)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static JTextComponent findTextComponent(Component component) {
+        if (component instanceof JTextComponent textComponent) {
+            return textComponent;
+        }
+        if (component instanceof java.awt.Container container) {
+            for (Component child : container.getComponents()) {
+                JTextComponent found = findTextComponent(child);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static String renderedTooltip(ListCellRenderer renderer, Object value) {
+        Component rendered = renderer.getListCellRendererComponent(new JList<>(), value, 0, false, false);
+        return ((JComponent) rendered).getToolTipText();
     }
 }

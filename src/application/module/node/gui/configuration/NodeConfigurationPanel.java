@@ -22,6 +22,7 @@ import application.module.node.props.Props;
 import application.module.node.util.Convert;
 import jiconfont.icons.font_awesome.FontAwesome;
 import application.utils.gui.CheckboxGroupPanel;
+import application.utils.gui.ComboBoxItemToolTips;
 import application.utils.gui.ComboSearchHighlightRenderer;
 import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
@@ -3253,6 +3254,22 @@ public class NodeConfigurationPanel extends JPanel {
             @Override
             public Component getListCellRendererComponent(JList<?> list, Object value, int index,
                     boolean isSelected, boolean cellHasFocus) {
+                if (list != null && index >= 0) {
+                    ComboBoxItemToolTips.install(list, item -> {
+                        if (!(item instanceof String text)) {
+                            return null;
+                        }
+                        String saved = savedProfile.getProperty(prop.getName());
+                        if (saved == null) {
+                            saved = getSafeDefault(prop);
+                        }
+                        String applied = appliedProfile.getProperty(prop.getName());
+                        if (applied == null) {
+                            applied = getSafeDefault(prop);
+                        }
+                        return itemStatus(text, currentValue.get(), saved, applied).tooltip();
+                    });
+                }
                 Component c = super.getListCellRendererComponent(
                         list == null ? RENDERER_FALLBACK_LIST : list, value, index, isSelected, cellHasFocus);
                 if (value instanceof String) {
@@ -3262,7 +3279,9 @@ public class NodeConfigurationPanel extends JPanel {
                     String applied = appliedProfile.getProperty(prop.getName());
                     if (applied == null)
                         applied = getSafeDefault(prop);
-                    c.setForeground(itemStatus((String) value, currentValue.get(), saved, applied).color());
+                    ValueStatus status = itemStatus((String) value, currentValue.get(), saved, applied);
+                    c.setForeground(status.color());
+                    ((JComponent) c).setToolTipText(status.tooltip());
                 }
                 return c;
             }
@@ -3804,6 +3823,19 @@ public class NodeConfigurationPanel extends JPanel {
     private enum ValueStatus {
         UNSAVED, UNSAVED_APPLIED, SAVED, SAVED_APPLIED;
 
+        String displayName() {
+            return switch (this) {
+                case UNSAVED -> "Unsaved";
+                case UNSAVED_APPLIED -> "Unsaved Applied";
+                case SAVED -> "Saved";
+                case SAVED_APPLIED -> "Saved Applied";
+            };
+        }
+
+        String tooltip() {
+            return "Status: " + displayName();
+        }
+
         /**
          * The palette color of this state — read LIVE from the palette on
          * every call (never cached): the state colors are theme-dependent
@@ -4080,7 +4112,9 @@ public class NodeConfigurationPanel extends JPanel {
             applied = applied.trim();
         }
 
-        Color color = valueStatus(comp instanceof JCheckBox, value, savedValue, applied).color();
+        ValueStatus status = valueStatus(comp instanceof JCheckBox, value, savedValue, applied);
+        Color color = status.color();
+        String tooltip = status.tooltip();
         // The state-aware select's dropdown follows the state: rebuild its
         // selectable baseline entries (saved / applied) after every
         // re-resolution so they can never disagree with the row color.
@@ -4111,6 +4145,17 @@ public class NodeConfigurationPanel extends JPanel {
         }
 
         target.setForeground(color);
+        comp.setToolTipText(tooltip);
+        if (comp instanceof JComboBox<?> comboBox && comboBox.isEditable()) {
+            JComponent editorComponent = (JComponent) comboBox.getEditor().getEditorComponent();
+            editorComponent.setToolTipText(tooltip);
+            javax.swing.text.JTextComponent currentEditorText = findEditorText(editorComponent);
+            if (currentEditorText != null) {
+                currentEditorText.setToolTipText(tooltip);
+            }
+        } else if (target != comp) {
+            target.setToolTipText(tooltip);
+        }
     }
 
     /**
@@ -5241,10 +5286,13 @@ public class NodeConfigurationPanel extends JPanel {
             try {
                 for (JComboBox<String> combo : itemFields) {
                     rebuildItemComboModel(combo);
+                    ValueStatus status = statusOf(stateAwareComboText(combo));
+                    combo.setToolTipText(status.tooltip());
                     javax.swing.text.JTextComponent text =
                             findEditorText((JComponent) combo.getEditor().getEditorComponent());
                     if (text != null) {
-                        text.setForeground(statusOf(stateAwareComboText(combo)).color());
+                        text.setForeground(status.color());
+                        text.setToolTipText(status.tooltip());
                     }
                 }
                 rebuildAddComboModel();
@@ -5460,11 +5508,18 @@ public class NodeConfigurationPanel extends JPanel {
                 @Override
                 public Component getListCellRendererComponent(JList<?> list, Object value, int index,
                         boolean isSelected, boolean cellHasFocus) {
+                    if (list != null && index >= 0) {
+                        ComboBoxItemToolTips.install(list, item -> item instanceof String text
+                                ? statusOf(text).tooltip()
+                                : null);
+                    }
                     Component c = super.getListCellRendererComponent(
                             list == null ? RENDERER_FALLBACK_LIST : list, value, index,
                             isSelected, cellHasFocus);
                     if (value instanceof String s) {
-                        c.setForeground(statusOf(s).color());
+                        ValueStatus status = statusOf(s);
+                        c.setForeground(status.color());
+                        ((JComponent) c).setToolTipText(status.tooltip());
                     }
                     return c;
                 }

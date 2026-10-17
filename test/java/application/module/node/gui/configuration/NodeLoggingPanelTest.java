@@ -482,6 +482,78 @@ class NodeLoggingPanelTest {
                 "the 'Default' message states that the node's custom assignment is cleared");
     }
 
+    @Test
+    @DisplayName("bound panel: an editable combo's status tooltip survives an L&F (updateUI) pass")
+    void editableComboStatusTooltipSurvivesLafPass() {
+        final NodeLoggingPanel[] holder = new NodeLoggingPanel[1];
+        onEdt(() -> holder[0] = new NodeLoggingPanel("zz-laf-node", () -> { }));
+        NodeLoggingPanel panel = holder[0];
+
+        JComboBox<?> combo = assertInstanceOf(JComboBox.class, editorForLabel(panel, "handlers"),
+                "the 'handlers' row (a non-level value) is an editable combo");
+        assertTrue(combo.isEditable(), "the non-level rows are editable combos");
+        JTextField original = editorTextFieldOf((JComponent) combo.getEditor().getEditorComponent());
+        assertNotNull(original, "the editable combo carries an editor text field");
+        assertNotNull(original.getToolTipText(),
+                "the editor field starts with the status tooltip (the hover tooltip of the row)");
+        assertEquals(combo.getToolTipText(), original.getToolTipText(),
+                "the field and the combo carry the same status tooltip");
+
+        // Simulate an L&F / theme update pass: the walk hits the panel first
+        // and then its descendants — an editable combo's updateUI() REPLACES
+        // its editor text field (FlatLaf), so the tooltip styled onto the old
+        // field would be lost (no status tooltip on hover in the profile
+        // logging tab).
+        onEdt(() -> {
+            panel.updateUI();
+            updateUiRecursively(panel);
+        });
+        // Pump the deferred re-style the panel scheduled after the pass.
+        onEdt(() -> { });
+
+        JTextField fresh = editorTextFieldOf((JComponent) combo.getEditor().getEditorComponent());
+        assertNotNull(fresh, "the editable combo still carries an editor text field");
+        assertEquals(combo.getToolTipText(), fresh.getToolTipText(),
+                "after the L&F pass the (possibly replaced) editor field carries the same status tooltip");
+        assertNotNull(fresh.getToolTipText(), "the status tooltip survives the L&F pass");
+        assertTrue(fresh.getToolTipText().startsWith("Status: "),
+                "the surviving tooltip is the status one: " + fresh.getToolTipText());
+        if (original != fresh) {
+            assertEquals(original.getForeground(), fresh.getForeground(),
+                    "the state font color survives on the replaced editor field");
+        }
+    }
+
+    /** The (first) text field inside the given component tree (a combo's editor text). */
+    private static JTextField editorTextFieldOf(JComponent component) {
+        if (component instanceof JTextField textField) {
+            return textField;
+        }
+        if (component instanceof Container) {
+            for (Component child : ((Container) component).getComponents()) {
+                if (child instanceof JComponent) {
+                    JTextField found = editorTextFieldOf((JComponent) child);
+                    if (found != null) {
+                        return found;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Recursively applies the updateUI() pass an L&F change walks the tree with. */
+    private static void updateUiRecursively(JComponent component) {
+        component.updateUI();
+        if (component instanceof Container container) {
+            for (Component child : container.getComponents()) {
+                if (child instanceof JComponent jc) {
+                    updateUiRecursively(jc);
+                }
+            }
+        }
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────
 
     private static int countVisibleTextFields(Container root) {

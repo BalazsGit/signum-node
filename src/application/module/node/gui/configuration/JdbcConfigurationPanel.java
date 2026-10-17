@@ -8,6 +8,7 @@ import application.module.database.utils.DatabaseConfigurationUtils.DbUser;
 import application.module.node.profile.ProfileCreateDefaults;
 import application.module.node.profile.SqliteDatabasePaths;
 import application.utils.gui.ConfigurationUtils;
+import application.utils.gui.ComboBoxItemToolTips;
 import application.utils.gui.GuiColors;
 import net.miginfocom.swing.MigLayout;
 import org.slf4j.Logger;
@@ -1703,6 +1704,10 @@ public class JdbcConfigurationPanel extends JPanel {
             target = editor;
         }
         target.setForeground(color);
+        String tooltip = "Status: " + stateDisplayName(state);
+        input.setToolTipText(tooltip);
+        target.setToolTipText(tooltip);
+        setToolTipTextRecursively(target, tooltip);
         if (target != input) {
             input.setForeground(color);
         }
@@ -1713,6 +1718,25 @@ public class JdbcConfigurationPanel extends JPanel {
             String base = label.getText().replace(" *", "");
             label.setText(base + (dirty ? " *" : ""));
         }
+    }
+
+    private static void setToolTipTextRecursively(Component component, String tooltip) {
+        if (component instanceof JComponent swingComponent) {
+            swingComponent.setToolTipText(tooltip);
+        }
+        if (component instanceof java.awt.Container container) {
+            for (Component child : container.getComponents()) {
+                setToolTipTextRecursively(child, tooltip);
+            }
+        }
+    }
+
+    private static String stateDisplayName(ValueState state) {
+        return switch (state) {
+            case APPLIED -> "Applied";
+            case SAVED -> "Saved";
+            case UNSAVED -> "Unsaved";
+        };
     }
 
     // ------------------------------------------------------------------
@@ -1732,18 +1756,36 @@ public class JdbcConfigurationPanel extends JPanel {
             Supplier<String> appliedValue, Supplier<String> savedValue) {
         ListCellRenderer<? super T> base = combo.getRenderer();
         combo.setRenderer((c, value, index, isSelected, hasFocus) -> {
+            if (c != null && index >= 0) {
+                ComboBoxItemToolTips.install(c, item -> {
+                    for (int itemIndex = 0; itemIndex < combo.getItemCount(); itemIndex++) {
+                        T candidate = combo.getItemAt(itemIndex);
+                        if (java.util.Objects.equals(candidate, item)) {
+                            String itemText = itemValue.apply(candidate);
+                            if (itemText == null) {
+                                return null;
+                            }
+                            return "Status: " + stateDisplayName(
+                                    statusOfValue(itemText, appliedValue.get(), savedValue.get()));
+                        }
+                    }
+                    return null;
+                });
+            }
             Component comp = base.getListCellRendererComponent(c, value, index, isSelected, hasFocus);
-            if (!isSelected && value != null) {
+            if (value != null) {
                 String v = itemValue.apply(value);
                 if (v != null && !v.isEmpty()) {
                     String applied = appliedValue.get();
-                    if (applied != null && v.equals(applied)) {
+                    String saved = savedValue.get();
+                    ValueState state = statusOfValue(v, applied, saved);
+                    if (comp instanceof JComponent swingComponent) {
+                        swingComponent.setToolTipText("Status: " + stateDisplayName(state));
+                    }
+                    if (!isSelected && applied != null && v.equals(applied)) {
                         comp.setForeground(GuiColors.getApplied());
-                    } else {
-                        String saved = savedValue.get();
-                        if (saved != null && v.equals(saved)) {
-                            comp.setForeground(GuiColors.getSaved());
-                        }
+                    } else if (!isSelected && saved != null && v.equals(saved)) {
+                        comp.setForeground(GuiColors.getSaved());
                     }
                 }
             }
