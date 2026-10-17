@@ -93,7 +93,7 @@ public class PeerTableDialog extends JFrame {
 
                     @Override
                     public void mouseEntered(java.awt.event.MouseEvent e) {
-                        ToolTipManager.sharedInstance().setDismissDelay(60000);
+                        ToolTipManager.sharedInstance().setDismissDelay(120000);
                     }
 
                     @Override
@@ -111,7 +111,7 @@ public class PeerTableDialog extends JFrame {
 
             @Override
             public void mouseEntered(java.awt.event.MouseEvent e) {
-                ToolTipManager.sharedInstance().setDismissDelay(60000);
+                ToolTipManager.sharedInstance().setDismissDelay(120000);
             }
 
             @Override

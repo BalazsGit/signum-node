@@ -861,7 +861,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
                     @Override
                     public void mouseEntered(MouseEvent e) {
-                        ToolTipManager.sharedInstance().setDismissDelay(60000);
+                        ToolTipManager.sharedInstance().setDismissDelay(120000);
                     }
 
                     @Override
@@ -877,7 +877,7 @@ public class BlockGenerationMetricsPanel extends JPanel {
 
             @Override
             public void mouseEntered(MouseEvent e) {
-                ToolTipManager.sharedInstance().setDismissDelay(60000);
+                ToolTipManager.sharedInstance().setDismissDelay(120000);
             }
 
             @Override

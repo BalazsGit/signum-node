@@ -818,7 +818,7 @@ public class PeerMetricsPanel extends JPanel {
 
                     @Override
                     public void mouseEntered(MouseEvent e) {
-                        ToolTipManager.sharedInstance().setDismissDelay(60000); // 1 minute
+                        ToolTipManager.sharedInstance().setDismissDelay(120000);
                     }
 
                     @Override
@@ -836,7 +836,7 @@ public class PeerMetricsPanel extends JPanel {
 
             @Override
             public void mouseEntered(MouseEvent e) {
-                ToolTipManager.sharedInstance().setDismissDelay(60000);
+                ToolTipManager.sharedInstance().setDismissDelay(120000);
             }
 
             @Override

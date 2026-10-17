@@ -262,6 +262,9 @@ public class ConfigurationUtils {
      *       height the dropdowns are unified to (the single place it is
      *       defined).</li>
      * </ul>
+     * The target is rounded up to an even pixel height, avoiding one-pixel
+     * differences between otherwise equivalent rows when a look-and-feel
+     * reports fractional font/border metrics differently.
      * A box shorter than the unified height is padded with a BOTTOM
      * EmptyBorder INSIDE its TitledBorder (the L&F's TitledBorder ignores
      * the inner border's top inset — the title owns the top edge — but
@@ -293,6 +296,9 @@ public class ConfigurationUtils {
             if (allVisible > target) {
                 target = allVisible;
             }
+        }
+        if ((target & 1) != 0) {
+            target++;
         }
         for (int i = 0; i < boxes.length; i++) {
             int extra = target - natural[i];

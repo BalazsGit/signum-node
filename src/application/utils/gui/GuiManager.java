@@ -3,6 +3,7 @@ package application.utils.gui;
 import com.formdev.flatlaf.FlatLaf;
 
 import javax.swing.JTabbedPane;
+import javax.swing.ToolTipManager;
 import javax.swing.UIManager;
 import java.awt.Color;
 import java.io.BufferedWriter;
@@ -93,6 +94,7 @@ public class GuiManager {
             return;
         }
         this.settingsPath = guiSettingsPath;
+        ToolTipManager.sharedInstance().setDismissDelay(120_000);
         loadFromJson(guiSettingsPath);
         LOGGER.info("[GUI-DEBUG] GuiManager initialized. Loaded tabLayoutPolicy={}, colorOverrides={}", 
                 getTabLayoutPolicyName(), colorOverrides.size());

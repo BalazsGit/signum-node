@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.awt.FlowLayout;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -16,7 +17,10 @@ import java.util.function.Consumer;
 
 import javax.swing.JButton;
 import javax.swing.JFrame;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
+import javax.swing.border.TitledBorder;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +32,7 @@ import application.utils.logging.event.CompositeFilter;
 import application.utils.logging.event.LogEvent;
 import application.utils.logging.event.LogFilter;
 import application.utils.logging.event.LogLevel;
+import application.utils.gui.SearchMatchPanel;
 
 /**
  * Unit tests for {@link ConsoleFilterHeader}.
@@ -68,6 +73,44 @@ class ConsoleFilterHeaderTest {
     @Nested
     @DisplayName("Constructor")
     class ConstructorTests {
+
+        @Test
+        void constructor_NodeConsoleLayout_usesSharedGapAndEqualTitledBoxHeights() throws Exception {
+            SwingUtilities.invokeAndWait(() -> {
+                ConsoleFilterHeader nodeHeader = new ConsoleFilterHeader(null, false, false);
+                JScrollPane scrollPane = (JScrollPane) nodeHeader.getComponent(0);
+                JPanel contentWrapper = (JPanel) scrollPane.getViewport().getView();
+                JPanel row = (JPanel) contentWrapper.getComponent(0);
+
+                assertEquals(0, ((FlowLayout) row.getLayout()).getHgap());
+                assertEquals(3, row.getComponentCount());
+                assertTrue(row.getComponent(2) instanceof SearchMatchPanel);
+                assertEquals(4, row.getComponent(1).getPreferredSize().width);
+                assertEquals(row.getComponent(0).getPreferredSize().height,
+                        row.getComponent(2).getPreferredSize().height);
+            });
+        }
+
+        @Test
+        void constructor_LevelFilterIsTitledShowLevelsWithoutRedundantShowLabel() throws Exception {
+            SwingUtilities.invokeAndWait(() -> {
+                ConsoleFilterHeader nodeHeader = new ConsoleFilterHeader(null, false, false);
+                JScrollPane scrollPane = (JScrollPane) nodeHeader.getComponent(0);
+                JPanel contentWrapper = (JPanel) scrollPane.getViewport().getView();
+                JPanel row = (JPanel) contentWrapper.getComponent(0);
+                JPanel levelPanel = (JPanel) row.getComponent(0);
+                TitledBorder border = (TitledBorder) levelPanel.getBorder();
+
+                assertEquals("Show levels", border.getTitle());
+                assertEquals(5, levelPanel.getComponentCount(),
+                        "the checkboxes should be the only controls inside the level filter");
+                assertEquals(levelPanel.getPreferredSize().height,
+                        row.getComponent(2).getPreferredSize().height,
+                        "the level filter and Search box should remain equal height");
+                assertEquals(4, row.getComponent(1).getPreferredSize().width,
+                        "the gap between adjacent filter boxes should remain 4px");
+            });
+        }
 
         @Test
         void constructor_WithNullCallback_doesNotThrow() {

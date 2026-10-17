@@ -88,7 +88,9 @@ public final class SearchMatchPanel extends JPanel {
         // every keystroke via the DocumentListener below.
         searchField = new JTextField(16);
         if (fieldTooltip != null) {
-            searchField.setToolTipText(fieldTooltip);
+            searchField.setToolTipText("<html><body style='width: 360px'>"
+                    + fieldTooltip.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    + "</body></html>");
         }
         searchField.getDocument().addDocumentListener(new DocumentListener() {
             @Override

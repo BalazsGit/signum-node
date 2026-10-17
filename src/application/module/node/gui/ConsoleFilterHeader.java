@@ -11,8 +11,10 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 import javax.swing.AbstractButton;
+import javax.swing.Box;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
@@ -24,6 +26,7 @@ import javax.swing.event.DocumentListener;
 import javax.swing.text.JTextComponent;
 
 import application.utils.gui.CheckboxGroupPanel;
+import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.ResponsiveToolbarScrollPane;
 import application.utils.gui.SearchMatchPanel;
 import application.utils.logging.event.CompositeFilter;
@@ -151,17 +154,21 @@ public final class ConsoleFilterHeader extends JPanel {
         setOpaque(false);
         setLayout(new BorderLayout(0, 0));
 
-        JPanel mainPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 0));
+        JPanel mainPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         mainPanel.setOpaque(false);
 
-        mainPanel.add(buildLevelPanel());
+        List<JComponent> titledBoxes = new ArrayList<>();
+        CheckboxGroupPanel levelPanel = buildLevelPanel();
+        addFilterSection(mainPanel, titledBoxes, levelPanel);
         if (showProfile) {
-            mainPanel.add(buildProfilePanel());
+            addFilterSection(mainPanel, titledBoxes, buildProfilePanel());
         }
         if (showModule) {
-            mainPanel.add(buildModulePanel());
+            addFilterSection(mainPanel, titledBoxes, buildModulePanel());
         }
-        mainPanel.add(buildSearchPanel());
+        SearchMatchPanel searchMatchPanel = buildSearchPanel();
+        addFilterSection(mainPanel, titledBoxes, searchMatchPanel);
+        ConfigurationUtils.unifyTitledBoxHeights(titledBoxes.toArray(new JComponent[0]));
 
         // Wrap in the same responsive toolbar scroll pane the button rows use:
         // when the window is narrowed, a horizontal scrollbar appears and the
@@ -175,13 +182,19 @@ public final class ConsoleFilterHeader extends JPanel {
         add(filterScroll, BorderLayout.CENTER);
     }
 
+    private static void addFilterSection(JPanel row, List<JComponent> titledBoxes, JComponent section) {
+        if (row.getComponentCount() > 0) {
+            row.add(Box.createHorizontalStrut(4));
+        }
+        row.add(section);
+        titledBoxes.add(section);
+    }
+
     private CheckboxGroupPanel buildLevelPanel() {
         // Shared titled checkbox-group box (like the node configuration's
         // "Show values" box): unchecking a level rebuilds the combined filter.
-        CheckboxGroupPanel panel = new CheckboxGroupPanel("Level");
+        CheckboxGroupPanel panel = new CheckboxGroupPanel("Show levels");
         panel.setChangeListener(button -> rebuildFilter());
-
-        panel.add(new JLabel("Show: "));
 
         cbTrace = addLevelCheckbox(panel, "TRACE", LogLevel.TRACE);
         cbDebug = addLevelCheckbox(panel, "DEBUG", LogLevel.DEBUG);

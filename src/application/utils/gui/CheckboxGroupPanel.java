@@ -18,8 +18,8 @@ import javax.swing.border.TitledBorder;
  * <p>
  * <h3>UI Layout</h3>
  * <pre>
- * ┌ Level ──────────────────────────────────────────┐
- * │ Show:  ☑TRACE ☑DEBUG ☑INFO ☑WARN ☑ERROR        │
+ * ┌ Show levels ────────────────────────────────────┐
+ * │ ☑TRACE ☑DEBUG ☑INFO ☑WARN ☑ERROR               │
  * └─────────────────────────────────────────────────┘
  * </pre>
  * </p>
@@ -45,7 +45,7 @@ public final class CheckboxGroupPanel extends JPanel {
     /**
      * Creates an empty titled checkbox group.
      *
-     * @param title the box title (e.g. "Level", "Show values")
+     * @param title the box title (e.g. "Show levels", "Show values")
      */
     public CheckboxGroupPanel(String title) {
         setLayout(new FlowLayout(FlowLayout.LEFT, 4, 0));

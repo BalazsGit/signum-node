@@ -354,11 +354,6 @@ public final class SmartScrollController {
         }
         if (wasFollowing != following) {
             stateTransitions++;
-            LOGGER.info("[ScrollDebug] SmartScrollController state transition: {} to {} " +
-                    "(ratio={} vs threshold={})",
-                    wasFollowing ? "FOLLOWING" : "PAUSED",
-                    following ? "FOLLOWING" : "PAUSED",
-                    String.format("%.3f", ratio), threshold);
             // Push event to listeners on state change
             fireStateChanged(!following && hasNewContentBelow);
         }

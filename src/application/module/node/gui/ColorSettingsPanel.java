@@ -3,6 +3,7 @@ package application.module.node.gui;
 import com.formdev.flatlaf.extras.FlatAnimatedLafChange;
 
 import application.utils.gui.ColorPaletteManager;
+import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
 import net.miginfocom.swing.MigLayout;
@@ -58,6 +59,7 @@ public class ColorSettingsPanel extends JPanel {
     /** Tracks which modules use nested tabs vs direct content */
     private final Map<String, Boolean> moduleUsesNestedTabs = new HashMap<>();
     private JPanel contentContainer;
+    private JTextField searchField;
     private final Map<String, String> descriptions = new HashMap<>();
 
     /**
@@ -111,6 +113,9 @@ public class ColorSettingsPanel extends JPanel {
     @Override
     public void updateUI() {
         super.updateUI();
+        if (searchField != null) {
+            ConfigurationUtils.styleInputComponent(searchField);
+        }
         if (allColorKeys != null && !allColorKeys.isEmpty()) {
             refreshAllColorRows();
         }
@@ -118,11 +123,11 @@ public class ColorSettingsPanel extends JPanel {
 
     private void initUI() {
         // Search Panel
-        JPanel searchPanel = new JPanel(new MigLayout("insets 5 10 5 5, fillx", "[][grow]", "[]"));
+        JPanel searchPanel = new JPanel(new MigLayout("insets 4 10 4 5, fillx, gap 4", "[][grow]", "[]"));
         searchPanel.add(new JLabel("Search Colors:"));
-        JTextField searchField = new JTextField();
+        searchField = new JTextField(16);
         searchField.putClientProperty("JTextField.placeholderText", "Type to filter colors...");
-        styleTextField(searchField);
+        ConfigurationUtils.styleInputComponent(searchField);
         searchPanel.add(searchField, "growx");
 
         searchField.getDocument().addDocumentListener(new DocumentListener() {
@@ -639,15 +644,6 @@ public class ColorSettingsPanel extends JPanel {
         }
         revalidate();
         repaint();
-    }
-
-    private void styleTextField(JComponent field) {
-        if (field instanceof JTextField || field instanceof JPasswordField) {
-            field.setFont(UIManager.getFont("TextField.font"));
-            field.setBorder(BorderFactory.createCompoundBorder(
-                    UIManager.getBorder("TextField.border"),
-                    BorderFactory.createEmptyBorder(4, 6, 4, 6)));
-        }
     }
 
     private static class ColorRow {

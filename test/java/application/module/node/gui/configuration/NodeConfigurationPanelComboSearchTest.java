@@ -23,6 +23,8 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.ListCellRenderer;
+import javax.swing.JComponent;
+import javax.swing.JTabbedPane;
 import javax.swing.SwingUtilities;
 
 import application.utils.gui.ComboSearchHighlightRenderer;
@@ -163,6 +165,11 @@ class NodeConfigurationPanelComboSearchTest {
             final List<String> out = new ArrayList<>();
             SwingUtilities.invokeAndWait(() -> {
                 try {
+                    JComponent statusPanel = (JComponent) readDeclaredField(panelRef[0], "statusPanel");
+                    JTabbedPane categoryTabs = (JTabbedPane) readDeclaredField(panelRef[0], "categoryTabbedPane");
+                    assertEquals(10, horizontalPosition(panelRef[0], statusPanel)
+                                    - horizontalPosition(panelRef[0], categoryTabs),
+                            "the Show values box must use the same 10px content inset as Configuration rows");
                     // Find a non-editable select row (the test profile has a
                     // few: API Documentation Mode, the SQLite select properties).
                     JComboBox<?> combo = null;
@@ -285,4 +292,15 @@ class NodeConfigurationPanelComboSearchTest {
         }
         throw new AssertionError("field not found: " + name);
     }
+
+    private static int horizontalPosition(Object root, Component component) {
+        int x = component.getX();
+        Component parent = component.getParent();
+        while (parent != null && parent != root) {
+            x += parent.getX();
+            parent = parent.getParent();
+        }
+        return x;
+    }
+
 }
