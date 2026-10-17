@@ -730,27 +730,37 @@ public class ModuleLoggingProfilePanel extends JPanel {
         keyLevelInput = new JComboBox<>(LOG_LEVELS);
         keyLevelInput.setSelectedItem("INFO");
         keyLevelInput.setToolTipText("The key's initial log level");
-        keyValueCell = new JPanel(new MigLayout("insets 0, fillx, filly", "[grow]", "[]")) {
+        // The JDK this project builds against has NO javax.swing.CardLayout,
+        // so the cell sizes its single VISIBLE editor to the whole cell
+        // itself (CardLayout semantics, hand-rolled below).
+        keyValueCell = new JPanel(null) {
             /**
-             * The cell reports the VISIBLE editor's preferred size. MigLayout's
-             * own preferred size counts the hidden editor as well, so a taller
-             * hidden level combo would inflate the row — and with the visible
-             * input centered / squeezed in it, the Initial value box would no
-             * longer match the Key box's size.
+             * The cell reports the VISIBLE editor's preferred size (the MAX of
+             * both would let a taller hidden level combo inflate the row).
+             * The visible editor fills the cell (see doLayout), so it renders
+             * at exactly the cell's bounds — the same width and height as the
+             * level rows' editors beside it.
              */
             @Override
             public Dimension getPreferredSize() {
                 return (keyValueInput.isVisible() ? keyValueInput : keyLevelInput).getPreferredSize();
             }
+
+            @Override
+            public void doLayout() {
+                for (Component child : getComponents()) {
+                    if (child.isVisible()) {
+                        child.setBounds(0, 0, getWidth(), getHeight());
+                    }
+                }
+            }
         };
         keyValueCell.setOpaque(false);
-        // One editor visible at a time; the visible one FILLs the cell
-        // (growx/growy), so it renders at exactly the cell's height — the
-        // same height as the key input's own row next door.
-        keyValueCell.add(keyValueInput, "growx, growy");
-        keyValueCell.add(keyLevelInput, "growx, growy");
-        keyValueInput.setVisible(true);
-        keyLevelInput.setVisible(false);
+        // One editor visible at a time; the visible one fills the WHOLE cell,
+        // so both states render the editor at exactly the same geometry —
+        // the same box the level rows' editors fill.
+        keyValueCell.add(keyValueInput);
+        keyValueCell.add(keyLevelInput);
         keyValueInput.setVisible(true);
         keyLevelInput.setVisible(false);
 
