@@ -45,28 +45,26 @@ public final class ContextMenuUtils {
 
         // Rename Profile
         JMenuItem renameItem = new JMenuItem("Rename Current Profile...");
-        if (currentProfile == null) {
-            renameItem.setEnabled(false);
-        }
+        renameItem.setEnabled(currentProfile != null
+                && !AppearancePanel.DEFAULT_PROFILE_NAME.equals(currentProfile));
         renameItem.addActionListener(ae -> appearancePanel.renameProfile(currentProfile));
         popup.add(renameItem);
 
         // Delete Profile
         JMenuItem deleteItem = new JMenuItem("Delete Current Profile");
-        if (currentProfile == null) {
-            deleteItem.setEnabled(false);
-        }
+        deleteItem.setEnabled(currentProfile != null
+                && !AppearancePanel.DEFAULT_PROFILE_NAME.equals(currentProfile));
         deleteItem.addActionListener(ae -> appearancePanel.deleteProfile(currentProfile));
         popup.add(deleteItem);
     }
 
     public static void addInfoTooltip(JFrame parentFrame, JLabel label, String text, String colorKey) {
         if (label.getToolTipText() == null && text != null) {
-            String newTooltip = "<html>" + text.replace("\n", "<br>");
+            String newTooltip = "<html><body style='width: 360px'>" + text.replace("\n", "<br>");
             if (colorKey != null) {
                 newTooltip += "<br><hr><i>Right-click for color and profile options.</i>";
             }
-            newTooltip += "</html>";
+            newTooltip += "</body></html>";
             label.setToolTipText(newTooltip);
         }
 

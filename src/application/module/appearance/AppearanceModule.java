@@ -48,6 +48,7 @@ public class AppearanceModule implements Module {
     private static final Logger logger = LoggerFactory.getLogger(AppearanceModule.class);
     private AppearancePanel settingsPanel;
     private static final List<Runnable> appearanceListeners = new ArrayList<>();
+    private static final String LEGACY_DEFAULT_PROFILE_NAME = "gui";
 
     @Override
     public String getId() {
@@ -182,10 +183,18 @@ public class AppearanceModule implements Module {
 
                         String profileName = settings.has("lastSelectedLafProfile")
                                 ? settings.get("lastSelectedLafProfile").getAsString()
-                                : "gui";
+                                : AppearancePanel.DEFAULT_PROFILE_NAME;
+                        JsonObject profiles = settings.has("lookAndFeelProfiles")
+                                && settings.get("lookAndFeelProfiles").isJsonObject()
+                                ? settings.getAsJsonObject("lookAndFeelProfiles")
+                                : new JsonObject();
+                        if (LEGACY_DEFAULT_PROFILE_NAME.equals(profileName) && !profiles.has(profileName)) {
+                            profileName = AppearancePanel.DEFAULT_PROFILE_NAME;
+                        }
 
-                        AppearanceProfile profile = ConfigurationUtils.loadLookAndFeelProfile(settingsPath,
-                                profileName);
+                        AppearanceProfile profile = AppearancePanel.DEFAULT_PROFILE_NAME.equals(profileName)
+                                ? new AppearanceProfile(AppearancePanel.DEFAULT_PROFILE_NAME)
+                                : ConfigurationUtils.loadLookAndFeelProfile(settingsPath, profileName);
                         if (profile != null) {
                             if (profile.getThemeClassName() != null) {
                                 themeClassName = profile.getThemeClassName();
