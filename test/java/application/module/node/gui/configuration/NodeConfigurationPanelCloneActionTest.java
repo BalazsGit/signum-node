@@ -162,6 +162,22 @@ class NodeConfigurationPanelCloneActionTest {
             throw failure;
         }
 
+        JButton newProfileBtn = (JButton) readDeclaredField(panelRef[0], "newProfileBtn");
+        JButton copyBtn = (JButton) readDeclaredField(panelRef[0], "copyProfileDataBtn");
+        JButton renameBtn = (JButton) readDeclaredField(panelRef[0], "renameProfileBtn");
+        assertTrue(newProfileBtn.getParent() == cloneBtn.getParent()
+                        && cloneBtn.getParent() == copyBtn.getParent()
+                        && copyBtn.getParent() == renameBtn.getParent(),
+                "the first four profile actions must share the toolbar row");
+        assertTrue(componentIndex(newProfileBtn) < componentIndex(cloneBtn)
+                        && componentIndex(cloneBtn) < componentIndex(copyBtn)
+                        && componentIndex(copyBtn) < componentIndex(renameBtn),
+                "the profile toolbar order must be New, Clone, Copy, Rename");
+        assertTrue(newProfileBtn.getToolTipText().contains("New Profile"));
+        assertTrue(cloneBtn.getToolTipText().contains("Clone Configuration to New Profile"));
+        assertTrue(copyBtn.getToolTipText().contains("Copy Existing Configuration to This Profile"));
+        assertTrue(renameBtn.getToolTipText().contains("Rename Profile"));
+
         // Fire the button's action listener exactly like a user click.
         SwingUtilities.invokeAndWait(() -> {
             try {
@@ -190,5 +206,15 @@ class NodeConfigurationPanelCloneActionTest {
         Field f = target.getClass().getDeclaredField(name);
         f.setAccessible(true);
         return f.get(target);
+    }
+
+    private static int componentIndex(Component component) {
+        java.awt.Container parent = component.getParent();
+        for (int i = 0; i < parent.getComponentCount(); i++) {
+            if (parent.getComponent(i) == component) {
+                return i;
+            }
+        }
+        throw new AssertionError("component is not present in its parent");
     }
 }

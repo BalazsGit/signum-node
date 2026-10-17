@@ -8,6 +8,7 @@ import application.utils.gui.GuiColors;
 import application.utils.gui.HelpDialog;
 import application.utils.gui.SearchMatchLabel;
 import application.utils.gui.SearchMatchPanel;
+import application.module.node.gui.ConsoleFilterHeader;
 import application.utils.logging.ModuleLoggingProfile;
 import application.utils.logging.ModuleLoggingProvider;
 import org.junit.jupiter.api.DisplayName;
@@ -350,6 +351,37 @@ class ModuleLoggingProfilePanelTest {
     }
 
     @Test
+    @DisplayName("the first profile actions are ordered New, Clone, Copy, Rename")
+    void profileActionsHaveRequestedOrderAndTooltips() {
+        ModuleLoggingProfilePanel panel = newPanel();
+        JButton newProfile = findButtonByTooltip(panel, "New Profile<br>");
+        JButton clone = findButtonByTooltip(panel, "Clone Configuration to New Profile");
+        JButton copy = findButtonByTooltip(panel, "Copy Existing Configuration to This Profile");
+        JButton rename = findButtonByTooltip(panel, "Rename Profile<br>");
+
+        assertNotNull(newProfile);
+        assertNotNull(clone);
+        assertNotNull(copy);
+        assertNotNull(rename);
+        assertSame(newProfile.getParent(), clone.getParent());
+        assertSame(newProfile.getParent(), copy.getParent());
+        assertSame(newProfile.getParent(), rename.getParent());
+        assertTrue(componentIndex(newProfile) < componentIndex(clone));
+        assertTrue(componentIndex(clone) < componentIndex(copy));
+        assertTrue(componentIndex(copy) < componentIndex(rename));
+    }
+
+    private static int componentIndex(Component component) {
+        Container parent = component.getParent();
+        for (int i = 0; i < parent.getComponentCount(); i++) {
+            if (parent.getComponent(i) == component) {
+                return i;
+            }
+        }
+        throw new AssertionError("component is not present in its parent");
+    }
+
+    @Test
     @DisplayName("the top area is laid out: icon toolbar on top, profile selector right of Show values and the search")
     void topAreaIsLaidOut() {
         ModuleLoggingProfilePanel panel = newPanel();
@@ -392,6 +424,10 @@ class ModuleLoggingProfilePanelTest {
         // like the configuration tab's tab area).
         Container frame = findTitledContainer(panel, "Logger levels");
         assertNotNull(frame, "the 'Logger levels' titled frame is present");
+        SearchMatchLabel firstRowLabel = findFirst(panel, SearchMatchLabel.class);
+        assertNotNull(firstRowLabel, "the logger rows contain a searchable label");
+        assertEquals(10, horizontalPosition(panel, firstRowLabel) - horizontalPosition(panel, frame),
+                "logger row content must use the same 10px inset as Configuration rows");
         Container profileBox = findTitledContainer(panel, "Profile");
         assertNotNull(profileBox, "the 'Profile' titled box is present");
         Container firstBox = findTitledContainer(panel, "Show values");
@@ -414,6 +450,29 @@ class ModuleLoggingProfilePanelTest {
         // Uniform heights: every box of the row is stretched to the same height.
         assertEquals(search.getHeight(), profileBox.getHeight(),
                 "the profile box and the search box must have the SAME height");
+    }
+
+    @Test
+    @DisplayName("the console Show levels filter and logging Show values box share the same left edge and height")
+    void consoleAndLoggingFilterBoxesShareGeometry() {
+        ModuleLoggingProfilePanel loggingPanel = newPanel();
+        ConsoleFilterHeader consoleHeader = new ConsoleFilterHeader(null, false, false);
+        onEdt(() -> {
+            loggingPanel.setSize(900, 600);
+            consoleHeader.setSize(900, 100);
+            layoutRecursively(loggingPanel);
+            layoutRecursively(consoleHeader);
+        });
+
+        Container loggingFilter = findTitledContainer(loggingPanel, "Show values");
+        Container consoleFilter = findTitledContainer(consoleHeader, "Show levels");
+        assertNotNull(loggingFilter);
+        assertNotNull(consoleFilter);
+        assertEquals(horizontalPosition(loggingPanel, loggingFilter),
+                horizontalPosition(consoleHeader, consoleFilter),
+                "the console and logging filter boxes must share the same left margin");
+        assertEquals(loggingFilter.getHeight(), consoleFilter.getHeight(),
+                "the console and logging filter boxes must have the same height");
     }
 
     @Test
@@ -952,7 +1011,7 @@ class ModuleLoggingProfilePanelTest {
         assertNotNull(findButtonByTooltip(panel, "New Profile<br>").getIcon(), "New icon present");
         assertNotNull(findButtonByTooltip(panel, "Save<br>").getIcon(), "Save icon present");
         assertNotNull(findButtonByTooltip(panel, "Apply<br>").getIcon(), "Apply icon present");
-        assertNotNull(findButtonByTooltip(panel, "Rename<br>").getIcon(), "Rename icon present");
+        assertNotNull(findButtonByTooltip(panel, "Rename Profile<br>").getIcon(), "Rename icon present");
         assertNotNull(findButtonByTooltip(panel, "Delete<br>").getIcon(), "Delete icon present");
         assertNotNull(findButtonByTooltip(panel, "Refresh<br>").getIcon(), "Refresh icon present");
         assertNotNull(findButtonByTooltip(panel, "Reset to Defaults<br>").getIcon(), "Reset icon present");
@@ -1170,7 +1229,7 @@ class ModuleLoggingProfilePanelTest {
 
         assertFalse(findButtonByTooltip(panel, "Save<br>").isEnabled(),
                 "Save is impossible for the built-in 'Default' profile â€” the button must not stay active");
-        assertFalse(findButtonByTooltip(panel, "Rename<br>").isEnabled(),
+        assertFalse(findButtonByTooltip(panel, "Rename Profile<br>").isEnabled(),
                 "Rename is impossible for the built-in 'Default' profile â€” the button must not stay active");
         assertFalse(findButtonByTooltip(panel, "Delete<br>").isEnabled(),
                 "Delete is impossible for the built-in 'Default' profile â€” the button must not stay active");
@@ -1406,13 +1465,14 @@ class ModuleLoggingProfilePanelTest {
             onEdt(() -> level.setSelectedItem("FINE"));
             assertTrue(findButtonByTooltip(panel, "Save<br>").isEnabled(),
                     "Save is valid while the profile has unsaved changes");
-            assertTrue(findButtonByTooltip(panel, "Rename<br>").isEnabled(), "Rename is valid for an on-disk profile");
+            assertTrue(findButtonByTooltip(panel, "Rename Profile<br>").isEnabled(),
+                    "Rename is valid for an on-disk profile");
             assertTrue(findButtonByTooltip(panel, "Delete<br>").isEnabled(), "Delete is valid for an on-disk profile");
 
             onEdt(() -> combo.setSelectedItem(ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY));
             assertFalse(findButtonByTooltip(panel, "Save<br>").isEnabled(),
                     "back to 'Default' â€” Save is disabled again");
-            assertFalse(findButtonByTooltip(panel, "Rename<br>").isEnabled(),
+            assertFalse(findButtonByTooltip(panel, "Rename Profile<br>").isEnabled(),
                     "back to 'Default' â€” Rename is disabled again");
             assertFalse(findButtonByTooltip(panel, "Delete<br>").isEnabled(),
                     "back to 'Default' â€” Delete is disabled again");

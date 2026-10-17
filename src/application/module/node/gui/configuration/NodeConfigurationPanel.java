@@ -210,7 +210,7 @@ public class NodeConfigurationPanel extends JPanel {
     /**
      * The "Show values" titled box holding the value-status visibility
      * checkboxes (the shared CheckboxGroupPanel, like the console header's
-     * "Level" box). While all of its checkboxes are selected the group
+     * "Show levels" box). While all of its checkboxes are selected the group
      * filters nothing (tabbed view); any unchecked box switches to the flat
      * results view listing only the still-selected states.
      */
@@ -394,20 +394,35 @@ public class NodeConfigurationPanel extends JPanel {
         JPanel profilePanel = ConfigurationUtils.createProfileToolbarRow();
 
         newProfileBtn.setToolTipText(
-                "<html>New Profile<br><br>Opens the dialog to launch the setup wizard<br>"
-                        + "or to create a new empty profile.</html>");
+                "<html>New Profile<br><br>Creates a new, independent node profile. "
+                        + "Choose the setup wizard or start with an empty profile.</html>");
         newProfileBtn.addActionListener(e -> runProfileAction("New Profile", this::newProfile));
         profilePanel.add(newProfileBtn);
 
-        // Clone sits right after New Profile: both are "create a profile"
-        // actions and belong next to each other.
         cloneProfileBtn = new JButton();
         cloneProfileBtn.setToolTipText(
-                "<html>Clone Configuration<br><br>Creates a new profile from the current (unsaved, editor) "
-                        + "effective state: only the values that differ from the default are copied.<br>"
-                        + "The new profile is not started; the source profile is left untouched.</html>");
+                "<html>Clone Configuration to New Profile<br><br>Creates a new profile from this editor's "
+                        + "current configuration, including unsaved changes. The existing profile is not changed, "
+                        + "and the new profile is not started.</html>");
         cloneProfileBtn.addActionListener(e -> runProfileAction("Clone Configuration", this::cloneProfile));
         profilePanel.add(cloneProfileBtn);
+
+        copyProfileDataBtn = new JButton();
+        copyProfileDataBtn.setToolTipText(
+                "<html>Copy Existing Configuration to This Profile<br><br>Selects another node profile and "
+                        + "loads its configuration into this editor. This replaces the current editor values; "
+                        + "unsaved changes are discarded after confirmation. Use Save to write the copied "
+                        + "configuration to this profile.</html>");
+        copyProfileDataBtn.addActionListener(e -> runProfileAction("Copy Configuration", this::copyProfileData));
+        profilePanel.add(copyProfileDataBtn);
+
+        renameProfileBtn.setToolTipText(
+                "<html>Rename Profile<br><br>Renames this node profile and its data paths. If the node is "
+                        + "running, it is stopped during the rename and returned to its previous state "
+                        + "(running, paused, or stopped).</html>");
+        renameProfileBtn.addActionListener(e -> runProfileAction("Rename Profile",
+                () -> renameProfile(loadedProfileName)));
+        profilePanel.add(renameProfileBtn);
 
         saveBtn.setToolTipText(
                 "<html>Save<br><br>Saves all unsaved changes to the current profile<br>"
@@ -425,27 +440,12 @@ public class NodeConfigurationPanel extends JPanel {
         applyBtn.addActionListener(e -> runProfileAction("Apply", this::applyProfile));
         profilePanel.add(applyBtn);
 
-        renameProfileBtn.setToolTipText(
-                "<html>Rename Profile<br><br>Renames this profile (including its data paths).<br>"
-                        + "If the node is running it will be stopped during the rename<br>"
-                        + "and returned to its previous state (running / paused / stopped).</html>");
-        renameProfileBtn.addActionListener(e -> runProfileAction("Rename Profile",
-                () -> renameProfile(loadedProfileName)));
-        profilePanel.add(renameProfileBtn);
-
         resetToDefaultsBtn = new JButton();
         resetToDefaultsBtn.setToolTipText(
                 "<html>Reset to Defaults<br><br>Resets all fields in the editor to the application default values.<br>"
                         + "Nothing is saved — use Save to persist the reset settings.</html>");
         resetToDefaultsBtn.addActionListener(e -> runProfileAction("Reset to Defaults", this::resetToDefaults));
         profilePanel.add(resetToDefaultsBtn);
-
-        copyProfileDataBtn = new JButton();
-        copyProfileDataBtn.setToolTipText(
-                "<html>Copy Configuration<br><br>Copies another profile's configuration into this editor.<br>"
-                        + "Unsaved changes in the editor are discarded (with confirmation).</html>");
-        copyProfileDataBtn.addActionListener(e -> runProfileAction("Copy Configuration", this::copyProfileData));
-        profilePanel.add(copyProfileDataBtn);
 
         reloadProfileBtn = new JButton();
         reloadProfileBtn.setToolTipText(
@@ -488,7 +488,7 @@ public class NodeConfigurationPanel extends JPanel {
 
         // Value-status visibility checkboxes in their own compact titled box
         // (the shared CheckboxGroupPanel, like the console filter header's
-        // "Level" box), placed BEFORE the "Search" box: moved here from the
+        // "Show levels" box), placed BEFORE the "Search" box: moved here from the
         // bottom legend row, which listed them as plain color boxes plus the
         // help button. Each is colored with its value-level state color and
         // selected by default (everything visible, tabbed view). Unchecking
@@ -542,17 +542,17 @@ public class NodeConfigurationPanel extends JPanel {
         // this the titled box — and its border — would span the entire
         // window. The wrapper absorbs the stretch and keeps the border
         // hugging the box's content.
-        JPanel searchPanelWrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+        JPanel searchPanelWrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         searchPanelWrap.setOpaque(false);
         // Unify the two boxes' heights (tracking the standard combo height,
         // measured with all search children shown) so the row stays even
         // when the font / L&F changes — the box-level counterpart of the
         // dropdown unification of styleComboEditor.
         ConfigurationUtils.unifyTitledBoxHeights(statusPanel, searchMatchPanel);
-        // The two compact titled boxes sit side by side (like the console
-        // filter header's search + filter boxes): the value-status filter
-        // box first, the search box second.
+        // The first box aligns with the row's 10px left inset; only the gap
+        // BETWEEN the status and search boxes is 4px.
         searchPanelWrap.add(statusPanel);
+        searchPanelWrap.add(Box.createHorizontalStrut(4));
         searchPanelWrap.add(searchMatchPanel);
         JScrollPane searchScroll = new ResponsiveToolbarScrollPane(searchPanelWrap, new Insets(0, 10, 0, 5), false);
         searchScroll.setBorder(new EmptyBorder(4, 0, 4, 0));

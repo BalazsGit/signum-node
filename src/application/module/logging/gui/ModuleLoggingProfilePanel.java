@@ -344,10 +344,9 @@ public class ModuleLoggingProfilePanel extends JPanel {
         // Defensive icon-font registration (the app registers it at startup in
         // AppearanceModule#init; this covers standalone/test construction).
         IconFontSwing.register(FontAwesome.getIconFont());
-        // No gaps of its own (the node configuration panel's body uses a bare
-        // BorderLayout): the spacing between the top area and the "Logger
-        // levels" frame is the search row's own bottom margin.
-        super(new BorderLayout());
+        // A 4px content gap matches the configuration tab's spacing between
+        // its search row and category content.
+        super(new BorderLayout(0, 4));
         this.context = context;
         this.provider = provider;
         this.moduleId = provider.getModuleId();
@@ -677,7 +676,9 @@ public class ModuleLoggingProfilePanel extends JPanel {
         JPanel wrap = new JPanel(new BorderLayout());
         wrap.setOpaque(false);
         wrap.setBorder(BorderFactory.createTitledBorder("Logger levels"));
-        JPanel gridWrap = new JPanel(new MigLayout("insets 0, fillx", "[grow]", "[]8[]"));
+        // Match the configuration category rows' 10px content inset after
+        // accounting for the titled frame's own interior inset.
+        JPanel gridWrap = new JPanel(new MigLayout("insets 0 5 0 5, fillx", "[grow]", "[]8[]"));
         gridWrap.setOpaque(false);
         gridWrap.add(editorGrid, "growx, top, wrap");
         gridWrap.add(buildAddKeyRowCell(), "growx, top");
@@ -1729,13 +1730,25 @@ public class ModuleLoggingProfilePanel extends JPanel {
         toolbarNewButton.addActionListener(e -> createNewProfile());
         panel.add(toolbarNewButton);
 
-        // Clone sits right after New Profile (the node configuration order):
-        // both are "create a profile" actions and belong next to each other.
         toolbarCloneButton = new JButton();
-        toolbarCloneButton.setToolTipText("<html>Clone Configuration<br><br>Creates a new profile from the current "
-                + "(unsaved, editor) effective state. The source profile is left untouched.</html>");
+        toolbarCloneButton.setToolTipText("<html>Clone Configuration to New Profile<br><br>Creates a new logging "
+                + "profile from the selected editor's current values, including unsaved changes. The source "
+                + "profile is left untouched.</html>");
         toolbarCloneButton.addActionListener(e -> cloneProfile());
         panel.add(toolbarCloneButton);
+
+        toolbarCopyButton = new JButton();
+        toolbarCopyButton.setToolTipText("<html>Copy Existing Configuration to This Profile<br><br>Selects another "
+                + "logging profile and loads its values into this editor as unsaved changes. Existing unsaved "
+                + "changes are discarded.</html>");
+        toolbarCopyButton.addActionListener(e -> copyConfiguration());
+        panel.add(toolbarCopyButton);
+
+        toolbarRenameButton = new JButton();
+        toolbarRenameButton.setToolTipText("<html>Rename Profile<br><br>Changes the name of the selected "
+                + "on-disk logging profile. The built-in Default profile cannot be renamed.</html>");
+        toolbarRenameButton.addActionListener(e -> renameProfile());
+        panel.add(toolbarRenameButton);
 
         JButton saveBtn = new JButton();
         saveBtn.setToolTipText("<html>Save<br><br>Saves the current editor state to the selected profile.<br>"
@@ -1753,24 +1766,11 @@ public class ModuleLoggingProfilePanel extends JPanel {
         applyBtn.addActionListener(e -> applyProfile());
         panel.add(applyBtn);
 
-        toolbarRenameButton = new JButton();
-        toolbarRenameButton.setToolTipText("<html>Rename<br><br>Changes the name of the selected on-disk "
-                + "logging profile. The built-in Default profile cannot be renamed.</html>");
-        toolbarRenameButton.addActionListener(e -> renameProfile());
-        panel.add(toolbarRenameButton);
-
         toolbarResetButton = new JButton();
         toolbarResetButton.setToolTipText("<html>Reset to Defaults<br><br>Replaces every logger setting in "
                 + "the editor with this module's defaults. The changes are not saved until you choose Save.</html>");
         toolbarResetButton.addActionListener(e -> resetToDefaults());
         panel.add(toolbarResetButton);
-
-        toolbarCopyButton = new JButton();
-        toolbarCopyButton.setToolTipText("<html>Copy Configuration<br><br>Copies another logging profile's "
-                + "values into this editor<br>"
-                + "as unsaved changes. Unsaved changes in the editor will be discarded.</html>");
-        toolbarCopyButton.addActionListener(e -> copyConfiguration());
-        panel.add(toolbarCopyButton);
 
         // The MERGED Reload + Refresh action: it re-scans the profiles on
         // disk AND re-reads the selected profile from disk (the standalone
