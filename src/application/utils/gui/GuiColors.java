@@ -46,6 +46,10 @@ public final class GuiColors {
         return ColorPaletteManager.getColor("unsavedApplied");
     }
 
+    public static Color getUnsavedInit() {
+        return ColorPaletteManager.getColor("unsavedInit");
+    }
+
     public static Color getPeerDisconnected() {
         return ColorPaletteManager.getColor("peer.disconnected");
     }

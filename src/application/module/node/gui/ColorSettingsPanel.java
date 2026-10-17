@@ -407,6 +407,8 @@ public class ColorSettingsPanel extends JPanel {
                 "Color used to indicate settings that are saved in the configuration file but may not be currently applied.");
         descriptions.put("savedInit",
                 "Color used for logging profile values that are saved and still match the values captured when the logging module initialized, but differ from its comparison-only applied baseline.");
+        descriptions.put("unsavedInit",
+                "Color used for logging profile values that differ from the saved and applied values but still match the initialization snapshot.");
         descriptions.put("unsavedApplied",
                 "Color used to indicate settings that match the running node but have not yet been saved to the profile file.");
 

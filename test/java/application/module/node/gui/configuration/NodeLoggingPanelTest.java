@@ -379,7 +379,7 @@ class NodeLoggingPanelTest {
     }
 
     @Test
-    @DisplayName("Saved Init is visible and highlighted in node-profile logging dropdowns")
+    @DisplayName("init states are visible and colored in node-profile logging dropdowns")
     void savedInitIsShownForNodeProfileAndHighlightedInDropdown() throws Exception {
         LoggingAssignmentStore store = new LoggingAssignmentStore();
         LoggingProfileRepository repository = new LoggingProfileRepository();
@@ -405,6 +405,8 @@ class NodeLoggingPanelTest {
             JCheckBox savedInitFilter = findCheckBox(panel, "Saved Init");
             assertNotNull(savedInitFilter, "the node-profile logging filter includes Saved Init");
             assertTrue(savedInitFilter.isVisible(), "the node-profile Saved Init filter is visible");
+            JCheckBox unsavedInitFilter = findCheckBox(panel, "Unsaved Init");
+            assertNotNull(unsavedInitFilter, "the node-profile logging filter includes Unsaved Init");
 
             JComboBox<?> fileLevel = assertInstanceOf(JComboBox.class, editorForLabel(panel, "File Level"));
             @SuppressWarnings("unchecked")
@@ -424,6 +426,18 @@ class NodeLoggingPanelTest {
                     "hovering keeps the normal selection background");
             assertEquals(GuiColors.getSavedInit(), findLabel(panel, "File Level").getForeground(),
                     "the current row also reflects its Saved Init state");
+
+            onEdt(() -> fileLevel.setSelectedItem("SEVERE"));
+            onEdt(findButtonByTooltip(panel, "Save<br>")::doClick);
+            onEdt(() -> fileLevel.setSelectedItem("WARNING"));
+            assertEquals(GuiColors.getUnsavedInit(), findLabel(panel, "File Level *").getForeground(),
+                    "returning to init after saving a different level yields Unsaved Init");
+            assertEquals(GuiColors.getUnsavedInit(), fileLevel.getForeground(),
+                    "the node logging editor uses the Unsaved Init palette color");
+            assertEquals(GuiColors.getUnsavedInit(),
+                    renderer.getListCellRendererComponent(new JList<>(), "WARNING", -1, false, false)
+                            .getForeground(),
+                    "the init dropdown option uses the Unsaved Init color after saved diverges");
         } finally {
             try {
                 store.clearAssignment(node);

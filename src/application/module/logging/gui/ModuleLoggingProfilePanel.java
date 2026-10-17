@@ -93,11 +93,11 @@ import javax.swing.text.JTextComponent;
  * <p>
  * <h3>Row states</h3>
  * Every row carries a derived {@link RowState} with the shared four-state
- * model plus the logging-only Saved Init state (see
+ * model plus the logging-only Unsaved Init and Saved Init states (see
  * {@link RowStateResolver}): <b>unsaved</b>
- * (the editor value differs from the selected profile's saved content AND
- * the applied baseline — a dirty edit), <b>unsaved applied</b> (differs from
- * the saved content but matches the applied baseline), <b>saved</b>
+ * (differs from saved, applied and init), <b>unsaved applied</b> (differs from
+ * saved but matches applied), <b>unsaved init</b> (differs from saved and
+ * applied but matches init), <b>saved</b>
  * (equals saved but not init or applied), <b>saved init</b> (equals saved and
  * init but not the applied comparison value) and <b>saved applied</b> (equals
  * saved and applied). The state colors the row
@@ -277,6 +277,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
     private JComponent profileSelectorPanel;
     private JCheckBox showUnsavedBox;
     private JCheckBox showUnsavedAppliedBox;
+    private JCheckBox showUnsavedInitBox;
     private JCheckBox showSavedBox;
     private JCheckBox showSavedInitBox;
     private JCheckBox showAppliedBox;
@@ -466,17 +467,21 @@ public class ModuleLoggingProfilePanel extends JPanel {
      */
     private void buildStatusFilter() {
         statusPanel.setChangeListener(button -> reevaluateRowStates());
-        // The first four states use the node configuration panel's shared
-        // model; Saved Init distinguishes unchanged initial profile values.
+        // The four shared states use the node configuration panel's model;
+        // logging profiles also distinguish both init-matching states.
         showUnsavedBox = statusPanel.addCheckbox("Unsaved", GuiColors.getUnsaved(), true);
         showUnsavedBox.setToolTipText(
-                "Show / hide the values that differ from the selected profile's saved content AND from "
-                        + "the applied baseline (dirty edits).");
+                "Show / hide dirty values that differ from the selected profile's saved content, applied "
+                        + "baseline, and initialization snapshot.");
         showUnsavedAppliedBox = statusPanel.addCheckbox("Unsaved Applied",
                 GuiColors.getUnsavedApplied(), true);
         showUnsavedAppliedBox.setToolTipText(
                 "Show / hide the values that differ from the selected profile's saved content but match "
                         + "this view's applied baseline.");
+        showUnsavedInitBox = statusPanel.addCheckbox("Unsaved Init", GuiColors.getUnsavedInit(), true);
+        showUnsavedInitBox.setToolTipText(
+                "Show / hide values that match the profile's initialization snapshot but differ from both "
+                        + "the saved profile and this view's applied baseline.");
         showSavedBox = statusPanel.addCheckbox("Saved", GuiColors.getSaved(), true);
         showSavedBox.setToolTipText(
                 "Show / hide values saved since module initialization that differ from both the init "
@@ -490,7 +495,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 "Show / hide the values that are saved in the selected profile AND match exactly the "
                         + "applied baseline.");
         // The color-legend help button — its legend covers the shared states
-        // and the logging-profile Saved Init state.
+        // and both logging-profile init states.
         JButton colorHelpBtn = new HelpButton();
         colorHelpBtn.setToolTipText("Detailed Color Legend");
         colorHelpBtn.addActionListener(e -> showColorLegendHelp());
@@ -501,7 +506,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
     /**
      * The "Show values" box's color-legend help — the same dialog the node
      * configuration panel shows from its legend button: the shared
-     * four-state model plus the logging-profile Saved Init comparison.
+     * four-state model plus the logging-profile init comparisons.
      */
     private void showColorLegendHelp() {
         String baselineScope = appliedBaselineScopeDescription();
@@ -524,20 +529,27 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 + ConfigurationUtils.toHex(GuiColors.getSavedInit())
                 + "'>\u25A0 Saved Init Values:</font></b> "
                 + "These values still match the saved profile and " + savedInitScope + "</li>";
+        String unsavedInitDescription = "<li><b><font color='"
+                + ConfigurationUtils.toHex(GuiColors.getUnsavedInit())
+                + "'>\u25A0 Unsaved Init Values:</font></b> "
+                + "These values differ from both the saved profile and applied baseline, but still match "
+                + "this profile editor's initialization snapshot.</li>";
+        String unsavedDescription = "<li><b><font color='"
+                + ConfigurationUtils.toHex(GuiColors.getUnsaved())
+                + "'>\u25A0 Unsaved Values:</font></b> "
+                + "These values differ from the saved profile, applied baseline, and initialization snapshot.</li>";
         String msg = "<html><body style='width: 350px'>" +
                 "<h3>Color Coding Legend</h3>" +
                 "<p>The logger rows are color-coded to indicate their current status. Each value is compared " +
                 comparison +
                 baselineScope + "</p>" +
                 "<ul>" +
-                "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getUnsaved())
-                + "'>\u25A0 Unsaved Values:</font></b> " +
-                "These values differ from the selected profile's saved content AND from the applied " +
-                "baseline — they are new, not-yet-saved (dirty) edits.</li>" +
+                unsavedDescription +
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getUnsavedApplied())
                 + "'>\u25A0 Unsaved Applied Values:</font></b> " +
                 "These values differ from the selected profile's saved content but match exactly the " +
                 "applied baseline — they are still unsaved edits.</li>" +
+                unsavedInitDescription +
                 "<li><b><font color='" + ConfigurationUtils.toHex(GuiColors.getSaved())
                 + "'>\u25A0 Saved Values:</font></b> " +
                 savedDescription + "</li>" +
@@ -878,7 +890,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
     /**
      * Recomputes the {@link RowState} of every row (no UI updates — the
      * caller re-renders or restyles) with the shared four-state model and
-     * the logging-profile initialization comparison:
+     * the two logging-profile initialization comparisons:
      * <ul>
      * <li><b>Unsaved</b> — the editor value differs from BOTH the selected
      *     profile's saved (on-disk) content and the applied
@@ -888,6 +900,8 @@ public class ModuleLoggingProfilePanel extends JPanel {
      * <li><b>Unsaved Applied</b> — the editor value differs from the saved
      *     content but matches the applied baseline: a dirty edit matching
      *     the current applied reference.</li>
+     * <li><b>Unsaved Init</b> — the editor value differs from saved and
+     *     applied but still matches the initialization snapshot.</li>
      * <li><b>Saved</b> — the editor value matches the saved content but
      * differs from both the init snapshot and applied baseline.</li>
      * <li><b>Saved Init</b> — the editor value matches saved and the init
@@ -977,15 +991,17 @@ public class ModuleLoggingProfilePanel extends JPanel {
      * @return true when the row's current editor value differs from the
      *         selected profile's saved content — i.e. it has a
      *         pending (unsaved) change (the rows computed as
-     *         {@link RowState#UNSAVED} or {@link RowState#UNSAVED_APPLIED}
-     *         by {@link #recomputeRowStates()} — both states are dirty with
+     *         {@link RowState#UNSAVED}, {@link RowState#UNSAVED_APPLIED}, or
+     *         {@link RowState#UNSAVED_INIT} by {@link #recomputeRowStates()} —
+     *         all three states are dirty with
      *         respect to the saved content). Such rows are shown with a
      *         trailing {@code " *"} star on their label (the same convention
      *         the node configuration panel uses for its unsaved values).
      */
     protected boolean isRowUnsaved(String key) {
         RowState state = rowStates.get(key);
-        return state == RowState.UNSAVED || state == RowState.UNSAVED_APPLIED;
+        return state == RowState.UNSAVED || state == RowState.UNSAVED_APPLIED
+                || state == RowState.UNSAVED_INIT;
     }
 
     /**
@@ -1057,6 +1073,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
         return switch (state) {
             case UNSAVED -> showUnsavedBox.isSelected();
             case UNSAVED_APPLIED -> showUnsavedAppliedBox.isSelected();
+            case UNSAVED_INIT -> showUnsavedInitBox.isSelected();
             case SAVED -> showSavedBox.isSelected();
             case SAVED_INIT -> showSavedInitBox.isSelected();
             case SAVED_APPLIED -> showAppliedBox.isSelected();
@@ -1115,6 +1132,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
         return switch (state) {
             case UNSAVED -> GuiColors.getUnsaved();
             case UNSAVED_APPLIED -> GuiColors.getUnsavedApplied();
+            case UNSAVED_INIT -> GuiColors.getUnsavedInit();
             case SAVED -> GuiColors.getSaved();
             case SAVED_INIT -> GuiColors.getSavedInit();
             case SAVED_APPLIED -> GuiColors.getApplied();
@@ -1157,6 +1175,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
         if (showUnsavedBox != null) {
             showUnsavedBox.setForeground(GuiColors.getUnsaved());
             showUnsavedAppliedBox.setForeground(GuiColors.getUnsavedApplied());
+            showUnsavedInitBox.setForeground(GuiColors.getUnsavedInit());
             showSavedBox.setForeground(GuiColors.getSaved());
             showSavedInitBox.setForeground(GuiColors.getSavedInit());
             showAppliedBox.setForeground(GuiColors.getApplied());
@@ -1920,12 +1939,13 @@ public class ModuleLoggingProfilePanel extends JPanel {
     /**
      * @return {@code true} when at least one row has an unsaved (dirty)
      *         change — the value differs from the selected profile's
-     *         saved content (the UNSAVED and UNSAVED_APPLIED states of the
+     *         saved content (the UNSAVED, UNSAVED_APPLIED, and UNSAVED_INIT states of the
      *         shared four-state model).
      */
     private boolean hasUnsavedRows() {
         for (RowState state : rowStates.values()) {
-            if (state == RowState.UNSAVED || state == RowState.UNSAVED_APPLIED) {
+            if (state == RowState.UNSAVED || state == RowState.UNSAVED_APPLIED
+                    || state == RowState.UNSAVED_INIT) {
                 return true;
             }
         }
@@ -2591,6 +2611,9 @@ public class ModuleLoggingProfilePanel extends JPanel {
         content.add(HelpDialog.legendRow(GuiColors.getUnsavedApplied(), "Unsaved Applied",
                 "The edited value differs from the selected profile's saved content but matches the applied "
                         + "baseline. It is still an unsaved edit."));
+        content.add(HelpDialog.legendRow(GuiColors.getUnsavedInit(), "Unsaved Init",
+                "Differs from the saved and applied values but matches the profile editor's initialization "
+                        + "snapshot."));
         content.add(HelpDialog.legendRow(GuiColors.getSaved(), "Saved",
                 "Saved after module initialization; differs from both the init snapshot and the applied "
                         + "comparison baseline."));

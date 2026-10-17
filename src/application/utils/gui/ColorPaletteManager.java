@@ -95,6 +95,7 @@ public final class ColorPaletteManager {
         colors.put("saved", Color.YELLOW);
         colors.put("savedInit", new Color(240, 220, 100));
         colors.put("unsavedApplied", new Color(128, 128, 128));
+        colors.put("unsavedInit", new Color(96, 96, 96));
         colors.put("peer.disconnected", Color.YELLOW);
         colors.put("peer.outdated.version", Color.ORANGE);
         colors.put("peer.up-to-date.version", Color.GREEN);

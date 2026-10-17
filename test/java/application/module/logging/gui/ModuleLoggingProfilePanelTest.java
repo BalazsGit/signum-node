@@ -428,32 +428,35 @@ class ModuleLoggingProfilePanelTest {
     }
 
     @Test
-    @DisplayName("the 'Show values' row-state filter includes Saved Init and is on by default")
+    @DisplayName("the 'Show values' row-state filter includes both init states and is on by default")
     void showValuesFilterIsOnByDefault() {
         ModuleLoggingProfilePanel panel = newPanel();
         Container box = findTitledContainer(panel, "Show values");
         assertNotNull(box, "the 'Show values' titled box is present");
         List<JCheckBox> checks = findAll(box, JCheckBox.class);
-        assertEquals(5, checks.size(), "the module logging panel has the shared four states plus Saved Init");
-        // The first four labels/colors are shared with node configuration;
-        // Saved Init is unique to module logging profiles.
+        assertEquals(6, checks.size(), "the logging panel has four shared states plus both init states");
         assertEquals("Unsaved", checks.get(0).getText());
         assertEquals("Unsaved Applied", checks.get(1).getText());
-        assertEquals("Saved", checks.get(2).getText());
-        assertEquals("Saved Init", checks.get(3).getText());
-        assertEquals("Saved Applied", checks.get(4).getText());
+        assertEquals("Unsaved Init", checks.get(2).getText());
+        assertEquals("Saved", checks.get(3).getText());
+        assertEquals("Saved Init", checks.get(4).getText());
+        assertEquals("Saved Applied", checks.get(5).getText());
         for (JCheckBox check : checks) {
             assertTrue(check.isSelected(), "every state filter is selected by default: " + check.getText());
         }
         assertEquals(GuiColors.getUnsaved(), checks.get(0).getForeground(), "the unsaved box is the unsaved color");
         assertEquals(GuiColors.getUnsavedApplied(), checks.get(1).getForeground(),
                 "the unsaved applied box is the unsaved applied color");
-        assertEquals(GuiColors.getSaved(), checks.get(2).getForeground(), "the saved box is the saved color");
-        assertEquals(GuiColors.getSavedInit(), checks.get(3).getForeground(),
+        assertEquals(GuiColors.getUnsavedInit(), checks.get(2).getForeground(),
+                "the unsaved init box uses its own dark-gray color");
+        assertEquals(new Color(96, 96, 96), GuiColors.getUnsavedInit(),
+                "Unsaved Init uses the default dark-gray palette color");
+        assertEquals(GuiColors.getSaved(), checks.get(3).getForeground(), "the saved box is the saved color");
+        assertEquals(GuiColors.getSavedInit(), checks.get(4).getForeground(),
                 "the saved init box uses its own pale-yellow color");
         assertEquals(new Color(240, 220, 100), GuiColors.getSavedInit(),
                 "Saved Init uses the slightly darker pale-yellow default palette color");
-        assertEquals(GuiColors.getApplied(), checks.get(4).getForeground(),
+        assertEquals(GuiColors.getApplied(), checks.get(5).getForeground(),
                 "the saved applied box is the applied color");
         // The SAME "Detailed Color Legend" help button the node configuration
         // panel's "Show values" box carries (its legend follows the shared
@@ -465,7 +468,7 @@ class ModuleLoggingProfilePanelTest {
     }
 
     @Test
-    @DisplayName("Saved Init colors the init baseline in logging value dropdowns and changes to Saved after save")
+    @DisplayName("init-matching states color dropdown values and transition from Saved Init to Unsaved Init")
     void savedInitColorsDropdownBaselineAndTransitionsAfterSave() throws Exception {
         LoggingProfileRepository repo = new LoggingProfileRepository();
         String name = "saved-init-dropdown-" + System.nanoTime();
@@ -506,6 +509,16 @@ class ModuleLoggingProfilePanelTest {
             onEdt(findButtonByTooltip(panel, "Save<br>")::doClick);
             assertEquals(GuiColors.getSaved(), labelWithText(panel, "test.handler").getForeground(),
                     "after saving a changed value, it is Saved rather than Saved Init");
+
+            onEdt(() -> editor.setText("initial.handler"));
+            assertEquals(GuiColors.getUnsavedInit(), labelWithText(panel, "test.handler *").getForeground(),
+                    "restoring the init value while saved and applied differ yields Unsaved Init");
+            assertEquals(GuiColors.getUnsavedInit(), editor.getForeground(),
+                    "the editor text uses the Unsaved Init palette color");
+            assertEquals(GuiColors.getUnsavedInit(),
+                    renderer.getListCellRendererComponent(new JList<>(), "initial.handler", 0, false, false)
+                            .getForeground(),
+                    "the init option uses the Unsaved Init font color when it differs from saved/applied");
         } finally {
             repo.setApplied("test-mod", null);
             cleanupProfiles(name);

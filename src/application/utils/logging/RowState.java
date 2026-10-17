@@ -6,9 +6,9 @@ package application.utils.logging;
  * colors live in the GUI layer).
  * <p>
  * The four shared states are the EXACT model of the node profile
- * configuration's value states ({@code ProfileValueState.State}). The logging
- * profile editor adds {@link #SAVED_INIT} to distinguish values that still
- * match their saved value when the editor initialized from values saved later.
+ * configuration's value states ({@code ProfileValueState.State}). Logging
+ * profiles additionally use {@link #SAVED_INIT} and {@link #UNSAVED_INIT} to
+ * distinguish values that match the initialization snapshot.
  * <p>
  * The references (see {@link RowStateResolver}):
  * </p>
@@ -31,6 +31,9 @@ public enum RowState {
 
     /** The editor value differs from saved but matches the applied comparison baseline. */
     UNSAVED_APPLIED,
+
+    /** The editor value differs from saved and applied but matches the init snapshot. */
+    UNSAVED_INIT,
 
     /** The editor value matches saved, but differs from init and the applied comparison baseline. */
     SAVED,

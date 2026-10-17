@@ -9,8 +9,9 @@ package application.utils.logging;
  * snapshot:
  * </p>
  * <pre>
- *   editor != saved ∧ editor != applied → UNSAVED          (dirty, not yet saved)
+ *   editor != saved ∧ editor != applied ∧ editor != init → UNSAVED
  *   editor != saved ∧ editor = applied  → UNSAVED_APPLIED  (dirty, matches applied)
+ *   editor != saved ∧ editor = init ∧ editor != applied → UNSAVED_INIT
  *   editor = saved ∧ editor != applied ∧ editor != init → SAVED
  *   editor = saved ∧ editor = applied   → SAVED_APPLIED    (saved and matches applied)
  *   editor = saved = init ∧ editor != applied → SAVED_INIT (unchanged since initialization)
@@ -52,8 +53,8 @@ public final class RowStateResolver {
 
     /**
      * Derives a logging profile row state with the profile editor's
-     * initialization snapshot. The additional state applies only when the editor is saved,
-     * differs from the applied comparison baseline, and still matches init.
+     * initialization snapshot. Init-specific states distinguish clean or
+     * dirty editor values that still match the initialization snapshot.
      *
      * @param editorValue  value currently shown in the editor
      * @param savedValue   value currently stored in the selected profile
@@ -83,6 +84,9 @@ public final class RowStateResolver {
         }
         if (eqApplied) {
             return RowState.UNSAVED_APPLIED;
+        }
+        if (compareInit && editor.equals(normalize(initValue))) {
+            return RowState.UNSAVED_INIT;
         }
         return RowState.UNSAVED;
     }

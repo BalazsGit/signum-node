@@ -38,6 +38,18 @@ class RowStateResolverTest {
         @DisplayName("editor != saved ∧ editor == applied → UNSAVED_APPLIED (a dirty edit the runtime runs with)")
         void unsavedAppliedWhenEditorDiffersFromSavedButMatchesApplied() {
             assertEquals(RowState.UNSAVED_APPLIED, RowStateResolver.resolve("FINE", "INFO", "FINE"));
+            assertEquals(RowState.UNSAVED_APPLIED, RowStateResolver.resolve("FINE", "INFO", "FINE", "FINE"),
+                    "matching applied takes precedence over matching init");
+        }
+
+        @Test
+        @DisplayName("editor == init != saved and applied → UNSAVED_INIT")
+        void unsavedInitWhenEditorMatchesInitializationOnly() {
+            assertEquals(RowState.UNSAVED_INIT, RowStateResolver.resolve("FINE", "CONFIG", "INFO", "FINE"));
+            assertEquals(RowState.UNSAVED_INIT, RowStateResolver.resolve("FINE", "CONFIG", "INFO", "FINE "));
+            assertEquals(RowState.UNSAVED, RowStateResolver.resolve("FINE", "CONFIG", "INFO", "OTHER"));
+            assertEquals(RowState.UNSAVED_APPLIED, RowStateResolver.resolve("FINE", "CONFIG", "FINE", "FINE"));
+            assertEquals(RowState.UNSAVED, RowStateResolver.resolve("FINE", "CONFIG", "INFO"));
         }
 
         @Test
