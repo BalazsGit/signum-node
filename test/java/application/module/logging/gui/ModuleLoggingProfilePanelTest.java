@@ -4,6 +4,7 @@ import application.api.ModuleContext;
 import application.module.appearance.AppearanceModule;
 import application.module.logging.LoggingProfileRepository;
 import application.utils.gui.ComboSearchHighlightRenderer;
+import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.HelpDialog;
 import application.utils.gui.SearchMatchLabel;
@@ -28,9 +29,11 @@ import javax.swing.Timer;
 import javax.swing.ListCellRenderer;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
+import javax.swing.border.EmptyBorder;
 import javax.swing.border.TitledBorder;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Insets;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Cursor;
@@ -382,7 +385,7 @@ class ModuleLoggingProfilePanelTest {
     }
 
     @Test
-    @DisplayName("the top area is laid out: icon toolbar on top, profile selector right of Show values and the search")
+    @DisplayName("the top area is laid out: the toolbar row carries the profile selector at its right end, the search row below it")
     void topAreaIsLaidOut() {
         ModuleLoggingProfilePanel panel = newPanel();
         onEdt(() -> {
@@ -401,22 +404,28 @@ class ModuleLoggingProfilePanelTest {
         assertNotNull(apply, "the Apply button is present");
         assertTrue(apply.getWidth() > 0 && apply.getHeight() > 0,
                 "the Apply button must be laid out, got " + apply.getWidth() + "x" + apply.getHeight());
-        // The profile selector sits on the SAME row, to the RIGHT of the
-        // search box, at its natural width (it must not stretch across the
-        // row).
+        // The profile selector sits on the TOOLBAR row (not the search row):
+        // at its RIGHT end, after the last (Help) button, at its fixed width
+        // (it must not stretch across the row).
         JComboBox<String> profile = panel.getProfileCombo();
         assertTrue(profile.getWidth() > 0 && profile.getHeight() > 0,
                 "the profile combo must be laid out, got " + profile.getWidth() + "x" + profile.getHeight());
         Component search = findFirst(panel, SearchMatchPanel.class);
         assertNotNull(search, "the search box is present after enableSearch");
+        JButton help = findButtonByTooltip(panel, "Help");
+        assertNotNull(help, "the Help button is present (the toolbar's last button)");
         int profileX = horizontalPosition(panel, profile);
-        int searchX = horizontalPosition(panel, search);
-        assertTrue(searchX + search.getWidth() <= profileX,
-                "the profile selector must sit to the RIGHT of the search box (search x=" + searchX
-                        + " width=" + search.getWidth() + ", profile x=" + profileX + ")");
-        assertTrue(Math.abs(verticalPosition(panel, profile) - verticalPosition(panel, search)) <= 24,
-                "the profile selector must sit on the SAME row as the search box (profile y="
-                        + verticalPosition(panel, profile) + ", search y=" + verticalPosition(panel, search) + ")");
+        int helpX = horizontalPosition(panel, help);
+        assertTrue(helpX + help.getWidth() <= profileX,
+                "the profile selector must sit to the RIGHT of the toolbar buttons (help x=" + helpX
+                        + " width=" + help.getWidth() + ", profile x=" + profileX + ")");
+        assertTrue(Math.abs(verticalPosition(panel, profile) - verticalPosition(panel, help)) <= 24,
+                "the profile selector must sit on the SAME row as the toolbar buttons (profile y="
+                        + verticalPosition(panel, profile) + ", buttons y=" + verticalPosition(panel, help) + ")");
+        // The gap between the last button and the combo is the shared toolbar
+        // row gap (the appearance panel's profile row uses the same value).
+        assertEquals(ConfigurationUtils.PROFILE_TOOLBAR_GAP, profileX - (helpX + help.getWidth()),
+                "the gap between the toolbar buttons and the profile combo must be the shared row gap");
 
         // The search row carries the node configuration panel's search-row
         // left margin: the row's FIRST box (the "Show values" filter) starts
@@ -428,28 +437,24 @@ class ModuleLoggingProfilePanelTest {
         assertNotNull(firstRowLabel, "the logger rows contain a searchable label");
         assertEquals(10, horizontalPosition(panel, firstRowLabel) - horizontalPosition(panel, frame),
                 "logger row content must use the same 10px inset as Configuration rows");
-        Container profileBox = findTitledContainer(panel, "Profile");
-        assertNotNull(profileBox, "the 'Profile' titled box is present");
+        // The former "Profile" titled box (with its "Active:" label) is GONE:
+        // the profile selector is a plain combo on the toolbar row above.
+        assertNull(findTitledContainer(panel, "Profile"),
+                "the former 'Profile' titled box must be gone (the selector is a plain combo on the toolbar row)");
+        assertNull(findLabel(panel, "Active:"),
+                "the former 'Active:' label must be gone (the selector is a plain combo on the toolbar row)");
         Container firstBox = findTitledContainer(panel, "Show values");
         assertNotNull(firstBox, "the 'Show values' titled box is present (the search row's first box)");
         assertEquals(horizontalPosition(panel, firstBox) - horizontalPosition(panel, frame), 10,
                 "the search row's first box must start 10px right of the 'Logger levels' frame (the configuration panel's search-row left margin)");
-        assertEquals(verticalPosition(panel, profileBox), verticalPosition(panel, search),
-                "the profile box and the search box must top-align on the same row");
-        // The search-row order: the "Show values" box, the live search box
-        // and the profile selector (directly to the RIGHT of the search box —
-        // the requirement) — every neighbor separated by the uniform ROW_GAP.
-        Container showValuesBox = findTitledContainer(panel, "Show values");
-        assertNotNull(showValuesBox, "the 'Show values' titled box is present");
-        int searchToProfileGap = horizontalPosition(panel, profileBox)
-                - (horizontalPosition(panel, search) + search.getWidth());
-        assertEquals(ModuleLoggingProfilePanel.ROW_GAP, searchToProfileGap,
-                "the profile box must sit DIRECTLY to the right of the search box with the uniform ROW_GAP");
-        assertTrue(horizontalPosition(panel, showValuesBox) + showValuesBox.getWidth() <= horizontalPosition(panel, search),
-                "the 'Show values' box must sit to the LEFT of the search box (row order: Show values, Search, Profile)");
-        // Uniform heights: every box of the row is stretched to the same height.
-        assertEquals(search.getHeight(), profileBox.getHeight(),
-                "the profile box and the search box must have the SAME height");
+        // The search-row order: the "Show values" box FIRST and the live
+        // search box SECOND (the profile selector left this row — it now
+        // sits on the toolbar row above, at the RIGHT end after the buttons).
+        assertTrue(horizontalPosition(panel, firstBox) + firstBox.getWidth() <= horizontalPosition(panel, search),
+                "the 'Show values' box must sit to the LEFT of the search box (row order: Show values, Search)");
+        // Uniform heights: every titled box of the row is stretched to the same height.
+        assertEquals(search.getHeight(), firstBox.getHeight(),
+                "the search box and the 'Show values' box must have the SAME height");
     }
 
     @Test
@@ -543,9 +548,13 @@ class ModuleLoggingProfilePanelTest {
                     "untouched saved values that match init but not the applied comparison are Saved Init");
 
             JTextField editor = rowEditorText(panel, "test.handler");
+            assertEquals("Status: Saved Init", editor.getToolTipText(),
+                    "the current editor value exposes its state on hover");
             onEdt(() -> editor.setText("edited.handler"));
             assertEquals(GuiColors.getUnsaved(), labelWithText(panel, "test.handler *").getForeground(),
                     "editing the value makes the row unsaved");
+            assertEquals("Status: Unsaved", editor.getToolTipText(),
+                    "typing refreshes the current-value status tooltip");
 
             @SuppressWarnings("unchecked")
             ListCellRenderer<Object> renderer =
@@ -555,6 +564,8 @@ class ModuleLoggingProfilePanelTest {
                     new JList<>(), "initial.handler", 0, false, false);
             assertEquals(GuiColors.getSavedInit(), initOption.getForeground(),
                     "the init value in the dropdown uses the Saved Init font color");
+            assertEquals("Status: Saved Init", ((JComponent) initOption).getToolTipText(),
+                    "the dropdown option exposes its own state on hover");
             assertEquals(new JList<>().getBackground(), initOption.getBackground(),
                     "the Saved Init dropdown option keeps the normal dropdown background");
             JList<String> options = new JList<>();
@@ -568,19 +579,77 @@ class ModuleLoggingProfilePanelTest {
             onEdt(findButtonByTooltip(panel, "Save<br>")::doClick);
             assertEquals(GuiColors.getSaved(), labelWithText(panel, "test.handler").getForeground(),
                     "after saving a changed value, it is Saved rather than Saved Init");
+            assertEquals("Status: Saved", editor.getToolTipText(),
+                    "saving updates the editor's status tooltip");
 
             onEdt(() -> editor.setText("initial.handler"));
             assertEquals(GuiColors.getUnsavedInit(), labelWithText(panel, "test.handler *").getForeground(),
                     "restoring the init value while saved and applied differ yields Unsaved Init");
             assertEquals(GuiColors.getUnsavedInit(), editor.getForeground(),
                     "the editor text uses the Unsaved Init palette color");
+            assertEquals("Status: Unsaved Init", editor.getToolTipText(),
+                    "restoring the init value updates the editor's status tooltip");
             assertEquals(GuiColors.getUnsavedInit(),
                     renderer.getListCellRendererComponent(new JList<>(), "initial.handler", 0, false, false)
                             .getForeground(),
                     "the init option uses the Unsaved Init font color when it differs from saved/applied");
+            assertEquals("Status: Unsaved Init",
+                    ((JComponent) renderer.getListCellRendererComponent(
+                            new JList<>(), "initial.handler", 0, false, false)).getToolTipText(),
+                    "the dropdown option tooltip follows its newly resolved state");
         } finally {
             repo.setApplied("test-mod", null);
             cleanupProfiles(name);
+        }
+    }
+
+    @Test
+    @DisplayName("an editable combo's status tooltip survives an L&F (updateUI) pass")
+    void editableComboStatusTooltipSurvivesLafPass() {
+        ModuleLoggingProfilePanel panel = newPanel();
+        JComboBox<?> combo = assertInstanceOf(JComboBox.class, editorAfterLabel(panel, "test.handler"),
+                "the non-level row is an editable combo");
+        assertTrue(combo.isEditable(), "the non-level rows are editable combos");
+        JTextField original = editorTextFieldOf((JComponent) combo.getEditor().getEditorComponent());
+        assertNotNull(original, "the editable combo carries an editor text field");
+        assertNotNull(original.getToolTipText(), "the editor field starts with the status tooltip");
+        assertEquals(combo.getToolTipText(), original.getToolTipText(),
+                "the field and the combo carry the same status tooltip");
+
+        // Simulate an L&F / theme update pass: the walk hits the panel first
+        // and then its descendants — an editable combo's updateUI() REPLACES
+        // its editor text field (FlatLaf), so the tooltip styled onto the old
+        // field would be lost (no status tooltip on hover in the profile
+        // logging tab).
+        onEdt(() -> {
+            panel.updateUI();
+            updateUiRecursively(panel);
+        });
+        // Pump the deferred re-style the panel scheduled after the pass.
+        onEdt(() -> { });
+
+        JTextField fresh = editorTextFieldOf((JComponent) combo.getEditor().getEditorComponent());
+        assertNotNull(fresh, "the editable combo still carries an editor text field");
+        assertEquals(combo.getToolTipText(), fresh.getToolTipText(),
+                "after the L&F pass the (possibly replaced) editor field carries the same status tooltip");
+        assertNotNull(fresh.getToolTipText(), "the status tooltip survives the L&F pass");
+        assertTrue(fresh.getToolTipText().startsWith("Status: "),
+                "the surviving tooltip is the status one: " + fresh.getToolTipText());
+        if (original != fresh) {
+            assertEquals(original.getForeground(), fresh.getForeground(),
+                    "the state font color survives on the replaced editor field");
+        }
+    }
+
+    /** Recursively applies the updateUI() pass an L&F change walks the tree with. */
+    private static void updateUiRecursively(JComponent component) {
+        component.updateUI();
+        if (component instanceof Container container) {
+            for (Component child : container.getComponents()) {
+                if (child instanceof JComponent jc) {
+                    updateUiRecursively(jc);
+                }
+            }
         }
     }
 
@@ -603,8 +672,25 @@ class ModuleLoggingProfilePanelTest {
                 "the add-key row must sit INSIDE the 'Logger levels' frame");
         JScrollPane gridScroll = findFirst(titled, JScrollPane.class);
         assertNotNull(gridScroll, "the logger rows and add section must be vertically scrollable");
-        assertNull(gridScroll.getBorder(),
-                "the scroll pane must not add a second frame inside the outer 'Logger levels' border");
+        // An explicit EMPTY border, not null: FlatLaf ignores null borders and
+        // restores its default scroll border (a visible second frame inside
+        // the titled panel) on every L&F / theme update.
+        EmptyBorder gridBorder = assertInstanceOf(EmptyBorder.class, gridScroll.getBorder(),
+                "the scroll pane must use an explicit empty border (a null border is reset by FlatLaf to a visible inner frame)");
+        assertEquals(new Insets(0, 0, 0, 0), gridBorder.getBorderInsets(gridScroll),
+                "the empty scroll border must not add a second frame inside the outer 'Logger levels' border");
+        // A round-trip theme switch (walk away and back): a null border would
+        // be replaced by the L&F's default scroll border on the FIRST pass and
+        // then PERSIST after switching back (null is only set once at build
+        // time, so the borderless state is never restored). The explicit empty
+        // border must survive every pass, in both directions.
+        onEdt(() -> updateUiRecursively(panel));
+        onEdt(() -> updateUiRecursively(panel));
+        onEdt(() -> { }); // pump the panel's deferred row re-style
+        EmptyBorder gridBorderAfter = assertInstanceOf(EmptyBorder.class, gridScroll.getBorder(),
+                "after a theme round-trip the empty scroll border must persist (no inner frame)");
+        assertEquals(new Insets(0, 0, 0, 0), gridBorderAfter.getBorderInsets(gridScroll),
+                "no inner frame may reappear after switching the theme back");
         assertEquals(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER, gridScroll.getHorizontalScrollBarPolicy(),
                 "the logger editor must not introduce a horizontal scrollbar");
         assertTrue(gridScroll.getVerticalScrollBar().getMaximum()
@@ -673,6 +759,103 @@ class ModuleLoggingProfilePanelTest {
         JButton builtInRemove = findButtonByTooltip(panel, "Built-in row");
         assertNotNull(builtInRemove, "the built-in rows carry the (disabled) trash icon");
         assertFalse(builtInRemove.isEnabled(), "a provider default row cannot be removed");
+    }
+
+    @Test
+    @DisplayName("the Key and Initial value inputs share the SAME height: the value cell tracks the VISIBLE editor, the hidden level combo cannot inflate it")
+    void addKeyRowInputsShareUnifiedHeight() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display (real layout)");
+        final String[] originalLaf = new String[1];
+        onEdt(() -> {
+            originalLaf[0] = UIManager.getLookAndFeel().getClass().getName();
+            try {
+                UIManager.setLookAndFeel(new com.formdev.flatlaf.FlatDarkLaf());
+            } catch (Exception e) {
+                throw new AssertionError(e);
+            }
+        });
+        ModuleLoggingProfilePanel panel = newPanel();
+        final Object[] refs = new Object[2]; // [0]=JFrame, [1]=laid-out flag
+        onEdt(() -> {
+            JFrame frame = new JFrame("add-key-unified-height-owner");
+            frame.setLayout(new BorderLayout());
+            frame.add(panel, BorderLayout.CENTER);
+            frame.setSize(1312, 720);
+            frame.setLocation(0, 0);
+            frame.setVisible(true);
+            refs[0] = frame;
+        });
+        try {
+            for (int i = 0; i < 50 && refs[1] == null; i++) {
+                Thread.sleep(100);
+                onEdt(() -> {
+                    if (findAddKeyInput(panel) != null && findAddKeyInput(panel).isShowing()) {
+                        refs[1] = Boolean.TRUE;
+                    }
+                });
+            }
+            assertNotNull(refs[1], "the add-key row was laid out");
+
+            final Object[] bounds = new Object[6];
+            onEdt(() -> {
+                JTextField keyInput = findAddKeyInput(panel);
+                JTextField valueInput = findKeyValueInput(panel);
+                JComboBox<?> levelCombo = findAddKeyLevelCombo(panel);
+                java.awt.Container cell = (java.awt.Container) valueInput.getParent();
+
+                // Text mode (the default): the two inputs are the SAME height
+                // and their tops line up — one unified add-key row.
+                bounds[0] = keyInput.getHeight();
+                bounds[1] = valueInput.getHeight();
+                bounds[2] = verticalPosition(panel, keyInput);
+                bounds[3] = verticalPosition(panel, valueInput);
+                bounds[4] = cell.getHeight();
+
+                // The mechanism: a TALLER (hidden) level combo must not
+                // resize the cell — the old CardLayout sized the cell to the
+                // MAX of both editors and centered the visible one, so the
+                // Initial value box rendered shorter than the Key box.
+                // (revalidate() invalidates the layout caches up the chain;
+                // the synchronous validate() on the NEXT EDT pump then lays
+                // the invalidated tree out before the bounds are read.)
+                levelCombo.setPreferredSize(new java.awt.Dimension(
+                        levelCombo.getPreferredSize().width, keyInput.getHeight() + 12));
+                levelCombo.revalidate();
+            });
+            onEdt(() -> {
+                ((JFrame) refs[0]).validate();
+                bounds[5] = new Object[]{
+                        findAddKeyInput(panel).getHeight(),
+                        findKeyValueInput(panel).getHeight(),
+                        ((java.awt.Container) findKeyValueInput(panel).getParent()).getHeight() };
+                findAddKeyLevelCombo(panel).setPreferredSize(null);
+            });
+
+            int keyH = (Integer) bounds[0];
+            int valueH = (Integer) bounds[1];
+            int keyTop = (Integer) bounds[2];
+            int valueTop = (Integer) bounds[3];
+            int cellH = (Integer) bounds[4];
+            Object[] after = (Object[]) bounds[5];
+
+            assertEquals(keyH, valueH, "the Initial value input must be the same height as the Key input");
+            assertEquals(keyTop, valueTop, "the two inputs must start at the same y (no centering offset)");
+            assertEquals(valueH, cellH, "the value cell must fill exactly the visible editor's height");
+            assertEquals(keyH, (Integer) after[0], "the Key input is unaffected");
+            assertEquals(keyH, (Integer) after[1],
+                    "a taller (hidden) level combo must not shrink or shift the Initial value input");
+            assertEquals(keyH, (Integer) after[2],
+                    "a taller (hidden) level combo must not inflate the value cell");
+        } finally {
+            onEdt(() -> ((JFrame) refs[0]).dispose());
+            onEdt(() -> {
+                try {
+                    UIManager.setLookAndFeel(originalLaf[0]);
+                } catch (Exception e) {
+                    // best effort: the next test sets up its own L&F state
+                }
+            });
+        }
     }
 
     @Test

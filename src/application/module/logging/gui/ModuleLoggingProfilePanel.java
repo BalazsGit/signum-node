@@ -4,6 +4,7 @@ import application.api.ModuleContext;
 import application.module.logging.LoggingProfileRepository;
 import application.utils.gui.CheckboxGroupPanel;
 import application.utils.gui.ConfigurationUtils;
+import application.utils.gui.ComboBoxItemToolTips;
 import application.utils.gui.ComboSearchHighlightRenderer;
 import application.utils.gui.FlatIconButton;
 import application.utils.gui.FlatPlusButton;
@@ -44,6 +45,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.JViewport;
+import javax.swing.DefaultListCellRenderer;
 import javax.swing.ListCellRenderer;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
@@ -51,7 +53,6 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.text.BadLocationException;
 import java.awt.BorderLayout;
-import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
@@ -178,7 +179,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
     private JPanel editorGrid;
     /** The add-key row's key input (created ONCE, persistent across re-renders — typed text must survive). */
     private JTextField keyInput;
-    /** The add-key row's value cell: a CardLayout holding the text input and the level combo. */
+    /** The add-key row's value cell: holds the text input and the level combo (one visible at a time). */
     private JPanel keyValueCell;
     /** The add-key row's initial-value input (the plain text mode). */
     private JTextField keyValueInput;
@@ -269,12 +270,6 @@ public class ModuleLoggingProfilePanel extends JPanel {
      * {@link #buildStatusFilter()}).
      */
     private final CheckboxGroupPanel statusPanel = new CheckboxGroupPanel("Show values");
-    /**
-     * The "Profile" titled box of the search row (kept as a field so the
-     * constructor can height-unify it with the search and "Show values"
-     * boxes — the node configuration panel's search-row logic).
-     */
-    private JComponent profileSelectorPanel;
     private JCheckBox showUnsavedBox;
     private JCheckBox showUnsavedAppliedBox;
     private JCheckBox showUnsavedInitBox;
@@ -374,10 +369,11 @@ public class ModuleLoggingProfilePanel extends JPanel {
         // first combo item) stays selected.
         // The same box-height unification the node configuration panel's search
         // row applies (ConfigurationUtils#unifyTitledBoxHeights — the standard
-        // combo height, measured with all search children shown): the three
-        // boxes of this row (Profile / Search / Show values) stay even when the
-        // font / L&F changes.
-        ConfigurationUtils.unifyTitledBoxHeights(profileSelectorPanel, searchPanel, statusPanel);
+        // combo height, measured with all search children shown): the two
+        // titled boxes of the search row (Search / Show values) stay even when
+        // the font / L&F changes. The profile combo lives on the toolbar row
+        // (its standard combo height is the same value).
+        ConfigurationUtils.unifyTitledBoxHeights(searchPanel, statusPanel);
         refreshProfileList();
         if (profileCombo.getItemCount() > 0 && !preselectModuleAppliedProfile()) {
             selectSilently(0);
@@ -389,10 +385,10 @@ public class ModuleLoggingProfilePanel extends JPanel {
      * The panel's entire top area, as ONE wrapper (BorderLayout keeps a single
      * component per side — see the constructor): the icon-only profile action
      * toolbar on the very top (the node/profile/configuration pattern — it
-     * replaced the former provider title/description text), and directly below
-     * it the search row: the profile selector at its NATURAL width to the LEFT
-     * of the search box, the live search box with the host's extra filters,
-     * and the reserved host strip.
+     * replaced the former provider title/description text) with the profile
+     * selector combo at its RIGHT end (after the buttons), and directly below
+     * it the search row: the "Show values" filter, the live search box, and
+     * the reserved host strip.
      */
     private JComponent buildTopArea() {
         // The 5px vgap mirrors the node configuration panel's top area (its
@@ -407,11 +403,10 @@ public class ModuleLoggingProfilePanel extends JPanel {
     }
 
     /**
-     * The search row: ["Show values" filter + live search box + profile
-     * selector + extra filters] [reserved host strip] — ONE left-aligned
-     * strip: every box separated by the SAME uniform gap
-     * ({@link #ROW_GAP}), every box stretched to the SAME height. The strip
-     * carries the node configuration
+     * The search row: ["Show values" filter + live search box + extra
+     * filters] [reserved host strip] — ONE left-aligned strip: every box
+     * separated by the SAME uniform gap ({@link #ROW_GAP}), every box
+     * stretched to the SAME height. The strip carries the node configuration
      * panel's search-row margins (10px left, 5px right, 4px top/bottom), so it sits 10px right of the "Logger levels" frame (the node configuration
      * panel's tab area runs flush, like the rows of its property tabs).
      */
@@ -429,10 +424,10 @@ public class ModuleLoggingProfilePanel extends JPanel {
         strip.setOpaque(false);
 
         // The row order: the "Show values" state-visibility filter FIRST
-        // (buildStatusFilter), the live search box SECOND (added to its
-        // holder by enableSearch) and the profile selector THIRD — directly
-        // to the RIGHT of the search box (the requirement: the profile
-        // selector sits next to the Search, on its right).
+        // (buildStatusFilter) and the live search box SECOND (added to its
+        // holder by enableSearch). The profile selector is NOT on this row
+        // anymore — it sits at the RIGHT end of the toolbar row above
+        // (buildActionToolbar), matching the appearance panel's profile row.
         filterBox = new JPanel(new LeftFlow(ROW_GAP));
         filterBox.setOpaque(false);
         strip.add(filterBox);
@@ -441,9 +436,6 @@ public class ModuleLoggingProfilePanel extends JPanel {
         searchBoxHolder = new JPanel(new LeftFlow(ROW_GAP));
         searchBoxHolder.setOpaque(false);
         strip.add(searchBoxHolder);
-
-        profileSelectorPanel = buildProfileSelector();
-        strip.add(profileSelectorPanel);
 
         // Reserved host strip (e.g. the node "link to node profile" checkbox).
         linkStrip = new JPanel(new LeftFlow(ROW_GAP));
@@ -571,19 +563,26 @@ public class ModuleLoggingProfilePanel extends JPanel {
         return "In this node-profile view it is the logging profile assigned to that node profile.";
     }
 
-    private JComponent buildProfileSelector() {
-        JPanel panel = new JPanel(new BorderLayout(6, 0));
-        panel.setBorder(BorderFactory.createTitledBorder("Profile"));
+    /**
+     * The profile selector combo — the RIGHT end of the profile action
+     * toolbar row (the former "Profile" titled box with its "Active:" label
+     * was removed): it uses the SAME sizing as the appearance panel's
+     * profile combo (the same prototype display value plus the shared
+     * size-fix), so the two profile selectors look identical — same width,
+     * same height and the same uniform gap between the buttons and the
+     * combo in both panels.
+     */
+    private JComboBox<String> buildProfileSelector() {
         profileCombo = new JComboBox<>();
         profileCombo.setRenderer(new ProfileCellRenderer());
+        profileCombo.setPrototypeDisplayValue("XXXXXXXXXXXXXXXXXXXX");
+        ConfigurationUtils.fixComponentSize(profileCombo);
         profileCombo.addActionListener(e -> {
             if (!isProgrammaticSelection) {
                 switchProfile();
             }
         });
-        panel.add(new JLabel("Active:"), BorderLayout.WEST);
-        panel.add(profileCombo, BorderLayout.CENTER);
-        return panel;
+        return profileCombo;
     }
 
     /**
@@ -592,26 +591,30 @@ public class ModuleLoggingProfilePanel extends JPanel {
      * icon, so the active profile is recognizable at a glance. The virtual
      * "Default" entry counts as applied when no explicit profile (or the
      * reserved sample config) is the applied marker.
+     * <p>
+     * Extends {@link DefaultListCellRenderer} (the L&F-standard cell renderer)
+     * rather than a plain {@link JLabel}: the combo measures its size through
+     * this renderer, and only the standard renderer measures the L&F-standard
+     * cell size — a plain label is a couple of pixels smaller, which would
+     * make this combo a different size than the appearance panel's profile
+     * selector (the two must look identical).
      */
-    private final class ProfileCellRenderer extends JLabel implements ListCellRenderer<String> {
+    private final class ProfileCellRenderer extends DefaultListCellRenderer {
         private final Icon appliedIcon = IconFontSwing.buildIcon(FontAwesome.CHECK,
                 GuiConstants.getHelpIconSize(), GuiColors.getApplied());
 
-        ProfileCellRenderer() {
-            setOpaque(true);
-        }
-
         @Override
-        public Component getListCellRendererComponent(JList<? extends String> list, String value,
+        public Component getListCellRendererComponent(JList<?> list, Object value,
                 int index, boolean isSelected, boolean cellHasFocus) {
+            String name = (String) value;
             setIcon(null);
-            setText(value);
+            setText(name);
             // A profile with unsaved (workspace) edits carries the trailing
             // star — the node configuration panel's convention.
-            if (value != null && dirtyProfiles.contains(value)) {
-                setText(value + " *");
+            if (name != null && dirtyProfiles.contains(name)) {
+                setText(name + " *");
             }
-            if (value != null && isAppliedProfile(value)) {
+            if (name != null && isAppliedProfile(name)) {
                 setIcon(appliedIcon);
                 setIconTextGap(4);
                 setForeground(isSelected ? list.getSelectionForeground() : GuiColors.getApplied());
@@ -670,7 +673,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
         searchPanel.setEnterListener(() -> navigateSearch(true));
         searchPanel.setChevronsVisible(false);
 
-        // The single outer titled border is the only frame; the borderless
+        // The single outer titled border is the only frame; the frameless
         // scroll pane lets every row, including the add section, remain
         // reachable in a short window.
         JPanel wrap = new JPanel(new BorderLayout());
@@ -683,7 +686,14 @@ public class ModuleLoggingProfilePanel extends JPanel {
         gridWrap.add(editorGrid, "growx, top, wrap");
         gridWrap.add(buildAddKeyRowCell(), "growx, top");
         JScrollPane scroll = new JScrollPane(gridWrap);
-        scroll.setBorder(null);
+        // An explicit EMPTY border (not null): the L&F walk of every theme
+        // change reinstalls the scroll pane's UI and replaces the border only
+        // when it is null (or a UIResource). A null border would therefore get
+        // the L&F's default scroll border (a second, inner frame inside the
+        // titled panel) on the FIRST theme switch and keep it even after
+        // switching back — the borderless state is never restored. The empty
+        // border is preserved on every switch, in both directions.
+        scroll.setBorder(BorderFactory.createEmptyBorder());
         scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         scroll.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         scroll.getVerticalScrollBar().setUnitIncrement(16);
@@ -720,10 +730,29 @@ public class ModuleLoggingProfilePanel extends JPanel {
         keyLevelInput = new JComboBox<>(LOG_LEVELS);
         keyLevelInput.setSelectedItem("INFO");
         keyLevelInput.setToolTipText("The key's initial log level");
-        keyValueCell = new JPanel(new CardLayout());
+        keyValueCell = new JPanel(new MigLayout("insets 0, fillx, filly", "[grow]", "[]")) {
+            /**
+             * The cell reports the VISIBLE editor's preferred size. MigLayout's
+             * own preferred size counts the hidden editor as well, so a taller
+             * hidden level combo would inflate the row — and with the visible
+             * input centered / squeezed in it, the Initial value box would no
+             * longer match the Key box's size.
+             */
+            @Override
+            public Dimension getPreferredSize() {
+                return (keyValueInput.isVisible() ? keyValueInput : keyLevelInput).getPreferredSize();
+            }
+        };
         keyValueCell.setOpaque(false);
-        keyValueCell.add(keyValueInput, "text");
-        keyValueCell.add(keyLevelInput, "level");
+        // One editor visible at a time; the visible one FILLs the cell
+        // (growx/growy), so it renders at exactly the cell's height — the
+        // same height as the key input's own row next door.
+        keyValueCell.add(keyValueInput, "growx, growy");
+        keyValueCell.add(keyLevelInput, "growx, growy");
+        keyValueInput.setVisible(true);
+        keyLevelInput.setVisible(false);
+        keyValueInput.setVisible(true);
+        keyLevelInput.setVisible(false);
 
         keyLevelTypeBox = new JCheckBox("log level");
         keyLevelTypeBox.setToolTipText(
@@ -741,7 +770,9 @@ public class ModuleLoggingProfilePanel extends JPanel {
     /** Shows the value editor of the add-key row the "log level" checkbox selected. */
     private void showKeyValueEditor(boolean level) {
         if (keyValueCell != null) {
-            ((CardLayout) keyValueCell.getLayout()).show(keyValueCell, level ? "level" : "text");
+            keyValueInput.setVisible(!level);
+            keyLevelInput.setVisible(level);
+            keyValueCell.revalidate();
         }
     }
 
@@ -1020,10 +1051,15 @@ public class ModuleLoggingProfilePanel extends JPanel {
      *         unsaved-change note when the row's value is not yet saved.
      */
     private String unsavedTooltip(String key) {
-        return isRowUnsaved(key)
-                ? "<html>" + key
-                        + "<br><br>Unsaved change: the value differs from the selected profile's saved content (Save to persist)."
-                : key;
+        RowState state = rowStates.get(key);
+        String tooltip = "<html>" + key;
+        if (state != null) {
+            tooltip += "<br><br>Status: " + stateDisplayName(state);
+        }
+        if (isRowUnsaved(key)) {
+            tooltip += "<br><br>Unsaved change: the value differs from the selected profile's saved content (Save to persist).";
+        }
+        return tooltip + "</html>";
     }
 
     /**
@@ -1097,12 +1133,30 @@ public class ModuleLoggingProfilePanel extends JPanel {
         Color color = stateColor(state);
         label.setForeground(color);
         editor.setForeground(color);
+        String tooltip = stateTooltip(state);
+        editor.setToolTipText(tooltip);
         if (editor instanceof JComboBox<?> combo && combo.isEditable()) {
             JTextField textField = editorTextField((JComponent) combo.getEditor().getEditorComponent());
             if (textField != null) {
                 textField.setForeground(color);
+                textField.setToolTipText(tooltip);
             }
         }
+    }
+
+    private static String stateTooltip(RowState state) {
+        return "Status: " + stateDisplayName(state);
+    }
+
+    private static String stateDisplayName(RowState state) {
+        return switch (state) {
+            case UNSAVED -> "Unsaved";
+            case UNSAVED_APPLIED -> "Unsaved Applied";
+            case UNSAVED_INIT -> "Unsaved Init";
+            case SAVED -> "Saved";
+            case SAVED_INIT -> "Saved Init";
+            case SAVED_APPLIED -> "Saved Applied";
+        };
     }
 
     /** The (first) text field inside the given component tree (a combo's editor text, may be null). */
@@ -1161,9 +1215,30 @@ public class ModuleLoggingProfilePanel extends JPanel {
         if (helpButton != null) {
             updateProfileToolbarUI();
         }
+        if (keyInput != null && keyValueInput != null) {
+            // The L&F walk visits the add-key inputs AFTER this panel, so
+            // re-style them once the walk has passed (next EDT pump): their
+            // padding was measured at construction, and after a font / theme
+            // change it must be recomputed against the CURRENT standard
+            // control height — otherwise the text inputs keep the old
+            // height while the level combos grow, and the Initial value box
+            // would no longer match the Key box's size.
+            SwingUtilities.invokeLater(() -> {
+                ConfigurationUtils.styleInputComponent(keyInput);
+                ConfigurationUtils.styleInputComponent(keyValueInput);
+            });
+        }
         if (profileCombo != null && editorGrid != null && !rowEditors.isEmpty()) {
             reevaluateRowStates();
             refreshStatusFilterColors();
+            // The L&F walk visits the row editors AFTER this panel, and an
+            // editable combo's updateUI() REPLACES its editor text field —
+            // the state color / status tooltip applied above lands on the
+            // old (now detached) field, so the fresh field would paint the
+            // plain text color and show no status tooltip on hover (the
+            // editable dropdowns of the profile logging tab). Re-apply the
+            // row styling once the walk has passed the rows (next EDT pump).
+            SwingUtilities.invokeLater(this::reevaluateRowStates);
         }
     }
 
@@ -1628,21 +1703,31 @@ public class ModuleLoggingProfilePanel extends JPanel {
      */
     private ListCellRenderer<String> valueCellRenderer(String key) {
         return (list, value, index, isSelected, cellHasFocus) -> {
+            if (list != null && index >= 0) {
+                ComboBoxItemToolTips.install(list, item -> item instanceof String text
+                        ? stateTooltip(valueState(key, text))
+                        : null);
+            }
             String text = value == null ? "" : value;
             JLabel cell = new JLabel(text);
             cell.setOpaque(true);
             cell.setBackground(isSelected ? list.getSelectionBackground() : list.getBackground());
-            RowState state = !DEFAULT_PROFILE_ENTRY.equals(selectedProfileName())
-                    ? RowStateResolver.resolve(text,
-                            rowSavedValues.getOrDefault(key, ""),
-                            rowAppliedValues.getOrDefault(key, ""),
-                            rowInitValues.getOrDefault(key, ""))
-                    : RowStateResolver.resolve(text,
-                            rowSavedValues.getOrDefault(key, ""),
-                            rowAppliedValues.getOrDefault(key, ""));
+            RowState state = valueState(key, text);
             cell.setForeground(stateColor(state));
+            cell.setToolTipText(stateTooltip(state));
             return cell;
         };
+    }
+
+    private RowState valueState(String key, String value) {
+        return !DEFAULT_PROFILE_ENTRY.equals(selectedProfileName())
+                ? RowStateResolver.resolve(value,
+                        rowSavedValues.getOrDefault(key, ""),
+                        rowAppliedValues.getOrDefault(key, ""),
+                        rowInitValues.getOrDefault(key, ""))
+                : RowStateResolver.resolve(value,
+                        rowSavedValues.getOrDefault(key, ""),
+                        rowAppliedValues.getOrDefault(key, ""));
     }
 
     /**
@@ -1714,7 +1799,9 @@ public class ModuleLoggingProfilePanel extends JPanel {
     /**
      * The icon-only profile action toolbar (the node/profile/configuration
      * pattern): one glyph per function — no text labels, the tooltip (shown on
-     * hover) is the single source of information about each action.
+     * hover) is the single source of information about each action. The
+     * profile selector combo sits at the row's RIGHT end, after the last
+     * button (no titled box of its own — see {@link #buildProfileSelector()}).
      */
     private JComponent buildActionToolbar() {
         // The shared profile-action toolbar row (the node/profile/configuration
@@ -1798,6 +1885,12 @@ public class ModuleLoggingProfilePanel extends JPanel {
         // (buildDefaultHelpContent); a host overrides the text via setHelpSupplier.
         helpButton.addActionListener(e -> showHelp());
         panel.add(helpButton);
+
+        // The profile selector at the row's RIGHT end (after the buttons):
+        // the former "Profile" titled box was removed — the combo sits at
+        // the row's uniform gap (ConfigurationUtils.PROFILE_TOOLBAR_GAP),
+        // the SAME geometry the appearance panel's profile selector uses.
+        panel.add(buildProfileSelector());
 
         // Keep references to the buttons whose validity depends on the SELECTED
         // profile / the current row states.
@@ -3032,13 +3125,16 @@ public class ModuleLoggingProfilePanel extends JPanel {
         @Override
         public void layoutContainer(Container parent) {
             Insets ins = parent.getInsets();
-            // Fill the parent's height (never less than the strip's preferred
-            // height) so every box of the row — including nested strip boxes —
-            // ends up at the SAME uniform height.
-            int h = Math.max(stripHeight(parent), parent.getHeight() - ins.top - ins.bottom);
-            if (h < 0) {
-                h = 0;
-            }
+            // The row's content height is the strip's OWN preferred height
+            // (the tallest box). The boxes of this row are height-unified
+            // (ConfigurationUtils#unifyTitledBoxHeights), so stretching them
+            // to a TALLER parent would distort them: the parent can be
+            // transiently taller on the first layout pass, because the
+            // responsive scroll wrapper's preferred size counts its
+            // horizontal scrollbar before the first layout decides whether
+            // it is needed (and with narrow-enough content it never is).
+            // The strip is vertically centered in any extra space instead.
+            int h = Math.max(0, stripHeight(parent));
             int y = ins.top + Math.max(0, (parent.getHeight() - ins.top - ins.bottom - h) / 2);
             int x = ins.left; // the strip starts at the container's left inset
             boolean first = true;

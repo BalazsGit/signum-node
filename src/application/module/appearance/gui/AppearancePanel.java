@@ -7,6 +7,8 @@ import application.module.appearance.gui.laf.FlatLafPanel;
 import application.module.node.gui.ColorSettingsPanel;
 import application.utils.gui.ColorPaletteManager;
 import application.utils.gui.ConfigurationUtils;
+import application.utils.gui.GuiColors;
+import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
@@ -59,6 +61,7 @@ public class AppearancePanel extends JPanel {
     private JButton saveProfileBtn;
     private JButton resetToDefaultsBtn;
     private JButton reloadProfileBtn;
+    private JButton helpBtn;
     private JTabbedPane tabbedPane;
 
     public static final String DEFAULT_PROFILE_NAME = "Default";
@@ -138,7 +141,6 @@ public class AppearancePanel extends JPanel {
         ConfigurationUtils.fixComponentSize(profileComboBox);
         profileComboBox.setToolTipText("<html>Select the appearance profile to edit.<br>"
                 + "Default is the built-in baseline.</html>");
-        profilePanel.add(profileComboBox);
 
         newProfileBtn = new JButton();
         newProfileBtn.setToolTipText("<html><body style='width: 360px'>New Profile<br><br>"
@@ -196,11 +198,17 @@ public class AppearancePanel extends JPanel {
         deleteProfileBtn.addActionListener(e -> deleteProfile((String) profileComboBox.getSelectedItem()));
         profilePanel.add(deleteProfileBtn);
 
-        JButton helpBtn = new HelpButton();
+        helpBtn = new HelpButton();
         helpBtn.setToolTipText("<html><body style='width: 360px'>Help<br><br>"
                 + "Explains appearance profiles and their actions.</body></html>");
         helpBtn.addActionListener(e -> showProfileHelp());
         profilePanel.add(helpBtn);
+
+        // The profile selector at the row's RIGHT end (after the buttons):
+        // the SAME geometry the module logging profile panels use — the
+        // shared row gap (ConfigurationUtils.PROFILE_TOOLBAR_GAP) and the
+        // same combo sizing (prototype display value + fixComponentSize).
+        profilePanel.add(profileComboBox);
 
         updateProfileButtonsUI();
         profileComboBox.addActionListener(e -> {
@@ -552,6 +560,15 @@ public class AppearancePanel extends JPanel {
         }
         ConfigurationUtils.configureProfileToolbar(newProfileBtn, saveProfileBtn, null, renameProfileBtn,
                 deleteProfileBtn, null, reloadProfileBtn, resetToDefaultsBtn, copyProfileBtn, cloneProfileBtn);
+        // The toolbar's help icon follows the SAME flat icon-button look as
+        // every other toolbar button (the module logging profile toolbar's
+        // pattern): the button-icon color, the toolbar icon size and the
+        // uniform 2/6/2/6 border — so the question mark sits at the same
+        // distance from the profile selector as in the logging module.
+        // Re-applied here because HelpButton.updateUI restores its own
+        // palette-colored, borderless icon after every L&F change.
+        ConfigurationUtils.styleProfileIconButton(helpBtn, FontAwesome.QUESTION_CIRCLE,
+                GuiColors.getButtonIcon(), GuiConstants.getToolBarIconSize());
         updateProfileButtonStates();
     }
 
@@ -904,13 +921,32 @@ public class AppearancePanel extends JPanel {
                 || (savedProfile != null && profileName.equals(savedProfile.getName())))
             return;
 
-        checkUnsavedChangesAndProceed(false,
+        // reloadCurrentOnDiscard = false: on "Discard" the current profile must
+        // NOT be reloaded first — the target profile's load fully re-specifies
+        // the appearance (theme, fonts and colors are always applied or
+        // explicitly reset), so the switch goes DIRECTLY to the selected
+        // profile instead of briefly showing the current profile's saved
+        // state in between.
+        checkUnsavedChangesAndProceed(false, false,
                 () -> performLoadProfile(profileName),
                 () -> profileComboBox
                         .setSelectedItem(savedProfile != null ? savedProfile.getName() : DEFAULT_PROFILE_NAME));
     }
 
     public boolean checkUnsavedChangesAndProceed(boolean allowKeepUnsaved, Runnable onProceed, Runnable onCancel) {
+        return checkUnsavedChangesAndProceed(allowKeepUnsaved, true, onProceed, onCancel);
+    }
+
+    /**
+     * Like {@link #checkUnsavedChangesAndProceed(boolean, Runnable, Runnable)}, but with control over
+     * what "Discard" does: when {@code reloadCurrentOnDiscard} is {@code true} (the default) the
+     * current profile is reloaded from disk first (restoring its saved state); when {@code false}
+     * the discard is implicit — the caller's {@code onProceed} continuation is expected to fully
+     * re-specify the appearance (e.g. by loading another profile), so no intermediate reload
+     * of the current profile happens.
+     */
+    private boolean checkUnsavedChangesAndProceed(boolean allowKeepUnsaved, boolean reloadCurrentOnDiscard,
+            Runnable onProceed, Runnable onCancel) {
         String report = getUnsavedChangesReport();
         if (report == null) {
             if (onProceed != null)
@@ -952,7 +988,12 @@ public class AppearancePanel extends JPanel {
                 onProceed.run();
             return true;
         } else if (result == discardIndex) {
-            performLoadProfile(savedProfile != null ? savedProfile.getName() : DEFAULT_PROFILE_NAME);
+            if (reloadCurrentOnDiscard) {
+                // "Discard" restores the current profile's saved state in the UI.
+                // (When false, the onProceed continuation fully re-specifies the
+                // appearance — see the 4-arg overload's javadoc.)
+                performLoadProfile(savedProfile != null ? savedProfile.getName() : DEFAULT_PROFILE_NAME);
+            }
             if (onProceed != null) {
                 SwingUtilities.invokeLater(onProceed);
             }
