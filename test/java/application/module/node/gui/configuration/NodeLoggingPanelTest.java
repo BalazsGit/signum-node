@@ -4,6 +4,7 @@ import application.module.logging.LoggingAssignmentStore;
 import application.module.logging.LoggingProfileRepository;
 import application.module.logging.gui.ModuleLoggingProfilePanel;
 import application.utils.config.ModuleIds;
+import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.GuiColors;
 import application.utils.logging.ModuleLoggingProfile;
 import application.utils.logging.ModuleLoggingProvider;
@@ -621,7 +622,7 @@ class NodeLoggingPanelTest {
     }
 
     @Test
-    @DisplayName("search row: Show values / Search / Profile are left-aligned with uniform gaps and equal heights")
+    @DisplayName("search row: Show values / Search left-aligned with uniform gaps; profile combo at the toolbar row's right end")
     void searchRowAlignment() {
         NodeLoggingPanel panel = newPanel();
         onEdt(() -> {
@@ -630,11 +631,11 @@ class NodeLoggingPanelTest {
             layoutRecursively(panel);
         });
 
-        Container profileBox = findTitled(panel, "Profile");
         Container searchBox = findTitled(panel, "Search");
         Container showValues = findTitled(panel, "Show values");
         Container levelsFrame = findTitled(panel, "Logger levels");
-        assertNotNull(profileBox, "the 'Profile' titled box is present");
+        assertNull(findTitled(panel, "Profile"),
+                "the former 'Profile' titled box must be gone (the selector is a plain combo on the toolbar row)");
         assertNotNull(searchBox, "the 'Search' titled box is present");
         assertNotNull(showValues, "the 'Show values' titled box is present");
         assertNotNull(levelsFrame, "the 'Logger levels' titled frame is present");
@@ -646,28 +647,36 @@ class NodeLoggingPanelTest {
         assertEquals(horizontalPosition(panel, showValues) - horizontalPosition(panel, levelsFrame), 10,
                 "the search row's first box must start 10px right of the 'Logger levels' frame (the configuration panel's search-row left margin)");
 
-        // The row order: the "Show values" state filter first, the
-        // "Search" box second, and the profile selector THIRD — directly
-        // to the RIGHT of the "Search" box (the requirement).
-        assertTrue(horizontalPosition(panel, showValues) < horizontalPosition(panel, searchBox)
-                        && horizontalPosition(panel, searchBox) < horizontalPosition(panel, profileBox),
-                "the search row order must be Show values, Search, Profile (Profile sits to the RIGHT of Search)");
+        // The row order: the "Show values" state filter first and the
+        // "Search" box second (the profile selector left this row — it now
+        // sits on the toolbar row above, at the RIGHT end after the buttons).
+        assertTrue(horizontalPosition(panel, showValues) < horizontalPosition(panel, searchBox),
+                "the search row order must be Show values, Search");
+        // Uniform 4px gap between the two boxes.
+        assertEquals(4, horizontalPosition(panel, searchBox)
+                        - (horizontalPosition(panel, showValues) + showValues.getWidth()),
+                "the gap between Show values and Search must be the row's uniform 4px gap");
+        // Uniform heights across the row's titled boxes.
+        assertEquals(searchBox.getHeight(), showValues.getHeight(),
+                "the Search and Show values boxes must have the same height");
 
-        // Uniform gaps between all three boxes (Show values ↔ Search ↔ Profile).
-        int showValuesToSearch = horizontalPosition(panel, searchBox)
-                - (horizontalPosition(panel, showValues) + showValues.getWidth());
-        int searchToProfile = horizontalPosition(panel, profileBox)
-                - (horizontalPosition(panel, searchBox) + searchBox.getWidth());
-        assertEquals(showValuesToSearch, searchToProfile,
-                "the gaps between Show values/Search/Profile must be uniform (show-values→search="
-                        + showValuesToSearch + ", search→profile=" + searchToProfile + ")");
-        assertEquals(4, showValuesToSearch, "the gap must be the row's uniform 4px gap");
-
-        // Uniform heights across all three boxes.
-        assertEquals(profileBox.getHeight(), searchBox.getHeight(),
-                "the Profile and Search boxes must have the same height");
-        assertEquals(profileBox.getHeight(), showValues.getHeight(),
-                "the Profile and Show values boxes must have the same height");
+        // The profile combo: the LAST element of the toolbar row (after the
+        // buttons), on the same row, at the shared toolbar row gap.
+        JComboBox<String> profile = panel.getProfileCombo();
+        Container toolbarRow = (Container) profile.getParent();
+        int last = toolbarRow.getComponentCount() - 1;
+        assertSame(profile, toolbarRow.getComponent(last),
+                "the profile combo must be the LAST element of the toolbar row");
+        Component previous = toolbarRow.getComponent(last - 1);
+        assertInstanceOf(JButton.class, previous,
+                "the element before the profile combo must be a toolbar button");
+        assertTrue(horizontalPosition(panel, previous) + previous.getWidth() <= horizontalPosition(panel, profile),
+                "the profile combo must sit to the RIGHT of the toolbar buttons");
+        assertTrue(Math.abs(verticalPosition(panel, profile) - verticalPosition(panel, previous)) <= 24,
+                "the profile combo must sit on the SAME row as the toolbar buttons");
+        assertEquals(ConfigurationUtils.PROFILE_TOOLBAR_GAP,
+                horizontalPosition(panel, profile) - (horizontalPosition(panel, previous) + previous.getWidth()),
+                "the gap between the toolbar buttons and the profile combo must be the shared toolbar row gap");
     }
 
     /** The first container carrying a TitledBorder with exactly the given title (may be null). */
@@ -686,6 +695,17 @@ class NodeLoggingPanelTest {
             }
         }
         return null;
+    }
+
+    /** The y position of {@code c} relative to {@code root} (walking up the parents). */
+    private static int verticalPosition(Container root, Component c) {
+        int y = c.getY();
+        Component p = c.getParent();
+        while (p != null && p != root) {
+            y += p.getY();
+            p = p.getParent();
+        }
+        return y;
     }
 
     /** The x position of {@code c} relative to {@code root} (walking up the parents). */
