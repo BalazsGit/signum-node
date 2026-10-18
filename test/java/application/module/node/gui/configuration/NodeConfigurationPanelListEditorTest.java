@@ -342,8 +342,8 @@ class NodeConfigurationPanelListEditorTest {
         javax.swing.JButton toolbarSave = (javax.swing.JButton) readField(panel, "saveBtn");
         assertTrue(!(toolbarHelp instanceof application.utils.gui.HelpButton),
                 "the profile-toolbar Help button must not carry the separate HelpButton context-menu behavior");
-        assertEquals(java.awt.Cursor.HAND_CURSOR, toolbarHelp.getCursor().getType(),
-                "the profile-toolbar Help button must use the standard action hand cursor");
+        assertEquals(java.awt.Cursor.DEFAULT_CURSOR, toolbarHelp.getCursor().getType(),
+                "the profile-toolbar Help button must use the standard arrow cursor (not a hand)");
         assertNotNull(toolbarHelp.getRolloverIcon(),
                 "the profile-toolbar Help button must use the shared hover-scale interaction");
         assertEquals(toolbarSave.getIcon().getIconWidth(), toolbarHelp.getIcon().getIconWidth(),

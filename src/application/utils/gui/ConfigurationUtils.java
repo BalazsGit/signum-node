@@ -778,8 +778,13 @@ public class ConfigurationUtils {
     /**
      * Styles one profile-toolbar button in the node profile toolbar's flat
      * icon-button pattern (a glyph at the toolbar icon size, hover-grow,
-     * no fill, a slim uniform border). A {@code null} button is skipped —
-     * the callers pass only the buttons they own.
+     * no fill, a slim uniform border). This is the SINGLE method that defines
+     * every profile toolbar button's look — the icon, the border, the fill AND
+     * the cursor ({@link #PROFILE_TOOLBAR_CURSOR}: the standard arrow, never a
+     * hand/pointer) — so the profile-action rows of all panels (node
+     * configuration, the module logging profile panels, appearance, ...) keep
+     * one identical appearance. A {@code null} button is skipped — the callers
+     * pass only the buttons they own.
      */
     public static void styleProfileIconButton(JButton button, FontAwesome iconCode, Color color, float iconSize) {
         if (button == null) {
@@ -791,7 +796,7 @@ public class ConfigurationUtils {
         button.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
         button.setOpaque(false);
         button.setContentAreaFilled(false);
-        button.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        button.setCursor(PROFILE_TOOLBAR_CURSOR);
     }
 
     /**
@@ -811,6 +816,16 @@ public class ConfigurationUtils {
      * rows have identical margins.
      */
     public static final Insets PROFILE_TOOLBAR_INSETS = GuiConstants.TOOLBAR_INSETS;
+
+    /**
+     * The cursor EVERY profile-action toolbar button uses: the STANDARD arrow
+     * (never the hand/pointer). Defined ONCE here so the profile-action rows
+     * of every panel (node configuration, the module logging profile panels,
+     * appearance, ...) share one identical cursor — the "manage it in a single
+     * place" anchor for the row's look, applied by
+     * {@link #styleProfileIconButton}.
+     */
+    public static final Cursor PROFILE_TOOLBAR_CURSOR = Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR);
 
     /**
      * Creates the profile-action toolbar ROW: a left-aligned button strip with

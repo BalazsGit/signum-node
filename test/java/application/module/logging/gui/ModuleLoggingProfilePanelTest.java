@@ -1217,8 +1217,8 @@ class ModuleLoggingProfilePanelTest {
         ModuleLoggingProfilePanel panel = newPanel();
         JButton help = findButtonByTooltip(panel, "Help<br>");
         assertNotNull(help);
-        assertEquals(Cursor.HAND_CURSOR, help.getCursor().getType(),
-                "the help button must use the same hand cursor as other profile toolbar actions");
+        assertEquals(Cursor.DEFAULT_CURSOR, help.getCursor().getType(),
+                "the help button must use the standard arrow cursor (not a hand) like every other profile toolbar action");
 
         Font originalFont = UIManager.getFont("Button.font");
         assertNotNull(originalFont);
