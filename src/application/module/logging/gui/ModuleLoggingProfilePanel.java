@@ -818,19 +818,13 @@ public class ModuleLoggingProfilePanel extends JPanel {
         JPanel addSection = new JPanel(new GridLayout(1, 2, 6, 0));
         addSection.setOpaque(false);
 
-        JPanel keyColumn = new JPanel(new MigLayout("insets 0, fillx", "[grow]", "[]2[]2[]"));
+        JPanel keyColumn = new JPanel(new MigLayout("insets 0, fillx, aligny top", "[grow]", "[]"));
         keyColumn.setOpaque(false);
-        JLabel keyLabel = new JLabel("Key");
-        keyLabel.setLabelFor(keyInput);
-        keyColumn.add(keyLabel, "wrap");
         keyColumn.add(keyInput, "growx");
 
-        JPanel valueColumn = new JPanel(new MigLayout("insets 0, fillx",
-                "[grow][" + actionColumnWidth() + "px, grow 0]", "[]2[]2[]"));
+        JPanel valueColumn = new JPanel(new MigLayout("insets 0, fillx, aligny top",
+                "[grow][" + actionColumnWidth() + "px, grow 0]", "[]2[]"));
         valueColumn.setOpaque(false);
-        JLabel valueLabel = new JLabel("Initial value");
-        valueLabel.setLabelFor(keyValueCell);
-        valueColumn.add(valueLabel, "span 2, wrap");
         valueColumn.add(keyValueCell, "growx");
         valueColumn.add(addKeyButton, "gapleft " + ConfigurationUtils.INPUT_ACTION_GAP
                 + ", w " + actionColumnWidth() + "!, growx, wrap");
