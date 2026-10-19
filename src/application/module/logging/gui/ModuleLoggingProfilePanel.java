@@ -952,10 +952,11 @@ public class ModuleLoggingProfilePanel extends JPanel {
      *     and the applied baseline.</li>
      * </ul>
      * A key the profile does not define falls back to the built-in default
-     * for saved, init, and applied references. The virtual Default entry
-     * retains the original four-state resolver because it has no profile
-     * snapshot. Invoked on every editor value change and
-     * before every full re-render.
+     * for saved, init, and applied references. For the virtual Default entry
+     * the saved and init baselines share the reserved default file's content
+     * (the same source), so the init comparison adds nothing and the entry
+     * keeps the original four-state resolver. Invoked on every editor value
+     * change and before every full re-render.
      */
     protected void recomputeRowStates() {
         rowStates.clear();
@@ -964,8 +965,14 @@ public class ModuleLoggingProfilePanel extends JPanel {
         rowAppliedValues.clear();
         String selected = selectedProfileName();
         boolean selectedIsDefault = DEFAULT_PROFILE_ENTRY.equals(selected);
-        Properties selectedProps = selectedIsDefault ? new Properties() : loadProfilePropsSafely(selected);
-        Properties selectedInitProps = selectedIsDefault ? new Properties() : initSnapshotFor(selected);
+        // The virtual "Default" entry IS the reserved built-in profile: its
+        // saved (and init) content is the on-disk default file (the runtime
+        // truth an unassigned owner starts with) — a key the file does not
+        // define falls back to the built-in row default below.
+        Properties selectedProps = selectedIsDefault
+                ? loadProfilePropsSafely(LoggingProfileRepository.RESERVED_PROFILE_NAME)
+                : loadProfilePropsSafely(selected);
+        Properties selectedInitProps = selectedIsDefault ? selectedProps : initSnapshotFor(selected);
 
         for (String key : rowKeys()) {
             String value = editorValueOf(key);
@@ -977,22 +984,12 @@ public class ModuleLoggingProfilePanel extends JPanel {
             // The saved (on-disk) baseline: the selected profile's content
             // (a key the profile does not define falls back to the built-in
             // default as the reference). For the virtual Default entry the
-            // saved content IS the default.
-            String saved;
-            if (selectedIsDefault) {
-                saved = def;
-            } else {
-                String inProfile = selectedProps.getProperty(key);
-                saved = inProfile != null ? inProfile : def;
-            }
+            // saved content IS the reserved default file's content.
+            String inProfile = selectedProps.getProperty(key);
+            String saved = inProfile != null ? inProfile : def;
 
-            String init;
-            if (selectedIsDefault) {
-                init = def;
-            } else {
-                String fromInit = selectedInitProps.getProperty(key);
-                init = fromInit != null ? fromInit : def;
-            }
+            String fromInit = selectedInitProps.getProperty(key);
+            String init = fromInit != null ? fromInit : def;
 
             // In the generic module panel this is a comparison-only
             // reference. Node-hosted panels use their per-node baseline.
@@ -2096,12 +2093,14 @@ public class ModuleLoggingProfilePanel extends JPanel {
         }
         // The editor's source: the profile's dirty workspace state (the
         // unsaved edits held while the user worked on another profile) wins
-        // over the disk content. The virtual "Default" entry has no content
-        // of its own (the built-in defaults; nothing is read from or written
-        // to disk).
+        // over the disk content. The virtual "Default" entry IS the reserved
+        // built-in profile: its content is the on-disk default file (the
+        // runtime truth an unassigned owner starts with) — a key the file
+        // does not define falls back to the built-in row default below.
+        // Nothing is ever written to the reserved file.
         Properties source;
         if (DEFAULT_PROFILE_ENTRY.equals(name)) {
-            source = null;
+            source = loadProfilePropsSafely(LoggingProfileRepository.RESERVED_PROFILE_NAME);
         } else {
             Properties dirty = dirtyProfiles.contains(name) ? profileWorkspace.get(name) : null;
             if (dirty != null) {
@@ -2259,17 +2258,28 @@ public class ModuleLoggingProfilePanel extends JPanel {
      * saved profile values are the baseline. The generic module panel uses
      * the selected profile's immutable init values when module-level Apply is
      * used; after startup, its saved values seed the comparison reference.
-     * Missing keys fall back to built-in defaults.
+     * With no applied marker the built-in default IS the applied reference
+     * (the profile menu marks the virtual "Default" entry as applied) — its
+     * on-disk content is the comparison baseline. Missing keys fall back to
+     * built-in defaults.
      */
     private void refreshAppliedBaseline() {
         appliedValues.clear();
-        if (appliedProfileName == null || appliedProfileName.isBlank()) {
-            return;
-        }
         try {
-            Properties baseline = appliedProfileNameSupplier != null
-                    ? repo.loadProps(moduleId, appliedProfileName)
-                    : repo.loadAppliedBaseline(moduleId, appliedProfileName);
+            Properties baseline;
+            if (appliedProfileNameSupplier != null) {
+                if (appliedProfileName == null || appliedProfileName.isBlank()) {
+                    return; // a host supplier resolves a concrete name (never blank)
+                }
+                baseline = repo.loadProps(moduleId, appliedProfileName);
+            } else if (appliedProfileName == null || appliedProfileName.isBlank()) {
+                // No applied marker: the built-in default is the applied
+                // reference — compare against its on-disk content (the
+                // runtime truth an unassigned owner starts with).
+                baseline = repo.loadProps(moduleId, LoggingProfileRepository.RESERVED_PROFILE_NAME);
+            } else {
+                baseline = repo.loadAppliedBaseline(moduleId, appliedProfileName);
+            }
             for (String key : baseline.stringPropertyNames()) {
                 String value = baseline.getProperty(key);
                 if (value != null) {
@@ -2520,6 +2530,11 @@ public class ModuleLoggingProfilePanel extends JPanel {
                                 + "This is the default for newly created node profiles; existing profiles are unchanged.",
                         "Applied", JOptionPane.INFORMATION_MESSAGE);
             }
+            // The applied marker may have moved (the hook above persists the
+            // host's applied state): repaint the CLOSED combo so its selected
+            // entry picks up the applied check/color at once — the dropdown
+            // re-renders on click, the closed selection does not.
+            profileCombo.repaint();
         } catch (Exception e) {
             JOptionPane.showMessageDialog(this, "Failed to apply profile: " + e.getMessage(),
                     "Error", JOptionPane.ERROR_MESSAGE);

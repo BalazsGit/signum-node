@@ -180,8 +180,7 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
         // the node so they take effect — it does not set the module's applied reference,
         // so the core's module-centric hover text is misleading here.
         setApplyButtonTooltip(ConfigurationUtils.profileTooltip("Apply<br><br>Links the selected logging profile to this node profile and applies "
-                + "its saved values to the node. Applying restarts the node so the changes take effect (other node "
-                + "profiles and the module's applied profile are not changed)."));
+                + "its saved values to the node. Applying restarts the node so the changes take effect."));
 
         // Optional "link to node profile" control.
         if (onLinkAction != null) {
@@ -189,9 +188,18 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
         }
 
         // The FileHandler rows were registered AFTER the super-constructor's
-        // initial profile load — recompute their row states (the unsaved/
-        // saved/applied coloring and the "Show values" filters) now.
-        reevaluateRowStates();
+        // initial profile load — reload the selected profile into the editor
+        // so the new rows show the selected profile's values (for the
+        // virtual "Default" entry: the reserved default file's content), not
+        // their registration defaults; the row states (the unsaved/saved/
+        // applied coloring and the "Show values" filters) are recomputed by
+        // the reload.
+        String selectedEntry = selectedProfileName();
+        if (selectedEntry == null) {
+            reevaluateRowStates();
+        } else {
+            selectProfile(selectedEntry);
+        }
 
         // The applied profile is the menu's default selection: the per-node
         // assignment (SSOT); without one, the virtual "Default" entry stands

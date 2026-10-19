@@ -490,8 +490,8 @@ class NodeLoggingPanelTest {
                 "the tooltip opens with the node-scoped link-to-the-node statement");
         assertTrue(tooltip.contains("applies its saved values to the node"),
                 "the tooltip states that the profile's saved values are applied to the node");
-        assertTrue(tooltip.contains("Applying restarts the node so the changes take effect"),
-                "the tooltip states that applying restarts the node for the changes to take effect");
+        assertTrue(tooltip.contains("Applying restarts the node so the saved changes take effect"),
+                "the tooltip states that applying restarts the node for the saved changes to take effect");
         assertFalse(tooltip.contains("Marks the selected profile as applied"),
                 "the module-scoped wording is replaced on the node tab");
         assertFalse(tooltip.contains("module's applied reference"),
