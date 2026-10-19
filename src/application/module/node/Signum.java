@@ -6,6 +6,7 @@ import application.module.node.props.PropertyServiceImpl;
 import application.module.node.props.Props;
 import application.module.node.web.server.WebServer;
 import application.module.node.instance.NodeStartupException;
+import application.module.node.profile.EffectiveNodeProps;
 import application.module.node.profile.NodeProfile;
 import application.module.node.profile.NodeProfileRepository;
 import application.utils.config.ModuleIds;
@@ -65,6 +66,8 @@ import application.module.node.web.api.http.common.APITransactionManager;
 import application.module.node.web.api.http.common.APITransactionManagerImpl;
 import application.module.node.web.server.WebServerContext;
 import application.module.node.web.server.WebServerImpl;
+import application.utils.logging.NodeLogContext;
+import application.utils.logging.ProfileFileAppender;
 import application.utils.logging.ProfileLogger;
 
 import org.slf4j.Logger;
@@ -268,6 +271,11 @@ public final class Signum {
 
     // ── Logging (per-node instance) ──
     private ProfileLogger profileLogger;
+    /**
+     * The per-node file log appender (created in doInitialize, removed in doShutdown /
+     * dispose): writes this node's INFO+ log events to {node.fileLog.dir}/{profile}.log.
+     */
+    private volatile ProfileFileAppender profileFileAppender;
 
     // ── Lifecycle flags ──
     private final AtomicBoolean contextStarted = new AtomicBoolean(false);
@@ -531,6 +539,7 @@ public final class Signum {
     public synchronized void dispose() {
         ProfileLogger pl = this.profileLogger;
         if (pl != null) {
+            detachProfileFileAppender();
             pl.close();
             if (this.profile != null) {
                 application.utils.logging.NodeLoggerRegistry.unregister(ModuleIds.NODE, this.profile.getName());
@@ -905,6 +914,68 @@ public final class Signum {
         return profileLogger;
     }
 
+    /**
+     * Attaches the per-node file log appender (the runtime half of per-node file
+     * logging): events at/above the configured {@code node.fileLog.level} of this
+     * node's ProfileLogger are written to {@code {node.fileLog.dir}/{profile}.log}
+     * for the lifetime of the node run.
+     * <p>
+     * Idempotent/restart-safe: an appender from a previous run is removed first,
+     * so a stop/start cycle within the same JVM never duplicates the file writes.
+     * Fail-soft: any problem (unwritable directory, bad config value) is logged
+     * once and the node keeps running without a file log.
+     * </p>
+     */
+    private void attachProfileFileAppender() {
+        detachProfileFileAppender(); // restart guard — never double-attach
+        try {
+            if (profileLogger == null || !propertyService.getBoolean(Props.FILE_LOG_ENABLE)) {
+                return;
+            }
+            ProfileFileAppender appender = new ProfileFileAppender(
+                    profile.getName(),
+                    java.nio.file.Paths.get(propertyService.getString(Props.FILE_LOG_DIR)),
+                    ProfileFileAppender.parseLevel(propertyService.getString(Props.FILE_LOG_LEVEL)),
+                    propertyService.getInt(Props.FILE_LOG_LIMIT),
+                    propertyService.getInt(Props.FILE_LOG_COUNT));
+            if (!appender.isActive()) {
+                appender.dispose();
+                NodeLogContext.runIn(ModuleIds.NODE, profile.getName(),
+                        () -> LOGGER.warn("Per-node file log is inactive for profile '{}' (could not open the log file in '{}')",
+                                profile.getName(), propertyService.getString(Props.FILE_LOG_DIR)));
+                return;
+            }
+            profileLogger.addSubscriber(appender);
+            this.profileFileAppender = appender;
+            NodeLogContext.runIn(ModuleIds.NODE, profile.getName(),
+                    () -> LOGGER.info("Per-node file log attached for profile '{}': {} (level {}, {} bytes x {} rotations)",
+                            profile.getName(), appender.getFile().toAbsolutePath(),
+                            propertyService.getString(Props.FILE_LOG_LEVEL),
+                            propertyService.getInt(Props.FILE_LOG_LIMIT), propertyService.getInt(Props.FILE_LOG_COUNT)));
+        } catch (Throwable t) {
+            NodeLogContext.runIn(ModuleIds.NODE, profile != null ? profile.getName() : "unknown",
+                    () -> LOGGER.warn("Failed to attach the per-node file log appender: {}", t.getMessage()));
+        }
+    }
+
+    /**
+     * Removes and closes the per-node file log appender (idempotent). Called from
+     * doShutdown (stop) and dispose (permanent removal); the next doInitialize
+     * attaches a fresh one.
+     */
+    private void detachProfileFileAppender() {
+        ProfileFileAppender appender = this.profileFileAppender;
+        if (appender == null) {
+            return;
+        }
+        this.profileFileAppender = null;
+        ProfileLogger pl = this.profileLogger;
+        if (pl != null) {
+            pl.removeSubscriber(appender);
+        }
+        appender.dispose(); // idempotent (removeSubscriber already disposed it)
+    }
+
     // =========================================================================
     // Profile management
     // =========================================================================
@@ -920,44 +991,29 @@ public final class Signum {
     // =========================================================================
 
     /**
-     * Loads properties for a specific named profile using the unified PropertiesProfileLoader.
-     * Architecture: Hardcoded defaults (Props.java) -> Profile .properties file only.
-     * Path schema: {confFolder}/node/profiles/{profileName}.properties
+     * Loads the effective properties for a named profile using the three-layer
+     * model (see {@link EffectiveNodeProps}):
+     * <pre>
+     *   L0: Hardcoded defaults (Props.java) — not materialized here; consumers
+     *       fall back to Prop.getDefaultValue() for every missing key.
+     *   L1: {confFolder}/node/profiles/node-default.properties — the reserved
+     *       default template; its ACTIVE lines override L0 for every profile.
+     *   L2: {confFolder}/node/profiles/{profileName}.properties — the profile's
+     *       own file; its active lines override L0 and L1.
+     * </pre>
+     * Path schema: {confFolder}/node/profiles/*.properties
      *
      * @param confFolder  The base configuration folder for this node (e.g., "./conf",
      *                    or "conf/junit" in tests) — the profile is resolved RELATIVE TO IT
      * @param profileName The profile name to load (without .properties extension)
-     * @return PropertyService with loaded properties, or empty one if file not found
+     * @return PropertyService over the merged L1+L2 properties (pure L0 fallback
+     *         when neither file exists or has active lines)
      */
     public static PropertyService loadPropertiesForProfile(String confFolder, String profileName) {
-        CaselessProperties properties = new CaselessProperties();
-
-        // Use unified profile loader for path resolution: {confFolder}/node/profiles/{profileName}.properties
-        // (v4: the confFolder parameter is the node's configuration root — honoring it is what
-        // makes per-node conf roots work, e.g. the JUnit mock profile under "conf/junit".)
-        Path profileFile = PropertiesProfileLoader.resolveProfileFile(
-                confFolder, ModuleIds.NODE, ModuleIds.CATEGORY_PROFILES, profileName);
+        CaselessProperties properties = EffectiveNodeProps.loadEffective(confFolder, profileName);
 
         application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                () -> {
-                    LOGGER.info("Initializing Signum Node version {}", VERSION);
-                    LOGGER.info("Looking for profile '{}' at {}", profileName, profileFile.toAbsolutePath());
-                });
-
-        if (Files.exists(profileFile)) {
-            try (Reader reader = new InputStreamReader(new FileInputStream(profileFile.toFile()),
-                    StandardCharsets.UTF_8)) {
-                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                        () -> LOGGER.info("Loading profile '{}' from {}", profileName, profileFile.toAbsolutePath()));
-                properties.load(reader);
-            } catch (IOException e) {
-                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                        () -> LOGGER.warn("Error loading profile '{}', using internal defaults.", profileName, e));
-            }
-        } else {
-            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                    () -> LOGGER.info("No profile file found for '{}'. Using internal defaults from Props.java.", profileName));
-        }
+                () -> LOGGER.info("Initializing Signum Node version {}", VERSION));
 
         // Ensure SETTINGS_DIR is set if not in file
         if (properties.getProperty(Props.SETTINGS_DIR.getName()) == null) {
@@ -1135,6 +1191,12 @@ public final class Signum {
         } catch (Throwable t) {
             System.err.println("Failed to apply per-node logging level for profile '" + profileName + "': " + t.getMessage());
         }
+
+        // ── Step 1.6: attach the per-node file log appender (per-node file logging) ──
+        // Writes this node's log events at/above the configured level to
+        // {node.fileLog.dir}/{profileName}.log for the lifetime of the node run.
+        // Detached again in doShutdown / dispose. Never breaks node startup.
+        attachProfileFileAppender();
 
         // ── Step 2.5: Create profile-scoped ShutdownManager ──
         this.shutdownManager = new ShutdownManager(this.propertyService, profileName);
@@ -1487,6 +1549,11 @@ public final class Signum {
     private void doShutdown() {
         String profileName = this.profile != null ? this.profile.getName() : "unknown";
         try {
+            // Stop the per-node file log appender first: no file writes happen from
+            // this point. The ProfileLogger itself stays alive (restart-friendly);
+            // the appender is re-attached on the next doInitialize.
+            detachProfileFileAppender();
+
             if (this.webServer != null) {
                 try {
                     this.webServer.shutdown();

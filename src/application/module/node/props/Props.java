@@ -295,6 +295,13 @@ public class Props {
     public static final Prop<String> REWARD_RECIPIENT_PASSPHRASES = new Prop<>("RewardRecipientPassphrases", "");
     public static final Prop<Boolean> ALLOW_OTHER_SOLO_MINERS = new Prop<>("AllowOtherSoloMiners", true);
 
+    // ── Per-node file logging (ProfileFileAppender) ────────────────────
+    public static final Prop<Boolean> FILE_LOG_ENABLE = new Prop<>("node.fileLog.enable", true);
+    public static final Prop<String> FILE_LOG_LEVEL = new Prop<>("node.fileLog.level", "INFO");
+    public static final Prop<String> FILE_LOG_DIR = new Prop<>("node.fileLog.dir", "logs/node");
+    public static final Prop<Integer> FILE_LOG_LIMIT = new Prop<>("node.fileLog.limit", 5000000);
+    public static final Prop<Integer> FILE_LOG_COUNT = new Prop<>("node.fileLog.count", 1);
+
     private Props() { // no need to construct
     }
 }

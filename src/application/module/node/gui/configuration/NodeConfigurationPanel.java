@@ -696,6 +696,11 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(systemPanel, Props.MEASUREMENT_ACTIVE, "Enable Metrics/Measurement");
         addProperty(systemPanel, Props.MEASUREMENT_DIR, "Measurement Dir");
         addProperty(systemPanel, Props.SETTINGS_DIR, "Settings Dir");
+        addProperty(systemPanel, Props.FILE_LOG_ENABLE, "Per-Node File Log Enabled");
+        addProperty(systemPanel, Props.FILE_LOG_LEVEL, "Per-Node File Log Level");
+        addProperty(systemPanel, Props.FILE_LOG_DIR, "Per-Node File Log Dir");
+        addProperty(systemPanel, Props.FILE_LOG_LIMIT, "Per-Node File Log Size Limit (bytes)");
+        addProperty(systemPanel, Props.FILE_LOG_COUNT, "Per-Node File Log Rotations");
         addProperty(systemPanel, Props.ICON_LOCATION, "Icon Location");
         addProperty(systemPanel, Props.AUTO_POP_OFF_ENABLED, "Enable Auto Pop-Off");
         addProperty(systemPanel, Props.INITIAL_POP_OFF_ENABLED, "Enable Initial Safety Pop-Off");
