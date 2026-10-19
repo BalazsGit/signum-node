@@ -1015,49 +1015,68 @@ public class ConfigurationUtils {
     }
 
     /**
-     * Reads the logging configuration according to the priority order.
-     * Path schema: ../conf/node/logging/{profileName}.properties
+     * Reads the logging configuration according to the three-layer model:
+     * <pre>
+     *   L0: hardcoded internal defaults ({@link LoggerProfile#applyInternalDefaults()}).
+     *   L1: {confFolder}/node/logging/logging-default.properties — the reserved
+     *       default file; its ACTIVE lines override L0 for every profile. It is
+     *       always consulted, so an empty (or missing) "logging.properties" can
+     *       no longer preempt the reserved default's active lines.
+     *   L2: {confFolder}/node/logging/{profileName}.properties, falling back to
+     *       the shared "logging.properties" — its active lines override L0 and L1.
+     * </pre>
+     * Path schema: {confFolder}/node/logging/{profileName}.properties
+     *
+     * @param confFolder  the base configuration root (e.g. "./conf"), never null
+     * @param profileName the logging profile name to load
+     * @return the effective LoggerProfile (L0 + the active lines of L1 and L2)
      */
     public static LoggerProfile loadEffectiveLoggerProfile(String confFolder, String profileName) {
         LoggerProfile effective = new LoggerProfile(profileName);
         effective.applyInternalDefaults();
 
-        Path pathToLoad = null;
+        // L1: the reserved default file — always consulted when present.
+        loadLoggingLayer(effective, confFolder, Signum.DEFAULT_LOGGING_PROPERTIES_NAME);
 
-        // 1. Search based on the active name using unified loader
-        Path specificPath = PropertiesProfileLoader.resolveProfileFile(
-                ConfigPaths.RUNTIME_CONF_ROOT, ModuleIds.NODE, ModuleIds.CATEGORY_LOGGING, profileName);
-        if (Files.exists(specificPath)) {
-            pathToLoad = specificPath;
-        } else {
-            // 2. Fallback to logging.properties
-            if (!Signum.LOGGING_PROPERTIES_NAME.equals(profileName)) {
-                Path fallbackPath = PropertiesProfileLoader.resolveProfileFile(
-                        ConfigPaths.RUNTIME_CONF_ROOT, ModuleIds.NODE, ModuleIds.CATEGORY_LOGGING, Signum.LOGGING_PROPERTIES_NAME);
-                if (Files.exists(fallbackPath))
-                    pathToLoad = fallbackPath;
-            }
-            // 3. Fallback to logging-default.properties
-            if (pathToLoad == null) {
-                Path defSub = PropertiesProfileLoader.resolveProfileFile(
-                        ConfigPaths.RUNTIME_CONF_ROOT, ModuleIds.NODE, ModuleIds.CATEGORY_LOGGING, Signum.DEFAULT_LOGGING_PROPERTIES_NAME);
-                if (Files.exists(defSub)) {
-                    pathToLoad = defSub;
-                }
+        // L2: the profile's own file, falling back to the shared "logging" file.
+        Path pathToLoad = PropertiesProfileLoader.resolveProfileFile(
+                confFolder, ModuleIds.NODE, ModuleIds.CATEGORY_LOGGING, profileName);
+        if (!Files.exists(pathToLoad) && !Signum.LOGGING_PROPERTIES_NAME.equals(profileName)) {
+            Path fallbackPath = PropertiesProfileLoader.resolveProfileFile(
+                    confFolder, ModuleIds.NODE, ModuleIds.CATEGORY_LOGGING, Signum.LOGGING_PROPERTIES_NAME);
+            if (Files.exists(fallbackPath)) {
+                pathToLoad = fallbackPath;
             }
         }
-
-        if (pathToLoad != null) {
-            try (FileInputStream is = new FileInputStream(pathToLoad.toFile())) {
-                Properties fileProps = new Properties();
-                fileProps.load(is);
-                effective.getProperties().putAll(fileProps);
-            } catch (IOException e) {
-                // Logger initialization has not happened yet, using System.err
-                System.err.println("Failed to load logger properties: " + e.getMessage());
-            }
-        }
+        loadLoggingLayer(effective, pathToLoad);
         return effective;
+    }
+
+    /**
+     * Loads the named logging layer: {confFolder}/node/logging/{profileName}.properties,
+     * when it exists.
+     */
+    private static void loadLoggingLayer(LoggerProfile target, String confFolder, String profileName) {
+        loadLoggingLayer(target, PropertiesProfileLoader.resolveProfileFile(confFolder,
+                ModuleIds.NODE, ModuleIds.CATEGORY_LOGGING, profileName));
+    }
+
+    /**
+     * Loads one logging layer from an already-resolved path, tolerating a
+     * missing or unreadable file (the layers below stay effective).
+     */
+    private static void loadLoggingLayer(LoggerProfile target, Path path) {
+        if (!Files.exists(path)) {
+            return; // layer absent
+        }
+        try (FileInputStream is = new FileInputStream(path.toFile())) {
+            Properties fileProps = new Properties();
+            fileProps.load(is);
+            target.getProperties().putAll(fileProps);
+        } catch (IOException e) {
+            // Logger initialization has not happened yet, using System.err
+            System.err.println("Failed to load logger properties from " + path + ": " + e.getMessage());
+        }
     }
 
     /**

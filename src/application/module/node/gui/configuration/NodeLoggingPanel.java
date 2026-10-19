@@ -155,9 +155,12 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
         }
 
         // Node-specific File Handler rows (not present in the provider defaults).
-        addExtraField("java.util.logging.FileHandler.level",   "File Level",            "INFO");
-        addExtraField("java.util.logging.FileHandler.pattern", "Log File Pattern",      "logs/signum%u.log");
-        addExtraField("java.util.logging.FileHandler.limit",   "File Size Limit (bytes)", "0");
+        // Their defaults mirror the "file logging recipe" kept in the reserved
+        // default file (conf/node/logging/logging-default.properties) — uncommenting
+        // that recipe block enables file logging with exactly these values.
+        addExtraField("java.util.logging.FileHandler.level",   "File Level",            "FINE");
+        addExtraField("java.util.logging.FileHandler.pattern", "Log File Pattern",      "node.log");
+        addExtraField("java.util.logging.FileHandler.limit",   "File Size Limit (bytes)", "5000000");
         addExtraField("java.util.logging.FileHandler.count",   "File Count",            "1");
 
         // Apply → record the per-node assignment (SSOT) then restart the node.
@@ -180,7 +183,7 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
         // the node so they take effect — it does not set the module's applied reference,
         // so the core's module-centric hover text is misleading here.
         setApplyButtonTooltip(ConfigurationUtils.profileTooltip("Apply<br><br>Links the selected logging profile to this node profile and applies "
-                + "its saved values to the node. Applying restarts the node so the changes take effect."));
+                + "its saved values to the node. Applying restarts the node so the saved changes take effect."));
 
         // Optional "link to node profile" control.
         if (onLinkAction != null) {

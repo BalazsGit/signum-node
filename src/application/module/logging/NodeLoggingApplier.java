@@ -92,8 +92,9 @@ public final class NodeLoggingApplier {
     }
 
     /**
-     * Resolves the effective {@code <module>.level} value for a profile, in precedence order:
-     * on-disk profile file → hardcoded module default.
+     * Resolves the effective {@code <module>.level} value for a profile, in precedence
+     * order (three-layer model): on-disk profile file (L2) &rarr; the module's reserved
+     * default file (L1, active lines only) &rarr; hardcoded module default (L0).
      *
      * @param confRoot    base configuration root
      * @param profileName the (already-fallback-resolved) profile name
@@ -102,25 +103,48 @@ public final class NodeLoggingApplier {
      */
     static String resolveLevel(String confRoot, String profileName, String moduleId) {
         String key = moduleId + ".level";
-        Path file = new LoggingProfileRepository(confRoot).getProfileFile(moduleId, profileName);
-        if (Files.exists(file)) {
-            try (InputStream is = Files.newInputStream(file);
-                 InputStreamReader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
-                Properties props = new Properties();
-                props.load(reader);
-                String value = props.getProperty(key);
-                if (value != null && !value.isBlank()) {
-                    return value.trim();
-                }
-            } catch (Exception e) {
-                LOGGER.debug("Failed to read profile file {}: {}", file, e.getMessage());
-            }
+        LoggingProfileRepository repository = new LoggingProfileRepository(confRoot);
+
+        // L2: the assigned profile's own file.
+        String value = readLevelKey(repository.getProfileFile(moduleId, profileName), key);
+        if (value != null) {
+            return value;
         }
+        // L1: the module's reserved default file (its active lines).
+        value = readLevelKey(
+                repository.getProfileFile(moduleId, LoggingProfileRepository.RESERVED_PROFILE_NAME), key);
+        if (value != null) {
+            return value;
+        }
+        // L0: the hardcoded module default.
         ModuleLoggingProvider provider = LoggingModuleRegistry.getInstance().getProvider(moduleId);
         if (provider == null) {
             return null;
         }
         return provider.getProfile().getDefaults().get(key);
+    }
+
+    /**
+     * Reads a single key from a profile file, tolerating a missing or unreadable file.
+     *
+     * @return the trimmed value, or null when the file is absent or the key is missing/blank
+     */
+    private static String readLevelKey(Path file, String key) {
+        if (!Files.exists(file)) {
+            return null;
+        }
+        try (InputStream is = Files.newInputStream(file);
+             InputStreamReader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
+            Properties props = new Properties();
+            props.load(reader);
+            String value = props.getProperty(key);
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        } catch (Exception e) {
+            LOGGER.debug("Failed to read profile file {}: {}", file, e.getMessage());
+        }
+        return null;
     }
 
     /**

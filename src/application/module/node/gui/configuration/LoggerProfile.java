@@ -43,7 +43,7 @@ public class LoggerProfile {
         properties.setProperty(".level", "SEVERE");
         properties.setProperty("node.level", "INFO");
         properties.setProperty("java.util.logging.ConsoleHandler.level", "ALL");
-        properties.setProperty("java.util.logging.ConsoleHandler.formatter", "node.util.BriefLogFormatter");
+        properties.setProperty("java.util.logging.ConsoleHandler.formatter", "application.module.node.util.BriefLogFormatter");
         properties.setProperty("org.eclipse.jetty.level", "OFF");
         properties.setProperty("javax.servlet.level", "OFF");
         properties.setProperty("com.zaxxer.hikari.level", "WARNING");

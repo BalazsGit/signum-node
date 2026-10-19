@@ -119,6 +119,34 @@ class NodeLoggingApplierTest {
     }
 
     @Test
+    @DisplayName("resolveLevel falls back to the reserved default file (L1) before the module default (L0)")
+    void resolveLevel_fallsBackToReservedDefaultFile() throws IOException {
+        java.nio.file.Path file = tempDir.resolve("node").resolve("logging")
+                .resolve(LoggingProfileRepository.RESERVED_PROFILE_NAME + ".properties");
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, "node.level = FINE\n");
+
+        assertEquals("FINE", NodeLoggingApplier.resolveLevel(tempDir.toString(), "unknown", MODULE),
+                "the reserved default file's active lines must override the hardcoded module default");
+    }
+
+    @Test
+    @DisplayName("the on-disk profile level (L2) wins over the reserved default file (L1)")
+    void resolveLevel_onDiskWinsOverReservedDefault() throws IOException {
+        java.nio.file.Path file = tempDir.resolve("node").resolve("logging")
+                .resolve(LoggingProfileRepository.RESERVED_PROFILE_NAME + ".properties");
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, "node.level = FINE\n");
+
+        LoggingProfileRepository repo = new LoggingProfileRepository(tempDir.toString());
+        java.util.Properties props = new java.util.Properties();
+        props.setProperty("node.level", "SEVERE");
+        repo.saveProps(MODULE, "custom", props);
+
+        assertEquals("SEVERE", NodeLoggingApplier.resolveLevel(tempDir.toString(), "custom", MODULE));
+    }
+
+    @Test
     @DisplayName("different node profiles get different levels (multi-node isolation)")
     void applyForNodeProfile_perProfileIsolation() throws IOException {
         LoggingProfileRepository repo = new LoggingProfileRepository(tempDir.toString());
