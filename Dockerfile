@@ -54,8 +54,8 @@ COPY docker/scripts/start-node.sh /signum/start-node.sh
 WORKDIR /signum
 RUN mkdir ./bootstrap
 
-COPY conf/logging-default.properties ./bootstrap/logging-default.properties
-COPY conf/node-default.properties ./bootstrap/node-default.properties
+COPY conf/node/logging/logging-default.properties ./bootstrap/logging-default.properties
+COPY conf/node/profiles/node-default.properties ./bootstrap/node-default.properties
 COPY conf/${network}/node.${database}.properties ./bootstrap/node.properties
 
 RUN chmod +x start-node.sh update-phoenix.sh update-classic.sh

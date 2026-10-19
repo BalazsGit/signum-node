@@ -199,12 +199,12 @@ docker run -d -p "8123:8123" -p "8125:8125" -v "/home/me/crypto/signum-node/db:/
 > using `docker ps` will list the running container 
 
 Be sure that the `db` and `conf` folder exist under the give path. You do not need to put any files there, they will be created on the first startup.
-Within the `conf` folder you'll see three file created:
+Within the `conf` folder you'll see the following files created:
 
-- logging-default.properties - default logging config reference
-- logging.properties - override default logging settings
-- node-default.properties - default config reference
-- node.properties - override default config settings
+- node/profiles/node-default.properties - reserved default node config (layer 1; uncomment lines to override the hardcoded defaults for every profile)
+- node/profiles/node.properties - node config overrides (legacy shared profile; per-profile files live next to it in node/profiles/)
+- node/logging/logging-default.properties - reserved default logging config (layer 1; uncomment lines to override the hardcoded logging defaults)
+- node/logging/logging.properties - logging config overrides (shared logging profile)
 
 
 # Building Image Manually

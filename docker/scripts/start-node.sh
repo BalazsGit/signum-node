@@ -7,13 +7,14 @@ set -e
 
 BOOT_DIR=./bootstrap
 CONF_DIR=/conf # symbolic link
-CONF_DEFAULT=$CONF_DIR/node-default.properties
-CONF_LOGGING=$CONF_DIR/logging-default.properties
+CONF_DEFAULT=$CONF_DIR/node/profiles/node-default.properties
+CONF_LOGGING=$CONF_DIR/node/logging/logging-default.properties
 CONF_CUSTOM=$CONF_DIR/node.properties
 
 echo "👩‍⚕Checking for configuration files..."
 if [[ ! -e $CONF_DEFAULT ]]; then
   echo "🆕Creating $CONF_DEFAULT"
+  mkdir -p "$CONF_DIR/node/profiles" "$CONF_DIR/node/logging"
   cp $BOOT_DIR/node-default.properties $CONF_DEFAULT
 fi
 
@@ -24,6 +25,7 @@ fi
 
 if [[ ! -e $CONF_LOGGING ]]; then
   echo "🆕Creating $CONF_LOGGING"
+  mkdir -p "$CONF_DIR/node/logging"
   cp $BOOT_DIR/logging-default.properties $CONF_LOGGING
 fi
 
