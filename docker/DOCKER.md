@@ -59,8 +59,8 @@ Due to that model concurrent access is possible, i.e. one can run an additional 
 Running the Mariadb image is similar to the H2 image, except it does not create a database docker volume. You must also provide the configuration in `node.properties` to point it to a mariadb instance.
 
 1. Run `mkdir signum-docker` or similar to create a folder to house all your docker files.
-2. Run `cd signum-docker` then `mkdir conf`
-3. Run `touch conf/node.properties`, then edit that file to override the nodes default settings as desired.
+2. Run `cd signum-docker` then `mkdir -p conf/node/profiles`
+3. Run `touch conf/node/profiles/node.properties`, then edit that file to override the nodes default settings as desired.
 4. In `node.properties`, set the connection string and credentials:
 ```
 DB.Url=jdbc:mariadb://mariadb:3306/signum
@@ -137,8 +137,8 @@ Once you port-forward the two relevant ports, the website should be available at
 To use the H2 docker image:
 
 1. Run `mkdir signum-docker` or similar to create a folder to house all your docker files.
-2. Run `cd signum-docker` then `mkdir conf`
-3. Run `touch conf/node.properties`, then edit that file to override the nodes default settings as desired.
+2. Run `cd signum-docker` then `mkdir -p conf/node/profiles`
+3. Run `touch conf/node/profiles/node.properties`, then edit that file to override the nodes default settings as desired.
 4. Run `docker volume create signum_db` to create a location to house your database.
 5. Create a file called `docker-compose.yml` with these contents:
 ```yml

@@ -62,7 +62,7 @@ All module configurations follow a standardized path schema:
 ./conf/
 └── node/
     ├── profiles/                              ← Node profile configurations
-    │   ├── profile-default.properties         ← Default template (synced from resources via SHA-256)
+    │   ├── node-default.properties            ← Default template (L1, synced from resources)
     │   ├── mainnet.properties                 ← User profile: "mainnet"
     │   └── testnet.properties                 ← User profile: "testnet"
     │
@@ -147,7 +147,7 @@ The following profile names are **excluded** from discovery:
 
 | Name | Purpose |
 |------|---------|
-| `profile-default` | Default property values (synced template, not a runnable profile) |
+| `node-default` | Default property values (L1 template, not a runnable profile) |
 | `logging-default` | Default logging configuration template |
 
 ---
@@ -325,7 +325,7 @@ graph TD
 
 ### Default File Not Updating?
 
-1. **Check classpath resource**: Verify `/conf/node/profiles/profile-default.properties` exists in JAR
+1. **Check classpath resource**: Verify `/conf/node/profiles/node-default.properties` exists in JAR
 2. **Check hash comparison**: Default files are only overwritten when SHA-256 hash differs
 3. **Manual override**: Delete the runtime file to force re-sync on next startup
 

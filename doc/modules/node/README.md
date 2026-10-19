@@ -3,29 +3,50 @@
 ## Overview
 The Node module is the core blockchain component. It manages profiles, lifecycle, networking, block processing, and mining.
 
-## Configuration Resolution Chain (Hybrid)
+## Configuration Resolution Chain (3-layer)
+
+Node configuration is loaded per key, the highest layer wins:
 
 ```
-Step 1: System base defaults
-       classpath:/conf/system/logging/logging-default.properties
+L0: Hardcoded defaults
+        Props.java (Prop.getDefaultValue) — never materialized to disk
 
-Step 2: Module profile defaults
-       classpath:/conf/node/profiles/profile-default.properties
+L1: Reserved default template
+        conf/node/profiles/node-default.properties
+        ships fully commented (documents L0); an active line overrides L0
+        for EVERY profile
 
-Step 3: Module logging defaults
-       classpath:/conf/node/logging/logging-default.properties
-
-Step 4: User override (empty at init)
-       conf/node/{profile}.properties      ← runtime file, created if missing
-       conf/node/logging.properties         ← runtime file, created if missing
+L2: Profile file (GUI-editable)
+        conf/node/profiles/{profileName}.properties
+        active lines override L0 and L1
 ```
 
-## Key Files
+The single loading path is `EffectiveNodeProps` (headless SSOT):
 
-| Resource (JAR) | Runtime Override | Purpose |
-|---|---|---|
-| `/conf/node/profiles/profile-default.properties` | `conf/node/{profile}.properties` | Node config values |
-| `/conf/node/logging/logging-default.properties` | `conf/node/logging.properties` | Logging levels |
+- runtime: `Signum.loadPropertiesForProfile` → `EffectiveNodeProps.loadEffective`
+- GUI "Default" baselines (edit / delete / reset / clone diff):
+  `EffectiveNodeProps.baselineValue`
+
+Both template and profile files are optional — deleting any layer degrades
+gracefully to the layers below (worst case: pure L0).
+
+Logging configuration follows the same model: hardcoded logging defaults (L0,
+`NodeLoggingProfile.getDefaults`) ← `conf/node/logging/logging-default.properties`
+(L1, ships fully commented) ← the logging profile file (L2). The merge lives in
+`ConfigurationUtils.loadEffectiveLoggerProfile`; the read-only "effective view"
+composition is `EffectiveProfileResolver` + `LoggingProfileManager`.
+
+### Per-Node File Log
+
+Every running node writes its own log file (INFO and above) via the
+`ProfileFileAppender` (a `LogSubscriber` on the node's `ProfileLogger`):
+
+```
+{node.fileLog.dir}/{profileName}.log    (default: logs/node/{profileName}.log)
+```
+
+Size-based rotation (`node.fileLog.limitBytes`, `node.fileLog.count`); the
+appender attaches on node start and detaches on stop/dispose.
 
 ## Logging Architecture
 

@@ -994,7 +994,7 @@ public class NodeConsolePanel extends JPanel {
         addInfoTooltip(openClassicButton, "Opens the Classic Wallet in your default web browser.");
         addInfoTooltip(openApiButton, "Opens the interactive API documentation in your default web browser.");
         addInfoTooltip(editConfButton,
-                "Opens the node's configuration file (node.properties or node-default.properties) in your default text editor for easy modification.");
+                "Opens the node's configuration profile file in your default text editor for easy modification.");
         addInfoTooltip(popOff10Button,
                 "Removes the last 10 blocks from your local blockchain. This can help resolve a local fork if your node is stuck.");
         addInfoTooltip(popOff100Button,

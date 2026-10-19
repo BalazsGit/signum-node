@@ -111,27 +111,27 @@ public class AppearanceModule implements Module {
 
         String settingsDir = Props.SETTINGS_DIR.getDefaultValue();
         Path confPath = PathUtils.resolvePath(confFolder);
-        Path nodePath = confPath.resolve(ModuleIds.NODE);
-        // Inline Signum.resolvePropertiesPath() to remove bridge dependency (v4.1 migration 2026-08-07)
-        Path nodePropsFile = null;
-        Path candidate = nodePath.resolve("node.properties");
-        if (Files.exists(candidate)) {
-            nodePropsFile = candidate;
-        } else {
-            candidate = confPath.resolve("node-default.properties");
+        // The node configuration is layered (3-layer model): the reserved
+        // default template (L1) is merged first, then the "node" profile file
+        // (L2) on top of it, so a key present in either file overrides the
+        // hardcoded default. Literal names (no Signum bridge, v4.1 migration
+        // 2026-08-07): "node" is Signum.PROPERTIES_NAME, "node-default" is the
+        // reserved template.
+        Path profilesDir = confPath.resolve(ModuleIds.NODE).resolve(ModuleIds.CATEGORY_PROFILES);
+        Properties nodeProps = new Properties();
+        for (String fileName : new String[] { "node-default.properties", "node.properties" }) {
+            Path candidate = profilesDir.resolve(fileName);
             if (Files.exists(candidate)) {
-                nodePropsFile = candidate;
+                try (java.io.FileInputStream in = new java.io.FileInputStream(candidate.toFile())) {
+                    nodeProps.load(in);
+                } catch (Exception e) {
+                    // ignore
+                }
             }
         }
 
-        if (nodePropsFile != null && Files.exists(nodePropsFile)) {
-            try (java.io.FileInputStream in = new java.io.FileInputStream(nodePropsFile.toFile())) {
-                Properties nodeProps = new Properties();
-                nodeProps.load(in);
-                settingsDir = nodeProps.getProperty(Props.SETTINGS_DIR.getName(), settingsDir);
-            } catch (Exception e) {
-                // ignore
-            }
+        if (!nodeProps.isEmpty()) {
+            settingsDir = nodeProps.getProperty(Props.SETTINGS_DIR.getName(), settingsDir);
         }
         return PathUtils.resolvePath(settingsDir).resolve("gui-settings.json");
     }

@@ -116,7 +116,15 @@ See in the following documents how to set up for different database
 
 Grab the latest [release](https://github.com/signum-network/signum-node/releases) (or, if you prefer, compile yourself using the instructions below)
 
-In the `conf` directory, copy `node-default.properties` into a new file named `node.properties` and modify this file to suit your needs (See "Configuration" section below)
+In the `conf` directory the node configuration is loaded as three layers (the highest one wins):
+
+1. **Hardcoded defaults** — every default is defined in the node code.
+2. **`conf/node/profiles/node-default.properties`** — the reserved default template. It ships
+   with all lines commented out (documenting the hardcoded defaults); uncommenting a line
+   overrides that default **for every profile**.
+3. **`conf/node/profiles/<profile-name>.properties`** — the profile file. Its active lines
+   override both layers above. Profiles are managed from the node GUI (create / rename /
+   delete); a profile with no active lines simply runs with the defaults above it.
 
 To run the node, double click on `signum-node.exe` (if on Windows) or run `java -jar signum-node.jar`.
 On most systems this will show you a monitoring window and will create a tray icon to show that Signum node is running. To disable this, instead run `java -jar signum-node.jar --headless`.
@@ -128,8 +136,10 @@ On most systems this will show you a monitoring window and will create a tray ic
 Starting with the release version 3.3.0 and higher the concept of the config file changed.
 To run the node for mainnet with the default options, no configuration change is needed.
 
-All default/recommended parameters are defined in code by the Signum Node but you can overwrite the parameter within the config file to suit your needs.
-The default values for the available settings are shown in the `conf/node-default.properties` file as commented out. 
+All default/recommended parameters are defined in code by the Signum Node but you can overwrite
+a parameter by adding an active line to your profile file (one profile) or to the reserved
+default template (every profile). The `conf/node/profiles/node-default.properties` file lists
+all available settings with their hardcoded defaults as commented-out lines.
 
 ### Configuration Hints
 
@@ -149,7 +159,7 @@ The cash-back is paid from block `1,029,000.`
 **SQLite/MariaDB**
 
 By default Signum Node is using SQLite (file based) as database. 
-If you like to use MariaDB you will need to adjust your `conf/node.properties`:
+If you like to use MariaDB you will need to adjust your profile file (`conf/node/profiles/node.properties`):
 
 ```properties
 #### DATABASE ####
@@ -205,7 +215,7 @@ node.indirectIncomingService.enable = false
 Starting with the Signum node version 3.3.0 and higher the node is able to handle different chains in a multiverse manner. All parameters for a different chain are set in the code section of the node and can be activated by pointing to the other chain aka universe in the config file.
 No additional setting is needed. 
 
-In order to run a testnet node adjust your `conf/node.properties` to:
+In order to run a testnet node adjust your profile file (`conf/node/profiles/node.properties`) to:
 ```properties
 ## Run with a different network
 # Testnet network
