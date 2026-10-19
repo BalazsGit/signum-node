@@ -34,7 +34,7 @@ import java.util.Set;
  *
  * <h3>Source precedence (highest → lowest)</h3>
  * {@link Source#RUNTIME_OVERRIDES} → {@link Source#ON_DISK}
- * → {@link Source#MODULE_DEFAULT} → {@link Source#GLOBAL_BASE}.
+ * → {@link Source#L1_BASE} → {@link Source#MODULE_DEFAULT}.
  *
  * <p>
  * The effective <b>value</b> is always taken from {@link LoggingProfileManager} (the
@@ -76,9 +76,9 @@ public final class EffectiveProfileResolver {
      * The layer that determines a logger key's effective value.
      */
     public enum Source {
-        /** Global base defaults from {@code conf/logging-default.properties}. */
-        GLOBAL_BASE("base"),
-        /** A module's built-in defaults ({@code getDefaults()}). */
+        /** The reserved default template ({@code conf/node/logging/logging-default.properties}). */
+        L1_BASE("base"),
+        /** A module's built-in defaults ({@code getDefaults()}) — the hardcoded L0 layer. */
         MODULE_DEFAULT("default"),
         /** On-disk profile file {@code conf/{module}/logging/{profile}.properties}. */
         ON_DISK("disk"),
@@ -177,16 +177,20 @@ public final class EffectiveProfileResolver {
         if (onDisk.contains(key)) {
             return Source.ON_DISK;
         }
-        if (defaults.contains(key)) {
-            return Source.MODULE_DEFAULT;
+        if (base.contains(key)) {
+            return Source.L1_BASE;
         }
-        // Defensive fallback: every key in the composite comes from base or a module.
-        return base.contains(key) ? Source.GLOBAL_BASE : Source.MODULE_DEFAULT;
+        // Defensive fallback: every key in the composite comes from a module.
+        return defaults.contains(key) ? Source.MODULE_DEFAULT : Source.L1_BASE;
     }
 
     private Set<String> baseDefaultKeys() {
+        // The reserved default template (L1) lives in the NODE module's logging
+        // category — the single L1 layer for every logging profile.
         Path baseFile = PathUtils.resolvePath(confRoot)
-                .resolve(LoggingProfileManager.GLOBAL_BASE_PROFILE + ".properties");
+                .resolve(ModuleIds.NODE)
+                .resolve(ModuleIds.CATEGORY_LOGGING)
+                .resolve(LoggingProfileManager.L1_BASE_PROFILE + ".properties");
         if (!Files.exists(baseFile)) {
             return Set.of();
         }

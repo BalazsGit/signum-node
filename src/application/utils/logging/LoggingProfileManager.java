@@ -28,9 +28,12 @@ import org.slf4j.LoggerFactory;
  *
  * <h3>Composition Order (highest priority last)</h3>
  * <ol>
- *   <li>Global base defaults (from existing {@code conf/logging-default.properties})</li>
- *   <li>Each enabled module's built-in defaults ({@link ModuleLoggingProfile#getDefaults()})</li>
- *   <li>On-disk profile file from {@code conf/{module}/logging/{profileName}.properties}</li>
+ *   <li>Each enabled module's built-in defaults ({@link ModuleLoggingProfile#getDefaults()})
+ *       — the hardcoded L0 layer</li>
+ *   <li>The reserved default template (L1): {@code {confFolder}/node/logging/logging-default.properties}
+ *       — its active lines override L0 for every profile</li>
+ *   <li>On-disk profile file from {@code conf/{module}/logging/{profileName}.properties}
+ *       (L2) — overrides L0 and L1</li>
  *   <li>User-provided runtime overrides (final argument map)</li>
  * </ol>
  *
@@ -57,8 +60,13 @@ public final class LoggingProfileManager {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(LoggingProfileManager.class);
 
-    /** Global base defaults key (fallback when no module-specific profile exists). */
-    public static final String GLOBAL_BASE_PROFILE = "logging-default";
+    /**
+     * The reserved default-template (L1) profile name of the logging tree. The
+     * template file lives in the NODE module's logging category
+     * ({@code {confFolder}/node/logging/logging-default.properties}); it is the
+     * single L1 layer for every logging profile.
+     */
+    public static final String L1_BASE_PROFILE = "logging-default";
 
     // ── Construction ──────────────────────────────────────────────────
 
@@ -86,25 +94,25 @@ public final class LoggingProfileManager {
 
         Properties result = new Properties();
 
-        // Step 1: Load global base defaults
-        loadGlobalBaseDefaults(confFolder, result);
-
-        // Step 2-4: Iterate registered modules in order
+        // Step 1: merge each module's built-in defaults (the hardcoded L0 layer —
+        // lowest priority of all).
         Collection<ModuleLoggingProvider> providers = LoggingModuleRegistry.getInstance().getAllProviders();
         LOGGER.info("Composing logging profile '{}' from {} registered module(s)", profileName, providers.size());
-
         for (ModuleLoggingProvider provider : providers) {
             ModuleLoggingProfile profile = provider.getProfile();
-            String moduleId = profile.getModuleId();
-
-            // Step 2: Merge module defaults
             profile.mergeDefaults(result, false);
-            LOGGER.debug("Merged defaults for module '{}'", moduleId);
+            LOGGER.debug("Merged defaults for module '{}'", profile.getModuleId());
+        }
 
-            // Step 3: Load on-disk profile file overrides
+        // Step 2: the reserved default template (L1) overrides L0 for every profile.
+        loadL1DefaultTemplate(confFolder, result);
+
+        // Step 3: on-disk profile files (L2) override L0 and L1.
+        for (ModuleLoggingProvider provider : providers) {
+            ModuleLoggingProfile profile = provider.getProfile();
             Properties diskProps = provider.loadProfileFile(confFolder, profileName);
             result.putAll(diskProps);
-            LOGGER.debug("Applied disk overrides for module '{}' ({} keys)", moduleId, diskProps.size());
+            LOGGER.debug("Applied disk overrides for module '{}' ({} keys)", profile.getModuleId(), diskProps.size());
         }
 
         LOGGER.info("Composite profile '{}' assembled with {} total property entries", profileName, result.size());
@@ -152,15 +160,19 @@ public final class LoggingProfileManager {
     // ── Private helpers ───────────────────────────────────────────────
 
     /**
-     * Loads global base defaults from {@code conf/logging-default.properties} as a
-     * fallback layer. This maintains backward compatibility with the existing codebase.
+     * Loads the reserved default template (L1) from
+     * {@code {confFolder}/node/logging/logging-default.properties}. Its active
+     * lines override the module built-in defaults (L0) for every profile; a
+     * missing or empty template simply leaves L0 in effect.
      */
-    private void loadGlobalBaseDefaults(String confFolder, Properties target) {
-        Path basePath = application.utils.io.PathUtils.resolvePath(confFolder);
-        Path defaultFile = basePath.resolve(GLOBAL_BASE_PROFILE + ".properties");
+    private void loadL1DefaultTemplate(String confFolder, Properties target) {
+        Path defaultFile = application.utils.io.PathUtils.resolvePath(confFolder)
+                .resolve(application.utils.config.ModuleIds.NODE)
+                .resolve(application.utils.config.ModuleIds.CATEGORY_LOGGING)
+                .resolve(L1_BASE_PROFILE + ".properties");
 
         if (!java.nio.file.Files.exists(defaultFile)) {
-            LOGGER.debug("Global base defaults file not found: {}", defaultFile);
+            LOGGER.debug("Logging default template (L1) not found: {}", defaultFile);
             return;
         }
 
@@ -168,9 +180,9 @@ public final class LoggingProfileManager {
             Properties base = new Properties();
             base.load(is);
             target.putAll(base);
-            LOGGER.info("Loaded {} global base default entries from {}", base.size(), defaultFile.getFileName());
+            LOGGER.info("Loaded {} logging default template (L1) entries from {}", base.size(), defaultFile);
         } catch (IOException e) {
-            LOGGER.warn("Failed to load global base defaults from {}: {}", defaultFile, e.getMessage());
+            LOGGER.warn("Failed to load logging default template (L1) from {}: {}", defaultFile, e.getMessage());
         }
     }
 

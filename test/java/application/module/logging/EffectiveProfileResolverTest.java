@@ -41,8 +41,10 @@ class EffectiveProfileResolverTest {
         new TestProvider().register();
         resolver = new EffectiveProfileResolver(tempDir.toString());
 
-        // Global base defaults layer
-        Files.writeString(tempDir.resolve("logging-default.properties"), "base.only=ALL\n");
+        // Reserved default template layer (L1): node module's logging category
+        Path l1Dir = tempDir.resolve("node").resolve("logging");
+        Files.createDirectories(l1Dir);
+        Files.writeString(l1Dir.resolve("logging-default.properties"), "base.only=ALL\n");
     }
 
     @AfterEach
@@ -55,14 +57,28 @@ class EffectiveProfileResolverTest {
     }
 
     @Test
-    @DisplayName("base defaults appear with GLOBAL_BASE source")
-    void preview_baseDefaults_labeledGlobalBase() {
+    @DisplayName("L1 template entries appear with L1_BASE source")
+    void preview_l1BaseEntries_labeledL1Base() {
         List<EffectiveKey> keys = resolver.previewComposition("p");
 
         EffectiveKey base = findKey(keys, "base.only");
         assertNotNull(base);
         assertEquals("ALL", base.value());
-        assertEquals(Source.GLOBAL_BASE, base.source());
+        assertEquals(Source.L1_BASE, base.source());
+    }
+
+    @Test
+    @DisplayName("L1 template overrides module defaults (L1 > L0) for the same key")
+    void preview_l1BaseOverridesModuleDefaults() throws IOException {
+        Path l1Dir = tempDir.resolve("node").resolve("logging");
+        Files.writeString(l1Dir.resolve("logging-default.properties"),
+                "base.only=ALL\nresmod.a=CONFIG\n");
+
+        List<EffectiveKey> keys = resolver.previewComposition("p");
+
+        EffectiveKey a = findKey(keys, "resmod.a");
+        assertEquals("CONFIG", a.value(), "the L1 template line must override the L0 module default");
+        assertEquals(Source.L1_BASE, a.source());
     }
 
     @Test
