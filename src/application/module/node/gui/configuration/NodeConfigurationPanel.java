@@ -6,6 +6,7 @@ import application.module.node.NodeModule;
 import application.module.node.Signum;
 import application.module.node.crypto.Crypto;
 import application.module.node.gui.NodePanel;
+import application.module.node.profile.EffectiveNodeProps;
 import application.module.node.profile.NodeProfile;
 import application.module.node.profile.NodeProfileRepository;
 import application.module.node.profile.ProfileCreateDefaults;
@@ -3818,9 +3819,16 @@ public class NodeConfigurationPanel extends JPanel {
         return Convert.toHexString(buffer.array());
     }
 
+    /**
+     * The effective "Default" baseline of a property: the reserved
+     * {@code node-default.properties} template (L1) value when the user
+     * activated a line there, otherwise the hardcoded L0 default — the SSOT
+     * is {@link EffectiveNodeProps#baselineValue}. Every row state, the
+     * reset-to-defaults action and the clone diff run against this baseline,
+     * so a profile file only ever needs to store the non-L1 overrides.
+     */
     private String getSafeDefault(Prop<?> prop) {
-        Object def = prop.getDefaultValue();
-        return def == null ? "" : String.valueOf(def);
+        return EffectiveNodeProps.baselineValue(prop.getName(), prop.getDefaultValue());
     }
 
     /**

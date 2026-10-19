@@ -34,7 +34,8 @@ import java.nio.file.Path;
  * <p>
  * This helper is the single loading path for both the runtime
  * ({@code Signum.loadPropertiesForProfile}) and the GUI profile-editor
- * baselines, so the two can never disagree about the effective values.
+ * baselines ({@link #baselineValue}), so the two can never disagree about
+ * the effective values.
  *
  * @see NodeProfileRepository
  * @see PropertiesProfileLoader
@@ -85,6 +86,99 @@ public final class EffectiveNodeProps {
                         + "(hardcoded Props.java defaults apply for every missing key)",
                         profileName, merged.size()));
         return merged;
+    }
+
+    /**
+     * The effective baseline (L0 &larr; L1) of a single property for the
+     * runtime configuration root — the {@code "Default"} value the GUI
+     * profile editor must work with (edit / delete / reset / diff all run
+     * against the effective L0&rarr;L1 value, so a profile file only needs to
+     * store the non-L1 overrides). See
+     * {@link #baselineValue(String, String, Object)}.
+     *
+     * @param key       the property name, never null
+     * @param l0Default the hardcoded L0 value ({@code Prop.getDefaultValue()}),
+     *                  may be null
+     * @return the effective baseline as a String, or {@code ""} when both
+     *         layers hold no value
+     */
+    public static String baselineValue(String key, Object l0Default) {
+        return baselineValue(NodeProfile.CONF_ROOT, key, l0Default);
+    }
+
+    /**
+     * The effective baseline (L0 &larr; L1) of a single property: the ACTIVE
+     * line of the reserved default template
+     * ({@code {confRoot}/node/profiles/node-default.properties}) when one
+     * exists, otherwise the hardcoded L0 value in its String form.
+     * <p>
+     * A template line without a value ({@code key=}) is NOT an override —
+     * the L0 default stays effective for that key. A missing or unreadable
+     * template degrades gracefully to pure L0.
+     * <p>
+     * The template is re-read only when its fingerprint (path, modification
+     * time, size) changes, so per-row / per-keystroke GUI lookups are cheap.
+     *
+     * @param confRoot  the base configuration root, never null
+     * @param key       the property name, never null
+     * @param l0Default the hardcoded L0 value ({@code Prop.getDefaultValue()}),
+     *                  may be null
+     * @return the effective baseline as a String, or {@code ""} when both
+     *         layers hold no value
+     */
+    public static String baselineValue(String confRoot, String key, Object l0Default) {
+        // getProperty — not get: CaselessProperties normalizes keys to lowercase
+        // on write, so the lookup must go through the case-insensitive accessor.
+        String value = loadDefaultTemplate(confRoot).getProperty(key);
+        if (value != null && !value.isBlank()) {
+            return value;
+        }
+        return l0Default == null ? "" : String.valueOf(l0Default);
+    }
+
+    // ── L1 template cache (per fingerprint: path + modification time + size) ─
+
+    private static final Object L1_CACHE_LOCK = new Object();
+    private static String l1CacheFingerprint;
+    private static CaselessProperties l1Cache;
+
+    /**
+     * Loads the reserved default template (L1) of the node module from the
+     * given conf root, transparently re-reading it only when its fingerprint
+     * (absolute path, last-modified time, size) changes. A missing or
+     * unreadable template yields an empty instance (pure L0 stays effective).
+     *
+     * @param confRoot the base configuration root, never null
+     * @return the template's active lines (case-insensitive), never null
+     */
+    static CaselessProperties loadDefaultTemplate(String confRoot) {
+        Path file = PropertiesProfileLoader.resolveProfileFile(confRoot, ModuleIds.NODE,
+                ModuleIds.CATEGORY_PROFILES, NodeProfile.DEFAULT_PROFILE_FILENAME);
+        String fingerprint;
+        try {
+            fingerprint = Files.isRegularFile(file)
+                    ? file.toAbsolutePath() + "|" + Files.getLastModifiedTime(file).toMillis() + "|"
+                            + Files.size(file)
+                    : "absent";
+        } catch (IOException e) {
+            fingerprint = "unreadable:" + System.nanoTime();
+        }
+        synchronized (L1_CACHE_LOCK) {
+            if (!fingerprint.equals(l1CacheFingerprint)) {
+                CaselessProperties template = new CaselessProperties();
+                if (Files.isRegularFile(file)) {
+                    try (InputStream is = Files.newInputStream(file)) {
+                        template.load(is);
+                    } catch (IOException e) {
+                        LOGGER.warn("Could not read the node default template {}",
+                                file.toAbsolutePath(), e);
+                    }
+                }
+                l1Cache = template;
+                l1CacheFingerprint = fingerprint;
+            }
+            return l1Cache;
+        }
     }
 
     /**

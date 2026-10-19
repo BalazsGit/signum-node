@@ -116,4 +116,58 @@ class EffectiveNodePropsTest {
         assertEquals("9001", result.getProperty("API.Port"));
         assertEquals(1, result.size(), "the template must not be loaded twice");
     }
+
+    // ── GUI baseline (effective L0 <- L1) ────────────────────────────────
+
+    @Test
+    @DisplayName("baseline without a template -> the hardcoded L0 default in String form")
+    void baseline_NoTemplate_ReturnsL0Default() {
+        assertEquals("8888", EffectiveNodeProps.baselineValue(tempDir.toString(), "API.Port", 8888));
+        assertEquals("true", EffectiveNodeProps.baselineValue(tempDir.toString(), "node.enabled", true));
+    }
+
+    @Test
+    @DisplayName("baseline with a null L0 default -> empty string")
+    void baseline_NullL0Default_ReturnsEmptyString() {
+        assertEquals("", EffectiveNodeProps.baselineValue(tempDir.toString(), "node.missing", null));
+    }
+
+    @Test
+    @DisplayName("baseline with an active template line -> L1 overrides L0 for every profile")
+    void baseline_ActiveTemplateLine_OverridesL0() throws IOException {
+        writeLayer("node-default.properties", "# documented default\nAPI.Port=9001\n");
+
+        assertEquals("9001", EffectiveNodeProps.baselineValue(tempDir.toString(), "API.Port", 8888));
+        assertEquals("8889", EffectiveNodeProps.baselineValue(tempDir.toString(), "node.other", "8889"),
+                "non-overridden keys must keep their L0 value");
+    }
+
+    @Test
+    @DisplayName("a template line without a value is not an override -> L0 stays effective")
+    void baseline_EmptyTemplateLine_FallsBackToL0() throws IOException {
+        writeLayer("node-default.properties", "API.Port=\n");
+
+        assertEquals("8888", EffectiveNodeProps.baselineValue(tempDir.toString(), "API.Port", 8888));
+    }
+
+    @Test
+    @DisplayName("baseline keys are case-insensitive")
+    void baseline_KeysAreCaseInsensitive() throws IOException {
+        writeLayer("node-default.properties", "node.blocktime=120\n");
+
+        assertEquals("120", EffectiveNodeProps.baselineValue(tempDir.toString(), "Node.BlockTime", "45"));
+    }
+
+    @Test
+    @DisplayName("a template change on disk is picked up (fingerprint-based cache invalidation)")
+    void baseline_TemplateChangedOnDisk_IsPickedUp() throws IOException {
+        writeLayer("node-default.properties", "API.Port=9001\n");
+        assertEquals("9001", EffectiveNodeProps.baselineValue(tempDir.toString(), "API.Port", 8888));
+
+        // The comment changes the file size, so the fingerprint must change
+        // even when the modification time rounds to the same millisecond.
+        writeLayer("node-default.properties", "API.Port=9002\n# template edited\n");
+        assertEquals("9002", EffectiveNodeProps.baselineValue(tempDir.toString(), "API.Port", 8888),
+                "the cached template must be re-read once the file changed");
+    }
 }
