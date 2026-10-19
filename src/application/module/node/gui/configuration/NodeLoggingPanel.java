@@ -84,7 +84,7 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
             + "running; a paused node is restored to the paused state after the restart). The assignment is "
             + "specific to this node profile — other node profiles keep their own assignment, and a newly "
             + "created node profile inherits the module's currently applied logging profile (or the built-in "
-            + "'logging-default' profile while 'Default' is the applied one) as its default assignment."
+            + "'Default' profile while 'Default' is the applied one) as its default assignment."
             + "</body></html>";
 
     /**
@@ -175,6 +175,14 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
             });
         }
 
+        // Node-scoped Apply tooltip: this tab LINKS the profile to the node profile
+        // (the per-node assignment), applies the profile's SAVED values and restarts
+        // the node so they take effect — it does not set the module's applied reference,
+        // so the core's module-centric hover text is misleading here.
+        setApplyButtonTooltip(ConfigurationUtils.profileTooltip("Apply<br><br>Links the selected logging profile to this node profile and applies "
+                + "its saved values to the node. Applying restarts the node so the changes take effect (other node "
+                + "profiles and the module's applied profile are not changed)."));
+
         // Optional "link to node profile" control.
         if (onLinkAction != null) {
             setLinkControl(buildLinkControl(onLinkAction, linkedProfileSupplier));
@@ -209,37 +217,29 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
     }
 
     /**
-     * The node-tab Apply confirmation message. States EXACTLY what pressing Yes will do:
-     * the profile is recorded as the <b>per-node</b> assignment of the bound node profile
-     * (affecting ONLY that node profile — other node profiles keep their own assignment,
-     * and newly created node profiles inherit the module's currently applied logging
-     * profile — or the built-in {@code logging-default} while "Default" is the applied
-     * one — as their default), then the node restarts (state-preserved).
+     * The node-tab Apply confirmation message — the short form: it asks for confirmation
+     * naming the profile and the target node profile, then states the restart outcome
+     * (a running node restarts so the change takes effect; a stopped node is NOT started
+     * and picks the change up on its next start). The per-node scope details (other node
+     * profiles untouched, the new-node default rule) live in the Apply button tooltip and
+     * the node help text instead of bloating the dialog.
      *
      * @param profileName the profile name being applied (the virtual Default entry included)
-     * @param isDefault   whether the virtual "Default" entry is applied (clears the node's custom assignment)
+     * @param isDefault   whether the virtual "Default" entry is applied; kept for
+     *                    {@link ModuleLoggingProfilePanel.ApplyConfirmationProvider}
+     *                    compatibility — the short message no longer special-cases it
      * @return the confirmation dialog message
      */
     String nodeApplyMessage(String profileName, boolean isDefault) {
         boolean bound = nodeProfileName != null && !nodeProfileName.isBlank();
         String target = bound ? "node profile '" + nodeProfileName + "'" : "the node";
-        String message = "Apply logging profile '" + profileName + "' to " + target + "?\n\n"
-                + (isDefault
-                        ? "This restores the application's built-in default logging configuration: it CLEARS "
-                                + "this node profile's custom logging assignment, so the node runs with the "
-                                + "built-in '" + LoggingProfileRepository.RESERVED_PROFILE_NAME + "' profile."
-                        : "This records '" + profileName + "' as this node profile's assigned (applied) logging "
-                                + "profile — the profile the node uses for its logging configuration.");
-        message += "\n\nThis assignment is specific to " + target + ". Other node profiles keep their own "
-                + "assignment, and newly created node profiles inherit the module's currently applied "
-                + "logging profile (or the built-in '" + LoggingProfileRepository.RESERVED_PROFILE_NAME
-                + "' while 'Default' is the applied one) as their default.";
-        message += (isBoundNodeRunning()
-                ? "\n\nPressing Yes will RESTART the node (stop + start) for the change to take effect."
-                        + (isBoundNodePaused() ? " The paused state is restored after the restart." : "")
-                : "\n\nThe node is not running, so it will NOT be started — the change takes "
+        return "Apply logging profile '" + profileName + "' to " + target + "?\n\n"
+                + (isBoundNodeRunning()
+                        ? "This will restart the node so the change takes effect"
+                                + (isBoundNodePaused() ? " — the paused state is restored after the restart" : "")
+                                + "."
+                        : "The node is not running, so it will not be started — the change takes "
                         + "effect the next time the node starts.");
-        return message;
     }
 
     /**

@@ -108,7 +108,7 @@ class ModuleLoggingProfilePanelTest {
     private static JComponent editorAfterLabel(Container root, String label) {
         for (int i = 0; i < root.getComponentCount(); i++) {
             Component child = root.getComponent(i);
-            if (child instanceof JLabel && label.equals(((JLabel) child).getText())
+            if (child instanceof JLabel && baseLabelText(label).equals(baseLabelText(((JLabel) child).getText()))
                     && i + 1 < root.getComponentCount()) {
                 JComponent next = (JComponent) root.getComponent(i + 1);
                 // The editor now sits inside the row's value cell (editor +
@@ -194,11 +194,30 @@ class ModuleLoggingProfilePanelTest {
         return null;
     }
 
-    /** The first JLabel with exactly the given text (may be null). */
+    /**
+     * A row's base label text: with the trailing unsaved star and the
+     * "(=...)" initial-value annotation stripped, so a row can be looked up
+     * by its plain label regardless of its unsaved / initial-value state.
+     */
+    private static String baseLabelText(String text) {
+        if (text == null) {
+            return "";
+        }
+        int p = text.indexOf(" (=");
+        if (p >= 0) {
+            text = text.substring(0, p);
+        }
+        if (text.endsWith(" *")) {
+            text = text.substring(0, text.length() - 2);
+        }
+        return text;
+    }
+
+    /** The first JLabel whose base text matches the given text (may be null). */
     private static JLabel findLabel(Container root, String text) {
         for (int i = 0; i < root.getComponentCount(); i++) {
             Component child = root.getComponent(i);
-            if (child instanceof JLabel label && text.equals(label.getText())) {
+            if (child instanceof JLabel label && baseLabelText(text).equals(baseLabelText(label.getText()))) {
                 return label;
             }
             if (child instanceof Container) {
@@ -314,16 +333,41 @@ class ModuleLoggingProfilePanelTest {
                 "the provider display name must not be painted as a header; labels=" + labels);
         assertFalse(labels.contains("test provider"),
                 "the provider description must not be painted as a header; labels=" + labels);
-        assertTrue(labels.contains("test.level"), "the editor rows are present; labels=" + labels);
+        assertTrue(labels.stream().anyMatch(l -> baseLabelText(l).equals("test.level")),
+                "the editor rows are present; labels=" + labels);
     }
 
     @Test
     @DisplayName("renders an editor row for each default key")
     void rendersDefaultRows() {
         List<String> labels = allLabels(newPanel());
-        assertTrue(labels.contains("test.level"), "level row present; labels=" + labels);
-        assertTrue(labels.contains("test.handler"), "handler row present; labels=" + labels);
+        assertTrue(labels.stream().anyMatch(l -> baseLabelText(l).equals("test.level")), "level row present; labels=" + labels);
+        assertTrue(labels.stream().anyMatch(l -> baseLabelText(l).equals("test.handler")), "handler row present; labels=" + labels);
     }
+
+    @Test
+    @DisplayName("every row label shows its initially loaded value in parentheses (loaded, changed, and reverted)")
+    void rowLabelAlwaysShowsInitialValue() {
+        ModuleLoggingProfilePanel panel = newPanel();
+        // 'test.level' starts at the built-in default 'INFO' (its initial value).
+        JComboBox<?> level = assertInstanceOf(JComboBox.class, editorAfterLabel(panel, "test.level"),
+                "the level row editor");
+        List<String> before = allLabels(panel);
+        assertTrue(before.stream().anyMatch(l -> l != null && l.startsWith("test.level") && l.contains("(=INFO)")),
+                "a freshly loaded row already shows its initial value in parentheses; labels=" + before);
+
+        onEdt(() -> level.setSelectedItem("FINE"));
+        List<String> changed = allLabels(panel);
+        assertTrue(changed.stream().anyMatch(l -> l != null && l.startsWith("test.level")
+                        && l.contains("(=INFO)") && l.endsWith(" *")),
+                "a changed row keeps its initial value and carries the unsaved star; labels=" + changed);
+
+        onEdt(() -> level.setSelectedItem("INFO"));
+        List<String> restored = allLabels(panel);
+        assertTrue(restored.stream().anyMatch(l -> l != null && l.startsWith("test.level") && l.contains("(=INFO)")),
+                "reverting to the initial value keeps the initial-value annotation; labels=" + restored);
+    }
+
 
     @Test
     @DisplayName("level rows are CLASSIC (non-editable) combos over the fixed level list; other rows EDITABLE combos (their baselines)")
@@ -551,14 +595,15 @@ class ModuleLoggingProfilePanelTest {
             assertEquals("Status: Saved Init", editor.getToolTipText(),
                     "the current editor value exposes its state on hover");
             onEdt(() -> editor.setText("edited.handler"));
-            assertEquals(GuiColors.getUnsaved(), labelWithText(panel, "test.handler *").getForeground(),
+            assertEquals(GuiColors.getUnsaved(),
+                    labelWithText(panel, "test.handler").getForeground(),
                     "editing the value makes the row unsaved");
             assertEquals("Status: Unsaved", editor.getToolTipText(),
                     "typing refreshes the current-value status tooltip");
 
             @SuppressWarnings("unchecked")
             ListCellRenderer<Object> renderer =
-                    (ListCellRenderer<Object>) ((JComboBox<?>) editorAfterLabel(panel, "test.handler *"))
+                    (ListCellRenderer<Object>) ((JComboBox<?>) editorAfterLabel(panel, "test.handler"))
                             .getRenderer();
             Component initOption = renderer.getListCellRendererComponent(
                     new JList<>(), "initial.handler", 0, false, false);
@@ -577,7 +622,8 @@ class ModuleLoggingProfilePanelTest {
                     "hovering keeps the normal selection background");
 
             onEdt(findButtonByTooltip(panel, "Save<br>")::doClick);
-            assertEquals(GuiColors.getSaved(), labelWithText(panel, "test.handler").getForeground(),
+            assertEquals(GuiColors.getSaved(),
+                    labelWithText(panel, "test.handler").getForeground(),
                     "after saving a changed value, it is Saved rather than Saved Init");
             assertEquals("Status: Saved", editor.getToolTipText(),
                     "saving updates the editor's status tooltip");
@@ -855,6 +901,266 @@ class ModuleLoggingProfilePanelTest {
                     // best effort: the next test sets up its own L&F state
                 }
             });
+        }
+    }
+
+    // TEMP-MEASURE2: app conditions (stock FlatDarkLaf, default font) with the
+    // vertical scroll bar forced visible (small viewport) + baseline (large).
+    @Test
+    void tempMeasureAddRowAppConditions() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display (real layout)");
+        final String[] originalLaf = new String[1];
+        onEdt(() -> {
+            originalLaf[0] = UIManager.getLookAndFeel().getClass().getName();
+            try {
+                UIManager.setLookAndFeel(new com.formdev.flatlaf.FlatDarkLaf());
+            } catch (Exception e) {
+                throw new AssertionError(e);
+            }
+        });
+        java.awt.Frame[] frames = new java.awt.Frame[1];
+        for (int height : new int[]{720, 520, 430, 380}) {
+            ModuleLoggingProfilePanel panel = newPanel();
+            onEdt(() -> {
+                JFrame frame = new JFrame("measure2-owner");
+                javax.swing.JPanel wrap = new javax.swing.JPanel(new java.awt.BorderLayout());
+                wrap.setPreferredSize(new java.awt.Dimension(1312, height));
+                wrap.add(panel, java.awt.BorderLayout.CENTER);
+                frame.add(wrap);
+                frame.pack();
+                frame.setLocation(0, 0);
+                frame.setVisible(true);
+                frames[0] = frame;
+            });
+            try {
+                for (int i = 0; i < 30; i++) {
+                    Thread.sleep(100);
+                    if (onEdtBoolean(() -> findAddKeyInput(panel) != null && findAddKeyInput(panel).isShowing())) {
+                        break;
+                    }
+                }
+                onEdt(() -> {
+                    panel.validate();
+                    JTextField keyInput = findAddKeyInput(panel);
+                    JTextField valueInput = findKeyValueInput(panel);
+                    String line = "h" + height + ": "
+                            + "keyIn(" + pt(panel, keyInput) + " w=" + keyInput.getWidth() + " h=" + keyInput.getHeight() + ")"
+                            + " valIn(" + pt(panel, valueInput) + " w=" + valueInput.getWidth() + " h=" + valueInput.getHeight() + ")";
+                    java.awt.Container[] trashes = findTrashParents(panel);
+                    if (trashes.length > 0) {
+                        for (java.awt.Component child : trashes[0].getComponents()) {
+                            if (child instanceof JComboBox<?>) {
+                                line += " combo(" + pt(panel, (java.awt.Component) child)
+                                        + " w=" + ((java.awt.Component) child).getWidth()
+                                        + " h=" + ((java.awt.Component) child).getHeight() + ")";
+                                break;
+                            }
+                        }
+                    }
+                    line += " valInRight=" + (pt(panel, valueInput).x + valueInput.getWidth());
+                    for (java.awt.Component child : trashes[0].getComponents()) {
+                        if (child instanceof JComboBox<?>) {
+                            line += " comboRight=" + (pt(panel, (java.awt.Component) child).x
+                                    + ((java.awt.Component) child).getWidth());
+                            break;
+                        }
+                    }
+                    // scroll bar state (the scroll pane lives INSIDE the panel)
+                    java.util.List<javax.swing.JScrollPane> sps = new java.util.ArrayList<>();
+                    collectScrolls(panel, sps);
+                    line += " scrollCount=" + sps.size() + " " + sps.stream()
+                            .map(s -> "vbar=" + s.getVerticalScrollBar().isVisible() + "/" + s.getVerticalScrollBar().getWidth())
+                            .reduce((a, b) -> a + " " + b)
+                            .orElse("none");
+                    System.out.println("M2 " + line);
+                });
+            } finally {
+                onEdt(() -> ((JFrame) frames[0]).dispose());
+            }
+        }
+        onEdt(() -> {
+            try {
+                UIManager.setLookAndFeel(originalLaf[0]);
+            } catch (Exception ignored) {
+                // best effort
+            }
+        });
+    }
+
+    @Test
+    @DisplayName("DIAGNOSTIC: Cobalt 2 theme — measure add-key row vs level row alignment")
+    void cobaltThemeAlignmentDiagnostic() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "requires a display (real layout)");
+        final String[] originalLaf = new String[1];
+        onEdt(() -> {
+            originalLaf[0] = UIManager.getLookAndFeel().getClass().getName();
+            try {
+                UIManager.setLookAndFeel(new com.formdev.flatlaf.intellijthemes.FlatCobalt2IJTheme());
+            } catch (Exception e) {
+                throw new AssertionError("Failed to set Cobalt 2 theme", e);
+            }
+        });
+        System.out.println("=== Cobalt 2 theme applied ===");
+        System.out.println("Panel.margin = " + UIManager.get("Panel.margin"));
+        ModuleLoggingProfilePanel panel = newPanel();
+        final Object[] refs = new Object[2];
+        onEdt(() -> {
+            JFrame frame = new JFrame("cobalt-diag-owner");
+            frame.setLayout(new BorderLayout());
+            frame.add(panel, BorderLayout.CENTER);
+            frame.setSize(1312, 720);
+            frame.setLocation(0, 0);
+            frame.setVisible(true);
+            refs[0] = frame;
+        });
+        try {
+            for (int i = 0; i < 50 && refs[1] == null; i++) {
+                Thread.sleep(100);
+                onEdt(() -> {
+                    if (findAddKeyInput(panel) != null && findAddKeyInput(panel).isShowing()) {
+                        refs[1] = Boolean.TRUE;
+                    }
+                });
+            }
+            assertNotNull(refs[1], "the add-key row was laid out");
+            onEdt(() -> {
+                panel.validate();
+                JTextField keyInput = findAddKeyInput(panel);
+                JTextField valueInput = findKeyValueInput(panel);
+                java.awt.Container keyValueCell = (java.awt.Container) valueInput.getParent();
+                java.awt.Container[] trashes = findTrashParents(panel);
+                JComboBox<?> firstCombo = null;
+                if (trashes.length > 0) {
+                    for (java.awt.Component child : trashes[0].getComponents()) {
+                        if (child instanceof JComboBox<?>) { firstCombo = (JComboBox<?>) child; break; }
+                    }
+                }
+                System.out.println("--- BOUNDS ---");
+                StringBuilder sb = new StringBuilder();
+                sb.append("Panel.margin=").append(UIManager.get("Panel.margin")).append("\n");
+                if (firstCombo != null) {
+                    java.awt.Point cp = pt(panel, firstCombo);
+                    String line = "Combo: x=" + cp.x + " y=" + cp.y + " w=" + firstCombo.getWidth() + " h=" + firstCombo.getHeight() + " right=" + (cp.x + firstCombo.getWidth()) + " insets=" + firstCombo.getInsets();
+                    System.out.println(line); sb.append(line).append("\n");
+                }
+                java.awt.Point kp = pt(panel, keyInput);
+                String kl = "KeyIn: x=" + kp.x + " y=" + kp.y + " w=" + keyInput.getWidth() + " h=" + keyInput.getHeight() + " right=" + (kp.x + keyInput.getWidth()) + " insets=" + keyInput.getInsets();
+                System.out.println(kl); sb.append(kl).append("\n");
+                java.awt.Point vp = pt(panel, valueInput);
+                String vl = "ValIn: x=" + vp.x + " y=" + vp.y + " w=" + valueInput.getWidth() + " h=" + valueInput.getHeight() + " right=" + (vp.x + valueInput.getWidth()) + " insets=" + valueInput.getInsets();
+                System.out.println(vl); sb.append(vl).append("\n");
+                java.awt.Point cellP = pt(panel, keyValueCell);
+                String cl = "Cell: x=" + cellP.x + " y=" + cellP.y + " w=" + keyValueCell.getWidth() + " h=" + keyValueCell.getHeight() + " right=" + (cellP.x + keyValueCell.getWidth()) + " ins=" + keyValueCell.getInsets();
+                System.out.println(cl); sb.append(cl).append("\n");
+                sb.append("--- PARENTS (valIn) ---\n");
+                Component cur = valueInput;
+                while (cur != null && cur != panel) {
+                    java.awt.Point p = pt(panel, cur);
+                    String ins = (cur instanceof Container) ? ((Container) cur).getInsets().toString() : "n/a";
+                    String pl = "  " + cur.getClass().getSimpleName() + " x=" + p.x + " y=" + p.y + " w=" + cur.getWidth() + " h=" + cur.getHeight() + " ins=" + ins;
+                    System.out.println(pl); sb.append(pl).append("\n");
+                    cur = cur.getParent();
+                }
+                sb.append("--- PARENTS (keyIn) ---\n");
+                cur = keyInput;
+                while (cur != null && cur != panel) {
+                    java.awt.Point p = pt(panel, cur);
+                    String ins2 = (cur instanceof Container) ? ((Container) cur).getInsets().toString() : "n/a";
+                    String pl2 = "  " + cur.getClass().getSimpleName() + " x=" + p.x + " y=" + p.y + " w=" + cur.getWidth() + " h=" + cur.getHeight() + " ins=" + ins2;
+                    System.out.println(pl2); sb.append(pl2).append("\n");
+                    cur = cur.getParent();
+                }
+                sb.append("--- PARENTS (combo) ---\n");
+                if (firstCombo != null) {
+                    cur = firstCombo;
+                    while (cur != null && cur != panel) {
+                        java.awt.Point p = pt(panel, cur);
+                        String ins3 = (cur instanceof Container) ? ((Container) cur).getInsets().toString() : "n/a";
+                        String pl3 = "  " + cur.getClass().getSimpleName() + " x=" + p.x + " y=" + p.y + " w=" + cur.getWidth() + " h=" + cur.getHeight() + " ins=" + ins3;
+                        System.out.println(pl3); sb.append(pl3).append("\n");
+                        cur = cur.getParent();
+                    }
+                    java.awt.Point cp2 = pt(panel, firstCombo);
+                    sb.append("--- DELTAS ---\n");
+                    sb.append("ValIn.left-Combo.left=").append(vp.x - cp2.x).append("\n");
+                    sb.append("ValIn.right-Combo.right=").append((vp.x + valueInput.getWidth()) - (cp2.x + firstCombo.getWidth())).append("\n");
+                    sb.append("ValIn.top-Combo.top=").append(vp.y - cp2.y).append("\n");
+                    sb.append("KeyIn.top-ValIn.top=").append(kp.y - vp.y).append("\n");
+                    sb.append("h: Key=").append(keyInput.getHeight()).append(" Val=").append(valueInput.getHeight()).append(" Combo=").append(firstCombo.getHeight()).append("\n");
+                }
+                sb.append("--- SIZES (pref/min/max) ---\n");
+                sb.append("keyInput pref=").append(keyInput.getPreferredSize()).append(" min=").append(keyInput.getMinimumSize()).append("\n");
+                sb.append("valInput pref=").append(valueInput.getPreferredSize()).append(" min=").append(valueInput.getMinimumSize()).append("\n");
+                sb.append("keyValueCell pref=").append(keyValueCell.getPreferredSize()).append(" min=").append(keyValueCell.getMinimumSize()).append(" max=").append(keyValueCell.getMaximumSize()).append("\n");
+                java.awt.Container keyColumn = (java.awt.Container) keyInput.getParent();
+                sb.append("keyColumn pref=").append(keyColumn.getPreferredSize()).append(" min=").append(keyColumn.getMinimumSize()).append(" actual=").append(keyColumn.getWidth()).append("x").append(keyColumn.getHeight()).append("\n");
+                java.awt.Container valueColumn = (java.awt.Container) keyValueCell.getParent();
+                sb.append("valueColumn pref=").append(valueColumn.getPreferredSize()).append(" min=").append(valueColumn.getMinimumSize()).append(" actual=").append(valueColumn.getWidth()).append("x").append(valueColumn.getHeight()).append("\n");
+                if (firstCombo != null) {
+                    sb.append("combo pref=").append(firstCombo.getPreferredSize()).append(" min=").append(firstCombo.getMinimumSize()).append("\n");
+                    java.awt.Container valueCell = (java.awt.Container) firstCombo.getParent();
+                    sb.append("valueCell pref=").append(valueCell.getPreferredSize()).append(" min=").append(valueCell.getMinimumSize()).append(" actual=").append(valueCell.getWidth()).append("x").append(valueCell.getHeight()).append("\n");
+                }
+                sb.append("levelCombo(keyLevelInput) pref=").append(findAddKeyLevelCombo(panel).getPreferredSize()).append(" min=").append(findAddKeyLevelCombo(panel).getMinimumSize()).append("\n");
+                // Action-column button geometry (trash in a level row, plus in the add row)
+                JButton firstTrash = null;
+                if (trashes.length > 0) {
+                    for (java.awt.Component c : trashes[0].getComponents()) if (c instanceof JButton) { firstTrash = (JButton) c; break; }
+                }
+                if (firstTrash != null) {
+                    java.awt.Point tp = pt(panel, firstTrash);
+                    sb.append("trash: x=").append(tp.x).append(" y=").append(tp.y).append(" w=").append(firstTrash.getWidth()).append(" h=").append(firstTrash.getHeight()).append(" right=").append(tp.x + firstTrash.getWidth()).append("\n");
+                }
+                JButton plus = findButtonByTooltip(panel, "Add key");
+                if (plus != null) {
+                    java.awt.Point pp = pt(panel, plus);
+                    sb.append("plus: x=").append(pp.x).append(" y=").append(pp.y).append(" w=").append(plus.getWidth()).append(" h=").append(plus.getHeight()).append(" right=").append(pp.x + plus.getWidth()).append("\n");
+                }
+                sb.append("keyValueCell rel-to-valueColumn = (").append(pt(valueColumn, keyValueCell).x).append(",").append(pt(valueColumn, keyValueCell).y).append(")\n");
+                if (firstCombo != null) sb.append("combo rel-to-valueCell = (").append(pt((java.awt.Container) firstCombo.getParent(), firstCombo).x).append(",").append(pt((java.awt.Container) firstCombo.getParent(), firstCombo).y).append(")\n");
+                sb.append("keyInput rel-to-keyColumn = (").append(pt(keyColumn, keyInput).x).append(",").append(pt(keyColumn, keyInput).y).append(")\n");
+                sb.append("=== END ===\n");
+                System.out.println(sb);
+                try { java.nio.file.Files.writeString(java.nio.file.Path.of("cobalt_diag_output.txt"), sb.toString()); } catch (Exception ignored) {}
+            });
+        } finally {
+            onEdt(() -> ((JFrame) refs[0]).dispose());
+            onEdt(() -> {
+                try { UIManager.setLookAndFeel(originalLaf[0]); } catch (Exception ignored) {}
+            });
+        }
+    }
+
+    private static java.awt.Point pt(java.awt.Container root, java.awt.Component c) {
+        return javax.swing.SwingUtilities.convertPoint(c, new java.awt.Point(0, 0), root);
+    }
+
+    private static void collectScrolls(java.awt.Container c, java.util.List<javax.swing.JScrollPane> out) {
+        for (java.awt.Component child : c.getComponents()) {
+            if (child instanceof javax.swing.JScrollPane sp) {
+                out.add(sp);
+            }
+            if (child instanceof java.awt.Container cc) {
+                collectScrolls(cc, out);
+            }
+        }
+    }
+
+    private static java.awt.Container[] findTrashParents(java.awt.Container c) {
+        java.util.List<java.awt.Container> out = new java.util.ArrayList<>();
+        walkForTrash(c, out);
+        return out.toArray(new java.awt.Container[0]);
+    }
+
+    private static void walkForTrash(java.awt.Container c, java.util.List<java.awt.Container> out) {
+        for (java.awt.Component child : c.getComponents()) {
+            String tip = (child instanceof javax.swing.JComponent jc) ? jc.getToolTipText() : null;
+            if (tip != null && tip.startsWith("Remove key")) {
+                out.add((java.awt.Container) child.getParent());
+            }
+            if (child instanceof java.awt.Container cc) {
+                walkForTrash(cc, out);
+            }
         }
     }
 
@@ -1197,7 +1503,10 @@ class ModuleLoggingProfilePanelTest {
         assertNotNull(findButtonByTooltip(panel, "Rename Profile<br>").getIcon(), "Rename icon present");
         assertNotNull(findButtonByTooltip(panel, "Delete<br>").getIcon(), "Delete icon present");
         assertNotNull(findButtonByTooltip(panel, "Refresh<br>").getIcon(), "Refresh icon present");
-        assertNotNull(findButtonByTooltip(panel, "Reset to Defaults<br>").getIcon(), "Reset icon present");
+        // The Reset to Defaults action is no longer a toolbar button — it was relocated into
+        // the Copy Configuration dialog (the "Default" entry / its Reset to Defaults button).
+        assertNull(findButtonByTooltip(panel, "Reset to Defaults<br>"),
+                "the Reset to Defaults toolbar button is gone (relocated into the Copy dialog)");
         // The standalone Reload button is GONE — its function is merged into
         // the Refresh one.
         assertNull(findButtonByTooltip(panel, "Reload"),
@@ -1421,7 +1730,6 @@ class ModuleLoggingProfilePanelTest {
         assertTrue(findButtonByTooltip(panel, "New Profile<br>").isEnabled());
         assertTrue(findButtonByTooltip(panel, "Apply<br>").isEnabled());
         assertTrue(findButtonByTooltip(panel, "Refresh<br>").isEnabled());
-        assertTrue(findButtonByTooltip(panel, "Reset to Defaults<br>").isEnabled());
 
         // The Help button shows the core's generic help out of the box (no host supplier).
         assertTrue(findButtonByTooltip(panel, "Help<br>").isEnabled(),
@@ -1457,49 +1765,68 @@ class ModuleLoggingProfilePanelTest {
     }
 
     @Test
-    @DisplayName("the default apply message explains module-default scope and restart")
+    @DisplayName("the default apply message explains module-default scope as a short bulleted list")
     void defaultApplyMessageStatesModuleScope() {
         ModuleLoggingProfilePanel panel = newPanel();
 
         String msg = panel.defaultApplyMessage("myprofile", false);
-        assertTrue(msg.contains("'myprofile'"), "the message names the selected profile");
-        assertTrue(msg.contains("'test-mod' module"), "the message names the module");
-        assertTrue(msg.contains("newly created node profiles will be linked to 'myprofile' by default"),
+        assertTrue(msg.contains("Sets this profile's initial values as the module's applied reference"),
+                "the message states that the profile's initial values become the applied reference");
+        assertTrue(msg.contains("cross-profile comparison baseline"),
+                "the message states that the applied reference is the cross-profile comparison baseline");
+        assertTrue(msg.contains("Newly created node profiles will be linked to the applied logging profile"),
                 "the message states that newly created node profiles are linked to the applied profile");
-        assertTrue(msg.contains("the module-level applied profile is checked when a node profile is created"),
-                "the message states that the module-level applied profile is checked at creation time");
-        assertTrue(msg.contains("Existing node profiles are not changed"),
-                "the message states that existing node profiles are entirely untouched");
-        assertTrue(msg.contains("profiles with their own assignment keep it"),
-                "the message states that existing per-node assignments are kept");
-        assertTrue(msg.contains("profiles without an assignment keep running on the built-in '"
-                + LoggingProfileRepository.RESERVED_PROFILE_NAME + "'"),
-                "the message states that unassigned existing profiles keep running on the built-in default");
-        assertFalse(msg.contains("without their own assignment will run on it"),
-                "unassigned EXISTING profiles must NOT be stated to run on the applied profile");
-        assertTrue(msg.contains("This marker is used as the default selection when a node profile is created"),
-                "the message explains that the module marker is used for new profiles");
-        assertTrue(msg.contains("Existing node profiles and their assignments are unaffected"),
-                "the message clarifies that current node profiles are not changed");
-        assertTrue(msg.contains("Restarting the application is optional"),
-                "the message states that restarting is optional");
+        assertTrue(msg.contains("take effect only for newly created nodes, or after a node/application restart"),
+                "the message explains when saved changes take effect");
+        assertTrue(msg.contains("with the saved changes loaded as initial values"),
+                "the message states that saved changes are loaded as initial values");
         assertTrue(msg.contains("Would you like to proceed?"),
                 "the message asks whether to apply the profile");
+        assertFalse(msg.contains("does not change the logging of any running node"),
+                "the verbose 'does not do' wording about running nodes is gone");
+        assertFalse(msg.contains("existing node profiles are unchanged"),
+                "the verbose 'does not do' wording about existing node profiles is gone");
+        assertFalse(msg.contains("Restarting the application is optional"),
+                "the redundant restart note is gone (the restart checkbox covers it)");
+        assertFalse(msg.contains("<html"),
+                "the message is plain text (it is rendered in a wrapped text area)");
+        assertTrue(msg.contains("\n  • "),
+                "the message presents its points as a bulleted list");
 
         String defMsg = panel.defaultApplyMessage(ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY, true);
-        assertTrue(defMsg.contains("reset to the built-in '" + LoggingProfileRepository.RESERVED_PROFILE_NAME + "'"),
-                "the 'Default' message states that the built-in logging profile is restored");
-        assertTrue(defMsg.contains("Newly created node profiles will have no logging assignment, as before"),
-                "the 'Default' message states that new node profiles get no assignment, as before");
-        assertTrue(defMsg.contains("Existing node profiles are not changed"),
-                "the 'Default' message states that existing node profiles are entirely untouched");
-        assertTrue(defMsg.contains("profiles without an assignment keep running on the built-in '"
-                + LoggingProfileRepository.RESERVED_PROFILE_NAME + "'"),
-                "the 'Default' message states that unassigned existing profiles keep running on the built-in default");
-        assertTrue(defMsg.contains("Restarting the application is optional"),
-                "the 'Default' message states that restarting is optional");
+        assertTrue(defMsg.startsWith("Applying the logging profile '"
+                        + ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY + "':"),
+                "the dialog header names the built-in profile with the dropdown entry, not the on-disk name");
+        assertFalse(defMsg.contains("logging-default"),
+                "the reserved on-disk profile name never leaks into the user-facing message");
+        assertTrue(defMsg.contains("Resets the module's applied reference to the built-in '"
+                + ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY + "' profile"),
+                "the 'Default' message states that the built-in logging profile is restored (the dropdown name)");
+        assertTrue(defMsg.contains("its initial values become the cross-profile comparison baseline"),
+                "the 'Default' message states that the built-in values become the comparison baseline");
+        assertTrue(defMsg.contains("Newly created node profiles will have no logging assignment"),
+                "the 'Default' message states that new node profiles get no assignment");
         assertTrue(defMsg.contains("Would you like to proceed?"),
                 "the 'Default' message asks whether to apply the profile");
+        assertFalse(defMsg.contains("does not change the logging of any running node"),
+                "the 'Default' message no longer states that running nodes are unchanged");
+        assertFalse(defMsg.contains("existing node profiles are unchanged"),
+                "the 'Default' message no longer states that existing node profiles are unchanged");
+    }
+
+    @Test
+    @DisplayName("the module Apply tooltip opens with the module-scoped 'mark as applied' paragraph")
+    void applyTooltipStatesModuleScope() {
+        ModuleLoggingProfilePanel panel = newPanel();
+        JButton apply = findButtonByTooltip(panel, "Apply<br>");
+        assertNotNull(apply, "the Apply button is present");
+        String tooltip = apply.getToolTipText();
+        assertTrue(tooltip.contains("Apply<br><br>Marks the selected profile as applied."),
+                "the tooltip opens with the module-scoped mark-as-applied paragraph");
+        assertTrue(tooltip.contains("cross-profile comparison baseline"),
+                "the tooltip still describes the applied reference (the comparison baseline)");
+        assertFalse(tooltip.contains("Links the selected profile to the node"),
+                "the node-scoped wording is not part of the module tooltip");
     }
 
     @Test
@@ -2121,7 +2448,7 @@ class ModuleLoggingProfilePanelTest {
             JComboBox<?> level = assertInstanceOf(JComboBox.class, editorAfterLabel(panel, "test.level"));
             onEdt(() -> level.setSelectedItem("FINE"));
             List<String> labels = allLabels(panel);
-            assertTrue(labels.contains("test.level *"),
+            assertTrue(labels.stream().anyMatch(l -> l != null && l.startsWith("test.level") && l.endsWith("*")),
                     "the changed row carries the trailing star; labels=" + labels);
             SearchMatchLabel starred = labelWithText(panel, "test.level *");
             assertNotNull(starred, "the starred row label is present");
@@ -2143,6 +2470,55 @@ class ModuleLoggingProfilePanelTest {
     }
 
     @Test
+    @DisplayName("the profile combo's dirty star tracks the live editor state (appears on edit, clears on revert to the saved value)")
+    void profileComboDirtyStarTracksLiveEdits() {
+        ModuleLoggingProfilePanel panel = newPanel();
+        String name = "profile-dirty-star-" + System.nanoTime();
+        onEdt(() -> panel.createProfileFromCurrentState(name));
+        try {
+            JComboBox<?> level = assertInstanceOf(JComboBox.class, editorAfterLabel(panel, "test.level"));
+            final String[] saved = new String[1];
+            onEdt(() -> saved[0] = (String) level.getSelectedItem());
+            // Pick a guaranteed-different level so the edit is always a real change.
+            final String changed = "OFF".equals(saved[0]) ? "INFO" : "OFF";
+
+            // A freshly created profile is clean — no dirty star in the profile menu.
+            assertEquals(name, profileCellText(panel, name),
+                    "a freshly created profile carries no dirty star; got: " + profileCellText(panel, name));
+
+            // A live edit must immediately star the profile in the combo.
+            onEdt(() -> level.setSelectedItem(changed));
+            assertEquals(name + " *", profileCellText(panel, name),
+                    "a live edit must immediately star the profile in the combo; got: " + profileCellText(panel, name));
+
+            // Reverting to the saved value must immediately clear the star.
+            onEdt(() -> level.setSelectedItem(saved[0]));
+            assertEquals(name, profileCellText(panel, name),
+                    "reverting to the saved value must immediately clear the profile star; got: " + profileCellText(panel, name));
+        } finally {
+            // Self-cleaning: never leave a test profile in the runtime conf root.
+            try {
+                new LoggingProfileRepository().delete("test-mod", name);
+            } catch (Exception ignored) {
+                // best-effort cleanup
+            }
+        }
+    }
+
+    /** The text the profile combo's renderer paints for the given profile entry (star included when dirty). */
+    private static String profileCellText(ModuleLoggingProfilePanel panel, String profile) {
+        final String[] text = new String[1];
+        onEdt(() -> {
+            @SuppressWarnings("unchecked")
+            ListCellRenderer<String> renderer = (ListCellRenderer<String>) panel.getProfileCombo().getRenderer();
+            JList<String> list = new JList<>();
+            JLabel cell = (JLabel) renderer.getListCellRendererComponent(list, profile, -1, false, false);
+            text[0] = cell.getText();
+        });
+        return text[0];
+    }
+
+    @Test
     @DisplayName("editing against the virtual 'Default' profile is starred too (it cannot be saved)")
     void unsavedRowIsStarredUnderDefaultProfile() {
         ModuleLoggingProfilePanel panel = newPanel();
@@ -2150,14 +2526,14 @@ class ModuleLoggingProfilePanelTest {
         JComboBox<?> level = assertInstanceOf(JComboBox.class, editorAfterLabel(panel, "test.level"));
         onEdt(() -> level.setSelectedItem("FINE"));
         List<String> labels = allLabels(panel);
-        assertTrue(labels.contains("test.level *"),
+        assertTrue(labels.stream().anyMatch(l -> l != null && l.startsWith("test.level") && l.endsWith("*")),
                 "the changed row carries the trailing star; labels=" + labels);
     }
 
-    /** The first {@link SearchMatchLabel} whose text equals the given text (may be null). */
+    /** The first {@link SearchMatchLabel} whose base text matches the given text (may be null). */
     private static SearchMatchLabel labelWithText(Container root, String text) {
         return findAll(root, SearchMatchLabel.class).stream()
-                .filter(l -> text.equals(l.getText()))
+                .filter(l -> baseLabelText(text).equals(baseLabelText(l.getText())))
                 .findFirst()
                 .orElse(null);
     }

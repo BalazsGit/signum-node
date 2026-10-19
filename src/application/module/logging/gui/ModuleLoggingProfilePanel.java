@@ -4,6 +4,7 @@ import application.api.ModuleContext;
 import application.module.logging.LoggingProfileRepository;
 import application.utils.gui.CheckboxGroupPanel;
 import application.utils.gui.ConfigurationUtils;
+import application.utils.gui.DialogUtils;
 import application.utils.gui.ComboBoxItemToolTips;
 import application.utils.gui.ComboSearchHighlightRenderer;
 import application.utils.gui.FlatIconButton;
@@ -14,6 +15,7 @@ import application.utils.gui.HelpButton;
 import application.utils.gui.HelpDialog;
 import application.utils.gui.NewProfileChoiceDialog;
 import application.utils.gui.PlusGlyphIcon;
+import application.utils.gui.ProfileCopyDialog;
 import application.utils.gui.ResponsiveToolbarScrollPane;
 import application.utils.gui.SearchMatchLabel;
 import application.utils.gui.SearchMatchNavigator;
@@ -286,7 +288,6 @@ public class ModuleLoggingProfilePanel extends JPanel {
     private JButton toolbarNewButton;
     private JButton toolbarCloneButton;
     private JButton toolbarRenameButton;
-    private JButton toolbarResetButton;
     private JButton toolbarCopyButton;
     private JButton toolbarRefreshButton;
     private JButton toolbarDeleteButton;
@@ -807,6 +808,11 @@ public class ModuleLoggingProfilePanel extends JPanel {
         keyInput.setText("");
         keyValueInput.setText("");
         keyLevelInput.setSelectedItem("INFO");
+        // A new key changes the profile's dirty state (a value absent from the
+        // saved profile is unsaved) — recompute/re-render so the new row's star is
+        // correct, then sync the profile combo's dirty star immediately.
+        reevaluateRowStates();
+        syncWorkspaceForSelectedProfile();
     }
 
     /**
@@ -1042,21 +1048,40 @@ public class ModuleLoggingProfilePanel extends JPanel {
 
     /**
      * @return the row label text for the editor grid: the human-readable
-     *         label plus the trailing unsaved star when the row has a
-     *         pending change.
+     *         label, the initially loaded value in parentheses (always, as a
+     *         standing reference of the value the profile loaded with — the
+     *         current value stays visible in the editor), and the trailing
+     *         unsaved star when the row has a pending change.
      */
     private String unsavedLabel(String key) {
         String label = rowLabels.getOrDefault(key, key);
-        return isRowUnsaved(key) ? label + " *" : label;
+        String text = label;
+        // The row's initial value: the value the selected profile held when
+        // this editor first loaded it. Always shown after the label in
+        // parentheses as a standing reference of what was loaded (the matching
+        // tooltip spells it out); when the user edits the value the current
+        // value is visible in the editor while this keeps the loaded baseline
+        // for comparison.
+        String init = rowInitValues.get(key);
+        if (init != null && !init.isBlank()) {
+            text += " (=" + init + ")";
+        }
+        return isRowUnsaved(key) ? text + " *" : text;
     }
 
     /**
-     * @return the row label tooltip: the raw property key, extended with an
-     *         unsaved-change note when the row's value is not yet saved.
+     * @return the row label tooltip: the raw property key, the initially
+     *         loaded and used value (a standing reference of what the profile
+     *         loaded with), the row's state, and an unsaved-change note when
+     *         the row's value is not yet saved.
      */
     private String unsavedTooltip(String key) {
         RowState state = rowStates.get(key);
         String tooltip = "<html>" + key;
+        String init = rowInitValues.get(key);
+        if (init != null && !init.isBlank()) {
+            tooltip += "<br><br>Initially loaded and used value: " + init;
+        }
         if (state != null) {
             tooltip += "<br><br>Status: " + stateDisplayName(state);
         }
@@ -1079,6 +1104,12 @@ public class ModuleLoggingProfilePanel extends JPanel {
      */
     private void handleEditorValueChange(String key) {
         recomputeRowStates();
+        // The profile combo's dirty star is driven by dirtyProfiles (not rowStates)
+        // and otherwise only syncs on switch/save/rename/delete/refresh — so a live
+        // edit, or a revert back to the saved value, would leave the combo's star
+        // stale until the next profile switch. Sync it here so the profile star
+        // appears/disappears immediately, in lockstep with the per-row star.
+        syncWorkspaceForSelectedProfile();
         updateProfileActionButtons(); // Save / Apply availability follows the row states
         JComponent editor = rowEditors.get(key);
         JLabel label = rowLabelComponents.get(key);
@@ -1370,6 +1401,9 @@ public class ModuleLoggingProfilePanel extends JPanel {
         rowDefaults.remove(key);
         rowLabelComponents.remove(key);
         reevaluateRowStates();
+        // Removing the only dirty row can make the profile clean — sync the
+        // profile combo's dirty star immediately.
+        syncWorkspaceForSelectedProfile();
     }
 
     /**
@@ -1816,60 +1850,51 @@ public class ModuleLoggingProfilePanel extends JPanel {
 
         // Icon-only: the tooltip carries the function description (on hover).
         toolbarNewButton = new JButton();
-        toolbarNewButton.setToolTipText("<html>New Profile<br><br>Creates a new logging profile initialized "
-                + "with the application default values for this module's logger settings.</html>");
+        toolbarNewButton.setToolTipText(ConfigurationUtils.profileTooltip("New Profile<br><br>Creates a new logging profile initialized "
+                + "with the application default values for this module's logger settings."));
         toolbarNewButton.addActionListener(e -> createNewProfile());
         panel.add(toolbarNewButton);
 
         toolbarCloneButton = new JButton();
-        toolbarCloneButton.setToolTipText("<html>Clone Configuration to New Profile<br><br>Creates a new logging "
+        toolbarCloneButton.setToolTipText(ConfigurationUtils.profileTooltip("Clone Configuration to New Profile<br><br>Creates a new logging "
                 + "profile from the selected editor's current values, including unsaved changes. The source "
-                + "profile is left untouched.</html>");
+                + "profile is left untouched."));
         toolbarCloneButton.addActionListener(e -> cloneProfile());
         panel.add(toolbarCloneButton);
 
         toolbarCopyButton = new JButton();
-        toolbarCopyButton.setToolTipText("<html>Copy Existing Configuration to This Profile<br><br>Selects another "
+        toolbarCopyButton.setToolTipText(ConfigurationUtils.profileTooltip("Copy Existing Configuration to This Profile<br><br>Selects another "
                 + "logging profile and loads its values into this editor as unsaved changes. Existing unsaved "
-                + "changes are discarded.</html>");
+                + "changes are discarded."));
         toolbarCopyButton.addActionListener(e -> copyConfiguration());
         panel.add(toolbarCopyButton);
 
         toolbarRenameButton = new JButton();
-        toolbarRenameButton.setToolTipText("<html>Rename Profile<br><br>Changes the name of the selected "
-                + "on-disk logging profile. The built-in Default profile cannot be renamed.</html>");
+        toolbarRenameButton.setToolTipText(ConfigurationUtils.profileTooltip("Rename Profile<br><br>Changes the name of the selected "
+                + "on-disk logging profile. The built-in Default profile cannot be renamed."));
         toolbarRenameButton.addActionListener(e -> renameProfile());
         panel.add(toolbarRenameButton);
 
         JButton saveBtn = new JButton();
-        saveBtn.setToolTipText("<html>Save<br><br>Saves the current editor state to the selected profile.<br>"
-                + "Active only while there are unsaved changes.</html>");
+        saveBtn.setToolTipText(ConfigurationUtils.profileTooltip("Save<br><br>Saves the current editor state to the selected profile.<br>"
+                + "Active only while there are unsaved changes."));
         saveBtn.addActionListener(e -> saveCurrentProfile());
         panel.add(saveBtn);
 
         JButton applyBtn = new JButton();
-        applyBtn.setToolTipText("<html>Apply<br><br>Marks the selected profile as applied for this view. "
-                + "In the module logging view this changes only the comparison reference and default "
-                + "selection for newly created node profiles; it does not change logging in any running "
-                + "node profile.<br>"
-                + "Active while the selected profile is not the applied one or there are unsaved or saved, "
-                + "not yet applied changes. Apply does not save unsaved editor changes; use Save first.</html>");
+        applyBtn.setToolTipText(ConfigurationUtils.profileTooltip("Apply<br><br>Marks the selected profile as applied.<br><br>Sets "
+                + "this profile's initial values as the module's applied reference (the cross-profile comparison baseline) and "
+                + "makes it the default for newly created node profiles."));
         applyBtn.addActionListener(e -> applyProfile());
         panel.add(applyBtn);
-
-        toolbarResetButton = new JButton();
-        toolbarResetButton.setToolTipText("<html>Reset to Defaults<br><br>Replaces every logger setting in "
-                + "the editor with this module's defaults. The changes are not saved until you choose Save.</html>");
-        toolbarResetButton.addActionListener(e -> resetToDefaults());
-        panel.add(toolbarResetButton);
 
         // The MERGED Reload + Refresh action: it re-scans the profiles on
         // disk AND re-reads the selected profile from disk (the standalone
         // Reload button was merged into this one).
         toolbarRefreshButton = new JButton();
-        toolbarRefreshButton.setToolTipText("<html>Refresh<br><br>Re-scans the logging profiles on disk and "
+        toolbarRefreshButton.setToolTipText(ConfigurationUtils.profileTooltip("Refresh<br><br>Re-scans the logging profiles on disk and "
                 + "re-reads the selected profile<br>"
-                + "(discards unsaved edits).</html>");
+                + "(discards unsaved edits)."));
         toolbarRefreshButton.addActionListener(e -> {
             refreshProfileList();
             discardAndReload();
@@ -1877,14 +1902,14 @@ public class ModuleLoggingProfilePanel extends JPanel {
         panel.add(toolbarRefreshButton);
 
         toolbarDeleteButton = new JButton();
-        toolbarDeleteButton.setToolTipText("<html>Delete<br><br>Permanently deletes the selected on-disk "
-                + "logging profile. The built-in Default profile cannot be deleted.</html>");
+        toolbarDeleteButton.setToolTipText(ConfigurationUtils.profileTooltip("Delete<br><br>Permanently deletes the selected on-disk "
+                + "logging profile. The built-in Default profile cannot be deleted."));
         toolbarDeleteButton.addActionListener(e -> deleteProfile());
         panel.add(toolbarDeleteButton);
 
         helpButton = new JButton();
-        helpButton.setToolTipText("<html>Help<br><br>Explains logging profiles, logger levels, row colors, "
-                + "and the actions available in this toolbar.</html>");
+        helpButton.setToolTipText(ConfigurationUtils.profileTooltip("Help<br><br>Explains logging profiles, logger levels, row colors, "
+                + "and the actions available in this toolbar."));
         // Enabled out of the box: the core shows its own structured default help
         // (buildDefaultHelpContent); a host overrides the text via setHelpSupplier.
         helpButton.addActionListener(e -> showHelp());
@@ -1913,13 +1938,13 @@ public class ModuleLoggingProfilePanel extends JPanel {
 
     private void updateProfileToolbarUI() {
         ConfigurationUtils.configureProfileToolbar(toolbarNewButton, saveButton, applyButton, toolbarRenameButton,
-                toolbarDeleteButton, null, toolbarRefreshButton, toolbarResetButton, toolbarCopyButton,
+                toolbarDeleteButton, null, toolbarRefreshButton, null, toolbarCopyButton,
                 toolbarCloneButton);
         float iconSize = GuiConstants.getToolBarIconSize();
         ConfigurationUtils.styleProfileIconButton(saveButton, FontAwesome.FLOPPY_O, GuiColors.getSaved(), iconSize);
         ConfigurationUtils.styleProfileIconButton(applyButton, FontAwesome.CHECK_CIRCLE_O, GuiColors.getApplied(),
                 iconSize);
-        ConfigurationUtils.styleProfileIconButton(toolbarRefreshButton, FontAwesome.REFRESH,
+        ConfigurationUtils.styleProfileIconButton(toolbarRefreshButton, FontAwesome.UNDO,
                 GuiColors.getButtonIcon(), iconSize);
         ConfigurationUtils.styleProfileIconButton(helpButton, FontAwesome.QUESTION_CIRCLE,
                 GuiColors.getButtonIcon(), iconSize);
@@ -2331,10 +2356,10 @@ public class ModuleLoggingProfilePanel extends JPanel {
     }
 
     /**
-     * Copy Configuration toolbar action: opens a dialog to pick a profile
-     * (or the virtual "Default") and copies its values into the CURRENT
-     * editor as unsaved changes. Unsaved changes in the editor are discarded
-     * (with confirmation).
+     * Copy Configuration toolbar action: opens the modal copy dialog to pick a
+     * profile (or the virtual "Default" entry, which resets the editor to the
+     * module's default values) and applies it to the CURRENT editor as unsaved
+     * changes. Unsaved changes in the editor are discarded (with confirmation).
      */
     private void copyConfiguration() {
         List<String> profiles;
@@ -2344,42 +2369,30 @@ public class ModuleLoggingProfilePanel extends JPanel {
             LOGGER.warn("Failed to list profiles for '{}': {}", moduleId, e.getMessage());
             profiles = List.of();
         }
-        if (profiles.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "There are no other profiles to copy from.",
-                    "Copy Configuration", JOptionPane.INFORMATION_MESSAGE);
-            return;
-        }
+        // Both "copy from profile" and the relocated reset-to-defaults action live in
+        // the same modal dialog: a real profile copies its values, while the virtual
+        // "Default" entry (or the dialog's Reset to Defaults button) resets the editor.
         if (hasUnsavedRows()) {
-            int confirm = JOptionPane.showConfirmDialog(this,
+            int confirm = DialogUtils.confirm(this,
+                    DialogUtils.actionIcon(FontAwesome.CLIPBOARD, GuiColors.getButtonIcon()),
+                    "Copy Configuration",
                     "The editor has unsaved changes that will be replaced by the copied values. Continue?",
-                    "Copy Configuration", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                    JOptionPane.YES_NO_OPTION, null, null);
             if (confirm != JOptionPane.YES_OPTION) {
                 return;
             }
         }
         String current = (String) profileCombo.getSelectedItem();
-        Object[] choices = new Object[profiles.size() + 1];
-        choices[0] = DEFAULT_PROFILE_ENTRY;
-        System.arraycopy(profiles.toArray(), 0, choices, 1, profiles.size());
-        Object sel = JOptionPane.showInputDialog(this, "Copy configuration from profile:",
-                "Copy Configuration", JOptionPane.QUESTION_MESSAGE, null, choices,
-                (current != null && !current.equals(DEFAULT_PROFILE_ENTRY) ? current : choices[0]));
+        String sel = ProfileCopyDialog.show(this, profiles, current, DEFAULT_PROFILE_ENTRY);
         if (sel == null) {
             return;
         }
         if (DEFAULT_PROFILE_ENTRY.equals(sel)) {
-            for (Map.Entry<String, JComponent> entry : rowEditors.entrySet()) {
-                String d = rowDefaults.get(entry.getKey());
-                if (d != null) {
-                    setEditorValue(entry.getValue(), d);
-                }
-            }
-            reevaluateRowStates();
-            syncWorkspaceForSelectedProfile();
+            resetToDefaults();
             return;
         }
         try {
-            Properties props = repo.loadProps(moduleId, sel.toString());
+            Properties props = repo.loadProps(moduleId, sel);
             for (Map.Entry<String, JComponent> entry : rowEditors.entrySet()) {
                 String value = props.getProperty(entry.getKey());
                 if (value != null) {
@@ -2452,8 +2465,9 @@ public class ModuleLoggingProfilePanel extends JPanel {
         Object confirmationContent = optionalRestart
                 ? createApplyConfirmationContent(message, restartOption)
                 : message;
-        int result = JOptionPane.showConfirmDialog(this, confirmationContent,
-                "Apply Profile", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+        int result = DialogUtils.confirm(this,
+                DialogUtils.actionIcon(FontAwesome.CHECK_CIRCLE_O, GuiColors.getApplied()),
+                "Apply Profile", confirmationContent, JOptionPane.YES_NO_OPTION, null, null);
         if (result != JOptionPane.YES_OPTION) {
             return;
         }
@@ -2513,22 +2527,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
     }
 
     JComponent createApplyConfirmationContent(String message, JCheckBox restartOption) {
-        JTextArea messageArea = new JTextArea(message, 12, 52);
-        messageArea.setEditable(false);
-        messageArea.setFocusable(false);
-        messageArea.setLineWrap(true);
-        messageArea.setWrapStyleWord(true);
-        messageArea.setOpaque(false);
-        messageArea.setBorder(null);
-
-        JPanel content = new JPanel();
-        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
-        content.setOpaque(false);
-        content.add(messageArea);
-        content.add(Box.createVerticalStrut(8));
-        restartOption.setAlignmentX(Component.LEFT_ALIGNMENT);
-        content.add(restartOption);
-        return content;
+        return DialogUtils.composeMessageArea(message, restartOption);
     }
 
     void requestRestartAfterApply(boolean restartOptionShown, boolean restartSelected) {
@@ -2540,42 +2539,37 @@ public class ModuleLoggingProfilePanel extends JPanel {
     /**
      * The core (module-scoped) Apply confirmation message — a compact, unambiguous
      * three-part statement (the node tab overrides this with a node-centric message):
-     * <b>what happens</b> (the module-level default marker is set/reset),
-     * <b>the effect on node profiles</b> (only <i>newly created</i> profiles are
-     * checked against the module-level applied profile at creation time — their
-     * default assignment is bound to it, or left absent when "Default" is applied;
-     * <i>existing</i> profiles are entirely untouched: those with their own
-     * assignment keep it, and those without an assignment keep running on the
-     * built-in default), and <b>when it takes effect</b> (new profiles use the
-     * marker when they are created; existing profiles are not affected).
+     * <b>what happens</b> (the profile's initial values become the module's applied
+     * reference — the cross-profile comparison baseline — and no running node's logging
+     * changes), <b>the effect on node profiles</b> (only <i>newly created</i> profiles are
+     * linked to the applied one by default, or left unassigned when "Default" is applied;
+     * <i>existing</i> profiles are entirely untouched), and <b>when saved changes take
+     * effect</b> (only for newly created nodes, or after a node/application restart, loading
+     * them as initial values).
      *
      * @param profileName the profile name being applied (the virtual Default entry included)
      * @param isDefault   whether the virtual {@link #DEFAULT_PROFILE_ENTRY} entry is applied
      * @return the confirmation dialog message
      */
     String defaultApplyMessage(String profileName, boolean isDefault) {
-        String defaultName = LoggingProfileRepository.RESERVED_PROFILE_NAME;
-        String newlyCreated = isDefault
-                ? "Newly created node profiles will have no logging assignment, as before (the built-in '"
-                        + defaultName + "' applies to them)"
-                : "newly created node profiles will be linked to '" + profileName + "' by default (the module-level "
-                        + "applied profile is checked when a node profile is created)";
-        String existing = "Existing node profiles are not changed: profiles with their own assignment keep it, and "
-                + "profiles without an assignment keep running on the built-in '" + defaultName + "'.";
-        return (isDefault
-                ? "The module-level applied-profile marker for the '" + moduleId
-                        + "' module will be reset to the built-in '"
-                        + defaultName + "'.\n\n"
-                        + newlyCreated + ".\n\n"
-                : "The module-level applied-profile marker for the '" + moduleId
-                        + "' module will be set to '"
-                        + profileName + "'.\n\n"
-                        + newlyCreated + ".\n\n")
-                + existing + "\n\n"
-                + "This marker is used as the default selection when a node profile is created. The "
-                + "module-level applied state is a comparison reference only; it does not change logging for "
-                + "any running node profile. Existing node profiles and their assignments are unaffected. "
-                + "Restarting the application is optional and can be selected below. Would you like to proceed?";
+        // The user-facing name of the built-in profile is the dropdown entry
+        // ("Default") — not the reserved on-disk name ("logging-default").
+        String defaultName = DEFAULT_PROFILE_ENTRY;
+        String what = isDefault
+                ? "Resets the module's applied reference to the built-in '" + defaultName + "' profile (its "
+                        + "initial values become the cross-profile comparison baseline)."
+                : "Sets this profile's initial values as the module's applied reference (the cross-profile "
+                        + "comparison baseline).";
+        String nodes = isDefault
+                ? "Newly created node profiles will have no logging assignment."
+                : "Newly created node profiles will be linked to the applied logging profile.";
+        String effect = "Saved logging-profile changes take effect only for newly created nodes, or after a "
+                + "node/application restart, with the saved changes loaded as initial values.";
+        return "Applying the logging profile '" + (isDefault ? defaultName : profileName) + "':\n\n"
+                + "  • " + what + "\n"
+                + "  • " + nodes + "\n"
+                + "  • " + effect + "\n\n"
+                + "Would you like to proceed?";
     }
 
     private void renameProfile() {
@@ -2624,9 +2618,11 @@ public class ModuleLoggingProfilePanel extends JPanel {
                     "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
-        int result = JOptionPane.showConfirmDialog(this,
+        int result = DialogUtils.confirm(this,
+                DialogUtils.actionIcon(FontAwesome.TRASH_O, GuiColors.getContrastRed()),
+                "Delete Profile",
                 "Delete profile '" + name + "' for module '" + moduleId + "'?",
-                "Delete Profile", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                JOptionPane.YES_NO_OPTION, null, null);
         if (result != JOptionPane.YES_OPTION) {
             return;
         }
@@ -2697,8 +2693,8 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 "This panel edits the logging profile assigned to the current module. Each row is a "
                         + "<b>key/value setting</b> consumed by that module's logging configuration. "
                         + "Logger level rows use the supported level dropdown; other settings accept text. "
-                        + "Save writes the profile. Module-level Apply updates only a comparison/default-selection "
-                        + "marker and does not change logging for any running node profile. Restart is optional. "
+                        + "Save writes the profile. Module-level Apply sets the applied reference (the "
+                        + "cross-profile comparison baseline) and links newly created node profiles to it. Restart is optional. "
                         + appliedBaselineScopeDescription()));
         content.add(HelpDialog.separator());
         content.add(HelpDialog.heading("Row colors"));
@@ -2733,21 +2729,23 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 "Saves the current editor state to the selected profile. "
                         + "Active only while there are unsaved changes."));
         content.add(HelpDialog.actionRow(FontAwesome.CHECK_CIRCLE_O, GuiColors.getApplied(), "Apply",
-                "In the module logging view this changes only the comparison/default-selection marker; it does "
-                        + "not change the logging configuration of any running node profile. It sets the new "
-                        + "profile's init values as the comparison reference. Restart is optional. "
+                "In the module logging view this sets the new profile's init values as the comparison reference "
+                        + "(the cross-profile comparison baseline) and links newly created node profiles to it. "
+                        + "Restart is optional. "
                         + "Active while the selected profile is not the applied one or there are unsaved or "
                         + "saved, not yet applied changes. Apply does not save unsaved editor changes."));
         content.add(HelpDialog.actionRow(FontAwesome.PENCIL_SQUARE_O, iconColor, "Rename",
                 "Renames the selected on-disk profile. The built-in Default entry cannot be renamed."));
-        content.add(HelpDialog.actionRow(FontAwesome.UNDO, iconColor, "Reset to Defaults",
-                "Replaces every editor value with this module's default. The changes remain unsaved until Save."));
+        content.add(HelpDialog.actionRow(FontAwesome.REFRESH, iconColor, "Reset to Defaults",
+                "In the Copy Configuration dialog: replaces every editor value with this module's default "
+                        + "(select the \"Default\" entry or press Reset to Defaults). The changes remain "
+                        + "unsaved until Save."));
         content.add(HelpDialog.actionRow(FontAwesome.CLIPBOARD, iconColor, "Copy Configuration",
                 "Copies another profile's values into this editor as unsaved changes; current unsaved edits "
                         + "are discarded."));
         content.add(HelpDialog.actionRow(FontAwesome.FILES_O, iconColor, "Clone Configuration",
                 "Creates a new profile from the current (unsaved, editor) effective state."));
-        content.add(HelpDialog.actionRow(FontAwesome.REFRESH, iconColor, "Refresh",
+        content.add(HelpDialog.actionRow(FontAwesome.UNDO, iconColor, "Refresh",
                 "Re-scans the profiles on disk and re-reads the selected profile (discards unsaved edits)."));
         content.add(HelpDialog.actionRow(FontAwesome.TRASH_O, GuiColors.getContrastRed(), "Delete",
                 "Permanently deletes the selected on-disk profile. The built-in Default entry cannot be deleted."));
@@ -2854,6 +2852,23 @@ public class ModuleLoggingProfilePanel extends JPanel {
      */
     public ModuleLoggingProfilePanel setApplyHook(java.util.function.Consumer<String> applyHook) {
         this.applyHook = applyHook;
+        return this;
+    }
+
+    /**
+     * Overrides the Apply button's hover tooltip. The core text ("Marks the selected profile as
+     * applied") is module-centric — hosts whose Apply targets something narrower (e.g. the node
+     * tab, which links the profile to the node profile) should replace it with their own wording.
+     *
+     * <p><b>Threading:</b> must be called on the EDT.
+     *
+     * @param tooltip the already-wrapped tooltip (see {@link ConfigurationUtils#profileTooltip(String)})
+     * @return {@code this} for fluent chaining
+     */
+    public ModuleLoggingProfilePanel setApplyButtonTooltip(String tooltip) {
+        if (applyButton != null) {
+            applyButton.setToolTipText(tooltip);
+        }
         return this;
     }
 

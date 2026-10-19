@@ -85,7 +85,7 @@ class NodeLoggingPanelTest {
         for (int i = 0; i < root.getComponentCount(); i++) {
             Component child = root.getComponent(i);
             if (child instanceof JLabel) {
-                if (label.equals(((JLabel) child).getText()) && i + 1 < root.getComponentCount()) {
+                if (baseLabel(label).equals(baseLabel(((JLabel) child).getText())) && i + 1 < root.getComponentCount()) {
                     JComponent next = (JComponent) root.getComponent(i + 1);
                     // The editor now sits inside the row's value cell (editor +
                     // per-row "Remove key" trash icon) — unwrap the cell.
@@ -121,10 +121,10 @@ class NodeLoggingPanelTest {
     void fileHandlerRowsPresent() {
         NodeLoggingPanel panel = newPanel();
         List<String> labels = allLabels(panel);
-        assertTrue(labels.contains("File Level"), "File Level row present; labels=" + labels);
-        assertTrue(labels.contains("Log File Pattern"), "Log File Pattern row present");
-        assertTrue(labels.contains("File Size Limit (bytes)"), "File limit row present");
-        assertTrue(labels.contains("File Count"), "File count row present");
+        assertTrue(labels.stream().anyMatch(l -> baseLabel(l).equals("File Level")), "File Level row present; labels=" + labels);
+        assertTrue(labels.stream().anyMatch(l -> baseLabel(l).equals("Log File Pattern")), "Log File Pattern row present; labels=" + labels);
+        assertTrue(labels.stream().anyMatch(l -> baseLabel(l).equals("File Size Limit (bytes)")), "File limit row present; labels=" + labels);
+        assertTrue(labels.stream().anyMatch(l -> baseLabel(l).equals("File Count")), "File count row present; labels=" + labels);
     }
 
     @Test
@@ -195,9 +195,9 @@ class NodeLoggingPanelTest {
         String other = "FINE".equals(String.valueOf(current)) ? "INFO" : "FINE";
         onEdt(() -> fileLevel.setSelectedItem(other));
         List<String> labels = allLabels(panel);
-        assertTrue(labels.contains("File Level *"),
+        assertTrue(labels.stream().anyMatch(l -> l != null && l.startsWith("File Level") && l.endsWith("*")),
                 "the changed row carries the trailing star; labels=" + labels);
-        assertFalse(labels.contains("File Count *"),
+        assertFalse(labels.stream().anyMatch(l -> l != null && l.startsWith("File Count") && l.endsWith("*")),
                 "an untouched row must not be starred; labels=" + labels);
     }
 
@@ -459,27 +459,43 @@ class NodeLoggingPanelTest {
     }
 
     @Test
-    @DisplayName("the apply dialog message names the node profile and states the per-node scope + new-node fallback")
+    @DisplayName("the apply dialog message is the short form: profile + target node profile, then the restart outcome")
     void applyMessageStatesPerNodeScope() {
         final NodeLoggingPanel[] holder = new NodeLoggingPanel[1];
         onEdt(() -> holder[0] = new NodeLoggingPanel("zz-msg-node", () -> { }));
         NodeLoggingPanel panel = holder[0];
 
         String msg = panel.nodeApplyMessage("myprofile", false);
-        assertTrue(msg.contains("node profile 'zz-msg-node'"), "the message names the bound node profile");
-        assertTrue(msg.contains("specific to node profile 'zz-msg-node'"),
-                "the message states the assignment is specific to this node profile");
-        assertTrue(msg.contains("Other node profiles keep their own assignment"),
-                "the message clarifies that other node profiles are unaffected");
-        assertTrue(msg.contains("newly created node profile")
-                        && msg.contains(LoggingProfileRepository.RESERVED_PROFILE_NAME),
-                "the message states a newly created node profile without an explicit assignment "
-                        + "uses the built-in logging-default profile");
+        assertTrue(msg.startsWith("Apply logging profile 'myprofile' to node profile 'zz-msg-node'?"),
+                "the message asks for confirmation naming the profile and the bound node profile");
+        assertTrue(msg.contains("The node is not running"),
+                "for a non-running node the message states that the node will not be started");
+        assertTrue(msg.contains("the change takes effect the next time the node starts"),
+                "the message states when the change takes effect");
 
         String defMsg = panel.nodeApplyMessage(ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY, true);
-        assertTrue(defMsg.contains("CLEARS")
-                        && defMsg.contains(LoggingProfileRepository.RESERVED_PROFILE_NAME),
-                "the 'Default' message states that the node's custom assignment is cleared");
+        assertTrue(defMsg.startsWith("Apply logging profile '"
+                        + ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY + "' to node profile 'zz-msg-node'?"),
+                "the 'Default' message uses the same short form");
+    }
+
+    @Test
+    @DisplayName("the node Apply tooltip states link + saved values applied + node restart (module wording replaced)")
+    void applyTooltipStatesNodeScope() {
+        NodeLoggingPanel panel = newPanel();
+        JButton apply = findButtonByTooltip(panel, "Apply<br>");
+        assertNotNull(apply, "the Apply button is present");
+        String tooltip = apply.getToolTipText();
+        assertTrue(tooltip.contains("Apply<br><br>Links the selected logging profile to this node profile"),
+                "the tooltip opens with the node-scoped link-to-the-node statement");
+        assertTrue(tooltip.contains("applies its saved values to the node"),
+                "the tooltip states that the profile's saved values are applied to the node");
+        assertTrue(tooltip.contains("Applying restarts the node so the changes take effect"),
+                "the tooltip states that applying restarts the node for the changes to take effect");
+        assertFalse(tooltip.contains("Marks the selected profile as applied"),
+                "the module-scoped wording is replaced on the node tab");
+        assertFalse(tooltip.contains("module's applied reference"),
+                "the module-centric description is not shown on the node tab");
     }
 
     @Test
@@ -659,7 +675,7 @@ class NodeLoggingPanelTest {
     }
 
     private static boolean hasLabel(Container root, String text) {
-        return allLabels(root).stream().anyMatch(t2 -> text.equals(t2) || (text + " *").equals(t2));
+        return allLabels(root).stream().anyMatch(t2 -> baseLabel(text).equals(baseLabel(t2)));
     }
 
     /** The text component carrying a row editor's value (a plain field, or the EDITOR TEXT of an editable combo). */
@@ -801,10 +817,28 @@ class NodeLoggingPanelTest {
         }
     }
 
-    /** Whether the label shows the row name, with or without the trailing unsaved star. */
+    /**
+     * Whether the label shows the row name, ignoring the trailing unsaved star
+     * and the "(=...)" initial-value annotation (so a row is found by its plain
+     * label regardless of its unsaved / initial-value state).
+     */
     private static boolean labelMatches(JLabel label, String text) {
-        String shown = label.getText();
-        return text.equals(shown) || (shown != null && shown.equals(text + " *"));
+        return baseLabel(text).equals(baseLabel(label.getText()));
+    }
+
+    /** A row's base label text: star and "(=...)" initial-value annotation stripped. */
+    private static String baseLabel(String text) {
+        if (text == null) {
+            return "";
+        }
+        int p = text.indexOf(" (=");
+        if (p >= 0) {
+            text = text.substring(0, p);
+        }
+        if (text.endsWith(" *")) {
+            text = text.substring(0, text.length() - 2);
+        }
+        return text;
     }
 
     private static JLabel findLabel(Container root, String text) {
