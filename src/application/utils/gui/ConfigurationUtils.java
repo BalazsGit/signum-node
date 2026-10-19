@@ -769,8 +769,11 @@ public class ConfigurationUtils {
         // delete stands out in the palette's contrast red (a destructive action)
         styleProfileIconButton(deleteBtn, FontAwesome.TRASH_O, GuiColors.getContrastRed(), iconSize);
         styleProfileIconButton(reloadBtn, FontAwesome.RECYCLE, iconColor, iconSize);
-        styleProfileIconButton(refreshBtn, FontAwesome.REFRESH, iconColor, iconSize);
-        styleProfileIconButton(resetToDefaultsBtn, FontAwesome.UNDO, iconColor, iconSize);
+        // Refresh and Reset to Defaults intentionally use swapped glyphs (a deliberate
+        // visual choice kept in this single source of truth so that every profile
+        // toolbar — node configuration, logging, appearance, ... — stays identical).
+        styleProfileIconButton(refreshBtn, FontAwesome.UNDO, iconColor, iconSize);
+        styleProfileIconButton(resetToDefaultsBtn, FontAwesome.REFRESH, iconColor, iconSize);
         styleProfileIconButton(copyBtn, FontAwesome.CLIPBOARD, iconColor, iconSize);
         styleProfileIconButton(cloneBtn, FontAwesome.FILES_O, iconColor, iconSize);
     }
@@ -826,6 +829,32 @@ public class ConfigurationUtils {
      * {@link #styleProfileIconButton}.
      */
     public static final Cursor PROFILE_TOOLBAR_CURSOR = Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR);
+
+    /**
+     * Maximum width (pixels) of the profile-action toolbar tooltips — the
+     * mouse-over helper boxes of the New / Save / Apply / ... icon buttons in
+     * the node configuration, logging, module logging and appearance rows. A
+     * single, central value: every one of those buttons pins its tooltip to
+     * this width, so the helper box is a uniform size that never exceeds the
+     * maximum and long text wraps onto multiple lines instead of stretching
+     * the box.
+     */
+    public static final int PROFILE_TOOLTIP_MAX_WIDTH = 360;
+
+    /**
+     * Builds the width-capped, wrapping HTML tooltip shared by every button in
+     * the profile-action toolbars (node configuration, logging, module logging
+     * and appearance). The body is rendered inside a {@code <body>} pinned to
+     * {@link #PROFILE_TOOLTIP_MAX_WIDTH}, so the helper box is a uniform width
+     * that never exceeds the maximum and long text wraps onto several lines
+     * instead of growing the box.
+     *
+     * @param text the tooltip body (plain text; use {@code <br>} for hard line breaks)
+     * @return the ready-to-set HTML tooltip string
+     */
+    public static String profileTooltip(String text) {
+        return "<html><body style='width: " + PROFILE_TOOLTIP_MAX_WIDTH + "px'>" + text + "</body></html>";
+    }
 
     /**
      * Creates the profile-action toolbar ROW: a left-aligned button strip with

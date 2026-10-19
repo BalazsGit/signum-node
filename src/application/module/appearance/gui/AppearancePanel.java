@@ -7,11 +7,13 @@ import application.module.appearance.gui.laf.FlatLafPanel;
 import application.module.node.gui.ColorSettingsPanel;
 import application.utils.gui.ColorPaletteManager;
 import application.utils.gui.ConfigurationUtils;
+import application.utils.gui.DialogUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiFontManager;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
+import application.utils.gui.ProfileCopyDialog;
 import application.utils.io.PathUtils;
 
 import com.formdev.flatlaf.*;
@@ -59,7 +61,6 @@ public class AppearancePanel extends JPanel {
     private JButton deleteProfileBtn;
     private ColorSettingsPanel colorSettingsPanel;
     private JButton saveProfileBtn;
-    private JButton resetToDefaultsBtn;
     private JButton reloadProfileBtn;
     private JButton helpBtn;
     private JTabbedPane tabbedPane;
@@ -139,68 +140,59 @@ public class AppearancePanel extends JPanel {
         profileComboBox.setEditable(false);
         profileComboBox.setPrototypeDisplayValue("XXXXXXXXXXXXXXXXXXXX");
         ConfigurationUtils.fixComponentSize(profileComboBox);
-        profileComboBox.setToolTipText("<html>Select the appearance profile to edit.<br>"
-                + "Default is the built-in baseline.</html>");
+        profileComboBox.setToolTipText(ConfigurationUtils.profileTooltip("Select the appearance profile to edit.<br>"
+                + "Default is the built-in baseline."));
 
         newProfileBtn = new JButton();
-        newProfileBtn.setToolTipText("<html><body style='width: 360px'>New Profile<br><br>"
-                + "Creates and selects a new appearance profile initialized with the built-in Default appearance."
-                + "</body></html>");
+        newProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip("New Profile<br><br>"
+                + "Creates and selects a new appearance profile initialized with the built-in Default appearance."));
         newProfileBtn.addActionListener(e -> createNewProfile());
         profilePanel.add(newProfileBtn);
 
         cloneProfileBtn = new JButton();
-        cloneProfileBtn.setToolTipText("<html><body style='width: 360px'>"
-                + "Clone Configuration to New Profile<br><br>Creates a new profile from the current appearance, "
-                + "including unsaved changes, and selects the new profile.</body></html>");
+        cloneProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip(
+                "Clone Configuration to New Profile<br><br>Creates a new profile from the current appearance, "
+                + "including unsaved changes, and selects the new profile."));
         cloneProfileBtn.addActionListener(e -> cloneProfile());
         profilePanel.add(cloneProfileBtn);
 
         copyProfileBtn = new JButton();
-        copyProfileBtn.setToolTipText("<html><body style='width: 360px'>"
-                + "Copy Existing Configuration to This Profile<br><br>Loads another profile's appearance into "
-                + "the current editor as unsaved changes.</body></html>");
+        copyProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip(
+                "Copy Existing Configuration to This Profile<br><br>Loads another profile's appearance into "
+                + "the current editor as unsaved changes."));
         copyProfileBtn.addActionListener(e -> copyProfile());
         profilePanel.add(copyProfileBtn);
 
         renameProfileBtn = new JButton();
-        renameProfileBtn.setToolTipText("<html><body style='width: 360px'>Rename Profile<br><br>"
-                + "Renames the selected custom profile. The built-in Default profile cannot be renamed."
-                + "</body></html>");
+        renameProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip("Rename Profile<br><br>"
+                + "Renames the selected custom profile. The built-in Default profile cannot be renamed."));
         renameProfileBtn.addActionListener(e -> renameProfile((String) profileComboBox.getSelectedItem()));
         profilePanel.add(renameProfileBtn);
 
         saveProfileBtn = new JButton();
-        saveProfileBtn.setToolTipText("<html><body style='width: 360px'>Save Profile<br><br>"
+        saveProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip("Save Profile<br><br>"
                 + "Saves the current appearance to the selected custom profile. "
-                + "The built-in Default profile cannot be overwritten.</body></html>");
+                + "The built-in Default profile cannot be overwritten."));
         saveProfileBtn.addActionListener(e -> saveCurrentProfile());
         profilePanel.add(saveProfileBtn);
 
-        resetToDefaultsBtn = new JButton();
-        resetToDefaultsBtn.setToolTipText("<html><body style='width: 360px'>Reset to Defaults<br><br>"
-                + "Resets the current appearance to the built-in Default values without saving changes to the "
-                + "selected profile.</body></html>");
-        resetToDefaultsBtn.addActionListener(e -> resetToDefault());
-        profilePanel.add(resetToDefaultsBtn);
-
         reloadProfileBtn = new JButton();
-        reloadProfileBtn.setToolTipText("<html><body style='width: 360px'>Refresh<br><br>"
+        reloadProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip("Refresh<br><br>"
                 + "Refreshes the available profile list and reloads the selected profile from disk. "
-                + "Any unsaved changes are discarded only after confirmation.</body></html>");
+                + "Any unsaved changes are discarded only after confirmation."));
         reloadProfileBtn.addActionListener(e -> refreshAndReloadProfile());
         profilePanel.add(reloadProfileBtn);
 
         deleteProfileBtn = new JButton();
-        deleteProfileBtn.setToolTipText("<html><body style='width: 360px'>Delete Profile<br><br>"
+        deleteProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip("Delete Profile<br><br>"
                 + "Permanently deletes the selected custom profile. "
-                + "The built-in Default profile cannot be deleted.</body></html>");
+                + "The built-in Default profile cannot be deleted."));
         deleteProfileBtn.addActionListener(e -> deleteProfile((String) profileComboBox.getSelectedItem()));
         profilePanel.add(deleteProfileBtn);
 
         helpBtn = new HelpButton();
-        helpBtn.setToolTipText("<html><body style='width: 360px'>Help<br><br>"
-                + "Explains appearance profiles and their actions.</body></html>");
+        helpBtn.setToolTipText(ConfigurationUtils.profileTooltip("Help<br><br>"
+                + "Explains appearance profiles and their actions."));
         helpBtn.addActionListener(e -> showProfileHelp());
         profilePanel.add(helpBtn);
 
@@ -308,9 +300,9 @@ public class AppearancePanel extends JPanel {
         if (isProgrammaticChange || savedProfile == null)
             return;
         boolean dirty = hasUnsavedChanges();
-        saveProfileBtn.setToolTipText("<html><body style='width: 360px'>Save Profile" + (dirty ? " *" : "")
+        saveProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip("Save Profile" + (dirty ? " *" : "")
                 + "<br><br>Saves the current appearance to the selected custom profile. "
-                + "The built-in Default profile cannot be overwritten.</body></html>");
+                + "The built-in Default profile cannot be overwritten."));
         saveProfileBtn.setEnabled(!DEFAULT_PROFILE_NAME.equals(savedProfile.getName()) && dirty);
 
         // Mark tabs with an asterisk if there are unsaved changes
@@ -379,30 +371,26 @@ public class AppearancePanel extends JPanel {
 
     private void copyProfile() {
         java.util.List<String> profiles = new java.util.ArrayList<>();
-        profiles.add(DEFAULT_PROFILE_NAME);
         for (int i = 0; i < profileComboBox.getItemCount(); i++) {
             String profile = profileComboBox.getItemAt(i);
             if (!DEFAULT_PROFILE_NAME.equals(profile)) {
                 profiles.add(profile);
             }
         }
-        if (profiles.size() == 1) {
-            JOptionPane.showMessageDialog(this, "There are no custom profiles to copy from.",
-                    "Copy Configuration", JOptionPane.INFORMATION_MESSAGE);
-            return;
-        }
+        // Both "copy from profile" and the relocated reset-to-defaults action live in
+        // the same modal dialog: a real profile copies its settings, while the virtual
+        // "Default" entry (or the dialog's Reset to Defaults button) resets the appearance.
         String current = (String) profileComboBox.getSelectedItem();
-        Object source = JOptionPane.showInputDialog(this, "Copy appearance from profile:",
-                "Copy Existing Configuration to This Profile", JOptionPane.QUESTION_MESSAGE, null,
-                profiles.toArray(), current != null ? current : DEFAULT_PROFILE_NAME);
+        String source = ProfileCopyDialog.show(this, profiles, current, DEFAULT_PROFILE_NAME);
         if (source == null) {
             return;
         }
         if (hasUnsavedChanges()) {
-            int confirm = JOptionPane.showConfirmDialog(this,
+            int confirm = DialogUtils.confirm(this,
+                    DialogUtils.actionIcon(FontAwesome.CLIPBOARD, GuiColors.getButtonIcon()),
+                    "Copy Configuration",
                     "The current appearance has unsaved changes that will be replaced. Continue?",
-                    "Copy Existing Configuration to This Profile", JOptionPane.YES_NO_OPTION,
-                    JOptionPane.WARNING_MESSAGE);
+                    JOptionPane.YES_NO_OPTION, null, null);
             if (confirm != JOptionPane.YES_OPTION) {
                 return;
             }
@@ -412,8 +400,8 @@ public class AppearancePanel extends JPanel {
             return;
         }
         AppearanceProfile sourceProfile = ConfigurationUtils.loadLookAndFeelProfile(getGuiSettingsPath(),
-                source.toString());
-        if (sourceProfile == null || !profileExistsInSettings(source.toString())) {
+                source);
+        if (sourceProfile == null || !profileExistsInSettings(source)) {
             JOptionPane.showMessageDialog(this, "Failed to load profile '" + source + "'.",
                     "Copy Configuration", JOptionPane.ERROR_MESSAGE);
             return;
@@ -485,10 +473,12 @@ public class AppearancePanel extends JPanel {
 
     private void refreshAndReloadProfile() {
         if (hasUnsavedChanges()) {
-            int result = JOptionPane.showConfirmDialog(this,
+            int result = DialogUtils.confirm(this,
+                    DialogUtils.actionIcon(FontAwesome.RECYCLE, GuiColors.getButtonIcon()),
+                    "Refresh Appearance Profiles",
                     "Refresh the profile list and reload the selected profile from disk? "
                             + "Unsaved changes will be discarded.",
-                    "Refresh Appearance Profiles", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                    JOptionPane.YES_NO_OPTION, null, null);
             if (result != JOptionPane.YES_OPTION) {
                 return;
             }
@@ -559,7 +549,7 @@ public class AppearancePanel extends JPanel {
             ConfigurationUtils.fixComponentSize(profileComboBox);
         }
         ConfigurationUtils.configureProfileToolbar(newProfileBtn, saveProfileBtn, null, renameProfileBtn,
-                deleteProfileBtn, null, reloadProfileBtn, resetToDefaultsBtn, copyProfileBtn, cloneProfileBtn);
+                deleteProfileBtn, null, reloadProfileBtn, null, copyProfileBtn, cloneProfileBtn);
         // The toolbar's help icon follows the SAME flat icon-button look as
         // every other toolbar button (the module logging profile toolbar's
         // pattern): the button-icon color, the toolbar icon size and the
@@ -698,11 +688,11 @@ public class AppearancePanel extends JPanel {
             JsonObject profiles = settings.getAsJsonObject("lookAndFeelProfiles");
 
             if (confirmOverwrite && profiles.has(name)) {
-                int choice = JOptionPane.showConfirmDialog(this,
-                        "Profile '" + name + "' already exists. Do you want to overwrite it?",
+                int choice = DialogUtils.confirm(this,
+                        DialogUtils.actionIcon(FontAwesome.FLOPPY_O, GuiColors.getButtonIcon()),
                         "Override profile settings",
-                        JOptionPane.YES_NO_OPTION,
-                        JOptionPane.WARNING_MESSAGE);
+                        "Profile '" + name + "' already exists. Do you want to overwrite it?",
+                        JOptionPane.YES_NO_OPTION, null, null);
                 if (choice != JOptionPane.YES_OPTION) {
                     return false;
                 }
@@ -1295,8 +1285,12 @@ public class AppearancePanel extends JPanel {
                 "Renames the selected custom profile. Default cannot be renamed.");
         addProfileHelpRow(help, saveProfileBtn, "Save Profile",
                 "Saves the current appearance to the selected custom profile. Default cannot be overwritten.");
-        addProfileHelpRow(help, resetToDefaultsBtn, "Reset to Defaults",
-                "Loads built-in Default values into the editor without saving to the selected profile.");
+        addProfileHelpRow(help,
+                IconFontSwing.buildIcon(FontAwesome.REFRESH, GuiConstants.getToolBarIconSize(),
+                        GuiColors.getButtonIcon()),
+                "Reset to Defaults",
+                "In the Copy Configuration dialog: loads the built-in Default values into the editor without "
+                        + "saving to the selected profile.");
         addProfileHelpRow(help, reloadProfileBtn, "Refresh",
                 "Refreshes the profile list and reloads the selected profile from disk after confirmation.");
         addProfileHelpRow(help, deleteProfileBtn, "Delete Profile",
@@ -1311,9 +1305,13 @@ public class AppearancePanel extends JPanel {
     }
 
     private void addProfileHelpRow(JPanel help, JButton actionButton, String title, String description) {
-        JLabel icon = new JLabel(actionButton.getIcon());
-        icon.setVerticalAlignment(SwingConstants.TOP);
-        help.add(icon, "aligny top");
+        addProfileHelpRow(help, actionButton.getIcon(), title, description);
+    }
+
+    private void addProfileHelpRow(JPanel help, Icon icon, String title, String description) {
+        JLabel iconLabel = new JLabel(icon);
+        iconLabel.setVerticalAlignment(SwingConstants.TOP);
+        help.add(iconLabel, "aligny top");
         help.add(new JLabel("<html><b>" + title + "</b><br>" + description + "</html>"), "growx, wrap");
     }
 
@@ -1328,11 +1326,11 @@ public class AppearancePanel extends JPanel {
             return;
         }
 
-        int choice = JOptionPane.showConfirmDialog(this,
-                "Are you sure you want to delete profile '" + profileName + "'?",
+        int choice = DialogUtils.confirm(this,
+                DialogUtils.actionIcon(FontAwesome.TRASH_O, GuiColors.getContrastRed()),
                 "Confirm Deletion",
-                JOptionPane.YES_NO_OPTION,
-                JOptionPane.WARNING_MESSAGE);
+                "Are you sure you want to delete profile '" + profileName + "'?",
+                JOptionPane.YES_NO_OPTION, null, null);
         if (choice != JOptionPane.YES_OPTION) {
             return;
         }

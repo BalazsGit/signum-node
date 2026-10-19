@@ -23,6 +23,7 @@ import java.io.BufferedWriter;
 import java.io.FileInputStream;
 
 import application.utils.gui.ConfigurationUtils;
+import application.utils.gui.DialogUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
 import application.utils.gui.GuiFontManager;
@@ -667,11 +668,11 @@ public class LoggerConfigurationPanel extends JPanel {
                     try {
                         Path targetFile = getPropertiesPath(name);
                         if (Files.exists(targetFile)) {
-                            int choice = JOptionPane.showConfirmDialog(this,
-                                    "Profile '" + name + "' already exists. Do you want to overwrite it?",
+                            int choice = DialogUtils.confirm(this,
+                                    DialogUtils.actionIcon(FontAwesome.FLOPPY_O, GuiColors.getButtonIcon()),
                                     "Override profile settings",
-                                    JOptionPane.YES_NO_OPTION,
-                                    JOptionPane.WARNING_MESSAGE);
+                                    "Profile '" + name + "' already exists. Do you want to overwrite it?",
+                                    JOptionPane.YES_NO_OPTION, null, null);
                             if (choice != JOptionPane.YES_OPTION) {
                                 continue;
                             }
@@ -1080,11 +1081,11 @@ public class LoggerConfigurationPanel extends JPanel {
             return;
         }
 
-        int choice = JOptionPane.showConfirmDialog(this,
-                "Are you sure you want to delete profile '" + profileName + "'?",
+        int choice = DialogUtils.confirm(this,
+                DialogUtils.actionIcon(FontAwesome.TRASH_O, GuiColors.getContrastRed()),
                 "Confirm Deletion",
-                JOptionPane.YES_NO_OPTION,
-                JOptionPane.WARNING_MESSAGE);
+                "Are you sure you want to delete profile '" + profileName + "'?",
+                JOptionPane.YES_NO_OPTION, null, null);
         if (choice != JOptionPane.YES_OPTION) {
             return;
         }

@@ -25,8 +25,10 @@ import application.utils.gui.CheckboxGroupPanel;
 import application.utils.gui.ComboBoxItemToolTips;
 import application.utils.gui.ComboSearchHighlightRenderer;
 import application.utils.gui.ConfigurationUtils;
+import application.utils.gui.DialogUtils;
 import application.utils.gui.GuiColors;
 import application.utils.gui.GuiConstants;
+import application.utils.gui.ProfileCopyDialog;
 import application.utils.gui.GuiUtils;
 import application.utils.gui.HelpButton;
 import application.utils.gui.HelpDialog;
@@ -254,7 +256,6 @@ public class NodeConfigurationPanel extends JPanel {
     private JButton copyProfileDataBtn;
     private JButton cloneProfileBtn;
     private JButton reloadProfileBtn;
-    private JButton resetToDefaultsBtn;
     private String runningProfileName;
     private String loadedProfileName;
     private int currentAddingTabIndex = -1;
@@ -394,79 +395,72 @@ public class NodeConfigurationPanel extends JPanel {
         //     and the node profile toolbar) ---
         JPanel profilePanel = ConfigurationUtils.createProfileToolbarRow();
 
-        newProfileBtn.setToolTipText(
-                "<html>New Profile<br><br>Creates a new, independent node profile. "
-                        + "Choose the setup wizard or start with an empty profile.</html>");
+        newProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip(
+                "New Profile<br><br>Creates a new, independent node profile. "
+                        + "Choose the setup wizard or start with an empty profile."));
         newProfileBtn.addActionListener(e -> runProfileAction("New Profile", this::newProfile));
         profilePanel.add(newProfileBtn);
 
         cloneProfileBtn = new JButton();
-        cloneProfileBtn.setToolTipText(
-                "<html>Clone Configuration to New Profile<br><br>Creates a new profile from this editor's "
+        cloneProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip(
+                "Clone Configuration to New Profile<br><br>Creates a new profile from this editor's "
                         + "current configuration, including unsaved changes. The existing profile is not changed, "
-                        + "and the new profile is not started.</html>");
+                        + "and the new profile is not started."));
         cloneProfileBtn.addActionListener(e -> runProfileAction("Clone Configuration", this::cloneProfile));
         profilePanel.add(cloneProfileBtn);
 
         copyProfileDataBtn = new JButton();
-        copyProfileDataBtn.setToolTipText(
-                "<html>Copy Existing Configuration to This Profile<br><br>Selects another node profile and "
+        copyProfileDataBtn.setToolTipText(ConfigurationUtils.profileTooltip(
+                "Copy Existing Configuration to This Profile<br><br>Selects another node profile and "
                         + "loads its configuration into this editor. This replaces the current editor values; "
                         + "unsaved changes are discarded after confirmation. Use Save to write the copied "
-                        + "configuration to this profile.</html>");
+                        + "configuration to this profile."));
         copyProfileDataBtn.addActionListener(e -> runProfileAction("Copy Configuration", this::copyProfileData));
         profilePanel.add(copyProfileDataBtn);
 
-        renameProfileBtn.setToolTipText(
-                "<html>Rename Profile<br><br>Renames this node profile and its data paths. If the node is "
+        renameProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip(
+                "Rename Profile<br><br>Renames this node profile and its data paths. If the node is "
                         + "running, it is stopped during the rename and returned to its previous state "
-                        + "(running, paused, or stopped).</html>");
+                        + "(running, paused, or stopped)."));
         renameProfileBtn.addActionListener(e -> runProfileAction("Rename Profile",
                 () -> renameProfile(loadedProfileName)));
         profilePanel.add(renameProfileBtn);
 
-        saveBtn.setToolTipText(
-                "<html>Save<br><br>Saves all unsaved changes to the current profile<br>"
+        saveBtn.setToolTipText(ConfigurationUtils.profileTooltip(
+                "Save<br><br>Saves all unsaved changes to the current profile<br>"
                         + "(reviewing them in a dialog first). Does NOT restart the node.<br>"
-                        + "Active only while there are unsaved changes.</html>");
+                        + "Active only while there are unsaved changes."));
         saveBtn.setEnabled(false);
         saveBtn.addActionListener(e -> runProfileAction("Save", this::saveProfile));
         profilePanel.add(saveBtn);
 
-        applyBtn.setToolTipText(
-                "<html>Apply<br><br>Applies the saved changes: marks the profile as applied<br>"
+        applyBtn.setToolTipText(ConfigurationUtils.profileTooltip(
+                "Apply<br><br>Applies the saved changes: marks the profile as applied<br>"
                         + "and restarts the node so they take effect.<br>"
-                        + "Active only while there are saved, not yet applied changes.</html>");
+                        + "Active only while there are saved, not yet applied changes."));
         applyBtn.setEnabled(false);
         applyBtn.addActionListener(e -> runProfileAction("Apply", this::applyProfile));
         profilePanel.add(applyBtn);
 
-        resetToDefaultsBtn = new JButton();
-        resetToDefaultsBtn.setToolTipText(
-                "<html>Reset to Defaults<br><br>Resets all fields in the editor to the application default values.<br>"
-                        + "Nothing is saved — use Save to persist the reset settings.</html>");
-        resetToDefaultsBtn.addActionListener(e -> runProfileAction("Reset to Defaults", this::resetToDefaults));
-        profilePanel.add(resetToDefaultsBtn);
-
         reloadProfileBtn = new JButton();
-        reloadProfileBtn.setToolTipText(
-                "<html>Reload Configuration<br><br>Re-reads the current profile file from disk (e.g. after external edits).<br>"
-                        + "Unsaved changes in the editor are discarded.</html>");
+        reloadProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip(
+                "Reload Configuration<br><br>Re-reads the current profile file from disk (e.g. after external edits).<br>"
+                        + "Unsaved changes in the editor are discarded."));
         reloadProfileBtn.addActionListener(e -> runProfileAction("Reload Configuration", this::reloadProfile));
         profilePanel.add(reloadProfileBtn);
 
-        deleteProfileBtn.setToolTipText(
-                "<html>Delete Profile<br><br>Permanently deletes this profile, its settings<br>"
+        deleteProfileBtn.setToolTipText(ConfigurationUtils.profileTooltip(
+                "Delete Profile<br><br>Permanently deletes this profile, its settings<br>"
                         + "(optionally its database files) and closes its tab.<br>"
-                        + "If the node is running it will be stopped (and not restarted).</html>");
+                        + "If the node is running it will be stopped (and not restarted)."));
         deleteProfileBtn.addActionListener(e -> runProfileAction("Delete Profile",
                 () -> deleteProfile(loadedProfileName)));
         profilePanel.add(deleteProfileBtn);
 
         updateProfileButtonsUI();
 
-        helpBtn.setToolTipText("<html>Help<br><br>Explains profile management, configuration value states, "
-                + "and the actions available in this toolbar.</html>");
+        helpBtn.setToolTipText(ConfigurationUtils.profileTooltip("Help<br><br>Explains profile management, "
+                + "configuration value states, and the actions available in this toolbar."));
         helpBtn.addActionListener(e -> HelpDialog.show(this, "Node Configuration Profiles",
                 buildConfigurationHelpContent()));
         profilePanel.add(helpBtn);
@@ -970,10 +964,13 @@ public class NodeConfigurationPanel extends JPanel {
 
     private void updateProfileButtonsUI() {
         ConfigurationUtils.configureProfileToolbar(newProfileBtn, saveBtn, applyBtn, renameProfileBtn,
-                deleteProfileBtn, reloadProfileBtn, null, resetToDefaultsBtn,
+                deleteProfileBtn, reloadProfileBtn, null, null,
                 copyProfileDataBtn, cloneProfileBtn);
         float iconSize = GuiConstants.getToolBarIconSize();
-        ConfigurationUtils.styleProfileIconButton(reloadProfileBtn, FontAwesome.REFRESH,
+        // Reload carries the refresh glyph's swapped counterpart (see
+        // ConfigurationUtils#configureProfileToolbar): it is node-config's
+        // "refresh" action, so it moves to the same UNDO glyph as the other panels.
+        ConfigurationUtils.styleProfileIconButton(reloadProfileBtn, FontAwesome.UNDO,
                 GuiColors.getButtonIcon(), iconSize);
         // Save / Apply are tinted with their value-state colors (the "saved"
         // and "applied" palette colors) so they read as the two halves of the
@@ -1920,9 +1917,11 @@ public class NodeConfigurationPanel extends JPanel {
                     "Action Not Allowed", JOptionPane.WARNING_MESSAGE);
             return;
         }
-        int choice = JOptionPane.showConfirmDialog(this,
+        int choice = DialogUtils.confirm(this,
+                DialogUtils.actionIcon(FontAwesome.CHECK_CIRCLE_O, GuiColors.getApplied()),
+                "Apply Configuration",
                 "Apply the saved configuration of profile '" + name + "'? It will restart the node.",
-                "Apply Configuration", JOptionPane.YES_NO_OPTION, JOptionPane.INFORMATION_MESSAGE);
+                JOptionPane.YES_NO_OPTION, null, null);
         if (choice == JOptionPane.YES_OPTION) {
             applySavedChanges();
         }
@@ -2045,8 +2044,15 @@ public class NodeConfigurationPanel extends JPanel {
                 ConfigurationUtils.getNodeProfilesDir(), null).stream()
                         .filter(name -> !NodeProfileRepository.isReservedProfileName(name))
                         .collect(Collectors.toList());
-        String source = ProfileCopyDialog.show(this, profiles, selected);
+        String source = ProfileCopyDialog.show(this, profiles, selected,
+                ProfileCopyDialog.DEFAULT_CONFIGURATION);
         if (source == null || source.trim().isEmpty()) {
+            return;
+        }
+        // "Default configuration" (or the dialog's Reset to Defaults button) is the
+        // relocated reset-to-defaults action, replacing the former toolbar button.
+        if (ProfileCopyDialog.DEFAULT_CONFIGURATION.equals(source)) {
+            resetToDefaults();
             return;
         }
 
@@ -2289,7 +2295,6 @@ public class NodeConfigurationPanel extends JPanel {
         String selected = loadedProfileName;
         boolean isReadOnly = Signum.NODE_SUBFOLDER.equals(selected)
                 || (Signum.NODE_SUBFOLDER + "-default").equals(selected);
-        resetToDefaultsBtn.setEnabled(true); // Always enable reset to defaults
         saveBtn.setEnabled(overallDirty && !isReadOnly);
         applyBtn.setEnabled(!isReadOnly && hasSavedNotAppliedChanges());
         renameProfileBtn.setEnabled(!isReadOnly);
@@ -2394,7 +2399,7 @@ public class NodeConfigurationPanel extends JPanel {
      */
     private void setProfileActionButtonsEnabled(boolean enabled) {
         for (JButton button : new JButton[] { newProfileBtn, saveBtn, applyBtn, renameProfileBtn,
-                deleteProfileBtn, resetToDefaultsBtn, copyProfileDataBtn, cloneProfileBtn,
+                deleteProfileBtn, copyProfileDataBtn, cloneProfileBtn,
                 reloadProfileBtn, helpBtn }) {
             if (button != null) {
                 button.setEnabled(enabled);
@@ -2529,16 +2534,18 @@ public class NodeConfigurationPanel extends JPanel {
                         + "yet applied changes."));
         content.add(HelpDialog.actionRow(FontAwesome.PENCIL_SQUARE_O, iconColor, "Rename Profile",
                 "Changes the name of the currently selected configuration profile."));
-        content.add(HelpDialog.actionRow(FontAwesome.UNDO, iconColor, "Reset to Defaults",
-                "Resets all current settings to their application default values without saving."));
+        content.add(HelpDialog.actionRow(FontAwesome.REFRESH, iconColor, "Reset to Defaults",
+                "In the Copy Configuration dialog: resets all current settings to their application "
+                        + "default values without saving (via the \"Default configuration\" entry or the "
+                        + "Reset to Defaults button)."));
         content.add(HelpDialog.actionRow(FontAwesome.CLIPBOARD, iconColor, "Copy Configuration",
-                "Opens a dialog to select a profile and copies its configuration into the editor of "
-                        + "the current profile. The copied values become unsaved changes you can "
-                        + "adjust before saving."));
+                "Opens a dialog to copy another profile's configuration — or the built-in \"Default "
+                        + "configuration\" — into the editor of the current profile. The copied values "
+                        + "become unsaved changes you can adjust before saving."));
         content.add(HelpDialog.actionRow(FontAwesome.FILES_O, iconColor, "Clone Configuration",
                 "Creates a new profile from the current (unsaved, editor) effective state; the "
                         + "source profile is left untouched."));
-        content.add(HelpDialog.actionRow(FontAwesome.REFRESH, iconColor, "Reload Configuration",
+        content.add(HelpDialog.actionRow(FontAwesome.UNDO, iconColor, "Reload Configuration",
                 "Reloads the current profile file from disk (e.g. after external edits), discarding "
                         + "any unsaved changes in the UI."));
         content.add(HelpDialog.actionRow(FontAwesome.TRASH_O, GuiColors.getContrastRed(),
@@ -2674,18 +2681,18 @@ public class NodeConfigurationPanel extends JPanel {
         // of the save-then-apply flow are independently usable:
         //   Save  — only while there is something to save (unsaved changes);
         //   Apply — only while there are saved, not yet applied changes.
-        saveBtn.setToolTipText(overallDirty
+        saveBtn.setToolTipText(ConfigurationUtils.profileTooltip(overallDirty
                 ? "Save — you have unsaved changes"
-                : "Save");
+                : "Save"));
         saveBtn.setEnabled(overallDirty);
 
         boolean savedNotApplied = hasSavedNotAppliedChanges();
-        applyBtn.setToolTipText(savedNotApplied
-                ? "<html>Apply<br><br>Applies the saved changes: marks the profile as applied<br>"
-                        + "and restarts the node so they take effect.</html>"
-                : "<html>Apply<br><br>Applies the saved changes: marks the profile as applied<br>"
+        applyBtn.setToolTipText(ConfigurationUtils.profileTooltip(savedNotApplied
+                ? "Apply<br><br>Applies the saved changes: marks the profile as applied<br>"
+                        + "and restarts the node so they take effect."
+                : "Apply<br><br>Applies the saved changes: marks the profile as applied<br>"
                         + "and restarts the node so they take effect.<br>"
-                        + "Active only while there are saved, not yet applied changes.</html>");
+                        + "Active only while there are saved, not yet applied changes."));
         applyBtn.setEnabled(savedNotApplied);
         this.overallDirty = overallDirty;
 
