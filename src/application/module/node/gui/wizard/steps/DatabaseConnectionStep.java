@@ -1,161 +1,166 @@
 package application.module.node.gui.wizard.steps;
 
 import application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine;
-import application.module.node.gui.configuration.JdbcManualConfigurationPanel;
+import application.module.node.gui.configuration.JdbcConfigurationPanel;
 import application.module.node.gui.wizard.WizardContext;
 import application.module.node.gui.wizard.WizardStep;
-import application.module.node.profile.NodeProfileRepository;
+import application.module.node.profile.ProfileCreateDefaults;
 import application.module.node.profile.ProfileNameSuggester;
+import application.module.node.profile.SqliteDatabasePaths;
 import application.utils.gui.GuiFontManager;
 import jiconfont.icons.font_awesome.FontAwesome;
 
 import javax.swing.BorderFactory;
+import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.JButton;
+import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.JPasswordField;
 import javax.swing.JTextField;
+import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
-import java.awt.CardLayout;
 import java.awt.FlowLayout;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.function.Supplier;
 
 /**
- * Wizard step 1.2 — database settings for the node profile.
+ * Wizard step 2 — database settings for the node profile.
  * <p>
- * Server engines (collected here, separated from the installation step, plan §1.2):
- * host, port, username, password and database name, with an optional TCP
- * reachability check. These values are persisted into the node profile via the
- * {@link ProfileCreateDefaults} SSOT at finish time (see
- * {@link application.module.node.gui.wizard.WizardFinish}).
+ * The step embeds the <b>same</b> unified JDBC {@code DB.Url} editor the node
+ * profile configuration panel's DB.Url row uses ({@link JdbcConfigurationPanel}
+ * — one engine- and link-mode-aware panel for every engine: the identical
+ * structure, URL-composition logic, value formats and the selectable,
+ * borderless JDBC URL preview as the configuration tab) together with the
+ * configuration tab's "Linked Database Profile" checkbox. The engine itself is
+ * fixed by the selection step — the editor's engine combo stays locked to it
+ * (change it by going back to step 1).
  * </p>
  * <p>
- * Shown for <b>every</b> engine — for SQLite it is the "database configuration"
- * step of the 3-step flow: the node profile configuration panel's own {@code DB.Url}
- * editor ({@link JdbcManualConfigurationPanel} — the Profile/Path/DB-file trio with
- * the live JDBC URL preview, the same structure and URL-composition logic) is
- * embedded instead of the server fields (no host/port validation). An untouched
- * trio means the per-profile SQLite file URL is derived at finish from the
- * profile name; an edited trio persists the composed URL.
+ * Above the editor the step shows the engine's logo + name and the
+ * engine-specific description (HTML-wrapped so the full text stays visible
+ * within the panel width) — the engine decision made in the selection step
+ * stays visible on this step.
+ * </p>
+ * <p>
+ * Server engines keep the optional TCP reachability check (Test connection).
+ * The values are persisted into the node profile via the
+ * {@link ProfileCreateDefaults} SSOT at finish time (see
+ * {@link application.module.node.gui.wizard.WizardFinish}). For SQLite an
+ * untouched setup (the convention base path + the default file, no link) keeps
+ * the per-profile SSOT URL derived at finish from the final profile name; an
+ * edited or linked setup persists the composed URL (the companion database
+ * profile is named after the URL's convention folder).
  * </p>
  */
 public class DatabaseConnectionStep implements WizardStep {
 
+    /** The height of the engine logo in the step's top header. */
+    private static final int HEADER_LOGO_SIZE = 28;
+
     private final JPanel panel = new JPanel();
-    private final JTextField hostField = new JTextField("localhost", 14);
-    private final JTextField portField = new JTextField("3306", 6);
-    private final JTextField userField = new JTextField("signum", 14);
-    private final JTextField dbField = new JTextField("signum", 14);
-    private final JPasswordField passwordField = new JPasswordField(14);
+    private final JLabel engineIconLabel = new JLabel();
+    private final JLabel engineNameLabel = new JLabel();
+    private final JLabel descriptionLabel = new JLabel();
+    private final JCheckBox linkedCheck = new JCheckBox("Linked Database Profile");
+    private final JPanel testRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
     private final JLabel statusLabel = new JLabel(" ");
-    private final JLabel hintLabel = new JLabel();
-    private final JPanel fieldsPanel = new JPanel();
-    private final CardLayout contentCards = new CardLayout();
-    private final JPanel contentPanel = new JPanel(contentCards);
-    private boolean engineResolved = false;
+    /** Guard for the checkbox syncs the panel initiates (no re-entrant requestLinkMode). */
+    private boolean programmaticLinkChange = false;
+    /** The engine the editor was last initialized for (null before the first entry). */
+    private DatabaseEngine initializedFor = null;
 
     /**
-     * The SQLite DB.Url editor — the same component the node profile
-     * configuration panel's DB.Url row uses (SSOT structure + composition logic).
+     * The unified JDBC db.url editor — the SAME component the node profile
+     * configuration panel's DB.Url row uses (SSOT structure + composition
+     * logic + preview format).
      */
-    private final JdbcManualConfigurationPanel sqliteDbPanel;
-    /** Existing profile names (SSOT: repository discovery; injectable for tests). */
-    private final Supplier<Set<String>> takenNames;
+    private final JdbcConfigurationPanel jdbcPanel;
 
     public DatabaseConnectionStep() {
-        this(() -> new HashSet<>(NodeProfileRepository.discoverProfileNames()));
-    }
-
-    /** @param takenNames source of existing profile names (injectable for tests). */
-    public DatabaseConnectionStep(Supplier<Set<String>> takenNames) {
-        this.takenNames = takenNames;
-        this.sqliteDbPanel = new JdbcManualConfigurationPanel(null, suggestedProfileName());
-        // The engine is fixed by the selection step — the editor's engine combo
-        // stays locked to SQLite (the step is the SQLite configuration card).
-        ((JComponent) sqliteDbPanel.getEngineCombo()).setEnabled(false);
-
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         panel.setOpaque(false);
         panel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 
-        hintLabel.setFont(hintLabel.getFont().deriveFont(java.awt.Font.BOLD, 14f));
-        GuiFontManager.applyDefaultFont(hintLabel);
-        panel.add(hintLabel);
+        // The engine header: the decision made in the selection step — the
+        // engine's official logo next to its bold (keyword-sized) name.
+        JPanel headerRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        headerRow.setOpaque(false);
+        headerRow.setAlignmentX(0f);
+        engineNameLabel.setFont(GuiFontManager.getBoldScaledDefaultFont(KEYWORD_FONT_SCALE));
+        headerRow.add(engineIconLabel);
+        headerRow.add(engineNameLabel);
+        panel.add(headerRow);
 
-        contentPanel.setOpaque(false);
+        // The engine-specific description — HTML-wrapped so the FULL text stays
+        // visible within the panel width (a plain single-line label overflows
+        // the panel and gets clipped, which made the old hint "not visible").
+        GuiFontManager.applyDefaultFont(descriptionLabel);
+        descriptionLabel.setHorizontalAlignment(SwingConstants.LEFT);
+        descriptionLabel.setAlignmentX(0f);
+        panel.add(descriptionLabel);
 
-        fieldsPanel.setLayout(new BoxLayout(fieldsPanel, BoxLayout.Y_AXIS));
-        fieldsPanel.setOpaque(false);
-        fieldsPanel.add(fieldRow("Host:", hostField));
-        fieldsPanel.add(fieldRow("Port:", portField));
-        fieldsPanel.add(fieldRow("Username:", userField));
-        fieldsPanel.add(fieldRow("Password:", passwordField));
-        fieldsPanel.add(fieldRow("Database:", dbField));
+        panel.add(Box.createVerticalStrut(6));
 
-        javax.swing.JButton testButton = new javax.swing.JButton("Test connection");
+        // The "Linked Database Profile" checkbox — the same control the
+        // configuration tab's DB.Url row uses to drive the editor's link mode.
+        linkedCheck.setOpaque(false);
+        linkedCheck.setAlignmentX(0f);
+        panel.add(linkedCheck);
+
+        jdbcPanel = new JdbcConfigurationPanel(null, null, this::syncLinkedCheck);
+        jdbcPanel.setAlignmentX(0f);
+        panel.add(jdbcPanel);
+
+        // Test connection (server engines only — SQLite is file-based).
+        JButton testButton = new JButton("Test connection");
         testButton.setFocusable(false);
         testButton.addActionListener(e -> testConnection());
-        fieldsPanel.add(testButton);
         GuiFontManager.applyDefaultFont(statusLabel);
-        fieldsPanel.add(statusLabel);
+        testRow.setOpaque(false);
+        testRow.setAlignmentX(0f);
+        testRow.add(testButton);
+        testRow.add(statusLabel);
+        panel.add(testRow);
 
-        contentPanel.add(fieldsPanel, "SERVER");
-        sqliteDbPanel.setAlignmentX(0f);
-        contentPanel.add(sqliteDbPanel, "SQLITE");
-        panel.add(contentPanel);
+        linkedCheck.addActionListener(e -> {
+            if (programmaticLinkChange) {
+                return;
+            }
+            jdbcPanel.requestLinkMode(linkedCheck.isSelected());
+        });
     }
 
     /**
-     * The profile name the SQLite database will default to: the same suggestion
-     * (SSOT: {@link ProfileNameSuggester}) the node-configuration step offers in
-     * its default state. Prefilling the Profile field of the SQLite trio keeps
-     * the URL preview in sync with the per-profile default; when the user later
-     * renames the profile and the trio stays untouched, the finish step derives
-     * the per-profile SSOT URL from the final name.
+     * The manual-mode SQLite URL of the untouched setup: the convention base
+     * path + the default database file (SSOT: {@link SqliteDatabasePaths} +
+     * {@link ProfileCreateDefaults#DEFAULT_SQLITE_FILE_NAME}).
      */
-    private String suggestedProfileName() {
-        return ProfileNameSuggester.nextAvailableName(
-                ProfileNameSuggester.baseName(false, null, false, 0), takenNames.get());
+    private String defaultSqliteUrl() {
+        return SqliteDatabasePaths.composeUrl(SqliteDatabasePaths.conventionBase(),
+                ProfileCreateDefaults.DEFAULT_SQLITE_FILE_NAME);
     }
 
-    private JPanel fieldRow(String label, JTextField field) {
-        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
-        row.setOpaque(false);
-        JLabel l = new JLabel(label);
-        l.setHorizontalAlignment(javax.swing.SwingConstants.RIGHT);
-        l.setPreferredSize(new java.awt.Dimension(90, 24));
-        GuiFontManager.applyDefaultFont(l);
-        GuiFontManager.applyDefaultFont(field);
-        row.add(l);
-        row.add(field);
-        return row;
+    /** The JDBC URL field's text (the unified panel's accessors return {@link JComponent}s). */
+    private static String text(JComponent field) {
+        return field instanceof JTextField textField ? textField.getText().trim() : "";
     }
 
-    // ── Accessors (used by onExit/validate and tests) ────────────────────
-
+    /** The server database host the editor's Host field holds. */
     public String getHost() {
-        return hostField.getText().trim();
+        return text(jdbcPanel.getHostField());
     }
 
+    /** The server database port the editor's Port field holds. */
     public String getPortText() {
-        return portField.getText().trim();
+        return text(jdbcPanel.getPortField());
     }
 
-    public String getUser() {
-        return userField.getText().trim();
-    }
-
-    public String getPassword() {
-        return new String(passwordField.getPassword());
-    }
-
+    /** The server database name the editor's Database field holds. */
     public String getDbName() {
-        return dbField.getText().trim();
+        return text(jdbcPanel.getDatabaseField());
     }
 
     private int parsePort() {
@@ -170,6 +175,7 @@ public class DatabaseConnectionStep implements WizardStep {
         }
     }
 
+    /** Optional TCP reachability check of the server engine's host:port. */
     private void testConnection() {
         String host = getHost();
         int port;
@@ -195,6 +201,68 @@ public class DatabaseConnectionStep implements WizardStep {
         }, "wizard-db-test").start();
     }
 
+    /** Keeps the "Linked Database Profile" checkbox in sync with the panel's link mode. */
+    private void syncLinkedCheck(JdbcConfigurationPanel p, JdbcConfigurationPanel.JdbcState state) {
+        if (linkedCheck.isSelected() != p.isLinkedMode()) {
+            programmaticLinkChange = true;
+            linkedCheck.setSelected(p.isLinkedMode());
+            programmaticLinkChange = false;
+        }
+    }
+
+    /**
+     * Locks the editor's engine combo to the selection step's engine. The
+     * programmatic {@code loadManual} of {@link #onEnter(WizardContext)}
+     * already left the combo on this engine — re-asserting the SAME selection
+     * would be dispatched as a user engine switch (the editor snapshots the
+     * outgoing state and restores it in a deferred task that can race user
+     * edits), so the combo is (re-)selected only when it actually differs and
+     * then disabled.
+     */
+    private void lockEngine(DatabaseEngine engine) {
+        JComponent combo = jdbcPanel.getEngineComboComponent();
+        if (jdbcPanel.getEngine() != engine && combo instanceof JComboBox<?> select) {
+            select.setSelectedItem(engine);
+        }
+        combo.setEnabled(false);
+    }
+
+    /**
+     * Prefills the editor's Profile selection with the node profile's own
+     * name — the database profile the "Linked Database Profile" link is meant
+     * for (SSOT: the node-configuration panel's auto-link uses the node
+     * profile name as the database profile name). The name is the link's
+     * target, not necessarily a discovered profile yet, so it is made
+     * selectable first: the manual mode reads the model selection (the editor
+     * is only live in linked mode), and a later link toggle re-derives the
+     * link from this selection. Before step 1 resolves a name, the standard
+     * base name applies.
+     */
+    private void prefillProfile(WizardContext context) {
+        String name = context.getName();
+        if (name == null || name.isEmpty()) {
+            name = ProfileNameSuggester.baseName(false, null, false, 0);
+        }
+        JComponent profile = jdbcPanel.getProfileComboComponent();
+        if (profile instanceof JComboBox<?> combo) {
+            if (!comboContains(combo, name)) {
+                @SuppressWarnings("unchecked")
+                JComboBox<Object> box = (JComboBox<Object>) combo;
+                box.addItem(name);
+            }
+            combo.setSelectedItem(name);
+        }
+    }
+
+    private static boolean comboContains(JComboBox<?> combo, Object item) {
+        for (int i = 0; i < combo.getItemCount(); i++) {
+            if (item.equals(combo.getItemAt(i))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @Override
     public String getId() {
         return "database-connection";
@@ -217,7 +285,8 @@ public class DatabaseConnectionStep implements WizardStep {
 
     @Override
     public String validate(WizardContext context) {
-        // File-based engine: the server connection fields do not apply — no validation.
+        // File-based engine: no server connection to validate — the editor's
+        // values are always a well-formed URL (composed from its own fields).
         if (context.getEngine() == DatabaseEngine.SQLITE) {
             return null;
         }
@@ -235,23 +304,30 @@ public class DatabaseConnectionStep implements WizardStep {
     @Override
     public void onExit(WizardContext context) {
         if (context.getEngine() == DatabaseEngine.SQLITE) {
-            // Collect the DB.Url editor: an edited trio persists the composed URL;
-            // an untouched trio keeps the per-profile default (derived at finish
-            // from the final profile name).
-            if (sqliteDbPanel.isSqliteTrioEdited()) {
-                context.setSqliteDbUrl(sqliteDbPanel.getJdbcUrl());
-                context.setSqliteDbProfileName(sqliteDbPanel.getSqliteProfile());
-            } else {
+            // Collect the unified editor: an untouched setup (the convention
+            // base path + the default file, no link) keeps the per-profile
+            // SSOT URL (derived at finish from the final profile name); an
+            // edited or linked setup persists the composed URL. The companion
+            // database profile is named after the URL's convention folder
+            // (null for a non-convention path — the node profile name applies).
+            String url = jdbcPanel.getJdbcUrl();
+            boolean untouched = !jdbcPanel.isLinkedMode() && defaultSqliteUrl().equals(url);
+            if (untouched) {
                 context.setSqliteDbUrl(null);
                 context.setSqliteDbProfileName(null);
+            } else {
+                context.setSqliteDbUrl(url);
+                SqliteDatabasePaths.SqliteUrlParts parts = SqliteDatabasePaths.splitUrl(url);
+                context.setSqliteDbProfileName(parts == null ? null
+                        : SqliteDatabasePaths.deriveProfileName(parts.dir()));
             }
             return;
         }
         context.setSkipDbSetup(false);
         context.setDbHost(getHost());
         context.setDbPort(parsePort());
-        context.setDbUser(getUser());
-        context.setDbPassword(getPassword());
+        context.setDbUser(jdbcPanel.getUsername());
+        context.setDbPassword(jdbcPanel.getPassword());
         context.setDbName(getDbName());
     }
 
@@ -259,18 +335,36 @@ public class DatabaseConnectionStep implements WizardStep {
     public void onEnter(WizardContext context) {
         DatabaseEngine engine = context.getEngine() == null ? DatabaseEngine.MARIADB : context.getEngine();
         boolean sqlite = engine == DatabaseEngine.SQLITE;
-        contentCards.show(contentPanel, sqlite ? "SQLITE" : "SERVER");
-        if (sqlite) {
-            hintLabel.setText("SQLite is file-based — no server connection is required. The database file "
-                    + "(DB.Url) is kept in the profile's own data directory; leave the defaults for the "
-                    + "per-profile database or adjust the location as needed.");
-            return;
+
+        // The engine decision made in the selection step, visible on this step:
+        // the official logo + the bold engine name + the full (wrapped)
+        // engine-specific description.
+        engineIconLabel.setIcon(engine.getLogoIcon(HEADER_LOGO_SIZE));
+        engineNameLabel.setText(engine.getDisplayName());
+        descriptionLabel.setText("<html>" + (sqlite
+                ? "SQLite is file-based — no server connection is required. The database file "
+                        + "(DB.Url) is kept in the profile's own data directory; leave the "
+                        + "defaults for the per-profile database or adjust the location as needed."
+                : engine.getDisplayName() + " — connection settings used by the node profile.")
+                + "</html>");
+
+        testRow.setVisible(!sqlite);
+
+        // Initialize the editor for a (new) engine once — the manual-mode
+        // defaults the configuration tab shows for a fresh profile (entering
+        // the step again with the same engine keeps the user's edits).
+        if (initializedFor != engine) {
+            if (sqlite) {
+                jdbcPanel.loadManual(defaultSqliteUrl(), "", "");
+                prefillProfile(context);
+            } else {
+                String protocol = engine == DatabaseEngine.POSTGRESQL ? "postgresql" : "mariadb";
+                jdbcPanel.loadManual("jdbc:" + protocol + "://localhost:"
+                        + engine.getDefaultPort() + "/signum", "signum", "");
+            }
+            initializedFor = engine;
         }
-        hintLabel.setText(engine.getDisplayName() + " — connection settings used by the node profile.");
-        if (!engineResolved) {
-            portField.setText(String.valueOf(engine.getDefaultPort()));
-            engineResolved = true;
-        }
+        lockEngine(engine);
     }
 
     @Override
@@ -278,3 +372,4 @@ public class DatabaseConnectionStep implements WizardStep {
         return false; // shown for every engine — for SQLite it is the DB-configuration step
     }
 }
+

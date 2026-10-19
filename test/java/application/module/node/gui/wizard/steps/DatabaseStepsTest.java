@@ -1,10 +1,11 @@
 package application.module.node.gui.wizard.steps;
 
 import application.module.database.gui.DatabaseConfigurationPanel.DatabaseEngine;
-import application.module.node.gui.configuration.JdbcManualConfigurationPanel;
+import application.module.node.gui.configuration.JdbcConfigurationPanel;
 import application.module.node.gui.wizard.WizardContext;
 import application.module.node.gui.wizard.WizardStep;
 import application.module.node.profile.ProfileCreateDefaults;
+import application.module.node.profile.SqliteDatabasePaths;
 import jiconfont.icons.font_awesome.FontAwesome;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -238,104 +239,191 @@ class DatabaseStepsTest {
     }
 
     @Test
-    @DisplayName("connection step validates host + port")
+    @DisplayName("connection step validates host + port (server engines); SQLite has nothing to validate")
     void connectionValidation() {
         DatabaseConnectionStep step = new DatabaseConnectionStep();
         WizardContext ctx = new WizardContext();
-        ctx.setEngine(DatabaseEngine.MARIADB); // default port 3306 (helper-locatable)
+        ctx.setEngine(DatabaseEngine.MARIADB);
         step.onEnter(ctx);
-        assertNull(step.validate(ctx)); // valid defaults
-        portField(step).setText("not-a-port");
+        JdbcConfigurationPanel db = jdbcPanel(step);
+        assertNull(step.validate(ctx), "the unified editor's defaults (localhost:3306) are valid");
+        ((javax.swing.JTextField) db.getPortField()).setText("not-a-port");
         String error = step.validate(ctx);
         assertNotNull(error);
         assertTrue(error.toLowerCase().contains("port"));
+        ((javax.swing.JTextField) db.getHostField()).setText("");
+        assertNotNull(step.validate(ctx), "an empty host is invalid");
+
+        ctx.setEngine(DatabaseEngine.SQLITE);
+        step.onEnter(ctx);
+        assertNull(step.validate(ctx), "SQLite: file-based — no server connection to validate");
     }
 
     @Test
-    @DisplayName("SQLite step 2 embeds the configuration panel's DB.Url editor (engine locked, trio pre-filled, live preview)")
+    @DisplayName("SQLite step 2: the configuration tab's unified DB.Url editor (engine locked, defaults, node-profile prefill, selectable URL preview)")
     void connectionSqliteShowsDbUrlEditor() {
-        DatabaseConnectionStep step = new DatabaseConnectionStep(() -> java.util.Set.of());
+        DatabaseConnectionStep step = new DatabaseConnectionStep();
+        WizardContext ctx = new WizardContext();
+        ctx.setEngine(DatabaseEngine.SQLITE);
+        ctx.setName("my-node");
+        step.onEnter(ctx);
+        JdbcConfigurationPanel db = jdbcPanel(step);
+
+        // the engine is fixed by the selection step — the editor's combo stays locked
+        javax.swing.JComponent engineCombo = db.getEngineComboComponent();
+        assertEquals(DatabaseEngine.SQLITE, ((javax.swing.JComboBox<?>) engineCombo).getSelectedItem());
+        assertFalse(engineCombo.isEnabled());
+        assertFalse(db.isLinkedMode());
+        // the Profile prefill is the node profile's own name (the link's target, SSOT with the auto-link)
+        assertEquals("my-node", db.getProfileName());
+        // the default trio: the convention base path + the default database file
+        assertEquals("./database/SQLite", editorItem(db.getPathFieldComponent()),
+                "the per-profile convention base is pre-filled (SSOT)");
+        assertEquals(ProfileCreateDefaults.DEFAULT_SQLITE_FILE_NAME, editorItem(db.getDbFileComboComponent()));
+        assertEquals("jdbc:sqlite:file:./database/SQLite/signum.sqlite.db", db.getJdbcUrl());
+        // the JDBC URL preview: the fields' font, read-only but selectable, no input-field frame
+        javax.swing.JLabel previewLabel = findLabel(step.getPanel(), "JDBC URL:");
+        assertNotNull(previewLabel, "the JDBC URL preview row must be present");
+        java.awt.Component[] siblings = previewLabel.getParent().getComponents();
+        int idx = java.util.Arrays.asList(siblings).indexOf(previewLabel);
+        javax.swing.JTextField preview = (javax.swing.JTextField) siblings[idx + 1];
+        assertFalse(preview.isEditable(), "the URL preview must stay read-only");
+        assertTrue(preview.isFocusable(), "the URL preview must stay selectable");
+        assertTrue(preview.getBorder() instanceof javax.swing.border.EmptyBorder,
+                "the URL preview must not look like an input field");
+        assertEquals("jdbc:sqlite:file:./database/SQLite/signum.sqlite.db", preview.getText());
+        assertEquals(javax.swing.UIManager.getFont("Label.font").getSize2D(), preview.getFont().getSize2D(),
+                0.0001f, "the preview keeps the fields' font");
+        // the server rows and the Test-connection row are hidden for SQLite
+        assertFalse(db.getHostField().isVisible());
+        assertFalse(db.getPortField().isVisible());
+        javax.swing.JButton testButton = findByText(step.getPanel(), javax.swing.JButton.class, "Test connection");
+        assertFalse(testButton.getParent().isVisible(), "the Test-connection row must be hidden for SQLite");
+    }
+
+    @Test
+    @DisplayName("server engines: the unified editor's server rows + Test-connection row; the SQLite rows stay hidden")
+    void connectionServerShowsServerCard() {
+        DatabaseConnectionStep step = new DatabaseConnectionStep();
+        WizardContext ctx = new WizardContext();
+        ctx.setEngine(DatabaseEngine.POSTGRESQL);
+        step.onEnter(ctx);
+        JdbcConfigurationPanel db = jdbcPanel(step);
+
+        // the engine is fixed by the selection step — the editor's combo stays locked
+        javax.swing.JComponent engineCombo = db.getEngineComboComponent();
+        assertEquals(DatabaseEngine.POSTGRESQL, ((javax.swing.JComboBox<?>) engineCombo).getSelectedItem());
+        assertFalse(engineCombo.isEnabled());
+        // the manual defaults follow the engine (host/port/database)
+        assertEquals("localhost", ((javax.swing.JTextField) db.getHostField()).getText());
+        assertEquals("5432", ((javax.swing.JTextField) db.getPortField()).getText());
+        assertEquals("signum", ((javax.swing.JTextField) db.getDatabaseField()).getText());
+        assertEquals("jdbc:postgresql://localhost:5432/signum", db.getJdbcUrl());
+        // the server rows are visible, the SQLite Path row hidden
+        assertTrue(db.getHostField().isVisible());
+        assertTrue(db.getPortField().isVisible());
+        assertTrue(db.getSuffixField().isVisible());
+        assertFalse(db.getPathFieldComponent().isVisible());
+        // the Test-connection row is visible for server engines
+        javax.swing.JButton testButton = findByText(step.getPanel(), javax.swing.JButton.class, "Test connection");
+        assertTrue(testButton.getParent().isVisible());
+    }
+
+    /** The step's unified JDBC db.url editor (the configuration tab's component). */
+    private static JdbcConfigurationPanel jdbcPanel(DatabaseConnectionStep step) {
+        return findByType(step.getPanel(), JdbcConfigurationPanel.class);
+    }
+
+    /** The live editor text of an editable combo (the model only commits on Enter/selection). */
+    private static String editorItem(javax.swing.JComponent combo) {
+        Object item = ((javax.swing.JComboBox<?>) combo).getEditor().getItem();
+        return item == null ? "" : item.toString();
+    }
+
+    /** Sets the live editor text of an editable combo (fires the panel's change listeners). */
+    private static void setEditorItem(javax.swing.JComponent combo, String value) {
+        ((javax.swing.JComboBox<?>) combo).getEditor().setItem(value);
+    }
+
+    @Test
+    @DisplayName("SQLite step 2 onExit: untouched editor keeps the per-profile SSOT URL; an edited DB file persists the composed URL")
+    void connectionSqliteOnExit() {
+        DatabaseConnectionStep step = new DatabaseConnectionStep();
         WizardContext ctx = new WizardContext();
         ctx.setEngine(DatabaseEngine.SQLITE);
         step.onEnter(ctx);
+        JdbcConfigurationPanel db = jdbcPanel(step);
 
-        JdbcManualConfigurationPanel db = findByType(step.getPanel(), JdbcManualConfigurationPanel.class);
-        assertNotNull(db, "the SQLite DB.Url editor must be embedded in the step");
-        assertTrue(db.isSqliteSelected());
-        assertFalse(((javax.swing.JComponent) db.getEngineCombo()).isEnabled(),
-                "the engine is fixed by the selection step");
-        assertEquals("./database/SQLite", db.getSqlitePath(),
-                "the per-profile convention base is pre-filled (SSOT)");
-        assertEquals(ProfileCreateDefaults.DEFAULT_SQLITE_FILE_NAME, db.getSqliteFile());
-        assertEquals("mainnet", db.getSqliteProfile(),
-                "the Profile field is pre-filled with the suggested profile name");
-        assertEquals("jdbc:sqlite:file:./database/SQLite/mainnet/signum.sqlite.db",
-                db.getJdbcUrl(), "the live URL preview composes the per-profile URL");
-        assertFalse(serverCardVisible(step), "the server card must be hidden for SQLite");
-        assertTrue(sqliteCardVisible(step), "the DB.Url editor card must be shown for SQLite");
+        step.onExit(ctx);
+        assertNull(ctx.getSqliteDbUrl(),
+                "an untouched editor keeps the per-profile SSOT URL (derived at finish)");
+        assertNull(ctx.getSqliteDbProfileName());
+
+        setEditorItem(db.getDbFileComboComponent(), "custom.sqlite.db");
+        step.onExit(ctx);
+        assertEquals("jdbc:sqlite:file:./database/SQLite/custom.sqlite.db", ctx.getSqliteDbUrl(),
+                "an edited editor persists the composed URL");
+        assertNull(ctx.getSqliteDbProfileName(),
+                "the convention base path names no profile — the node profile name applies");
     }
 
     @Test
-    @DisplayName("server engines still show the server connection card")
-    void connectionServerShowsServerCard() {
-        DatabaseConnectionStep step = new DatabaseConnectionStep(() -> java.util.Set.of());
-        WizardContext ctx = new WizardContext();
-        ctx.setEngine(DatabaseEngine.MARIADB);
-        step.onEnter(ctx);
-        assertTrue(serverCardVisible(step), "the server card must be visible for server engines");
-        assertFalse(sqliteCardVisible(step), "the DB.Url editor card must be hidden for server engines");
-    }
+    @DisplayName("SQLite step 2: the 'Linked Database Profile' checkbox drives the editor's link mode end-to-end")
+    void linkedCheckboxDrivesLinkMode() throws Exception {
+        java.nio.file.Path probe = SqliteDatabasePaths.profileDir("wizard-linked-probe");
+        java.nio.file.Files.createDirectories(probe);
+        try {
+            DatabaseConnectionStep step = new DatabaseConnectionStep();
+            WizardContext ctx = new WizardContext();
+            ctx.setEngine(DatabaseEngine.SQLITE);
+            step.onEnter(ctx);
+            JdbcConfigurationPanel db = jdbcPanel(step);
+            javax.swing.JCheckBox linked =
+                    findByText(step.getPanel(), javax.swing.JCheckBox.class, "Linked Database Profile");
+            assertFalse(linked.isSelected(), "a fresh step starts in manual mode");
 
-    /**
-     * The visibility of the card holding the server fields (a component's own
-     * {@code isVisible()} ignores hidden ancestors — the CardLayout card itself
-     * is what gets hidden, two levels above the host field: field → row → card).
-     */
-    private static boolean serverCardVisible(DatabaseConnectionStep step) {
-        javax.swing.JComponent card = (javax.swing.JComponent) ((javax.swing.JComponent) hostField(step).getParent()).getParent();
-        return card.isVisible();
-    }
+            linked.doClick();
+            assertTrue(db.isLinkedMode(), "checking the box links the editor to a database profile");
+            ((javax.swing.JComboBox<?>) db.getProfileComboComponent()).setSelectedItem("wizard-linked-probe");
+            String url = db.getJdbcUrl();
+            assertEquals("jdbc:sqlite:file:./database/SQLite/wizard-linked-probe/signum.sqlite.db", url);
+            step.onExit(ctx);
+            assertEquals(url, ctx.getSqliteDbUrl());
+            assertEquals("wizard-linked-probe", ctx.getSqliteDbProfileName());
 
-    private static boolean sqliteCardVisible(DatabaseConnectionStep step) {
-        JdbcManualConfigurationPanel db = findByType(step.getPanel(), JdbcManualConfigurationPanel.class);
-        return db.isVisible();
-    }
-
-    @Test
-    @DisplayName("connection step onExit (SQLite): untouched trio → auto per-profile URL; edited trio → composed DB.Url")
-    void connectionSqliteOnExit() {
-        DatabaseConnectionStep step = new DatabaseConnectionStep(() -> java.util.Set.of());
-        JdbcManualConfigurationPanel db = findByType(step.getPanel(), JdbcManualConfigurationPanel.class);
-
-        WizardContext untouched = new WizardContext();
-        untouched.setEngine(DatabaseEngine.SQLITE);
-        step.onExit(untouched);
-        assertNull(untouched.getSqliteDbUrl(),
-                "an untouched trio keeps the per-profile SSOT URL (derived at finish)");
-        assertNull(untouched.getSqliteDbProfileName());
-
-        WizardContext edited = new WizardContext();
-        edited.setEngine(DatabaseEngine.SQLITE);
-        ((javax.swing.JTextField) db.getSqlProfileField()).setText("my-db");
-        step.onExit(edited);
-        assertEquals("jdbc:sqlite:file:./database/SQLite/my-db/signum.sqlite.db",
-                edited.getSqliteDbUrl(), "an edited trio persists the composed URL");
-        assertEquals("my-db", edited.getSqliteDbProfileName());
+            linked.doClick();
+            assertFalse(db.isLinkedMode(), "unchecking returns to the manual mode");
+            assertEquals("wizard-linked-probe", db.getProfileName(), "the profile selection is retained");
+        } finally {
+            for (java.nio.file.Path p : java.nio.file.Files.list(probe).toList()) {
+                java.nio.file.Files.deleteIfExists(p);
+            }
+            java.nio.file.Files.deleteIfExists(probe);
+        }
     }
 
     @Test
-    @DisplayName("connection step onExit collects the connection settings")
+    @DisplayName("connection step onExit (server): collects host/port/user/password/dbName from the unified editor")
     void connectionOnExit() {
         DatabaseConnectionStep step = new DatabaseConnectionStep();
-        hostField(step).setText("mydb");
-        portField(step).setText("5433");
         WizardContext ctx = new WizardContext();
         ctx.setEngine(DatabaseEngine.POSTGRESQL);
+        step.onEnter(ctx);
+        JdbcConfigurationPanel db = jdbcPanel(step);
+
+        ((javax.swing.JTextField) db.getHostField()).setText("mydb");
+        ((javax.swing.JTextField) db.getPortField()).setText("5433");
+        ((javax.swing.JTextField) db.getDatabaseField()).setText("signum_prod");
+        ((javax.swing.JTextField) db.getUserEditComponent()).setText("signum_app");
+        ((javax.swing.JPasswordField) db.getPassField()).setText("s3cret");
+
         step.onExit(ctx);
         assertEquals(false, ctx.isSkipDbSetup());
         assertEquals("mydb", ctx.getDbHost());
         assertEquals(5433, ctx.getDbPort());
-        assertEquals("signum", ctx.getDbName());
+        assertEquals("signum_app", ctx.getDbUser());
+        assertEquals("s3cret", ctx.getDbPassword());
+        assertEquals("signum_prod", ctx.getDbName());
     }
 
     // ── helpers ────────────────────────────────────────────────────────
@@ -406,14 +494,6 @@ class DatabaseStepsTest {
         return null;
     }
 
-    private static javax.swing.JTextField hostField(DatabaseConnectionStep step) {
-        return findByText(step.getPanel(), javax.swing.JTextField.class, "localhost");
-    }
-
-    private static javax.swing.JTextField portField(DatabaseConnectionStep step) {
-        return findByText(step.getPanel(), javax.swing.JTextField.class, "3306");
-    }
-
     private static javax.swing.JCheckBox findCheck(javax.swing.JComponent root) {
         return findByText(root, javax.swing.JCheckBox.class,
                 "Skip — the database is already installed / I will install it manually");
@@ -432,6 +512,8 @@ class DatabaseStepsTest {
                 t = f.getText();
             } else if (c instanceof javax.swing.JCheckBox cb) {
                 t = cb.getText();
+            } else if (c instanceof javax.swing.JButton b) {
+                t = b.getText();
             } else {
                 continue;
             }
