@@ -85,8 +85,10 @@ public final class SearchMatchPanel extends JPanel {
         setBorder(new TitledBorder("Search"));
 
         // Live "find" input — plain text only, no extra settings. Fires on
-        // every keystroke via the DocumentListener below.
+        // every keystroke via the DocumentListener below. Styled with the
+        // FlatLaf search look (leading magnifier + placeholder).
         searchField = new JTextField(16);
+        ConfigurationUtils.applySearchFieldStyle(searchField, "Type to search...");
         if (fieldTooltip != null) {
             searchField.setToolTipText("<html><body style='width: 360px'>"
                     + fieldTooltip.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")

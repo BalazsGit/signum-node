@@ -138,6 +138,7 @@ public class AppearancePanel extends JPanel {
 
         profileComboBox = new JComboBox<>();
         profileComboBox.setEditable(false);
+        profileComboBox.setRenderer(new ProfileCellRenderer());
         profileComboBox.setPrototypeDisplayValue("XXXXXXXXXXXXXXXXXXXX");
         ConfigurationUtils.fixComponentSize(profileComboBox);
         profileComboBox.setToolTipText(ConfigurationUtils.profileTooltip("Select the appearance profile to edit.<br>"
@@ -313,6 +314,10 @@ public class AppearancePanel extends JPanel {
 
         updateTabTitle(0, "Themes & Fonts", themeDirty);
         updateTabTitle(1, "Color Settings", colorsDirty);
+        // The loaded profile's cell carries the unsaved star — repaint the
+        // CLOSED combo so its selected cell picks the star up (the module
+        // logging profile combo's refresh pattern).
+        profileComboBox.repaint();
     }
 
     private void updateTabTitle(int index, String baseTitle, boolean dirty) {
@@ -535,6 +540,12 @@ public class AppearancePanel extends JPanel {
             colorSettingsPanel.setProfileOverrides(savedProfile.getColorOverrides());
         }
         lastUnsavedStatus = false;
+        // The applied marker (check icon / color / star) moves with the
+        // loaded profile — repaint the CLOSED combo so its selected cell
+        // reflects the new profile.
+        if (profileComboBox != null) {
+            profileComboBox.repaint();
+        }
     }
 
     private Font parseFont(JsonObject fontSettings) {
@@ -547,19 +558,65 @@ public class AppearancePanel extends JPanel {
     private void updateProfileButtonsUI() {
         if (profileComboBox != null) {
             ConfigurationUtils.fixComponentSize(profileComboBox);
+            // The applied (check) marker and the unsaved star are recomputed
+            // on every L&F change — repaint the CLOSED combo so its selected
+            // cell reflects them.
+            profileComboBox.repaint();
         }
         ConfigurationUtils.configureProfileToolbar(newProfileBtn, saveProfileBtn, null, renameProfileBtn,
                 deleteProfileBtn, null, reloadProfileBtn, null, copyProfileBtn, cloneProfileBtn);
         // The toolbar's help icon follows the SAME flat icon-button look as
         // every other toolbar button (the module logging profile toolbar's
-        // pattern): the button-icon color, the toolbar icon size and the
-        // uniform 2/6/2/6 border — so the question mark sits at the same
-        // distance from the profile selector as in the logging module.
+        // pattern): the button-icon color, the toolbar icon size, the uniform
+        // 2/6/2/6 border and the standard button margin — so the question mark
+        // sits at the same distance from the profile selector as in the
+        // logging module.
         // Re-applied here because HelpButton.updateUI restores its own
         // palette-colored, borderless icon after every L&F change.
         ConfigurationUtils.styleProfileIconButton(helpBtn, FontAwesome.QUESTION_CIRCLE,
                 GuiColors.getButtonIcon(), GuiConstants.getToolBarIconSize());
         updateProfileButtonStates();
+    }
+
+    /**
+     * Profile combo renderer: the profile currently LOADED (applied) for this
+     * appearance is painted in the applied (green) color with a leading check
+     * icon — the SAME color scheme the module logging profile combo uses —
+     * so the active profile is recognizable at a glance.
+     * <p>
+     * Extends {@link DefaultListCellRenderer} (the L&F-standard cell renderer)
+     * rather than a plain {@link JLabel}: the combo measures its size through
+     * this renderer, and only the standard renderer measures the L&F-standard
+     * cell size — the same reason the module logging profile combo's renderer
+     * does, so the two profile selectors keep identical sizing.
+     */
+    private final class ProfileCellRenderer extends DefaultListCellRenderer {
+        private final Icon appliedIcon = IconFontSwing.buildIcon(FontAwesome.CHECK,
+                GuiConstants.getHelpIconSize(), GuiColors.getApplied());
+
+        @Override
+        public Component getListCellRendererComponent(JList<?> list, Object value,
+                int index, boolean isSelected, boolean cellHasFocus) {
+            String name = (String) value;
+            setIcon(null);
+            setText(name);
+            boolean applied = name != null && savedProfile != null && name.equals(savedProfile.getName());
+            // The currently loaded profile with unsaved (editor) edits carries
+            // the trailing star — the node configuration panel's convention
+            // (the same the module logging profile combo uses).
+            if (applied && hasUnsavedChanges()) {
+                setText(name + " *");
+            }
+            if (applied) {
+                setIcon(appliedIcon);
+                setIconTextGap(4);
+                setForeground(isSelected ? list.getSelectionForeground() : GuiColors.getApplied());
+            } else {
+                setForeground(isSelected ? list.getSelectionForeground() : list.getForeground());
+            }
+            setBackground(isSelected ? list.getSelectionBackground() : list.getBackground());
+            return this;
+        }
     }
 
     @Override

@@ -1,8 +1,11 @@
 package application.utils.gui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.formdev.flatlaf.FlatClientProperties;
+import com.formdev.flatlaf.icons.FlatSearchIcon;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -200,6 +203,32 @@ class ConfigurationUtilsTest {
         assertEquals(size[1], size[5],
                 "the search box's hidden match counter / chevrons must fit the unified height "
                         + "(unified H=" + size[1] + ", shown H=" + size[5] + ")");
+    }
+
+    @Test
+    @DisplayName("createSearchField applies the FlatLaf search look (leading magnifier + placeholder)")
+    void createSearchFieldAppliesFlatLafSearchLook() throws Exception {
+        final JTextField[] field = new JTextField[1];
+        SwingUtilities.invokeAndWait(() -> field[0] = ConfigurationUtils.createSearchField("Search..."));
+        assertEquals("Search...",
+                field[0].getClientProperty(FlatClientProperties.PLACEHOLDER_TEXT));
+        assertTrue(field[0].getClientProperty(FlatClientProperties.TEXT_FIELD_LEADING_ICON)
+                        instanceof FlatSearchIcon,
+                "the search field must carry FlatLaf's leading magnifier icon");
+    }
+
+    @Test
+    @DisplayName("applySearchFieldStyle with a blank placeholder sets only the leading icon")
+    void applySearchFieldStyleBlankPlaceholderSetsIconOnly() throws Exception {
+        final JTextField[] field = new JTextField[1];
+        SwingUtilities.invokeAndWait(() -> {
+            field[0] = new JTextField();
+            ConfigurationUtils.applySearchFieldStyle(field[0], "  ");
+        });
+        assertNull(field[0].getClientProperty(FlatClientProperties.PLACEHOLDER_TEXT));
+        assertTrue(field[0].getClientProperty(FlatClientProperties.TEXT_FIELD_LEADING_ICON)
+                        instanceof FlatSearchIcon,
+                "the leading magnifier icon must be set regardless of the placeholder");
     }
 
     /** The text field of a combo editor (the editor component itself with

@@ -10,6 +10,8 @@ import application.utils.config.PropertiesProfileLoader;
 import application.utils.config.ReservedNames;
 import application.utils.io.PathUtils;
 
+import com.formdev.flatlaf.FlatClientProperties;
+import com.formdev.flatlaf.icons.FlatSearchIcon;
 import com.google.gson.JsonElement;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
@@ -86,15 +88,66 @@ public class ConfigurationUtils {
             // the rounding remainder) — measured, not modeled, so any L&F's
             // border / font interplay lands exactly.
             comp.setBorder(fieldBorder);
-            int naturalH = comp.getPreferredSize().height;
-            int extra = Math.max(0, standardControlHeight() - naturalH);
-            int top = extra / 2;
-            int bottom = extra - top;
             int fieldLeft = fieldBorder == null ? 0 : fieldBorder.getBorderInsets(comp).left;
             int left = Math.max(0, plainComboTextX() - fieldLeft);
-            comp.setBorder(BorderFactory.createCompoundBorder(fieldBorder,
-                    BorderFactory.createEmptyBorder(top, left, bottom, 6)));
+            padToStandardHeight(comp, fieldBorder, left);
         }
+    }
+
+    /**
+     * Creates a search / filter text field with the FlatLaf search-field
+     * look — the SAME recipe the FlatLaf demo's "Basic components" panel
+     * uses for its search box: FlatLaf's leading magnifier icon (tinted
+     * with the field's foreground color automatically) plus the given
+     * placeholder text. THE single place this look is defined, so every
+     * configuration search field (the node / logging / database / color
+     * panels and the unified {@link SearchMatchPanel} find box) renders
+     * identically.
+     *
+     * @param placeholderText the placeholder shown while the field is empty
+     *                        (null/blank: no placeholder)
+     */
+    public static JTextField createSearchField(String placeholderText) {
+        JTextField field = new JTextField();
+        applySearchFieldStyle(field, placeholderText);
+        return field;
+    }
+
+    /**
+     * Applies the FlatLaf search-field look to an existing field (see
+     * {@link #createSearchField}).
+     * <p>
+     * Like {@link #styleInputComponent} the field gets the label font and
+     * the standard control height, but WITHOUT the combo-aligned left
+     * margin: the leading icon must sit flush at the field's left edge.
+     *
+     * @param placeholderText the placeholder shown while the field is empty
+     *                        (null/blank: no placeholder)
+     */
+    public static void applySearchFieldStyle(JTextField field, String placeholderText) {
+        field.putClientProperty(FlatClientProperties.TEXT_FIELD_LEADING_ICON, new FlatSearchIcon());
+        if (placeholderText != null && !placeholderText.isBlank()) {
+            field.putClientProperty(FlatClientProperties.PLACEHOLDER_TEXT, placeholderText);
+        }
+        field.setFont(UIManager.getFont("Label.font"));
+        Border fieldBorder = UIManager.getBorder("TextField.border");
+        field.setBorder(fieldBorder);
+        padToStandardHeight(field, fieldBorder, 0);
+    }
+
+    /**
+     * Pads the field's (already applied) L&F border so its preferred height
+     * equals the standard one-line control height — the vertical half of
+     * {@link #styleInputComponent}, extracted because the search-field
+     * variant needs the same height but a flush left edge.
+     */
+    private static void padToStandardHeight(JComponent field, Border fieldBorder, int leftInset) {
+        int naturalH = field.getPreferredSize().height;
+        int extra = Math.max(0, standardControlHeight() - naturalH);
+        int top = extra / 2;
+        int bottom = extra - top;
+        field.setBorder(BorderFactory.createCompoundBorder(fieldBorder,
+                BorderFactory.createEmptyBorder(top, leftInset, bottom, 6)));
     }
 
     /**
@@ -800,9 +853,25 @@ public class ConfigurationUtils {
                 IconFontSwing.buildIcon(iconCode, iconSize, color),
                 IconFontSwing.buildIcon(iconCode, iconSize * HoverScaleIcon.DEFAULT_SCALE, color));
         button.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
+        button.setMargin(profileToolbarButtonMargin());
         button.setOpaque(false);
         button.setContentAreaFilled(false);
         button.setCursor(PROFILE_TOOLBAR_CURSOR);
+    }
+
+    /**
+     * The margin of EVERY profile-toolbar button: the standard L&F button
+     * margin (FlatLaf's {@code Button.margin = 2,14,2,14}) — the same value a
+     * plain {@link JButton} receives from its UI delegate. Pinned HERE, the
+     * single source of truth, so buttons that override their own margin (the
+     * appearance toolbar's {@link HelpButton} zeroes it in its constructor)
+     * still end up with exactly the same geometry as a plain JButton in the
+     * other toolbars — the ? glyph then sits at the same distance from the
+     * profile selector in every profile row.
+     */
+    private static Insets profileToolbarButtonMargin() {
+        Insets margin = UIManager.getInsets("Button.margin");
+        return margin != null ? margin : new Insets(2, 14, 2, 14);
     }
 
     /**

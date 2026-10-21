@@ -1199,10 +1199,15 @@ public class NodeConsolePanel extends JPanel {
 
         popOffToggle.addPropertyChangeListener("UI", e -> SwingUtilities.invokeLater(this::updatePopOffToggleIcon));
 
-        // Hamburger Menu
-        menuButton = new JButton(IconFontSwing.buildIcon(FontAwesome.BARS, GuiConstants.getToolBarIconSize(),
-                GuiColors.getButtonIcon()));
+        // Hamburger Menu (FlatLaf's built-in list icon — same integration as
+        // the jiconfont icons: Button.foreground colour, GuiConstants size,
+        // hover scale-up; see NodeToolbar#setMenuButtonIcon)
+        menuButton = new JButton();
+        NodeToolbar.setMenuButtonIcon(menuButton, GuiConstants.getToolBarIconSize());
         menuButton.setToolTipText("Menu");
+        // Same border as NodeToolbar's menu button (tight right side: the
+        // button is pinned to the toolbar's right edge).
+        menuButton.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 2));
         menuButton.addActionListener(e -> toggleMenu(null));
 
         // Menu Panel setup
@@ -1360,7 +1365,13 @@ public class NodeConsolePanel extends JPanel {
 
         toolBar.add(toolbarScroll, "growx, pushx, aligny top");
 
-        JPanel rightIconsPanel = new JPanel(new MigLayout("insets 5 5 5 10, gap 5, aligny top"));
+        // Right icons panel with the hamburger pinned to the right — same
+        // geometry as NodeToolbar#buildToolbar: the SAME 5px top inset as the
+        // scroll pane's content wrapper (the icons sit on one line, top-aligned,
+        // whether or not the overflow scrollbar is visible) and NO right inset —
+        // the button's own tight right border (see NodeToolbar) plus the nested
+        // window/panel borders give the hamburger its final ~12px margin.
+        JPanel rightIconsPanel = new JPanel(new MigLayout("insets 5 0 0 0, hidemode 3, aligny top"));
         rightIconsPanel.setOpaque(false);
         rightIconsPanel.add(menuButton);
         toolBar.add(rightIconsPanel, "shrink 0, aligny top");
@@ -1805,7 +1816,7 @@ public class NodeConsolePanel extends JPanel {
                     GuiColors.getButtonIcon()));
 
         if (menuButton != null)
-            menuButton.setIcon(IconFontSwing.buildIcon(FontAwesome.BARS, iconSize, currentIconColor));
+            NodeToolbar.setMenuButtonIcon(menuButton, iconSize);
 
         if (globeButton != null)
             globeButton.setIcon(

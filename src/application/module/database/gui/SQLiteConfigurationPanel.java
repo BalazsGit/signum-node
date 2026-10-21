@@ -136,8 +136,7 @@ public class SQLiteConfigurationPanel extends JPanel implements DatabaseEnginePa
         // --- Search Bar ---
         JPanel searchPanel = new JPanel(new MigLayout("insets 5 10 5 5, fillx", "[][grow]"));
         searchPanel.add(new JLabel("Search:"));
-        JTextField searchField = new JTextField();
-        ConfigurationUtils.styleInputComponent(searchField);
+        JTextField searchField = ConfigurationUtils.createSearchField("Type to filter properties...");
         searchField.getDocument().addDocumentListener(new DocumentListener() {
             public void insertUpdate(DocumentEvent e) {
                 filterProperties(searchField.getText());

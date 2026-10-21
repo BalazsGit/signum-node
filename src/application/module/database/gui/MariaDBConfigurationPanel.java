@@ -129,9 +129,9 @@ public class MariaDBConfigurationPanel extends JPanel implements DatabaseEngineP
         // Separator
         toolbar.add(Box.createHorizontalStrut(10));
 
-        // Search field for filtering profile tabs
-        searchField = new JTextField(20);
-        searchField.setToolTipText("Search profiles...");
+        // Search field for filtering profile tabs (FlatLaf search look:
+        // leading magnifier + placeholder — see ConfigurationUtils)
+        searchField = ConfigurationUtils.createSearchField("Search profiles...");
         searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             @Override
             public void insertUpdate(javax.swing.event.DocumentEvent e) {

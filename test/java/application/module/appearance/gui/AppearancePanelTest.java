@@ -3,6 +3,7 @@ package application.module.appearance.gui;
 import application.module.appearance.gui.laf.FlatLafPrefs;
 import application.module.logging.gui.ModuleLoggingProfilePanel;
 import application.utils.gui.ConfigurationUtils;
+import application.utils.gui.GuiColors;
 import application.utils.logging.ModuleLoggingProfile;
 import application.utils.logging.ModuleLoggingProvider;
 import com.formdev.flatlaf.FlatLightLaf;
@@ -17,6 +18,8 @@ import javax.swing.JDialog;
 import javax.swing.JComboBox;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
+import javax.swing.JList;
+import javax.swing.ListCellRenderer;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.UIManager;
@@ -194,6 +197,23 @@ class AppearancePanelTest {
                 "the help buttons must have identical border insets so the ? glyph "
                         + "sits at the same distance from the profile selector");
 
+        // Same MARGIN: the logging help button is a plain JButton (the L&F
+        // default Button.margin) while the appearance one is a HelpButton that
+        // zeroes its own margin — styleProfileIconButton pins the standard
+        // margin on both, so the ? glyph-to-selector distance is identical
+        // (a zero-margin button would be 28px narrower and shift the combo).
+        assertEquals(loggingHelp.getMargin(), appearanceHelp.getMargin(),
+                "the help buttons must have identical margins so both toolbars "
+                        + "give the profile selector the same position");
+        // The pinned value is the L&F standard Button.margin (with the same
+        // fallback styleProfileIconButton uses when the property is absent).
+        java.awt.Insets standardMargin = UIManager.getInsets("Button.margin");
+        if (standardMargin == null) {
+            standardMargin = new java.awt.Insets(2, 14, 2, 14);
+        }
+        assertEquals(standardMargin, appearanceHelp.getMargin(),
+                "the help button must carry the L&F standard button margin");
+
         // The icons must render pixel-for-pixel the same (same glyph color,
         // size and anti-aliasing) — the unified look the two toolbars share.
         java.awt.image.BufferedImage a = renderIcon(appearanceHelp.getIcon());
@@ -216,6 +236,24 @@ class AppearancePanelTest {
         assertTrue(anyOpaque, "the help icons are actually painted");
         assertTrue(maxDelta <= 8,
                 "the help icons must render in the same color (max channel delta " + maxDelta + ")");
+    }
+
+    @Test
+    @DisplayName("the profile combo paints the loaded (applied) profile with the check icon and the applied color — the logging combo's color scheme")
+    void profileComboPaintsAppliedProfileWithLoggingColorScheme() {
+        AppearancePanel appearance = newAppearancePanel();
+        JComboBox<String> combo = appearance.getProfileComboBox();
+        String appliedName = onEdtGet(() -> (String) combo.getSelectedItem());
+        assertNotNull(appliedName, "the loaded (applied) profile is selected");
+
+        ListCellRenderer<? super String> renderer = onEdtGet(combo::getRenderer);
+        @SuppressWarnings("unchecked")
+        JLabel cell = onEdtGet(() -> (JLabel) renderer.getListCellRendererComponent(
+                new JList<>(new String[] { appliedName }), appliedName, 0, false, false));
+        assertNotNull(cell.getIcon(),
+                "the applied profile must carry the leading check icon like the logging combo");
+        assertEquals(GuiColors.getApplied(), cell.getForeground(),
+                "the applied profile must be painted in the applied color like the logging combo");
     }
 
     /** Recursively finds the profile-toolbar help button (tooltip contains the marker). */

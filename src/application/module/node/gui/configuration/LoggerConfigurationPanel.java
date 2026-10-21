@@ -242,9 +242,7 @@ public class LoggerConfigurationPanel extends JPanel {
         // --- Search Panel ---
         JPanel searchPanel = new JPanel(new MigLayout("insets 5 10 5 5, fillx", "[][grow]", "[]"));
         searchPanel.add(new JLabel("Search Configuration:"));
-        JTextField searchField = new JTextField();
-        searchField.putClientProperty("JTextField.placeholderText", "Type to filter properties...");
-        ConfigurationUtils.styleInputComponent(searchField);
+        JTextField searchField = ConfigurationUtils.createSearchField("Type to filter properties...");
         searchPanel.add(searchField, "growx");
 
         searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {

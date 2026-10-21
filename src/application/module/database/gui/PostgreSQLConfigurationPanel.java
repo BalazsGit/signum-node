@@ -541,9 +541,7 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
         // --- Search Panel ---
         JPanel searchPanel = new JPanel(new MigLayout("insets 5 10 5 5, fillx", "[][grow]", "[]"));
         searchPanel.add(new JLabel("Search:"));
-        JTextField searchField = new JTextField();
-        searchField.putClientProperty("JTextField.placeholderText", "Type to filter properties...");
-        ConfigurationUtils.styleInputComponent(searchField);
+        JTextField searchField = ConfigurationUtils.createSearchField("Type to filter properties...");
         searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             public void insertUpdate(javax.swing.event.DocumentEvent e) {
                 if (isInitialized)

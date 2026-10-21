@@ -16,6 +16,7 @@ import application.utils.gui.GuiIcons;
 import application.utils.gui.HoverScaleIcon;
 import application.utils.gui.SpinnerIcon;
 
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 
@@ -253,10 +254,16 @@ public class NodeToolbar extends JPanel {
         maintenanceLabel.setVisible(false);
 
         // --- Hamburger menu button (right side) ---
+        // FlatLaf's built-in list icon (the hamburger of the demo's "Custom
+        // tab area components" row) instead of the jiconfont BARS glyph.
         menuButton = new JButton();
-        setIconButton(menuButton, FontAwesome.BARS, iconColor, iconSize);
+        setMenuButtonIcon(menuButton, iconSize);
         menuButton.setToolTipText("Menu");
-        menuButton.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 6));
+        // Left padding matches the other toolbar icons (6px); the right side is
+        // tight (2px) because the button is pinned to the toolbar's right edge —
+        // together with rightIconsPanel's zero right inset this keeps the
+        // hamburger ~12px from the window edge (matching the other modules).
+        menuButton.setBorder(BorderFactory.createEmptyBorder(2, 6, 2, 2));
         menuButton.setOpaque(false);
         menuButton.setContentAreaFilled(false);
     }
@@ -290,6 +297,52 @@ public class NodeToolbar extends JPanel {
         HoverScaleIcon.install(button,
                 IconFontSwing.buildIcon(iconCode, iconSize, color),
                 IconFontSwing.buildIcon(iconCode, iconSize * HoverScaleIcon.DEFAULT_SCALE, color));
+    }
+
+    /**
+     * Sets the hamburger menu button's icon to FlatLaf's built-in list icon
+     * (the same {@code listFiles.svg} the FlatLaf demo's "Custom tab area
+     * components" row uses for its trailing menu button), with the SAME
+     * integration as the jiconfont icons:
+     * <ul>
+     *   <li><b>colour</b>: the SVG's default {@code "text"} color filter tints
+     *       the glyph with the L&F's {@code Button.foreground} — exactly the
+     *       colour {@code GuiColors.getButtonIcon()} returns, re-read on every
+     *       paint, so theme / appearance changes need no icon refresh;</li>
+     *   <li><b>size</b>: {@code GuiConstants.getToolBarIconSize()} (scales with
+     *       the font) — the SVG glyph is vector, so any size stays crisp;</li>
+     *   <li><b>hover</b>: the same {@link HoverScaleIcon} grow-on-hover effect
+     *       with a fixed bounding box as every other toolbar icon.</li>
+     * </ul>
+     * Package-private so {@link NodeConsolePanel}'s legacy toolbar hamburger
+     * can share the exact same icon construction.
+     */
+    static void setMenuButtonIcon(JButton button, float iconSize) {
+        FlatSVGIcon base = new FlatSVGIcon(GuiResources.FLATLAF_ICONS_PATH + "listFiles.svg",
+                NodeToolbar.class.getClassLoader());
+        int size = Math.max(8, Math.round(iconSize));
+        int hoverSize = Math.max(8, Math.round(iconSize * HoverScaleIcon.DEFAULT_SCALE));
+        // derive(w, h) is PIXEL-sized — it must be used for BOTH icons: the
+        // 1-arg derive(float) overload is a SCALE FACTOR (an int silently
+        // widens to it), which would blow the glyph up ~17x and make the
+        // HoverScaleIcon bounding box (max of both glyphs) huge, so the small
+        // glyph would float in the middle of a giant button even off hover.
+        //
+        // The two glyphs are then centred in the SAME fixed box the jiconfont
+        // toolbar icons expose: buildIcon derives its box from the font
+        // metrics (19 px for a 14.4 px toolbar icon), which is 2 px larger
+        // than the raw 14/17 px SVG pair. Without this, the menu button's
+        // bounding box is 2 px shorter than its siblings, so the hamburger
+        // sits above the other icons' vertical centre line.
+        // (measured via a throwaway jiconfont HOVER icon of the same font size —
+        // the hover glyph is what gives the siblings' box its final size, since
+        // HoverScaleIcon sizes the box to the larger of the two glyphs)
+        Icon siblingMetrics = IconFontSwing.buildIcon(FontAwesome.BARS, iconSize * HoverScaleIcon.DEFAULT_SCALE, Color.WHITE);
+        int box = Math.max(hoverSize,
+                Math.max(siblingMetrics.getIconWidth(), siblingMetrics.getIconHeight()));
+        HoverScaleIcon.install(button,
+                HoverScaleIcon.box(box, base.derive(size, size)),
+                HoverScaleIcon.box(box, base.derive(hoverSize, hoverSize)));
     }
 
     /**
@@ -329,8 +382,22 @@ public class NodeToolbar extends JPanel {
 
         add(toolbarScroll, "growx, pushx, aligny top");
 
-        // Right icons panel with hamburger menu pinned to the right
-        JPanel rightIconsPanel = new JPanel(new MigLayout("insets 5 5 5 10, gap 5, aligny top"));
+        // Right icons panel with hamburger pinned to the right.
+        //
+        // Vertical placement: the action icons sit 5px below the toolbar top
+        // (the scroll pane's content wrapper top inset) and are top-aligned
+        // inside the row. The right panel must mirror exactly that — the SAME
+        // 5px top inset, NO bottom inset (the horizontal-scrollbar strip below
+        // the icons is not part of the icon line), and aligny top — so the
+        // hamburger lands on the same line as the other toolbar icons whether
+        // or not the overflow scrollbar is visible.
+        //
+        // Horizontal placement: the panel itself has NO right inset and the
+        // menu button's right border is tight (2px) — the nested panel/window
+        // borders (NodePanel 5px + NodeProfilePanel 5px) already give the
+        // hamburger its ~12px distance from the window edge, so any inset
+        // here only adds a visibly large right margin.
+        JPanel rightIconsPanel = new JPanel(new MigLayout("insets 5 0 0 0, hidemode 3, aligny top"));
         rightIconsPanel.setOpaque(false);
         rightIconsPanel.add(menuButton);
         add(rightIconsPanel, "shrink 0, aligny top");
@@ -1026,8 +1093,9 @@ public class NodeToolbar extends JPanel {
             setIconButton(syncButton,
                     isSyncStopped ? FontAwesome.PLAY : FontAwesome.PAUSE, iconColor, iconSize);
 
-            // Update hamburger menu button icon
-            setIconButton(menuButton, FontAwesome.BARS, iconColor, iconSize);
+            // Update hamburger menu button icon (re-derive the size from the
+            // current font; the glyph colour follows the L&F automatically)
+            setMenuButtonIcon(menuButton, iconSize);
 
             // Restore DB check icon color based on consistency state.
             // Without this, appearance changes would overwrite the green/red icon

@@ -125,9 +125,7 @@ public class ColorSettingsPanel extends JPanel {
         // Search Panel
         JPanel searchPanel = new JPanel(new MigLayout("insets 4 10 4 5, fillx, gap 4", "[][grow]", "[]"));
         searchPanel.add(new JLabel("Search Colors:"));
-        searchField = new JTextField(16);
-        searchField.putClientProperty("JTextField.placeholderText", "Type to filter colors...");
-        ConfigurationUtils.styleInputComponent(searchField);
+        searchField = ConfigurationUtils.createSearchField("Type to filter colors...");
         searchPanel.add(searchField, "growx");
 
         searchField.getDocument().addDocumentListener(new DocumentListener() {

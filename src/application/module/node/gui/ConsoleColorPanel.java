@@ -25,6 +25,7 @@ import javax.swing.border.TitledBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 
+import application.utils.gui.ConfigurationUtils;
 import application.utils.logging.ConsoleColorScheme;
 import application.utils.logging.ConsoleSettings;
 
@@ -92,8 +93,7 @@ public final class ConsoleColorPanel extends JPanel {
         JPanel bottomPanel = new JPanel(new BorderLayout(8, 8));
         bottomPanel.setOpaque(false);
 
-        searchField = new JTextField(15);
-        searchField.setToolTipText("Filter profiles by name");
+        searchField = ConfigurationUtils.createSearchField("Filter profiles by name...");
         searchField.getDocument().addDocumentListener(new DocumentListener() {
             @Override public void changedUpdate(DocumentEvent e) { filterTable(); }
             @Override public void insertUpdate(DocumentEvent e) { filterTable(); }
