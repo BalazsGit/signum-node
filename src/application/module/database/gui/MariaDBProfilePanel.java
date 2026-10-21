@@ -1032,15 +1032,10 @@ public class MariaDBProfilePanel extends JPanel {
         addUserInnerPanel.add(newUserHostCombo, "growx, wrap");
 
         addUserInnerPanel.add(new JLabel("Password:"), "align right"); // Password row starts on a new line
+        // The FlatLaf reveal button on the field itself provides show/hide.
         JPasswordField newUserPassField = new JPasswordField();
         ConfigurationUtils.styleInputComponent(newUserPassField);
-        addUserInnerPanel.add(newUserPassField, "growx, span, wrap");
-
-        JCheckBox showNewUserPass = new JCheckBox("Show Password");
-        char defaultEchoChar = newUserPassField.getEchoChar();
-        showNewUserPass.addActionListener(
-                e -> newUserPassField.setEchoChar(showNewUserPass.isSelected() ? (char) 0 : defaultEchoChar));
-        addUserInnerPanel.add(showNewUserPass, "skip 1, wrap, gapbottom 10");
+        addUserInnerPanel.add(newUserPassField, "growx, span, wrap, gapbottom 10");
 
         // Temporary grants section for new user
         tempGrantsContainer = new JPanel( // (Requirement 1)
@@ -1082,26 +1077,16 @@ public class MariaDBProfilePanel extends JPanel {
         JTextField newUserField = new JTextField(currentProfile.getAdminUsername());
         JPasswordField newPassField = new JPasswordField("");
 
-        char defaultEchoChar = oldPassField.getEchoChar();
-        JCheckBox showOldPass = new JCheckBox("Show Password");
-        showOldPass.addActionListener(
-                e -> oldPassField.setEchoChar(showOldPass.isSelected() ? (char) 0 : defaultEchoChar));
-        JCheckBox showNewPass = new JCheckBox("Show Password");
-        showNewPass.addActionListener(
-                e -> newPassField.setEchoChar(showNewPass.isSelected() ? (char) 0 : defaultEchoChar));
-
         JPanel panel = new JPanel(new MigLayout("wrap 2, insets 10", "[][grow]"));
         panel.add(new JLabel("Old Admin Username:"));
         panel.add(oldUserField, "growx");
         panel.add(new JLabel("Old Admin Password:"));
-        panel.add(oldPassField, "growx");
-        panel.add(showOldPass, "skip 1, wrap");
+        panel.add(oldPassField, "growx, wrap");
         panel.add(new JSeparator(), "span, growx, gaptop 5, gapbottom 5");
         panel.add(new JLabel("New Admin Username:"));
         panel.add(newUserField, "growx");
         panel.add(new JLabel("New Admin Password:"));
-        panel.add(newPassField, "growx");
-        panel.add(showNewPass, "skip 1, wrap");
+        panel.add(newPassField, "growx, wrap");
 
         int result = JOptionPane.showConfirmDialog(this, panel, "Change Admin Credentials",
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
@@ -2855,12 +2840,6 @@ public class MariaDBProfilePanel extends JPanel {
             passHelpBtn.setToolTipText("Update password for the selected user.");
             userContainer.add(passHelpBtn, "gapleft 2, wrap");
 
-            // 3. Show password row
-            JCheckBox showPass = new JCheckBox("Show Password");
-            char defaultEchoChar = passField.getEchoChar();
-            showPass.addActionListener(e -> passField.setEchoChar(showPass.isSelected() ? (char) 0 : defaultEchoChar));
-            userContainer.add(showPass, "skip 1, span 5, wrap, gapbottom 10");
-
             // Add headers for grants section
             userContainer.add(new JSeparator(), "span, growx, wrap, gaptop 10, gapbottom 5"); // Separator before
                                                                                               // headers
@@ -3462,7 +3441,6 @@ public class MariaDBProfilePanel extends JPanel {
         panel.add(label, row.labelConstraints);
 
         JPasswordField passwordField = new JPasswordField();
-        char defaultEchoChar = passwordField.getEchoChar();
         ConfigurationUtils.styleInputComponent(passwordField);
         ConfigurationUtils.fixComponentSize(passwordField);
         row.input = passwordField;
@@ -3501,13 +3479,6 @@ public class MariaDBProfilePanel extends JPanel {
         row.help = helpBtn;
         row.helpConstraints = "wrap";
         panel.add(helpBtn, row.helpConstraints);
-
-        // Show/Hide Checkbox
-        JCheckBox showPass = new JCheckBox("Show Password");
-        showPass.addActionListener(e -> passwordField.setEchoChar(showPass.isSelected() ? (char) 0 : defaultEchoChar));
-        row.extra = showPass;
-        row.extraConstraints = "skip 1, wrap";
-        panel.add(showPass, row.extraConstraints);
 
         row.separator = new JSeparator();
         row.separatorConstraints = "span, growx, wrap, gaptop 2, gapbottom 2";

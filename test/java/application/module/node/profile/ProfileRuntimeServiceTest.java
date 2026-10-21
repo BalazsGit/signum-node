@@ -594,7 +594,7 @@ class ProfileRuntimeServiceTest {
                 () -> ProfileRuntimeService.deleteProfile(confRoot(), "ghost", false));
     }
 
-    // ── create empty default (F5: "+" tab, New Empty Default Profile) ─────
+    // ── create empty default ("+" tab, New Empty Default Profile) ─────
 
     @Test
     @DisplayName("creates a zero-override profile file without a logging assignment (no module profile applied)")
@@ -655,6 +655,25 @@ class ProfileRuntimeServiceTest {
             Map<String, String> assignment = new LoggingAssignmentStore(confRoot()).getAssignment(created);
             assertFalse(assignment.containsKey(ModuleIds.NODE),
                     "a stale applied marker must not be seeded as an unresolvable assignment");
+        } finally {
+            repo.setApplied(ModuleIds.NODE, null);
+        }
+    }
+
+    @Test
+    @DisplayName("seeds nothing when the applied marker is the legacy 'logging-default' (default-marker equivalence)")
+    void createEmpty_LegacyDefaultMarker_SeededNothing() throws IOException {
+        // Arrange — a legacy marker denoting the built-in "Default".
+        LoggingProfileRepository repo = new LoggingProfileRepository(confRoot());
+        repo.setApplied(ModuleIds.NODE, "logging-default");
+        try {
+            // Act
+            String created = ProfileRuntimeService.createEmptyProfile(confRoot(), "node");
+
+            // Assert — the legacy marker denotes "Default" — nothing is seeded.
+            Map<String, String> assignment = new LoggingAssignmentStore(confRoot()).getAssignment(created);
+            assertFalse(assignment.containsKey(ModuleIds.NODE),
+                    "the legacy 'logging-default' marker denotes 'Default' — no assignment is seeded");
         } finally {
             repo.setApplied(ModuleIds.NODE, null);
         }

@@ -21,9 +21,11 @@ import java.nio.file.Path;
  *   L0: hardcoded defaults (Props.java) — NOT materialized here; every
  *       consumer falls back to {@code Prop.getDefaultValue()} when a key is
  *       absent, so a key present in L1 or L2 automatically overrides L0.
- *   L1: {confRoot}/node/profiles/node-default.properties — the reserved
- *       default template. It ships fully commented (documenting L0 values);
- *       a user may uncomment lines to override L0 for EVERY profile.
+ *   L1: {confRoot}/node/profiles/default.properties — the user-editable L1
+ *       layer; its ACTIVE lines override L0 for EVERY profile. It is
+ *       auto-created at first start and never overwritten by the classpath
+ *       sync (the fully commented node-default.properties file is the
+ *       reference-only L0 documentation template).
  *   L2: {confRoot}/node/profiles/{profileName}.properties — the profile's
  *       own file (GUI-editable). Its active lines override L0 and L1.
  * </pre>
@@ -51,13 +53,13 @@ public final class EffectiveNodeProps {
     /**
      * Loads the effective properties (L1 &larr; L2) for the given profile.
      * <p>
-     * L1 (the reserved default template's ACTIVE lines) is loaded first, then
+     * L1 (the user-editable default layer's ACTIVE lines) is loaded first, then
      * L2 (the profile file) on top of it, so L2 wins per key. Missing files,
      * missing directories and unreadable files are all tolerated — an
      * unreadable layer logs a warning and the lower layers stay effective.
      * <p>
-     * A reserved profile name (e.g. {@code "node-default"}) is treated as
-     * "L1 only": the profile file is not loaded on top of the template, so
+     * A reserved profile name (e.g. {@code "default"}) is treated as
+     * "L1 only": the profile file is not loaded on top of the layer, so
      * the reserved name can never double-load itself.
      *
      * @param confRoot    the base configuration root (e.g. {@code "./conf"},
@@ -70,11 +72,11 @@ public final class EffectiveNodeProps {
         CaselessProperties merged = new CaselessProperties();
 
         Path layerOne = PropertiesProfileLoader.resolveProfileFile(confRoot, ModuleIds.NODE,
-                ModuleIds.CATEGORY_PROFILES, NodeProfile.DEFAULT_PROFILE_FILENAME);
-        loadLayer(merged, layerOne, "default-template", profileName);
+                ModuleIds.CATEGORY_PROFILES, NodeProfile.DEFAULT_L1_FILENAME);
+        loadLayer(merged, layerOne, "default", profileName);
 
         // The profile file (L2) is skipped for reserved names — for
-        // "node-default" it would be the very same file as L1.
+        // "default" it would be the very same file as L1.
         if (!NodeProfile.RESERVED_PROFILE_NAMES.contains(profileName)) {
             Path layerTwo = PropertiesProfileLoader.resolveProfileFile(confRoot, ModuleIds.NODE,
                     ModuleIds.CATEGORY_PROFILES, profileName);
@@ -143,17 +145,18 @@ public final class EffectiveNodeProps {
     private static CaselessProperties l1Cache;
 
     /**
-     * Loads the reserved default template (L1) of the node module from the
-     * given conf root, transparently re-reading it only when its fingerprint
+     * Loads the user-editable default layer (L1) of the node module
+     * ({@code {confRoot}/node/profiles/default.properties}) from the given
+     * conf root, transparently re-reading it only when its fingerprint
      * (absolute path, last-modified time, size) changes. A missing or
-     * unreadable template yields an empty instance (pure L0 stays effective).
+     * unreadable file yields an empty instance (pure L0 stays effective).
      *
      * @param confRoot the base configuration root, never null
-     * @return the template's active lines (case-insensitive), never null
+     * @return the layer's active lines (case-insensitive), never null
      */
     static CaselessProperties loadDefaultTemplate(String confRoot) {
         Path file = PropertiesProfileLoader.resolveProfileFile(confRoot, ModuleIds.NODE,
-                ModuleIds.CATEGORY_PROFILES, NodeProfile.DEFAULT_PROFILE_FILENAME);
+                ModuleIds.CATEGORY_PROFILES, NodeProfile.DEFAULT_L1_FILENAME);
         String fingerprint;
         try {
             fingerprint = Files.isRegularFile(file)

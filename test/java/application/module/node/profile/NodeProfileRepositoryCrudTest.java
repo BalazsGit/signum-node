@@ -98,8 +98,8 @@ class NodeProfileRepositoryCrudTest {
     class CreateDefaultTests {
 
         @Test
-        @DisplayName("merges the node-default template with overrides")
-        void createDefault_MergesTemplateAndOverrides() throws IOException {
+        @DisplayName("the base is empty — the reference-only template is no longer loaded, overrides only")
+        void createDefault_OverridesOnly_TemplateNotLoaded() throws IOException {
             Files.createDirectories(profilesDir());
             Files.writeString(profileFile("node-default"), "node.network=mainnet\nAPI.Port=8125\n");
             Properties overrides = new Properties();
@@ -109,7 +109,8 @@ class NodeProfileRepositoryCrudTest {
 
             assertNotNull(result);
             assertEquals("7777", result.getProperties().getProperty("API.Port"));
-            assertEquals("mainnet", result.getProperties().getProperty("node.network"));
+            assertNull(result.getProperties().getProperty("node.network"),
+                    "the reference-only template must no longer be merged into the base");
         }
 
         @Test
@@ -232,6 +233,8 @@ class NodeProfileRepositoryCrudTest {
         void check_ReservedName_ReturnsError() {
             assertNotNull(NodeProfileRepository.checkProfileName("node-default", null));
             assertNotNull(NodeProfileRepository.checkProfileName("logging-default", List.of()));
+            assertNotNull(NodeProfileRepository.checkProfileName("default", List.of()),
+                    "the canonical L1 name must be reserved as well");
         }
 
         @Test

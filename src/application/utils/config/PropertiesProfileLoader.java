@@ -321,6 +321,46 @@ public final class PropertiesProfileLoader {
         syncDefaultFile(confRoot, moduleId, category, defaultFileName, is);
     }
 
+    /**
+     * Ensures a USER-OWNED default file (the runtime L1 layer) exists.
+     * <p>
+     * Unlike {@link #syncDefaultFile} (which keeps the reference template in
+     * step with the classpath resource via SHA-256 comparison), the user-owned
+     * file is created from the classpath resource ONLY WHEN MISSING and is
+     * never overwritten afterwards — a user edit must survive application
+     * updates. If the classpath resource does not exist, the call is a
+     * graceful no-op.
+     *
+     * @param confRoot              base configuration root (e.g., "conf")
+     * @param moduleId              module identifier
+     * @param category              profile category
+     * @param defaultFileName       filename of the user-owned default file (e.g., "default.properties")
+     * @param classpathResourceName full classpath resource name used as the seed
+     */
+    public static void ensureUserDefaultFile(String confRoot, String moduleId, String category,
+            String defaultFileName, String classpathResourceName) {
+
+        Path target = resolveProfileDir(confRoot, moduleId, category).resolve(defaultFileName);
+
+        if (Files.exists(target)) {
+            return; // user-owned — never overwritten
+        }
+
+        InputStream is = PropertiesProfileLoader.class.getResourceAsStream(classpathResourceName);
+        if (is == null) {
+            // Module may not have this embedded resource - gracefully skip
+            return;
+        }
+
+        try {
+            byte[] resourceBytes = is.readAllBytes();
+            Files.createDirectories(target.getParent());
+            Files.write(target, resourceBytes);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to create user-owned default file: " + target, e);
+        }
+    }
+
     // ── Empty Placeholder Creation ─────────────────────────────────────
 
     /**

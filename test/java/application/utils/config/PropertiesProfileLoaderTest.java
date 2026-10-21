@@ -454,6 +454,63 @@ class PropertiesProfileLoaderTest {
     }
 
     // =====================================================================
+    // ensureUserDefaultFile()
+    // =====================================================================
+
+    @Nested
+    @DisplayName("ensureUserDefaultFile()")
+    class EnsureUserDefaultFileTests {
+
+        private static final String NODE_DEFAULT_RESOURCE = "/conf/node/profiles/node-default.properties";
+
+        @Test
+        @DisplayName("creates the user-owned file from the classpath resource when missing")
+        void ensureUserDefaultFile_GivenMissingTarget_CreatesFile() throws Exception {
+            // Arrange
+            Path targetDir = tempDir.resolve("node/profiles");
+            Files.createDirectories(targetDir);
+
+            // Act
+            PropertiesProfileLoader.ensureUserDefaultFile(
+                    tempDir.toString(), "node", "profiles",
+                    "default.properties", NODE_DEFAULT_RESOURCE);
+
+            // Assert
+            assertTrue(Files.exists(targetDir.resolve("default.properties")));
+        }
+
+        @Test
+        @DisplayName("never overwrites an existing user-owned file (user edits survive updates)")
+        void ensureUserDefaultFile_GivenExistingTarget_DoesNotOverwrite() throws Exception {
+            // Arrange
+            Path targetDir = tempDir.resolve("node/profiles");
+            Files.createDirectories(targetDir);
+            Path file = targetDir.resolve("default.properties");
+            Files.writeString(file, "# user edit\nAPI.Port=9999\n");
+
+            // Act
+            PropertiesProfileLoader.ensureUserDefaultFile(
+                    tempDir.toString(), "node", "profiles",
+                    "default.properties", NODE_DEFAULT_RESOURCE);
+
+            // Assert — the user content is untouched
+            String content = Files.readString(file);
+            assertTrue(content.contains("API.Port=9999"));
+            assertTrue(content.contains("# user edit"));
+        }
+
+        @Test
+        @DisplayName("gracefully skips when the classpath resource does not exist")
+        void ensureUserDefaultFile_GivenMissingResource_SkipsGracefully() {
+            // Act & Assert — no exception, no file
+            PropertiesProfileLoader.ensureUserDefaultFile(
+                    tempDir.toString(), "node", "profiles",
+                    "default.properties", "/conf/nonexistent/module/default.properties");
+            assertFalse(Files.exists(tempDir.resolve("node/profiles/default.properties")));
+        }
+    }
+
+    // =====================================================================
     // ensureEmptyPlaceholderIfNoProfiles()
     // =====================================================================
 

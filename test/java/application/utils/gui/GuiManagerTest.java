@@ -267,4 +267,37 @@ class GuiManagerTest {
             assertEquals(JTabbedPane.SCROLL_TAB_LAYOUT, GuiManager.DEFAULT_TAB_LAYOUT_POLICY);
         });
     }
+
+    // ======================================================================
+    // Password reveal button (the FlatLaf eye icon) tests
+    // ======================================================================
+
+    @Test
+    void applyDefaultsAfterLaf_EnablesPasswordFieldRevealButton() throws Exception {
+        javax.swing.LookAndFeel previousLaf = javax.swing.UIManager.getLookAndFeel();
+        try {
+            javax.swing.UIManager.setLookAndFeel(new com.formdev.flatlaf.FlatDarkLaf());
+            // Start from FlatLaf's own default (no reveal button)
+            javax.swing.UIManager.put("PasswordField.showRevealButton", false);
+
+            GuiManager.getInstance().applyDefaultsAfterLaf();
+
+            assertTrue(javax.swing.UIManager.getBoolean("PasswordField.showRevealButton"),
+                    "applyDefaultsAfterLaf must enable the FlatLaf password reveal button");
+            // FlatPasswordFieldUI reads the key when its delegate is created:
+            // a field created after the override must contain the eye button.
+            javax.swing.JPasswordField field = new javax.swing.JPasswordField();
+            boolean hasRevealButton = false;
+            for (java.awt.Component comp : field.getComponents()) {
+                if (comp instanceof javax.swing.JToggleButton) {
+                    hasRevealButton = true;
+                    break;
+                }
+            }
+            assertTrue(hasRevealButton,
+                    "a JPasswordField created after applyDefaultsAfterLaf must contain the reveal (eye) button");
+        } finally {
+            javax.swing.UIManager.setLookAndFeel(previousLaf);
+        }
+    }
 }

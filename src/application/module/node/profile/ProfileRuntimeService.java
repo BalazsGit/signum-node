@@ -6,6 +6,7 @@ import application.module.node.NodeModule;
 import application.module.node.Signum;
 import application.module.node.props.Props;
 import application.utils.config.ModuleIds;
+import application.utils.config.ReservedNames;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -182,10 +183,11 @@ public final class ProfileRuntimeService {
      * </p>
      * <p>
      * No assignment is recorded — and the profile runs with the built-in
-     * {@code logging-default} until it is explicitly assigned — when the
-     * module has no explicit applied profile (the marker is missing/blank or
-     * the reserved default, i.e. "Default" is the applied one) or when the
-     * marker is stale (the applied profile was deleted since).
+     * defaults until it is explicitly assigned — when the module has no
+     * explicit applied profile (the marker is missing/blank or a default
+     * marker: canonical {@code default} / legacy {@code logging-default},
+     * i.e. "Default" is the applied one) or when the marker is stale (the
+     * applied profile was deleted since).
      * </p>
      * <p>
      * Creation-time seeding only: <b>existing</b> profiles are never touched.
@@ -200,9 +202,11 @@ public final class ProfileRuntimeService {
         Objects.requireNonNull(profileName, "profileName");
         LoggingProfileRepository repo = new LoggingProfileRepository(confRoot);
         String applied = repo.getApplied(ModuleIds.NODE);
-        if (applied == null || applied.isBlank()
-                || LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(applied)) {
-            return; // "Default" is the applied profile — there is nothing to seed
+        if (ReservedNames.isDefaultMarker(applied)) {
+            // A default marker (missing/blank, canonical "default" or the legacy
+            // "logging-default") means "Default" is the applied profile —
+            // there is nothing to seed.
+            return;
         }
         if (!repo.hasProfile(ModuleIds.NODE, applied)) {
             // Stale marker (the applied profile was deleted since): seeding it

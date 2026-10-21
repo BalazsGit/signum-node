@@ -147,6 +147,18 @@ class NodeLoggingApplierTest {
     }
 
     @Test
+    @DisplayName("the legacy logging-default template is no longer consulted as L1")
+    void resolveLevel_legacyTemplateNoLongerL1() throws IOException {
+        java.nio.file.Path file = tempDir.resolve("node").resolve("logging")
+                .resolve("logging-default.properties");
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, "node.level = FINE\n");
+
+        assertEquals("INFO", NodeLoggingApplier.resolveLevel(tempDir.toString(), "unknown", MODULE),
+                "the reference-only template must not override the hardcoded module default anymore");
+    }
+
+    @Test
     @DisplayName("different node profiles get different levels (multi-node isolation)")
     void applyForNodeProfile_perProfileIsolation() throws IOException {
         LoggingProfileRepository repo = new LoggingProfileRepository(tempDir.toString());

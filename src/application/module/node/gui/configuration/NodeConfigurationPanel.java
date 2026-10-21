@@ -46,7 +46,14 @@ import jiconfont.swing.IconFontSwing;
 import net.miginfocom.swing.MigLayout;
 
 import java.awt.event.ActionListener;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseListener;
+import java.awt.event.MouseMotionAdapter;
 import javax.swing.*;
+import javax.swing.event.PopupMenuEvent;
+import javax.swing.event.PopupMenuListener;
+import javax.swing.border.Border;
 import javax.swing.border.EmptyBorder;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.Highlighter;
@@ -61,6 +68,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import org.slf4j.Logger;
@@ -338,7 +346,7 @@ public class NodeConfigurationPanel extends JPanel {
         this.categoryTabbedPane.setBorder(BorderFactory.createEmptyBorder());
         // Initialize buttons early to avoid NullPointerException in listeners during UI
         // construction. The toolbar is icon-only: the tooltip is the single source of
-        // information about each action (F0 of the profile-actions refactor plan).
+        // information about each action.
         this.newProfileBtn = new JButton();
         this.saveBtn = new JButton();
         this.applyBtn = new JButton();
@@ -436,7 +444,7 @@ public class NodeConfigurationPanel extends JPanel {
         profilePanel.add(saveBtn);
 
         applyBtn.setToolTipText(ConfigurationUtils.profileTooltip(
-                "Apply<br><br>Applies the saved changes: marks the profile as applied<br>"
+                "Apply<br><br>Applies the saved changes, marks the profile as applied<br>"
                         + "and restarts the node so they take effect.<br>"
                         + "Active only while there are saved, not yet applied changes."));
         applyBtn.setEnabled(false);
@@ -583,7 +591,7 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(apiPanel, Props.API_PORT, "API Port");
         addProperty(apiPanel, Props.API_LISTEN, "API Listen Interface");
         addListProperty(apiPanel, Props.API_ALLOWED, "Allowed IPs");
-        addListProperty(apiPanel, Props.API_ADMIN_KEY_LIST, "Admin Password (API Key)");
+        addSecretListProperty(apiPanel, Props.API_ADMIN_KEY_LIST, "Admin Password (API Key)");
         addProperty(apiPanel, Props.API_SSL, "Enable SSL");
         addProperty(apiPanel, Props.API_DOC_MODE, "API Documentation Mode", new String[] { "modern", "legacy", "off" });
         addProperty(apiPanel, Props.API_UI_DIR, "UI Directory");
@@ -675,8 +683,8 @@ public class NodeConfigurationPanel extends JPanel {
         addProperty(miningPanel, Props.GPU_UNVERIFIED_QUEUE, "Unverified Queue Size");
         addProperty(miningPanel, Props.GPU_DYNAMIC_HASHES_PER_BATCH, "Dynamic Hashes Per Batch");
         addProperty(miningPanel, Props.GPU_HASHES_PER_BATCH, "Hashes Per Batch");
-        addListProperty(miningPanel, Props.SOLO_MINING_PASSPHRASES, "Solo Mining Passphrases");
-        addListProperty(miningPanel, Props.REWARD_RECIPIENT_PASSPHRASES, "Reward Recipient Passphrases");
+        addSecretListProperty(miningPanel, Props.SOLO_MINING_PASSPHRASES, "Solo Mining Passphrases");
+        addSecretListProperty(miningPanel, Props.REWARD_RECIPIENT_PASSPHRASES, "Reward Recipient Passphrases");
         addProperty(miningPanel, Props.ALLOW_OTHER_SOLO_MINERS, "Allow Other Solo Miners");
         finalizeCategoryPanel(miningPanel);
         categoryTabbedPane.addTab("Mining & GPU", createScrollPane(miningPanel));
@@ -2694,9 +2702,9 @@ public class NodeConfigurationPanel extends JPanel {
 
         boolean savedNotApplied = hasSavedNotAppliedChanges();
         applyBtn.setToolTipText(ConfigurationUtils.profileTooltip(savedNotApplied
-                ? "Apply<br><br>Applies the saved changes: marks the profile as applied<br>"
+                ? "Apply<br><br>Applies the saved changes, marks the profile as applied<br>"
                         + "and restarts the node so they take effect."
-                : "Apply<br><br>Applies the saved changes: marks the profile as applied<br>"
+                : "Apply<br><br>Applies the saved changes, marks the profile as applied<br>"
                         + "and restarts the node so they take effect.<br>"
                         + "Active only while there are saved, not yet applied changes."));
         applyBtn.setEnabled(savedNotApplied);
@@ -3472,8 +3480,6 @@ public class NodeConfigurationPanel extends JPanel {
         // Fix dimensions to match standard text fields (consistent with addProperty)
         ConfigurationUtils.fixComponentSize(passwordField);
 
-        char defaultEchoChar = passwordField.getEchoChar();
-
         passwordField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             public void insertUpdate(javax.swing.event.DocumentEvent e) {
                 if (isProgrammaticChange)
@@ -3514,16 +3520,6 @@ public class NodeConfigurationPanel extends JPanel {
         row.help = helpBtn;
         row.helpConstraints = "wrap";
         panel.add(helpBtn, row.helpConstraints);
-
-        // Show/Hide Checkbox — the distance from the row's icons/field is
-        // the uniform field-to-action-icon gap (INPUT_ACTION_GAP).
-        JCheckBox showPass = new JCheckBox("Show Password");
-        showPass.addActionListener(e -> {
-            passwordField.setEchoChar(showPass.isSelected() ? (char) 0 : defaultEchoChar);
-        });
-        row.extra = showPass;
-        row.extraConstraints = "skip 1, wrap, gapleft " + ConfigurationUtils.INPUT_ACTION_GAP;
-        panel.add(showPass, row.extraConstraints);
 
         row.separator = new JSeparator();
         row.separatorConstraints = "span, growx, wrap, gaptop 2, gapbottom 2";
@@ -3584,6 +3580,20 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     private void addListProperty(JPanel panel, Prop<?> prop, String labelText) {
+        addListProperty(panel, prop, labelText, false);
+    }
+
+    /**
+     * A list property whose items are SECRETS (the API admin key, the
+     * mining passphrases): identical to {@link #addListProperty} except the
+     * per-item dropdowns mask every entry by default and give each one its
+     * own eye toggle to reveal / hide the value before selecting it.
+     */
+    private void addSecretListProperty(JPanel panel, Prop<?> prop, String labelText) {
+        addListProperty(panel, prop, labelText, true);
+    }
+
+    private void addListProperty(JPanel panel, Prop<?> prop, String labelText, boolean secretItems) {
         // Label — with the exact property key rendered below the name
         // (unified key style, see SearchMatchLabel#setKeyText).
         PropertyRow row = new PropertyRow(prop, labelText, panel, currentAddingTabIndex);
@@ -3605,7 +3615,7 @@ public class NodeConfigurationPanel extends JPanel {
         // button). Emptying an item input removes that item. Every item is
         // colored by its own state (unsaved/saved/applied) and the row reads
         // DIRTY whenever the item set differs from saved.
-        ListEditor editor = new ListEditor(prop.getName());
+        ListEditor editor = new ListEditor(prop.getName(), secretItems);
         listEditors.put(prop.getName(), editor);
         editor.onChange = () -> {
             updateColor(editor, prop.getName(), getSafeDefault(prop));
@@ -3820,8 +3830,8 @@ public class NodeConfigurationPanel extends JPanel {
     }
 
     /**
-     * The effective "Default" baseline of a property: the reserved
-     * {@code node-default.properties} template (L1) value when the user
+     * The effective "Default" baseline of a property: the user-editable
+     * {@code default.properties} L1 layer value when the user
      * activated a line there, otherwise the hardcoded L0 default — the SSOT
      * is {@link EffectiveNodeProps#baselineValue}. Every row state, the
      * reset-to-defaults action and the clone diff run against this baseline,
@@ -5090,7 +5100,7 @@ public class NodeConfigurationPanel extends JPanel {
         JComponent input;
         String inputConstraints;
 
-        JComponent extra; // e.g. the "Show Password" checkbox of a password row
+        JComponent extra; // optional extra component rendered after the row's input field
         String extraConstraints;
 
         JButton help;
@@ -5119,10 +5129,31 @@ public class NodeConfigurationPanel extends JPanel {
      * Per-item editor for a list-typed property: one single-line field per stored
      * item (each with a trash icon) plus an "add" row (empty field + '+'). Emptying
      * an item's field removes that item; every item is colored by its own state and
-     * the row is DIRTY when the item set differs from the saved one.
+     * the row is DIRTY when the item set differs from the saved one. For SECRET
+     * lists (the API admin key, the mining passphrases) the editable inputs are
+     * masked password fields (the L&F's own reveal eye) and the dropdown
+     * entries are masked by default, each with its own eye toggle that reveals
+     * / hides that one entry before it is selected (see
+     * {@link #secretListItemRenderer}).
      */
     private final class ListEditor extends JPanel {
         private final String propName;
+        /**
+         * True when this list's items are secrets (API admin key, mining
+         * passphrases): the per-item dropdowns then mask every entry and
+         * carry the per-entry eye toggle (see
+         * {@link #secretListItemRenderer}).
+         */
+        private final boolean secretItems;
+        /** The echo character the secret list inputs mask with (dots). */
+        private static final char SECRET_ECHO_CHAR = '\u2022';
+        /**
+         * The width in px of the painted eye's hit region at the right edge
+         * of each secret row — the rendered icon label sits in exactly this
+         * area, and a click inside it toggles the reveal instead of
+         * selecting the row (see {@link #installSecretRowHooks}).
+         */
+        private static final int REVEAL_EYE_HIT_WIDTH = 26;
         private final JPanel itemsPanel;
         private final JComboBox<String> addField;
         private final FlatPlusButton addButton;
@@ -5157,9 +5188,10 @@ public class NodeConfigurationPanel extends JPanel {
         /** Invoked on every structural change (add/remove) and item edit. */
         private Runnable onChange;
 
-        ListEditor(String propName) {
+        ListEditor(String propName, boolean secretItems) {
             super(new BorderLayout());
             this.propName = propName;
+            this.secretItems = secretItems;
             setOpaque(false);
 
             // The "?" info button of the whole list row (it is added to the
@@ -5203,13 +5235,21 @@ public class NodeConfigurationPanel extends JPanel {
             // NodePanel#NewProfileButton).
             addField = new JComboBox<>(new String[0]);
             addField.setEditable(true);
+            if (secretItems) {
+                addField.setEditor(secretComboEditor());
+            }
             addField.setPrototypeDisplayValue("Prototype");
             // same input styling (font / border / left margin) as the regular selects
             ConfigurationUtils.styleComboEditor(addField);
+            if (secretItems) {
+                reserveRevealButtonSpace(addField);
+            }
             refreshInputWidths();
             // the baseline entries of the dropdown carry the same per-item
-            // state coloring as the item rows' dropdowns
-            addField.setRenderer(listItemRenderer());
+            // state coloring as the item rows' dropdowns (masked + per-entry
+            // eye toggle for the secret lists)
+            addField.setRenderer(secretItems ? secretListItemRenderer(addField)
+                    : listItemRenderer());
             addField.setToolTipText("Type an item, then press '+' (or Enter) to add it");
 
             addButton = new FlatPlusButton();
@@ -5350,12 +5390,19 @@ public class NodeConfigurationPanel extends JPanel {
         private JComboBox<String> makeItemCombo(String value) {
             JComboBox<String> combo = new JComboBox<>(new String[0]);
             combo.setEditable(true);
+            if (secretItems) {
+                combo.setEditor(secretComboEditor());
+            }
             combo.setPrototypeDisplayValue("Prototype");
             combo.getEditor().setItem(value);
             JComponent editorComponent = (JComponent) combo.getEditor().getEditorComponent();
             // same input styling (font / border / left margin) as the regular selects
             ConfigurationUtils.styleComboEditor(combo);
-            combo.setRenderer(listItemRenderer());
+            if (secretItems) {
+                reserveRevealButtonSpace(combo);
+            }
+            combo.setRenderer(secretItems ? secretListItemRenderer(combo)
+                    : listItemRenderer());
             // The editor text IS the value — track its changes through a
             // DocumentListener (the L&F alone is not reliable, the same quirk
             // as the state-aware value combos — see createStateAwareValueCombo).
@@ -5544,6 +5591,413 @@ public class NodeConfigurationPanel extends JPanel {
                     return c;
                 }
             };
+        }
+
+        /**
+         * The per-item dropdown renderer for SECRET list editors (the API
+         * admin key, the mining passphrases): every entry is MASKED (one
+         * echo dot per character) by default, and each row carries its own
+         * flat eye icon at its right that reveals / hides THAT ONE entry —
+         * the user can read and compare the stored values and pick one, all
+         * before selecting anything and WITHOUT the dropdown closing.
+         *
+         * <p>JDK 25's {@link JList} PAINTS its renderer cells instead of
+         * hosting them as child components, so the eye is a painted icon,
+         * not an interactive component: the list-level hook (see
+         * {@link #installSecretRowHooks}) hit-tests the icon's area and
+         * handles clicks there — the eye toggles only the reveal (no row
+         * selection, no popup close), while clicking the ROW itself
+         * selects the entry as usual. On selection the owning combo's
+         * editor mirrors the entry's revealed state at that moment: an
+         * entry selected while revealed stays readable, one selected while
+         * masked stays hidden (see {@link #syncEditorRevealWithSelection}).
+         * Revealing is per entry and is dropped when the popup closes, so
+         * a reopened dropdown is masked again.
+         */
+        private ListCellRenderer<Object> secretListItemRenderer(final JComboBox<String> owner) {
+            // The entries revealed in THIS dropdown's rows (per value).
+            // Cleared when the popup closes, so a reopened dropdown is
+            // masked again.
+            final Set<String> revealed = new LinkedHashSet<>();
+            final boolean[] hooksInstalled = { false };
+            return (list, value, index, isSelected, cellHasFocus) -> {
+                if (list != null && index >= 0) {
+                    ComboBoxItemToolTips.install(list, item -> item instanceof String text
+                            ? statusOf(text).tooltip()
+                            : null);
+                    // Install the hooks once, on the first render from the
+                    // LIVE list (the popup is the list's ancestor;
+                    // JComboBox has no public accessor to it).
+                    if (!hooksInstalled[0]) {
+                        installSecretRowHooks(list, owner, revealed, hooksInstalled);
+                    }
+                }
+                String text = value instanceof String s ? s : String.valueOf(value);
+                boolean revealedNow = value instanceof String && revealed.contains(text);
+                JPanel cell = new JPanel(new BorderLayout());
+                cell.setOpaque(true);
+                if (list != null) {
+                    cell.setBackground(isSelected
+                            ? list.getSelectionBackground()
+                            : list.getBackground());
+                }
+                JLabel label = new JLabel(revealedNow ? text : maskSecret(text));
+                label.setBorder(new EmptyBorder(0, 2, 0, 0));
+                if (value instanceof String s) {
+                    ValueStatus status = statusOf(s);
+                    label.setForeground(status.color());
+                    label.setToolTipText(status.tooltip());
+                }
+                cell.add(label, BorderLayout.CENTER);
+                // The eye icon at the row's right edge: painted, not a
+                // button (the list's hit-tested hook handles its clicks —
+                // see installSecretRowHooks and the method javadoc).
+                JLabel eye = new JLabel();
+                eye.setBorder(new EmptyBorder(0, 2, 0, 6));
+                applyRevealEyeState(eye, revealedNow);
+                cell.add(eye, BorderLayout.EAST);
+                return cell;
+            };
+        }
+
+        /**
+         * The list-level input hook for the secret rows' painted eyes.
+         * JDK 25's JList paints the renderer's cells instead of hosting
+         * them as child components, so EVERY click on a row — the eye
+         * included — is received by the LIST itself. This hook wraps the
+         * list's existing (UI-installed) mouse listeners so it runs FIRST:
+         * a click inside the eye icon's area toggles the reveal of that
+         * one entry only (no row selection, no popup close), while every
+         * other click is delegated to the original handler unchanged
+         * (normal row selection). It also records the revealed state of
+         * the entry selected while the popup is open: when the popup
+         * closes, the owning combo's editor mirrors it.
+         */
+        private void installSecretRowHooks(final JList<?> list, final JComboBox<String> owner,
+                                           final Set<String> revealed, final boolean[] hooksInstalled) {
+            // Shared per-list state, on the list itself, so the row mouse
+            // hook and the popup close hook always agree on one instance
+            // even if the renderer (re)installs while the popup is not yet
+            // attached.
+            list.putClientProperty("secretRowRevealed", revealed);
+            list.putClientProperty("secretRowOwner", owner);
+            if (list.getClientProperty("secretRowSelChanged") == null) {
+                list.putClientProperty("secretRowSelChanged", new boolean[] { false });
+                list.putClientProperty("secretRowSelRevealed", new boolean[] { false });
+            }
+            // The mouse hook wraps the list's UI listener exactly once.
+            if (!Boolean.TRUE.equals(list.getClientProperty("secretRowMouseHook"))
+                    && list.getMouseListeners().length > 0) {
+                list.putClientProperty("secretRowMouseHook", Boolean.TRUE);
+                MouseListener[] originals = list.getMouseListeners();
+                for (MouseListener original : originals) {
+                    list.removeMouseListener(original);
+                }
+                // A single hook wraps every original listener: an eye click
+                // toggles the reveal once and skips them all, while any other
+                // click is delegated to all of them (normal row selection).
+                list.addMouseListener(secretRowMouseHook(list, originals));
+                // Hand cursor over the eye's area, the default cursor over
+                // the row's text.
+                list.addMouseMotionListener(new MouseMotionAdapter() {
+                    @Override
+                    public void mouseMoved(MouseEvent e) {
+                        list.setCursor(secretRowEyeAt(list, e.getPoint()) >= 0
+                                ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                                : Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR));
+                    }
+                });
+            }
+            // The re-mask-on-close hook + editor mirroring: the popup is
+            // the list's ancestor (JComboBox has no public accessor to
+            // it), so install it from the first live render.
+            java.awt.Container ancestor =
+                    SwingUtilities.getAncestorOfClass(JPopupMenu.class, list);
+            if (ancestor instanceof JPopupMenu popup) {
+                if (!Boolean.TRUE.equals(popup.getClientProperty("secretRowPopupHook"))) {
+                    popup.putClientProperty("secretRowPopupHook", Boolean.TRUE);
+                    popup.addPopupMenuListener(new PopupMenuListener() {
+                        @Override
+                        public void popupMenuWillBecomeVisible(PopupMenuEvent e) {
+                            resetSecretRowSelection(list);
+                        }
+
+                        @Override
+                        public void popupMenuWillBecomeInvisible(PopupMenuEvent e) {
+                            @SuppressWarnings("unchecked")
+                            boolean[] selChanged = (boolean[]) list.getClientProperty("secretRowSelChanged");
+                            @SuppressWarnings("unchecked")
+                            boolean[] selRevealed = (boolean[]) list.getClientProperty("secretRowSelRevealed");
+                            @SuppressWarnings("unchecked")
+                            JComboBox<String> ow = (JComboBox<String>) list.getClientProperty("secretRowOwner");
+                            @SuppressWarnings("unchecked")
+                            Set<String> rev = (Set<String>) list.getClientProperty("secretRowRevealed");
+                            if (selChanged != null && selRevealed != null && selChanged[0]) {
+                                syncEditorRevealWithSelection(ow, selRevealed[0]);
+                            }
+                            resetSecretRowSelection(list);
+                            // A closed dropdown re-masks everything, so the
+                            // secrets are only visible while the popup is
+                            // open.
+                            if (rev != null) {
+                                rev.clear();
+                            }
+                        }
+
+                        @Override
+                        public void popupMenuCanceled(PopupMenuEvent e) {
+                            @SuppressWarnings("unchecked")
+                            Set<String> rev = (Set<String>) list.getClientProperty("secretRowRevealed");
+                            if (rev != null) {
+                                rev.clear();
+                            }
+                        }
+                    });
+                }
+                hooksInstalled[0] = true;
+            }
+        }
+
+        /**
+         * The row whose cell (in LIST coordinates) contains the point, or
+         * -1. Cell-bounds hit-testing is used instead of
+         * JList.locationToIndex: the latter mixes in the list's screen
+         * position and needs a laid-out visible rect, while the cell bounds
+         * are computed straight from the model — reliable for a posted or a
+         * real click.
+         */
+        private static int secretRowIndex(JList<?> list, Point p) {
+            int count = list.getModel().getSize();
+            for (int i = 0; i < count; i++) {
+                Rectangle b = list.getCellBounds(i, i);
+                if (b != null && b.contains(p)) {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        /** The row under the point when it is over that row's eye area, else -1. */
+        private static int secretRowEyeAt(JList<?> list, Point p) {
+            int idx = secretRowIndex(list, p);
+            if (idx < 0) {
+                return -1;
+            }
+            Rectangle b = list.getCellBounds(idx, idx);
+            return b != null && p.x >= b.getMaxX() - REVEAL_EYE_HIT_WIDTH ? idx : -1;
+        }
+
+        private static void resetSecretRowSelection(JList<?> list) {
+            @SuppressWarnings("unchecked")
+            boolean[] selChanged = (boolean[]) list.getClientProperty("secretRowSelChanged");
+            @SuppressWarnings("unchecked")
+            boolean[] selRevealed = (boolean[]) list.getClientProperty("secretRowSelRevealed");
+            if (selChanged != null) {
+                selChanged[0] = false;
+            }
+            if (selRevealed != null) {
+                selRevealed[0] = false;
+            }
+        }
+
+
+        /**
+         * Wraps the list's UI mouse listener so a press over a row's eye
+         * toggles THAT entry only (no selection, no popup close) while any
+         * other press falls through to the original listener unchanged.
+         */
+        private static MouseListener secretRowMouseHook(final JList<?> list, final MouseListener[] originals) {
+            return new MouseListener() {
+                @Override
+                public void mousePressed(MouseEvent e) {
+                    if (secretRowEyeAt(list, e.getPoint()) >= 0) {
+                        // Toggle THIS entry only and repaint: the list
+                        // re-renders its visible rows and the row's text and
+                        // icon update. No selection, no close.
+                        int idx = secretRowIndex(list, e.getPoint());
+                        Object item = idx < 0 ? null : list.getModel().getElementAt(idx);
+                        if (item instanceof String text) {
+                            @SuppressWarnings("unchecked")
+                            Set<String> revealed = (Set<String>) list.getClientProperty("secretRowRevealed");
+                            if (revealed != null) {
+                                if (!revealed.add(text)) {
+                                    revealed.remove(text);
+                                }
+                                list.repaint();
+                            }
+                        }
+                        return; // consume the press
+                    }
+                    // A regular row click: record the clicked entry's
+                    // revealed state, then behave exactly as the UI would
+                    // (select the row, close the popup, ...).
+                    int idx = secretRowIndex(list, e.getPoint());
+                    if (idx >= 0) {
+                        Object item = list.getModel().getElementAt(idx);
+                        @SuppressWarnings("unchecked")
+                        Set<String> revealed = (Set<String>) list.getClientProperty("secretRowRevealed");
+                        @SuppressWarnings("unchecked")
+                        boolean[] selChanged = (boolean[]) list.getClientProperty("secretRowSelChanged");
+                        @SuppressWarnings("unchecked")
+                        boolean[] selRevealed = (boolean[]) list.getClientProperty("secretRowSelRevealed");
+                        if (selChanged != null && selRevealed != null) {
+                            selChanged[0] = true;
+                            selRevealed[0] = revealed != null
+                                    && item instanceof String s && revealed.contains(s);
+                        }
+                    }
+                    for (MouseListener original : originals) {
+                        original.mousePressed(e);
+                    }
+                }
+
+                @Override
+                public void mouseReleased(MouseEvent e) {
+                    if (secretRowEyeAt(list, e.getPoint()) < 0) {
+                        for (MouseListener original : originals) {
+                            original.mouseReleased(e);
+                        }
+                    }
+                }
+
+                @Override
+                public void mouseClicked(MouseEvent e) {
+                    if (secretRowEyeAt(list, e.getPoint()) < 0) {
+                        for (MouseListener original : originals) {
+                            original.mouseClicked(e);
+                        }
+                    }
+                }
+
+                @Override
+                public void mouseEntered(MouseEvent e) {
+                    for (MouseListener original : originals) {
+                        original.mouseEntered(e);
+                    }
+                }
+
+                @Override
+                public void mouseExited(MouseEvent e) {
+                    for (MouseListener original : originals) {
+                        original.mouseExited(e);
+                    }
+                }
+            };
+        }
+
+
+        /** The masked form of a secret: one echo dot per character (the length stays visible). */
+        private static String maskSecret(String secret) {
+            StringBuilder dots = new StringBuilder(secret.length());
+            for (int i = 0; i < secret.length(); i++) {
+                dots.append(SECRET_ECHO_CHAR);
+            }
+            return dots.toString();
+        }
+
+        /**
+         * Mirrors the revealed state of the entry selected in the dropdown
+         * into the owning combo's editor: an entry selected while REVEALED
+         * stays readable in the editor, one selected while MASKED is masked
+         * there (hidden by default). The L&F's built-in reveal button (a
+         * JToggleButton child of the field, when present) is kept in step
+         * with the echo state it was not told about.
+         */
+        private static void syncEditorRevealWithSelection(JComboBox<String> combo, boolean revealed) {
+            JComponent editorComponent = (JComponent) combo.getEditor().getEditorComponent();
+            if (!(editorComponent instanceof JPasswordField field)) {
+                return;
+            }
+            field.setEchoChar(revealed ? 0 : SECRET_ECHO_CHAR);
+            for (Component child : field.getComponents()) {
+                if (child instanceof JToggleButton toggle) {
+                    toggle.setSelected(revealed);
+                }
+            }
+        }
+
+        /** The eye's revealed / hidden face (icon + tooltip). */
+        private static void applyRevealEyeState(JLabel eye, boolean revealed) {
+            eye.setIcon(IconFontSwing.buildIcon(
+                    revealed ? FontAwesome.EYE_SLASH : FontAwesome.EYE,
+                    GuiConstants.getHelpIconSize(), GuiColors.getHelpIcon()));
+            eye.setToolTipText(revealed ? "Hide password" : "Show password");
+        }
+
+        /**
+         * The EDITOR of one secret list input: a {@link JPasswordField}
+         * wrapped as a combo editor. A password field is MASKED by its
+         * nature (hidden by default, under every L&F), and the app's L&F
+         * (FlatLaf, with the app-wide "PasswordField.showRevealButton"
+         * property — see GuiManager#applyDefaultsAfterLaf) gives it its
+         * OWN eye button: the very same reveal control every password
+         * field of the app gets, so no custom eye is needed here. A
+         * JPasswordField IS a JTextField (its subclass), so the shared
+         * editor-styling and text-finding helpers keep working unchanged.
+         */
+        private ComboBoxEditor secretComboEditor() {
+            JPasswordField field = new JPasswordField();
+            final List<ActionListener> actionListeners = new ArrayList<>();
+            // The combo registers action listeners on the editor (the
+            // Enter-key action): forward the field's own action events to
+            // them, the same way the standard editor does.
+            field.addActionListener(e -> {
+                for (ActionListener listener : List.copyOf(actionListeners)) {
+                    listener.actionPerformed(e);
+                }
+            });
+            return new ComboBoxEditor() {
+                @Override
+                public void setItem(Object anItem) {
+                    field.setText(anItem == null ? "" : String.valueOf(anItem));
+                }
+
+                @Override
+                public Object getItem() {
+                    return field.getText();
+                }
+
+                @Override
+                public Component getEditorComponent() {
+                    return field;
+                }
+
+                @Override
+                public void selectAll() {
+                    field.selectAll();
+                }
+
+                @Override
+                public void addActionListener(ActionListener listener) {
+                    actionListeners.add(listener);
+                }
+
+                @Override
+                public void removeActionListener(ActionListener listener) {
+                    actionListeners.remove(listener);
+                }
+            };
+        }
+
+        /**
+         * Gives a secret editor's field room on the RIGHT: the L&F's
+         * built-in reveal button sits at the field's right edge, and the
+         * shared editor styling (ConfigurationUtils.styleComboEditor)
+         * leaves no space for it — widen the right inset so long values
+         * never slide under the button (the right inset does not affect
+         * the measured height).
+         */
+        private static void reserveRevealButtonSpace(JComboBox<String> combo) {
+            JComponent editorComponent = (JComponent) combo.getEditor().getEditorComponent();
+            if (!(editorComponent instanceof JTextField field)) {
+                return;
+            }
+            Border border = field.getBorder();
+            if (border instanceof EmptyBorder) {
+                Insets insets = border.getBorderInsets(field);
+                field.setBorder(BorderFactory.createEmptyBorder(
+                        insets.top, insets.left, insets.bottom, insets.right + 28));
+            }
         }
 
         private void onItemComboChange(JComboBox<String> combo) {

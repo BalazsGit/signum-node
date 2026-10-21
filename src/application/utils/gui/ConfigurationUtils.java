@@ -7,6 +7,7 @@ import application.module.node.profile.NodeProfile;
 import application.utils.config.ConfigPaths;
 import application.utils.config.ModuleIds;
 import application.utils.config.PropertiesProfileLoader;
+import application.utils.config.ReservedNames;
 import application.utils.io.PathUtils;
 
 import com.google.gson.JsonElement;
@@ -43,11 +44,13 @@ public class ConfigurationUtils {
     /**
      * THE single, uniformly adjustable gap between an input field and the
      * action icon sitting next to it — the list editors' "+" add button and
-     * per-item trash icon, the "Show Password" check box (the configuration
-     * password row and the JDBC section's password slot) and the logging
-     * profile rows' trash icon. Every one of these field-adjacent icon gaps
-     * reads from this constant, so the distance is uniform across the
-     * configuration and logging panels and tunable in exactly one place.
+     * per-item trash icon and the logging profile rows' trash icon. (Password
+     * fields reveal/hide through FlatLaf's built-in reveal button — enabled
+     * globally by GuiManager#applyDefaultsAfterLaf — and need no adjacent
+     * control.) Every one of
+     * these field-adjacent icon gaps reads from this constant, so the
+     * distance is uniform across the configuration and logging panels and
+     * tunable in exactly one place.
      */
     public static final int INPUT_ACTION_GAP = 4;
 
@@ -1018,10 +1021,10 @@ public class ConfigurationUtils {
      * Reads the logging configuration according to the three-layer model:
      * <pre>
      *   L0: hardcoded internal defaults ({@link LoggerProfile#applyInternalDefaults()}).
-     *   L1: {confFolder}/node/logging/logging-default.properties — the reserved
-     *       default file; its ACTIVE lines override L0 for every profile. It is
+     *   L1: {confFolder}/node/logging/default.properties — the user-editable
+     *       L1 layer; its ACTIVE lines override L0 for every profile. It is
      *       always consulted, so an empty (or missing) "logging.properties" can
-     *       no longer preempt the reserved default's active lines.
+     *       no longer preempt the L1 layer's active lines.
      *   L2: {confFolder}/node/logging/{profileName}.properties, falling back to
      *       the shared "logging.properties" — its active lines override L0 and L1.
      * </pre>
@@ -1035,8 +1038,8 @@ public class ConfigurationUtils {
         LoggerProfile effective = new LoggerProfile(profileName);
         effective.applyInternalDefaults();
 
-        // L1: the reserved default file — always consulted when present.
-        loadLoggingLayer(effective, confFolder, Signum.DEFAULT_LOGGING_PROPERTIES_NAME);
+        // L1: the user-editable default layer — always consulted when present.
+        loadLoggingLayer(effective, confFolder, ReservedNames.DEFAULT_PROFILE_NAME);
 
         // L2: the profile's own file, falling back to the shared "logging" file.
         Path pathToLoad = PropertiesProfileLoader.resolveProfileFile(

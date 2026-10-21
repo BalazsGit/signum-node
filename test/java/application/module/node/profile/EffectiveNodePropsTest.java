@@ -49,9 +49,9 @@ class EffectiveNodePropsTest {
     }
 
     @Test
-    @DisplayName("default template (L1) active lines are loaded; comments are ignored")
+    @DisplayName("user L1 layer (default.properties) active lines are loaded; comments are ignored")
     void defaultTemplateActiveLines_AreLoaded() throws IOException {
-        writeLayer("node-default.properties",
+        writeLayer("default.properties",
                 "# a fully commented template line\n"
                         + "API.Port=9001\n"
                         + "# DB.Url=jdbc:sqlite:file:./db/x.sqlite.db\n");
@@ -75,7 +75,7 @@ class EffectiveNodePropsTest {
     @Test
     @DisplayName("the profile file overrides the default template per key; non-conflicting L1 keys survive")
     void profileOverridesDefaultTemplate_PerKey() throws IOException {
-        writeLayer("node-default.properties", "API.Port=9001\nnode.blockTime=120\n");
+        writeLayer("default.properties", "API.Port=9001\nnode.blockTime=120\n");
         writeLayer("mainnet.properties", "API.Port=9002\n");
 
         CaselessProperties result = EffectiveNodeProps.loadEffective(tempDir.toString(), "mainnet");
@@ -87,7 +87,7 @@ class EffectiveNodePropsTest {
     @Test
     @DisplayName("fully commented layers contribute nothing")
     void fullyCommentedLayers_ContributeNothing() throws IOException {
-        writeLayer("node-default.properties", "# API.Port=9001\n# DB.Url=jdbc:sqlite:file:./db/x.sqlite.db\n");
+        writeLayer("default.properties", "# API.Port=9001\n# DB.Url=jdbc:sqlite:file:./db/x.sqlite.db\n");
         writeLayer("mainnet.properties", "# node.blockTime=120\n");
 
         CaselessProperties result = EffectiveNodeProps.loadEffective(tempDir.toString(), "mainnet");
@@ -98,7 +98,7 @@ class EffectiveNodePropsTest {
     @Test
     @DisplayName("keys are case-insensitive across layers")
     void keysAreCaseInsensitive_AcrossLayers() throws IOException {
-        writeLayer("node-default.properties", "Node.ApiPort=9001\n");
+        writeLayer("default.properties", "Node.ApiPort=9001\n");
         writeLayer("mainnet.properties", "node.apiport=9002\n");
 
         CaselessProperties result = EffectiveNodeProps.loadEffective(tempDir.toString(), "mainnet");
@@ -107,14 +107,14 @@ class EffectiveNodePropsTest {
     }
 
     @Test
-    @DisplayName("a reserved profile name loads the template only (no double-load of itself)")
-    void reservedProfileName_LoadsTemplateOnly() throws IOException {
-        writeLayer("node-default.properties", "API.Port=9001\n");
+    @DisplayName("a reserved profile name loads the L1 layer only (no double-load of itself)")
+    void reservedProfileName_LoadsL1Only() throws IOException {
+        writeLayer("default.properties", "API.Port=9001\n");
 
-        CaselessProperties result = EffectiveNodeProps.loadEffective(tempDir.toString(), "node-default");
+        CaselessProperties result = EffectiveNodeProps.loadEffective(tempDir.toString(), "default");
 
         assertEquals("9001", result.getProperty("API.Port"));
-        assertEquals(1, result.size(), "the template must not be loaded twice");
+        assertEquals(1, result.size(), "the L1 layer must not be loaded twice");
     }
 
     // ── GUI baseline (effective L0 <- L1) ────────────────────────────────
@@ -135,7 +135,7 @@ class EffectiveNodePropsTest {
     @Test
     @DisplayName("baseline with an active template line -> L1 overrides L0 for every profile")
     void baseline_ActiveTemplateLine_OverridesL0() throws IOException {
-        writeLayer("node-default.properties", "# documented default\nAPI.Port=9001\n");
+        writeLayer("default.properties", "# documented default\nAPI.Port=9001\n");
 
         assertEquals("9001", EffectiveNodeProps.baselineValue(tempDir.toString(), "API.Port", 8888));
         assertEquals("8889", EffectiveNodeProps.baselineValue(tempDir.toString(), "node.other", "8889"),
@@ -145,7 +145,7 @@ class EffectiveNodePropsTest {
     @Test
     @DisplayName("a template line without a value is not an override -> L0 stays effective")
     void baseline_EmptyTemplateLine_FallsBackToL0() throws IOException {
-        writeLayer("node-default.properties", "API.Port=\n");
+        writeLayer("default.properties", "API.Port=\n");
 
         assertEquals("8888", EffectiveNodeProps.baselineValue(tempDir.toString(), "API.Port", 8888));
     }
@@ -153,7 +153,7 @@ class EffectiveNodePropsTest {
     @Test
     @DisplayName("baseline keys are case-insensitive")
     void baseline_KeysAreCaseInsensitive() throws IOException {
-        writeLayer("node-default.properties", "node.blocktime=120\n");
+        writeLayer("default.properties", "node.blocktime=120\n");
 
         assertEquals("120", EffectiveNodeProps.baselineValue(tempDir.toString(), "Node.BlockTime", "45"));
     }
@@ -161,13 +161,24 @@ class EffectiveNodePropsTest {
     @Test
     @DisplayName("a template change on disk is picked up (fingerprint-based cache invalidation)")
     void baseline_TemplateChangedOnDisk_IsPickedUp() throws IOException {
-        writeLayer("node-default.properties", "API.Port=9001\n");
+        writeLayer("default.properties", "API.Port=9001\n");
         assertEquals("9001", EffectiveNodeProps.baselineValue(tempDir.toString(), "API.Port", 8888));
 
         // The comment changes the file size, so the fingerprint must change
         // even when the modification time rounds to the same millisecond.
-        writeLayer("node-default.properties", "API.Port=9002\n# template edited\n");
+        writeLayer("default.properties", "API.Port=9002\n# template edited\n");
         assertEquals("9002", EffectiveNodeProps.baselineValue(tempDir.toString(), "API.Port", 8888),
                 "the cached template must be re-read once the file changed");
+    }
+
+    @Test
+    @DisplayName("the reference-only node-default template is no longer loaded as L1")
+    void legacyTemplateActiveLines_NoLongerEffective() throws IOException {
+        writeLayer("node-default.properties", "API.Port=9001\n");
+
+        CaselessProperties result = EffectiveNodeProps.loadEffective(tempDir.toString(), "mainnet");
+
+        assertTrue(result.isEmpty(),
+                "the reference-only template must not contribute active lines anymore");
     }
 }

@@ -111,15 +111,15 @@ public class AppearanceModule implements Module {
 
         String settingsDir = Props.SETTINGS_DIR.getDefaultValue();
         Path confPath = PathUtils.resolvePath(confFolder);
-        // The node configuration is layered (3-layer model): the reserved
-        // default template (L1) is merged first, then the "node" profile file
-        // (L2) on top of it, so a key present in either file overrides the
-        // hardcoded default. Literal names (no Signum bridge, v4.1 migration
-        // 2026-08-07): "node" is Signum.PROPERTIES_NAME, "node-default" is the
-        // reserved template.
+        // The node configuration is layered (3-layer model): the user-editable
+        // L1 layer (default.properties) is merged first, then the "node"
+        // profile file (L2) on top of it, so a key present in either file
+        // overrides the hardcoded default. Literal names (no Signum bridge,
+        // v4.1 migration 2026-08-07): "node" is Signum.PROPERTIES_NAME,
+        // "default" is the user-editable L1 layer.
         Path profilesDir = confPath.resolve(ModuleIds.NODE).resolve(ModuleIds.CATEGORY_PROFILES);
         Properties nodeProps = new Properties();
-        for (String fileName : new String[] { "node-default.properties", "node.properties" }) {
+        for (String fileName : new String[] { "default.properties", "node.properties" }) {
             Path candidate = profilesDir.resolve(fileName);
             if (Files.exists(candidate)) {
                 try (java.io.FileInputStream in = new java.io.FileInputStream(candidate.toFile())) {
@@ -269,7 +269,11 @@ public class AppearanceModule implements Module {
         // 1. Update the color palette
         ColorPaletteManager.updatePalette(overrides);
 
-        // 2. Refresh basic Swing UI
+        // 2. Refresh basic Swing UI. Re-apply the password reveal button
+        // BEFORE the refresh: a runtime theme change (UIManager.setLookAndFeel)
+        // clears all UIManager overrides, and FlatLaf re-reads the key when it
+        // recreates the field delegates in the refresh below.
+        UIManager.put("PasswordField.showRevealButton", true);
         if (UIManager.getLookAndFeel() instanceof FlatLaf) {
             FlatLaf.updateUI();
         } else {

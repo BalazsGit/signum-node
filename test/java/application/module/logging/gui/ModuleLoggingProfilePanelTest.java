@@ -1488,8 +1488,10 @@ class ModuleLoggingProfilePanelTest {
         assertEquals(ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY, combo.getItemAt(0),
                 "Default is the first (built-in) profile entry");
         for (int i = 0; i < combo.getItemCount(); i++) {
-            org.junit.jupiter.api.Assertions.assertNotEquals(LoggingProfileRepository.RESERVED_PROFILE_NAME,
-                    combo.getItemAt(i), "the on-disk sample config must not be listed");
+            org.junit.jupiter.api.Assertions.assertNotEquals("default",
+                    combo.getItemAt(i), "the user-editable L1 layer file must not be listed");
+            org.junit.jupiter.api.Assertions.assertNotEquals("logging-default",
+                    combo.getItemAt(i), "the reference template must not be listed");
         }
     }
 
@@ -1567,8 +1569,7 @@ class ModuleLoggingProfilePanelTest {
         } catch (Exception e) {
             marker = null;
         }
-        boolean defaultApplied = marker == null || marker.isBlank()
-                || LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(marker);
+        boolean defaultApplied = application.utils.config.ReservedNames.isDefaultMarker(marker);
         String appliedEntry = defaultApplied ? ModuleLoggingProfilePanel.DEFAULT_PROFILE_ENTRY : marker;
         JLabel applied = (JLabel) renderer.getListCellRendererComponent(list, appliedEntry, -1, false, false);
         assertNotNull(applied.getIcon(), "the applied profile shows the check icon");

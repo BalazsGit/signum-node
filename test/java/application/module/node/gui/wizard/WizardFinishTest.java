@@ -62,8 +62,7 @@ class WizardFinishTest {
         // marker is seeded, a missing/blank/reserved/stale one is not.
         LoggingProfileRepository repo = new LoggingProfileRepository();
         String applied = repo.getApplied(ModuleIds.NODE);
-        boolean expectSeed = applied != null && !applied.isBlank()
-                && !LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(applied)
+        boolean expectSeed = !application.utils.config.ReservedNames.isDefaultMarker(applied)
                 && repo.hasProfile(ModuleIds.NODE, applied);
 
         String name = "wizard_probe_" + System.nanoTime();

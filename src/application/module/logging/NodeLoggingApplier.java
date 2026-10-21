@@ -93,8 +93,8 @@ public final class NodeLoggingApplier {
 
     /**
      * Resolves the effective {@code <module>.level} value for a profile, in precedence
-     * order (three-layer model): on-disk profile file (L2) &rarr; the module's reserved
-     * default file (L1, active lines only) &rarr; hardcoded module default (L0).
+     * order (three-layer model): on-disk profile file (L2) &rarr; the user-editable
+     * L1 layer file (active lines only) &rarr; hardcoded module default (L0).
      *
      * @param confRoot    base configuration root
      * @param profileName the (already-fallback-resolved) profile name
@@ -110,7 +110,7 @@ public final class NodeLoggingApplier {
         if (value != null) {
             return value;
         }
-        // L1: the module's reserved default file (its active lines).
+        // L1: the user-editable default layer file (its active lines only).
         value = readLevelKey(
                 repository.getProfileFile(moduleId, LoggingProfileRepository.RESERVED_PROFILE_NAME), key);
         if (value != null) {

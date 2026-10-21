@@ -2,6 +2,7 @@ package application.module.logging.gui;
 
 import application.api.ModuleContext;
 import application.module.logging.LoggingProfileRepository;
+import application.utils.config.ReservedNames;
 import application.utils.gui.CheckboxGroupPanel;
 import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.DialogUtils;
@@ -129,9 +130,10 @@ public class ModuleLoggingProfilePanel extends JPanel {
     /**
      * The virtual "Default" profile entry shown at the top of the profile
      * selector. Selecting it loads the application's built-in default values
-     * into the editor — it is NOT an on-disk profile file: nothing is read
-     * from or written to disk for it, and the reserved sample config on disk
-     * ({@code logging-default}) is not listed at all.
+     * into the editor — it is NOT an on-disk profile file: nothing is written
+     * to disk for it, and the reserved on-disk names ({@code default} — the
+     * user-editable L1 layer — and the legacy {@code logging-default}
+     * reference template) are not listed at all.
      */
     public static final String DEFAULT_PROFILE_ENTRY = "Default";
 
@@ -630,8 +632,10 @@ public class ModuleLoggingProfilePanel extends JPanel {
     /** @return true when the given profile entry is the one currently applied for this module. */
     private boolean isAppliedProfile(String name) {
         if (DEFAULT_PROFILE_ENTRY.equals(name)) {
-            return appliedProfileName == null || appliedProfileName.isBlank()
-                    || LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(appliedProfileName);
+            // A default marker (missing/blank, canonical "default" or the legacy
+            // "logging-default") means the built-in Default is applied: all
+            // these marker values are equivalent.
+            return ReservedNames.isDefaultMarker(appliedProfileName);
         }
         return name != null && name.equals(appliedProfileName);
     }
@@ -2093,14 +2097,15 @@ public class ModuleLoggingProfilePanel extends JPanel {
         }
         // The editor's source: the profile's dirty workspace state (the
         // unsaved edits held while the user worked on another profile) wins
-        // over the disk content. The virtual "Default" entry IS the reserved
-        // built-in profile: its content is the on-disk default file (the
-        // runtime truth an unassigned owner starts with) — a key the file
-        // does not define falls back to the built-in row default below.
-        // Nothing is ever written to the reserved file.
+        // over the disk content. The virtual "Default" entry shows the
+        // built-in defaults: its content is the reference-only L0 template
+        // file — the user-editable L1 layer ("default.properties") is a
+        // separate file and is never shown here. A key the template does
+        // not define falls back to the built-in row default below.
+        // Nothing is ever written to the template file.
         Properties source;
         if (DEFAULT_PROFILE_ENTRY.equals(name)) {
-            source = loadProfilePropsSafely(LoggingProfileRepository.RESERVED_PROFILE_NAME);
+            source = loadProfilePropsSafely(ReservedNames.LEGACY_DEFAULT_LOGGING_NAME);
         } else {
             Properties dirty = dirtyProfiles.contains(name) ? profileWorkspace.get(name) : null;
             if (dirty != null) {
@@ -2568,7 +2573,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
      */
     String defaultApplyMessage(String profileName, boolean isDefault) {
         // The user-facing name of the built-in profile is the dropdown entry
-        // ("Default") — not the reserved on-disk name ("logging-default").
+        // ("Default") — not the on-disk L1 file name ("default.properties").
         String defaultName = DEFAULT_PROFILE_ENTRY;
         String what = isDefault
                 ? "Resets the module's applied reference to the built-in '" + defaultName + "' profile (its "
@@ -3026,9 +3031,10 @@ public class ModuleLoggingProfilePanel extends JPanel {
      * on-disk profile listed in the menu, that entry becomes the default selection,
      * so the applied profile is what the user sees loaded when the panel opens.
      * <p>
-     * A missing, blank, reserved ({@code logging-default}) or stale marker (the
-     * applied profile was deleted since) selects nothing — the caller then falls
-     * back to the virtual {@link #DEFAULT_PROFILE_ENTRY} entry.
+     * A missing, blank, default-marker ({@code default} / legacy
+     * {@code logging-default}) or stale marker (the applied profile was
+     * deleted since) selects nothing — the caller then falls back to the
+     * virtual {@link #DEFAULT_PROFILE_ENTRY} entry.
      * </p>
      *
      * @return true when the applied profile was selected, false when the caller should
@@ -3036,9 +3042,7 @@ public class ModuleLoggingProfilePanel extends JPanel {
      */
     protected boolean preselectModuleAppliedProfile() {
         String applied = appliedProfileName;
-        if (applied == null || applied.isBlank()
-                || DEFAULT_PROFILE_ENTRY.equals(applied)
-                || LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(applied)) {
+        if (DEFAULT_PROFILE_ENTRY.equals(applied) || ReservedNames.isDefaultMarker(applied)) {
             return false;
         }
         return selectProfile(applied);

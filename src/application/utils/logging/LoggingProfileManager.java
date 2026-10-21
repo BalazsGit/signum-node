@@ -30,7 +30,7 @@ import org.slf4j.LoggerFactory;
  * <ol>
  *   <li>Each enabled module's built-in defaults ({@link ModuleLoggingProfile#getDefaults()})
  *       — the hardcoded L0 layer</li>
- *   <li>The reserved default template (L1): {@code {confFolder}/node/logging/logging-default.properties}
+ *   <li>The user-editable L1 layer: {@code {confFolder}/node/logging/default.properties}
  *       — its active lines override L0 for every profile</li>
  *   <li>On-disk profile file from {@code conf/{module}/logging/{profileName}.properties}
  *       (L2) — overrides L0 and L1</li>
@@ -61,12 +61,12 @@ public final class LoggingProfileManager {
     private static final Logger LOGGER = LoggerFactory.getLogger(LoggingProfileManager.class);
 
     /**
-     * The reserved default-template (L1) profile name of the logging tree. The
-     * template file lives in the NODE module's logging category
-     * ({@code {confFolder}/node/logging/logging-default.properties}); it is the
+     * The user-editable L1 layer profile name. The L1 file lives in the
+     * NODE module's logging category
+     * ({@code {confFolder}/node/logging/default.properties}); it is the
      * single L1 layer for every logging profile.
      */
-    public static final String L1_BASE_PROFILE = "logging-default";
+    public static final String L1_BASE_PROFILE = application.utils.config.ReservedNames.DEFAULT_PROFILE_NAME;
 
     // ── Construction ──────────────────────────────────────────────────
 
@@ -160,10 +160,10 @@ public final class LoggingProfileManager {
     // ── Private helpers ───────────────────────────────────────────────
 
     /**
-     * Loads the reserved default template (L1) from
-     * {@code {confFolder}/node/logging/logging-default.properties}. Its active
-     * lines override the module built-in defaults (L0) for every profile; a
-     * missing or empty template simply leaves L0 in effect.
+     * Loads the user-editable L1 layer from
+     * {@code {confFolder}/node/logging/default.properties}. Its active lines
+     * override the module built-in defaults (L0) for every profile; a missing
+     * or empty file simply leaves L0 in effect.
      */
     private void loadL1DefaultTemplate(String confFolder, Properties target) {
         Path defaultFile = application.utils.io.PathUtils.resolvePath(confFolder)

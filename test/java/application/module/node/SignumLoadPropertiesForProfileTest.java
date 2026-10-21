@@ -17,8 +17,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /**
  * Unit tests for the three-layer node configuration chain of
  * {@link Signum#loadPropertiesForProfile(String, String)}:
- * hardcoded defaults (Props.java, L0) &larr; the reserved default template
- * (L1) &larr; the profile file (L2).
+ * hardcoded defaults (Props.java, L0) &larr; the user-editable L1 layer
+ * ({@code default.properties}) &larr; the profile file (L2).
  * <p>
  * Uses an explicit conf-root sandbox (a JUnit {@link TempDir}) so the tests
  * never touch the real {@code conf/} tree. Follows AAA + JUnit 5 conventions.
@@ -48,9 +48,9 @@ class SignumLoadPropertiesForProfileTest {
     }
 
     @Test
-    @DisplayName("an active default-template line (L1) overrides the hardcoded default for every profile")
+    @DisplayName("an active L1 line (default.properties) overrides the hardcoded default for every profile")
     void defaultTemplateOverridesHardcoded() throws IOException {
-        writeProfileLayer("node-default.properties", "API.Port=9001\n");
+        writeProfileLayer("default.properties", "API.Port=9001\n");
 
         PropertyService service = Signum.loadPropertiesForProfile(tempDir.toString(), "mainnet");
 
@@ -58,9 +58,9 @@ class SignumLoadPropertiesForProfileTest {
     }
 
     @Test
-    @DisplayName("the profile file (L2) overrides the default template (L1)")
+    @DisplayName("the profile file (L2) overrides the L1 layer")
     void profileOverridesDefaultTemplate() throws IOException {
-        writeProfileLayer("node-default.properties", "API.Port=9001\n");
+        writeProfileLayer("default.properties", "API.Port=9001\n");
         writeProfileLayer("mainnet.properties", "API.Port=9002\n");
 
         PropertyService service = Signum.loadPropertiesForProfile(tempDir.toString(), "mainnet");
@@ -71,7 +71,7 @@ class SignumLoadPropertiesForProfileTest {
     @Test
     @DisplayName("the SETTINGS_DIR materialization still works (from the default-template layer)")
     void settingsDirFromDefaultTemplate_IsMaterialized() throws IOException {
-        writeProfileLayer("node-default.properties",
+        writeProfileLayer("default.properties",
                 Props.SETTINGS_DIR.getName() + "=./custom-settings\n");
 
         PropertyService service = Signum.loadPropertiesForProfile(tempDir.toString(), "mainnet");

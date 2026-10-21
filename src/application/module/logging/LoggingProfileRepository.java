@@ -3,6 +3,7 @@ package application.module.logging;
 import application.utils.config.ConfigPaths;
 import application.utils.config.ModuleIds;
 import application.utils.config.PropertiesProfileLoader;
+import application.utils.config.ReservedNames;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
@@ -18,7 +19,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
@@ -37,17 +37,20 @@ import java.util.concurrent.ConcurrentMap;
  * <h3>On-disk contract (kept identical to the existing layout)</h3>
  * <ul>
  *   <li>{@code conf/{module}/logging/{profileName}.properties} — user profiles</li>
- *   <li>{@code conf/{module}/logging/logging-default.properties} — reserved default</li>
+ *   <li>{@code conf/{module}/logging/default.properties} — the user-editable L1
+ *       layer (auto-created at first start, never overwritten by the sync)</li>
+ *   <li>{@code conf/{module}/logging/logging-default.properties} — the reference-only
+ *       L0 documentation template (SHA-256 synced from classpath resources)</li>
  *   <li>{@code conf/{module}/logging/profile.json} — applied-profile metadata
  *       ({@code {"appliedProfile": "..."}}, same schema as
  *       {@code ConfigurationUtils}, so existing files stay readable)</li>
  * </ul>
  *
  * <h3>Reserved name protection</h3>
- * The reserved default profile {@value #RESERVED_PROFILE_NAME} may be loaded and
- * read, but it can never be created, renamed, saved-over or deleted through this
- * repository (it is managed by the SHA-256 classpath sync in
- * {@link PropertiesProfileLoader}).
+ * The reserved names (the canonical {@code default} — the user-editable L1
+ * layer — and the legacy {@code logging-default} reference template) may be
+ * loaded and read, but can never be created, renamed, saved-over or deleted
+ * through this repository (SSOT: {@link ReservedNames}).
  *
  * <p>
  * This class intentionally has no Swing dependency and is safe to construct and
@@ -60,8 +63,14 @@ import java.util.concurrent.ConcurrentMap;
  */
 public final class LoggingProfileRepository {
 
-    /** Reserved logging profile name that is protected from user CRUD. */
-    public static final String RESERVED_PROFILE_NAME = "logging-default";
+    /**
+     * The canonical reserved L1 profile name: the user-editable
+     * {@code default.properties} file (auto-created at first start, protected
+     * from user CRUD — see {@link #isReserved}). The legacy
+     * {@code logging-default} reference template stays reserved as well
+     * (SSOT: {@link ReservedNames}).
+     */
+    public static final String RESERVED_PROFILE_NAME = ReservedNames.DEFAULT_PROFILE_NAME;
 
     /** JSON key holding the applied profile name in {@code profile.json}. */
     private static final String APPLIED_PROFILE_KEY = "appliedProfile";
@@ -145,7 +154,7 @@ public final class LoggingProfileRepository {
      */
     public List<String> listProfiles(String moduleId) {
         return PropertiesProfileLoader.discoverProfiles(
-                confRoot, moduleId, ModuleIds.CATEGORY_LOGGING, Collections.singleton(RESERVED_PROFILE_NAME));
+                confRoot, moduleId, ModuleIds.CATEGORY_LOGGING, ReservedNames.LOGGING_RESERVED_NAMES);
     }
 
     /**
@@ -155,7 +164,7 @@ public final class LoggingProfileRepository {
      * @return true if the name is the reserved default
      */
     public boolean isReserved(String profileName) {
-        return RESERVED_PROFILE_NAME.equals(profileName);
+        return ReservedNames.isLoggingReservedName(profileName);
     }
 
     /**
@@ -471,7 +480,7 @@ public final class LoggingProfileRepository {
         if (profileName == null || profileName.isBlank()) {
             throw new IllegalArgumentException("profileName must not be null or blank");
         }
-        if (RESERVED_PROFILE_NAME.equals(profileName)) {
+        if (ReservedNames.isLoggingReservedName(profileName)) {
             throw new IllegalArgumentException("The name '" + profileName + "' is reserved");
         }
     }

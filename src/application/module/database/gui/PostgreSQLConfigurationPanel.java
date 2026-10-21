@@ -1089,11 +1089,7 @@ public class PostgreSQLConfigurationPanel extends JPanel implements DatabaseEngi
         ConfigurationUtils.styleInputComponent(pf);
         propertyComponents.put(key, pf);
         valueSuppliers.put(key, () -> new String(pf.getPassword()));
-        panel.add(pf, "split 2, growx, height pref!");
-        JCheckBox show = new JCheckBox("Show Password");
-        char def = pf.getEchoChar();
-        show.addActionListener(e -> pf.setEchoChar(show.isSelected() ? (char) 0 : def));
-        panel.add(show, "wrap");
+        panel.add(pf, "split 2, growx, height pref!, wrap");
         allPropertyRows.add(row);
     }
 

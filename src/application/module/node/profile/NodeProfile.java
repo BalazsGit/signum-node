@@ -5,6 +5,7 @@ import application.utils.config.ConfigPaths;
 import application.utils.config.ModuleIds;
 import application.utils.config.PropertiesProfileEntity;
 import application.utils.config.PropertiesProfileLoader;
+import application.utils.config.ReservedNames;
 
 import java.nio.file.Path;
 import java.util.Objects;
@@ -24,10 +25,11 @@ import java.util.Set;
  * Profiles are discovered from: {@code conf/node/profiles/*.properties}
  *
  * <h3>Reserved Profile Names</h3>
- * The following names are excluded from discovery:
+ * The following names are excluded from discovery (SSOT: {@link ReservedNames}):
  * <ul>
- *   <li>{@code node-default} - default template (not a runnable profile)</li>
- *   <li>{@code logging-default} - logging default template</li>
+ *   <li>{@code default} - the user-editable L1 layer (not a runnable profile)</li>
+ *   <li>{@code node-default} - reference-only L0 documentation template</li>
+ *   <li>{@code logging-default} - reference-only logging L0 documentation template</li>
  * </ul>
  *
  * @see PropertiesProfileLoader
@@ -46,8 +48,26 @@ public class NodeProfile implements PropertiesProfileEntity {
     /** Profile category (subdirectory under module; SSOT: {@link ModuleIds#CATEGORY_PROFILES}). */
     public static final String CATEGORY = PropertiesProfileLoader.DEFAULT_CATEGORY_PROFILES;
 
-    /** Default profile file name (follows {module}-default.properties convention). */
+    /**
+     * Default profile file name (follows {module}-default.properties convention).
+     * <p>
+     * This is the <b>reference-only L0 documentation template</b> (SHA-256
+     * synced from classpath resources, never read at runtime). The runtime L1
+     * layer is {@link #DEFAULT_L1_FILENAME}.
+     */
     static final String DEFAULT_PROFILE_FILENAME = MODULE_ID + "-default.properties";
+
+    /**
+     * The user-editable L1 layer file name:
+     * {@code conf/node/profiles/default.properties}.
+     * <p>
+     * Its ACTIVE lines override the hardcoded L0 defaults for EVERY node
+     * profile. The file is user-owned: it is auto-created at first start
+     * ({@link NodeProfileRepository#ensureUserDefaultFiles}) and is never
+     * overwritten by the classpath sync.
+     */
+    public static final String DEFAULT_L1_FILENAME =
+            ReservedNames.DEFAULT_PROFILE_NAME + ".properties";
 
     /** Default logging file name. */
     static final String DEFAULT_LOGGING_FILENAME =
@@ -68,7 +88,7 @@ public class NodeProfile implements PropertiesProfileEntity {
      * Assignments table, the {@code sys.profiles} CLI command) must use this
      * set so the lists can never drift apart.
      */
-    public static final Set<String> RESERVED_PROFILE_NAMES = Set.of("node-default", "logging-default");
+    public static final Set<String> RESERVED_PROFILE_NAMES = ReservedNames.NODE_RESERVED_NAMES;
 
     // ── Immutable Identity Fields ──────────────────────────────────────
 

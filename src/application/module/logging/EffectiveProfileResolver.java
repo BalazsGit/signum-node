@@ -76,7 +76,7 @@ public final class EffectiveProfileResolver {
      * The layer that determines a logger key's effective value.
      */
     public enum Source {
-        /** The reserved default template ({@code conf/node/logging/logging-default.properties}). */
+        /** The user-editable L1 layer ({@code conf/node/logging/default.properties}). */
         L1_BASE("base"),
         /** A module's built-in defaults ({@code getDefaults()}) — the hardcoded L0 layer. */
         MODULE_DEFAULT("default"),
@@ -185,8 +185,8 @@ public final class EffectiveProfileResolver {
     }
 
     private Set<String> baseDefaultKeys() {
-        // The reserved default template (L1) lives in the NODE module's logging
-        // category — the single L1 layer for every logging profile.
+        // The user-editable L1 layer file lives in the NODE module's
+        // logging category — the single L1 layer for every logging profile.
         Path baseFile = PathUtils.resolvePath(confRoot)
                 .resolve(ModuleIds.NODE)
                 .resolve(ModuleIds.CATEGORY_LOGGING)

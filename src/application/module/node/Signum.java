@@ -996,8 +996,8 @@ public final class Signum {
      * <pre>
      *   L0: Hardcoded defaults (Props.java) — not materialized here; consumers
      *       fall back to Prop.getDefaultValue() for every missing key.
-     *   L1: {confFolder}/node/profiles/node-default.properties — the reserved
-     *       default template; its ACTIVE lines override L0 for every profile.
+     *   L1: {confFolder}/node/profiles/default.properties — the user-editable
+     *       L1 layer; its ACTIVE lines override L0 for every profile.
      *   L2: {confFolder}/node/profiles/{profileName}.properties — the profile's
      *       own file; its active lines override L0 and L1.
      * </pre>

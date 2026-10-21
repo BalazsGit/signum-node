@@ -124,6 +124,15 @@ public class GuiManager {
         LOGGER.info("[GUI-DEBUG] Applied TabbedPane.tabLayoutPolicy={}. UIManager now reports: {} (SCROLL={})", 
                 tabLayoutPolicy, actualValue, JTabbedPane.SCROLL_TAB_LAYOUT);
         
+        // The FlatLaf "reveal password" button (the eye inside every
+        // JPasswordField that toggles the value's visibility). It replaces
+        // any custom show/hide checkbox: FlatPasswordFieldUI reads this key
+        // when its delegate is created, so the value must be in the UIManager
+        // before the app's components are built — which is guaranteed by this
+        // method's position in the init flow (after setLookAndFeel()).
+        UIManager.put("PasswordField.showRevealButton", true);
+        LOGGER.info("[GUI-DEBUG] Applied PasswordField.showRevealButton=true");
+        
         for (Map.Entry<String, String> entry : colorOverrides.entrySet()) {
             try {
                 UIManager.put(entry.getKey(), Color.decode(entry.getValue()));

@@ -18,7 +18,7 @@ import application.utils.logging.event.LogSubscriber;
 
 /**
  * Verifies the SLF4J/JUL → per-profile routing contract that the Node Console
- * depends on (see {@code implementation_plan/gui_signum_binding_and_init_order_v2.md}, D4).
+ * depends on.
  * <p>
  * The {@link SystemLoggerJulHandler} forwards <b>every</b> event to
  * {@link SystemLogger}, but forwards it to the per-profile {@link ProfileLogger}

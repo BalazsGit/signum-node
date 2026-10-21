@@ -45,6 +45,12 @@ class NodeProfileTest {
         }
 
         @Test
+        @DisplayName("returns true for the 'default' reserved profile name (the user-editable L1 layer)")
+        void isReservedProfileName_GivenDefault_ReturnsTrue() {
+            assertTrue(NodeProfileRepository.isReservedProfileName("default"));
+        }
+
+        @Test
         @DisplayName("returns false for user profile ending with '-default' (exact-name matching, not suffix)")
         void isReservedProfileName_GivenCustomDefaultSuffix_ReturnsFalse() {
             assertFalse(NodeProfileRepository.isReservedProfileName("test-node-default"));

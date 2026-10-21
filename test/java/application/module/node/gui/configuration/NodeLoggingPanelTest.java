@@ -237,8 +237,7 @@ class NodeLoggingPanelTest {
         // in the runtime conf (a custom applied marker would be the legitimate selection).
         try {
             String applied = new LoggingProfileRepository().getApplied(ModuleIds.NODE);
-            if (applied != null && !applied.isBlank()
-                    && !LoggingProfileRepository.RESERVED_PROFILE_NAME.equals(applied)) {
+            if (!application.utils.config.ReservedNames.isDefaultMarker(applied)) {
                 return;
             }
         } catch (Exception ignored) {

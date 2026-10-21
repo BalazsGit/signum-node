@@ -22,6 +22,7 @@ import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.FileInputStream;
 
+import application.utils.config.ReservedNames;
 import application.utils.gui.ConfigurationUtils;
 import application.utils.gui.DialogUtils;
 import application.utils.gui.GuiColors;
@@ -558,6 +559,7 @@ public class LoggerConfigurationPanel extends JPanel {
             ConfigurationUtils
                     .fetchProfileNames(loggingConfPath, Signum.DEFAULT_LOGGING_PROPERTIES_NAME + ".properties")
                     .stream()
+                    .filter(name -> !ReservedNames.LOGGING_RESERVED_NAMES.contains(name))
                     .filter(name -> !(name + ".properties").equals(baseFileName))
                     .forEach(profileComboBox::addItem);
 
@@ -639,7 +641,7 @@ public class LoggerConfigurationPanel extends JPanel {
         nameField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             private void validate() {
                 String text = nameField.getText().trim();
-                boolean isReserved = Signum.DEFAULT_LOGGING_PROPERTIES_NAME.equalsIgnoreCase(text);
+                boolean isReserved = ReservedNames.isLoggingReservedName(text.toLowerCase());
                 errorLabel.setVisible(isReserved);
                 saveBtn.setEnabled(!isReserved && !text.isEmpty());
             }
@@ -931,7 +933,7 @@ public class LoggerConfigurationPanel extends JPanel {
             String name = (String) JOptionPane.showInputDialog(this, "Enter new profile name:", "New Profile",
                     JOptionPane.PLAIN_MESSAGE, null, null, "");
             if (name == null || name.trim().isEmpty()
-                    || Signum.DEFAULT_LOGGING_PROPERTIES_NAME.equalsIgnoreCase(name.trim()))
+                    || ReservedNames.isLoggingReservedName(name.trim().toLowerCase()))
                 return;
 
             Path targetFile = getPropertiesPath(name);
@@ -1008,7 +1010,7 @@ public class LoggerConfigurationPanel extends JPanel {
     private void updateProfileButtonStates() {
         String selected = (String) profileComboBox.getSelectedItem();
         boolean isReadOnly = Signum.LOGGING_PROPERTIES_NAME.equals(selected)
-                || Signum.DEFAULT_LOGGING_PROPERTIES_NAME.equals(selected);
+                || ReservedNames.isLoggingReservedName(selected);
         resetToDefaultsBtn.setEnabled(true); // Always enable reset to defaults
         renameProfileBtn.setEnabled(!isReadOnly);
         deleteProfileBtn.setEnabled(!isReadOnly);
@@ -1031,7 +1033,7 @@ public class LoggerConfigurationPanel extends JPanel {
                 oldProfileName);
 
         if (newProfileName == null || newProfileName.trim().isEmpty() || newProfileName.equals(oldProfileName)
-                || Signum.DEFAULT_LOGGING_PROPERTIES_NAME.equalsIgnoreCase(newProfileName.trim())) {
+                || ReservedNames.isLoggingReservedName(newProfileName.trim().toLowerCase())) {
             return; // User cancelled or entered the same name
         }
 
@@ -1075,7 +1077,7 @@ public class LoggerConfigurationPanel extends JPanel {
         if (profileName == null || profileName.trim().isEmpty()) {
             return;
         }
-        if (Signum.DEFAULT_LOGGING_PROPERTIES_NAME.equals(profileName)) {
+        if (ReservedNames.isLoggingReservedName(profileName)) {
             JOptionPane.showMessageDialog(this, "The system profiles cannot be deleted.", "Action Not Allowed",
                     JOptionPane.WARNING_MESSAGE);
             return;

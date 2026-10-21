@@ -130,7 +130,6 @@ public class JdbcConfigurationPanel extends JPanel {
     private final JTextField userField;
     private final JComboBox<DbUser> userCombo;
     private final JPasswordField passField;
-    private final JCheckBox showPass;
     private final JTextField previewField;
 
     // --- Row labels ---
@@ -140,10 +139,8 @@ public class JdbcConfigurationPanel extends JPanel {
     // --- Slot overlays (one visual row, two implementations) ---
     private final JPanel dbSlot;      // "FILE" = dbCombo, "TEXT" = databaseField
     private final JPanel userSlot;    // "FIELD" = userField, "COMBO" = userCombo
-    private final JPanel passSlot;    // passField + showPass
 
     // --- State ---
-    private final char defaultEchoChar;
     private boolean linked = false;
     private int programmaticDepth = 0;
     private String originalUrl = "";
@@ -228,10 +225,10 @@ public class JdbcConfigurationPanel extends JPanel {
         suffixField = new JTextField();
         userField = new JTextField();
         userCombo = new JComboBox<>();
+        // The FlatLaf "reveal password" eye button comes from the global
+        // UIManager setting (GuiManager#applyDefaultsAfterLaf) — no show/hide
+        // checkbox.
         passField = new JPasswordField();
-        defaultEchoChar = passField.getEchoChar();
-        showPass = new JCheckBox("Show Password");
-        showPass.setOpaque(false);
         // The composed-URL preview: selectable/copyable but read-only — a
         // non-editable text field styled exactly like the other rows.
         JTextField preview = new JTextField();
@@ -255,11 +252,6 @@ public class JdbcConfigurationPanel extends JPanel {
 
         dbSlot = slot("FILE", dbCombo, "TEXT", databaseField);
         userSlot = slot("FIELD", userField, "COMBO", userCombo);
-        passSlot = new JPanel(new MigLayout("insets 0, fillx, gap " + ConfigurationUtils.INPUT_ACTION_GAP,
-                "[grow][]"));
-        passSlot.setOpaque(false);
-        passSlot.add(passField, "growx");
-        passSlot.add(showPass);
 
         style(engineCombo);
         style(profileCombo);
@@ -290,7 +282,7 @@ public class JdbcConfigurationPanel extends JPanel {
         addRow(portLabel, portField);
         addRow(suffixLabel, suffixField);
         addRow(userLabel, userSlot);
-        addRow(passLabel, passSlot);
+        addRow(passLabel, passField);
         addRow(label("JDBC URL:"), previewField);
 
         installListeners();
@@ -623,10 +615,6 @@ public class JdbcConfigurationPanel extends JPanel {
             syncPasswordFromUser();
             fireChange();
         });
-
-        showPass.addActionListener(e -> {
-            passField.setEchoChar(showPass.isSelected() ? (char) 0 : defaultEchoChar);
-        });
     }
 
     private void textChanges(JTextField field, Runnable onUserChange) {
@@ -741,8 +729,7 @@ public class JdbcConfigurationPanel extends JPanel {
 
         // Password: server only.
         passLabel.setVisible(server);
-        passSlot.setVisible(server);
-        showPass.setVisible(server);
+        passField.setVisible(server);
 
         revalidate();
         repaint();

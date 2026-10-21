@@ -1,6 +1,7 @@
 package application.utils.logging;
 
 import application.utils.config.PropertiesProfileLoader;
+import application.utils.config.ReservedNames;
 
 import java.nio.file.Path;
 import java.util.Collections;
@@ -50,9 +51,8 @@ public abstract class ModuleLoggingProvider {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ModuleLoggingProvider.class);
 
-    /** Reserved logging profile names excluded from discovery. */
-    private static final java.util.Set<String> RESERVED_LOGGING_NAMES =
-            Collections.singleton("logging-default");
+    /** Reserved logging profile names excluded from discovery (SSOT: {@link ReservedNames}). */
+    private static final java.util.Set<String> RESERVED_LOGGING_NAMES = ReservedNames.LOGGING_RESERVED_NAMES;
 
     // ── Mandatory ─────────────────────────────────────────────────────
 

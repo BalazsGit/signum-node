@@ -41,10 +41,10 @@ class EffectiveProfileResolverTest {
         new TestProvider().register();
         resolver = new EffectiveProfileResolver(tempDir.toString());
 
-        // Reserved default template layer (L1): node module's logging category
+        // User-editable L1 layer: the node module's logging category
         Path l1Dir = tempDir.resolve("node").resolve("logging");
         Files.createDirectories(l1Dir);
-        Files.writeString(l1Dir.resolve("logging-default.properties"), "base.only=ALL\n");
+        Files.writeString(l1Dir.resolve("default.properties"), "base.only=ALL\n");
     }
 
     @AfterEach
@@ -71,7 +71,7 @@ class EffectiveProfileResolverTest {
     @DisplayName("L1 template overrides module defaults (L1 > L0) for the same key")
     void preview_l1BaseOverridesModuleDefaults() throws IOException {
         Path l1Dir = tempDir.resolve("node").resolve("logging");
-        Files.writeString(l1Dir.resolve("logging-default.properties"),
+        Files.writeString(l1Dir.resolve("default.properties"),
                 "base.only=ALL\nresmod.a=CONFIG\n");
 
         List<EffectiveKey> keys = resolver.previewComposition("p");

@@ -137,6 +137,7 @@ class LoggingAssignmentStoreTest {
         Files.writeString(profilesDir.resolve("node.properties"), "n=1\n");
         Files.writeString(profilesDir.resolve("node-default.properties"), "n=1\n");
         Files.writeString(profilesDir.resolve("logging-default.properties"), "n=1\n");
+        Files.writeString(profilesDir.resolve("default.properties"), "n=1\n");
         Files.writeString(profilesDir.resolve("mainnet.properties"), "n=1\n");
         Files.writeString(profilesDir.resolve("testnet.properties"), "n=1\n");
 
@@ -150,6 +151,7 @@ class LoggingAssignmentStoreTest {
         assertTrue(profiles.contains("node"));
         assertFalse(profiles.contains("node-default"));
         assertFalse(profiles.contains("logging-default"));
+        assertFalse(profiles.contains("default"), "the canonical L1 name must be excluded");
     }
 
     @Test
@@ -164,14 +166,14 @@ class LoggingAssignmentStoreTest {
     @DisplayName("resolveEffectiveForModule falls back to the default when the assigned profile is missing")
     void resolveEffectiveForModule_invalidFallsBackToDefault() {
         store.setAssignment("mainnet", Map.of(ModuleIds.NODE, "deleted-profile"));
-        assertEquals("logging-default", store.resolveEffectiveForModule("mainnet", ModuleIds.NODE));
+        assertEquals(LoggingProfileRepository.RESERVED_PROFILE_NAME, store.resolveEffectiveForModule("mainnet", ModuleIds.NODE));
     }
 
     @Test
     @DisplayName("resolveEffectiveForModule falls back to the default when there is no assignment")
     void resolveEffectiveForModule_noAssignmentFallsBackToDefault() {
-        assertEquals("logging-default", store.resolveEffectiveForModule("mainnet", ModuleIds.NODE));
-        assertEquals("logging-default", store.resolveEffectiveForModule("no-such-profile", ModuleIds.NODE));
+        assertEquals(LoggingProfileRepository.RESERVED_PROFILE_NAME, store.resolveEffectiveForModule("mainnet", ModuleIds.NODE));
+        assertEquals(LoggingProfileRepository.RESERVED_PROFILE_NAME, store.resolveEffectiveForModule("no-such-profile", ModuleIds.NODE));
     }
 
     // ── Push change notification ───────────────────────────────────────

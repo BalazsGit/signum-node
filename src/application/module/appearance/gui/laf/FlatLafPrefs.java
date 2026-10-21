@@ -67,6 +67,13 @@ public class FlatLafPrefs {
     public static void setupLaf(String[] args) {
         // com.formdev.flatlaf.demo.intellijthemes.IJThemesDump.install();
 
+        // FlatLaf's built-in "reveal password" button on EVERY JPasswordField
+        // (demo: Appearance → Basic components → JPasswordField). Note: this
+        // method is the FlatLaf DEMO entry point (FlatLafCommon#main); the
+        // application itself enables the button in
+        // GuiManager#applyDefaultsAfterLaf, after the LAF is installed.
+        UIManager.put("PasswordField.showRevealButton", true);
+
         // set look and feel
         try {
             if (args.length > 0)

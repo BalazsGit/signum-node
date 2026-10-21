@@ -6,10 +6,10 @@ import org.slf4j.LoggerFactory;
 import application.module.logging.LoggingAssignmentStore;
 import application.utils.config.ModuleIds;
 import application.utils.config.PropertiesProfileLoader;
+import application.utils.config.ReservedNames;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.Reader;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -261,30 +261,28 @@ public final class NodeProfileRepository {
     }
 
     /**
-     * Creates a new node profile from the {@code node-default.properties} template (default conf root).
+     * Creates a new empty node profile with the given overrides (default conf root).
      */
     public static NodeProfile createDefaultProfile(String profileName, Properties overrides) throws IOException {
         return createDefaultProfile(NodeProfile.CONF_ROOT, profileName, overrides);
     }
 
     /**
-     * Creates a new node profile from the {@code {confRoot}/node/profiles/node-default.properties}
-     * template, applying the given overrides on top.
+     * Creates a new node profile from an <b>empty</b> base, applying the given
+     * overrides on top.
+     * <p>
+     * The historical template load ({@code node-default.properties}) was
+     * removed: that file is the reference-only, fully commented L0
+     * documentation template (synced from classpath resources, never read
+     * at runtime), so the load would have been a no-op. The effective
+     * configuration always comes from the layered L0/L1/L2 model (see
+     * {@link EffectiveNodeProps}).
      *
      * @throws IllegalArgumentException if the name is blank, invalid, reserved, or already exists
-     * @throws IOException              on read/write error
+     * @throws IOException              on write error
      */
     static NodeProfile createDefaultProfile(String confRoot, String profileName, Properties overrides) throws IOException {
-        Path dir = profileDir(confRoot);
-        Path template = dir.resolve(NodeProfile.DEFAULT_PROFILE_FILENAME);
         Properties base = new Properties();
-        if (Files.exists(template)) {
-            try (Reader reader = Files.newBufferedReader(template, StandardCharsets.UTF_8)) {
-                base.load(reader);
-            }
-        } else {
-            LOGGER.warn("Default profile template not found at {}; creating empty base", template);
-        }
         if (overrides != null) {
             for (String key : overrides.stringPropertyNames()) {
                 base.setProperty(key, overrides.getProperty(key));
@@ -525,7 +523,8 @@ public final class NodeProfileRepository {
     }
 
     /**
-     * Full initialization: sync defaults + create placeholders if needed.
+     * Full initialization: sync defaults + ensure the user-owned L1 layer
+     * files + create placeholders if needed.
      * <p>
      * Call this once during application startup, before any profile loading occurs.
      */
@@ -533,5 +532,32 @@ public final class NodeProfileRepository {
         PropertiesProfileLoader.initializeModule(
                 NodeProfile.CONF_ROOT, NodeProfile.MODULE_ID, NodeProfile.RESERVED_PROFILE_NAMES,
                 ModuleIds.NODE, ModuleIds.CATEGORY_LOGGING);
+        ensureUserDefaultFiles();
+    }
+
+    /**
+     * Ensures the user-owned L1 layer files exist:
+     * {@code conf/node/profiles/default.properties} and
+     * {@code conf/node/logging/default.properties}.
+     * <p>
+     * Unlike the SHA-256-synced reference templates, these files are
+     * USER-OWNED: they are created from the classpath resource only when
+     * missing and are never overwritten afterwards — a user edit must
+     * survive application updates. A missing classpath resource is skipped
+     * gracefully. Deleting a file at runtime restores pure L0 defaults; the
+     * next start re-creates it.
+     */
+    public static void ensureUserDefaultFiles() {
+        PropertiesProfileLoader.ensureUserDefaultFile(
+                NodeProfile.CONF_ROOT, NodeProfile.MODULE_ID, NodeProfile.CATEGORY,
+                NodeProfile.DEFAULT_L1_FILENAME,
+                "/conf/" + NodeProfile.MODULE_ID + "/" + NodeProfile.CATEGORY + "/"
+                        + ReservedNames.DEFAULT_PROFILE_NAME + ".properties");
+        PropertiesProfileLoader.ensureUserDefaultFile(
+                NodeProfile.CONF_ROOT, NodeProfile.MODULE_ID,
+                PropertiesProfileLoader.DEFAULT_CATEGORY_LOGGING,
+                ReservedNames.DEFAULT_PROFILE_NAME + ".properties",
+                "/conf/" + NodeProfile.MODULE_ID + "/" + PropertiesProfileLoader.DEFAULT_CATEGORY_LOGGING
+                        + "/" + ReservedNames.DEFAULT_PROFILE_NAME + ".properties");
     }
 }

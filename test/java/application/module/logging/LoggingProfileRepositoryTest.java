@@ -70,9 +70,11 @@ class LoggingProfileRepositoryTest {
         assertEquals(2, loaded.size(), "exactly the seeded entries are written");
     }
 
-    @DisplayName("create refuses the reserved name")
+    @DisplayName("create refuses the reserved names")
     void create_reservedName_rejected() {
         assertThrows(IllegalArgumentException.class, () -> repo.create(MODULE, "logging-default", (java.util.Properties) null));
+        assertThrows(IllegalArgumentException.class, () -> repo.create(MODULE, "default", (java.util.Properties) null),
+                "the canonical L1 name must be reserved as well");
     }
 
     @Test
@@ -83,16 +85,18 @@ class LoggingProfileRepositoryTest {
     }
 
     @Test
-    @DisplayName("listProfiles excludes the reserved default even if present on disk")
+    @DisplayName("listProfiles excludes the reserved names even if present on disk")
     void listProfiles_excludesReserved() throws IOException {
         Path dir = repo.getLoggingDir(MODULE);
         Files.createDirectories(dir);
         Files.writeString(dir.resolve("logging-default.properties"), "node.level=INFO\n");
+        Files.writeString(dir.resolve("default.properties"), "node.level=INFO\n");
         Files.writeString(dir.resolve("alpha.properties"), "node.level=INFO\n");
 
         List<String> names = repo.listProfiles(MODULE);
         assertTrue(names.contains("alpha"));
         assertFalse(names.contains("logging-default"));
+        assertFalse(names.contains("default"), "the canonical L1 name must be excluded");
     }
 
     @Test
