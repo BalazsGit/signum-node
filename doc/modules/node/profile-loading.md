@@ -24,6 +24,7 @@ NodeProfile (Config Entity) ──composition──► NodeProfileRuntime (State
 - [Properties Profile Loader](#properties-profile-loader)
 - [Scope Distinction](#scope-distinction)
 - [Configuration Resolution Flow](#configuration-resolution-flow)
+- [Configuration Layer Model (L0/L1/L2)](#configuration-layer-model-l0-l1-l2)
 - [Node Profile Discovery](#node-profile-discovery)
 - [Logging Profile Loading](#logging-profile-loading)
 - [Default File Synchronization](#default-file-synchronization)
@@ -62,12 +63,21 @@ All module configurations follow a standardized path schema:
 ./conf/
 └── node/
     ├── profiles/                              ← Node profile configurations
-    │   ├── node-default.properties            ← Default template (L1, synced from resources)
-    │   ├── mainnet.properties                 ← User profile: "mainnet"
-    │   └── testnet.properties                 ← User profile: "testnet"
+    │   ├── default.properties                 ← Runtime L1: user-editable per-key
+    │   │                                        overrides (reserved name, auto-created
+    │   │                                        at first start, never synced, not
+    │   │                                        GUI-editable)
+    │   ├── node-default.properties            ← Reference template (L0 documentation,
+    │   │                                        read-only, SHA-256 synced from resources)
+    │   ├── mainnet.properties                 ← User profile: "mainnet" (L2)
+    │   └── testnet.properties                 ← User profile: "testnet" (L2)
     │
     └── logging/                               ← Logging preset configurations
-        ├── logging-default.properties         ← Default template (synced from resources via SHA-256)
+        ├── default.properties                 ← Runtime L1: user-editable overrides for
+        │                                        every logging profile (reserved name,
+        │                                        auto-created, never synced)
+        ├── logging-default.properties         ← Reference template (L0 documentation,
+        │                                        read-only, SHA-256 synced from resources)
         ├── minimal.properties
         ├── standard.properties
         └── verbose.properties
@@ -143,12 +153,46 @@ sequenceDiagram
 
 ### Reserved Profile Names
 
-The following profile names are **excluded** from discovery:
+The following profile names are **excluded** from discovery (SSOT:
+`NodeProfile.RESERVED_PROFILE_NAMES`, `ModuleLoggingProvider`,
+`LoggingProfileRepository`):
 
 | Name | Purpose |
 |------|---------|
-| `node-default` | Default property values (L1 template, not a runnable profile) |
-| `logging-default` | Default logging configuration template |
+| `default` | **Runtime L1 layer** — the user-editable per-key override file (`default.properties`); auto-created at first start, reserved (not a runnable profile, not GUI-editable) |
+| `node-default` | Reference template documenting the node module's L0 defaults (read-only, SHA-256 synced from classpath resources) |
+| `logging-default` | Reference template documenting the L0 logging defaults (read-only, SHA-256 synced from classpath resources) |
+
+### Configuration Layer Model (L0 / L1 / L2)
+
+Per key, the highest layer wins:
+
+| Layer | Node profiles | Logging |
+|-------|--------------|---------|
+| **L0** (hardcoded) | `node.props.Props` | `NodeLoggingProfile.getDefaults()` / `LoggerProfile.applyInternalDefaults()` |
+| **L1** (cross-profile overrides) | `conf/node/profiles/default.properties` | `conf/node/logging/default.properties` |
+| **L2** (per-profile) | `conf/node/profiles/{name}.properties` | `conf/node/logging/{profile}.properties` (+ the shared `logging.properties`) |
+
+- **L1 is user-editable and file-only**: the GUI never lists `default` (the
+  virtual **Default** entry of the logging UI is the built-in L0 baseline, not
+  this file). The file is auto-created at first start when missing (header +
+  fully commented L0 documentation), is **never overwritten** by the classpath
+  sync, and may be deleted at any time — the configuration then degrades to L0
+  and the file is re-created on the next start.
+- **The templates are reference-only**: `node-default.properties` and
+  `logging-default.properties` ship fully commented, stay up to date via the
+  SHA-256 sync, and are **not read at runtime**.
+- Loading SSOTs: node — `EffectiveNodeProps` (runtime: `Signum.loadPropertiesForProfile`;
+  GUI baselines: `EffectiveNodeProps.baselineValue`); logging —
+  `ConfigurationUtils.loadEffectiveLoggerProfile` (shared `logging` profile),
+  `NodeLoggingApplier.resolveLevel` (per-node `node.level`),
+  `LoggingProfileManager` + `EffectiveProfileResolver` (preview composition) —
+  all resolve L1 to `default.properties`.
+
+> **Implementation status:** the `default.properties` L1 layer landed as
+> **F7** (2026-10-20) —
+> [`implementation_plan/unified_defaults_layers_plan.md`](../../implementation_plan/unified_defaults_layers_plan.md)
+> (§3, decisions D1–D5).
 
 ---
 
@@ -168,8 +212,9 @@ The following profile names are **excluded** from discovery:
 
 ```
 resources/conf/
-├── node/logging/logging-default.properties    ← Default logging levels for node module
-├── database/logging/logging-default.properties ← Default logging levels for database module
+├── node/logging/default.properties            ← L1 auto-create seed (header + comments, 0 active lines)
+├── node/logging/logging-default.properties    ← Reference template (L0 documentation) for node module
+├── database/logging/logging-default.properties ← Reference template for database module
 └── system/logging/logging-default.properties   ← System-level defaults
 ```
 
@@ -179,7 +224,14 @@ resources/conf/
 
 ### SHA-256 Hash-Based Sync
 
-Default files (`profile-default.properties`, `logging-default.properties`) are automatically synchronized from classpath resources to the runtime `./conf/` directory:
+The **reference templates** (`node-default.properties`, `logging-default.properties`)
+are automatically synchronized from classpath resources to the runtime `./conf/`
+directory — they are read-only L0 documentation, so overwriting them is safe:
+
+> The **runtime L1 files** (`default.properties` in `profiles/` and `logging/`)
+> are **exempt from the sync**: they are user-owned, created once at first start
+> when missing (auto-create), and never overwritten afterwards — a user edit to
+> an L1 file always survives an application update.
 
 | Condition | Action |
 |-----------|--------|
@@ -326,8 +378,18 @@ graph TD
 ### Default File Not Updating?
 
 1. **Check classpath resource**: Verify `/conf/node/profiles/node-default.properties` exists in JAR
-2. **Check hash comparison**: Default files are only overwritten when SHA-256 hash differs
-3. **Manual override**: Delete the runtime file to force re-sync on next startup
+2. **Check hash comparison**: Reference templates are only overwritten when SHA-256 hash differs
+3. **Manual re-sync**: Delete the runtime template file to force re-sync on next startup
+4. **`default.properties` (runtime L1) is exempt**: it is user-owned — never re-synced
+   and never reset by an update; delete it to restore pure L0 defaults (it is
+   re-created empty on the next start)
+
+### L1 (`default.properties`) Changes Have No Effect?
+
+1. **Restart required**: L1 is read at startup (node: per profile load; logging: at
+   `LogManager` reconfiguration / node restart)
+2. **Key must have an L0 counterpart**: unknown keys cannot override anything
+3. **L2 wins per key**: a key set in the profile's own file (L2) overrides L1
 
 ---
 

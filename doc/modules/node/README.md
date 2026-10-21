@@ -11,10 +11,10 @@ Node configuration is loaded per key, the highest layer wins:
 L0: Hardcoded defaults
         Props.java (Prop.getDefaultValue) — never materialized to disk
 
-L1: Reserved default template
-        conf/node/profiles/node-default.properties
-        ships fully commented (documents L0); an active line overrides L0
-        for EVERY profile
+L1: User-editable layer (F7)
+        conf/node/profiles/default.properties
+        auto-created at first start, never overwritten by the classpath sync;
+        an active line overrides L0 for EVERY profile
 
 L2: Profile file (GUI-editable)
         conf/node/profiles/{profileName}.properties
@@ -31,8 +31,8 @@ Both template and profile files are optional — deleting any layer degrades
 gracefully to the layers below (worst case: pure L0).
 
 Logging configuration follows the same model: hardcoded logging defaults (L0,
-`NodeLoggingProfile.getDefaults`) ← `conf/node/logging/logging-default.properties`
-(L1, ships fully commented) ← the logging profile file (L2). The merge lives in
+`NodeLoggingProfile.getDefaults`) ← `conf/node/logging/default.properties`
+(L1, user-editable, F7) ← the logging profile file (L2). The merge lives in
 `ConfigurationUtils.loadEffectiveLoggerProfile`; the read-only "effective view"
 composition is `EffectiveProfileResolver` + `LoggingProfileManager`.
 
