@@ -11,6 +11,7 @@ Run:
 
 | Gate | Test class | Question |
 |------|------------|----------|
+| (1)+(2) | `SpikeQ0TwoContextIsolationTest` | two contexts with the SAME logger name: independent levels + independent reconfigure? |
 | Q1 | `SpikeQ1DefaultContextContractTest` | Do null-name and FQCN lookups converge? Does a P1-style single-context selector force convergence? |
 | Q2a | `SpikeQ2aContextFromPropertiesTest` | named `LoggerContext` from generated .properties + `start()` applies the config? |
 | Q2b | `SpikeQ2bReconfigureTest` | existing logger instances reflect the new level after `reconfigure()`? (hot reapply, GUI) |
