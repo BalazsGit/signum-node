@@ -94,8 +94,13 @@ public final class NodeLoggingContextApplier {
         final NodeLoggingConfigResolver.Resolved resolved = NodeLoggingConfigResolver.resolve(
                 new NodeLoggingConfigResolver.Layers(loadL0Node(), loadL0Global(), loadL1(root), l2),
                 defaultFileLogDir(root));
-        // [0]=global file, [1]=node file
-        final Path nodeFile = NodeLoggingConfigWriter.write(root, profileName, resolved)[1];
+        // The node pipeline writes ONLY its own generated node file (P2.4):
+        // the global generated file belongs to the global context and is
+        // written exclusively by the global Apply pipeline
+        // (GlobalLoggingApplier) — one node's L2 must never leak into the
+        // JVM-wide global file, and parallel node/global Applies must not
+        // fight over the same file (Windows file locks, plan T17).
+        final Path nodeFile = NodeLoggingConfigWriter.writeNode(root, profileName, resolved);
         final URI uri = nodeFile.toUri();
 
         final NodeLoggingContext ctx = manager.getOrCreate(profileName, uri);
@@ -113,6 +118,21 @@ public final class NodeLoggingContextApplier {
     }
 
     // ── Layer loaders (plan §8) ────────────────────────────────────────
+
+    /**
+     * Loads the four configuration layers for the given node profile
+     * (plan §8) from the same sources the Apply pipeline uses — exposed so
+     * the global Apply pipeline ({@code GlobalLoggingApplier}) resolves from
+     * exactly the same layer files.
+     *
+     * @return the loaded layers (never null; missing files pass as empty)
+     */
+    public static NodeLoggingConfigResolver.Layers loadLayers(Path confRoot, String profileName) {
+        final Properties l2 = new Properties();
+        loadL2(confRoot.toAbsolutePath(), profileName, l2);
+        return new NodeLoggingConfigResolver.Layers(
+                loadL0Node(), loadL0Global(), loadL1(confRoot.toAbsolutePath()), l2);
+    }
 
     /** L0-node: the node module's built-in defaults (empty until the provider registers). */
     static Properties loadL0Node() {
@@ -144,10 +164,14 @@ public final class NodeLoggingContextApplier {
 
     /**
      * L2: the node profile's assigned logging profile for the node module
-     * (missing/blank assignment → empty layer; the reserved fallback is the
-     * assignment store's own contract).
+     * (null/blank profile — global-only resolution — or a missing/blank
+     * assignment → empty layer; the reserved fallback is the assignment
+     * store's own contract).
      */
     static void loadL2(Path confRoot, String profileName, Properties target) {
+        if (profileName == null || profileName.isBlank()) {
+            return;
+        }
         final String effective = new LoggingAssignmentStore(confRoot.toString())
                 .resolveEffectiveForModule(profileName, ModuleIds.NODE);
         if (effective == null || effective.isBlank()) {
@@ -164,7 +188,7 @@ public final class NodeLoggingContextApplier {
      * The default node log file directory ({@code {confRoot}/logs/node}),
      * absolute, as the resolver expects.
      */
-    static String defaultFileLogDir(Path confRoot) {
+    public static String defaultFileLogDir(Path confRoot) {
         return confRoot.toAbsolutePath().resolve("logs").resolve("node").toString();
     }
 

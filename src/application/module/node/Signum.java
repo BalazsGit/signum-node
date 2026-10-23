@@ -293,13 +293,14 @@ public final class Signum {
     private static final Logger LOGGER = LoggerFactory.getLogger(Signum.class);
 
     /**
-     * JVM-wide registry of the nodes' isolated Log4j2 contexts (per-node isolated
-     * LoggerContext plan §6.3): every Signum instance of this JVM shares it; it is
-     * keyed by the node profile name (NodeModule contract: at most one running node
-     * per profile).
+     * The ONE JVM-wide registry of the nodes' isolated Log4j2 contexts (per-node
+     * isolated LoggerContext plan §6.3/§11.1): every Signum instance of this JVM
+     * and the NodeLoggingApplier share it (see
+     * {@link NodeLoggingContextManager#shared()}); keyed by the node profile name
+     * (NodeModule contract: at most one running node per profile).
      */
     private static final NodeLoggingContextManager NODE_LOGGING_CONTEXT_MANAGER =
-            NodeLoggingContextManager.ofCurrentFactory();
+            NodeLoggingContextManager.shared();
 
     // ── Isolated node LoggerContext (per-node isolated LoggerContext plan, P2.3) ──
 
@@ -1294,15 +1295,11 @@ public final class Signum {
         // identically.)
         this.profileLogger = application.utils.logging.NodeLoggerRegistry.getOrCreate(ModuleIds.NODE, profileName);
 
-        // ── Step 1.5: apply the per-node logging level (from conf/node/profiles.json) ──
-        // Defensively apply the per-node/per-module logging level assigned to this node profile.
-        // An invalid or missing assignment (e.g. the linked profile was deleted) falls back to
-        // the module's hardcoded default. Never breaks node startup.
-        try {
-            application.module.logging.NodeLoggingApplier.applyForNodeProfile(profileName, ModuleIds.NODE);
-        } catch (Throwable t) {
-            System.err.println("Failed to apply per-node logging level for profile '" + profileName + "': " + t.getMessage());
-        }
+        // ── Step 1.5 (P2.4): REMOVED — the legacy bus-minLevel write for the node
+        // module is replaced by the isolated-context apply of step 1.7 below
+        // (NodeLoggingContextApplier): the node context's configuration is the
+        // single level gate for node-context events, and the legacy (JUL-routed)
+        // events stay gated by their own JUL levels (LoggerConfigurator).
 
         // ── Step 1.6: attach the per-node file log appender (per-node file logging) ──
         // Writes this node's log events at/above the configured level to

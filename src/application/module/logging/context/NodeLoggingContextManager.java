@@ -55,6 +55,23 @@ public final class NodeLoggingContextManager {
     }
 
     /**
+     * The ONE JVM-wide shared manager (early-initialized, plan §11.1).
+     * <p>
+     * Every owner of node contexts — {@code Signum} (constructor/start/stop/
+     * dispose) and {@code application.module.logging.NodeLoggingApplier}
+     * (CLI/GUI Apply routing) — MUST use this instance, so a profile's context
+     * is found by all of them. A per-caller {@link #ofCurrentFactory()}
+     * instance would keep its own map and would create duplicate contexts for
+     * the same profile name.
+     * </p>
+     */
+    public static NodeLoggingContextManager shared() {
+        return SHARED;
+    }
+
+    private static final NodeLoggingContextManager SHARED = ofCurrentFactory();
+
+    /**
      * Returns the context of the profile, creating and starting it from the
      * given generated config file when it does not exist yet. Idempotent under
      * the manager lock (parallel starts of the same profile share one context).

@@ -29,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class NodeLoggingApplierTest {
 
     private static final String MODULE = "node";
+    private static final String MODULE_DB = "database";
     private static final String PROFILE = "mainnet";
 
     @TempDir
@@ -38,6 +39,7 @@ class NodeLoggingApplierTest {
     void setUp() {
         LoggingModuleRegistry.getInstance().clear();
         new TestProvider().register();
+        new DbProvider().register();
     }
 
     @AfterEach
@@ -45,23 +47,13 @@ class NodeLoggingApplierTest {
         LoggingModuleRegistry.getInstance().clear();
         NodeLoggerRegistry.unregister(MODULE, PROFILE);
         NodeLoggerRegistry.unregister(MODULE, "other");
+        NodeLoggerRegistry.unregister(MODULE_DB, PROFILE);
+        NodeLoggerRegistry.unregister(MODULE_DB, "other");
     }
 
     @Test
-    @DisplayName("falls back to the module default level when the assigned profile is missing")
-    void applyForNodeProfile_fallbackToDefault() {
-        new LoggingAssignmentStore(tempDir.toString())
-                .setAssignment(PROFILE, Map.of(MODULE, "nonexistent-profile"));
-
-        NodeLoggingApplier.applyForNodeProfile(tempDir.toString(), PROFILE, MODULE);
-
-        ProfileLogger logger = NodeLoggerRegistry.get(MODULE, PROFILE);
-        assertEquals(LogLevel.INFO, logger.getLogLevel(), "missing profile falls back to default (node.level=INFO)");
-    }
-
-    @Test
-    @DisplayName("an on-disk profile's level wins over the default")
-    void applyForNodeProfile_onDiskWins() throws IOException {
+    @DisplayName("P2.4: the node module is applied through the isolated context — with no live node it is a defensive no-op")
+    void applyForNodeProfile_nodeModule_withoutLiveNode_isDefensiveNoOp() throws IOException {
         LoggingProfileRepository repo = new LoggingProfileRepository(tempDir.toString());
         java.util.Properties props = new java.util.Properties();
         props.setProperty("node.level", "SEVERE");
@@ -70,29 +62,64 @@ class NodeLoggingApplierTest {
         new LoggingAssignmentStore(tempDir.toString())
                 .setAssignment(PROFILE, Map.of(MODULE, "custom"));
 
+        // Capture the bus state BEFORE: the P2.4 routing must not touch the
+        // legacy bus at all (the context's config is the single level gate).
+        ProfileLogger logger = NodeLoggerRegistry.getOrCreate(MODULE, PROFILE);
+        LogLevel levelBefore = logger.getLogLevel();
+
         NodeLoggingApplier.applyForNodeProfile(tempDir.toString(), PROFILE, MODULE);
 
-        ProfileLogger logger = NodeLoggerRegistry.get(MODULE, PROFILE);
-        assertEquals(LogLevel.ERROR, logger.getLogLevel(), "on-disk node.level=SEVERE → ERROR");
+        assertEquals(levelBefore, logger.getLogLevel(),
+                "without a live Signum instance the node module apply must not write the legacy bus level");
+        assertFalse(Files.exists(repo.getLoggingDir(MODULE).resolve("applied")),
+                "per-node application must not create shared applied snapshot files");
     }
 
     @Test
-    @DisplayName("applying a per-node logger level does not write a shared profile snapshot")
+    @DisplayName("legacy path: a non-node module still falls back to its module default level when the assigned profile is missing")
+    void applyForNodeProfile_fallbackToDefault() {
+        new LoggingAssignmentStore(tempDir.toString())
+                .setAssignment(PROFILE, Map.of(MODULE_DB, "nonexistent-profile"));
+
+        NodeLoggingApplier.applyForNodeProfile(tempDir.toString(), PROFILE, MODULE_DB);
+
+        ProfileLogger logger = NodeLoggerRegistry.get(MODULE_DB, PROFILE);
+        assertEquals(LogLevel.INFO, logger.getLogLevel(), "missing profile falls back to default (database.level=INFO)");
+    }
+
+    @Test
+    @DisplayName("legacy path: a non-node module's on-disk profile level wins over the default")
+    void applyForNodeProfile_onDiskWins() throws IOException {
+        LoggingProfileRepository repo = new LoggingProfileRepository(tempDir.toString());
+        java.util.Properties props = new java.util.Properties();
+        props.setProperty("database.level", "SEVERE");
+        repo.saveProps(MODULE_DB, "custom", props);
+
+        new LoggingAssignmentStore(tempDir.toString())
+                .setAssignment(PROFILE, Map.of(MODULE_DB, "custom"));
+
+        NodeLoggingApplier.applyForNodeProfile(tempDir.toString(), PROFILE, MODULE_DB);
+
+        ProfileLogger logger = NodeLoggerRegistry.get(MODULE_DB, PROFILE);
+        assertEquals(LogLevel.ERROR, logger.getLogLevel(), "on-disk database.level=SEVERE → ERROR");
+    }
+
+    @Test
+    @DisplayName("legacy path: applying a per-node logger level does not write a shared profile snapshot")
     void applyForNodeProfile_doesNotPersistSharedSnapshot() throws IOException {
         LoggingProfileRepository repo = new LoggingProfileRepository(tempDir.toString());
         java.util.Properties props = new java.util.Properties();
-        props.setProperty("node.level", "WARNING");
-        props.setProperty("node.handler", "java.util.logging.FileHandler");
-        repo.saveProps(MODULE, "custom", props);
+        props.setProperty("database.level", "WARNING");
+        repo.saveProps(MODULE_DB, "custom", props);
 
         new LoggingAssignmentStore(tempDir.toString())
-                .setAssignment(PROFILE, Map.of(MODULE, "custom"));
+                .setAssignment(PROFILE, Map.of(MODULE_DB, "custom"));
 
-        NodeLoggingApplier.applyForNodeProfile(tempDir.toString(), PROFILE, MODULE);
+        NodeLoggingApplier.applyForNodeProfile(tempDir.toString(), PROFILE, MODULE_DB);
 
-        assertEquals(LogLevel.WARN, NodeLoggerRegistry.get(MODULE, PROFILE).getLogLevel(),
-                "the assigned node.level is still applied to its profile logger");
-        assertFalse(Files.exists(repo.getLoggingDir(MODULE).resolve("applied")),
+        assertEquals(LogLevel.WARN, NodeLoggerRegistry.get(MODULE_DB, PROFILE).getLogLevel(),
+                "the assigned database.level is still applied to its profile logger");
+        assertFalse(Files.exists(repo.getLoggingDir(MODULE_DB).resolve("applied")),
                 "per-node application must not create shared applied snapshot files");
     }
 
@@ -159,25 +186,25 @@ class NodeLoggingApplierTest {
     }
 
     @Test
-    @DisplayName("different node profiles get different levels (multi-node isolation)")
+    @DisplayName("legacy path: different node profiles get different levels (multi-node isolation)")
     void applyForNodeProfile_perProfileIsolation() throws IOException {
         LoggingProfileRepository repo = new LoggingProfileRepository(tempDir.toString());
         java.util.Properties loud = new java.util.Properties();
-        loud.setProperty("node.level", "FINE");
-        repo.saveProps(MODULE, "loud", loud);
+        loud.setProperty("database.level", "FINE");
+        repo.saveProps(MODULE_DB, "loud", loud);
         java.util.Properties quiet = new java.util.Properties();
-        quiet.setProperty("node.level", "WARNING");
-        repo.saveProps(MODULE, "quiet", quiet);
+        quiet.setProperty("database.level", "WARNING");
+        repo.saveProps(MODULE_DB, "quiet", quiet);
 
         LoggingAssignmentStore store = new LoggingAssignmentStore(tempDir.toString());
-        store.setAssignment("mainnet", Map.of(MODULE, "loud"));    // FINE → DEBUG
-        store.setAssignment("other", Map.of(MODULE, "quiet"));     // WARNING → WARN
+        store.setAssignment("mainnet", Map.of(MODULE_DB, "loud"));    // FINE → DEBUG
+        store.setAssignment("other", Map.of(MODULE_DB, "quiet"));     // WARNING → WARN
 
-        NodeLoggingApplier.applyForNodeProfile(tempDir.toString(), "mainnet", MODULE);
-        NodeLoggingApplier.applyForNodeProfile(tempDir.toString(), "other", MODULE);
+        NodeLoggingApplier.applyForNodeProfile(tempDir.toString(), "mainnet", MODULE_DB);
+        NodeLoggingApplier.applyForNodeProfile(tempDir.toString(), "other", MODULE_DB);
 
-        assertEquals(LogLevel.DEBUG, NodeLoggerRegistry.get(MODULE, "mainnet").getLogLevel());
-        assertEquals(LogLevel.WARN, NodeLoggerRegistry.get(MODULE, "other").getLogLevel());
+        assertEquals(LogLevel.DEBUG, NodeLoggerRegistry.get(MODULE_DB, "mainnet").getLogLevel());
+        assertEquals(LogLevel.WARN, NodeLoggerRegistry.get(MODULE_DB, "other").getLogLevel());
     }
 
     // ── Test fixtures ──────────────────────────────────────────────────
@@ -206,6 +233,38 @@ class NodeLoggingApplierTest {
 
     static final class TestProvider extends ModuleLoggingProvider {
         private final ModuleLoggingProfile profile = new TestProfile();
+
+        @Override
+        public ModuleLoggingProfile getProfile() {
+            return profile;
+        }
+    }
+
+    /** The legacy (un-migrated) module path keeps its own provider + defaults. */
+    static final class DbProfile extends ModuleLoggingProfile {
+        @Override
+        public String getModuleId() {
+            return MODULE_DB;
+        }
+
+        @Override
+        public String getDisplayName() {
+            return "Test Database";
+        }
+
+        @Override
+        public String getDescription() {
+            return "Test";
+        }
+
+        @Override
+        public Map<String, String> getDefaults() {
+            return Map.of("database.level", "INFO");
+        }
+    }
+
+    static final class DbProvider extends ModuleLoggingProvider {
+        private final ModuleLoggingProfile profile = new DbProfile();
 
         @Override
         public ModuleLoggingProfile getProfile() {

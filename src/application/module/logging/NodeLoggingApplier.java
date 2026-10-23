@@ -1,5 +1,8 @@
 package application.module.logging;
 
+import application.module.node.NodeModule;
+import application.module.node.Signum;
+import application.utils.config.ModuleIds;
 import application.utils.config.PropertiesProfileLoader;
 import application.utils.logging.LoggingModuleRegistry;
 import application.utils.logging.ModuleLoggingProvider;
@@ -67,6 +70,28 @@ public final class NodeLoggingApplier {
      */
     public static void applyForNodeProfile(String confRoot, String nodeProfile, String moduleId) {
         if (nodeProfile == null || nodeProfile.isBlank() || moduleId == null || moduleId.isBlank()) {
+            return;
+        }
+        // P2.4: the node module is applied through the ISOLATED node LoggerContext
+        // (resolve L0/L1/L2 → generated file → same-context reconfigure +
+        // GUI-bridge re-attach) — no longer through the legacy bus-minLevel
+        // write, because the context's configuration is the single level gate
+        // for node-context events (plan §9.1/§9.2A).
+        if (ModuleIds.NODE.equals(moduleId)) {
+            try {
+                Signum node = NodeModule.getInstance().get(nodeProfile);
+                if (node == null) {
+                    // No live Signum instance: nothing to apply to right now —
+                    // the next start() runs the full apply (doInitialize step 1.7).
+                    LOGGER.debug("No live Signum instance for node profile '{}' — "
+                            + "the logging configuration takes effect at the next start", nodeProfile);
+                    return;
+                }
+                node.applyNodeLoggingConfiguration();
+            } catch (Throwable t) {
+                LOGGER.warn("Failed to apply the node logging context for profile '{}': {}",
+                        nodeProfile, t.getMessage());
+            }
             return;
         }
         try {

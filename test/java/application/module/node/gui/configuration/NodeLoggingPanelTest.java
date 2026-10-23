@@ -479,7 +479,7 @@ class NodeLoggingPanelTest {
     }
 
     @Test
-    @DisplayName("the node Apply tooltip states link + saved values applied + node restart (module wording replaced)")
+    @DisplayName("the node Apply tooltip states link + saved values applied + live apply without restart (P2.4)")
     void applyTooltipStatesNodeScope() {
         NodeLoggingPanel panel = newPanel();
         JButton apply = findButtonByTooltip(panel, "Apply<br>");
@@ -489,8 +489,12 @@ class NodeLoggingPanelTest {
                 "the tooltip opens with the node-scoped link-to-the-node statement");
         assertTrue(tooltip.contains("applies its saved values to the node"),
                 "the tooltip states that the profile's saved values are applied to the node");
-        assertTrue(tooltip.contains("Applying restarts the node so the saved changes take effect"),
-                "the tooltip states that applying restarts the node for the saved changes to take effect");
+        assertTrue(tooltip.contains("A running node applies the change immediately (no restart)"),
+                "the tooltip states that a running node applies the change live (P2.4: no restart)");
+        assertTrue(tooltip.contains("a stopped node picks it up at the next start"),
+                "the tooltip states when a stopped node picks the change up");
+        assertFalse(tooltip.contains("restarts the node"),
+                "the P2.4 tooltip no longer promises a restart");
         assertFalse(tooltip.contains("Marks the selected profile as applied"),
                 "the module-scoped wording is replaced on the node tab");
         assertFalse(tooltip.contains("module's applied reference"),

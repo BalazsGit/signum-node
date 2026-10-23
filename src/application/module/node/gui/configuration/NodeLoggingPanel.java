@@ -27,7 +27,8 @@ import java.util.function.Supplier;
  * <p>Owns ONLY the node concerns and delegates all generic logging-profile editing to the core
  * (including the live row search and the "Show values" logging row-state filter —
  * both core features of the {@link ModuleLoggingProfilePanel}): the File Handler rows, the
- * apply→restart hook, the optional "link to node profile" control and the node help text.
+ * apply→live-reconfigure hook (P2.4: no restart), the optional "link to node profile"
+ * control and the node help text.
  * All storage goes through the shared
  * {@code LoggingProfileRepository} (module {@code node}) at {@code ./conf/node/logging/}, exactly
  * where the legacy {@code LoggerConfigurationPanel} stored profiles.</p>
@@ -80,8 +81,9 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
             + "<br><br>"
             + "<b>Apply</b> records this profile as the active logging profile for <i>this</i> node profile "
             + "(any unsaved changes are saved to the profile first). Pressing <b>Yes</b> in the confirmation "
-            + "dialog restarts the node for the change to take effect (the node is not started if it was not "
-            + "running; a paused node is restored to the paused state after the restart). The assignment is "
+            + "dialog applies the change to the running node <b>without a restart</b> (the node's logging "
+            + "configuration is reconfigured in place). The node is not started if it was not "
+            + "running — the change takes effect at the next start. The assignment is "
             + "specific to this node profile — other node profiles keep their own assignment, and a newly "
             + "created node profile inherits the module's currently applied logging profile (or the built-in "
             + "'Default' profile while 'Default' is the applied one) as its default assignment."
@@ -95,7 +97,7 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
      * module profile as applied (no per-node assignment is recorded).
      * </p>
      *
-     * @param applyAction invoked (EDT) after a profile is applied, to restart the node; may be null
+     * @param applyAction invoked (EDT) after a profile is applied, to apply the logging live (no restart); may be null
      */
     public NodeLoggingPanel(Runnable applyAction) {
         this(null, applyAction, null, null, null);
@@ -106,7 +108,7 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
      * action (the {@code NodeProfilePanel} "Logging" tab has no link control).
      *
      * @param nodeProfileName the node profile this tab belongs to (for the per-node assignment)
-     * @param applyAction     invoked (EDT) after a profile is applied, to restart the node; may be null
+     * @param applyAction     invoked (EDT) after a profile is applied, to apply the logging live (no restart); may be null
      */
     public NodeLoggingPanel(String nodeProfileName, Runnable applyAction) {
         this(nodeProfileName, applyAction, null, null, null);
@@ -116,7 +118,7 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
      * Creates the node logging tab with an optional "link to node profile" control,
      * without binding a node profile for per-node assignment.
      *
-     * @param applyAction               invoked after Apply to restart the node; may be null
+     * @param applyAction               invoked after Apply to apply the logging live (no restart); may be null
      * @param onLinkAction              invoked when the user picks a linked node profile; null to disable linking
      * @param activeNodeProfileSupplier current node profile name (for the link control); null to disable linking
      * @param linkedProfileSupplier     last selected linked profile (for the link control); null to disable linking
@@ -133,7 +135,7 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
      *
      * @param nodeProfileName           the node profile this tab belongs to (for the per-node
      *                                  assignment SSOT); null to skip recording the assignment
-     * @param applyAction               invoked after Apply to restart the node; may be null
+     * @param applyAction               invoked after Apply to apply the logging live (no restart); may be null
      * @param onLinkAction              invoked when the user picks a linked node profile; null to disable linking
      * @param activeNodeProfileSupplier current node profile name (for the link control); null to disable linking
      * @param linkedProfileSupplier     last selected linked profile (for the link control); null to disable linking
@@ -163,7 +165,8 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
         addExtraField("java.util.logging.FileHandler.limit",   "File Size Limit (bytes)", "5000000");
         addExtraField("java.util.logging.FileHandler.count",   "File Count",            "1");
 
-        // Apply → record the per-node assignment (SSOT) then restart the node.
+        // Apply → record the per-node assignment (SSOT) then apply it LIVE to the
+        // running node (P2.4: no restart — the node context is reconfigured in place).
         // (The core already persisted the shared module marker and showed the confirmation.)
         if (applyAction != null) {
             // The confirmation dialog must name the NODE PROFILE (not the module) and state
@@ -172,18 +175,21 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
             setApplyConfirmationProvider((profileName, isDefault) -> nodeApplyMessage(profileName, isDefault));
             setApplyHook(name -> {
                 persistPerNodeAssignment(name);
-                LOGGER.info("Node logging profile '{}' applied for node profile '{}' — restarting node",
+                LOGGER.info("Node logging profile '{}' applied for node profile '{}' — applying live (no restart)",
                         name, nodeProfileName);
                 applyAction.run();
             });
         }
 
         // Node-scoped Apply tooltip: this tab LINKS the profile to the node profile
-        // (the per-node assignment), applies the profile's SAVED values and restarts
-        // the node so they take effect — it does not set the module's applied reference,
-        // so the core's module-centric hover text is misleading here.
+        // (the per-node assignment) and applies the profile's SAVED values — a running
+        // node picks the changes up immediately (its logging context is reconfigured
+        // in place, no restart); a stopped node is not started and picks them up at its
+        // next start. It does not set the module's applied reference, so the core's
+        // module-centric hover text is misleading here.
         setApplyButtonTooltip(ConfigurationUtils.profileTooltip("Apply<br><br>Links the selected logging profile to this node profile and applies "
-                + "its saved values to the node. Applying restarts the node so the saved changes take effect."));
+                + "its saved values to the node. A running node applies the change immediately (no restart); "
+                + "a stopped node picks it up at the next start."));
 
         // Optional "link to node profile" control.
         if (onLinkAction != null) {
@@ -229,10 +235,10 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
 
     /**
      * The node-tab Apply confirmation message — the short form: it asks for confirmation
-     * naming the profile and the target node profile, then states the restart outcome
-     * (a running node restarts so the change takes effect; a stopped node is NOT started
-     * and picks the change up on its next start). The per-node scope details (other node
-     * profiles untouched, the new-node default rule) live in the Apply button tooltip and
+     * naming the profile and the target node profile, then states the apply outcome
+     * (P2.4: a running node is reconfigured in place — no restart; a stopped node is NOT
+     * started and picks the change up on its next start). The per-node scope details (other
+     * node profiles untouched, the new-node default rule) live in the Apply button tooltip and
      * the node help text instead of bloating the dialog.
      *
      * @param profileName the profile name being applied (the virtual Default entry included)
@@ -246,9 +252,7 @@ public final class NodeLoggingPanel extends ModuleLoggingProfilePanel {
         String target = bound ? "node profile '" + nodeProfileName + "'" : "the node";
         return "Apply logging profile '" + profileName + "' to " + target + "?\n\n"
                 + (isBoundNodeRunning()
-                        ? "This will restart the node so the change takes effect"
-                                + (isBoundNodePaused() ? " — the paused state is restored after the restart" : "")
-                                + "."
+                        ? "The running node applies the change immediately — no restart is needed."
                         : "The node is not running, so it will not be started — the change takes "
                         + "effect the next time the node starts.");
     }

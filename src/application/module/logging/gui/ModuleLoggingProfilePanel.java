@@ -1,6 +1,7 @@
 package application.module.logging.gui;
 
 import application.api.ModuleContext;
+import application.module.logging.GlobalLoggingApplier;
 import application.module.logging.LoggingProfileRepository;
 import application.utils.config.ReservedNames;
 import application.utils.gui.CheckboxGroupPanel;
@@ -2534,6 +2535,21 @@ public class ModuleLoggingProfilePanel extends JPanel {
                 JOptionPane.showMessageDialog(this, "Profile '" + name + "' marked as applied.\n"
                                 + "This is the default for newly created node profiles; existing profiles are unchanged.",
                         "Applied", JOptionPane.INFORMATION_MESSAGE);
+            }
+            // P2.4: live re-apply to the isolated logging contexts — the old
+            // "Apply requires a restart" limitation is gone. The global context is
+            // reconfigured from the generated global file and every RUNNING node
+            // re-resolves the fresh layers into its own context (plan §9.2
+            // propagation); stopped nodes pick the change up at their next start.
+            // The applier is defensive (never throws, never breaks a node), but
+            // the try-catch makes it bulletproof against the Apply itself.
+            if (application.utils.config.ModuleIds.NODE.equals(moduleId)) {
+                try {
+                    GlobalLoggingApplier.applyGlobal();
+                } catch (Throwable t) {
+                    LOGGER.warn("Failed to re-apply the logging configuration to the running "
+                            + "logging contexts: {}", t.getMessage());
+                }
             }
             // The applied marker may have moved (the hook above persists the
             // host's applied state): repaint the CLOSED combo so its selected
