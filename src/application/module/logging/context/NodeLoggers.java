@@ -3,6 +3,9 @@ package application.module.logging.context;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.config.ConfigurationSource;
+import org.apache.logging.log4j.core.config.properties.PropertiesConfiguration;
+import org.apache.logging.log4j.core.config.properties.PropertiesConfigurationFactory;
 
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -82,5 +85,40 @@ public final class NodeLoggers {
     /** The node context these loggers are bound to. */
     public LoggerContext context() {
         return ctx;
+    }
+
+    /**
+     * A guaranteed no-op logger (effective level OFF, no appenders): the P3
+     * migration stand-in for SLF4J's {@code NOPLogger} (plan §7.4, the
+     * {@code AtMachineProcessor} debug gate). Backed by a dedicated, isolated
+     * {@link LoggerContext} configured from {@value #NOOP_RESOURCE} at OFF
+     * level, so every {@code isXxxEnabled()} is false and every log call is
+     * dropped — independent of any node's or the global context's
+     * configuration. Created lazily once, then shared and thread-safe.
+     *
+     * @return the shared no-op log4j logger
+     */
+    public Logger noop() {
+        return NoopHolder.LOGGER;
+    }
+
+    private static final String NOOP_CONTEXT_NAME = "signum-node-noop";
+
+    private static final String NOOP_RESOURCE = "application/module/logging/context/noop.log4j2.properties";
+
+    /** Lazy holder: the no-op context is built on first {@link #noop()} call. */
+    private static final class NoopHolder {
+        static final Logger LOGGER = createNoopLogger();
+    }
+
+    private static Logger createNoopLogger() {
+        final LoggerContext ctx = new LoggerContext(NOOP_CONTEXT_NAME);
+        // the LoggerContext constructor does NOT start the context (P0 spike Q2a)
+        ctx.start();
+        final PropertiesConfiguration configuration = new PropertiesConfigurationFactory()
+                .getConfiguration(ctx, ConfigurationSource.fromResource(NOOP_RESOURCE,
+                        NodeLoggers.class.getClassLoader()));
+        ctx.reconfigure(configuration);
+        return ctx.getLogger(NOOP_CONTEXT_NAME);
     }
 }

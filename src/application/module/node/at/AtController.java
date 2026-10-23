@@ -8,10 +8,9 @@ import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.util.Convert;
+import application.module.logging.context.NodeLoggers;
 import application.module.node.TransactionType;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.slf4j.helpers.NOPLogger;
+import org.apache.logging.log4j.Logger;
 
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
@@ -32,15 +31,15 @@ public abstract class AtController {
     private AtController() {
     }
 
-    private static final Logger logger = LoggerFactory.getLogger(AtController.class);
-
     // Helper to get debug logger based on context property
-    private static Logger getDebugLogger(PropertyService propertyService) {
-        return propertyService.getBoolean(Props.ENABLE_AT_DEBUG_LOG) ? logger : NOPLogger.NOP_LOGGER;
+    private static Logger getDebugLogger(ATProcessingContext ctx) {
+        return ctx.getPropertyService().getBoolean(Props.ENABLE_AT_DEBUG_LOG)
+                ? ctx.loggers().forClass(AtController.class)
+                : NodeLoggers.global().noop();
     }
 
     private static int runSteps(AtMachineState state, ATProcessingContext ctx) {
-        final Logger debugLog = getDebugLogger(ctx.getPropertyService());
+        final Logger debugLog = getDebugLogger(ctx);
 
         state.getMachineState().running = true;
         state.getMachineState().stopped = false;
@@ -260,7 +259,7 @@ public abstract class AtController {
     public static AtBlock getCurrentBlockATs(ATProcessingContext ctx, int freePayload, int blockHeight,
             long generatorId, int indirectsCount) {
         final FluxCapacitor fluxCapacitor = ctx.getFluxCapacitor();
-        final Logger debugLog = getDebugLogger(ctx.getPropertyService());
+        final Logger debugLog = getDebugLogger(ctx);
 
         List<Long> orderedATs = AT.getOrderedATs(ctx);
         Iterator<Long> keys = orderedATs.iterator();
@@ -340,7 +339,8 @@ public abstract class AtController {
         }
 
         final FluxCapacitor fluxCapacitor = ctx.getFluxCapacitor();
-        final Logger debugLog = getDebugLogger(ctx.getPropertyService());
+        final Logger debugLog = getDebugLogger(ctx);
+        final Logger log = ctx.loggers().forClass(AtController.class);
 
         ATProcessorCache atProcessorCache = ctx.getProcessorCache();
         atProcessorCache.loadBlock(blockATs, blockHeight);
@@ -359,7 +359,7 @@ public abstract class AtController {
             AT at = atContext.at;
             byte[] receivedMd5 = atContext.md5;
 
-            logger.debug("Running AT {}", Convert.toUnsignedLong(atIdLong));
+            log.debug("Running AT {}", Convert.toUnsignedLong(atIdLong));
             try {
                 at.clearLists();
                 at.setHeight(blockHeight);
@@ -405,14 +405,14 @@ public abstract class AtController {
 
                 md5 = digest.digest(at.getBytes());
                 if (!Arrays.equals(md5, receivedMd5)) {
-                    logger.error("MD5 mismatch for AT {}", Convert.toUnsignedLong(atIdLong));
+                    log.error("MD5 mismatch for AT {}", Convert.toUnsignedLong(atIdLong));
                     throw new AtException("Calculated md5 and received md5 are not matching");
                 }
             } catch (Exception e) {
                 debugLog.debug("ATs error", e);
                 throw new AtException("ATs error. Block rejected", e);
             }
-            logger.debug("Finished running AT {}", Convert.toUnsignedLong(atIdLong));
+            log.debug("Finished running AT {}", Convert.toUnsignedLong(atIdLong));
         }
 
         processedATs.forEach(at -> at.saveState(ctx));
@@ -474,6 +474,7 @@ public abstract class AtController {
     private static long makeTransactions(AT at, ATProcessingContext ctx, int blockHeight, long generatorId)
             throws AtException {
         final FluxCapacitor fluxCapacitor = ctx.getFluxCapacitor();
+        final Logger log = ctx.loggers().forClass(AtController.class);
         long totalAmount = 0;
 
         List<AtTransaction> ordered = new ArrayList<>(at.getTransactions());
@@ -502,8 +503,8 @@ public abstract class AtController {
         for (AtTransaction tx : ordered) {
             totalAmount = Convert.safeAdd(totalAmount, tx.getAmount());
             AT.addPendingTransaction(ctx.getPendingState(), tx, blockHeight, generatorId);
-            if (logger.isDebugEnabled()) {
-                logger.debug(
+            if (log.isDebugEnabled()) {
+                log.debug(
                         "Transaction to {}, amount {}",
                         tx.getRecipientId() == null ? 0L
                                 : Convert.toUnsignedLong(AtApiHelper.getLong(tx.getRecipientId())),

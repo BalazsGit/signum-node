@@ -16,10 +16,9 @@ import application.module.node.services.AccountService;
 import application.module.node.services.ATService;
 import application.module.node.TransactionType;
 import application.module.node.util.CollectionWithIndex;
+import application.module.logging.context.NodeLoggers;
 import application.module.node.util.Convert;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.slf4j.helpers.NOPLogger;
+import org.apache.logging.log4j.Logger;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -39,8 +38,6 @@ import java.util.*;
  * @since 4.0
  */
 public class ATServiceImpl implements ATService {
-
-    private static final Logger logger = LoggerFactory.getLogger(ATServiceImpl.class);
 
     private final ATStore atStore;
     private final ATProcessingContext processingContext;
@@ -95,7 +92,7 @@ public class ATServiceImpl implements ATService {
                         accountService,
                         assetExchange,
                         indirectIncomingStore,
-                        assetStore));
+                        assetStore, NodeLoggers.global()));
     }
 
     // -------------------------------------------------------------------------
@@ -137,7 +134,8 @@ public class ATServiceImpl implements ATService {
         }
 
         final FluxCapacitor fluxCapacitor = ctx.getFluxCapacitor();
-        final Logger debugLog = getDebugLogger(ctx.getPropertyService());
+        final Logger debugLog = getDebugLogger(ctx);
+        final Logger log = ctx.loggers().forClass(ATServiceImpl.class);
 
         ATProcessorCache atProcessorCache = ctx.getProcessorCache();
         atProcessorCache.loadBlock(blockATs, blockHeight);
@@ -161,7 +159,7 @@ public class ATServiceImpl implements ATService {
                 throw new AtException("AT " + Convert.toUnsignedLong(atIdLong)
                         + " not found in database at height " + blockHeight);
             }
-            logger.debug("Running AT {}", Convert.toUnsignedLong(atIdLong));
+            log.debug("Running AT {}", Convert.toUnsignedLong(atIdLong));
             try {
                 at.clearLists();
                 at.setHeight(blockHeight);
@@ -207,18 +205,18 @@ public class ATServiceImpl implements ATService {
 
                 md5 = digest.digest(at.getBytes());
                 if (!Arrays.equals(md5, receivedMd5)) {
-                    logger.error("MD5 mismatch for AT {}", Convert.toUnsignedLong(atIdLong));
+                    log.error("MD5 mismatch for AT {}", Convert.toUnsignedLong(atIdLong));
                     throw new AtException("Calculated md5 and received md5 are not matching");
                 }
             } catch (Exception e) {
                 // Surface the REAL cause at a level that is always visible. Previously this was
                 // only logged via the (off-by-default) AT debug logger, so the root cause was
                 // hidden behind the generic "ATs error. Block rejected" and diagnosis was impossible.
-                logger.warn("AT validation failed for block height {} (AT {}): {}",
+                log.warn("AT validation failed for block height {} (AT {}): {}",
                         blockHeight, Convert.toUnsignedLong(atIdLong), e.toString(), e);
                 throw new AtException("ATs error. Block rejected", e);
             }
-            logger.debug("Finished running AT {}", Convert.toUnsignedLong(atIdLong));
+            log.debug("Finished running AT {}", Convert.toUnsignedLong(atIdLong));
         }
 
         processedATs.forEach(at -> at.saveState(ctx));
@@ -234,7 +232,7 @@ public class ATServiceImpl implements ATService {
             long generatorId, int indirectsCount) {
 
         final FluxCapacitor fluxCapacitor = ctx.getFluxCapacitor();
-        final Logger debugLog = getDebugLogger(ctx.getPropertyService());
+        final Logger debugLog = getDebugLogger(ctx);
 
         List<Long> orderedATs = AT.getOrderedATs(ctx);
         Iterator<Long> keys = orderedATs.iterator();
@@ -337,12 +335,14 @@ public class ATServiceImpl implements ATService {
     // Internal helpers (migrated from AtController)
     // -------------------------------------------------------------------------
 
-    private Logger getDebugLogger(PropertyService propertyService) {
-        return propertyService.getBoolean(Props.ENABLE_AT_DEBUG_LOG) ? logger : NOPLogger.NOP_LOGGER;
+    private Logger getDebugLogger(ATProcessingContext ctx) {
+        return ctx.getPropertyService().getBoolean(Props.ENABLE_AT_DEBUG_LOG)
+                ? ctx.loggers().forClass(ATServiceImpl.class)
+                : NodeLoggers.global().noop();
     }
 
     private int runSteps(AtMachineState state, ATProcessingContext ctx) {
-        final Logger debugLog = getDebugLogger(ctx.getPropertyService());
+        final Logger debugLog = getDebugLogger(ctx);
 
         state.getMachineState().running = true;
         state.getMachineState().stopped = false;
@@ -449,6 +449,7 @@ public class ATServiceImpl implements ATService {
     private long makeTransactions(AT at, ATProcessingContext ctx, int blockHeight, long generatorId)
             throws AtException {
         final FluxCapacitor fluxCapacitor = ctx.getFluxCapacitor();
+        final Logger log = ctx.loggers().forClass(ATServiceImpl.class);
         long totalAmount = 0;
 
         List<AtTransaction> ordered = new ArrayList<>(at.getTransactions());
@@ -477,8 +478,8 @@ public class ATServiceImpl implements ATService {
         for (AtTransaction tx : ordered) {
             totalAmount = Convert.safeAdd(totalAmount, tx.getAmount());
             AT.addPendingTransaction(ctx.getPendingState(), tx, blockHeight, generatorId);
-            if (logger.isDebugEnabled()) {
-                logger.debug(
+            if (log.isDebugEnabled()) {
+                log.debug(
                         "Transaction to {}, amount {}",
                         tx.getRecipientId() == null ? 0L
                                 : Convert.toUnsignedLong(AtApiHelper.getLong(tx.getRecipientId())),

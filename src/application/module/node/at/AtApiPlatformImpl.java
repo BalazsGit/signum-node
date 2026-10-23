@@ -21,8 +21,8 @@ import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.props.Props;
 import application.module.node.util.Convert;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import application.module.logging.context.NodeLoggers;
+import org.apache.logging.log4j.Logger;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -40,9 +40,8 @@ import java.util.Objects;
  */
 public class AtApiPlatformImpl extends AtApiImpl {
 
-    private static final Logger logger = LoggerFactory.getLogger(AtApiPlatformImpl.class);
-
     private final ATProcessingContext context;
+    private final Logger logger;
 
     /**
      * Creates a new platform API implementation with the given processing context.
@@ -51,6 +50,8 @@ public class AtApiPlatformImpl extends AtApiImpl {
      */
     public AtApiPlatformImpl(ATProcessingContext context) {
         this.context = context;
+        this.logger = (context != null ? context.loggers() : NodeLoggers.global())
+                .forClass(AtApiPlatformImpl.class);
     }
 
     /**

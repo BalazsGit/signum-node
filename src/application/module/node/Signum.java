@@ -1470,7 +1470,7 @@ public final class Signum {
         final BlockchainStore blockchainStore = this.stores.getBlockchainStore();
 
         this.atProcessorCache = new ATProcessorCache(
-                this.propertyService, this.stores.getAtStore(), this.dbContext, this.dbs);
+                this.propertyService, this.stores.getAtStore(), this.dbContext, this.dbs, this.loggers());
 
         this.atConstants = new AtConstants(this.fluxCapacitor);
 
@@ -1503,7 +1503,7 @@ public final class Signum {
                 this.fluxCapacitor, this.blockchain, this.stores.getAtStore(),
                 this.stores.getAccountStore(), this.accountService,
                 this.assetExchange, this.stores.getIndirectIncomingStore(),
-                this.stores.getAssetStore(), new ATPendingState());
+                this.stores.getAssetStore(), new ATPendingState(), this.loggers());
 
         this.atService = new ATServiceImpl(this.stores.getAtStore(), this.atProcessingContext);
 

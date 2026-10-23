@@ -9,9 +9,9 @@ import application.module.node.db.store.Dbs;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import org.jooq.Cursor;
+import application.module.logging.context.NodeLoggers;
 import application.module.node.schema.tables.records.TransactionRecord;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -33,7 +33,7 @@ public final class ATProcessorCache {
     public static class CacheMissException extends Exception {
     }
 
-    private static final Logger logger = LoggerFactory.getLogger(ATProcessorCache.class);
+    private final Logger logger;
 
     private static final int CostOfOneAT = AtConstants.AT_ID_SIZE + 16;
     private final LinkedHashMap<Long, ATContext> atMap = new LinkedHashMap<>();
@@ -62,12 +62,15 @@ public final class ATProcessorCache {
      * @param atStore         the AT data store
      * @param dbContext       the per-instance database context (multi-node isolation)
      * @param dbs             the per-instance database wrapper
+     * @param loggers         the node's loggers (per-node isolated LoggerContext)
      */
-    public ATProcessorCache(PropertyService propertyService, ATStore atStore, DbContext dbContext, Dbs dbs) {
+    public ATProcessorCache(PropertyService propertyService, ATStore atStore, DbContext dbContext, Dbs dbs,
+                            NodeLoggers loggers) {
         this.numberOfBlocksToCache = propertyService.getInt(Props.NODE_AT_PROCESSOR_CACHE_BLOCK_COUNT);
         this.atStore = atStore;
         this.dbContext = dbContext;
         this.dbs = dbs;
+        this.logger = loggers.forClass(ATProcessorCache.class);
     }
 
     public boolean isEnabled() {

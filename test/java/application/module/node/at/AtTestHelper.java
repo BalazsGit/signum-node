@@ -1,5 +1,6 @@
 package application.module.node.at;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Account;
 import application.module.node.Blockchain;
 import application.module.node.Signum;
@@ -104,7 +105,7 @@ public class AtTestHelper {
         Account.Balance mockAccountBalance = mock(Account.Balance.class);
         DbContext mockDbContext = mock(DbContext.class);
         Dbs mockDbs = mock(Dbs.class);
-        ATProcessorCache realProcessorCache = new ATProcessorCache(mockPropertyService, mockAtStore, mockDbContext, mockDbs);
+        ATProcessorCache realProcessorCache = new ATProcessorCache(mockPropertyService, mockAtStore, mockDbContext, mockDbs, NodeLoggers.global());
         AccountService mockAccountService = mock(AccountService.class);
         AssetExchange mockAssetExchange = mock(AssetExchange.class);
         IndirectIncomingStore mockIndirectIncomingStore = mock(IndirectIncomingStore.class);
@@ -177,7 +178,7 @@ public class AtTestHelper {
                 mockAccountService,
                 mockAssetExchange,
                 mockIndirectIncomingStore,
-                mockAssetStore);
+                mockAssetStore, NodeLoggers.global());
     }
 
     static ATProcessingContext getTestContext() {

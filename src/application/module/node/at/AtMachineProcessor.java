@@ -9,10 +9,9 @@ package application.module.node.at;
 
 import java.math.BigInteger;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.slf4j.helpers.NOPLogger;
+import org.apache.logging.log4j.Logger;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Asset;
 import application.module.node.TransactionType;
 import application.module.node.assetexchange.AssetExchange;
@@ -32,7 +31,9 @@ class AtMachineProcessor {
     public AtMachineProcessor(AtMachineState machineData, ATProcessingContext context, boolean enableLogger) {
         this.machineData = machineData;
         this.context = context;
-        this.logger = enableLogger ? LoggerFactory.getLogger(AtMachineProcessor.class) : NOPLogger.NOP_LOGGER;
+        this.logger = enableLogger
+                ? (context != null ? context.loggers() : NodeLoggers.global()).forClass(AtMachineProcessor.class)
+                : NodeLoggers.global().noop();
     }
 
     /** @return the FluxCapacitor from context */

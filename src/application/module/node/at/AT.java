@@ -15,8 +15,6 @@ import application.module.node.db.TransactionDb;
 import application.module.node.db.VersionedEntityTable;
 import application.module.node.services.AccountService;
 import application.module.node.util.Listener;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -32,8 +30,6 @@ import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 public class AT extends AtMachineState {
-
-    private static final Logger logger = LoggerFactory.getLogger(AT.class);
 
     public final SignumKey dbKey;
     private final String name;

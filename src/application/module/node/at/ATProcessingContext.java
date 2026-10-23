@@ -1,5 +1,6 @@
 package application.module.node.at;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Blockchain;
 import application.module.node.assetexchange.AssetExchange;
 import application.module.node.db.store.AccountStore;
@@ -45,6 +46,8 @@ public final class ATProcessingContext {
      * One per node, eliminating JVM-wide shared mutable state.
      */
     private final ATPendingState pendingState;
+    /** The node's loggers (per-node isolated LoggerContext, plan §7.2). */
+    private final NodeLoggers loggers;
 
     /**
      * Creates a new AT processing context with all required dependencies.
@@ -64,10 +67,11 @@ public final class ATProcessingContext {
             AccountService accountService,
             AssetExchange assetExchange,
             IndirectIncomingStore indirectIncomingStore,
-            AssetStore assetStore) {
+            AssetStore assetStore,
+            NodeLoggers loggers) {
         this(atConstants, processorCache, propertyService, fluxCapacitor, blockchain,
                 atStore, accountStore, accountService, assetExchange, indirectIncomingStore,
-                assetStore, new ATPendingState());
+                assetStore, new ATPendingState(), loggers);
     }
 
     /**
@@ -85,7 +89,8 @@ public final class ATProcessingContext {
             AssetExchange assetExchange,
             IndirectIncomingStore indirectIncomingStore,
             AssetStore assetStore,
-            ATPendingState pendingState) {
+            ATPendingState pendingState,
+            NodeLoggers loggers) {
         this.atConstants = atConstants;
         this.processorCache = processorCache;
         this.propertyService = propertyService;
@@ -98,6 +103,7 @@ public final class ATProcessingContext {
         this.indirectIncomingStore = indirectIncomingStore;
         this.assetStore = assetStore;
         this.pendingState = pendingState;
+        this.loggers = loggers;
     }
 
     /** @return the AT configuration constants */
@@ -160,6 +166,11 @@ public final class ATProcessingContext {
      */
     public ATPendingState getPendingState() {
         return pendingState;
+    }
+
+    /** @return the node's loggers (per-node isolated LoggerContext) */
+    public NodeLoggers loggers() {
+        return loggers;
     }
 
     @Override
