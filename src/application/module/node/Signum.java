@@ -69,6 +69,11 @@ import application.module.node.web.server.WebServerImpl;
 import application.utils.logging.NodeLogContext;
 import application.utils.logging.ProfileFileAppender;
 import application.utils.logging.ProfileLogger;
+import application.module.logging.appender.ProfileConsoleAppender;
+import application.module.logging.context.NodeLoggingContext;
+import application.module.logging.context.NodeLoggingContextApplier;
+import application.module.logging.context.NodeLoggingContextManager;
+import application.module.logging.context.NodeLoggers;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -287,6 +292,24 @@ public final class Signum {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(Signum.class);
 
+    /**
+     * JVM-wide registry of the nodes' isolated Log4j2 contexts (per-node isolated
+     * LoggerContext plan §6.3): every Signum instance of this JVM shares it; it is
+     * keyed by the node profile name (NodeModule contract: at most one running node
+     * per profile).
+     */
+    private static final NodeLoggingContextManager NODE_LOGGING_CONTEXT_MANAGER =
+            NodeLoggingContextManager.ofCurrentFactory();
+
+    // ── Isolated node LoggerContext (per-node isolated LoggerContext plan, P2.3) ──
+
+    /** This node's isolated Log4j2 context (minimal config until the start() full apply). */
+    private volatile NodeLoggingContext nodeLoggingContext;
+    /** Loggers bound to the isolated node context (plan §7.1) — the engine's target API (P3). */
+    private volatile NodeLoggers nodeLoggers;
+    /** The programmatic GUI-bridge appender: node context &rarr; ProfileLogger bus (plan §6.3). */
+    private volatile ProfileConsoleAppender profileConsoleAppender;
+
     // =========================================================================
     // Constructors
     // =========================================================================
@@ -312,6 +335,29 @@ public final class Signum {
         // way the ProfileLogger's forwarding to SystemLogger stays disabled (the
         // SystemLoggerJulHandler already forwards), avoiding System Console duplicates.
         this.profileLogger = application.utils.logging.NodeLoggerRegistry.getOrCreate(ModuleIds.NODE, profile.getName());
+
+        // ── Step 2: the isolated node LoggerContext, minimal config first ──
+        // Two-phase start (plan §6.3): the context boots with the L0-only minimal
+        // config (root=INFO, console-only, NO file appender — no log file is
+        // opened before start()) so the GUI-bridge appender can be attached
+        // immediately and the engine (P3) can obtain NodeLoggers right away.
+        // The full L0+L1+L2 config is applied in doInitialize() (start).
+        // Defensive: a failure keeps the node bootable on the legacy chain.
+        try {
+            this.nodeLoggingContext = NodeLoggingContextApplier.applyMinimal(
+                    confFolder, NODE_LOGGING_CONTEXT_MANAGER, profile.getName());
+            this.nodeLoggers = new NodeLoggers(nodeLoggingContext.loggerContext());
+            this.profileConsoleAppender = new ProfileConsoleAppender(this.profileLogger);
+            this.profileConsoleAppender.attach(nodeLoggingContext.loggerContext());
+            LOGGER.info("Isolated node LoggerContext '{}' created (minimal config; full config at start())",
+                    profile.getName());
+        } catch (Throwable t) {
+            LOGGER.warn("Failed to create the isolated node LoggerContext for profile '{}' — "
+                    + "node logging stays on the legacy chain: {}", profile.getName(), t.getMessage());
+            this.nodeLoggingContext = null;
+            this.nodeLoggers = null;
+            this.profileConsoleAppender = null;
+        }
     }
 
     // =========================================================================
@@ -546,6 +592,21 @@ public final class Signum {
             }
         }
         this.profileLogger = null;
+        // Remove the isolated node LoggerContext (plan §5.3: dispose → ctx close +
+        // factory.removeContext via the manager); the engine's NodeLoggers are
+        // then unreachable and GC-collectible (§11).
+        NodeLoggingContext nlc = this.nodeLoggingContext;
+        if (nlc != null) {
+            try {
+                NODE_LOGGING_CONTEXT_MANAGER.remove(nlc.profileName());
+            } catch (Throwable t) {
+                LOGGER.warn("Failed to remove the isolated node LoggerContext for profile '{}': {}",
+                        nlc.profileName(), t.getMessage());
+            }
+        }
+        this.nodeLoggingContext = null;
+        this.nodeLoggers = null;
+        this.profileConsoleAppender = null;
     }
 
     // =========================================================================
@@ -1146,6 +1207,57 @@ public final class Signum {
     // =========================================================================
 
     /**
+     * Applies the full resolved logging configuration to this node's isolated
+     * Log4j2 context (per-node isolated LoggerContext plan §9.2A):
+     * L0+L1+L2 resolve &rarr; generated-file write &rarr; SAME-context
+     * reconfigure (no restart) &rarr; GUI-bridge appender re-attach.
+     * <p>
+     * Called from {@code doInitialize()} on every (re)start (step 1.7); the
+     * GUI Apply path (P2.4) reuses this entry point, which is what makes a
+     * live level change possible without a node restart (§9.1). Defensive: a
+     * failure keeps the previous (or minimal) configuration and never breaks
+     * node startup.
+     * </p>
+     *
+     * @return true when the full configuration was applied to the context
+     */
+    public boolean applyNodeLoggingConfiguration() {
+        if (this.profile == null) {
+            return false;
+        }
+        try {
+            this.nodeLoggingContext = NodeLoggingContextApplier.applyFull(
+                    this.confFolder, NODE_LOGGING_CONTEXT_MANAGER, this.profile.getName());
+            this.nodeLoggers = new NodeLoggers(this.nodeLoggingContext.loggerContext());
+            if (this.profileLogger != null && this.profileConsoleAppender == null) {
+                this.profileConsoleAppender = new ProfileConsoleAppender(this.profileLogger);
+            }
+            if (this.profileConsoleAppender != null) {
+                this.profileConsoleAppender.attach(this.nodeLoggingContext.loggerContext());
+            }
+            LOGGER.info("Isolated node LoggerContext '{}' reconfigured (full config: {})",
+                    this.profile.getName(), this.nodeLoggingContext.configUri());
+            return true;
+        } catch (Throwable t) {
+            LOGGER.warn("Failed to apply the full node logging configuration for profile '{}' — "
+                    + "keeping the previous configuration: {}", this.profile.getName(), t.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Returns the loggers of this node's isolated Log4j2 context (plan §7.1) —
+     * the target API for the node engine classes (migrated package-by-package
+     * in P3). Null until the context exists (i.e. the constructor succeeded);
+     * the legacy SLF4J loggers stay the fallback meanwhile.
+     *
+     * @return the per-node logger facade, or null when the context was not created
+     */
+    public NodeLoggers loggers() {
+        return this.nodeLoggers;
+    }
+
+    /**
      * Bootstrap logic for starting all node components.
      */
     private void doInitialize() {
@@ -1197,6 +1309,13 @@ public final class Signum {
         // {node.fileLog.dir}/{profileName}.log for the lifetime of the node run.
         // Detached again in doShutdown / dispose. Never breaks node startup.
         attachProfileFileAppender();
+
+        // ── Step 1.7: full apply of the isolated node LoggerContext config (P2.3) ──
+        // L0+L1+L2 resolve -> generated-file write -> reconfigure of the SAME
+        // context (no restart, plan §9.2A) -> GUI-bridge appender re-attach (a
+        // reconfigure drops it without stopping it, P0 spike Q4). Defensive:
+        // a failure keeps the minimal configuration, never breaks startup.
+        applyNodeLoggingConfiguration();
 
         // ── Step 2.5: Create profile-scoped ShutdownManager ──
         this.shutdownManager = new ShutdownManager(this.propertyService, profileName);
@@ -1553,6 +1672,19 @@ public final class Signum {
             // this point. The ProfileLogger itself stays alive (restart-friendly);
             // the appender is re-attached on the next doInitialize.
             detachProfileFileAppender();
+
+            // Stop the isolated node LoggerContext (plan §5.3 lifecycle): its file
+            // appenders are closed. The context OBJECT stays in the manager map —
+            // restart re-uses the same instance (start + full re-apply, P0 Q6).
+            NodeLoggingContext nlc = this.nodeLoggingContext;
+            if (nlc != null) {
+                try {
+                    nlc.stop();
+                } catch (Throwable t) {
+                    LOGGER.warn("Failed to stop the isolated node LoggerContext for profile '{}': {}",
+                            profileName, t.getMessage());
+                }
+            }
 
             if (this.webServer != null) {
                 try {
