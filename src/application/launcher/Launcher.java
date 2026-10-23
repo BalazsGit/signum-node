@@ -2,6 +2,7 @@ package application.launcher;
 
 import application.kernel.ApplicationKernel;
 import application.module.browser.core.JcefProcessBootstrap;
+import application.module.logging.context.SignumGlobalContextSelector;
 import application.module.node.profile.NodeProfileRepository;
 import application.module.node.profile.ProfileCli;
 import application.module.node.profile.ProfileConfig;
@@ -14,6 +15,8 @@ import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.core.impl.Log4jContextFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,8 +59,15 @@ public class Launcher {
         // process bootstrap (JcefProcessBootstrap) runs at the very start of
         // main() — before any application logic — and installs the native
         // library loader before the first org.cef.* use.
+        // 1. P1 (per-node isolated LoggerContext plan §6.2): install the global-only
+        //    Log4j2 context factory before any log4j logger access. While the SLF4J
+        //    binding is still JUL-based (pre-P3.5) no app code reaches log4j, so this
+        //    is a no-op for now; after the binding swap, every static lookup (SLF4J
+        //    binding, log4j-jul bridge, null-name) converges on the single
+        //    "signum-global" context instead of log4j's default selector, which does
+        //    NOT converge null-name and FQCN lookups on 2.26.1 (P0 spike Q1).
+        LogManager.setFactory(new Log4jContextFactory(new SignumGlobalContextSelector()));
     }
-
     /**
      * The main entry point for the application.
      * Determines whether to launch in GUI or Headless mode based on arguments and
