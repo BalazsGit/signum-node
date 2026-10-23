@@ -2,13 +2,18 @@ package application.module.node.db.sql;
 
 import application.module.node.db.DerivedTable;
 import application.module.node.db.store.DerivedTableManager;
+import org.apache.logging.log4j.Logger;
 import org.jooq.Field;
 import org.jooq.impl.TableImpl;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public abstract class DerivedSqlTable implements DerivedTable {
-    private static final Logger logger = LoggerFactory.getLogger(DerivedSqlTable.class);
+
+    /**
+     * Per-node (isolated LoggerContext) logger, taken from this table's
+     * {@link DbContext} (P3-B1). Subclasses share the base FQCN name, as
+     * before the static logger migration.
+     */
+    protected final Logger logger;
     final String table;
     final TableImpl<?> tableClass;
 
@@ -26,6 +31,7 @@ public abstract class DerivedSqlTable implements DerivedTable {
         this.tableClass = tableClass;
         this.derivedTableManager = derivedTableManager;
         this.dbContext = dbContext;
+        this.logger = dbContext.loggers().forClass(DerivedSqlTable.class);
         logger.trace("Creating derived table for {}", table);
         derivedTableManager.registerDerivedTable(this);
         this.heightField = tableClass.field("height", Integer.class);

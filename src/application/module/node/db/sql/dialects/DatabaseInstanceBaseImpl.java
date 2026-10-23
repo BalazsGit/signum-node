@@ -1,25 +1,32 @@
 package application.module.node.db.sql.dialects;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
 
 public abstract class DatabaseInstanceBaseImpl implements DatabaseInstance {
-    private static final Logger logger = LoggerFactory.getLogger(DatabaseInstanceBaseImpl.class);
+
+    /**
+     * Per-class (base FQCN) log4j logger from the node's isolated context
+     * (P3-B1). Subclasses shadow this field with their own FQCN logger,
+     * preserving the per-class logger names of the former static loggers.
+     */
+    protected final Logger logger;
 
     private final HikariDataSource dataSource;
     private HikariConfig config = new HikariConfig();
     protected PropertyService propertyService;
 
-    protected DatabaseInstanceBaseImpl(PropertyService propertyService) {
+    protected DatabaseInstanceBaseImpl(PropertyService propertyService, NodeLoggers loggers) {
         this.propertyService = propertyService;
+        this.logger = loggers.forClass(DatabaseInstanceBaseImpl.class);
         String dbUrl = propertyService.getString(Props.DB_URL);
         String dbUsername = propertyService.getString(Props.DB_USERNAME);
         String dbPassword = propertyService.getString(Props.DB_PASSWORD);

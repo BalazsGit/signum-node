@@ -1,16 +1,14 @@
 package application.module.node.db.sql.dialects;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.props.PropertyService;
 import com.zaxxer.hikari.HikariConfig;
 import org.jooq.SQLDialect;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public class DatabaseInstancePostgres extends DatabaseInstanceBaseImpl {
-    private static final Logger logger = LoggerFactory.getLogger(DatabaseInstancePostgres.class);
 
-    protected DatabaseInstancePostgres(PropertyService propertyService) {
-        super(propertyService);
+    protected DatabaseInstancePostgres(PropertyService propertyService, NodeLoggers loggers) {
+        super(propertyService, loggers);
     }
 
     @Override

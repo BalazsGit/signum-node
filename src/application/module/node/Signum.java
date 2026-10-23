@@ -1383,11 +1383,11 @@ public final class Signum {
         this.timeService = new TimeServiceImpl();
 
         // DerivedTableManager
-        this.derivedTableManager = new DerivedTableManager();
+        this.derivedTableManager = new DerivedTableManager(this.loggers());
 
         // StatisticsManager + DBCacheManager
         this.statisticsManager = new StatisticsManagerImpl(this.timeService);
-        this.dbCacheManager = new DBCacheManagerImpl(this.statisticsManager);
+        this.dbCacheManager = new DBCacheManagerImpl(this.statisticsManager, this.loggers());
 
         // ThreadPool
         this.threadPool = new ThreadPool(this.propertyService);
@@ -1396,7 +1396,7 @@ public final class Signum {
         this.threadPool.setProfileName(this.profile.getName());
 
         // Db.init + Dbs + Stores
-        this.dbContext = DbContext.create(this.propertyService, this.dbCacheManager);
+        this.dbContext = DbContext.create(this.propertyService, this.dbCacheManager, this.loggers());
         this.dbs = this.dbContext.getDbsByDatabaseType();
 
         TransactionDb transactionDb = dbs.getTransactionDb();

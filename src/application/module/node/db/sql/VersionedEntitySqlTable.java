@@ -4,12 +4,11 @@ import application.module.node.Blockchain;
 import application.module.node.db.SignumKey;
 import application.module.node.db.VersionedEntityTable;
 import application.module.node.db.store.DerivedTableManager;
+import org.apache.logging.log4j.Logger;
 import org.jooq.*;
 import org.jooq.Record;
 import org.jooq.impl.DSL;
 import org.jooq.impl.TableImpl;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -17,7 +16,11 @@ import java.util.List;
 
 public abstract class VersionedEntitySqlTable<T> extends EntitySqlTable<T> implements VersionedEntityTable<T> {
 
-    private static final Logger logger = LoggerFactory.getLogger(VersionedEntitySqlTable.class);
+    /**
+     * Per-node logger from this table's {@link DbContext} (P3-B1); shadows the
+     * base class field so the FQCN stays the versioned table's.
+     */
+    private final Logger logger;
 
     private Blockchain blockchain;
 
@@ -25,12 +28,14 @@ public abstract class VersionedEntitySqlTable<T> extends EntitySqlTable<T> imple
             DerivedTableManager derivedTableManager, DbContext dbContext) {
         super(table, tableClass, dbKeyFactory, true, derivedTableManager, dbContext);
         this.blockchain = null;
+        this.logger = dbContext.loggers().forClass(VersionedEntitySqlTable.class);
     }
 
     VersionedEntitySqlTable(String table, TableImpl<?> tableClass, SignumKey.Factory<T> dbKeyFactory,
             DerivedTableManager derivedTableManager, Blockchain blockchain, DbContext dbContext) {
         super(table, tableClass, dbKeyFactory, true, derivedTableManager, dbContext);
         this.blockchain = blockchain;
+        this.logger = dbContext.loggers().forClass(VersionedEntitySqlTable.class);
     }
 
     /**
@@ -106,6 +111,9 @@ public abstract class VersionedEntitySqlTable<T> extends EntitySqlTable<T> imple
         if (!dbContext.isInTransaction()) {
             throw new IllegalStateException("Not in transaction");
         }
+        // Static helper: the logger comes from the calling context's node
+        // loggers (P3-B1 static-method rule — plan §7.2).
+        final Logger logger = dbContext.loggers().forClass(VersionedEntitySqlTable.class);
 
         final int selectBatchSize = 10_000;
         final int deleteBatchSize = 1_000;

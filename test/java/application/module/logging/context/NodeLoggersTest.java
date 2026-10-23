@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -69,6 +70,20 @@ class NodeLoggersTest {
             debugNode.stop();
             warnNode.stop();
         }
+    }
+
+    @Test
+    @DisplayName("global(): facade over the JVM-global context, usable and stable")
+    void globalFallback() {
+        NodeLoggers g1 = NodeLoggers.global();
+        NodeLoggers g2 = NodeLoggers.global();
+        assertNotNull(g1);
+        assertSame(g1.context(), g2.context(),
+                "two global() calls must wrap the same JVM-global context");
+        Logger logger = g1.forClass(SomeNodeComponent.class);
+        assertNotNull(logger);
+        assertSame(logger, g1.forClass(SomeNodeComponent.class),
+                "identity holds inside the global facade too");
     }
 
     /** A stand-in node motor class for logger-name tests. */

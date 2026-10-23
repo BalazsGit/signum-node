@@ -13,8 +13,8 @@ import org.flywaydb.core.api.exception.FlywayValidateException;
 import org.jooq.*;
 import org.jooq.conf.Settings;
 import org.jooq.impl.DSL;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import application.module.logging.context.NodeLoggers;
+import org.apache.logging.log4j.Logger;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -50,7 +50,32 @@ import java.util.function.Predicate;
  */
 public final class DbContext {
 
-    private static final Logger logger = LoggerFactory.getLogger(DbContext.class);
+    /**
+     * This node's logger facade (P3-B1: isolated per-node LoggerContext).
+     * Set by {@link #create(PropertyService, DBCacheManagerImpl, NodeLoggers)};
+     * the no-arg constructor (unit tests, pre-node paths) falls back to the
+     * JVM-global context via {@link NodeLoggers#global()}.
+     */
+    private volatile NodeLoggers nodeLoggers;
+
+    /**
+     * The node logger facade bound to this context's node (P3-B1). Subclasses
+     * of the table hierarchy ({@code DerivedSqlTable} &amp; co.) and the
+     * dialect implementations obtain their per-class loggers from here.
+     *
+     * @return the node loggers, or the JVM-global fallback when this context
+     *         was created without a node (no-arg constructor / tests)
+     */
+    public NodeLoggers loggers() {
+        if (nodeLoggers == null) {
+            nodeLoggers = NodeLoggers.global();
+        }
+        return nodeLoggers;
+    }
+
+    private Logger logger() {
+        return loggers().forClass(DbContext.class);
+    }
 
     // ========================================================================
     // Instance state (was static in Db.java)
@@ -79,7 +104,7 @@ public final class DbContext {
 
     /** Handler that confirms whether to auto-repair Flyway validation failures. */
     private Predicate<String> repairConfirmationHandler = msg -> {
-        logger.error(
+        logger().error(
                 "Database validation failed, but no confirmation handler is registered. Skipping automated repair.");
         return false;
     };
@@ -90,6 +115,15 @@ public final class DbContext {
 
     /** Creates a new, uninitialized context. Call {@link #init(PropertyService, DBCacheManagerImpl)} to bootstrap. */
     public DbContext() {
+        this((NodeLoggers) null);
+    }
+
+    /**
+     * Package-private: lets tests (and {@link #create}) bind a node logger
+     * facade without running database initialization.
+     */
+    DbContext(NodeLoggers nodeLoggers) {
+        this.nodeLoggers = nodeLoggers;
     }
 
     /**
@@ -103,12 +137,16 @@ public final class DbContext {
      *
      * @param propertyService  resolved properties for this profile
      * @param dbCacheManager   cache manager to associate with this context
+     * @param nodeLoggers      the node's logger facade (P3-B1); may be null —
+     *                         the context then falls back to the JVM-global context
      * @return a fully initialized DbContext ready for use
      * @throws RuntimeException if database initialization fails
      * @since 4.1
      */
-    public static DbContext create(PropertyService propertyService, DBCacheManagerImpl dbCacheManager) {
+    public static DbContext create(PropertyService propertyService, DBCacheManagerImpl dbCacheManager,
+            NodeLoggers nodeLoggers) {
         DbContext ctx = new DbContext();
+        ctx.nodeLoggers = nodeLoggers;
         ctx.init(propertyService, dbCacheManager);
         return ctx;
     }
@@ -127,13 +165,13 @@ public final class DbContext {
     public void init(PropertyService propertyService, DBCacheManagerImpl dbCacheManager) {
         try {
             this.dbCacheManager = dbCacheManager;
-            this.databaseInstance = DatabaseInstanceFactory.createInstance(propertyService);
-            logger.info("Using SQL Backend with Dialect {} - Version {}", databaseInstance.getDialect().getName(),
+            this.databaseInstance = DatabaseInstanceFactory.createInstance(propertyService, loggers());
+            logger().info("Using SQL Backend with Dialect {} - Version {}", databaseInstance.getDialect().getName(),
                     getDatabaseVersion());
 
             String javaMigrations = databaseInstance.getMigrationClassPath();
             String sqlMigrations = databaseInstance.getMigrationSqlScriptPath();
-            logger.info("Flyway scanning locations: Java: [{}], SQL: [{}]", javaMigrations, sqlMigrations);
+            logger().info("Flyway scanning locations: Java: [{}], SQL: [{}]", javaMigrations, sqlMigrations);
 
             var config = databaseInstance.getConfig();
             flyway = Flyway.configure()
@@ -143,11 +181,11 @@ public final class DbContext {
                     .load();
 
             try {
-                logger.info("Validating database migrations...");
+                logger().info("Validating database migrations...");
                 flyway.validate();
             } catch (FlywayValidateException e) {
-                logger.warn("Database migration validation failed!");
-                logger.info("Validation details: {}", e.getMessage());
+                logger().warn("Database migration validation failed!");
+                logger().info("Validation details: {}", e.getMessage());
 
                 // Check if the error is due to pending migrations on a fresh/new database.
                 // In this case, we can skip validation and proceed directly to migration,
@@ -155,13 +193,13 @@ public final class DbContext {
                 boolean isFreshDbError = e.getMessage().contains("not applied to database");
 
                 if (isFreshDbError) {
-                    logger.info(
+                    logger().info(
                             "Detected fresh database with pending migrations — skipping validation, proceeding to migrate...");
                 } else {
                     // For other validation errors (e.g., checksum mismatch), ask for repair confirmation
                     if (repairConfirmationHandler.test(e.getMessage())) {
-                        logger.info("Repairing Flyway metadata as authorized by user...");
-                        logger.debug("Flyway repair initiated.");
+                        logger().info("Repairing Flyway metadata as authorized by user...");
+                        logger().debug("Flyway repair initiated.");
                         flyway.repair();
                     } else {
                         throw new RuntimeException(
@@ -171,7 +209,7 @@ public final class DbContext {
                 }
             }
 
-            logger.info("Running flyway migration");
+            logger().info("Running flyway migration");
             flyway.migrate();
             databaseInstance.onStartup();
         } catch (Exception e) {
@@ -194,7 +232,7 @@ public final class DbContext {
             flyway.clean();
             flyway.migrate();
         } catch (Exception e) {
-            logger.error(e.getMessage());
+            logger().error(e.getMessage());
         }
     }
 
@@ -207,7 +245,7 @@ public final class DbContext {
             try {
                 databaseInstance.onShutdown();
             } catch (Throwable t) {
-                logger.error("Error shutting down database instance", t);
+                logger().error("Error shutting down database instance", t);
                 firstException = t;
             }
         }
@@ -262,13 +300,13 @@ public final class DbContext {
             Statement stmt = con.createStatement();
             stmt.execute(statement);
         } catch (SQLException e) {
-            logger.error(e.toString(), e);
+            logger().error(e.toString(), e);
         }
     }
 
     /** Backup support (not yet implemented for SQL backends). */
     public void backup(String filename) {
-        logger.error("Backup not yet implemented for {}", databaseInstance.getDialect());
+        logger().error("Backup not yet implemented for {}", databaseInstance.getDialect());
     }
 
     // ========================================================================
@@ -439,7 +477,7 @@ public final class DbContext {
                         break;
                 }
             } catch (Exception e) {
-                logger.debug("Failed to optimize table {}", tableName, e);
+                logger().debug("Failed to optimize table {}", tableName, e);
                 throw new RuntimeException(e);
             }
         });
@@ -464,7 +502,7 @@ public final class DbContext {
                 }
             }
         } catch (Exception e) {
-            logger.warn("Failed to fetch version");
+            logger().warn("Failed to fetch version");
         }
         return version;
     }

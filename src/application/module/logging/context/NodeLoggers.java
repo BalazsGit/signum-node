@@ -1,6 +1,7 @@
 package application.module.logging.context;
 
 import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LoggerContext;
 
 import java.util.Objects;
@@ -40,6 +41,19 @@ public final class NodeLoggers {
      */
     public NodeLoggers(final LoggerContext ctx) {
         this.ctx = Objects.requireNonNull(ctx, "ctx must not be null");
+    }
+
+    /**
+     * Loggers bound to the JVM-GLOBAL context (null-name lookup, plan A.1/13):
+     * the fallback for code that runs before or outside a live node (unit
+     * tests without a {@code Signum}, deprecated no-context constructor
+     * overloads, static utilities). A live node always passes its own
+     * {@code Signum.loggers()} instance instead.
+     *
+     * @return a facade over the global (non-node) LoggerContext
+     */
+    public static NodeLoggers global() {
+        return new NodeLoggers((org.apache.logging.log4j.core.LoggerContext) LogManager.getContext(false));
     }
 
     /**

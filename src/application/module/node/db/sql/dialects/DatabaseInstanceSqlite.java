@@ -1,14 +1,14 @@
 package application.module.node.db.sql.dialects;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.instance.NodeStartupException;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.util.DurationFormatter;
 import application.utils.sqlite.SqliteNativeSupport;
 import com.zaxxer.hikari.HikariConfig;
+import org.apache.logging.log4j.Logger;
 import org.jooq.SQLDialect;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -16,9 +16,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 public class DatabaseInstanceSqlite extends DatabaseInstanceBaseImpl {
-    private static final Logger logger = LoggerFactory.getLogger(DatabaseInstanceSqlite.class);
 
-    protected DatabaseInstanceSqlite(PropertyService propertyService) {
+    /** Per-class (SQLite FQCN) logger; shadows the base field (P3-B1). */
+    private final Logger logger;
+
+    protected DatabaseInstanceSqlite(PropertyService propertyService, NodeLoggers loggers) {
         // Last line of defense: if the SQLite native library is not loaded in this
         // JVM, fail with an actionable error instead of letting HikariCP surface a
         // raw java.lang.UnsatisfiedLinkError at pool initialization. (sqlite-jdbc
@@ -31,7 +33,8 @@ public class DatabaseInstanceSqlite extends DatabaseInstanceBaseImpl {
                             + "Start a server-based profile (MariaDB/PostgreSQL), or restart the "
                             + "application and try again.");
         }
-        super(propertyService);
+        super(propertyService, loggers);
+        this.logger = loggers.forClass(DatabaseInstanceSqlite.class);
     }
 
     private String getJournalMode() {

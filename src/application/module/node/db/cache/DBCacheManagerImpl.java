@@ -1,6 +1,7 @@
 package application.module.node.db.cache;
 
 import application.module.node.Account;
+import application.module.logging.context.NodeLoggers;
 import application.module.node.db.SignumKey;
 import application.module.node.statistics.StatisticsManagerImpl;
 import org.ehcache.Cache;
@@ -10,15 +11,14 @@ import org.ehcache.config.CacheConfiguration;
 import org.ehcache.config.builders.CacheConfigurationBuilder;
 import org.ehcache.config.builders.CacheManagerBuilder;
 import org.ehcache.config.builders.ResourcePoolsBuilder;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.util.HashMap;
 import java.util.Map;
 
 public class DBCacheManagerImpl {
 
-    private static final Logger logger = LoggerFactory.getLogger(DBCacheManagerImpl.class);
+    private final Logger logger;
 
     private final CacheManager cacheManager;
 
@@ -28,8 +28,9 @@ public class DBCacheManagerImpl {
 
     private final HashMap<String, CacheConfiguration<SignumKey, ?>> caches = new HashMap<>();
 
-    public DBCacheManagerImpl(StatisticsManagerImpl statisticsManager) {
+    public DBCacheManagerImpl(StatisticsManagerImpl statisticsManager, NodeLoggers loggers) {
         this.statisticsManager = statisticsManager;
+        this.logger = loggers.forClass(DBCacheManagerImpl.class);
         statisticsEnabled = true;
 
         caches.put("account", CacheConfigurationBuilder.newCacheConfigurationBuilder(SignumKey.class, Account.class,

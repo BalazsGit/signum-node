@@ -1,8 +1,8 @@
 package application.module.node.db.store;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.db.DerivedTable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -10,7 +10,7 @@ import java.util.function.IntSupplier;
 
 public class DerivedTableManager {
 
-    private final Logger logger = LoggerFactory.getLogger(DerivedTableManager.class);
+    private final Logger logger;
 
     private final List<DerivedTable> derivedTables = new CopyOnWriteArrayList<>();
 
@@ -20,6 +20,19 @@ public class DerivedTableManager {
      * BlockchainProcessor after initialization completes.
      */
     private volatile IntSupplier minRollbackHeightSupplier = () -> Integer.MIN_VALUE;
+
+    /**
+     * @param loggers the node's logger facade (P3-B1)
+     */
+    public DerivedTableManager(NodeLoggers loggers) {
+        this.logger = loggers.forClass(DerivedTableManager.class);
+    }
+
+    /** @deprecated use {@link #DerivedTableManager(NodeLoggers)} */
+    @Deprecated
+    public DerivedTableManager() {
+        this(NodeLoggers.global());
+    }
 
     public List<DerivedTable> getDerivedTables() {
         return derivedTables;

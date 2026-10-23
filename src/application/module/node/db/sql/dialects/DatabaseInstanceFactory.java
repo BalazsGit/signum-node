@@ -1,5 +1,6 @@
 package application.module.node.db.sql.dialects;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import org.jooq.SQLDialect;
@@ -7,18 +8,18 @@ import org.jooq.tools.jdbc.JDBCUtils;
 
 public class DatabaseInstanceFactory {
 
-    public static DatabaseInstance createInstance(PropertyService propertyService) {
+    public static DatabaseInstance createInstance(PropertyService propertyService, NodeLoggers loggers) {
         String dbUrl = propertyService.getString(Props.DB_URL);
         SQLDialect dialect = JDBCUtils.dialect(dbUrl);
 
         switch (dialect) {
             case MARIADB:
             case MYSQL:
-                return new DatabaseInstanceMariaDb(propertyService);
+                return new DatabaseInstanceMariaDb(propertyService, loggers);
             case SQLITE:
-                return new DatabaseInstanceSqlite(propertyService);
+                return new DatabaseInstanceSqlite(propertyService, loggers);
             case POSTGRES:
-                return new DatabaseInstancePostgres(propertyService);
+                return new DatabaseInstancePostgres(propertyService, loggers);
             default:
                 throw new IllegalArgumentException("Database dialect not supported: " + dialect);
         }

@@ -16,8 +16,8 @@ import application.module.node.util.Convert;
 
 import org.jooq.*;
 import org.jooq.impl.DSL;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import application.module.logging.context.NodeLoggers;
+import org.apache.logging.log4j.Logger;
 
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
@@ -33,7 +33,11 @@ import static application.module.node.schema.Tables.INDIRECT_INCOMING;
 
 public class SqlBlockchainStore implements BlockchainStore {
 
-    private final Logger logger = LoggerFactory.getLogger(SqlBlockchainStore.class);
+    /**
+     * Per-node logger from this store's {@link DbContext} (P3-B1); the
+     * deprecated no-context overload falls back to the JVM-global context.
+     */
+    private final Logger logger;
 
     private final TransactionDb transactionDb;
     private final BlockDb blockDb;
@@ -50,6 +54,8 @@ public class SqlBlockchainStore implements BlockchainStore {
         this.blockchain = storeDependencies.blockchain();
         this.fluxCapacitor = storeDependencies.fluxCapacitor();
         this.dbContext = storeDependencies.dbContext();
+        this.logger = (this.dbContext != null ? this.dbContext.loggers() : NodeLoggers.global())
+                .forClass(SqlBlockchainStore.class);
     }
 
     @Deprecated
@@ -59,6 +65,7 @@ public class SqlBlockchainStore implements BlockchainStore {
         this.blockchain = null;
         this.fluxCapacitor = null;
         this.dbContext = null;
+        this.logger = NodeLoggers.global().forClass(SqlBlockchainStore.class);
     }
 
     /**

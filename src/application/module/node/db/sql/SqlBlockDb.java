@@ -5,12 +5,12 @@ import application.module.node.SignumException;
 import application.module.node.db.BlockDb;
 import application.module.node.db.TransactionDb;
 import application.module.node.fluxcapacitor.FluxCapacitor;
+import application.module.logging.context.NodeLoggers;
 import application.module.node.schema.tables.records.BlockRecord;
+import org.apache.logging.log4j.Logger;
 import org.jooq.*;
 import org.jooq.Record;
 import org.jooq.impl.DSL;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.math.BigInteger;
 import java.util.Optional;
@@ -19,7 +19,11 @@ import static application.module.node.schema.Tables.BLOCK;
 
 public class SqlBlockDb implements BlockDb {
 
-    private static final Logger logger = LoggerFactory.getLogger(SqlBlockDb.class);
+    /**
+     * Per-node logger from this db's {@link DbContext} (P3-B1); the deprecated
+     * no-context overloads fall back to the JVM-global context.
+     */
+    private final Logger logger;
 
     private TransactionDb transactionDb;
     private final DbContext dbContext;
@@ -28,8 +32,7 @@ public class SqlBlockDb implements BlockDb {
     /** Default constructor for backward compatibility (transactionDb will be null). */
     @Deprecated
     public SqlBlockDb() {
-        this.transactionDb = null;
-        this.dbContext = null;
+        this((DbContext) null);
     }
 
     /**
@@ -40,6 +43,8 @@ public class SqlBlockDb implements BlockDb {
     public SqlBlockDb(DbContext dbContext) {
         this.transactionDb = null;
         this.dbContext = dbContext;
+        this.logger = (dbContext != null ? dbContext.loggers() : NodeLoggers.global())
+                .forClass(SqlBlockDb.class);
     }
 
     /**
@@ -52,6 +57,7 @@ public class SqlBlockDb implements BlockDb {
     public SqlBlockDb(TransactionDb transactionDb) {
         this.transactionDb = transactionDb;
         this.dbContext = null;
+        this.logger = NodeLoggers.global().forClass(SqlBlockDb.class);
     }
 
     /**

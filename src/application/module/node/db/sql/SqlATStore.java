@@ -17,8 +17,8 @@ import application.module.node.util.CollectionWithIndex;
 import org.jooq.*;
 import org.jooq.Record;
 import org.jooq.exception.DataAccessException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import application.module.logging.context.NodeLoggers;
+import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -28,7 +28,11 @@ import java.util.stream.Collectors;
 import static application.module.node.schema.Tables.*;
 
 public class SqlATStore implements ATStore {
-    private static final Logger logger = LoggerFactory.getLogger(SqlATStore.class);
+    /**
+     * Per-node logger from this store's {@link DbContext} (P3-B1); the
+     * deprecated no-context overload falls back to the JVM-global context.
+     */
+    private final Logger logger;
 
     private final SignumKey.LongKeyFactory<application.module.node.at.AT> atDbKeyFactory = new DbKey.LongKeyFactory<application.module.node.at.AT>(
             AT.ID) {
@@ -66,6 +70,8 @@ public class SqlATStore implements ATStore {
     public SqlATStore(DerivedTableManager derivedTableManager, StoreDependencies storeDependencies) {
         this.blockchain = storeDependencies.blockchain();
         this.dbContext = storeDependencies.dbContext();
+        this.logger = (this.dbContext != null ? this.dbContext.loggers() : NodeLoggers.global())
+                .forClass(SqlATStore.class);
         initTables(derivedTableManager);
     }
 
@@ -73,6 +79,7 @@ public class SqlATStore implements ATStore {
     public SqlATStore(DerivedTableManager derivedTableManager) {
         this.blockchain = null;
         this.dbContext = null;
+        this.logger = NodeLoggers.global().forClass(SqlATStore.class);
         initTables(derivedTableManager);
     }
 

@@ -21,7 +21,8 @@ import signumj.crypto.SignumCrypto;
 import org.jooq.*;
 import org.jooq.Record;
 import org.jooq.impl.DSL;
-import org.slf4j.LoggerFactory;
+import application.module.logging.context.NodeLoggers;
+import org.apache.logging.log4j.Logger;
 
 import java.math.BigDecimal;
 import java.util.*;
@@ -51,7 +52,11 @@ public class SqlAccountStore implements AccountStore {
             return (DbKey) assignment.signumKey;
         }
     };
-    private static final org.slf4j.Logger logger = LoggerFactory.getLogger(SqlAccountStore.class);
+    /**
+     * Per-node logger from this store's {@link DbContext} (P3-B1); the
+     * deprecated no-context overload falls back to the JVM-global context.
+     */
+    private final Logger logger;
     private static final DbKey.LinkKeyFactory<Account.AccountAsset> accountAssetDbKeyFactory = new DbKey.LinkKeyFactory<Account.AccountAsset>(
             "account_id", "asset_id") {
         @Override
@@ -78,6 +83,8 @@ public class SqlAccountStore implements AccountStore {
         this.fluxCapacitor = storeDependencies.fluxCapacitor();
         this.propertyService = storeDependencies.propertyService();
         this.dbContext = storeDependencies.dbContext();
+        this.logger = (this.dbContext != null ? this.dbContext.loggers() : NodeLoggers.global())
+                .forClass(SqlAccountStore.class);
         this.insertMaxBatchSize = propertyService.getInt(Props.DB_INSERT_BATCH_MAX_SIZE);
         this.pkChecks = Collections.unmodifiableSet(new HashSet<>(propertyService.getStringList(Props.NODE_PK_CHECKS)));
         initTables(derivedTableManager, dbCacheManager);
@@ -89,6 +96,7 @@ public class SqlAccountStore implements AccountStore {
         this.fluxCapacitor = null;
         this.propertyService = null;
         this.dbContext = null;
+        this.logger = NodeLoggers.global().forClass(SqlAccountStore.class);
         this.insertMaxBatchSize = 1000;
         this.pkChecks = Collections.emptySet();
         initTables(derivedTableManager, dbCacheManager);
