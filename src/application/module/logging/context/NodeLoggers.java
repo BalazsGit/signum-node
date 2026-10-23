@@ -1,0 +1,72 @@
+package application.module.logging.context;
+
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.core.LoggerContext;
+
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
+/**
+ * The ONE source of a node's loggers (per-node isolated LoggerContext plan,
+ * §7.1): hands out {@link org.apache.logging.log4j.Logger} instances taken
+ * from THIS node's isolated {@link LoggerContext}.
+ * <p>
+ * Why log4j-Logger directly (not an SLF4J wrapper): before the binding swap
+ * (P3.5) the {@code log4j-slf4j2-impl} provider may not enter the classpath
+ * (multiple-provider), and the wrapper would demand it. The call surface is
+ * identical to SLF4J's ({@code isDebugEnabled()}, {@code debug(String,
+ * Object...)}, {@code warn}, {@code error}, ...), so migration (P3) changes
+ * only the import and the field initialization — the call sites stay
+ * textually unchanged (plan §7.4 audit).
+ * </p>
+ * <p>
+ * Identity: {@code ctx.getLogger(name)} serves the context's own registry —
+ * the same name on the SAME node returns the SAME instance; two nodes with
+ * the same name get SEPARATE instances, each bound to its own context's
+ * configuration (plan A.1/3, 4; P0 spike Q1). The private cache on top is
+ * only a fast path, never a second source of truth.
+ * </p>
+ *
+ * <p>Headless-safe (no Swing).</p>
+ */
+public final class NodeLoggers {
+
+    private final LoggerContext ctx;
+    private final ConcurrentMap<String, Logger> cache = new ConcurrentHashMap<>();
+
+    /**
+     * @param ctx the node's isolated LoggerContext (never null)
+     */
+    public NodeLoggers(final LoggerContext ctx) {
+        this.ctx = Objects.requireNonNull(ctx, "ctx must not be null");
+    }
+
+    /**
+     * The node logger of the given class (FQCN as logger name).
+     *
+     * @param clazz the declaring class of the calling node component
+     * @return the log4j logger bound to this node's context (same instance
+     *         for the same class, every time)
+     */
+    public Logger forClass(final Class<?> clazz) {
+        return forName(clazz.getName());
+    }
+
+    /**
+     * The node logger with the given name.
+     *
+     * @param name the logger name (typically a class FQCN)
+     * @return the log4j logger bound to this node's context (same instance
+     *         for the same name, every time)
+     */
+    public Logger forName(final String name) {
+        Objects.requireNonNull(name, "name must not be null");
+        return cache.computeIfAbsent(name, n -> ctx.getLogger(n));
+    }
+
+    /** The node context these loggers are bound to. */
+    public LoggerContext context() {
+        return ctx;
+    }
+}
