@@ -7,19 +7,19 @@ import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
 import org.eclipse.jetty.ee10.websocket.server.config.JettyWebSocketServletContainerInitializer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.time.Duration;
 
 public class ServerConnectorWebsocketBuilderImpl extends AbstractServerConnectorBuilder {
 
-    private static final Logger logger = LoggerFactory.getLogger(ServerConnectorWebsocketBuilderImpl.class);
+    private final Logger logger;
     private final ServletContextHandler servletContextHandler;
 
     public ServerConnectorWebsocketBuilderImpl(WebServerContext context, ServletContextHandler servletContextHandler) {
         super(context);
         this.servletContextHandler = servletContextHandler;
+        this.logger = context.loggers().forClass(ServerConnectorWebsocketBuilderImpl.class);
     }
 
     @Override

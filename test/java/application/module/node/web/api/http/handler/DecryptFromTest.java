@@ -1,5 +1,6 @@
 package application.module.node.web.api.http.handler;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Account;
 import application.module.node.SignumException;
 import application.module.node.common.QuickMocker;
@@ -33,7 +34,7 @@ class DecryptFromTest {
     public void setUp() {
         mockParameterService = mock(ParameterService.class);
 
-        t = new DecryptFrom(mockParameterService);
+        t = new DecryptFrom(mockParameterService, NodeLoggers.global());
     }
 
     @Test

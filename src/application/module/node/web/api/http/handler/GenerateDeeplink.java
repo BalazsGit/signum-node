@@ -1,5 +1,6 @@
 package application.module.node.web.api.http.handler;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.deeplink.DeeplinkGenerator;
 import application.module.node.util.Convert;
 import application.module.node.util.StringUtils;
@@ -7,8 +8,7 @@ import application.module.node.web.api.http.ApiServlet;
 import application.module.node.web.api.http.common.LegacyDocTag;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.UnsupportedEncodingException;
@@ -18,11 +18,11 @@ import static application.module.node.web.api.http.common.Parameters.*;
 
 public class GenerateDeeplink extends ApiServlet.JsonRequestHandler {
 
-    private final Logger logger = LoggerFactory.getLogger(GenerateDeeplink.class);
-    public static final GenerateDeeplink instance = new GenerateDeeplink();
+    private final Logger logger;
 
-    private GenerateDeeplink() {
+    public GenerateDeeplink(NodeLoggers loggers) {
         super(new LegacyDocTag[] { LegacyDocTag.UTILS }, ACTION_PARAMETER, PAYLOAD_PARAMETER);
+        this.logger = loggers.forClass(GenerateDeeplink.class);
     }
 
     @Override

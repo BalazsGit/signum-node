@@ -1,5 +1,6 @@
 package application.module.node.web.api.http.handler;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.SignumException;
 import application.module.node.Transaction;
 import application.module.node.crypto.Crypto;
@@ -10,8 +11,7 @@ import application.module.node.web.api.http.ApiServlet;
 import application.module.node.web.api.http.common.LegacyDocTag;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Arrays;
@@ -23,16 +23,18 @@ import static application.module.node.web.api.http.common.ResultFields.FULL_HASH
 
 public final class SignTransaction extends ApiServlet.JsonRequestHandler {
 
-    private static final Logger logger = LoggerFactory.getLogger(SignTransaction.class);
+    private final Logger logger;
 
     private final ParameterService parameterService;
     private final TransactionService transactionService;
 
-    public SignTransaction(ParameterService parameterService, TransactionService transactionService) {
+    public SignTransaction(ParameterService parameterService, TransactionService transactionService,
+            NodeLoggers loggers) {
         super(new LegacyDocTag[] { LegacyDocTag.TRANSACTIONS }, UNSIGNED_TRANSACTION_BYTES_PARAMETER,
                 UNSIGNED_TRANSACTION_JSON_PARAMETER, SECRET_PHRASE_PARAMETER);
         this.parameterService = parameterService;
         this.transactionService = transactionService;
+        this.logger = loggers.forClass(SignTransaction.class);
     }
 
     @Override

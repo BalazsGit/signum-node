@@ -7,8 +7,6 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.ServletRequest;
 import jakarta.servlet.ServletResponse;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 
@@ -24,8 +22,6 @@ import java.io.IOException;
  * @since 4.1
  */
 public final class TransactionContextFilter implements Filter {
-
-    private static final Logger logger = LoggerFactory.getLogger(TransactionContextFilter.class);
 
     private final TransactionApplyContext context;
 

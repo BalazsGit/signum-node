@@ -1,5 +1,6 @@
 package application.module.node.web.api.http.handler;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.*;
 import application.module.node.at.AtConstants;
 import application.module.node.at.AtMachineState;
@@ -12,8 +13,7 @@ import application.module.node.web.api.http.common.ParameterParser;
 import application.module.node.fluxcapacitor.FluxCapacitor;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.nio.ByteBuffer;
@@ -26,7 +26,7 @@ import static application.module.node.web.api.http.common.ResultFields.ERROR_DES
 
 public final class CreateATProgram extends CreateTransaction {
 
-    private final Logger logger = LoggerFactory.getLogger(CreateATProgram.class);
+    private final Logger logger;
 
     private final ParameterService parameterService;
     private final Blockchain blockchain;
@@ -34,7 +34,8 @@ public final class CreateATProgram extends CreateTransaction {
     private final FluxCapacitor fluxCapacitor;
 
     public CreateATProgram(ParameterService parameterService, Blockchain blockchain,
-            APITransactionManager apiTransactionManager, AtConstants atConstants, FluxCapacitor fluxCapacitor) {
+            APITransactionManager apiTransactionManager, AtConstants atConstants, FluxCapacitor fluxCapacitor,
+            NodeLoggers loggers) {
         super(new LegacyDocTag[] { LegacyDocTag.AT, LegacyDocTag.CREATE_TRANSACTION }, apiTransactionManager,
                 fluxCapacitor, NAME_PARAMETER, DESCRIPTION_PARAMETER, CREATION_BYTES_PARAMETER, CODE_PARAMETER, DATA_PARAMETER,
                 DPAGES_PARAMETER, CSPAGES_PARAMETER, USPAGES_PARAMETER, MIN_ACTIVATION_AMOUNT_NQT_PARAMETER);
@@ -42,6 +43,7 @@ public final class CreateATProgram extends CreateTransaction {
         this.blockchain = blockchain;
         this.atConstants = atConstants;
         this.fluxCapacitor = fluxCapacitor;
+        this.logger = loggers.forClass(CreateATProgram.class);
     }
 
     @Override

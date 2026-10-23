@@ -1,5 +1,6 @@
 package application.module.node.web.api.http.handler;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.deeplink.DeeplinkGenerator;
 import application.module.node.web.api.http.ApiServlet.HttpRequestHandler;
 import application.module.node.util.Convert;
@@ -7,8 +8,7 @@ import application.module.node.util.StringUtils;
 import application.module.node.web.api.http.common.LegacyDocTag;
 import com.google.zxing.WriterException;
 import org.eclipse.jetty.http.HttpStatus;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import javax.imageio.ImageIO;
 import jakarta.servlet.http.HttpServletRequest;
@@ -21,11 +21,11 @@ import static application.module.node.web.api.http.common.Parameters.*;
 
 public class GenerateDeeplinkQR extends HttpRequestHandler {
 
-    private final Logger logger = LoggerFactory.getLogger(GenerateDeeplinkQR.class);
-    public static final GenerateDeeplinkQR instance = new GenerateDeeplinkQR();
+    private final Logger logger;
 
-    private GenerateDeeplinkQR() {
+    public GenerateDeeplinkQR(NodeLoggers loggers) {
         super(new LegacyDocTag[] { LegacyDocTag.UTILS }, ACTION_PARAMETER, PAYLOAD_PARAMETER);
+        this.logger = loggers.forClass(GenerateDeeplinkQR.class);
     }
 
     @Override

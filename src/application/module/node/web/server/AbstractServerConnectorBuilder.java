@@ -9,8 +9,7 @@ import org.bouncycastle.openssl.PEMKeyPair;
 import org.bouncycastle.openssl.PEMParser;
 import org.eclipse.jetty.server.*;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.io.*;
 import java.security.*;
@@ -24,12 +23,13 @@ import java.util.concurrent.TimeUnit;
 
 public abstract class AbstractServerConnectorBuilder {
 
-    private static final Logger logger = LoggerFactory.getLogger(AbstractServerConnectorBuilder.class);
+    private final Logger logger;
     protected final WebServerContext context;
     private static SslContextFactory.Server sslContextFactory;
 
     public AbstractServerConnectorBuilder(WebServerContext context) {
         this.context = context;
+        this.logger = context.loggers().forClass(AbstractServerConnectorBuilder.class);
     }
 
     abstract ServerConnector build(Server server);
@@ -90,7 +90,7 @@ public abstract class AbstractServerConnectorBuilder {
                 new HttpConnectionFactory(httpsConfig));
     }
 
-    public static void loadLetsEncryptCertsAsPkcs12(String letsencryptPath, String p12Filename, String password)
+    public void loadLetsEncryptCertsAsPkcs12(String letsencryptPath, String p12Filename, String password)
             throws Exception {
 
         logger.info("Converting Let's Encrypt Certificate to PKCS12...");

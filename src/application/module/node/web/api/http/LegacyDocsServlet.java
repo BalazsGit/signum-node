@@ -4,8 +4,7 @@ import application.module.node.util.Convert;
 import application.module.node.util.Subnet;
 import application.module.node.web.api.http.common.LegacyDocTag;
 import org.owasp.encoder.Encode;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,7 +17,7 @@ public class LegacyDocsServlet extends HttpServlet {
 
     public static final String API_DOC_PATH = "/api-doc";
 
-    private static final Logger logger = LoggerFactory.getLogger(LegacyDocsServlet.class);
+    private final Logger logger;
 
     private static final String HEADER_1_a = "<!DOCTYPE html>\n"
             + "<html>\n"
@@ -160,6 +159,7 @@ public class LegacyDocsServlet extends HttpServlet {
     private final String networkName;
 
     public LegacyDocsServlet(ApiServlet apiServlet, Set<Subnet> allowedBotHosts, String networkName) {
+        this.logger = apiServlet.loggers().forClass(LegacyDocsServlet.class);
         this.allowedBotHosts = allowedBotHosts;
         this.networkName = networkName;
         apiRequestHandlers.putAll(apiServlet.apiRequestHandlers);

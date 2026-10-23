@@ -7,8 +7,7 @@ import application.module.node.web.api.ws.common.SimpleScheduler;
 import application.module.node.web.api.ws.emitter.data.ConnectedEventData;
 import application.module.node.web.api.ws.emitter.*;
 import application.module.node.web.server.WebServerContext;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.util.List;
 import java.util.concurrent.*;
@@ -21,10 +20,10 @@ public class BlockchainEventNotifier {
     private final static int IO_THREAD_COUNT = 10;
     private static BlockchainEventNotifier instance;
     private final ExecutorService notifyExecutor;
-    private final Logger logger = LoggerFactory.getLogger(BlockchainEventNotifier.class);
+    private final Logger logger;
     private final WebServerContext context;
     private final ConcurrentHashMap<String, WebSocketConnection> connections = new ConcurrentHashMap<>();
-    private final Debouncer blockPushedDebouncer = new Debouncer(BLOCK_PUSHED_DEBOUNCE_SECS * 1000);
+    private final Debouncer blockPushedDebouncer;
     private SimpleScheduler heartbeat;
 
     public static BlockchainEventNotifier getInstance(WebServerContext context) {
@@ -36,6 +35,8 @@ public class BlockchainEventNotifier {
 
     private BlockchainEventNotifier(WebServerContext context) {
         this.context = context;
+        this.logger = context.loggers().forClass(BlockchainEventNotifier.class);
+        this.blockPushedDebouncer = new Debouncer(BLOCK_PUSHED_DEBOUNCE_SECS * 1000, context.loggers());
         this.notifyExecutor = Executors.newFixedThreadPool(IO_THREAD_COUNT);
         this.context.getBlockchainProcessor().addListener(this::onBlockPushedEvent,
                 BlockchainProcessor.Event.BLOCK_PUSHED);

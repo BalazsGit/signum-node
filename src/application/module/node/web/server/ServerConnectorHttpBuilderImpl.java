@@ -4,8 +4,7 @@ import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import org.eclipse.jetty.server.*;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -13,10 +12,11 @@ import java.util.concurrent.TimeUnit;
 
 public class ServerConnectorHttpBuilderImpl extends AbstractServerConnectorBuilder {
 
-    private static final Logger logger = LoggerFactory.getLogger(ServerConnectorHttpBuilderImpl.class);
+    private final Logger logger;
 
     public ServerConnectorHttpBuilderImpl(WebServerContext context) {
         super(context);
+        this.logger = context.loggers().forClass(ServerConnectorHttpBuilderImpl.class);
     }
 
     @Override

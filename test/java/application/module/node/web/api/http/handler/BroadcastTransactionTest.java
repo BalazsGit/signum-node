@@ -1,5 +1,6 @@
 package application.module.node.web.api.http.handler;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Signum;
 import application.module.node.SignumException;
 import application.module.node.Transaction;
@@ -47,7 +48,7 @@ class BroadcastTransactionTest {
     void setUp() {
         FluxCapacitor mockFluxCapacitor = QuickMocker.latestValueFluxCapacitor();
         t = new BroadcastTransaction(transactionProcessorMock, parameterServiceMock, transactionServiceMock,
-                propertyServiceMock, mockFluxCapacitor);
+                propertyServiceMock, mockFluxCapacitor, NodeLoggers.global());
     }
 
     @Test

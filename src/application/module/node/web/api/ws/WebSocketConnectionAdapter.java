@@ -1,18 +1,21 @@
 
 package application.module.node.web.api.ws;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.web.server.WebServerContext;
 import org.eclipse.jetty.websocket.api.Callback;
 import org.eclipse.jetty.websocket.api.Session;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 public class WebSocketConnectionAdapter extends Session.Listener.Abstract {
-    private static final Logger logger = LoggerFactory.getLogger(WebSocketConnectionAdapter.class);
+    private final Logger logger;
+    private final NodeLoggers loggers;
     private WebSocketConnection connection;
     private final BlockchainEventNotifier notifier;
 
     public WebSocketConnectionAdapter(WebServerContext context) {
+        this.loggers = context.loggers();
+        this.logger = loggers.forClass(WebSocketConnectionAdapter.class);
         this.notifier = BlockchainEventNotifier.getInstance(context);
     }
 
@@ -20,7 +23,7 @@ public class WebSocketConnectionAdapter extends Session.Listener.Abstract {
     public void onWebSocketOpen(Session session) {
         super.onWebSocketOpen(session);
         logger.debug("Endpoint connected: {}", session);
-        this.connection = new WebSocketConnection(session);
+        this.connection = new WebSocketConnection(session, loggers);
         this.notifier.addConnection(connection);
     }
 

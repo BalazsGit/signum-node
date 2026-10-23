@@ -1,7 +1,7 @@
 package application.module.node.web.api.ws.common;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import application.module.logging.context.NodeLoggers;
+import org.apache.logging.log4j.Logger;
 
 import java.util.Timer;
 import java.util.TimerTask;
@@ -9,16 +9,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public class Debouncer {
 
-    private static final Logger logger = LoggerFactory.getLogger(Debouncer.class);
+    private final Logger logger;
 
     private final int delay;
     private final Timer timer;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
 
-    public Debouncer(int delayMillies) {
+    public Debouncer(int delayMillies, NodeLoggers loggers) {
         timer = new Timer();
         isRunning.set(false);
         this.delay = delayMillies;
+        this.logger = loggers.forClass(Debouncer.class);
     }
 
     public void debounce(Runnable task) {

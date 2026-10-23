@@ -19,8 +19,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.net.UnknownHostException;
 import java.nio.file.Paths;
@@ -28,7 +27,7 @@ import java.util.*;
 
 public final class WebServerImpl implements WebServer {
 
-    private static final Logger logger = LoggerFactory.getLogger(WebServerImpl.class);
+    private final Logger logger;
 
     private static final String LEGACY_API_PATH = "/burst";
     private static final String API_PATH = "/api";
@@ -42,6 +41,7 @@ public final class WebServerImpl implements WebServer {
     public WebServerImpl(WebServerContext context) {
 
         this.context = context;
+        this.logger = context.loggers().forClass(WebServerImpl.class);
         boolean enableAPIServer = context.getPropertyService().getBoolean(Props.API_SERVER);
         if (enableAPIServer) {
             jettyServer = createServerInstance();

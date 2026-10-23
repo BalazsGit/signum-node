@@ -1,5 +1,6 @@
 package application.module.node.web.api.http.handler;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Account;
 import application.module.node.Appendix;
 import application.module.node.Blockchain;
@@ -11,8 +12,7 @@ import application.module.node.web.api.http.ApiServlet;
 import application.module.node.web.api.http.common.LegacyDocTag;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -22,16 +22,17 @@ import static application.module.node.web.api.http.common.Parameters.TRANSACTION
 
 public final class ReadMessage extends ApiServlet.JsonRequestHandler {
 
-    private static final Logger logger = LoggerFactory.getLogger(ReadMessage.class);
+    private final Logger logger;
 
     private final Blockchain blockchain;
 
     private final AccountService accountService;
 
-    public ReadMessage(Blockchain blockchain, AccountService accountService) {
+    public ReadMessage(Blockchain blockchain, AccountService accountService, NodeLoggers loggers) {
         super(new LegacyDocTag[] { LegacyDocTag.MESSAGES }, TRANSACTION_PARAMETER, SECRET_PHRASE_PARAMETER);
         this.blockchain = blockchain;
         this.accountService = accountService;
+        this.logger = loggers.forClass(ReadMessage.class);
     }
 
     @Override

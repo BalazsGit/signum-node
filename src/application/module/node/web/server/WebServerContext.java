@@ -1,5 +1,6 @@
 package application.module.node.web.server;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.*;
 import application.module.node.at.AtConstants;
 import application.module.node.assetexchange.AssetExchange;
@@ -44,6 +45,7 @@ public class WebServerContext {
     private final FluxCapacitor fluxCapacitor;
     private final Stores stores;
     private final PeerManager peerManager;
+    private final NodeLoggers loggers;
     private volatile TransactionApplyContext transactionApplyContext;
 
     public TransactionApplyContext getTransactionApplyContext() {
@@ -63,7 +65,8 @@ public class WebServerContext {
             Generator generator, APITransactionManager apiTransactionManager,
             FeeSuggestionCalculator feeSuggestionCalculator, DeeplinkQRCodeGenerator deepLinkQRCodeGenerator,
             IndirectIncomingService indirectIncomingService, NetworkParameters params, AtConstants atConstants,
-            FluxCapacitor fluxCapacitor, Stores stores, PeerManager peerManager) {
+            FluxCapacitor fluxCapacitor, Stores stores, PeerManager peerManager,
+            NodeLoggers loggers) {
         this.transactionProcessor = transactionProcessor;
         this.blockchain = blockchain;
         this.blockchainProcessor = blockchainProcessor;
@@ -91,6 +94,18 @@ public class WebServerContext {
         this.fluxCapacitor = fluxCapacitor;
         this.stores = stores;
         this.peerManager = peerManager;
+        this.loggers = loggers;
+    }
+
+    /**
+     * Returns this profile's node-scoped logger facade (P3-B3): web components
+     * take their loggers from here so they bind to this node's isolated
+     * LoggerContext (plan §7.2).
+     *
+     * @return the node's logger facade
+     */
+    public NodeLoggers loggers() {
+        return loggers;
     }
 
     /**

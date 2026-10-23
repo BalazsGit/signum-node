@@ -1,5 +1,6 @@
 package application.module.node.web.api.http.handler;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.SignumException;
 import application.module.node.Transaction;
 import application.module.node.TransactionProcessor;
@@ -17,8 +18,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import jakarta.servlet.http.HttpServletRequest;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.apache.logging.log4j.Logger;
 
 import static application.module.node.web.api.http.common.Parameters.TRANSACTION_BYTES_PARAMETER;
 import static application.module.node.web.api.http.common.Parameters.TRANSACTION_JSON_PARAMETER;
@@ -26,7 +26,7 @@ import static application.module.node.web.api.http.common.ResultFields.*;
 
 public final class BroadcastTransaction extends ApiServlet.JsonRequestHandler {
 
-    private static final Logger logger = Logger.getLogger(BroadcastTransaction.class.getSimpleName());
+    private final Logger logger;
 
     private final TransactionProcessor transactionProcessor;
     private final ParameterService parameterService;
@@ -36,7 +36,7 @@ public final class BroadcastTransaction extends ApiServlet.JsonRequestHandler {
 
     public BroadcastTransaction(TransactionProcessor transactionProcessor, ParameterService parameterService,
             TransactionService transactionService, PropertyService propertyService,
-            FluxCapacitor fluxCapacitor) {
+            FluxCapacitor fluxCapacitor, NodeLoggers loggers) {
         super(new LegacyDocTag[] { LegacyDocTag.TRANSACTIONS }, TRANSACTION_BYTES_PARAMETER,
                 TRANSACTION_JSON_PARAMETER);
 
@@ -45,6 +45,7 @@ public final class BroadcastTransaction extends ApiServlet.JsonRequestHandler {
         this.transactionService = transactionService;
         this.propertyService = propertyService;
         this.fluxCapacitor = fluxCapacitor;
+        this.logger = loggers.forClass(BroadcastTransaction.class);
     }
 
     @Override
@@ -82,7 +83,7 @@ public final class BroadcastTransaction extends ApiServlet.JsonRequestHandler {
             response.addProperty(TRANSACTION_RESPONSE, transaction.getStringId());
             response.addProperty(FULL_HASH_RESPONSE, transaction.getFullHash());
         } catch (SignumException.ValidationException | RuntimeException e) {
-            logger.log(Level.INFO, e.getMessage(), e);
+            logger.info(e.getMessage(), e);
             response.addProperty(ERROR_CODE_RESPONSE, 4);
             response.addProperty(ERROR_DESCRIPTION_RESPONSE, "Incorrect transaction: " + e.toString());
             response.addProperty(ERROR_RESPONSE, e.getMessage());

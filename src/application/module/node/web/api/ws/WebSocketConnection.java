@@ -1,19 +1,20 @@
 package application.module.node.web.api.ws;
 
+import application.module.logging.context.NodeLoggers;
 import org.eclipse.jetty.websocket.api.Callback;
 import org.eclipse.jetty.websocket.api.Session;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.net.SocketAddress;
 
 public class WebSocketConnection {
-    private static final Logger logger = LoggerFactory.getLogger(WebSocketConnection.class);
+    private final Logger logger;
 
     private final Session session;
 
-    public WebSocketConnection(Session session) {
+    public WebSocketConnection(Session session, NodeLoggers loggers) {
         this.session = session;
+        this.logger = loggers.forClass(WebSocketConnection.class);
     }
 
     public String getId() {

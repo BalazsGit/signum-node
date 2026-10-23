@@ -1,5 +1,6 @@
 package application.module.node.web.api.http.handler;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Account;
 import application.module.node.SignumException;
 import application.module.node.crypto.EncryptedData;
@@ -11,8 +12,7 @@ import application.module.node.util.Convert;
 import application.module.node.web.api.http.ApiServlet;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -23,14 +23,15 @@ import static application.module.node.web.api.http.common.ResultFields.DECRYPTED
 
 public final class DecryptFrom extends ApiServlet.JsonRequestHandler {
 
-    private static final Logger logger = LoggerFactory.getLogger(DecryptFrom.class);
+    private final Logger logger;
 
     private final ParameterService parameterService;
 
-    public DecryptFrom(ParameterService parameterService) {
+    public DecryptFrom(ParameterService parameterService, NodeLoggers loggers) {
         super(new LegacyDocTag[] { LegacyDocTag.MESSAGES }, ACCOUNT_PARAMETER, DATA_PARAMETER, NONCE_PARAMETER,
                 DECRYPTED_MESSAGE_IS_TEXT_PARAMETER, SECRET_PHRASE_PARAMETER);
         this.parameterService = parameterService;
+        this.logger = loggers.forClass(DecryptFrom.class);
     }
 
     @Override

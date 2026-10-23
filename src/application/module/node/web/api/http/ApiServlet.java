@@ -1,5 +1,6 @@
 package application.module.node.web.api.http;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.*;
 import application.module.node.assetexchange.AssetExchange;
 import application.module.node.deeplink.DeeplinkQRCodeGenerator;
@@ -18,8 +19,7 @@ import application.module.node.web.api.http.common.*;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import org.eclipse.jetty.http.HttpStatus;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 import signum.net.NetworkParameters;
 
 import jakarta.servlet.ServletException;
@@ -35,7 +35,7 @@ import static application.module.node.web.api.http.common.JSONResponses.*;
 
 public final class ApiServlet extends HttpServlet {
 
-    private static final Logger logger = LoggerFactory.getLogger(ApiServlet.class);
+    private final Logger logger;
 
     private final Set<Subnet> allowedBotHosts;
     private final boolean acceptSurplusParams;
@@ -44,6 +44,7 @@ public final class ApiServlet extends HttpServlet {
     public ApiServlet(WebServerContext context, Set<Subnet> allowedBotHosts) {
 
         this.context = context;
+        this.logger = context.loggers().forClass(ApiServlet.class);
         this.allowedBotHosts = allowedBotHosts;
 
         this.enforcePost = context.getPropertyService().getBoolean(Props.API_SERVER_ENFORCE_POST);
@@ -51,6 +52,17 @@ public final class ApiServlet extends HttpServlet {
         this.acceptSurplusParams = context.getPropertyService().getBoolean(Props.API_ACCEPT_SURPLUS_PARAMS);
 
         apiRequestHandlers = mapRequestHandlers();
+    }
+
+    /**
+     * Exposes this servlet's node-scoped logger facade (P3-B3) so sibling web
+     * components (e.g. {@link LegacyDocsServlet}) created alongside this servlet
+     * bind to the same node's isolated LoggerContext.
+     *
+     * @return the node's logger facade
+     */
+    public NodeLoggers loggers() {
+        return context.loggers();
     }
 
     private Map<String, HttpRequestHandler> mapRequestHandlers() {
@@ -81,13 +93,13 @@ public final class ApiServlet extends HttpServlet {
         ATStore atStore = context.getStores().getAtStore();
 
         map.put("broadcastTransaction",
-                new BroadcastTransaction(transactionProcessor, parameterService, transactionService, propertyService, fluxCapacitor));
+                new BroadcastTransaction(transactionProcessor, parameterService, transactionService, propertyService, fluxCapacitor, context.loggers()));
         map.put("calculateFullHash", new CalculateFullHash());
         map.put("cancelAskOrder",
                 new CancelAskOrder(parameterService, blockchain, assetExchange, apiTransactionManager, fluxCapacitor));
         map.put("cancelBidOrder",
                 new CancelBidOrder(parameterService, blockchain, assetExchange, apiTransactionManager, fluxCapacitor));
-        map.put("decryptFrom", new DecryptFrom(parameterService));
+        map.put("decryptFrom", new DecryptFrom(parameterService, context.loggers()));
         map.put("dgsListing", new DGSListing(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
         map.put("dgsDelisting", new DGSDelisting(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
         map.put("dgsDelivery", new DGSDelivery(parameterService, blockchain, accountService, apiTransactionManager, fluxCapacitor));
@@ -174,12 +186,12 @@ public final class ApiServlet extends HttpServlet {
         map.put("addAssetTreasuryAccount", new AddAssetTreasuryAccount(parameterService, assetExchange, blockchain,
                 apiTransactionManager, accountService, fluxCapacitor));
         map.put("longConvert", LongConvert.instance);
-        map.put("parseTransaction", new ParseTransaction(parameterService, transactionService));
+        map.put("parseTransaction", new ParseTransaction(parameterService, transactionService, context.loggers()));
         map.put("placeAskOrder",
                 new PlaceAskOrder(parameterService, blockchain, apiTransactionManager, accountService, fluxCapacitor));
         map.put("placeBidOrder", new PlaceBidOrder(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
         map.put("rsConvert", RSConvert.instance);
-        map.put("readMessage", new ReadMessage(blockchain, accountService));
+        map.put("readMessage", new ReadMessage(blockchain, accountService, context.loggers()));
         map.put("sendMessage", new SendMessage(parameterService, apiTransactionManager, fluxCapacitor));
         map.put("sendMoney", new SendMoney(parameterService, apiTransactionManager, fluxCapacitor));
         map.put("sendMoneyMulti", new SendMoneyMulti(parameterService, blockchain, apiTransactionManager, fluxCapacitor, accountService));
@@ -187,7 +199,7 @@ public final class ApiServlet extends HttpServlet {
         map.put("setAccountInfo", new SetAccountInfo(parameterService, blockchain, apiTransactionManager, fluxCapacitor));
         map.put("setAlias", new SetAlias(parameterService, blockchain, aliasService, apiTransactionManager, fluxCapacitor));
         map.put("setTLD", new SetTLD(parameterService, blockchain, aliasService, apiTransactionManager, fluxCapacitor));
-        map.put("signTransaction", new SignTransaction(parameterService, transactionService));
+        map.put("signTransaction", new SignTransaction(parameterService, transactionService, context.loggers()));
         map.put("transferAsset",
                 new TransferAsset(parameterService, blockchain, apiTransactionManager, accountService, fluxCapacitor));
         map.put("transferAssetMulti",
@@ -217,7 +229,7 @@ public final class ApiServlet extends HttpServlet {
         map.put("getAccountSubscriptions",
                 new GetAccountSubscriptions(parameterService, subscriptionService, aliasService, blockchain));
         map.put("getSubscriptionsToAccount", new GetSubscriptionsToAccount(parameterService, subscriptionService, blockchain));
-        map.put("createATProgram", new CreateATProgram(parameterService, blockchain, apiTransactionManager, context.getAtConstants(), fluxCapacitor));
+        map.put("createATProgram", new CreateATProgram(parameterService, blockchain, apiTransactionManager, context.getAtConstants(), fluxCapacitor, context.loggers()));
         map.put("getAT", new GetAT(parameterService, blockchain, context.getAtConstants()));
         map.put("getATDetails", new GetATDetails(parameterService));
         map.put("getATs", new GetATs(atService, blockchain, context.getAtConstants()));
@@ -226,9 +238,9 @@ public final class ApiServlet extends HttpServlet {
         map.put("getATMapValue", new GetATMapValue(atStore));
         map.put("getATMapValues", new GetATMapValues(atStore));
         map.put("getAccountATs", new GetAccountATs(parameterService, atService));
-        map.put("generateSendTransactionQRCode", new GenerateDeeplinkQRCode(deeplinkQRCodeGenerator));
-        map.put("generateDeeplink", GenerateDeeplink.instance);
-        map.put("generateDeeplinkQRCode", GenerateDeeplinkQR.instance);
+        map.put("generateSendTransactionQRCode", new GenerateDeeplinkQRCode(deeplinkQRCodeGenerator, context.loggers()));
+        map.put("generateDeeplink", new GenerateDeeplink(context.loggers()));
+        map.put("generateDeeplinkQRCode", new GenerateDeeplinkQR(context.loggers()));
 
         // Calls that require an admin api key:
         map.put("clearUnconfirmedTransactions",
@@ -242,6 +254,12 @@ public final class ApiServlet extends HttpServlet {
             networkParameters.adjustAPIs(map);
         }
 
+        // Bind every handler to this node's logger for the JsonRequestHandler template
+        // method's generic request logging (P3-B3, plan §7.2).
+        Logger requestLogger = context.loggers().forClass(ApiServlet.class);
+        for (HttpRequestHandler handler : map.values()) {
+            handler.setRequestLogger(requestLogger);
+        }
         return Collections.unmodifiableMap(map);
     }
 
@@ -261,7 +279,7 @@ public final class ApiServlet extends HttpServlet {
             } catch (ParameterException e) {
                 response = e.getErrorResponse();
             } catch (SignumException | RuntimeException e) {
-                logger.debug("Error processing API request", e);
+                requestLogger.debug("Error processing API request", e);
                 response = ERROR_INCORRECT_REQUEST;
             }
 
@@ -269,8 +287,8 @@ public final class ApiServlet extends HttpServlet {
             if (response instanceof JsonObject) {
                 JSON.getAsJsonObject(response).addProperty("requestProcessingTime", processingTime);
             }
-            if (logger.isDebugEnabled() && processingTime > 20) {
-                logger.debug("{} ms - {}", processingTime, req.getParameter("requestType"));
+            if (requestLogger.isDebugEnabled() && processingTime > 20) {
+                requestLogger.debug("{} ms - {}", processingTime, req.getParameter("requestType"));
             }
 
             writeJsonToResponse(resp, response);
@@ -285,9 +303,22 @@ public final class ApiServlet extends HttpServlet {
         private final List<String> parameters;
         private final Set<LegacyDocTag> legacyDocTags;
 
+        /**
+         * The owning node's logger used for generic API request error/timing logging
+         * in the {@link JsonRequestHandler} template method (P3-B3, plan §7.2). Set
+         * by the enclosing {@link ApiServlet} right after each handler is created;
+         * preserves the original behaviour of logging under the {@code ApiServlet}
+         * FQCN. Never {@code null} once the servlet is constructed.
+         */
+        protected Logger requestLogger;
+
         protected HttpRequestHandler(LegacyDocTag[] legacyDocTags, String... parameters) {
             this.parameters = Collections.unmodifiableList(Arrays.asList(parameters));
             this.legacyDocTags = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(legacyDocTags)));
+        }
+
+        final void setRequestLogger(Logger requestLogger) {
+            this.requestLogger = requestLogger;
         }
 
         final List<String> getParameters() {

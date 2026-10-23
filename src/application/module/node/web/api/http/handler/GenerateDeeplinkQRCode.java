@@ -1,5 +1,6 @@
 package application.module.node.web.api.http.handler;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Constants;
 import application.module.node.deeplink.DeeplinkQRCodeGenerator;
 import application.module.node.feesuggestions.FeeSuggestionType;
@@ -10,8 +11,7 @@ import application.module.node.util.Convert;
 import application.module.node.util.StringUtils;
 import com.google.zxing.WriterException;
 import org.eclipse.jetty.http.HttpStatus;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import javax.imageio.ImageIO;
 import jakarta.servlet.http.HttpServletRequest;
@@ -24,15 +24,16 @@ import static application.module.node.web.api.http.common.Parameters.*;
 
 public class GenerateDeeplinkQRCode extends HttpRequestHandler {
 
-    private final Logger logger = LoggerFactory.getLogger(GenerateDeeplinkQRCode.class);
+    private final Logger logger;
 
     private final DeeplinkQRCodeGenerator deeplinkQRCodeGenerator;
 
-    public GenerateDeeplinkQRCode(DeeplinkQRCodeGenerator deeplinkQRCodeGenerator) {
+    public GenerateDeeplinkQRCode(DeeplinkQRCodeGenerator deeplinkQRCodeGenerator, NodeLoggers loggers) {
         super(new LegacyDocTag[] { LegacyDocTag.CREATE_TRANSACTION, LegacyDocTag.TRANSACTIONS }, IMMUTABLE_PARAMETER,
                 RECEIVER_ID_PARAMETER, AMOUNT_NQT_PARAMETER, FEE_NQT_PARAMETER, FEE_SUGGESTION_TYPE_PARAMETER,
                 MESSAGE_PARAMETER);
         this.deeplinkQRCodeGenerator = deeplinkQRCodeGenerator;
+        this.logger = loggers.forClass(GenerateDeeplinkQRCode.class);
     }
 
     @Override

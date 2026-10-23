@@ -1579,7 +1579,7 @@ public final class Signum {
                 this.apiTransactionManager, this.feeSuggestionCalculator,
                 this.deeplinkQRCodeGenerator, this.indirectIncomingService,
                 this.networkParameters, this.atConstants, this.fluxCapacitor, this.stores,
-                this.peerManager));
+                this.peerManager, this.loggers()));
         try {
             this.webServer.start();
         } catch (Exception e) {
