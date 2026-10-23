@@ -1,25 +1,27 @@
 package application.module.node.services.impl;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.IndirectIncoming;
 import application.module.node.Transaction;
 import application.module.node.db.store.IndirectIncomingStore;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.services.IndirectIncomingService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 public class IndirectIncomingServiceImpl implements IndirectIncomingService {
-    private static final Logger LOGGER = LoggerFactory.getLogger(IndirectIncomingServiceImpl.class);
+    private final Logger logger;
 
     private final IndirectIncomingStore indirectIncomingStore;
     private final boolean disabled;
 
-    public IndirectIncomingServiceImpl(IndirectIncomingStore indirectIncomingStore, PropertyService propertyService) {
+    public IndirectIncomingServiceImpl(IndirectIncomingStore indirectIncomingStore, PropertyService propertyService,
+            NodeLoggers loggers) {
+        this.logger = loggers.forClass(IndirectIncomingServiceImpl.class);
         this.indirectIncomingStore = indirectIncomingStore;
         this.disabled = !propertyService.getBoolean(Props.INDIRECT_INCOMING_SERVICE_ENABLE);
         if (disabled) {
-            LOGGER.warn("Indirect Incoming Service Disabled!");
+            logger.warn("Indirect Incoming Service Disabled!");
         }
     }
 

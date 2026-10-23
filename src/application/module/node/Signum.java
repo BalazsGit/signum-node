@@ -1386,7 +1386,7 @@ public final class Signum {
         this.derivedTableManager = new DerivedTableManager(this.loggers());
 
         // StatisticsManager + DBCacheManager
-        this.statisticsManager = new StatisticsManagerImpl(this.timeService);
+        this.statisticsManager = new StatisticsManagerImpl(this.timeService, this.loggers());
         this.dbCacheManager = new DBCacheManagerImpl(this.statisticsManager, this.loggers());
 
         // ThreadPool
@@ -1479,7 +1479,8 @@ public final class Signum {
         AliasStore aliasStore = this.stores.getAliasStore();
         this.subscriptionService = new SubscriptionServiceImpl(
                 this.stores.getSubscriptionStore(), transactionDb, this.blockchain,
-                this.fluxCapacitor, this.aliasService, aliasStore, this.accountService);
+                this.fluxCapacitor, this.aliasService, aliasStore, this.accountService,
+                this.loggers());
         ((AliasServiceImpl) this.aliasService).setSubscriptionService(this.subscriptionService);
 
         this.digitalGoodsStoreService = new DGSGoodsStoreServiceImpl(
@@ -1496,7 +1497,7 @@ public final class Signum {
                 this.stores.getOrderStore());
 
         this.indirectIncomingService = new IndirectIncomingServiceImpl(
-                this.stores.getIndirectIncomingStore(), this.propertyService);
+                this.stores.getIndirectIncomingStore(), this.propertyService, this.loggers());
 
         this.atProcessingContext = new ATProcessingContext(
                 this.atConstants, this.atProcessorCache, this.propertyService,
@@ -1511,7 +1512,7 @@ public final class Signum {
         this.blockService = new BlockServiceImpl(
                 this.accountService, this.transactionService, this.blockchain,
                 this.downloadCache, this.generator, this.fluxCapacitor,
-                this.propertyService, params);
+                this.propertyService, params, this.loggers());
 
         this.blockchainProcessor = NodeComponentFactory.createBlockchainProcessor(
                 this.threadPool, this.blockService, this.transactionProcessor,
@@ -1533,7 +1534,8 @@ public final class Signum {
         this.parameterService = new ParameterServiceImpl(
                 this.accountService, this.aliasService, this.assetExchange,
                 this.digitalGoodsStoreService, this.blockchain, this.blockchainProcessor,
-                this.transactionProcessor, this.atService, this.stores.getAccountStore());
+                this.transactionProcessor, this.atService, this.stores.getAccountStore(),
+                this.loggers());
 
         // addBlockchainListeners
         AT.HandleATBlockTransactionsListener handleAtBlockTransactionListener =

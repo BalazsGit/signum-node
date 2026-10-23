@@ -1,5 +1,6 @@
 package application.module.node.services.impl;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Account;
 import application.module.node.Block;
 import application.module.node.Blockchain;
@@ -60,7 +61,7 @@ class BlockServiceImplTest extends AbstractUnitTest {
 
         return new BlockServiceImpl(accountService, mock(TransactionService.class),
                 blockchain, mock(DownloadCacheImpl.class), mock(Generator.class),
-                fluxCapacitor, propertyService, null);
+                fluxCapacitor, propertyService, null, NodeLoggers.global());
     }
 
     private static FluxCapacitor smartFeesEnabled() {

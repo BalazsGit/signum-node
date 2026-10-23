@@ -1,5 +1,6 @@
 package application.module.node.services.impl;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Account;
 import application.module.node.Block;
 import application.module.node.Blockchain;
@@ -64,7 +65,8 @@ class SubscriptionServiceImplTest extends AbstractUnitTest {
         aliasStore = mock(AliasStore.class);
         accountService = mock(AccountService.class);
 
-        t = new SubscriptionServiceImpl(mockSubscriptionStore, transactionDb, blockchain, fluxCapacitor, aliasService, aliasStore, accountService);
+        t = new SubscriptionServiceImpl(mockSubscriptionStore, transactionDb, blockchain, fluxCapacitor, aliasService,
+                aliasStore, accountService, NodeLoggers.global());
     }
 
     @Test
@@ -137,7 +139,8 @@ class SubscriptionServiceImplTest extends AbstractUnitTest {
         when(accountServiceA.getOrAddAccount(333L)).thenReturn(recipientA);
 
         SubscriptionServiceImpl profileA = new SubscriptionServiceImpl(
-                storeA, transactionDb, blockchain, fluxCapacitor, aliasService, aliasStore, accountServiceA);
+                storeA, transactionDb, blockchain, fluxCapacitor, aliasService, aliasStore, accountServiceA,
+                NodeLoggers.global());
 
         // ── Profile B (different accounts + account service) ──
         Subscription subB = new Subscription(222L, 444L, 9002L, 2_000L, 1440, timestamp, mock(SignumKey.class));
@@ -159,7 +162,8 @@ class SubscriptionServiceImplTest extends AbstractUnitTest {
         when(accountServiceB.getOrAddAccount(444L)).thenReturn(recipientB);
 
         SubscriptionServiceImpl profileB = new SubscriptionServiceImpl(
-                storeB, transactionDb, blockchain, fluxCapacitor, aliasService, aliasStore, accountServiceB);
+                storeB, transactionDb, blockchain, fluxCapacitor, aliasService, aliasStore, accountServiceB,
+                NodeLoggers.global());
 
         // Bind the per-thread transaction apply context required by Transaction ID
         // computation (production binds this on the import threads via ThreadPool).
@@ -209,7 +213,8 @@ class SubscriptionServiceImplTest extends AbstractUnitTest {
         when(accountServiceA.getAccountBalance(111L)).thenReturn(balanceA);
 
         SubscriptionServiceImpl profileA = new SubscriptionServiceImpl(
-                storeA, transactionDb, blockchain, fluxCapacitor, aliasService, aliasStore, accountServiceA);
+                storeA, transactionDb, blockchain, fluxCapacitor, aliasService, aliasStore, accountServiceA,
+                NodeLoggers.global());
 
         profileA.applyUnconfirmed(timestamp, height);
 

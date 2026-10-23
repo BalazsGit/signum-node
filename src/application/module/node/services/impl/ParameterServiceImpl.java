@@ -1,5 +1,6 @@
 package application.module.node.services.impl;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.*;
 import application.module.node.assetexchange.AssetExchange;
 import application.module.node.db.store.AccountStore;
@@ -14,8 +15,7 @@ import application.module.node.util.JSON;
 import signumj.entity.SignumAddress;
 
 import com.google.gson.JsonObject;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.ArrayList;
@@ -29,7 +29,7 @@ import static application.module.node.web.api.http.common.ResultFields.ERROR_DES
 
 public class ParameterServiceImpl implements ParameterService {
 
-    private static final Logger logger = LoggerFactory.getLogger(ParameterServiceImpl.class);
+    private final Logger logger;
 
     private final AccountService accountService;
     private final AliasService aliasService;
@@ -44,7 +44,9 @@ public class ParameterServiceImpl implements ParameterService {
     public ParameterServiceImpl(AccountService accountService, AliasService aliasService, AssetExchange assetExchange,
             DGSGoodsStoreService dgsGoodsStoreService, Blockchain blockchain,
             BlockchainProcessor blockchainProcessor,
-            TransactionProcessor transactionProcessor, ATService atService, AccountStore accountStore) {
+            TransactionProcessor transactionProcessor, ATService atService, AccountStore accountStore,
+            NodeLoggers loggers) {
+        this.logger = loggers.forClass(ParameterServiceImpl.class);
         this.accountService = accountService;
         this.aliasService = aliasService;
         this.assetExchange = assetExchange;

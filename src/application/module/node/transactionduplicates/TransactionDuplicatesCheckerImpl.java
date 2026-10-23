@@ -1,18 +1,26 @@
 package application.module.node.transactionduplicates;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Transaction;
 import application.module.node.TransactionType;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.util.HashMap;
 import java.util.Objects;
 
 public class TransactionDuplicatesCheckerImpl {
 
-    private final Logger logger = LoggerFactory.getLogger(TransactionDuplicatesCheckerImpl.class);
+    private final Logger logger;
 
     private final HashMap<TransactionType, HashMap<String, Transaction>> duplicates = new HashMap<>();
+
+    public TransactionDuplicatesCheckerImpl() {
+        this(NodeLoggers.global());
+    }
+
+    public TransactionDuplicatesCheckerImpl(NodeLoggers loggers) {
+        this.logger = loggers.forClass(TransactionDuplicatesCheckerImpl.class);
+    }
 
     public void clear() {
         duplicates.clear();

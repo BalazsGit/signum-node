@@ -1,5 +1,6 @@
 package application.module.node.services.impl;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.*;
 import application.module.node.Alias.Offer;
 import application.module.node.SignumException.NotValidException;
@@ -18,12 +19,11 @@ import application.module.node.util.Convert;
 
 import java.util.*;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 public class SubscriptionServiceImpl implements SubscriptionService {
 
-    private final Logger logger = LoggerFactory.getLogger(SubscriptionServiceImpl.class);
+    private final Logger logger;
     private final SubscriptionStore subscriptionStore;
     private final VersionedEntityTable<Subscription> subscriptionTable;
     private final LongKeyFactory<Subscription> subscriptionDbKeyFactory;
@@ -48,7 +48,8 @@ public class SubscriptionServiceImpl implements SubscriptionService {
 
     public SubscriptionServiceImpl(SubscriptionStore subscriptionStore, TransactionDb transactionDb,
             Blockchain blockchain, FluxCapacitor fluxCapacitor, AliasService aliasService,
-            AliasStore aliasStore, AccountService accountService) {
+            AliasStore aliasStore, AccountService accountService, NodeLoggers loggers) {
+        this.logger = loggers.forClass(SubscriptionServiceImpl.class);
         this.subscriptionStore = subscriptionStore;
         this.subscriptionTable = subscriptionStore.getSubscriptionTable();
         this.subscriptionDbKeyFactory = subscriptionStore.getSubscriptionDbKeyFactory();

@@ -1,5 +1,6 @@
 package application.module.node.services.impl;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.*;
 import application.module.node.SignumException.ValidationException;
 import application.module.node.assetexchange.AssetExchange;
@@ -62,7 +63,8 @@ class ParameterServiceImplTest {
         accountStoreMock = mock(AccountStore.class);
 
         t = new ParameterServiceImpl(accountServiceMock, aliasServiceMock, assetExchangeMock, dgsGoodsStoreServiceMock,
-                blockchainMock, blockchainProcessorMock, transactionProcessorMock, atServiceMock, accountStoreMock);
+                blockchainMock, blockchainProcessorMock, transactionProcessorMock, atServiceMock, accountStoreMock,
+                NodeLoggers.global());
     }
 
     @Test

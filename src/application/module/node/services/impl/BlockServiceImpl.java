@@ -1,5 +1,6 @@
 package application.module.node.services.impl;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Account;
 import application.module.node.Block;
 import application.module.node.Blockchain;
@@ -25,8 +26,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import org.bouncycastle.util.encoders.Hex;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 import signum.net.NetworkParameters;
 
 //TODO: Create JavaDocs and remove this
@@ -45,7 +45,7 @@ public class BlockServiceImpl implements BlockService {
 
     private final List<Block> watchedBlocks = new ArrayList<>();
 
-    private static final Logger logger = LoggerFactory.getLogger(BlockServiceImpl.class);
+    private final Logger logger;
 
     public BlockServiceImpl(
             AccountService accountService,
@@ -55,7 +55,9 @@ public class BlockServiceImpl implements BlockService {
             Generator generator,
             FluxCapacitor fluxCapacitor,
             PropertyService propertyService,
-            NetworkParameters networkParameters) {
+            NetworkParameters networkParameters,
+            NodeLoggers loggers) {
+        this.logger = loggers.forClass(BlockServiceImpl.class);
         this.accountService = accountService;
         this.transactionService = transactionService;
         this.blockchain = blockchain;

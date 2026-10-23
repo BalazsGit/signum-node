@@ -1,8 +1,8 @@
 package application.module.node.statistics;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.services.TimeService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -10,7 +10,7 @@ import java.util.stream.Collectors;
 
 public class StatisticsManagerImpl {
 
-    private final Logger logger = LoggerFactory.getLogger(StatisticsManagerImpl.class);
+    private final Logger logger;
 
     private final TimeService timeService;
 
@@ -19,7 +19,8 @@ public class StatisticsManagerImpl {
 
     private final Map<String, CacheStatisticsOverview> cacheStatistics = new HashMap<>();
 
-    public StatisticsManagerImpl(TimeService timeService) {
+    public StatisticsManagerImpl(TimeService timeService, NodeLoggers loggers) {
+        this.logger = loggers.forClass(StatisticsManagerImpl.class);
         this.timeService = timeService;
     }
 

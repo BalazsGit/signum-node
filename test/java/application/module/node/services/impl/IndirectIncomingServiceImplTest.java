@@ -1,5 +1,6 @@
 package application.module.node.services.impl;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.*;
 import application.module.node.db.store.IndirectIncomingStore;
 import application.module.node.props.PropertyService;
@@ -31,7 +32,8 @@ class IndirectIncomingServiceImplTest {
             addIndirectIncomingsRunnable.get().accept(invocation.getArgument(0));
             return null;
         }).when(indirectIncomingStore).addIndirectIncomings(any());
-        indirectIncomingService = new IndirectIncomingServiceImpl(indirectIncomingStore, propertyService);
+        indirectIncomingService = new IndirectIncomingServiceImpl(indirectIncomingStore, propertyService,
+                NodeLoggers.global());
     }
 
     @Test
