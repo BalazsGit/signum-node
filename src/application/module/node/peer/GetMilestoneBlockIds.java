@@ -1,5 +1,6 @@
 package application.module.node.peer;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Block;
 import application.module.node.Blockchain;
 import application.module.node.util.Convert;
@@ -7,17 +8,17 @@ import application.module.node.util.JSON;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 final class GetMilestoneBlockIds implements PeerServlet.PeerRequestHandler {
 
-    private static final Logger logger = LoggerFactory.getLogger(GetMilestoneBlockIds.class);
+    private final Logger logger;
 
     private final Blockchain blockchain;
 
-    GetMilestoneBlockIds(Blockchain blockchain) {
+    GetMilestoneBlockIds(Blockchain blockchain, NodeLoggers loggers) {
         this.blockchain = blockchain;
+        this.logger = loggers.forClass(GetMilestoneBlockIds.class);
     }
 
     @Override

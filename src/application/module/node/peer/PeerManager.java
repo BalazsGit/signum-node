@@ -1,5 +1,6 @@
 package application.module.node.peer;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Blockchain;
 import application.module.node.BlockchainProcessor;
 import application.module.node.TransactionProcessor;
@@ -12,8 +13,7 @@ import application.module.node.services.TimeService;
 import application.module.node.util.Listener;
 import application.module.node.util.Listeners;
 import application.module.node.util.ThreadPool;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -36,7 +36,7 @@ import java.util.concurrent.ConcurrentMap;
  * <pre>{@code
  * // Create with dependencies via constructor injection
  * PeerManager manager = new PeerManager(
- *     propertyService, blockchain, threadPool, timeService);
+ *     propertyService, blockchain, threadPool, timeService, loggers);
  *
  * // Start peer networking for this profile
  * manager.start(timeService, accountService, blockchain,
@@ -58,13 +58,14 @@ import java.util.concurrent.ConcurrentMap;
  */
 public final class PeerManager {
 
-    private static final Logger logger = LoggerFactory.getLogger(PeerManager.class);
+    private final Logger logger;
 
     // Dependencies (constructor-injected, immutable)
     private final PropertyService propertyService;
     private final Blockchain blockchain;
     private final ThreadPool threadPool;
     private final TimeService timeService;
+    private final NodeLoggers loggers;
 
     // Instance-scoped P2P engine for this profile (created by start(), cleared by shutdown())
     private volatile Peers peers;
@@ -81,11 +82,14 @@ public final class PeerManager {
      * @param timeService     the profile's time service
      */
     public PeerManager(PropertyService propertyService, Blockchain blockchain,
-                       ThreadPool threadPool, TimeService timeService) {
+                       ThreadPool threadPool, TimeService timeService,
+                       NodeLoggers loggers) {
         this.propertyService = propertyService;
         this.blockchain = blockchain;
         this.threadPool = threadPool;
         this.timeService = timeService;
+        this.loggers = loggers;
+        this.logger = loggers.forClass(PeerManager.class);
     }
 
     /**
@@ -118,7 +122,7 @@ public final class PeerManager {
         this.running = true;
         this.peers = new Peers(timeService, accountService, blockchain,
                 transactionProcessor, blockchainProcessor, propertyService, threadPool,
-                fluxCapacitor, dbs, stores);
+                fluxCapacitor, dbs, stores, this.loggers);
         logger.info("PeerManager started (instance-scoped Peers created)");
     }
 

@@ -32,14 +32,15 @@ class PeerManagerTest {
     class ConstructorTests {
 
         @Test
-        @DisplayName("Has single public constructor with 4 parameters")
+        @DisplayName("Has single public constructor with 5 parameters")
         void constructor_HasCorrectSignature() throws Exception {
             Constructor<PeerManager> constructor = PeerManager.class.getConstructor(
                     application.module.node.props.PropertyService.class,
                     application.module.node.Blockchain.class,
                     application.module.node.util.ThreadPool.class,
-                    application.module.node.services.TimeService.class);
-            assertNotNull(constructor, "Expected public constructor with PropertyService, Blockchain, ThreadPool, TimeService");
+                    application.module.node.services.TimeService.class,
+                    application.module.logging.context.NodeLoggers.class);
+            assertNotNull(constructor, "Expected public constructor with PropertyService, Blockchain, ThreadPool, TimeService, NodeLoggers");
         }
 
         @Test

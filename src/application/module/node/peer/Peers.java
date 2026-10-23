@@ -1,5 +1,6 @@
 package application.module.node.peer;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.*;
 import application.module.node.db.store.Dbs;
 import application.module.node.db.store.Stores;
@@ -27,8 +28,7 @@ import org.eclipse.jetty.ee10.servlet.FilterHolder;
 import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
 import org.eclipse.jetty.ee10.servlet.ServletHolder;
 import org.eclipse.jetty.ee10.servlets.DoSFilter;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 import org.xml.sax.SAXException;
 
 import jakarta.servlet.DispatcherType;
@@ -52,7 +52,15 @@ import static application.module.node.util.JSON.prepareRequest;
 
 public final class Peers {
 
-    private static final Logger logger = LoggerFactory.getLogger(Peers.class);
+    /**
+     * Non-final on purpose: {@link Peers}' Runnable field initializers
+     * (anonymous inner classes) capture this field, and field initializers run
+     * before the constructor body assigns it — a blank final would fail the
+     * definite-assignment check. The Runnables only touch the logger at run
+     * time (after construction), so a plain instance field is safe here.
+     */
+    private Logger logger;
+    private final NodeLoggers loggers;
 
     public boolean isSupportedUserAgent(String header) {
         if (header == null || header.isEmpty() || !header.trim().startsWith("BRS/")) {
@@ -158,13 +166,16 @@ public final class Peers {
     public Peers(TimeService timeService, AccountService accountService, Blockchain blockchain,
             TransactionProcessor transactionProcessor,
             BlockchainProcessor blockchainProcessor, PropertyService propertyService, ThreadPool threadPool,
-            FluxCapacitor fluxCapacitor, Dbs dbs, Stores stores) {
+            FluxCapacitor fluxCapacitor, Dbs dbs, Stores stores,
+            NodeLoggers loggers) {
         this.timeService = timeService;
         this.propertyService = propertyService;
         this.fluxCapacitor = fluxCapacitor;
         this.dbs = dbs;
         this.stores = stores;
         this.blockchainProcessor = blockchainProcessor;
+        this.loggers = loggers;
+        this.logger = loggers.forClass(Peers.class);
         this.logContext = application.utils.logging.NodeLogContext.current();
 
         myPlatform = propertyService.getString(Props.P2P_MY_PLATFORM);
@@ -380,7 +391,8 @@ public final class Peers {
 
                 ServletHolder peerServletHolder = new ServletHolder(
                         new PeerServlet(this, timeService, accountService, blockchain,
-                                transactionProcessor, blockchainProcessor, propertyService));
+                                transactionProcessor, blockchainProcessor, propertyService,
+                                this.loggers));
                 boolean isGzipEnabled = propertyService.getBoolean(Props.JETTY_P2P_GZIP_FILTER);
                 peerServletHolder.setInitParameter("isGzipEnabled", Boolean.toString(isGzipEnabled));
 
@@ -870,7 +882,8 @@ public final class Peers {
             return null;
         }
 
-        peer = new PeerImpl(peerAddress, announcedPeerAddress, propertyService, fluxCapacitor, this);
+        peer = new PeerImpl(peerAddress, announcedPeerAddress, propertyService, fluxCapacitor, this,
+                this.loggers);
         peers.put(peerAddress, peer);
         if (announcedAddress != null) {
             updateAddress(peer);

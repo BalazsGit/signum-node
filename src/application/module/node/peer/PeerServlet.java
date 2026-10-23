@@ -2,6 +2,7 @@ package application.module.node.peer;
 
 import static application.module.node.Constants.PROTOCOL;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Blockchain;
 import application.module.node.BlockchainProcessor;
 import application.module.node.TransactionProcessor;
@@ -27,14 +28,13 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 //TODO: Create JavaDocs and remove this
 @SuppressWarnings({ "checkstyle:MissingJavadocTypeCheck", "checkstyle:MissingJavadocMethodCheck" })
 public final class PeerServlet extends HttpServlet {
 
-    private static final Logger logger = LoggerFactory.getLogger(PeerServlet.class);
+    private final Logger logger;
 
     interface PeerRequestHandler {
         JsonElement processRequest(JsonObject request, Peer peer);
@@ -71,16 +71,18 @@ public final class PeerServlet extends HttpServlet {
             Blockchain blockchain,
             TransactionProcessor transactionProcessor,
             BlockchainProcessor blockchainProcessor,
-            PropertyService propertyService) {
+            PropertyService propertyService,
+            NodeLoggers loggers) {
         this.peers = peers;
+        this.logger = loggers.forClass(PeerServlet.class);
         final Map<String, PeerRequestHandler> map = new HashMap<>();
         map.put("addPeers", new AddPeers(peers));
         map.put("getCumulativeDifficulty", new GetCumulativeDifficulty(blockchain));
         map.put("getInfo", new GetInfo(peers, timeService, blockchain));
-        map.put("getMilestoneBlockIds", new GetMilestoneBlockIds(blockchain));
+        map.put("getMilestoneBlockIds", new GetMilestoneBlockIds(blockchain, loggers));
         map.put("getNextBlockIds", new GetNextBlockIds(blockchain));
         map.put("getBlocksFromHeight", new GetBlocksFromHeight(blockchain));
-        map.put("getNextBlocks", new GetNextBlocks(blockchain, propertyService));
+        map.put("getNextBlocks", new GetNextBlocks(blockchain, propertyService, loggers));
         map.put("getPeers", new GetPeers(peers));
         map.put("getUnconfirmedTransactions", new GetUnconfirmedTransactions(transactionProcessor));
         map.put("processBlock", new ProcessBlock(blockchain, blockchainProcessor));

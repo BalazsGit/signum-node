@@ -1,5 +1,6 @@
 package application.module.node.peer;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Block;
 import application.module.node.Blockchain;
 import application.module.node.Constants;
@@ -15,19 +16,19 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 final class GetNextBlocks implements PeerServlet.PeerRequestHandler {
 
-    private static final Logger logger = LoggerFactory.getLogger(GetNextBlocks.class);
+    private final Logger logger;
 
     private final Blockchain blockchain;
     private static final int MAX_LENGHT = 1048576;
     private static final int MAX_BLOCKS = 1440 / 2; // maxRollback must be at least 1440 and we are using half of that
     private final int maxBlocks;
 
-    GetNextBlocks(Blockchain blockchain, PropertyService propertyService) {
+    GetNextBlocks(Blockchain blockchain, PropertyService propertyService, NodeLoggers loggers) {
+        this.logger = loggers.forClass(GetNextBlocks.class);
         this.blockchain = blockchain;
 
         maxBlocks = Math.min(MAX_BLOCKS, propertyService.getInt(Props.P2P_MAX_BLOCKS));

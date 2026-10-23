@@ -1,5 +1,6 @@
 package application.module.node.peer;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.BlockchainProcessor;
 import application.module.node.Constants;
 import application.module.node.Signum;
@@ -42,14 +43,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.GZIPInputStream;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 //TODO: Create JavaDocs and remove this
 @SuppressWarnings({ "checkstyle:MissingJavadocTypeCheck", "checkstyle:MissingJavadocMethodCheck" })
 final class PeerImpl implements Peer {
 
-    private static final Logger logger = LoggerFactory.getLogger(PeerImpl.class);
+    private final Logger logger;
 
     private final String peerAddress;
     private final AtomicReference<String> announcedAddress = new AtomicReference<>();
@@ -75,11 +75,13 @@ final class PeerImpl implements Peer {
     private final Peers peers;
 
     PeerImpl(String peerAddress, String announcedAddress) {
-        this(peerAddress, announcedAddress, null, null, null);
+        this(peerAddress, announcedAddress, null, null, null, NodeLoggers.global());
     }
 
     PeerImpl(String peerAddress, String announcedAddress, PropertyService propertyService,
-            FluxCapacitor fluxCapacitor, Peers peers) {
+            FluxCapacitor fluxCapacitor, Peers peers,
+            NodeLoggers loggers) {
+        this.logger = loggers.forClass(PeerImpl.class);
         this.peerAddress = peerAddress;
         this.propertyService = propertyService;
         this.fluxCapacitor = fluxCapacitor;

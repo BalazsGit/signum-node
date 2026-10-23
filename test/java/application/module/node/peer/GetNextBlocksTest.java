@@ -1,5 +1,6 @@
 package application.module.node.peer;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Block;
 import application.module.node.Blockchain;
 import application.module.node.Genesis;
@@ -42,7 +43,7 @@ class GetNextBlocksTest {
         }
         when(mockBlockchain.getBlocksAfter(ArgumentMatchers.eq(Genesis.GENESIS_BLOCK_ID), ArgumentMatchers.anyInt()))
                 .thenReturn(blocks);
-        getNextBlocks = new GetNextBlocks(mockBlockchain, mockPropertyService);
+        getNextBlocks = new GetNextBlocks(mockBlockchain, mockPropertyService, NodeLoggers.global());
     }
 
     @Test

@@ -1550,7 +1550,8 @@ public final class Signum {
                 this.fluxCapacitor);
 
         this.peerManager = new PeerManager(
-                this.propertyService, this.blockchain, this.threadPool, this.timeService);
+                this.propertyService, this.blockchain, this.threadPool, this.timeService,
+                this.loggers());
         this.peerManager.start(
                 this.timeService, this.accountService, this.blockchain,
                 this.transactionProcessor, this.blockchainProcessor,
