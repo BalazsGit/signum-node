@@ -1,5 +1,6 @@
 package application.module.logging;
 
+import application.module.logging.appender.SystemConsoleAppender;
 import application.module.logging.context.NodeLoggingConfigResolver;
 import application.module.logging.context.NodeLoggingConfigWriter;
 import application.module.logging.context.NodeLoggingContextApplier;
@@ -7,6 +8,9 @@ import application.module.logging.context.SignumGlobalContext;
 import application.module.node.NodeModule;
 import application.module.node.Signum;
 import application.utils.config.PropertiesProfileLoader;
+import org.apache.logging.log4j.core.appender.ConsoleAppender;
+import org.apache.logging.log4j.core.config.LoggerConfig;
+import org.apache.logging.log4j.core.layout.PatternLayout;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -84,6 +88,7 @@ public final class GlobalLoggingApplier {
             } else {
                 global.reconfigure();
             }
+            attachGlobalConsole(global);
             globalApplied = true;
             LOGGER.info("Global logging configuration applied ({}); re-applying to running nodes",
                     globalFile);
@@ -104,6 +109,40 @@ public final class GlobalLoggingApplier {
             reapplyNode(signum);
         }
         return globalApplied;
+    }
+
+    /** Terminal (stdout) appender name on the global root (re-attach dedup key). */
+    private static final String GLOBAL_CONSOLE_NAME = "globalConsole";
+    /** Terminal line pattern (BriefLogFormatter shape, matching the node console appender). */
+    private static final String GLOBAL_CONSOLE_PATTERN = "[%level] %d{yyyy-MM-dd HH:mm:ss} [%t] %logger{1} - %msg%n";
+
+    /**
+     * (Re)attaches the programmatic global-context appenders to the root (P3.5, plan §10.2): the
+     * {@link SystemConsoleAppender} (GUI System Console bridge) and a terminal
+     * {@link ConsoleAppender} (stdout). The generated global file is levels-only, and a
+     * reconfigure REPLACES the configuration — dropping programmatic appenders without stopping
+     * them (P0 spike fact) — so this must run after EVERY global reconfigure. Mirrors the
+     * node's ProfileConsoleAppender re-attach. Idempotent (name-based dedup on the root → no
+     * double delivery).
+     */
+    private static void attachGlobalConsole(SignumGlobalContext global) {
+        try {
+            LoggerConfig root = global.loggerContext().getConfiguration().getRootLogger();
+            // GUI System Console bridge (programmatic; NOT in the generated file).
+            new SystemConsoleAppender().attach(global.loggerContext());
+            // Terminal (stdout): programmatic, matching the node console appender (§10.2).
+            if (!root.getAppenders().containsKey(GLOBAL_CONSOLE_NAME)) {
+                ConsoleAppender terminal = ConsoleAppender.newBuilder()
+                        .setName(GLOBAL_CONSOLE_NAME)
+                        .setLayout(PatternLayout.newBuilder().withPattern(GLOBAL_CONSOLE_PATTERN).build())
+                        .setTarget(ConsoleAppender.Target.SYSTEM_OUT)
+                        .build();
+                terminal.start();
+                root.addAppender(terminal, null, null);
+            }
+        } catch (Throwable t) {
+            LOGGER.warn("Failed to attach the global console appenders: {}", t.getMessage());
+        }
     }
 
     /**

@@ -51,7 +51,12 @@ dependencies {
     implementation 'com.google.zxing:core:3.5.4'
     implementation 'com.google.zxing:javase:3.5.4'
     implementation 'org.slf4j:slf4j-api:2.0.19'
-    implementation 'org.slf4j:slf4j-jdk14:2.0.19'
+    // P3.5 binding swap: SLF4J -> log4j2 (replaces slf4j-jdk14). Single SLF4J provider on
+    // the classpath; every SLF4J static logger resolves (via the SignumGlobalContextSelector)
+    // to the single global "signum-global" Log4j2 context.
+    implementation 'org.apache.logging.log4j:log4j-slf4j2-impl:2.26.1'
+    // P3.5: JUL -> log4j2 bridge (JDK-internal + external JUL loggers -> the global context).
+    implementation 'org.apache.logging.log4j:log4j-jul:2.26.1'
 
     implementation 'org.eclipse.jetty.ee10:jetty-ee10-servlet:12.1.13'
     implementation 'org.eclipse.jetty.ee10:jetty-ee10-servlets:12.1.13'

@@ -44,26 +44,31 @@ public final class SignumGlobalContextSelector implements ContextSelector {
     private final LoggerContext globalContext;
 
     /**
-     * Creates the selector with a global context that has no config URI (log4j
-     * default configuration). Used until the generated global config file
-     * ({@code conf/logging-runtime/global.log4j2.properties}, §6.4) exists.
+     * The production (no-config) selector: serves the ONE shared global context
+     * ({@link SignumGlobalContext#shared()}) so that every SLF4J/JUL static lookup
+     * converges on the SAME context the global Apply pipeline
+     * ({@code GlobalLoggingApplier}) reconfigures and the
+     * {@code SystemConsoleAppender} attaches to (P3.5 coherence).
      */
     public SignumGlobalContextSelector() {
-        this((URI) null);
+        this.globalContext = SignumGlobalContext.shared().loggerContext();
     }
 
     /**
-     * @param configUri location of the global context configuration (the
-     *                  generated global .properties file, §6.4) or {@code null}
-     *                  for log4j default configuration. Note: the
+     * A standalone selector backed by its OWN context configured from the given file
+     * (test/diagnostic use only — production always uses the no-arg shared selector).
+     *
+     * @param configUri location of the context configuration; non-null. Note: the
      *                  {@code LoggerContext} constructor does <b>not</b> start
      *                  the context (P0 spike Q2a) — this constructor starts it
      *                  explicitly, which applies the configuration.
      */
     public SignumGlobalContextSelector(final URI configUri) {
-        final LoggerContext context = configUri == null
-                ? new LoggerContext(GLOBAL_CONTEXT_NAME)
-                : new LoggerContext(GLOBAL_CONTEXT_NAME, null, configUri);
+        if (configUri == null) {
+            throw new IllegalArgumentException(
+                    "configUri must not be null (use the no-arg constructor for the shared global context)");
+        }
+        final LoggerContext context = new LoggerContext(GLOBAL_CONTEXT_NAME, null, configUri);
         context.start();
         this.globalContext = context;
     }

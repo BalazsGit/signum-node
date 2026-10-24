@@ -119,15 +119,21 @@ class GlobalLoggingApplierTest {
             assertSame(minimal, ctx, "the propagation must reconfigure the SAME context (no restart)");
             assertEquals("DEBUG", rootLevel(ctx), "L2 node.level=FINE → DEBUG, applied live");
 
-            // the GUI-bridge appender survives the reconfigure (re-attached) — single delivery
+            // the GUI-bridge appender survives the reconfigure (re-attached) — single delivery.
+            // NOTE: the ProfileLogger is a bounded replay buffer — addSubscriber() re-delivers
+            // the node's own history to the new subscriber. Since B6.5b, Signum's instance
+            // logger writes its "created"/"reconfigured" lifecycle lines to the node context,
+            // so they land in this bus. Assert the DELTA caused by the single "hello" log,
+            // not the absolute (replayed) count.
             ProfileLogger bus = NodeLoggerRegistry.get("node", name);
             assertNotNull(bus);
             Recorder recorder = new Recorder();
             bus.addSubscriber(recorder);
+            int replayed = recorder.events.size();
             ((Logger) ctx.loggerContext().getLogger("application.module.node.globalapply.Engine"))
                     .info("hello");
-            assertEquals(1, recorder.events.size(),
-                    "exactly ONE bus event — no duplicate, no dead appender after the live re-apply");
+            assertEquals(replayed + 1, recorder.events.size(),
+                    "the single 'hello' log must add exactly ONE bus event — no duplicate, no dead appender after the live re-apply");
         } finally {
             signum.dispose();
         }

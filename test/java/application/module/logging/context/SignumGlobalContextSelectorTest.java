@@ -40,8 +40,13 @@ class SignumGlobalContextSelectorTest {
     @AfterEach
     void restoreFactory() {
         Log4jContextFactory current = (Log4jContextFactory) LogManager.getFactory();
+        // P3.5: the no-arg selector now serves the JVM-lifetime shared global context
+        // (SignumGlobalContext.shared()); it must NOT be stopped here (other tests rely on
+        // it). Only stop standalone (URI-based) contexts created in this test.
         for (LoggerContext ctx : current.getSelector().getLoggerContexts()) {
-            ctx.stop();
+            if (ctx != SignumGlobalContext.shared().loggerContext()) {
+                ctx.stop();
+            }
         }
         LogManager.setFactory(previousFactory);
     }

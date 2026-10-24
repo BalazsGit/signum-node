@@ -1,5 +1,6 @@
 package application.module.logging.context;
 
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.core.LoggerContext;
 import org.apache.logging.log4j.core.config.ConfigurationSource;
 import org.apache.logging.log4j.core.config.properties.PropertiesConfiguration;
@@ -39,6 +40,11 @@ public final class SignumGlobalContext {
                 : new LoggerContext(SignumGlobalContextSelector.GLOBAL_CONTEXT_NAME, null, configUri);
         // the LoggerContext constructor does NOT start the context (P0 Q2a)
         this.context.start();
+        // P3.5: the default (no-file) configuration runs at root ERROR. Raise it to the
+        // global default (INFO) so early bootstrap logs (before the first applyGlobal) are
+        // not dropped from the System Console. applyGlobal() later sets the authoritative
+        // resolved level.
+        this.context.getConfiguration().getRootLogger().setLevel(Level.INFO);
         this.configUri[0] = configUri;
     }
 

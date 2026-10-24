@@ -2,6 +2,7 @@ package application.launcher;
 
 import application.kernel.ApplicationKernel;
 import application.module.browser.core.JcefProcessBootstrap;
+import application.module.logging.GlobalLoggingApplier;
 import application.module.logging.context.SignumGlobalContextSelector;
 import application.module.node.profile.NodeProfileRepository;
 import application.module.node.profile.ProfileCli;
@@ -49,23 +50,26 @@ public class Launcher {
             .addOption("o", "order", true, "Set the node start/tab order (comma-separated profile names) and exit");
 
     static {
-        // 0. Pre-emptively set the LogManager before JUL is ever touched.
-        // This helps avoid IllegalAccessException on modern JREs (17/21+)
-        // when the LogManager tries to initialize via LoggerFactory calls.
+        // 0. Pre-emptively set the JUL LogManager before JUL is ever touched. This helps
+        // avoid IllegalAccessException on modern JREs (17/21+) when the LogManager tries to
+        // initialize via LoggerFactory calls. P3.5: the JUL -> log4j2 bridge (log4j-jul)
+        // owns the LogManager, so JDK-internal and external JUL loggers route into the
+        // global "signum-global" Log4j2 context (the same context the SLF4J binding
+        // reaches). Replaces the legacy SignumLogManager (fully removed in P5).
         if (System.getProperty("java.util.logging.manager") == null) {
-            System.setProperty("java.util.logging.manager", "application.module.node.util.SignumLogManager");
+            System.setProperty("java.util.logging.manager", "org.apache.logging.log4j.jul.LogManager");
         }
         // Note (JCEF/browser module): no early setup is needed here. The JCEF
         // process bootstrap (JcefProcessBootstrap) runs at the very start of
         // main() — before any application logic — and installs the native
         // library loader before the first org.cef.* use.
-        // 1. P1 (per-node isolated LoggerContext plan §6.2): install the global-only
-        //    Log4j2 context factory before any log4j logger access. While the SLF4J
-        //    binding is still JUL-based (pre-P3.5) no app code reaches log4j, so this
-        //    is a no-op for now; after the binding swap, every static lookup (SLF4J
-        //    binding, log4j-jul bridge, null-name) converges on the single
-        //    "signum-global" context instead of log4j's default selector, which does
-        //    NOT converge null-name and FQCN lookups on 2.26.1 (P0 spike Q1).
+        // 1. P1/P3.5 (per-node isolated LoggerContext plan §6.2): install the global-only
+        //    Log4j2 context factory before any log4j logger access. Since the P3.5 binding
+        //    swap, every static lookup (the log4j-slf4j2-impl SLF4J binding, the log4j-jul
+        //    bridge, and null-name) converges on the single "signum-global" context instead
+        //    of log4j's default selector, which does NOT converge null-name and FQCN lookups
+        //    on 2.26.1 (P0 spike Q1). The no-arg selector serves the shared
+        //    SignumGlobalContext (P3.5 coherence).
         LogManager.setFactory(new Log4jContextFactory(new SignumGlobalContextSelector()));
     }
     /**
@@ -107,13 +111,10 @@ public class Launcher {
 
         Path confPath = PathUtils.resolvePath(confFolder);
 
-        // Install the GUI log bridge as EARLY as possible (before the JCEF
-        // bootstrap and the logging reconfiguration). The SystemLogger keeps a
-        // bounded ring buffer, so the startup lines logged before the GUI (and
-        // before the logging configuration) are replayed to the System Console
-        // when the tab attaches. Idempotent; SignumLogManager re-installs the
-        // bridge after readConfiguration() resets the root logger's handlers.
-        application.utils.logging.SystemLoggerJulHandler.install();
+        // P3.5: the legacy SystemLoggerJulHandler (JUL -> SystemLogger/ProfileLogger bridge)
+        // is no longer installed here. After the log4j binding swap, SLF4J/JUL events route
+        // to the global "signum-global" Log4j2 context, whose SystemConsoleAppender forwards
+        // them to the SystemLogger (System Console). The handler itself is removed in P5.
 
         // ── JCEF process bootstrap (must precede ALL application logic) ──
         // JCEF renderer/utility/GPU processes re-run this main() with an extra
@@ -145,6 +146,12 @@ public class Launcher {
         // log bridge installed above), so the GUI shows the same lines as the
         // terminal.
         initLogs.forEach(msg -> logger.info("[Bootstrap] {}", msg));
+
+        // P3.5: configure the GLOBAL Log4j2 context (resolved root level + the
+        // SystemConsoleAppender/terminal appenders) from the L0/L1/L2 layers. After the
+        // binding swap this is the live destination for all SLF4J/JUL/global loggers;
+        // node contexts are configured separately by each Signum instance.
+        GlobalLoggingApplier.applyGlobal(confFolder);
 
         // Pre-warm the SQLite JDBC native library (with retries) before the
         // first sqlite-jdbc usage in this JVM (browser history DB, node DB).
