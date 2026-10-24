@@ -1408,7 +1408,7 @@ public final class Signum {
         this.dbCacheManager = new DBCacheManagerImpl(this.statisticsManager, this.loggers());
 
         // ThreadPool
-        this.threadPool = new ThreadPool(this.propertyService);
+        this.threadPool = new ThreadPool(this.propertyService, this.loggers());
         // Scope all pool tasks to this node's profile so log events route to the
         // correct per-node ProfileLogger (Node Console).
         this.threadPool.setProfileName(this.profile.getName());
@@ -1462,7 +1462,7 @@ public final class Signum {
                 this.stores.getAccountStore(), this.stores.getAssetTransferStore(), this.blockchain);
 
         this.downloadCache = new DownloadCacheImpl(
-                this.propertyService, this.fluxCapacitor, this.blockchain);
+                this.propertyService, this.fluxCapacitor, this.blockchain, this.loggers());
 
         boolean mockMining = this.propertyService.getBoolean(Props.DEV_MOCK_MINING);
         this.generator = NodeComponentFactory.createGenerator(

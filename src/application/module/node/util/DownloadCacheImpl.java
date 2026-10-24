@@ -1,5 +1,6 @@
 package application.module.node.util;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Block;
 import application.module.node.Blockchain;
 import application.module.node.BlockchainProcessor;
@@ -17,8 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.locks.StampedLock;
 import java.util.function.Supplier;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 //TODO: Create JavaDocs and remove this
 @SuppressWarnings({ "checkstyle:MissingJavadocTypeCheck", "checkstyle:MissingJavadocMethodCheck" })
@@ -30,7 +30,7 @@ public final class DownloadCacheImpl {
     private final Map<Long, Long> reverseCache = new LinkedHashMap<>();
     private final List<Long> unverified = new LinkedList<>();
 
-    private final Logger logger = LoggerFactory.getLogger(DownloadCacheImpl.class);
+    private final Logger logger;
 
     private final Blockchain blockchain;
     private final FluxCapacitor fluxCapacitor;
@@ -53,7 +53,9 @@ public final class DownloadCacheImpl {
     public DownloadCacheImpl(
             PropertyService propertyService,
             FluxCapacitor fluxCapacitor,
-            Blockchain blockchain) {
+            Blockchain blockchain,
+            NodeLoggers nodeLoggers) {
+        this.logger = nodeLoggers.forClass(DownloadCacheImpl.class);
         this.blockCacheMb = propertyService.getInt(Props.NODE_BLOCK_CACHE_MB);
         this.fluxCapacitor = fluxCapacitor;
         this.blockchain = blockchain;

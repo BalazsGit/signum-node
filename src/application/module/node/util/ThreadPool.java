@@ -1,12 +1,12 @@
 package application.module.node.util;
 import application.utils.config.ModuleIds;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.TransactionApplyContext;
 import application.module.node.TransactionType;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -47,7 +47,7 @@ public final class ThreadPool {
     private static final java.util.concurrent.atomic.AtomicInteger activePoolCount =
             new java.util.concurrent.atomic.AtomicInteger(0);
 
-    private static final Logger logger = LoggerFactory.getLogger(ThreadPool.class);
+    private final Logger logger;
     private final Map<Thread, Long> activeThreadsStartTime = new ConcurrentHashMap<>();
     private final Map<Thread, String> activeThreadsJobName = new ConcurrentHashMap<>();
 
@@ -78,8 +78,9 @@ public final class ThreadPool {
      */
     private volatile TransactionApplyContext transactionApplyContext;
 
-    public ThreadPool(PropertyService propertyService) {
+    public ThreadPool(PropertyService propertyService, NodeLoggers nodeLoggers) {
         this.propertyService = propertyService;
+        this.logger = nodeLoggers.forClass(ThreadPool.class);
     }
 
     /**

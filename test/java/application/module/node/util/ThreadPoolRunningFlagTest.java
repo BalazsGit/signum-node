@@ -1,5 +1,6 @@
 package application.module.node.util;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.props.CaselessProperties;
 import application.module.node.props.PropertyServiceImpl;
 
@@ -27,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ThreadPoolRunningFlagTest {
 
     private ThreadPool newPool() {
-        return new ThreadPool(new PropertyServiceImpl(new CaselessProperties()));
+        return new ThreadPool(new PropertyServiceImpl(new CaselessProperties()), NodeLoggers.global());
     }
 
     @Test
