@@ -167,6 +167,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
     private static final int MAX_TIMESTAMP_DIFFERENCE = 15;
     private boolean oclVerify;
     private final int oclUnverifiedQueue;
+    private final OCLPoC oclPoC;
 
     private final Semaphore gpuUsage = new Semaphore(2);
 
@@ -465,7 +466,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 if (oclInitialized.get()) {
                     logger.info("Destroying OCLPoC instance from BlockchainProcessor.");
                     try {
-                        OCLPoC.destroy();
+                        oclPoC.destroy();
                     } catch (Throwable t) {
                         logger.error("Error destroying OCLPoC", t);
                         if (firstException == null) {
@@ -684,10 +685,11 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
         this.skipDbCheckOnManualPopOff.set(propertyService.getBoolean(Props.POP_OFF_SKIP_DB_CHECK));
 
+        oclPoC = new OCLPoC(propertyService, loggers);
         oclVerify = propertyService.getBoolean(Props.GPU_ACCELERATION); // use GPU acceleration ?
         oclUnverifiedQueue = propertyService.getInt(Props.GPU_UNVERIFIED_QUEUE);
         if (oclVerify) {
-            OCLPoC.configure(propertyService);
+            oclPoC.configure();
         }
 
         String archivalModeStr = propertyService.getString(Props.DB_ARCHIVAL_MODE).toUpperCase();
@@ -1542,7 +1544,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                             if (downloadCache.getUnverifiedSize() > 0) {
                                 pocVersion = downloadCache.getPocVersion(downloadCache.getUnverifiedBlockIdFromPos(0));
                                 while (pos < downloadCache.getUnverifiedSize()
-                                        && blocks.size() < OCLPoC.getMaxItems()) {
+                                        && blocks.size() < oclPoC.getMaxItems()) {
                                     long blockId = downloadCache.getUnverifiedBlockIdFromPos(pos);
                                     if (downloadCache.getPocVersion(blockId) != pocVersion) {
                                         break;
@@ -1562,7 +1564,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                         if (!blocks.isEmpty()) {
                             try {
                                 oclInitialized.set(true);
-                                OCLPoC.validatePoC(blocks, pocVersion, blockService);
+                                oclPoC.validatePoC(blocks, pocVersion, blockService);
                                 downloadCache.removeUnverifiedBatch(blocks.keySet());
                             } catch (OCLPoC.PreValidateFailException e) {
                                 logger.info(e.toString(), e);

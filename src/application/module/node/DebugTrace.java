@@ -1,13 +1,13 @@
 package application.module.node;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.assetexchange.AssetExchange;
 import application.module.node.db.store.AccountStore;
 import application.module.node.props.Props;
 import application.module.node.services.AccountService;
 import application.module.node.services.DGSGoodsStoreService;
 import application.module.node.util.Convert;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.io.BufferedWriter;
 import java.io.FileOutputStream;
@@ -37,7 +37,7 @@ import java.util.Set;
  */
 public final class DebugTrace {
 
-    private static final Logger logger = LoggerFactory.getLogger(DebugTrace.class);
+    private final Logger logger;
 
     /** CSV quote character – public constant for VerifyTrace compatibility. */
     public static final String DEFAULT_QUOTE = "\"";
@@ -110,10 +110,11 @@ public final class DebugTrace {
      * @param assetExchange      asset exchange reference
      * @param blockchain         instance-scoped blockchain reference (eliminates static Signum.getBlockchain())
      * @param accountStore       account data store (eliminates static Account.getAccountBalance())
+     * @param nodeLoggers        the node's per-node logger facade (plan §7.1)
      */
     DebugTrace(Set<Long> accountIds, String logName, String quote, String separator,
             boolean logUnconfirmed, DGSGoodsStoreService dgsGoodsStoreService, AssetExchange assetExchange,
-            Blockchain blockchain, AccountStore accountStore) {
+            Blockchain blockchain, AccountStore accountStore, NodeLoggers nodeLoggers) {
         this.accountIds = accountIds;
         this.logName = logName;
         this.quote = quote != null ? quote : DEFAULT_QUOTE;
@@ -123,6 +124,7 @@ public final class DebugTrace {
         this.assetExchange = assetExchange;
         this.blockchain = blockchain;
         this.accountStore = accountStore;
+        this.logger = nodeLoggers.forClass(DebugTrace.class);
         resetLog();
     }
 
@@ -156,7 +158,8 @@ public final class DebugTrace {
             AssetExchange assetExchange,
             DGSGoodsStoreService dgsGoodsStoreService,
             Blockchain blockchain,
-            AccountStore accountStore) {
+            AccountStore accountStore,
+            NodeLoggers nodeLoggers) {
 
         String quote = propertyService.getString(Props.NODE_DEBUG_TRACE_QUOTE);
         String separator = propertyService.getString(Props.NODE_DEBUG_TRACE_SEPARATOR);
@@ -178,10 +181,11 @@ public final class DebugTrace {
         }
 
         DebugTrace debugTrace = new DebugTrace(
-                accountIds, logName, quote, separator, logUnconfirmed, dgsGoodsStoreService, assetExchange, blockchain, accountStore);
+                accountIds, logName, quote, separator, logUnconfirmed, dgsGoodsStoreService, assetExchange, blockchain, accountStore,
+                nodeLoggers);
         debugTrace.registerListeners(blockchainProcessor, accountService);
 
-        logger.debug("Debug tracing of " + (accountIdStrings.contains("*") ? "ALL"
+        nodeLoggers.forClass(DebugTrace.class).debug("Debug tracing of " + (accountIdStrings.contains("*") ? "ALL"
                 : String.valueOf(accountIds.size())) + " accounts enabled");
         return debugTrace;
     }

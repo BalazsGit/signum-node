@@ -1,13 +1,13 @@
 
 package application.module.node;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.module.node.services.BlockService;
 import application.module.node.util.MiningPlot;
 import org.jocl.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -21,27 +21,32 @@ import java.util.Locale;
 import static org.jocl.CL.*;
 
 final class OCLPoC {
-    private OCLPoC() {
+
+    private final PropertyService propertyService;
+    private final Logger logger;
+
+    private int HASHES_PER_ENQUEUE_DYNAMIC;
+    private int HASHES_PER_ENQUEUE;
+    private int MEM_PERCENT;
+
+    private cl_context ctx;
+    private cl_command_queue queue;
+    private cl_program program;
+    private cl_kernel genKernel;
+    private cl_kernel getKernel;
+    private cl_kernel getKernel2;
+
+    private long maxItems;
+    private long MAX_GROUP_ITEMS;
+
+    private volatile boolean initialized = false;
+
+    private final Object oclLock = new Object();
+
+    OCLPoC(PropertyService propertyService, NodeLoggers nodeLoggers) {
+        this.propertyService = propertyService;
+        this.logger = nodeLoggers.forClass(OCLPoC.class);
     }
-
-    private static final Logger logger = LoggerFactory.getLogger(OCLPoC.class);
-    private static int HASHES_PER_ENQUEUE_DYNAMIC;
-    private static int HASHES_PER_ENQUEUE;
-    private static int MEM_PERCENT;
-
-    private static cl_context ctx;
-    private static cl_command_queue queue;
-    private static cl_program program;
-    private static cl_kernel genKernel;
-    private static cl_kernel getKernel;
-    private static cl_kernel getKernel2;
-
-    private static long maxItems;
-    private static long MAX_GROUP_ITEMS;
-
-    private static volatile boolean initialized = false;
-
-    private static final Object oclLock = new Object();
 
     private static final long BUFFER_PER_ITEM = (long) MiningPlot.PLOT_SIZE + 16;
     private static final long MEM_PER_ITEM = 8 // id
@@ -51,27 +56,27 @@ final class OCLPoC {
             + MiningPlot.SCOOP_SIZE; // output scoop
 
     /**
-     * Initializes the OpenCL environment with the given PropertyService.
-     * Must be called before any other OCLPoC method. Thread-safe (idempotent).
+     * Initializes the OpenCL environment using the PropertyService bound to
+     * this instance. Must be called before any other OCLPoC method.
+     * Thread-safe (idempotent).
      *
-     * @param propertyService the node-scoped property service for GPU configuration
      * @throws OCLCheckerException if OpenCL initialization fails
      */
-    public static synchronized void configure(PropertyService propertyService) {
+    public synchronized void configure() {
         if (initialized) {
             return;
         }
-        init(propertyService);
+        init();
         initialized = true;
     }
 
-    private static synchronized void ensureInitialized() {
+    private synchronized void ensureInitialized() {
         if (!initialized) {
-            throw new OCLCheckerException("OCLPoC not initialized — call configure(PropertyService) first");
+            throw new OCLCheckerException("OCLPoC not initialized — call configure() first");
         }
     }
 
-    private static void init(PropertyService propertyService) {
+    private void init() {
         HASHES_PER_ENQUEUE = propertyService.getInt(Props.GPU_HASHES_PER_BATCH);
         MEM_PERCENT = propertyService.getInt(Props.GPU_MEM_PERCENT);
 
@@ -273,12 +278,12 @@ final class OCLPoC {
         }
     }
 
-    public static long getMaxItems() {
+    public long getMaxItems() {
         ensureInitialized();
         return maxItems;
     }
 
-    public static void validatePoC(HashMap<Block, Block> blocks, int pocVersion, BlockService blockService) {
+    public void validatePoC(HashMap<Block, Block> blocks, int pocVersion, BlockService blockService) {
         ensureInitialized();
         try {
             if (logger.isDebugEnabled()) {
@@ -435,7 +440,7 @@ final class OCLPoC {
         }
     }
 
-    static void destroy() {
+    void destroy() {
         synchronized (oclLock) {
             if (program != null) {
                 try {
@@ -488,7 +493,7 @@ final class OCLPoC {
         }
     }
 
-    private static boolean checkAvailable(cl_device_id device) {
+    private boolean checkAvailable(cl_device_id device) {
         long[] available = new long[1];
         clGetDeviceInfo(device, CL_DEVICE_AVAILABLE, Sizeof.cl_long, Pointer.to(available), null);
         return available[0] == 1;
@@ -497,20 +502,20 @@ final class OCLPoC {
     // idk if the kernel works on big endian, but I'm guessing not and I don't have
     // the hardware to
     // find out
-    private static boolean checkLittleEndian(cl_device_id device) {
+    private boolean checkLittleEndian(cl_device_id device) {
         long[] endianLittle = new long[1];
         clGetDeviceInfo(device, CL_DEVICE_ENDIAN_LITTLE, Sizeof.cl_long, Pointer.to(endianLittle),
                 null);
         return endianLittle[0] == 1;
     }
 
-    private static int getComputeUnits(cl_device_id device) {
+    private int getComputeUnits(cl_device_id device) {
         int[] maxComputeUnits = new int[1];
         clGetDeviceInfo(device, CL_DEVICE_MAX_COMPUTE_UNITS, 4, Pointer.to(maxComputeUnits), null);
         return maxComputeUnits[0];
     }
 
-    private static long calculateMaxItemsByMem(cl_device_id device) {
+    private long calculateMaxItemsByMem(cl_device_id device) {
         long[] globalMemSize = new long[1];
         long[] maxMemAllocSize = new long[1];
 
@@ -528,7 +533,7 @@ final class OCLPoC {
         return Math.min(maxItemsByGlobalMemSize, maxItemsByMaxAllocSize);
     }
 
-    private static AutoChooseResult autoChooseDevice() {
+    private AutoChooseResult autoChooseDevice() {
         int[] numPlatforms = new int[1];
         clGetPlatformIDs(0, null, numPlatforms);
 

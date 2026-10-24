@@ -297,7 +297,16 @@ public final class Signum {
      * own logging stays on the global context (plan §7.2 static boundary). The per-node
      * components (P3-B6) each receive their own node-isolated loggers via {@link #loggers()}.
      */
-    private static final Logger LOGGER = LogManager.getLogger(Signum.class);
+    // Serves the JVM-wide bootstrap entry points that run before/without a node instance
+    // (main, loadPropertiesForProfile) — legitimately global (no node context exists yet).
+    private static final Logger BOOTSTRAP_LOGGER = LogManager.getLogger(Signum.class);
+
+    // The node-scoped logger (P3-B6.5b): assigned once in the constructor from this node's
+    // isolated LoggerContext (global fallback if the context could not be created). Every
+    // per-node instance method logs through it, so a Signum logs to its OWN node context /
+    // profile console. A later full Apply reconfigures the SAME context, which re-binds this
+    // logger to the new level (P0/Q2b) — so it needs no reassignment.
+    private Logger logger;
 
     /**
      * The ONE JVM-wide registry of the nodes' isolated Log4j2 contexts (per-node
@@ -357,10 +366,12 @@ public final class Signum {
             this.nodeLoggers = new NodeLoggers(nodeLoggingContext.loggerContext());
             this.profileConsoleAppender = new ProfileConsoleAppender(this.profileLogger);
             this.profileConsoleAppender.attach(nodeLoggingContext.loggerContext());
-            LOGGER.info("Isolated node LoggerContext '{}' created (minimal config; full config at start())",
+            this.logger = this.nodeLoggers.forClass(Signum.class);
+            logger.info("Isolated node LoggerContext '{}' created (minimal config; full config at start())",
                     profile.getName());
         } catch (Throwable t) {
-            LOGGER.warn("Failed to create the isolated node LoggerContext for profile '{}' — "
+            this.logger = BOOTSTRAP_LOGGER;
+            logger.warn("Failed to create the isolated node LoggerContext for profile '{}' — "
                     + "node logging stays on the legacy chain: {}", profile.getName(), t.getMessage());
             this.nodeLoggingContext = null;
             this.nodeLoggers = null;
@@ -417,7 +428,7 @@ public final class Signum {
         NodeProfile reloaded = NodeProfileRepository.loadByName(this.profile.getName());
         if (reloaded == null) {
             application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, this.profile.getName(),
-                    () -> LOGGER.debug("refreshConfiguration('{}'): no on-disk profile — keeping current config",
+                    () -> logger.debug("refreshConfiguration('{}'): no on-disk profile — keeping current config",
                             this.profile.getName()));
             return;
         }
@@ -429,7 +440,7 @@ public final class Signum {
                     "Failed to refresh configuration for profile '" + this.profile.getName() + "' from " + this.confFolder, e);
         }
         application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, this.profile.getName(),
-                () -> LOGGER.info("refreshConfiguration('{}'): reloaded configuration from disk ({} propert(ies))",
+                () -> logger.info("refreshConfiguration('{}'): reloaded configuration from disk ({} propert(ies))",
                         this.profile.getName(), reloaded.getProperties().size()));
     }
 
@@ -531,7 +542,7 @@ public final class Signum {
         if (pl != null && !pl.isClosed()) {
             pl.error("Start rejected — " + r);
         }
-        LOGGER.warn("Start rejected for profile '{}': {}", getProfileName(), r);
+        logger.warn("Start rejected for profile '{}': {}", getProfileName(), r);
     }
 
     /**
@@ -608,7 +619,7 @@ public final class Signum {
             try {
                 NODE_LOGGING_CONTEXT_MANAGER.remove(nlc.profileName());
             } catch (Throwable t) {
-                LOGGER.warn("Failed to remove the isolated node LoggerContext for profile '{}': {}",
+                logger.warn("Failed to remove the isolated node LoggerContext for profile '{}': {}",
                         nlc.profileName(), t.getMessage());
             }
         }
@@ -1010,20 +1021,20 @@ public final class Signum {
             if (!appender.isActive()) {
                 appender.dispose();
                 NodeLogContext.runIn(ModuleIds.NODE, profile.getName(),
-                        () -> LOGGER.warn("Per-node file log is inactive for profile '{}' (could not open the log file in '{}')",
+                        () -> logger.warn("Per-node file log is inactive for profile '{}' (could not open the log file in '{}')",
                                 profile.getName(), propertyService.getString(Props.FILE_LOG_DIR)));
                 return;
             }
             profileLogger.addSubscriber(appender);
             this.profileFileAppender = appender;
             NodeLogContext.runIn(ModuleIds.NODE, profile.getName(),
-                    () -> LOGGER.info("Per-node file log attached for profile '{}': {} (level {}, {} bytes x {} rotations)",
+                    () -> logger.info("Per-node file log attached for profile '{}': {} (level {}, {} bytes x {} rotations)",
                             profile.getName(), appender.getFile().toAbsolutePath(),
                             propertyService.getString(Props.FILE_LOG_LEVEL),
                             propertyService.getInt(Props.FILE_LOG_LIMIT), propertyService.getInt(Props.FILE_LOG_COUNT)));
         } catch (Throwable t) {
             NodeLogContext.runIn(ModuleIds.NODE, profile != null ? profile.getName() : "unknown",
-                    () -> LOGGER.warn("Failed to attach the per-node file log appender: {}", t.getMessage()));
+                    () -> logger.warn("Failed to attach the per-node file log appender: {}", t.getMessage()));
         }
     }
 
@@ -1082,7 +1093,7 @@ public final class Signum {
         CaselessProperties properties = EffectiveNodeProps.loadEffective(confFolder, profileName);
 
         application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                () -> LOGGER.info("Initializing Signum Node version {}", VERSION));
+                () -> BOOTSTRAP_LOGGER.info("Initializing Signum Node version {}", VERSION));
 
         // Ensure SETTINGS_DIR is set if not in file
         if (properties.getProperty(Props.SETTINGS_DIR.getName()) == null) {
@@ -1118,7 +1129,7 @@ public final class Signum {
         } catch (Exception e) {
             System.err.println("Exception parsing command line arguments: " + e.getMessage());
         }
-        LOGGER.info("Headless boot: delegating to NodeModule (confFolder={})", confFolder);
+        BOOTSTRAP_LOGGER.info("Headless boot: delegating to NodeModule (confFolder={})", confFolder);
         // Pre-warm the SQLite JDBC native library (with retries) before the node
         // database (or any other sqlite-jdbc usage) triggers the driver's
         // one-shot native load. See application.utils.sqlite.SqliteNativeSupport.
@@ -1127,7 +1138,7 @@ public final class Signum {
         Path confRoot = PathUtils.resolvePath(confFolder);
         module.start();
         if (module.size() == 0) {
-            LOGGER.info("No autostart profile registered — starting default profile '{}'", PROPERTIES_NAME);
+            BOOTSTRAP_LOGGER.info("No autostart profile registered — starting default profile '{}'", PROPERTIES_NAME);
             module.startNode(PROPERTIES_NAME, confRoot);
         }
     }
@@ -1148,7 +1159,7 @@ public final class Signum {
      * @param command the console command string
      */
     public void processCommandInstance(String command) {
-        LOGGER.debug("received command: >{}<", command);
+        logger.debug("received command: >{}<", command);
 
         BlockchainProcessor proc = this.blockchainProcessor;
         Blockchain chain = this.blockchain;
@@ -1169,30 +1180,30 @@ public final class Signum {
             if (proc != null && chain != null) proc.scheduleTrim(chain.getLastBlock());
         } else if (command.equals(".dbcheck")) {
             if (proc == null) {
-                LOGGER.warn("Blockchain processor is not initialized. Cannot run database check.");
+                logger.warn("Blockchain processor is not initialized. Cannot run database check.");
             } else {
                 try {
                     int result = proc.checkDatabaseStateRequest();
                     if (result == 0) {
-                        LOGGER.info("Database check completed: CONSISTENT.");
+                        logger.info("Database check completed: CONSISTENT.");
                     } else {
-                        LOGGER.warn("Database check completed: INCONSISTENT. Consider running .autoresolve.");
+                        logger.warn("Database check completed: INCONSISTENT. Consider running .autoresolve.");
                     }
                 } catch (IllegalStateException e) {
-                    LOGGER.info(e.getMessage());
+                    logger.info(e.getMessage());
                 }
             }
         } else if (command.equals(".help")) {
-            LOGGER.info("Available commands:");
-            LOGGER.info("  .shutdown     - Gracefully shuts down the node.");
-            LOGGER.info("  .restart      - Restarts the node application.");
-            LOGGER.info("  .pause        - Pauses blockchain synchronization.");
-            LOGGER.info("  .resume       - Resumes blockchain synchronization.");
-            LOGGER.info("  .autoresolve  - Triggers manual database consistency resolution.");
-            LOGGER.info("  .trim         - Schedules a database trim.");
-            LOGGER.info("  .dbcheck      - Performs a database consistency check.");
-            LOGGER.info("  .popoff <n>   - Pops off the last n blocks from the blockchain (e.g., .popoff 10).");
-            LOGGER.info("  .help         - Displays this help message.");
+            logger.info("Available commands:");
+            logger.info("  .shutdown     - Gracefully shuts down the node.");
+            logger.info("  .restart      - Restarts the node application.");
+            logger.info("  .pause        - Pauses blockchain synchronization.");
+            logger.info("  .resume       - Resumes blockchain synchronization.");
+            logger.info("  .autoresolve  - Triggers manual database consistency resolution.");
+            logger.info("  .trim         - Schedules a database trim.");
+            logger.info("  .dbcheck      - Performs a database consistency check.");
+            logger.info("  .popoff <n>   - Pops off the last n blocks from the blockchain (e.g., .popoff 10).");
+            logger.info("  .help         - Displays this help message.");
         } else if (command.startsWith(".popoff ")) {
             Pattern r = Pattern.compile("^\\.popoff (\\d+)$");
             Matcher m = r.matcher(command);
@@ -1203,7 +1214,7 @@ public final class Signum {
                 }
             }
         } else if (!command.trim().isEmpty()) {
-            LOGGER.info("Unknown command: \"{}\". Type .help to see the list of available commands.", command);
+            logger.info("Unknown command: \"{}\". Type .help to see the list of available commands.", command);
         }
     }
 
@@ -1243,11 +1254,11 @@ public final class Signum {
             if (this.profileConsoleAppender != null) {
                 this.profileConsoleAppender.attach(this.nodeLoggingContext.loggerContext());
             }
-            LOGGER.info("Isolated node LoggerContext '{}' reconfigured (full config: {})",
+            logger.info("Isolated node LoggerContext '{}' reconfigured (full config: {})",
                     this.profile.getName(), this.nodeLoggingContext.configUri());
             return true;
         } catch (Throwable t) {
-            LOGGER.warn("Failed to apply the full node logging configuration for profile '{}' — "
+            logger.warn("Failed to apply the full node logging configuration for profile '{}' — "
                     + "keeping the previous configuration: {}", this.profile.getName(), t.getMessage());
             return false;
         }
@@ -1355,8 +1366,8 @@ public final class Signum {
         }
 
         // ── Step 4: Log initialization summary ──
-        LOGGER.info("Node profile '{}' initialization completed.", profileName);
-        LOGGER.info("Running network: {}", propertyService.getString(Props.NETWORK_NAME));
+        logger.info("Node profile '{}' initialization completed.", profileName);
+        logger.info("Running network: {}", propertyService.getString(Props.NETWORK_NAME));
     }
 
     /**
@@ -1606,7 +1617,7 @@ public final class Signum {
             this.timeService.setTime(new application.module.node.util.Time.FasterTime(
                     Math.max(this.timeService.getEpochTime(), this.blockchain.getLastBlock().getTimestamp()),
                     timeMultiplier));
-            LOGGER.info("TIME WILL FLOW {} TIMES FASTER!", timeMultiplier);
+            logger.info("TIME WILL FLOW {} TIMES FASTER!", timeMultiplier);
         }
 
         this.transactionApplyContext = new TransactionApplyContext(
@@ -1625,7 +1636,7 @@ public final class Signum {
         this.debugTrace = DebugTrace.create(
                 this.propertyService, this.blockchainProcessor, this.accountService,
                 this.assetExchange, this.digitalGoodsStoreService,
-                this.blockchain, this.stores.getAccountStore());
+                this.blockchain, this.stores.getAccountStore(), this.loggers());
     }
 
     /**
@@ -1662,10 +1673,10 @@ public final class Signum {
             Path parent = dbPath.getParent();
             if (parent != null && Files.notExists(parent)) {
                 Files.createDirectories(parent);
-                LOGGER.info("Created missing database directory: {}", parent.toAbsolutePath());
+                logger.info("Created missing database directory: {}", parent.toAbsolutePath());
             }
         } catch (Exception e) {
-            LOGGER.warn("Failed to ensure database directory exists: {}", e.getMessage());
+            logger.warn("Failed to ensure database directory exists: {}", e.getMessage());
         }
     }
 
@@ -1688,7 +1699,7 @@ public final class Signum {
                 try {
                     nlc.stop();
                 } catch (Throwable t) {
-                    LOGGER.warn("Failed to stop the isolated node LoggerContext for profile '{}': {}",
+                    logger.warn("Failed to stop the isolated node LoggerContext for profile '{}': {}",
                             profileName, t.getMessage());
                 }
             }
@@ -1698,7 +1709,7 @@ public final class Signum {
                     this.webServer.shutdown();
                 } catch (Throwable t) {
                     if (this.shutdownManager != null) this.shutdownManager.markFailure("WebServer");
-                    LOGGER.error("Error shutting down WebServer for profile '{}'", profileName, t);
+                    logger.error("Error shutting down WebServer for profile '{}'", profileName, t);
                 }
                 this.webServer = null;
             }
@@ -1708,7 +1719,7 @@ public final class Signum {
                     this.blockchainProcessor.shutdown();
                 } catch (Throwable t) {
                     if (this.shutdownManager != null) this.shutdownManager.markFailure("BlockchainProcessor");
-                    LOGGER.error("Error shutting down BlockchainProcessor for profile '{}'", profileName, t);
+                    logger.error("Error shutting down BlockchainProcessor for profile '{}'", profileName, t);
                 }
                 // CRITICAL: null out the reference so getBlockchainProcessor()
                 // returns null during the STOPPED state. Without this, a racing
@@ -1725,7 +1736,7 @@ public final class Signum {
                     this.peerManager.shutdown(this.threadPool);
                 } catch (Throwable t) {
                     if (this.shutdownManager != null) this.shutdownManager.markFailure("PeerManager");
-                    LOGGER.error("Error shutting down PeerManager for profile '{}'", profileName, t);
+                    logger.error("Error shutting down PeerManager for profile '{}'", profileName, t);
                 }
                 this.peerManager = null;
             }
@@ -1735,7 +1746,7 @@ public final class Signum {
                     this.threadPool.shutdown();
                 } catch (Throwable t) {
                     if (this.shutdownManager != null) this.shutdownManager.markFailure("ThreadPool");
-                    LOGGER.error("Error shutting down ThreadPool for profile '{}'", profileName, t);
+                    logger.error("Error shutting down ThreadPool for profile '{}'", profileName, t);
                 }
                 this.threadPool = null;
             }
@@ -1745,7 +1756,7 @@ public final class Signum {
                     this.dbCacheManager.close();
                 } catch (Throwable t) {
                     if (this.shutdownManager != null) this.shutdownManager.markFailure("DBCacheManager");
-                    LOGGER.error("Error closing DBCacheManager for profile '{}'", profileName, t);
+                    logger.error("Error closing DBCacheManager for profile '{}'", profileName, t);
                 }
                 this.dbCacheManager = null;
             }
@@ -1754,7 +1765,7 @@ public final class Signum {
                 if (this.dbContext != null) this.dbContext.shutdown();
             } catch (Throwable t) {
                 if (this.shutdownManager != null) this.shutdownManager.markFailure("Database");
-                LOGGER.error("Error shutting down DB for profile '{}'", profileName, t);
+                logger.error("Error shutting down DB for profile '{}'", profileName, t);
             }
             this.dbContext = null;
 
@@ -1762,9 +1773,9 @@ public final class Signum {
                 this.shutdownManager.finishShutdown();
             }
 
-            LOGGER.info("Node profile '{}' stopped.", profileName);
+            logger.info("Node profile '{}' stopped.", profileName);
         } catch (Exception e) {
-            LOGGER.error("Unexpected error during shutdown of profile '{}'", profileName, e);
+            logger.error("Unexpected error during shutdown of profile '{}'", profileName, e);
         } finally {
             contextStarted.set(false);
             // ── The ProfileLogger is INTENTIONALLY KEPT ALIVE across stop/start cycles ──
