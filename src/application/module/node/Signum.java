@@ -75,8 +75,8 @@ import application.module.logging.context.NodeLoggingContextApplier;
 import application.module.logging.context.NodeLoggingContextManager;
 import application.module.logging.context.NodeLoggers;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 
 import java.util.Objects;
 import java.util.List;
@@ -290,7 +290,14 @@ public final class Signum {
     // Logging (class-level, stateless; per-node routing goes through ProfileLogger)
     // =========================================================================
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(Signum.class);
+    /**
+     * Class-level logger (log4j, JVM-global context): Signum is the per-node orchestrator
+     * with static entry points ({@code main}, {@code loadPropertiesForProfile}) and its
+     * constructor runs before the isolated context's full config is applied, so Signum's
+     * own logging stays on the global context (plan §7.2 static boundary). The per-node
+     * components (P3-B6) each receive their own node-isolated loggers via {@link #loggers()}.
+     */
+    private static final Logger LOGGER = LogManager.getLogger(Signum.class);
 
     /**
      * The ONE JVM-wide registry of the nodes' isolated Log4j2 contexts (per-node
@@ -1255,7 +1262,7 @@ public final class Signum {
      * @return the per-node logger facade, or null when the context was not created
      */
     public NodeLoggers loggers() {
-        return this.nodeLoggers;
+        return this.nodeLoggers != null ? this.nodeLoggers : NodeLoggers.global();
     }
 
     /**
@@ -1315,7 +1322,7 @@ public final class Signum {
         applyNodeLoggingConfiguration();
 
         // ── Step 2.5: Create profile-scoped ShutdownManager ──
-        this.shutdownManager = new ShutdownManager(this.propertyService, profileName);
+        this.shutdownManager = new ShutdownManager(this.propertyService, profileName, this.loggers());
 
         // ── Step 3: Database Foundation ──
         try {
@@ -1438,7 +1445,7 @@ public final class Signum {
                 this.stores.getAliasStore(), this.stores, this.fluxCapacitor, this.propertyService);
         this.aliasService.addDefaultTLDs();
 
-        this.economicClustering = new EconomicClustering(this.blockchain, this.fluxCapacitor);
+        this.economicClustering = new EconomicClustering(this.blockchain, this.fluxCapacitor, this.loggers());
 
         this.accountService = new AccountServiceImpl(
                 this.stores.getAccountStore(), this.stores.getAssetTransferStore(), this.blockchain);
@@ -1449,7 +1456,7 @@ public final class Signum {
         boolean mockMining = this.propertyService.getBoolean(Props.DEV_MOCK_MINING);
         this.generator = NodeComponentFactory.createGenerator(
                 mockMining, this.propertyService, this.blockchain,
-                this.accountService, this.timeService, this.fluxCapacitor, this.downloadCache);
+                this.accountService, this.timeService, this.fluxCapacitor, this.downloadCache, this.loggers());
 
         this.transactionService = new TransactionServiceImpl(
                 this.accountService, this.blockchain);
@@ -1458,7 +1465,7 @@ public final class Signum {
                 this.propertyService, this.economicClustering, this.blockchain,
                 this.stores, this.timeService, this.dbs,
                 this.accountService, this.transactionService,
-                this.fluxCapacitor, this.threadPool);
+                this.fluxCapacitor, this.threadPool, this.loggers());
     }
 
     /**
@@ -1523,7 +1530,7 @@ public final class Signum {
                 this.generator, this.statisticsManager, this.dbCacheManager,
                 this.accountService, this.indirectIncomingService,
                 this.aliasService, this.fluxCapacitor, this.atService,
-                this.atProcessorCache);
+                this.atProcessorCache, this.loggers());
 
         this.derivedTableManager.setMinRollbackHeightSupplier(this.blockchainProcessor::getMinRollbackHeight);
         this.downloadCache.setBlockchainProcessor(this.blockchainProcessor);

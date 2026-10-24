@@ -8,15 +8,15 @@ import application.module.node.db.SignumKey;
 import application.module.node.db.store.AccountStore;
 import application.module.node.util.Convert;
 import java.util.Arrays;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 
 //TODO: Create JavaDocs and remove this
 @SuppressWarnings({ "checkstyle:MissingJavadocTypeCheck", "checkstyle:MissingJavadocMethodCheck" })
 
 public class Account {
 
-    private static final Logger logger = Logger.getLogger(Account.class.getSimpleName());
+    private static final Logger logger = LogManager.getLogger(Account.class);
 
     public final long id;
     public final SignumKey nxtKey;
@@ -322,7 +322,7 @@ public class Account {
 
     public Account(long id, int creationHeight, AccountStore store) {
         if (id != Crypto.rsDecode(Crypto.rsEncode(id))) {
-            logger.log(Level.INFO, "CRITICAL ERROR: Reed-Solomon encoding fails for {0}", id);
+            logger.info("CRITICAL ERROR: Reed-Solomon encoding fails for {}", id);
         }
         this.id = id;
         this.nxtKey = store.getAccountKeyFactory().newKey(this.id);
@@ -332,7 +332,7 @@ public class Account {
 
     protected Account(long id, SignumKey signumKey, int creationHeight) {
         if (id != Crypto.rsDecode(Crypto.rsEncode(id))) {
-            logger.log(Level.INFO, "CRITICAL ERROR: Reed-Solomon encoding fails for {0}", id);
+            logger.info("CRITICAL ERROR: Reed-Solomon encoding fails for {}", id);
         }
         this.id = id;
         this.nxtKey = signumKey;

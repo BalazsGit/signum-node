@@ -1,5 +1,6 @@
 package application.module.node.unconfirmedtransactions;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.*;
 import application.module.node.Attachment.MessagingAliasSell;
 import application.module.node.SignumException.NotCurrentlyValidException;
@@ -97,7 +98,7 @@ public class UnconfirmedTransactionStoreTest {
                 null, null, null, null, null, null, null, null, null, null));
 
         t = new UnconfirmedTransactionStoreImpl(timeService, mockPropertyService, accountStoreMock, transactionDbMock,
-                null);
+                null, NodeLoggers.global());
         t.setFluxCapacitor(fluxCapacitor);
         t.setBlockchain(mockBlockChain);
     }

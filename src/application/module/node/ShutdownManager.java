@@ -1,5 +1,6 @@
 package application.module.node;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.props.PropertyService;
 import application.module.node.props.Props;
 import application.utils.io.PathUtils;
@@ -9,8 +10,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -55,7 +55,7 @@ import java.util.Map;
  */
 public class ShutdownManager {
 
-    private static final Logger logger = LoggerFactory.getLogger(ShutdownManager.class);
+    private final Logger logger;
 
     static final String STATE_FILE_NAME = "settings.json";
 
@@ -86,7 +86,8 @@ public class ShutdownManager {
      * @param propertyService the property service providing the settings directory
      * @param profileName     the human-readable profile name used as a JSON key
      */
-    public ShutdownManager(PropertyService propertyService, String profileName) {
+    public ShutdownManager(PropertyService propertyService, String profileName, NodeLoggers loggers) {
+        this.logger = loggers.forClass(ShutdownManager.class);
         this.profileName = profileName != null && !profileName.isEmpty() ? profileName : "default";
         String confDir = propertyService.getString(Props.SETTINGS_DIR);
         this.stateFilePath = PathUtils.resolvePath(Paths.get(confDir, STATE_FILE_NAME).toString());

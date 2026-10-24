@@ -3,6 +3,7 @@ package application.module.node;
 import static application.module.node.Constants.FEE_QUANT_SIP3;
 import static application.module.node.Constants.ONE_SIGNA;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.at.*;
 import application.module.node.crypto.Crypto;
 import application.module.node.db.BlockDb;
@@ -98,13 +99,13 @@ import java.util.stream.Stream;
 
 import com.sun.management.OperatingSystemMXBean;
 import org.bouncycastle.util.encoders.Hex;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 import signumj.entity.SignumID;
 
 public final class BlockchainProcessorImpl implements BlockchainProcessor {
 
-    private final Logger logger = LoggerFactory.getLogger(BlockchainProcessorImpl.class);
+    private final NodeLoggers nodeLoggers;
+    private final Logger logger;
     private final Stores stores;
     private final BlockchainImpl blockchain;
     private final BlockService blockService;
@@ -614,7 +615,10 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             AliasService aliasService,
             FluxCapacitor fluxCapacitor,
             ATService atService,
-            ATProcessorCache atProcessorCache) {
+            ATProcessorCache atProcessorCache,
+            NodeLoggers loggers) {
+        this.nodeLoggers = loggers;
+        this.logger = loggers.forClass(BlockchainProcessorImpl.class);
         this.atProcessorCache = atProcessorCache;
         this.blockService = blockService;
         this.atService = atService;
@@ -3423,7 +3427,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
                 validationTime = (System.nanoTime() - stepStart);
                 stepStart = System.nanoTime();
 
-                final TransactionDuplicatesCheckerImpl transactionDuplicatesChecker = new TransactionDuplicatesCheckerImpl();
+                final TransactionDuplicatesCheckerImpl transactionDuplicatesChecker = new TransactionDuplicatesCheckerImpl(nodeLoggers);
                 long calculatedTotalAmount = 0;
                 long calculatedTotalFee = 0;
                 MessageDigest digest = Crypto.sha256();
@@ -4179,7 +4183,7 @@ public final class BlockchainProcessorImpl implements BlockchainProcessor {
             try {
                 stores.beginTransaction();
 
-                final TransactionDuplicatesCheckerImpl transactionDuplicatesChecker = new TransactionDuplicatesCheckerImpl();
+                final TransactionDuplicatesCheckerImpl transactionDuplicatesChecker = new TransactionDuplicatesCheckerImpl(nodeLoggers);
 
                 ToLongFunction<Transaction> priorityCalculator = transaction -> {
                     int age = blockTimestamp + 1 - transaction.getTimestamp();

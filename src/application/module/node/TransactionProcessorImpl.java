@@ -1,5 +1,6 @@
 package application.module.node;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.SignumException.ValidationException;
 import application.module.node.db.store.Dbs;
 import application.module.node.db.store.Stores;
@@ -21,8 +22,7 @@ import application.module.node.util.ThreadPool;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -38,7 +38,7 @@ import static application.module.node.web.api.http.common.ResultFields.UNCONFIRM
 
 public class TransactionProcessorImpl implements TransactionProcessor {
 
-    private static final Logger logger = LoggerFactory.getLogger(TransactionProcessorImpl.class);
+    private final Logger logger;
 
     private final boolean testUnconfirmedTransactions;
     private final AtomicBoolean isShutdown = new AtomicBoolean(false);
@@ -80,7 +80,9 @@ public class TransactionProcessorImpl implements TransactionProcessor {
     public TransactionProcessorImpl(PropertyService propertyService,
             EconomicClustering economicClustering, Blockchain blockchain, Stores stores, TimeService timeService,
             Dbs dbs, AccountService accountService,
-            TransactionService transactionService, FluxCapacitor fluxCapacitor, ThreadPool threadPool) {
+            TransactionService transactionService, FluxCapacitor fluxCapacitor, ThreadPool threadPool,
+            NodeLoggers loggers) {
+        this.logger = loggers.forClass(TransactionProcessorImpl.class);
         this.economicClustering = economicClustering;
         this.fluxCapacitor = fluxCapacitor;
         this.blockchain = blockchain;

@@ -1,16 +1,16 @@
 package application.module.node.props;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Signum;
 import java.util.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 import signum.net.NetworkParameters;
 
 // TODO: Remove this and add proper javadoc
 @SuppressWarnings("checkstyle:MissingJavadocTypeCheck")
 public class PropertyServiceImpl implements PropertyService {
 
-    private final Logger logger = LoggerFactory.getLogger(Signum.class);
+    private final Logger logger;
     private static final String LOG_UNDEF_NAME_DEFAULT = "{} using default: >{}<";
 
     private final CaselessProperties properties;
@@ -19,7 +19,12 @@ public class PropertyServiceImpl implements PropertyService {
     private NetworkParameters networkParameters;
 
     public PropertyServiceImpl(CaselessProperties properties) {
+        this(properties, NodeLoggers.global());
+    }
+
+    public PropertyServiceImpl(CaselessProperties properties, NodeLoggers loggers) {
         this.properties = properties;
+        this.logger = loggers.forClass(Signum.class);
     }
 
     private String getProperty(String name) {

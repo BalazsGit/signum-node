@@ -9,9 +9,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Attachment.CommitmentAdd;
 import application.module.node.Attachment.CommitmentRemove;
 import application.module.node.crypto.Crypto;
@@ -30,7 +30,7 @@ import signumj.crypto.SignumCrypto;
 import signumj.entity.SignumID;
 
 public class GeneratorImpl implements Generator {
-    private static final Logger logger = LoggerFactory.getLogger(GeneratorImpl.class);
+    private final Logger logger;
 
     private final Listeners<GeneratorState, Event> listeners = new Listeners<>();
     private final ConcurrentMap<Long, GeneratorStateImpl> generators = new ConcurrentHashMap<>();
@@ -41,7 +41,8 @@ public class GeneratorImpl implements Generator {
     private final FluxCapacitor fluxCapacitor;
 
     public GeneratorImpl(Blockchain blockchain, DownloadCacheImpl downloadCache, AccountService accountService,
-            TimeService timeService, FluxCapacitor fluxCapacitor) {
+            TimeService timeService, FluxCapacitor fluxCapacitor, NodeLoggers loggers) {
+        this.logger = loggers.forClass(GeneratorImpl.class);
         this.blockchain = blockchain;
         this.downloadCache = downloadCache;
         this.timeService = timeService;
@@ -270,8 +271,8 @@ public class GeneratorImpl implements Generator {
         private final PropertyService propertyService;
 
         public MockGenerator(PropertyService propertyService, Blockchain blockchain, AccountService accountService,
-                TimeService timeService, FluxCapacitor fluxCapacitor) {
-            super(blockchain, null, accountService, timeService, fluxCapacitor);
+                TimeService timeService, FluxCapacitor fluxCapacitor, NodeLoggers loggers) {
+            super(blockchain, null, accountService, timeService, fluxCapacitor, loggers);
             this.propertyService = propertyService;
         }
 

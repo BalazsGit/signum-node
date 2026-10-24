@@ -50,7 +50,7 @@ public class Stores {
         this.tradeStore = new SqlTradeStore(derivedTableManager, dbContext);
         this.subscriptionStore = new SqlSubscriptionStore(derivedTableManager, insertMaxBatchSize, dbContext);
         this.unconfirmedTransactionStore = new UnconfirmedTransactionStoreImpl(timeService, propertyService,
-                accountStore, transactionDb, params);
+                accountStore, transactionDb, params, dbContext.loggers());
         this.indirectIncomingStore = new SqlIndirectIncomingStore(derivedTableManager, insertMaxBatchSize, dbContext);
         this.blockchainStore = new SqlBlockchainStore(transactionDb, blockDb, storeDependencies);
     }

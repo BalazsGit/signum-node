@@ -1,5 +1,6 @@
 package application.module.node.unconfirmedtransactions;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Account;
 import application.module.node.SignumException;
 import application.module.node.Constants;
@@ -10,8 +11,7 @@ import application.module.node.Attachment.CommitmentRemove;
 import application.module.node.Blockchain;
 import application.module.node.db.store.AccountStore;
 import application.module.node.util.Convert;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -19,7 +19,7 @@ import java.util.List;
 
 class ReservedBalanceCache {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(ReservedBalanceCache.class);
+    private final Logger logger;
 
     private Blockchain blockchain;
 
@@ -27,7 +27,8 @@ class ReservedBalanceCache {
 
     private final HashMap<Long, Long> reservedBalanceCache;
 
-    public ReservedBalanceCache(AccountStore accountStore) {
+    public ReservedBalanceCache(AccountStore accountStore, NodeLoggers loggers) {
+        this.logger = loggers.forClass(ReservedBalanceCache.class);
         this.accountStore = accountStore;
         this.reservedBalanceCache = new HashMap<>();
     }
@@ -50,8 +51,8 @@ class ReservedBalanceCache {
                 thisTransactionAmountNQT);
 
         if (senderAccount == null) {
-            if (LOGGER.isInfoEnabled()) {
-                LOGGER.info(String.format(
+            if (logger.isInfoEnabled()) {
+                logger.info(String.format(
                         "Transaction %d: Account %d does not exist and has no balance. Required funds: %d",
                         transaction.getId(), transaction.getSenderId(), amountNQT));
             }
@@ -60,8 +61,8 @@ class ReservedBalanceCache {
         }
 
         if (amountNQT > senderAccount.getUnconfirmedBalanceNqt()) {
-            if (LOGGER.isInfoEnabled()) {
-                LOGGER.info("Transaction {} for {}: account {} balance too low. Total required {} > {} balance",
+            if (logger.isInfoEnabled()) {
+                logger.info("Transaction {} for {}: account {} balance too low. Total required {} > {} balance",
                         Convert.toUnsignedLong(transaction.getId()), thisTransactionAmountNQT,
                         Convert.toUnsignedLong(transaction.getSenderId()), amountNQT,
                         senderAccount.getUnconfirmedBalanceNqt());
@@ -78,8 +79,8 @@ class ReservedBalanceCache {
             long amountCommitted = blockchain.getCommittedAmount(senderAccount.getId(), blockchain.getHeight(),
                     blockchain.getHeight(), transaction);
             if (nBlocksMined > 0 || amountCommitted < totalAmountNQT) {
-                if (LOGGER.isInfoEnabled()) {
-                    LOGGER.debug(
+                if (logger.isInfoEnabled()) {
+                    logger.debug(
                             "Transaction {}: Account {} commitment remove not allowed. Blocks mined {}, amount commitment {}, amount removing {}",
                             transaction.getId(), transaction.getSenderId(), nBlocksMined, amountCommitted,
                             totalAmountNQT);

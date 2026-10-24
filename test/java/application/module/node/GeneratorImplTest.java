@@ -1,5 +1,6 @@
 package application.module.node;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.common.QuickMocker;
 import application.module.node.common.TestConstants;
 import application.module.node.fluxcapacitor.FluxCapacitor;
@@ -50,9 +51,9 @@ class GeneratorImplTest {
         doReturn(240).when(fluxCapacitorLnTime).getValue(FluxValues.BLOCK_TIME);
         doReturn(240).when(fluxCapacitorPocPlus).getValue(FluxValues.BLOCK_TIME);
 
-        generator = new GeneratorImpl(blockchain, null, null, timeService, fluxCapacitor);
-        generatorLnTime = new GeneratorImpl(blockchain, null, null, timeService, fluxCapacitorLnTime);
-        generatorPocPlus = new GeneratorImpl(blockchain, null, null, timeService, fluxCapacitorPocPlus);
+        generator = new GeneratorImpl(blockchain, null, null, timeService, fluxCapacitor, NodeLoggers.global());
+        generatorLnTime = new GeneratorImpl(blockchain, null, null, timeService, fluxCapacitorLnTime, NodeLoggers.global());
+        generatorPocPlus = new GeneratorImpl(blockchain, null, null, timeService, fluxCapacitorPocPlus, NodeLoggers.global());
     }
 
     @Test

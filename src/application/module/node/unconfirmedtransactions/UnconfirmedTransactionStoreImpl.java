@@ -1,5 +1,6 @@
 package application.module.node.unconfirmedtransactions;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.Blockchain;
 import application.module.node.SignumException.ValidationException;
 import application.module.node.Constants;
@@ -17,8 +18,7 @@ import application.module.node.transactionduplicates.TransactionDuplicationResul
 import application.module.node.util.StringUtils;
 import signum.net.NetworkParameters;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 import java.util.*;
 import java.util.concurrent.Executors;
@@ -28,11 +28,11 @@ import java.util.stream.Collectors;
 
 public class UnconfirmedTransactionStoreImpl implements UnconfirmedTransactionStore {
 
-    private static final Logger logger = LoggerFactory.getLogger(UnconfirmedTransactionStoreImpl.class);
+    private final Logger logger;
 
     private final TimeService timeService;
     private final ReservedBalanceCache reservedBalanceCache;
-    private final TransactionDuplicatesCheckerImpl transactionDuplicatesChecker = new TransactionDuplicatesCheckerImpl();
+    private final TransactionDuplicatesCheckerImpl transactionDuplicatesChecker;
 
     private final HashMap<Transaction, HashSet<Peer>> fingerPrintsOverview = new HashMap<>();
     private final TransactionDb transactionDb;
@@ -64,12 +64,14 @@ public class UnconfirmedTransactionStoreImpl implements UnconfirmedTransactionSt
 
     public UnconfirmedTransactionStoreImpl(TimeService timeService, PropertyService propertyService,
             AccountStore accountStore, TransactionDb transactionDb,
-            NetworkParameters params) {
+            NetworkParameters params, NodeLoggers loggers) {
+        this.logger = loggers.forClass(UnconfirmedTransactionStoreImpl.class);
         this.timeService = timeService;
         this.transactionDb = transactionDb;
         this.params = params;
 
-        this.reservedBalanceCache = new ReservedBalanceCache(accountStore);
+        this.transactionDuplicatesChecker = new TransactionDuplicatesCheckerImpl(loggers);
+        this.reservedBalanceCache = new ReservedBalanceCache(accountStore, loggers);
 
         this.maxSize = propertyService.getInt(Props.P2P_MAX_UNCONFIRMED_TRANSACTIONS);
         this.totalSize = 0;

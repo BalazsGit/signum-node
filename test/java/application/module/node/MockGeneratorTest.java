@@ -1,5 +1,6 @@
 package application.module.node;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.common.QuickMocker;
 import application.module.node.common.TestConstants;
 import application.module.node.fluxcapacitor.FluxCapacitor;
@@ -42,7 +43,7 @@ class MockGeneratorTest {
         PropertyService propertyService = mock(PropertyService.class);
         doReturn(1000).when(propertyService).getInt(Props.DEV_MOCK_MINING_DEADLINE);
 
-        generator = new GeneratorImpl.MockGenerator(propertyService, blockchain, null, timeService, fluxCapacitor);
+        generator = new GeneratorImpl.MockGenerator(propertyService, blockchain, null, timeService, fluxCapacitor, NodeLoggers.global());
     }
 
     @Test

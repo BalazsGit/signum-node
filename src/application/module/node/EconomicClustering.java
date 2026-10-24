@@ -1,10 +1,10 @@
 package application.module.node;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.fluxcapacitor.FluxCapacitor;
 import application.module.node.fluxcapacitor.FluxValues;
 import application.module.node.util.JSON;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Economic Clustering concept (EC) solves the most critical flaw of "classical"
@@ -26,12 +26,13 @@ import org.slf4j.LoggerFactory;
  */
 public final class EconomicClustering {
 
-    private static final Logger logger = LoggerFactory.getLogger(EconomicClustering.class);
+    private final Logger logger;
 
     private final Blockchain blockchain;
     private final FluxCapacitor fluxCapacitor;
 
-    public EconomicClustering(Blockchain blockchain, FluxCapacitor fluxCapacitor) {
+    public EconomicClustering(Blockchain blockchain, FluxCapacitor fluxCapacitor, NodeLoggers loggers) {
+        this.logger = loggers.forClass(EconomicClustering.class);
         this.blockchain = blockchain;
         this.fluxCapacitor = fluxCapacitor;
     }

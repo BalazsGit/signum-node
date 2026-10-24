@@ -1,5 +1,6 @@
 package application.module.node;
 
+import application.module.logging.context.NodeLoggers;
 import application.module.node.at.ATProcessorCache;
 import application.module.node.db.BlockDb;
 import application.module.node.db.TransactionDb;
@@ -92,21 +93,24 @@ public final class NodeComponentFactory {
             AccountService accountService,
             TimeService timeService,
             FluxCapacitor fluxCapacitor,
-            DownloadCacheImpl downloadCache) {
+            DownloadCacheImpl downloadCache,
+            NodeLoggers loggers) {
         if (mockMining) {
             return new GeneratorImpl.MockGenerator(
                     propertyService,
                     blockchain,
                     accountService,
                     timeService,
-                    fluxCapacitor);
+                    fluxCapacitor,
+                    loggers);
         }
         return new GeneratorImpl(
                 blockchain,
                 downloadCache,
                 accountService,
                 timeService,
-                fluxCapacitor);
+                fluxCapacitor,
+                loggers);
     }
 
     // -------------------------------------------------------------------------
@@ -173,7 +177,8 @@ public final class NodeComponentFactory {
             AliasService aliasService,
             FluxCapacitor fluxCapacitor,
             ATService atService,
-            ATProcessorCache atProcessorCache) {
+            ATProcessorCache atProcessorCache,
+            NodeLoggers loggers) {
         return new BlockchainProcessorImpl(
                 threadPool,
                 blockService,
@@ -199,7 +204,8 @@ public final class NodeComponentFactory {
                 aliasService,
                 fluxCapacitor,
                 atService,
-                atProcessorCache);
+                atProcessorCache,
+                loggers);
     }
 
 }
