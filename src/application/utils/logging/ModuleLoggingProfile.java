@@ -1,5 +1,7 @@
 package application.utils.logging;
 
+import application.utils.profile.ProfileModule;
+
 import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
@@ -33,7 +35,7 @@ import org.slf4j.LoggerFactory;
  * @see LoggingModuleRegistry
  * @see LoggingProfileManager
  */
-public abstract class ModuleLoggingProfile {
+public abstract class ModuleLoggingProfile implements ProfileModule {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ModuleLoggingProfile.class);
 
@@ -78,6 +80,24 @@ public abstract class ModuleLoggingProfile {
      */
     public String getLoggingSubDir() {
         return "logging";
+    }
+
+    /**
+     * {@inheritDoc}
+     * <p>Maps the R1 L0-defaults contract to {@link #getDefaults()}.</p>
+     */
+    @Override
+    public Map<String, String> getDefaultProfile() {
+        return getDefaults();
+    }
+
+    /**
+     * {@inheritDoc}
+     * <p>Maps the R1 on-disk-category contract to {@link #getLoggingSubDir()}.</p>
+     */
+    @Override
+    public String getCategory() {
+        return getLoggingSubDir();
     }
 
     /**
