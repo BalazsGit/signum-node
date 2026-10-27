@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import application.module.logging.context.NodeLoggingContextManager;
 import application.module.node.Signum;
 import application.module.node.profile.NodeProfile;
 
@@ -209,5 +210,99 @@ class NodeConsolePanelAttachTest {
         String m2 = "TABMOVE_M2_" + System.nanoTime();
         signum.getProfileLogger().info(m2);
         assertEventuallyOccurrences(panel, m2, 1, "post-move event must be delivered (feed restored across the drag)");
+    }
+
+    @Test
+    @DisplayName("A9: new / replay / displayed are measured separately (total line length alone does not prove no-duplication)")
+    void a9_newReplayDisplayedMeasuredSeparately() throws InterruptedException {
+        String profileName = newProfileName();
+        NodeProfile profile = new NodeProfile(profileName);
+        NodeConsolePanel panel = new NodeConsolePanel(null, profile);
+        Signum signum = new Signum(new NodeProfile(profileName), Paths.get("./conf"));
+        try {
+            // 3 REPLAY events: logged to the bus BEFORE the console subscribes (startup
+            // output). They sit in the ProfileLogger replay ring and are delivered when
+            // the subscriber attaches.
+            String r0 = "A9_REPLAY_R0_" + System.nanoTime();
+            String r1 = "A9_REPLAY_R1_" + System.nanoTime();
+            String r2 = "A9_REPLAY_R2_" + System.nanoTime();
+            signum.getProfileLogger().info(r0);
+            signum.getProfileLogger().info(r1);
+            signum.getProfileLogger().info(r2);
+
+            panel.setSignum(signum);             // adopt + (re)attach the console subscriber
+            panel.ensureProfileLoggerAttached(); // -> the 3 above are REPLAYED to the console
+
+            // 2 NEW events: logged AFTER the attach (live path).
+            String n0 = "A9_NEW_N0_" + System.nanoTime();
+            String n1 = "A9_NEW_N1_" + System.nanoTime();
+            signum.getProfileLogger().info(n0);
+            signum.getProfileLogger().info(n1);
+
+            String[] replay = {r0, r1, r2};
+            String[] fresh = {n0, n1};
+            String[] all = {r0, r1, r2, n0, n1};
+
+            // wait (async EDT render) until every one of the 5 markers is present
+            long deadline = System.currentTimeMillis() + 5000;
+            String text = consoleText(panel);
+            while (!allPresent(text, all) && System.currentTimeMillis() < deadline) {
+                Thread.sleep(50);
+                text = consoleText(panel);
+            }
+            Thread.sleep(150); // settle: let any in-flight EDT render complete before counting
+            text = consoleText(panel);
+
+            // (1) REPLAY measured on its own: each pre-attach event displayed exactly once
+            int replaySeen = sumOccurrences(text, replay);
+            assertEquals(replay.length, replaySeen,
+                    "the 3 pre-attach (replay) events must each be displayed exactly once");
+
+            // (2) NEW measured on its own: each post-attach event displayed exactly once
+            int newSeen = sumOccurrences(text, fresh);
+            assertEquals(fresh.length, newSeen,
+                    "the 2 post-attach (new) events must each be displayed exactly once");
+
+            // (3) DISPLAYED = replay + NEW as a PARTITION. A naive "total line count" check
+            //     cannot prove this: a replay-duplication + a dropped new event leave the
+            //     total length unchanged, but break the per-category counts and the
+            //     displayed == replay + new identity.
+            int displayed = sumOccurrences(text, all);
+            assertEquals(replaySeen + newSeen, displayed,
+                    "displayed markers must equal replay + new (no duplication, no loss)");
+            assertEquals(all.length, displayed,
+                    "displayed markers must be exactly 5 (3 replay + 2 new)");
+
+            // (4) no individual marker may be duplicated
+            for (String m : all) {
+                assertEquals(1, countOccurrences(text, m),
+                        "a marker must appear exactly once (no duplication): " + m);
+            }
+        } finally {
+            try {
+                NodeLoggingContextManager.shared().remove(profileName);
+            } catch (Exception ignored) {
+                // best-effort cleanup; never fail the test on it
+            }
+        }
+    }
+
+    /** True when every marker occurs at least once in the given text. */
+    private static boolean allPresent(String text, String... markers) {
+        for (String m : markers) {
+            if (countOccurrences(text, m) < 1) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Total number of occurrences of all the given markers in the given text. */
+    private static int sumOccurrences(String text, String... markers) {
+        int total = 0;
+        for (String m : markers) {
+            total += countOccurrences(text, m);
+        }
+        return total;
     }
 }
