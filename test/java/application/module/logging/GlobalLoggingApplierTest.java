@@ -140,7 +140,7 @@ class GlobalLoggingApplierTest {
     }
 
     @Test
-    @DisplayName("T17: parallel global + node Apply — no deadlock, no exceptions, consistent final state")
+    @DisplayName("T17: parallel global + node Apply — no deadlock, no exceptions, consistent state, last-committed-version-wins")
     void parallelGlobalAndNodeApply_consistent() throws Exception {
         String name = "p24-parallel-" + System.nanoTime();
         writeL1(props("node.level", "INFO"));
@@ -175,6 +175,19 @@ class GlobalLoggingApplierTest {
             assertTrue(ctx.isStarted());
             assertEquals("INFO", rootLevel(ctx),
                     "the node context's final config is consistent with the L1 layer");
+
+            // Last-committed-version-wins (plan §9.2 / §14.4-A3): after the parallel storm,
+            // changing L1 and re-applying must bring the node to the LATEST committed value —
+            // no stale (INFO) snapshot can linger. The global Apply is serialized by
+            // GLOBAL_APPLY_LOCK and every apply re-reads the source layers (L0/L1/L2), so the
+            // newest committed L1 always wins.
+            writeL1(props("node.level", "DEBUG"));
+            NodeLoggingContextApplier.applyFull(confRoot, manager, name);
+            assertEquals("DEBUG", rootLevel(ctx),
+                    "the node Apply must pick up the LATEST committed L1 (DEBUG), not the stale INFO");
+            writeL1(props("node.level", "WARN"));
+            NodeLoggingContextApplier.applyFull(confRoot, manager, name);
+            assertEquals("WARN", rootLevel(ctx), "the newest committed L1 (WARN) wins");
         } finally {
             manager.remove(name);
         }

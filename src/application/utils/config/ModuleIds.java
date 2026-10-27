@@ -6,7 +6,7 @@ package application.utils.config;
  * These constants define the canonical string literals used in:
  * <ul>
  *   <li>runtime configuration paths: {@code {ConfigPaths.RUNTIME_CONF_ROOT}/{module}/{category}/}</li>
- *   <li>logging scopes: {@code NodeLoggerRegistry}, {@code NodeLogContext}, {@code LogScope}</li>
+ *   <li>logging scopes: {@code NodeLoggerRegistry}, {@code LogScope}</li>
  *   <li>module identity: {@link application.api.Module#getId()}</li>
  * </ul>
  * <p>

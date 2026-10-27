@@ -113,8 +113,6 @@ public class NodeProfilePanel extends JPanel {
         // known here, so we also ensure the ProfileLogger exists now; the Signum adopts
         // this same instance when the node starts, so nothing logged before then is lost.
         application.utils.logging.NodeLoggerRegistry.getOrCreate(ModuleIds.NODE, profile.getName());
-        application.utils.logging.LogScope previousContext = application.utils.logging.NodeLogContext.current();
-        application.utils.logging.NodeLogContext.set(ModuleIds.NODE, profile.getName());
         LOGGER.debug("NodeProfilePanel constructor START for profile: {}", profile.getName());
         
         try {
@@ -271,14 +269,6 @@ public class NodeProfilePanel extends JPanel {
         } catch (Exception e) {
             LOGGER.error("NodeProfilePanel constructor FAILED for profile: {}", profile.getName(), e);
             throw e;
-        } finally {
-            // Restore the thread-local log context — the EDT is shared, so it must never
-            // leak past this panel's construction.
-            if (previousContext != null) {
-                application.utils.logging.NodeLogContext.set(previousContext);
-            } else {
-                application.utils.logging.NodeLogContext.clear();
-            }
         }
     }
 
@@ -588,9 +578,8 @@ public class NodeProfilePanel extends JPanel {
      * <p>
      * Same behavior as the original SignumGUI: the <b>manual</b> pop-off path
      * ({@code BlockchainProcessor.popOff(int)}) on a dedicated background
-     * thread — never on the EDT, since a pop-off can take a while. The work
-     * runs inside this profile's {@code NodeLogContext} so all progress log
-     * lines ("Request adds N blocks to pop off.", "Block processing threads
+     * thread — never on the EDT, since a pop-off can take a while. All progress
+     * log lines ("Request adds N blocks to pop off.", "Block processing threads
      * paused for pop-off.", "Pop-off height to X from Y", ...) are routed to
      * this profile's Node Console. Repeated clicks while a pop-off is already
      * queued add more blocks ("Request adds N blocks to pop off.").
@@ -602,8 +591,7 @@ public class NodeProfilePanel extends JPanel {
         if (blockchainProcessor == null) {
             return;
         }
-        new Thread(() -> application.utils.logging.NodeLogContext
-                .runIn("node", profile.getName(), () -> blockchainProcessor.popOff(count))).start();
+        new Thread(() -> blockchainProcessor.popOff(count)).start();
     }
 
     /** Copy from NodeConsolePanel.dbCheckAction */
@@ -751,15 +739,13 @@ public class NodeProfilePanel extends JPanel {
         // Run within the profile's log context so the request logs (this panel +
         // NodeConsolePanel.restart + NodeModule.restartNode, all on the EDT) route
         // to the per-profile logger (<node.<profile>>) instead of the <system> context.
-        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(), () -> {
-            LOGGER.info("Restart requested for profile: {}", profile.getName());
-            if (consolePanel != null) {
-                consolePanel.restartNode();
-            }
-            if (infoBar != null) {
-                infoBar.refreshData();
-            }
-        });
+        LOGGER.info("Restart requested for profile: {}", profile.getName());
+        if (consolePanel != null) {
+            consolePanel.restartNode();
+        }
+        if (infoBar != null) {
+            infoBar.refreshData();
+        }
     }
 
     /**
@@ -779,16 +765,23 @@ public class NodeProfilePanel extends JPanel {
     private void applyLoggingLive() {
         Signum node = NodeModule.getInstance().get(profile.getName());
         if (node == null || node.getState() != Signum.State.RUNNING) {
-            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(), () ->
-                    LOGGER.info("Apply-logging for profile '{}': previous state {} — the node was not "
-                                    + "running, so it is not started (the saved logging profile takes "
-                                    + "effect at the next start)",
-                            profile.getName(), node == null ? "unregistered" : node.getState()));
+            LOGGER.info("Apply-logging for profile '{}': previous state {} — the node was not "
+                    + "running, so it is not started (the saved logging profile takes "
+                    + "effect at the next start)",
+                    profile.getName(), node == null ? "unregistered" : node.getState());
             NodeModule.getInstance().stopNode(profile.getName());
             return;
         }
-        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(),
-                () -> node.applyNodeLoggingConfiguration());
+        // Capture the apply result: Signum.applyNodeLoggingConfiguration() returns false
+        // when the full config could not be applied (e.g. the reconfigure was rejected by
+        // an unloadable generated file, P1.4). Surfacing it lets the base panel's Apply
+        // handler show an error instead of a false "applied" confirmation.
+        final boolean[] applied = { true };
+        applied[0] = node.applyNodeLoggingConfiguration();
+        if (!applied[0]) {
+            throw new IllegalStateException("Failed to apply the live logging configuration for profile '"
+                    + profile.getName() + "' - the node kept its previous configuration");
+        }
         LOGGER.info("Node logging applied live for profile '{}' — no restart needed", profile.getName());
     }
 
@@ -821,10 +814,8 @@ public class NodeProfilePanel extends JPanel {
         // Run within the profile's log context so the request logs (this panel +
         // NodeModule.stopNode on the EDT) route to the per-profile logger
         // (<node.<profile>>) instead of the <system> context.
-        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(), () -> {
-            NodeModule.getInstance().stopNode(profile.getName());
-            LOGGER.info("Stop requested for profile: {}", profile.getName());
-        });
+        NodeModule.getInstance().stopNode(profile.getName());
+        LOGGER.info("Stop requested for profile: {}", profile.getName());
     }
 
     public void startNode() {
@@ -836,24 +827,20 @@ public class NodeProfilePanel extends JPanel {
         Signum started = null;
         try {
             final Signum[] holder = new Signum[1];
-            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(), () -> {
-                Signum existing = NodeModule.getInstance().get(profile.getName());
-                if (existing != null && existing.getState() == Signum.State.ERROR) {
-                    // ERROR is only recoverable through an explicit stop first
-                    // (Signum.stop() accepts the ERROR state) — route Start through
-                    // the restart path so a failed start never dead-ends the node.
-                    holder[0] = NodeModule.getInstance().restartNode(profile.getName());
-                } else {
-                    holder[0] = NodeModule.getInstance().startNode(profile.getName());
-                }
-            });
+            Signum existing = NodeModule.getInstance().get(profile.getName());
+            if (existing != null && existing.getState() == Signum.State.ERROR) {
+                // ERROR is only recoverable through an explicit stop first
+                // (Signum.stop() accepts the ERROR state) — route Start through
+                // the restart path so a failed start never dead-ends the node.
+                holder[0] = NodeModule.getInstance().restartNode(profile.getName());
+            } else {
+                holder[0] = NodeModule.getInstance().startNode(profile.getName());
+            }
             started = holder[0];
         } catch (Exception e) {
-            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(),
-                    () -> LOGGER.error("Start failed for profile: {}", profile.getName(), e));
+            LOGGER.error("Start failed for profile: {}", profile.getName(), e);
         }
-        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(),
-                () -> LOGGER.info("Start requested for profile: {}", profile.getName()));
+        LOGGER.info("Start requested for profile: {}", profile.getName());
         onNodeStarted(started);
     }
 
@@ -925,8 +912,7 @@ public class NodeProfilePanel extends JPanel {
      */
     public void refreshFromSignum(Signum.State oldState, Signum.State newState) {
         String profileName = profile.getName();
-        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profile.getName(),
-                () -> LOGGER.info("[{}] State change: {} -> {}", profileName, oldState, newState));
+        LOGGER.info("[{}] State change: {} -> {}", profileName, oldState, newState);
 
         // Single visual refresh point (info bar + toolbar + tab icon), shared with the
         // operating-state path so the tab header always matches the panel.

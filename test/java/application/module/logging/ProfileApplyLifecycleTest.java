@@ -75,14 +75,25 @@ class ProfileApplyLifecycleTest {
                     .resolve(name + ".log4j2.properties");
             assertTrue(Files.exists(nodeFile), "the generated node file was (re)written in place");
 
-            // 4) the GUI-bridge appender survived the reconfigure — single delivery
+            // 4) the GUI-bridge appender survived the reconfigure — the engine event is
+            //    delivered exactly once (no duplication). P3-B6.5b: the Signum's OWN lifecycle
+            //    logs now also flow into this node's console bus (that IS the fix under test),
+            //    so we count the specific engine event rather than every replayed event.
             ProfileLogger bus = NodeLoggerRegistry.get(ModuleIds.NODE, name);
             assertNotNull(bus);
             Recorder recorder = new Recorder();
             bus.addSubscriber(recorder);
             engine.trace("after apply");
-            assertEquals(1, recorder.events.size(),
-                    "exactly ONE bus event — the appender was re-attached, not duplicated");
+            long afterApply = recorder.events.stream()
+                    .filter(e -> e.getMessage() != null && e.getMessage().contains("after apply"))
+                    .count();
+            assertEquals(1L, afterApply,
+                    "the engine.trace event must be delivered exactly ONCE — the appender was "
+                            + "re-attached, not duplicated");
+            // P3-B6.5b: the Signum's own lifecycle logs now reach its node console (the fix)
+            assertTrue(recorder.events.stream().anyMatch(e ->
+                            e.getMessage() != null && e.getMessage().contains("Isolated node LoggerContext")),
+                    "the Signum's own lifecycle logs must be delivered to its node console");
         } finally {
             NodeModule.getInstance().removeNode(name); // disposes the Signum (context + bus)
         }

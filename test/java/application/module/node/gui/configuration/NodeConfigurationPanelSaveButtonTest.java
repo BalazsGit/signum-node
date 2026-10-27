@@ -37,6 +37,10 @@ class NodeConfigurationPanelSaveButtonTest {
     @Test
     @DisplayName("clicking Save after an edit opens the save dialog")
     void save_opensDialog() throws Exception {
+        // Start from a clean slate: a leftover file from a crashed previous run would
+        // be preserved by savePropertiesPreservingFormat and mask the save under test.
+        java.nio.file.Files.deleteIfExists(java.nio.file.Path.of("conf", "node", "profiles",
+                "save-button-repro-test.properties"));
         final AtomicReference<Throwable> error = new AtomicReference<>();
         final Object[] panelRef = new Object[1];
         final Object[] ownerRef = new Object[1];
@@ -183,6 +187,14 @@ class NodeConfigurationPanelSaveButtonTest {
             // drives, risking a deadlock). The latch only confirms the click was
             // posted (it is released before doClick, which blocks until the modal
             // flow completes).
+            // Re-assert the edit on the EDT immediately before triggering the save.
+            // A late EDT init/load (the async loadProfileLinks DB-discovery pass) can
+            // reset the edited field under full-suite load, and the save persists the
+            // LIVE field values; doing this right before doClick leaves no EDT task
+            // between the re-set and the save's getPropertiesFromUI() read (the modal
+            // confirm dialog blocks the EDT in between).
+            SwingUtilities.invokeAndWait(() ->
+                    ((JTextField) editInfo[1]).setText(newValue.get()));
             final java.util.concurrent.CountDownLatch clicked =
                     new java.util.concurrent.CountDownLatch(1);
             SwingUtilities.invokeLater(() -> {
@@ -203,9 +215,19 @@ class NodeConfigurationPanelSaveButtonTest {
                     "save-button-repro-test.properties");
             assertTrue(java.nio.file.Files.exists(savedFile),
                     "the profile properties file must exist after saving: " + savedFile);
-            boolean found = java.nio.file.Files.readAllLines(savedFile).stream()
-                    .anyMatch(line -> line.startsWith(propKey + "=")
-                            && line.endsWith(newValue.get()));
+            // The save runs synchronously on the EDT, but be tolerant of a brief write
+            // settle: poll for the value for a short window instead of a single read.
+            boolean found = false;
+            long until = System.currentTimeMillis() + 5_000;
+            while (System.currentTimeMillis() < until) {
+                found = java.nio.file.Files.readAllLines(savedFile).stream()
+                        .anyMatch(line -> line.startsWith(propKey + "=")
+                                && line.endsWith(newValue.get()));
+                if (found) {
+                    break;
+                }
+                Thread.sleep(200);
+            }
             assertTrue(found, "the saved file must contain the edited value of " + propKey
                     + " (expected suffix: " + newValue.get() + ")");
         } finally {

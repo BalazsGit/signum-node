@@ -24,6 +24,12 @@ import javax.swing.Timer;
 import jiconfont.icons.font_awesome.FontAwesome;
 import jiconfont.swing.IconFontSwing;
 
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.config.LoggerConfig;
+import org.apache.logging.log4j.core.layout.PatternLayout;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -52,34 +58,33 @@ class NodeConfigurationPanelCloneActionTest {
         final AtomicReference<String> dialogTitle = new AtomicReference<>();
         final CountDownLatch dialogAppeared = new CountDownLatch(1);
         final Object[] panelRef = new Object[1];
-        // The panel swallows async-init exceptions into the logger; capture
-        // them so a failed initUI surfaces as a diagnostic, not a timeout.
         final List<Throwable> loggedErrors = new ArrayList<>();
-        final java.util.logging.Logger panelLogger =
-                java.util.logging.Logger.getLogger(NodeConfigurationPanel.class.getName());
-        final boolean parentHandlers = panelLogger.getUseParentHandlers();
-        final java.util.logging.Handler captureHandler = new java.util.logging.Handler() {
+        // The panel swallows async-init exceptions into its SLF4J logger; capture
+        // them through a Log4j2 appender on the ROOT of the context that the
+        // SLF4J binding (log4j-slf4j2-impl) resolved to in this JVM — the single
+        // provider context every SLF4J logger in this process logs through,
+        // independent of any ContextFactory swap a test may have performed — so
+        // a failed initUI surfaces as a diagnostic, not a timeout.
+        final LoggerContext ctx = slf4jBindingContext();
+        final LoggerConfig rootConfig = ctx.getConfiguration().getRootLogger();
+        final AbstractAppender captureHandler = new AbstractAppender("clone-action-capture", null,
+                PatternLayout.createDefaultLayout(), false) {
             @Override
-            public void publish(java.util.logging.LogRecord record) {
-                if (record.getThrown() != null) {
-                    loggedErrors.add(record.getThrown());
+            public void append(LogEvent event) {
+                if (NodeConfigurationPanel.class.getName().equals(event.getLoggerName())
+                        && event.getThrown() != null) {
+                    loggedErrors.add(event.getThrown());
                 }
             }
-
-            @Override
-            public void flush() {
-            }
-
-            @Override
-            public void close() {
-            }
         };
-        panelLogger.addHandler(captureHandler);
-        panelLogger.setUseParentHandlers(false);
+        captureHandler.start();
+        rootConfig.addAppender(captureHandler, Level.ERROR, null);
+        ctx.updateLoggers();
         try {
             clickAndExpectCloneDialog(error, dialogTitle, dialogAppeared, panelRef, loggedErrors);
         } finally {
-            panelLogger.setUseParentHandlers(parentHandlers);
+            rootConfig.removeAppender("clone-action-capture");
+            captureHandler.stop();
         }
     }
 
@@ -200,6 +205,26 @@ class NodeConfigurationPanelCloneActionTest {
         assertTrue(dialogAppeared.await(20, TimeUnit.SECONDS),
                 "the 'Clone Configuration' dialog must open after the button click");
         assertEquals("Clone Configuration", dialogTitle.get());
+    }
+
+    /**
+     * The Log4j2 context the SLF4J binding (log4j-slf4j2-impl) resolved to in
+     * this JVM. 2.26.1 keeps it behind the protected
+     * {@code Log4jLoggerFactory.getContext()}, so it is read through reflection
+     * from the provider's logger factory (the same context every SLF4J logger
+     * in this process logs through, regardless of any ContextFactory swap a
+     * test may have performed).
+     */
+    private static LoggerContext slf4jBindingContext() {
+        try {
+            Object factory = org.slf4j.LoggerFactory.getILoggerFactory();
+            java.lang.reflect.Method m = factory.getClass().getDeclaredMethod("getContext");
+            m.setAccessible(true);
+            return (LoggerContext) m.invoke(factory);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError(
+                    "the SLF4J provider must be log4j-slf4j2-impl (protected getContext) to capture events", e);
+        }
     }
 
     private static Object readDeclaredField(Object target, String name) throws Exception {

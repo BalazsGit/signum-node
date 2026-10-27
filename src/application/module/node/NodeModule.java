@@ -308,8 +308,7 @@ public class NodeModule implements Module {
         }
 
         nodes.add(signum);
-        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                () -> LOGGER.info("Registered Signum for profile '{}'", profileName));
+        LOGGER.info("Registered Signum for profile '{}'", profileName);
     }
 
     /**
@@ -465,8 +464,7 @@ public class NodeModule implements Module {
                 target = existing;
             } else {
                 NodeProfile profile = resolveProfile(profileName);
-                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                        () -> LOGGER.info("startNode('{}'): creating new Signum instance (confRoot={})", profileName, confRoot));
+                LOGGER.info("startNode('{}'): creating new Signum instance (confRoot={})", profileName, confRoot);
                 Signum fresh = new Signum(profile, confRoot);
                 addNode(fresh);
                 target = fresh;
@@ -503,8 +501,7 @@ public class NodeModule implements Module {
         synchronized (this) {
             conflict = findResourceConflict(target);
             if (conflict != null) {
-                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                        () -> LOGGER.warn("startNode('{}'): REJECTED — {}", profileName, conflict));
+                LOGGER.warn("startNode('{}'): REJECTED — {}", profileName, conflict);
                 target.reportStartRejected(conflict);
                 return target;
             }
@@ -518,8 +515,7 @@ public class NodeModule implements Module {
         //    queue — the mark is cleared when the task completes (see finally). ──
         markStartPending(profileName);
 
-        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                () -> LOGGER.info("startNode('{}'): queuing async start on lifecycle thread", profileName));
+        LOGGER.info("startNode('{}'): queuing async start on lifecycle thread", profileName);
         lifecycleExecutor.execute(serialize(profileName, () -> {
             try {
                 // A queued duplicate (double click, restart cycle) may find the node
@@ -540,8 +536,7 @@ public class NodeModule implements Module {
                 }
                 target.start();
             } catch (Exception e) {
-                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                        () -> LOGGER.error("Startup failed for profile '{}'", profileName, e));
+                LOGGER.error("Startup failed for profile '{}'", profileName, e);
                 // A failed start (e.g. the OS port is already bound by a non-profile
                 // process) leaves the node in ERROR, i.e. NOT running — so it must not
                 // keep holding its API/P2P/WS port or database reservation. Releasing it
@@ -580,8 +575,7 @@ public class NodeModule implements Module {
             LOGGER.debug("stopNode('{}'): not registered — no-op", profileName);
             return null;
         }
-        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                () -> LOGGER.info("stopNode('{}'): queuing async stop on lifecycle thread", profileName));
+        LOGGER.info("stopNode('{}'): queuing async stop on lifecycle thread", profileName);
         lifecycleExecutor.execute(serialize(profileName, () -> {
             try {
                 signum.stop();
@@ -612,8 +606,7 @@ public class NodeModule implements Module {
         if (profileName == null || profileName.isBlank()) {
             throw new IllegalArgumentException("Profile name must not be null or blank");
         }
-        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                () -> LOGGER.info("restartNode('{}')", profileName));
+        LOGGER.info("restartNode('{}')", profileName);
 
         Signum target;
         synchronized (this) {
@@ -640,8 +633,7 @@ public class NodeModule implements Module {
                 try {
                     target.stop();
                 } catch (Exception e) {
-                    application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                            () -> LOGGER.error("restartNode('{}'): stop failed", profileName, e));
+                    LOGGER.error("restartNode('{}'): stop failed", profileName, e);
                 } finally {
                     releaseResources(target);
                 }
@@ -655,8 +647,7 @@ public class NodeModule implements Module {
                     }
                 }
                 if (conflict != null) {
-                    application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                            () -> LOGGER.warn("restartNode('{}'): REJECTED — {}", profileName, conflict));
+                    LOGGER.warn("restartNode('{}'): REJECTED — {}", profileName, conflict);
                     target.reportStartRejected(conflict);
                     return;
                 }
@@ -667,8 +658,7 @@ public class NodeModule implements Module {
                 try {
                     target.start();
                 } catch (Exception e) {
-                    application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                            () -> LOGGER.error("restartNode('{}'): start failed", profileName, e));
+                    LOGGER.error("restartNode('{}'): start failed", profileName, e);
                     releaseResources(target);
                 }
             } finally {

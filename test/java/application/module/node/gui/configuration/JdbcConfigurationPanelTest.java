@@ -14,6 +14,7 @@ import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
+import javax.swing.UIManager;
 import javax.swing.border.Border;
 import javax.swing.border.EmptyBorder;
 import java.awt.Component;
@@ -827,13 +828,25 @@ class JdbcConfigurationPanelTest {
         assertFalse(((JTextField) panel.getPreviewField()).isEditable());
         assertFalse((Boolean) out[2], "the preview has no field background (transparent)");
         // The preview text still aligns with the real inputs' text start
-        // (the shared plain-combo text margin — only the FRAME is gone).
+        // (only the FRAME is gone). Both the frameless preview and the real
+        // framed inputs compute their left inset the SAME way
+        // (ConfigurationUtils.styleInputComponent / stylePreviewText):
+        //   fieldBorderLeft + max(0, plainComboTextX() - fieldBorderLeft)
+        //     == max(fieldBorderLeft, plainComboTextX())
+        // So the correct reference is that shared value, NOT the raw
+        // plain-combo text x alone: on an L&F whose field-border inset already
+        // exceeds the combo text start (e.g. fieldBorderLeft=7 > plainComboTextX=2)
+        // every input's text starts at fieldBorderLeft, and only max() matches.
         onEdt(() -> {
             EmptyBorder eb = (EmptyBorder) panel.getPreviewField().getBorder();
             int left = eb.getBorderInsets(panel.getPreviewField()).left;
-            int plainComboTextX = ConfigurationUtils.plainComboTextX();
-            assertTrue(left >= plainComboTextX - 2 && left <= plainComboTextX + 2,
-                    "the preview text must start at the unified text margin (left=" + left + ", margin=" + plainComboTextX + ")");
+            Border tb = UIManager.getBorder("TextField.border");
+            int fieldBorderLeft = (tb == null) ? 0 : tb.getBorderInsets(panel.getPreviewField()).left;
+            int alignedX = Math.max(fieldBorderLeft, ConfigurationUtils.plainComboTextX());
+            assertTrue(left >= alignedX - 2 && left <= alignedX + 2,
+                    "the preview text must start at the unified text margin (left=" + left
+                            + ", alignedX=" + alignedX + ", fieldBorderLeft=" + fieldBorderLeft
+                            + ", plainComboTextX=" + ConfigurationUtils.plainComboTextX() + ")");
             return null;
         });
     }

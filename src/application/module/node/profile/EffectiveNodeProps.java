@@ -6,7 +6,6 @@ import org.slf4j.LoggerFactory;
 import application.module.node.props.CaselessProperties;
 import application.utils.config.ModuleIds;
 import application.utils.config.PropertiesProfileLoader;
-import application.utils.logging.NodeLogContext;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -83,10 +82,9 @@ public final class EffectiveNodeProps {
             loadLayer(merged, layerTwo, "profile", profileName);
         }
 
-        NodeLogContext.runIn(ModuleIds.NODE, profileName,
-                () -> LOGGER.info("Effective node properties for profile '{}' loaded: {} active line(s) "
-                        + "(hardcoded Props.java defaults apply for every missing key)",
-                        profileName, merged.size()));
+        LOGGER.info("Effective node properties for profile '{}' loaded: {} active line(s) "
+                + "(hardcoded Props.java defaults apply for every missing key)",
+                profileName, merged.size());
         return merged;
     }
 
@@ -195,13 +193,11 @@ public final class EffectiveNodeProps {
         }
         try (InputStream is = Files.newInputStream(file)) {
             target.load(is);
-            NodeLogContext.runIn(ModuleIds.NODE, profileName,
-                    () -> LOGGER.info("Loaded node {} layer for profile '{}' from {} ({} active line(s))",
-                            layerLabel, profileName, file.toAbsolutePath(), target.size()));
+            LOGGER.info("Loaded node {} layer for profile '{}' from {} ({} active line(s))",
+                    layerLabel, profileName, file.toAbsolutePath(), target.size());
         } catch (IOException e) {
-            NodeLogContext.runIn(ModuleIds.NODE, profileName,
-                    () -> LOGGER.warn("Could not read node {} layer for profile '{}' from {}",
-                            layerLabel, profileName, file.toAbsolutePath(), e));
+            LOGGER.warn("Could not read node {} layer for profile '{}' from {}",
+                    layerLabel, profileName, file.toAbsolutePath(), e);
         }
     }
 }

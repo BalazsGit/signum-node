@@ -20,8 +20,8 @@ import java.nio.file.StandardOpenOption;
  * file: {@code {logDir}/{profile}.log}.
  * <p>
  * This is the runtime half of the per-node file logging feature: node logs
- * converge into the per-profile {@link ProfileLogger} (direct module logging and
- * the JUL bridge via {@code NodeLogContext}), and this subscriber attaches to
+ * converge into the per-profile {@link ProfileLogger} (the node's isolated Log4j2
+ * context bridge and direct module logging), and this subscriber attaches to
  * that bus, so each node profile gets a physically separate log file without
  * any JUL-level reconfiguration.
  * </p>

@@ -15,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * The GLOBAL logging Apply pipeline (per-node isolated LoggerContext plan,
@@ -50,6 +51,16 @@ public final class GlobalLoggingApplier {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(GlobalLoggingApplier.class);
 
+    /**
+     * Serializes concurrent global Applies (plan §9.2 / §14.4-A3): two global Applies must
+     * not interleave. Each Apply re-reads the source layers (L0/L1/L2) at Step 1, so the
+     * last COMPLETED Apply's global reconfigure (Step 1) and per-node re-applies (Step 2)
+     * reflect the latest committed source — a newer Apply can never be clobbered by an older
+     * one's delayed per-node refresh. Lock order is global → node (each node's own
+     * {@code applyLock}), so a standalone node Apply never blocks on this and no deadlock forms.
+     */
+    private static final ReentrantLock GLOBAL_APPLY_LOCK = new ReentrantLock();
+
     private GlobalLoggingApplier() {
         // Utility class
     }
@@ -72,6 +83,20 @@ public final class GlobalLoggingApplier {
      * @return true when the global context was reconfigured
      */
     public static boolean applyGlobal(String confRoot) {
+        // Serialize concurrent global Applies (plan §9.2 / §14.4-A3): see GLOBAL_APPLY_LOCK.
+        GLOBAL_APPLY_LOCK.lock();
+        try {
+            return doApplyGlobal(confRoot);
+        } finally {
+            GLOBAL_APPLY_LOCK.unlock();
+        }
+    }
+
+    /**
+     * The actual two-step global Apply pipeline (global reconfigure, then per-node
+     * re-apply). Runs under {@link #GLOBAL_APPLY_LOCK}; see {@link #applyGlobal(String)}.
+     */
+    private static boolean doApplyGlobal(String confRoot) {
         boolean globalApplied = false;
         try {
             Path root = Path.of(confRoot).toAbsolutePath();

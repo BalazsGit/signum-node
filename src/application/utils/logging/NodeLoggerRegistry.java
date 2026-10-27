@@ -11,9 +11,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>
  * Each {@link application.module.node.Signum} instance registers its
  * {@link ProfileLogger} here at startup and unregisters it at shutdown.
- * The {@link SystemLoggerJulHandler} consults this registry to route log
- * events (that carry a {@link NodeLogContext} profile) to the correct
- * per-profile logger.
+ * GUI components and direct loggers look up the per-profile {@link ProfileLogger}
+ * here so their events reach the correct profile's bus.
  * </p>
  * <p>
  * <b>Lifecycle:</b>
@@ -22,7 +21,6 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li>Signum.doShutdown()  → unregister(profileName)</li>
  * </ol>
  *
- * @see NodeLogContext
  * @see ProfileLogger
  */
 public final class NodeLoggerRegistry {
@@ -85,11 +83,10 @@ public final class NodeLoggerRegistry {
      * in no particular order.
      * <p>
      * Exposed as a public utility for introspection/tooling. The
-     * {@link SystemLoggerJulHandler} does <b>not</b> use this for routing: context-less
-     * log events are deliberately never broadcast to every profile of a module (that
-     * fan-out is what leaked one profile's lines into another profile's console).
-     * Profile-aware emitters set their {@link NodeLogContext} and are routed to a single
-     * profile via {@link #get(LogScope)}.
+     * Context-less log events are deliberately never broadcast to every profile of a
+     * module (that fan-out is what leaked one profile's lines into another profile's
+     * console). Profile-aware emitters carry a {@code (module, profile)} scope and are
+     * routed to a single profile via {@link #get(LogScope)}.
      * </p>
      *
      * @param module the module id (e.g. "node"), never null

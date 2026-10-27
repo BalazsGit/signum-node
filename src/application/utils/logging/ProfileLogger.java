@@ -191,14 +191,10 @@ public final class ProfileLogger extends LoggerImpl {
         if (event == null) {
             return;
         }
-        // Per-node level filter. Events routed here by the JUL bridge
-        // ({@link SystemLoggerJulHandler}) bypass {@code LoggerImpl.log()}'s min-level
-        // check, so we enforce the configured level here too. This is what makes a
-        // per-node assigned log level actually take effect on the routed stream. The
-        // separate {@link SystemLogger} (a different class) is unaffected.
-        if (event.getLevel() == null || event.getLevel().ordinal() < minLevel.ordinal()) {
-            return;
-        }
+        // The node's isolated Log4j2 context is the SOLE level gate: an event only
+        // reaches this bus if the context's configuration emitted it, and direct calls
+        // (profileLogger.debug/...) are already level-checked by LoggerImpl.log(). So
+        // the bus never re-filters by level here.
         // Stamp this logger's (module, profile) scope so downstream consumers
         // (System Console tag, color scheme, filters) see the qualified identity.
         event = withScope(event);

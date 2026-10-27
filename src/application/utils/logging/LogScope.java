@@ -20,7 +20,6 @@ import java.util.Objects;
  * profile name may itself contain a dot. Always keep the two parts separately.
  * </p>
  *
- * @see NodeLogContext
  * @see NodeLoggerRegistry
  */
 public final class LogScope {

@@ -11,6 +11,7 @@ import javax.swing.JTextField;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Unit tests for the {@link Omnibox} URL mirror ({@link Omnibox#showUrl}).
@@ -83,6 +84,13 @@ class OmniboxTest {
             JTextField field = fieldOf(box);
             field.requestFocusInWindow();
             awaitFocusOwner(field);
+            // The guard under test is (focused && edited); it is only meaningful
+            // once the field genuinely owns OS keyboard focus. In a background
+            // session no window can hold focus, so awaitFocusOwner times out and
+            // the precondition is unmet — skip rather than fail (the production
+            // guard is correct; this is a display-focus-capability issue).
+            assumeTrue(field.isFocusOwner(),
+                    "keyboard focus could not be established in this environment");
 
             box.showUrl("https://a.example/");
             field.setText("search query"); // the user is typing
@@ -370,6 +378,21 @@ class OmniboxTest {
     }
 
     private static void awaitFocusOwner(java.awt.Component expected) {
+        // A background test window is never the OS keyboard-focus owner, so a
+        // bare requestFocusInWindow() is a no-op and the focused-* tests go
+        // flaky on a real display. Force the owner window to the front AND pin
+        // it on top for the duration of the test — restoring the z-order the
+        // instant focus is acquired lets another window take keyboard focus
+        // again before the focused operations run. The caller disposes the
+        // frame in its finally, which clears the on-top flag.
+        java.awt.Component top = (expected instanceof javax.swing.JComponent jc)
+                ? jc.getTopLevelAncestor() : expected;
+        java.awt.Window owner = top instanceof java.awt.Window w ? w : null;
+        if (owner != null) {
+            owner.setAlwaysOnTop(true);
+            owner.toFront();
+            owner.requestFocusInWindow();
+        }
         long deadline = System.currentTimeMillis() + 2000;
         while (System.currentTimeMillis() < deadline) {
             if (java.awt.KeyboardFocusManager

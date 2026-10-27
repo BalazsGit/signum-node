@@ -17,9 +17,9 @@ import java.util.concurrent.locks.ReentrantLock;
  * Creation happens under the manager lock, so parallel node starts are safe
  * and a profile can never end up with two contexts. Disposal
  * ({@link #remove}) stops the context and calls
- * {@link Log4jContextFactory#removeContext(org.apache.logging.log4j.spi.LoggerContext)}
- * so the factory's {@code getLoggerContexts()} stays consistent (not a
- * routing concern, §6.2).
+ * {@link Log4jContextFactory#removeContext(org.apache.logging.log4j.spi.LoggerContext)} —
+ * a defensive no-op here, since directly-created contexts are never registered in
+ * the factory/selector (this manager's map is the only registry, §6.2/§14.4-A5).
  * </p>
  *
  * <p>

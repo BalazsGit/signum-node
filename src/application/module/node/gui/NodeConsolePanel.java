@@ -780,13 +780,7 @@ public class NodeConsolePanel extends JPanel {
 
     public static void main(String[] args) {
         // We no longer manually add a JUL handler or redirect here.
-        // Launcher.main has already set up the Proxy Streams.
-        try {
-            application.module.node.util.BriefLogFormatter.init(); // Apply consistent formatting
-        } catch (Exception e) {
-            // ignore
-        }
-
+        // Launcher.main has already set up the Proxy Streams + Log4j2.
         AppearanceModule.setupInitialLookAndFeel(args);
         SwingUtilities.invokeLater(() -> {
             JFrame frame = new JFrame();
@@ -2220,8 +2214,7 @@ public class NodeConsolePanel extends JPanel {
         // System Console, while pool-thread logs (e.g. "Forkprocessing
         // complete.") would still appear here, creating the confusing
         // "fork log yes, pop-off log no" asymmetry.
-        new Thread(() -> application.utils.logging.NodeLogContext
-                .runIn(ModuleIds.NODE, profileName, () -> processor.popOff(count))).start();
+        new Thread(() -> processor.popOff(count)).start();
     }
 
     /**
@@ -2715,9 +2708,8 @@ public class NodeConsolePanel extends JPanel {
             pl.addSubscriber(unifiedConsole.getSubscriber());
             final String attachedName = pl.getName();
             final String attachedProfile = profileName;
-            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, attachedProfile,
-                    () -> LOGGER.info("Attached console subscriber to ProfileLogger '{}' for profile '{}'",
-                            attachedName, attachedProfile));
+            LOGGER.info("Attached console subscriber to ProfileLogger '{}' for profile '{}'",
+                    attachedName, attachedProfile);
             profileLoggerAttached = true;
         } catch (Exception e) {
             LOGGER.error("Failed to attach console subscriber to ProfileLogger for profile '{}'", profileName, e);
@@ -3090,8 +3082,7 @@ public class NodeConsolePanel extends JPanel {
                 // runs the processor must exist. A null here is a genuine bug, not a
                 // transient startup state — surface it as an error. Do NOT mark this
                 // instance as wired.
-                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                        () -> LOGGER.error("[{}] ensureRuntimeWiring: invariant violation — BlockchainProcessor is null in state RUNNING", profileName));
+                LOGGER.error("[{}] ensureRuntimeWiring: invariant violation — BlockchainProcessor is null in state RUNNING", profileName);
                 return;
             }
             // v4 toolbar-start path: the feature flags (measurement/experimental/
@@ -3123,11 +3114,9 @@ public class NodeConsolePanel extends JPanel {
                 // configuration here.
                 configureFeatureIndicators(processor);
             });
-            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                    () -> LOGGER.info("[{}] Runtime listeners wired — Latest block / peer / volume labels active", profileName));
+            LOGGER.info("[{}] Runtime listeners wired — Latest block / peer / volume labels active", profileName);
         } catch (Exception e) {
-            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                    () -> LOGGER.error("[{}] ensureRuntimeWiring failed", profileName, e));
+            LOGGER.error("[{}] ensureRuntimeWiring failed", profileName, e);
         }
     }
 

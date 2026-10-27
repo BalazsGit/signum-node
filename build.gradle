@@ -263,6 +263,11 @@ tasks.named('run') {
 
 test {
     useJUnitPlatform()
+    // P5.1: pin the test-worker heap. Left on the JVM's ergonomic default the
+    // worker crashed mid-suite (exit NTSTATUS 0xCFFFFFFF; a late-binding GUI
+    // test hit "Timed out waiting ..."), so a deterministic, generously sized
+    // heap keeps the GUI/JCEF-heavy suite stable across machines.
+    maxHeapSize = '8g'
     testLogging {
         exceptionFormat = 'full'
         showStandardStreams = true
@@ -296,6 +301,7 @@ test {
  */
 tasks.register('runTest', Test) {
     useJUnitPlatform()
+    maxHeapSize = '8g'
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
     testLogging {
@@ -321,6 +327,7 @@ import java.net.Socket
 
 tasks.register('integrationTest', Test) {
     useJUnitPlatform()
+    maxHeapSize = '8g'
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
     include '**/chain/**'

@@ -14,6 +14,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Orchestrates the node-context Apply pipeline (per-node isolated
@@ -60,6 +62,26 @@ public final class NodeLoggingContextApplier {
     }
 
     /**
+     * Per-profile Apply serialization (plan §14.4-A3 / T11): the generated node
+     * file write ({@link NodeLoggingConfigWriter#writeNode}) happens OUTSIDE
+     * the node context's own applyLock (it precedes {@code getOrCreate}), so
+     * two concurrent full Applies on the SAME profile would race on the same
+     * target file — on Windows the atomic temp&#8594;target {@code Files.move}
+     * then fails because the other Apply (or the freshly loaded config) still
+     * holds the file. A per-profile lock covering write + getOrCreate +
+     * reconfigure makes one Apply atomic per profile (no file-lock fight, no
+     * half-applied state). It is distinct from the global Apply lock and the
+     * node applyLock; the profile&#8594;node ordering is one-way, so there is
+     * no deadlock cycle. Bounded by the number of profiles (small).
+     */
+    private static final ConcurrentHashMap<String, ReentrantLock> PROFILE_APPLY_LOCKS =
+            new ConcurrentHashMap<>();
+
+    private static ReentrantLock profileLock(final String profileName) {
+        return PROFILE_APPLY_LOCKS.computeIfAbsent(profileName, k -> new ReentrantLock());
+    }
+
+    /**
      * Minimal config for the constructor phase: L0 layers only, file log
      * forced off (no file opened before {@code start()}).
      *
@@ -83,6 +105,20 @@ public final class NodeLoggingContextApplier {
 
     private static NodeLoggingContext apply(Path confRoot, NodeLoggingContextManager manager,
                                             String profileName, boolean minimal) throws IOException {
+        // Per-profile serialization (plan §14.4-A3 / T11): one Apply (file write +
+        // getOrCreate + reconfigure) is atomic per profile, so parallel Applies
+        // on the same node cannot fight over the generated node file.
+        ReentrantLock lock = profileLock(profileName);
+        lock.lock();
+        try {
+            return doApply(confRoot, manager, profileName, minimal);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private static NodeLoggingContext doApply(Path confRoot, NodeLoggingContextManager manager,
+                                              String profileName, boolean minimal) throws IOException {
         final Path root = confRoot.toAbsolutePath();
         final Properties l2 = new Properties();
         if (minimal) {
@@ -109,10 +145,16 @@ public final class NodeLoggingContextApplier {
         }
         // minimal and full write the SAME node file, so the normal path is a
         // plain file reconfigure(); reconfigureFrom() covers an unexpected path change
-        if (!uri.equals(ctx.configUri())) {
-            ctx.reconfigureFrom(uri);
-        } else {
-            ctx.reconfigure();
+        final boolean reconfigured = !uri.equals(ctx.configUri())
+                ? ctx.reconfigureFrom(uri)
+                : ctx.reconfigure();
+        // P1.4: NodeLoggingContext rejects an unloadable target (it keeps the previous
+        // configuration and logs a WARN). Surface that rejection as a failure here so the
+        // Apply chain (Signum.applyNodeLoggingConfiguration -> the GUI Apply handler)
+        // reports an error instead of a false success.
+        if (!reconfigured) {
+            throw new IOException("node logging reconfigure rejected for profile '" + profileName
+                    + "' (unloadable config at " + uri + ") - the previous configuration was kept");
         }
         return ctx;
     }

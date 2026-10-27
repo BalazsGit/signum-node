@@ -291,8 +291,7 @@ public class NodePanel extends JPanel  {
                 profileTabbedPane.setComponentAt(index, actualPanel);
                 placeholderReplaced.put(profileName, true);
 
-                application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                        () -> LOGGER.info("Profile panel loaded for: {}", profileName));
+                LOGGER.info("Profile panel loaded for: {}", profileName);
             });
         });
     }

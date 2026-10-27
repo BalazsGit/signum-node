@@ -36,10 +36,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.logging.Handler;
-import java.util.logging.Level;
-import java.util.logging.LogRecord;
-import java.util.logging.Logger;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.LoggerContext;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.config.LoggerConfig;
+import org.apache.logging.log4j.core.layout.PatternLayout;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -352,32 +354,34 @@ class AppearancePanelTest {
             Files.writeString(GUI_SETTINGS_PATH, fixture, StandardCharsets.UTF_8);
 
             // Capture every profile load: performLoadProfileNow() logs
-            // "Loading Look and Feel profile: '<name>'" (SLF4J -> JUL). The
+            // "Loading Look and Feel profile: '<name>'" (SLF4J -> Log4j2). The
             // event sequence is the exact, race-free observable of WHICH
-            // profiles were (re)loaded during the switch.
-            Logger jul = Logger.getLogger(AppearancePanel.class.getName());
-            Level oldLevel = jul.getLevel();
-            jul.setLevel(Level.INFO);
+            // profiles were (re)loaded during the switch. The capture appender
+            // is attached to the ROOT of the Log4j2 context that the SLF4J
+            // binding (log4j-slf4j2-impl) resolved to in this JVM — the single
+            // provider context every SLF4J logger in this process logs
+            // through, independent of which ContextFactory the test JVM
+            // currently holds.
+            LoggerContext ctx = slf4jBindingContext();
+            LoggerConfig rootConfig = ctx.getConfiguration().getRootLogger();
+            Level oldLevel = rootConfig.getLevel();
+            rootConfig.setLevel(Level.INFO);
             List<String> loadEvents = Collections.synchronizedList(new ArrayList<>());
-            Handler capture = new Handler() {
+            AbstractAppender capture = new AbstractAppender("appearance-switch-capture", null,
+                    PatternLayout.createDefaultLayout(), false) {
                 @Override
-                public void publish(LogRecord record) {
-                    String msg = record.getMessage();
-                    if (msg != null && msg.startsWith("Loading Look and Feel profile")) {
-                        loadEvents.add(msg);
+                public void append(LogEvent event) {
+                    if (event.getMessage() != null) {
+                        String msg = event.getMessage().getFormattedMessage();
+                        if (msg.startsWith("Loading Look and Feel profile")) {
+                            loadEvents.add(msg);
+                        }
                     }
                 }
-
-                @Override
-                public void flush() {
-                }
-
-                @Override
-                public void close() {
-                }
             };
-            capture.setLevel(Level.ALL);
-            jul.addHandler(capture);
+            capture.start();
+            rootConfig.addAppender(capture, Level.INFO, null);
+            ctx.updateLoggers();
 
             final AppearancePanel[] holder = new AppearancePanel[1];
             final JFrame[] frameHolder = new JFrame[1];
@@ -457,8 +461,9 @@ class AppearancePanelTest {
                 });
             } finally {
                 dialogCloser.stop();
-                jul.removeHandler(capture);
-                jul.setLevel(oldLevel);
+                rootConfig.removeAppender("appearance-switch-capture");
+                rootConfig.setLevel(oldLevel);
+                capture.stop();
                 onEdt(() -> frameHolder[0].dispose());
             }
         } finally {
@@ -467,6 +472,26 @@ class AppearancePanelTest {
             } else {
                 Files.deleteIfExists(GUI_SETTINGS_PATH);
             }
+        }
+    }
+
+    /**
+     * The Log4j2 context the SLF4J binding (log4j-slf4j2-impl) resolved to in
+     * this JVM. 2.26.1 keeps it behind the protected
+     * {@code Log4jLoggerFactory.getContext()}, so it is read through reflection
+     * from the provider's logger factory (the same context every SLF4J logger
+     * in this process logs through, regardless of any ContextFactory swap a
+     * test may have performed).
+     */
+    private static LoggerContext slf4jBindingContext() {
+        try {
+            Object factory = org.slf4j.LoggerFactory.getILoggerFactory();
+            java.lang.reflect.Method m = factory.getClass().getDeclaredMethod("getContext");
+            m.setAccessible(true);
+            return (LoggerContext) m.invoke(factory);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError(
+                    "the SLF4J provider must be log4j-slf4j2-impl (protected getContext) to capture events", e);
         }
     }
 

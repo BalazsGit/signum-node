@@ -8,16 +8,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-import java.util.logging.Level;
-import java.util.logging.LogRecord;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Unit tests for {@link LogEvent}.
  * <p>
  * Verifies immutable ADT construction via Builder and factory methods,
- * lazy rendering with double-checked locking, and proper field extraction from LogRecord.
+ * and lazy rendering with double-checked locking.
  * </p>
  */
 @DisplayName("LogEvent Tests")
@@ -60,148 +57,6 @@ class LogEventTest {
             LogEvent event2 = LogEvent.fromText("b");
 
             assertTrue(event2.getTimestamp() >= event1.getTimestamp());
-        }
-    }
-
-    // ------------------------ from(LogRecord) ------------------------
-
-    @Nested
-    @DisplayName("from(LogRecord) factory")
-    class FromLogRecordTests {
-
-        @Test
-        @DisplayName("null LogRecord throws NullPointerException")
-        void from_GivenNullRecord_ThrowsNPE() {
-            assertThrows(NullPointerException.class, () -> LogEvent.from(null));
-        }
-
-        @Test
-        @DisplayName("extracts timestamp from LogRecord")
-        void from_GivenRecordWithTimestamp_PreservesTimestamp() {
-            long expectedTs = 1234567890L;
-            LogRecord record = new LogRecord(Level.INFO, "test message");
-            record.setMillis(expectedTs);
-
-            LogEvent event = LogEvent.from(record);
-
-            assertEquals(expectedTs, event.getTimestamp());
-        }
-
-        @Test
-        @DisplayName("extracts level from LogRecord")
-        void from_GivenRecordWithLevel_MapsLevelCorrectly() {
-            LogRecord record = new LogRecord(Level.SEVERE, "error msg");
-            LogEvent event = LogEvent.from(record);
-            assertEquals(LogLevel.ERROR, event.getLevel());
-
-            record = new LogRecord(Level.FINE, "debug msg");
-            event = LogEvent.from(record);
-            assertEquals(LogLevel.DEBUG, event.getLevel());
-
-            record = new LogRecord(Level.INFO, "info msg");
-            event = LogEvent.from(record);
-            assertEquals(LogLevel.INFO, event.getLevel());
-        }
-
-        @Test
-        @DisplayName("extracts logger name from LogRecord")
-        void from_GivenRecordWithLoggerName_PreservesLoggerName() {
-            LogRecord record = new LogRecord(Level.INFO, "msg");
-            record.setLoggerName("signum.node.test");
-
-            LogEvent event = LogEvent.from(record);
-
-            assertEquals("signum.node.test", event.getLoggerName());
-        }
-
-        @Test
-        @DisplayName("extracts message from LogRecord")
-        void from_GivenRecordWithMessage_PreservesMessage() {
-            LogRecord record = new LogRecord(Level.INFO, "my message");
-
-            LogEvent event = LogEvent.from(record);
-
-            assertEquals("my message", event.getMessage());
-        }
-
-        @Test
-        @DisplayName("extracts source class and method from LogRecord")
-        void from_GivenRecordWithSourceInfo_PreservesSource() {
-            LogRecord record = new LogRecord(Level.INFO, "msg");
-            record.setSourceClassName("com.example.MyClass");
-            record.setSourceMethodName("myMethod");
-
-            LogEvent event = LogEvent.from(record);
-
-            assertEquals("com.example.MyClass", event.getSourceClassName());
-            assertEquals("myMethod", event.getSourceMethodName());
-        }
-
-        @Test
-        @DisplayName("source line number defaults to -1 when not set")
-        void from_GivenRecordWithoutLineNumber_DefaultsToMinusOne() {
-            LogRecord record = new LogRecord(Level.INFO, "msg");
-            LogEvent event = LogEvent.from(record);
-            assertEquals(-1, event.getSourceLineNumber());
-        }
-
-        @Test
-        @DisplayName("extracts parameters from LogRecord")
-        void from_GivenRecordWithParameters_PreservesParameters() {
-            LogRecord record = new LogRecord(Level.INFO, "msg: {} and {}");
-            record.setParameters(new Object[]{"a", "b"});
-
-            LogEvent event = LogEvent.from(record);
-
-            assertNotNull(event.getParameters());
-            assertEquals(2, event.getParameters().length);
-            assertEquals("a", event.getParameters()[0]);
-            assertEquals("b", event.getParameters()[1]);
-        }
-
-        @Test
-        @DisplayName("getParameters returns a clone (mutation safe)")
-        void from_GivenRecordWithParameters_ReturnsClone() {
-            LogRecord record = new LogRecord(Level.INFO, "msg");
-            record.setParameters(new Object[]{"x"});
-
-            LogEvent event = LogEvent.from(record);
-            Object[] params1 = event.getParameters();
-            Object[] params2 = event.getParameters();
-
-            assertNotNull(params1);
-            assertNotNull(params2);
-            assertNotSame(params1, params2); // Different arrays
-            assertArrayEquals(params1, params2); // Same content
-        }
-
-        @Test
-        @DisplayName("extracts throwable from LogRecord")
-        void from_GivenRecordWithThrowable_PreservesThrowable() {
-            RuntimeException ex = new RuntimeException("boom");
-            LogRecord record = new LogRecord(Level.SEVERE, "error");
-            record.setThrown(ex);
-
-            LogEvent event = LogEvent.from(record);
-
-            assertSame(ex, event.getThrowable());
-        }
-
-        @Test
-        @DisplayName("thread name is current thread")
-        void from_GivenRecord_SetThreadNameToCurrent() {
-            LogRecord record = new LogRecord(Level.INFO, "msg");
-            LogEvent event = LogEvent.from(record);
-
-            assertEquals(Thread.currentThread().getName(), event.getThreadName());
-        }
-
-        @Test
-        @DisplayName("profileName is null when not explicitly set")
-        void from_GivenRecord_DefaultProfileIsNull() {
-            LogRecord record = new LogRecord(Level.INFO, "msg");
-            LogEvent event = LogEvent.from(record);
-            assertNull(event.getProfileName());
         }
     }
 

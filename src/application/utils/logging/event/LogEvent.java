@@ -3,14 +3,12 @@ package application.utils.logging.event;
 import application.utils.logging.LogScope;
 
 import java.util.Arrays;
-import java.util.logging.LogRecord;
 
 /**
  * Immutable data class representing a single log event in the routing system.
  * <p>
- * Acts as the common currency between the logging framework (JUL/SLF4J) and
- * the GUI display layer. Created from JUL {@link LogRecord} instances via
- * {@link #from(LogRecord)}, or directly for synthetic events (e.g., bootstrap flush).
+ * Acts as the common currency between the logging framework (SLF4J) and
+ * the GUI display layer, created directly for synthetic events (e.g., bootstrap flush).
  * </p>
  * <p>
  * <h3>Lazy Formatting</h3>
@@ -18,7 +16,6 @@ import java.util.logging.LogRecord;
  * and cached using double-checked locking for thread safety with minimal synchronization overhead.
  * </p>
  *
- * @see LogRecord
  * @see LogFormatter
  */
 public final class LogEvent {
@@ -53,51 +50,6 @@ public final class LogEvent {
         this.module = builder.module;
         this.throwable = builder.throwable;
         this.parameters = builder.parameters != null ? builder.parameters.clone() : null;
-    }
-
-    /**
-     * Creates a LogEvent from a JUL LogRecord.
-     * <p>
-     * This is the primary factory method used by ProfileLogRouter to convert
-     * framework log records into our routing-friendly format.
-     * </p>
-     *
-     * @param record the JUL LogRecord to convert (never null)
-     * @return a new immutable LogEvent
-     * @throws NullPointerException if record is null
-     */
-    public static LogEvent from(LogRecord record) {
-        if (record == null) {
-            throw new NullPointerException("LogRecord must not be null");
-        }
-        Builder builder = new Builder()
-                .timestamp(record.getMillis())
-                .level(LogLevel.fromJul(record.getLevel()))
-                .loggerName(record.getLoggerName())
-                .message(record.getMessage())
-                .threadName(Thread.currentThread().getName());
-
-        // Extract source info if available
-        if (record.getSourceClassName() != null) {
-            builder.sourceClassName(record.getSourceClassName());
-        }
-        if (record.getSourceMethodName() != null) {
-            builder.sourceMethodName(record.getSourceMethodName());
-        }
-        // Note: LogRecord does not expose line number directly; it remains at default -1
-
-        // Extract parameters from LogRecord
-        Object[] params = record.getParameters();
-        if (params != null && params.length > 0) {
-            builder.parameters(params.clone());
-        }
-
-        // Extract throwable
-        if (record.getThrown() != null) {
-            builder.throwable(record.getThrown());
-        }
-
-        return builder.build();
     }
 
     /**

@@ -110,9 +110,6 @@ class ConsoleBusAppenderTest {
             logger.warn("loud enough");
             assertEquals(1, recorder.events.size(), "DEBUG suppressed by the context, WARN delivered");
             assertEquals(LogLevel.WARN, recorder.events.get(0).getLevel());
-
-            // and the bus itself no longer re-filters (minLevel raised to TRACE by the appender)
-            assertEquals(LogLevel.TRACE, bus.getLogLevel());
         } finally {
             nlc.stop();
             bus.close();

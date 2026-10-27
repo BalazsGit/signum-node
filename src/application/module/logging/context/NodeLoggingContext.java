@@ -5,8 +5,13 @@ import org.apache.logging.log4j.core.config.ConfigurationSource;
 import org.apache.logging.log4j.core.config.properties.PropertiesConfiguration;
 import org.apache.logging.log4j.core.config.properties.PropertiesConfigurationFactory;
 import org.apache.logging.log4j.core.impl.Log4jContextFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.Properties;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
 
@@ -26,9 +31,10 @@ import java.util.regex.Pattern;
  *   <li>{@link #stop()} — node stop: appenders close, the context object stays</li>
  *   <li>{@link #reconfigure(Path)} — Apply: reload the (regenerated) config
  *       file into the SAME context; existing loggers rebind (spike Q2b)</li>
- *   <li>{@link #remove(Log4jContextFactory)} — dispose: stop +
- *       {@code factory.removeContext} so the factory's context map stays
- *       consistent (not a routing concern, §6.2)</li>
+ *   <li>{@link #remove(Log4jContextFactory)} — dispose: stop the context, then call
+ *       {@code factory.removeContext(ctx)} (a defensive no-op for our directly-created
+ *       contexts, which are never registered in the factory/selector — the
+ *       {@code NodeLoggingContextManager}'s own map is the only registry, §6.2/§14.4-A5)</li>
  * </ul>
  *
  * <p>
@@ -43,6 +49,8 @@ public final class NodeLoggingContext {
     /** Context name prefix: {@code signum-node-<sanitized profile>} (plan §6.1). */
     public static final String NAME_PREFIX = "signum-node-";
     private static final Pattern UNSAFE_NAME_CHARS = Pattern.compile("[^A-Za-z0-9_.\\-]");
+    /** Infrastructure logger (JVM-global): reports degraded-config reconfigure refusals (audit P1.4). */
+    private static final Logger LOGGER = LoggerFactory.getLogger(NodeLoggingContext.class);
 
     private final String profileName;
     private final LoggerContext ctx;
@@ -92,12 +100,28 @@ public final class NodeLoggingContext {
      * path, §9.2A): the caller rewrites the generated file in place first
      * (the writer does this atomically), then this reloads it. Existing
      * logger instances rebind to the new configuration (spike Q2b).
+     * <p>
+     * <b>Audit P1.4:</b> a corrupt / truncated / hand-broken file must NOT
+     * silently degrade a running node to Log4j2's default configuration
+     * (which would lose its configured levels and appenders). Before reloading
+     * we verify the file is still a well-formed generated config; when it is
+     * not, the current configuration is kept, a warning is logged, and
+     * {@code false} is returned so the Apply chain does not report success.
+     *
+     * @return {@code true} when the reconfigure was applied; {@code false} when
+     *         the current config file was invalid and the previous
+     *         configuration was kept
      */
-    public NodeLoggingContext reconfigure() {
+    public boolean reconfigure() {
+        if (!isLoadableNodeConfig(this.configUri)) {
+            LOGGER.warn("reconfigure skipped for node '{}': config file {} is not a valid generated Log4j2 config — keeping the current configuration",
+                    profileName, this.configUri);
+            return false;
+        }
         applyLock.lock();
         try {
             ctx.reconfigure();
-            return this;
+            return true;
         } finally {
             applyLock.unlock();
         }
@@ -108,13 +132,24 @@ public final class NodeLoggingContext {
      * two-phase start's minimal &rarr; full switch (plan §6.3). 2.26.1 has no
      * {@code reconfigure(URI)}, so the plan's Q2a fallback is used: build a
      * {@code PropertiesConfiguration} from the URI and reconfigure with it.
+     * <p>
+     * Like {@link #reconfigure()}, a corrupt / unreadable target file is refused
+     * (the current configuration is kept, a warning is logged) instead of
+     * degrading the node to Log4j2's default (audit P1.4).
      *
      * @param newConfigUri the new .properties file (e.g. the full config
      *                     replacing the minimal startup config)
+     * @return {@code true} when the switch was applied; {@code false} when the
+     *         target file was invalid and the previous configuration was kept
      */
-    public NodeLoggingContext reconfigureFrom(final URI newConfigUri) {
+    public boolean reconfigureFrom(final URI newConfigUri) {
         if (newConfigUri == null) {
             throw new IllegalArgumentException("newConfigUri must not be null");
+        }
+        if (!isLoadableNodeConfig(newConfigUri)) {
+            LOGGER.warn("reconfigureFrom skipped for node '{}': target config file {} is not a valid generated Log4j2 config — keeping the current configuration",
+                    profileName, newConfigUri);
+            return false;
         }
         applyLock.lock();
         try {
@@ -122,9 +157,33 @@ public final class NodeLoggingContext {
                     .getConfiguration(ctx, ConfigurationSource.fromUri(newConfigUri));
             ctx.reconfigure(configuration);
             this.configUri = newConfigUri;
-            return this;
+            return true;
         } finally {
             applyLock.unlock();
+        }
+    }
+
+    /**
+     * True when the file at {@code uri} is a readable generated node config,
+     * i.e. a Log4j2 properties file that sets {@code rootLogger.level}. The
+     * generated writer always emits {@code rootLogger.level}; a truncated,
+     * corrupted or hand-broken file does not. This is the pre-reload guard that
+     * lets {@link #reconfigure()} / {@link #reconfigureFrom(URI)} tell a
+     * "reload a valid file" apart from a "this would degrade to Log4j2's
+     * default" situation (audit P1.4).
+     */
+    private static boolean isLoadableNodeConfig(final URI uri) {
+        if (uri == null) {
+            return false;
+        }
+        try {
+            final Properties props = new Properties();
+            try (var in = Files.newInputStream(Paths.get(uri))) {
+                props.load(in);
+            }
+            return props.getProperty("rootLogger.level") != null;
+        } catch (final Exception e) {
+            return false; // unreadable / non-file / missing marker -> treat as corrupt
         }
     }
 
@@ -139,8 +198,11 @@ public final class NodeLoggingContext {
     }
 
     /**
-     * Disposes: stops (if running) and removes the context from the factory's
-     * map so {@code getLoggerContexts()} stays consistent (plan §6.2/§6.3).
+     * Disposes: stops the context (if running) and calls
+     * {@code factory.removeContext(ctx)}. Node contexts are created directly (D7) and are
+     * NEVER registered in the factory/selector, so {@code removeContext} is a no-op here
+     * (the {@code NodeLoggingContextManager}'s own map is the registry); the call is kept as
+     * a defensive guard in case a future selector starts tracking contexts (plan §6.2/§14.4-A5).
      */
     public void remove(final Log4jContextFactory factory) {
         applyLock.lock();

@@ -66,7 +66,6 @@ import application.module.node.web.api.http.common.APITransactionManager;
 import application.module.node.web.api.http.common.APITransactionManagerImpl;
 import application.module.node.web.server.WebServerContext;
 import application.module.node.web.server.WebServerImpl;
-import application.utils.logging.NodeLogContext;
 import application.utils.logging.ProfileFileAppender;
 import application.utils.logging.ProfileLogger;
 import application.module.logging.appender.ProfileConsoleAppender;
@@ -427,9 +426,8 @@ public final class Signum {
     public synchronized void refreshConfiguration() {
         NodeProfile reloaded = NodeProfileRepository.loadByName(this.profile.getName());
         if (reloaded == null) {
-            application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, this.profile.getName(),
-                    () -> logger.debug("refreshConfiguration('{}'): no on-disk profile — keeping current config",
-                            this.profile.getName()));
+            logger.debug("refreshConfiguration('{}'): no on-disk profile — keeping current config",
+                    this.profile.getName());
             return;
         }
         this.profile = reloaded;
@@ -439,9 +437,8 @@ public final class Signum {
             throw new NodeStartupException(
                     "Failed to refresh configuration for profile '" + this.profile.getName() + "' from " + this.confFolder, e);
         }
-        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, this.profile.getName(),
-                () -> logger.info("refreshConfiguration('{}'): reloaded configuration from disk ({} propert(ies))",
-                        this.profile.getName(), reloaded.getProperties().size()));
+        logger.info("refreshConfiguration('{}'): reloaded configuration from disk ({} propert(ies))",
+                this.profile.getName(), reloaded.getProperties().size());
     }
 
     /**
@@ -466,29 +463,23 @@ public final class Signum {
      * @throws application.module.node.instance.NodeStartupException if startup fails
      */
     public synchronized void start() {
-        // Route this startup's SLF4J output to this node's ProfileLogger (Node Console).
-        // The SystemLoggerJulHandler forwards an event to the per-profile ProfileLogger
-        // only when NodeLogContext.current() carries the profile name; otherwise every
-        // line (DB init, sync start, …) goes to SystemLogger alone and the per-profile
-        // console stays empty. Binding the context on the thread that runs init() +
-        // doInitialize() is what lets the ProfileLogger's replay buffer actually capture
-        // those lines for late-attaching GUI subscribers (v2 plan D4).
-        withProfileLogContext(() -> {
-            if (this.state == State.CREATED) {
-                this.init();
-            }
-            if (this.state != State.INITIALIZED && this.state != State.STOPPED) {
-                throw new IllegalStateException("Cannot start from state " + this.state);
-            }
-            setState(State.STARTING);
-            try {
-                doInitialize();
-                setState(State.RUNNING);
-            } catch (Exception e) {
-                setState(State.ERROR);
-                throw e;
-            }
-        });
+        // The startup thread's own lifecycle logging (init/doInitialize) routes through
+        // this node's isolated Log4j2 context, so those lines reach the ProfileLogger's
+        // replay buffer for late-attaching GUI subscribers (Node Console).
+        if (this.state == State.CREATED) {
+            this.init();
+        }
+        if (this.state != State.INITIALIZED && this.state != State.STOPPED) {
+            throw new IllegalStateException("Cannot start from state " + this.state);
+        }
+        setState(State.STARTING);
+        try {
+            doInitialize();
+            setState(State.RUNNING);
+        } catch (Exception e) {
+            setState(State.ERROR);
+            throw e;
+        }
     }
 
     /**
@@ -509,17 +500,14 @@ public final class Signum {
      */
     public void stop() {
         if (this.state == State.RUNNING || this.state == State.ERROR) {
-            // Same log-context binding as start() so shutdown lines reach the profile console.
-            withProfileLogContext(() -> {
-                setState(State.STOPPING);
-                try {
-                    doShutdown();
-                    setState(State.STOPPED);
-                } catch (Exception e) {
-                    setState(State.ERROR);
-                    throw e;
-                }
-            });
+            setState(State.STOPPING);
+            try {
+                doShutdown();
+                setState(State.STOPPED);
+            } catch (Exception e) {
+                setState(State.ERROR);
+                throw e;
+            }
         }
     }
 
@@ -543,40 +531,6 @@ public final class Signum {
             pl.error("Start rejected — " + r);
         }
         logger.warn("Start rejected for profile '{}': {}", getProfileName(), r);
-    }
-
-    /**
-     * Runs the given lifecycle block on the current thread with the
-     * {@link application.utils.logging.NodeLogContext} bound to this node's profile,
-     * so SLF4J log output is routed to this node's {@link ProfileLogger} (Node Console
-     * tab) in addition to {@link application.utils.logging.SystemLogger}. The previous
-     * context (if any) is restored afterwards.
-     * <p>
-     * Without this binding the startup/shutdown thread has no active profile context,
-     * so the JUL bridge ({@code SystemLoggerJulHandler}) would drop those events to the
-     * per-profile console — leaving the Node Console empty even though the replay buffer
-     * (see {@link ProfileLogger}) is otherwise correct.
-     * </p>
-     *
-     * @param task the lifecycle block to execute (init/doInitialize or doShutdown)
-     */
-    private void withProfileLogContext(Runnable task) {
-        application.utils.logging.LogScope previousContext = application.utils.logging.NodeLogContext.current();
-        boolean bound = this.profile != null;
-        if (bound) {
-            application.utils.logging.NodeLogContext.set(ModuleIds.NODE, this.profile.getName());
-        }
-        try {
-            task.run();
-        } finally {
-            if (bound) {
-                if (previousContext != null) {
-                    application.utils.logging.NodeLogContext.set(previousContext);
-                } else {
-                    application.utils.logging.NodeLogContext.clear();
-                }
-            }
-        }
     }
 
     public void restart() {
@@ -1020,21 +974,18 @@ public final class Signum {
                     propertyService.getInt(Props.FILE_LOG_COUNT));
             if (!appender.isActive()) {
                 appender.dispose();
-                NodeLogContext.runIn(ModuleIds.NODE, profile.getName(),
-                        () -> logger.warn("Per-node file log is inactive for profile '{}' (could not open the log file in '{}')",
-                                profile.getName(), propertyService.getString(Props.FILE_LOG_DIR)));
+                logger.warn("Per-node file log is inactive for profile '{}' (could not open the log file in '{}')",
+                        profile.getName(), propertyService.getString(Props.FILE_LOG_DIR));
                 return;
             }
             profileLogger.addSubscriber(appender);
             this.profileFileAppender = appender;
-            NodeLogContext.runIn(ModuleIds.NODE, profile.getName(),
-                    () -> logger.info("Per-node file log attached for profile '{}': {} (level {}, {} bytes x {} rotations)",
-                            profile.getName(), appender.getFile().toAbsolutePath(),
-                            propertyService.getString(Props.FILE_LOG_LEVEL),
-                            propertyService.getInt(Props.FILE_LOG_LIMIT), propertyService.getInt(Props.FILE_LOG_COUNT)));
+            logger.info("Per-node file log attached for profile '{}': {} (level {}, {} bytes x {} rotations)",
+                    profile.getName(), appender.getFile().toAbsolutePath(),
+                    propertyService.getString(Props.FILE_LOG_LEVEL),
+                    propertyService.getInt(Props.FILE_LOG_LIMIT), propertyService.getInt(Props.FILE_LOG_COUNT));
         } catch (Throwable t) {
-            NodeLogContext.runIn(ModuleIds.NODE, profile != null ? profile.getName() : "unknown",
-                    () -> logger.warn("Failed to attach the per-node file log appender: {}", t.getMessage()));
+            logger.warn("Failed to attach the per-node file log appender: {}", t.getMessage());
         }
     }
 
@@ -1092,8 +1043,7 @@ public final class Signum {
     public static PropertyService loadPropertiesForProfile(String confFolder, String profileName) {
         CaselessProperties properties = EffectiveNodeProps.loadEffective(confFolder, profileName);
 
-        application.utils.logging.NodeLogContext.runIn(application.utils.config.ModuleIds.NODE, profileName,
-                () -> BOOTSTRAP_LOGGER.info("Initializing Signum Node version {}", VERSION));
+        BOOTSTRAP_LOGGER.info("Initializing Signum Node version {}", VERSION);
 
         // Ensure SETTINGS_DIR is set if not in file
         if (properties.getProperty(Props.SETTINGS_DIR.getName()) == null) {
@@ -1282,23 +1232,6 @@ public final class Signum {
     private void doInitialize() {
         String profileName = this.profile.getName();
 
-        // ── Step 0: Re-apply the logging configuration (logging.properties) ──
-        // LoggerConfigurator.init() (application.module.node.util) configures the
-        // JVM-wide LogManager from this profile's logging.properties. It runs once at
-        // app startup (Launcher), but the user may edit the properties file between stop
-        // and start. Re-applying it here — on every (re)start, and before any component
-        // below emits a log — makes the new log levels / handlers take effect
-        // immediately (the expected "edit logging.properties → restart → new settings
-        // apply"). Safe to call repeatedly: it just re-reads the properties and re-wires
-        // the handlers.
-        try {
-            for (String line : application.module.node.util.LoggerConfigurator.init(this.confFolder.toString())) {
-                System.out.println("[logging] " + line);
-            }
-        } catch (Exception e) {
-            System.err.println("Failed to re-apply logging configuration on (re)start: " + e.getMessage());
-        }
-
         // ── Step 1: ProfileLogger ── created in the Signum(NodeProfile, Path) constructor
         // (moved out of here) so GUI consoles can attach before start() and no
         // bootstrap log line is lost.
@@ -1317,7 +1250,7 @@ public final class Signum {
         // module is replaced by the isolated-context apply of step 1.7 below
         // (NodeLoggingContextApplier): the node context's configuration is the
         // single level gate for node-context events, and the legacy (JUL-routed)
-        // events stay gated by their own JUL levels (LoggerConfigurator).
+        // events stay gated by their own JUL levels.
 
         // ── Step 1.6: attach the per-node file log appender (per-node file logging) ──
         // Writes this node's log events at/above the configured level to
@@ -1409,9 +1342,6 @@ public final class Signum {
 
         // ThreadPool
         this.threadPool = new ThreadPool(this.propertyService, this.loggers());
-        // Scope all pool tasks to this node's profile so log events route to the
-        // correct per-node ProfileLogger (Node Console).
-        this.threadPool.setProfileName(this.profile.getName());
 
         // Db.init + Dbs + Stores
         this.dbContext = DbContext.create(this.propertyService, this.dbCacheManager, this.loggers());
@@ -1691,19 +1621,6 @@ public final class Signum {
             // the appender is re-attached on the next doInitialize.
             detachProfileFileAppender();
 
-            // Stop the isolated node LoggerContext (plan §5.3 lifecycle): its file
-            // appenders are closed. The context OBJECT stays in the manager map —
-            // restart re-uses the same instance (start + full re-apply, P0 Q6).
-            NodeLoggingContext nlc = this.nodeLoggingContext;
-            if (nlc != null) {
-                try {
-                    nlc.stop();
-                } catch (Throwable t) {
-                    logger.warn("Failed to stop the isolated node LoggerContext for profile '{}': {}",
-                            profileName, t.getMessage());
-                }
-            }
-
             if (this.webServer != null) {
                 try {
                     this.webServer.shutdown();
@@ -1778,6 +1695,21 @@ public final class Signum {
             logger.error("Unexpected error during shutdown of profile '{}'", profileName, e);
         } finally {
             contextStarted.set(false);
+            // Stop the isolated node LoggerContext LAST (audit P1.2): after every
+            // motor above has quiesced (web/blockchain/peer/threadpool/DB), so their
+            // shutdown logs reach the node's appenders before the context (and its
+            // appenders) close. In the finally so it runs even if a motor shutdown
+            // threw. The context OBJECT stays in the manager map — restart re-uses
+            // the same instance (start + full re-apply, P0 Q6).
+            NodeLoggingContext nlc = this.nodeLoggingContext;
+            if (nlc != null) {
+                try {
+                    nlc.stop();
+                } catch (Throwable t) {
+                    logger.warn("Failed to stop the isolated node LoggerContext for profile '{}': {}",
+                            profileName, t.getMessage());
+                }
+            }
             // ── The ProfileLogger is INTENTIONALLY KEPT ALIVE across stop/start cycles ──
             // It is a per-Signum (long-lived) resource and the GUI console subscriber
             // must persist across restarts. ProfileLogger.close() DISPOSES its

@@ -1,13 +1,10 @@
 package application.utils.logging.event;
 
-import java.util.logging.Level;
-
 /**
- * Unified log level enum providing mapping between JUL and SLF4J levels.
+ * Unified log level enum providing mapping between SLF4J levels.
  * <p>
  * This enum normalizes the different severity representations used across
- * Java Util Logging (JUL) and SLF4J/chains into a single comparable type
- * for filtering and display purposes.
+ * SLF4J/chains into a single comparable type for filtering and display purposes.
  * </p>
  */
 public enum LogLevel {
@@ -50,30 +47,6 @@ public enum LogLevel {
     }
 
     /**
-     * Converts a JUL {@link Level} to the closest matching LogLevel.
-     *
-     * @param julLevel the JUL level to convert (never null)
-     * @return the mapped LogLevel
-     */
-    public static LogLevel fromJul(Level julLevel) {
-        if (julLevel == null) {
-            return INFO;
-        }
-        int intValue = julLevel.intValue();
-        if (intValue <= Level.FINEST.intValue()) {
-            return TRACE;
-        } else if (intValue <= Level.FINE.intValue()) {
-            return DEBUG;
-        } else if (intValue <= Level.INFO.intValue()) {
-            return INFO;
-        } else if (intValue <= Level.WARNING.intValue()) {
-            return WARN;
-        } else {
-            return ERROR;
-        }
-    }
-
-    /**
      * Converts a SLF4J level name string to LogLevel.
      * Handles common variations: "trace", "debug", "info", "warn", "error", "off".
      *
@@ -95,18 +68,4 @@ public enum LogLevel {
         }
     }
 
-    /**
-     * Returns the corresponding JUL {@link Level} for this LogLevel.
-     */
-    public Level toJul() {
-        switch (this) {
-            case TRACE: return Level.FINEST;
-            case DEBUG: return Level.FINE;
-            case INFO:  return Level.INFO;
-            case WARN:  return Level.WARNING;
-            case ERROR: return Level.SEVERE;
-            case OFF:   return Level.OFF;
-            default:    return Level.INFO;
-        }
-    }
 }

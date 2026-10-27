@@ -6,14 +6,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-import java.util.logging.Level;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Unit tests for {@link LogLevel}.
  * <p>
- * Verifies enum values, severity ordering, JUL/SLF4J bidirectional mapping,
+ * Verifies enum values, severity ordering, SLF4J name mapping,
  * and the isAtLeast() comparison logic.
  * </p>
  */
@@ -104,73 +102,6 @@ class LogLevelTest {
         }
     }
 
-    // ------------------------ fromJul() ------------------------
-
-    @Nested
-    @DisplayName("fromJul() - JUL Level mapping")
-    class FromJulTests {
-
-        @Test
-        @DisplayName("null JUL level defaults to INFO")
-        void fromJul_GivenNull_ReturnsInfo() {
-            assertSame(LogLevel.INFO, LogLevel.fromJul(null));
-        }
-
-        @Test
-        @DisplayName("JUL FINEST maps to TRACE")
-        void fromJul_GivenFINEST_ReturnsTRACE() {
-            assertSame(LogLevel.TRACE, LogLevel.fromJul(Level.FINEST));
-        }
-
-        @Test
-        @DisplayName("JUL FINER maps to TRACE (below FINEST threshold)")
-        void fromJul_GivenFINER_ReturnsTRACE() {
-            // FINER.intValue() <= FINEST.intValue() is false, but FINER < FINE so it's TRACE
-            // Actually FINER > FINEST, so it falls into DEBUG range
-            // Let's check: FINEST=300, FINER=400, FINE=500, INFO=800, WARNING=900, SEVERE=1000
-            // FINER(400) <= FINEST(300)? No. <= FINE(500)? Yes → DEBUG
-            assertSame(LogLevel.DEBUG, LogLevel.fromJul(Level.FINER));
-        }
-
-        @Test
-        @DisplayName("JUL FINE maps to DEBUG")
-        void fromJul_GivenFINE_ReturnsDEBUG() {
-            assertSame(LogLevel.DEBUG, LogLevel.fromJul(Level.FINE));
-        }
-
-        @Test
-        @DisplayName("JUL INFO maps to INFO")
-        void fromJul_GivenINFO_ReturnsINFO() {
-            assertSame(LogLevel.INFO, LogLevel.fromJul(Level.INFO));
-        }
-
-        @Test
-        @DisplayName("JUL WARNING maps to WARN")
-        void fromJul_GivenWARNING_ReturnsWARN() {
-            assertSame(LogLevel.WARN, LogLevel.fromJul(Level.WARNING));
-        }
-
-        @Test
-        @DisplayName("JUL SEVERE maps to ERROR")
-        void fromJul_GivenSEVERE_ReturnsERROR() {
-            assertSame(LogLevel.ERROR, LogLevel.fromJul(Level.SEVERE));
-        }
-
-        @Test
-        @DisplayName("JUL OFF maps to ERROR (above WARNING)")
-        void fromJul_GivenOFF_ReturnsERROR() {
-            // OFF.intValue() = 1000, which is > WARNING(900), so it falls into else branch → ERROR
-            assertSame(LogLevel.ERROR, LogLevel.fromJul(Level.OFF));
-        }
-
-        @Test
-        @DisplayName("JUL ALL maps to TRACE (lowest severity)")
-        void fromJul_GivenALL_ReturnsTRACE() {
-            // ALL.intValue() = 0, which is <= FINEST(300), so → TRACE
-            assertSame(LogLevel.TRACE, LogLevel.fromJul(Level.ALL));
-        }
-    }
-
     // ------------------------ fromSlf4jName() ------------------------
 
     @Nested
@@ -228,84 +159,4 @@ class LogLevelTest {
         }
     }
 
-    // ------------------------ toJul() ------------------------
-
-    @Nested
-    @DisplayName("toJul() - convert back to JUL Level")
-    class ToJulTests {
-
-        @Test
-        @DisplayName("TRACE maps to JUL FINEST")
-        void toJul_GivenTRACE_ReturnsFINEST() {
-            assertSame(Level.FINEST, LogLevel.TRACE.toJul());
-        }
-
-        @Test
-        @DisplayName("DEBUG maps to JUL FINE")
-        void toJul_GivenDEBUG_ReturnsFINE() {
-            assertSame(Level.FINE, LogLevel.DEBUG.toJul());
-        }
-
-        @Test
-        @DisplayName("INFO maps to JUL INFO")
-        void toJul_GivenINFO_ReturnsINFO() {
-            assertSame(Level.INFO, LogLevel.INFO.toJul());
-        }
-
-        @Test
-        @DisplayName("WARN maps to JUL WARNING")
-        void toJul_GivenWARN_ReturnsWARNING() {
-            assertSame(Level.WARNING, LogLevel.WARN.toJul());
-        }
-
-        @Test
-        @DisplayName("ERROR maps to JUL SEVERE")
-        void toJul_GivenERROR_ReturnsSEVERE() {
-            assertSame(Level.SEVERE, LogLevel.ERROR.toJul());
-        }
-
-        @Test
-        @DisplayName("OFF maps to JUL OFF")
-        void toJul_GivenOFF_ReturnsOFF() {
-            assertSame(Level.OFF, LogLevel.OFF.toJul());
-        }
-    }
-
-    // ------------------------ Round-trip Consistency ------------------------
-
-    @Nested
-    @DisplayName("Round-trip consistency (fromJul → toJul and vice versa)")
-    class RoundTripTests {
-
-        @Test
-        @DisplayName("JUL INFO → LogLevel → JUL is consistent")
-        void julToLogLevelToJul_InfoConsistent() {
-            Level original = Level.INFO;
-            LogLevel level = LogLevel.fromJul(original);
-            Level roundTrip = level.toJul();
-            assertSame(original, roundTrip);
-        }
-
-        @Test
-        @DisplayName("SLF4J 'error' → LogLevel → SLF4j name is consistent")
-        void slf4jToLogLevel_NameConsistent() {
-            String original = "error";
-            LogLevel level = LogLevel.fromSlf4jName(original);
-            // Check enum name matches original concept (case-insensitive comparison)
-            assertEquals("ERROR", level.getDisplayName());
-        }
-
-        @Test
-        @DisplayName("all recognized SLF4J names round-trip through fromSlf4jName")
-        void allSlf4jNamesRoundTrip() {
-            String[] names = {"trace", "debug", "info", "warn", "error", "off"};
-            for (String name : names) {
-                LogLevel level = LogLevel.fromSlf4jName(name);
-                assertNotNull(level);
-                // Verify we can convert to JUL and back without null
-                Level jul = level.toJul();
-                assertNotNull(jul);
-            }
-        }
-    }
 }

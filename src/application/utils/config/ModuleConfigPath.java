@@ -5,7 +5,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.logging.Logger;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 
 /**
  * Handles module configuration file paths using a hybrid resolution strategy:
@@ -21,7 +22,7 @@ import java.util.logging.Logger;
  */
 public final class ModuleConfigPath {
 
-    private static final Logger LOGGER = Logger.getLogger(ModuleConfigPath.class.getName());
+    private static final Logger LOGGER = LogManager.getLogger(ModuleConfigPath.class);
 
     /** Base directory for runtime (user-editable) configuration. */
     private static final String RUNTIME_CONF_ROOT = ConfigPaths.RUNTIME_CONF_ROOT;
@@ -90,7 +91,7 @@ public final class ModuleConfigPath {
                 LOGGER.info("Created empty override config: " + path);
             }
         } catch (IOException e) {
-            LOGGER.warning("Could not create override config at " + path + ": " + e.getMessage());
+            LOGGER.warn("Could not create override config at " + path + ": " + e.getMessage());
         }
     }
 

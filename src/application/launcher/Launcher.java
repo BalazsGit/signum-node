@@ -7,7 +7,6 @@ import application.module.logging.context.SignumGlobalContextSelector;
 import application.module.node.profile.NodeProfileRepository;
 import application.module.node.profile.ProfileCli;
 import application.module.node.profile.ProfileConfig;
-import application.module.node.util.LoggerConfigurator;
 import application.utils.io.PathUtils;
 import application.utils.sqlite.SqliteNativeSupport;
 
@@ -131,21 +130,7 @@ public class Launcher {
         // subprocess has already terminated inside bootstrap().
         LaunchCommand.capture(args);
 
-        // Logging inicializálás (Ez maradhat a Launcher-ben mint infra).
-        // (The SystemLoggerJulHandler bridge was already installed above; the
-        // reconfiguration re-applies it internally via SignumLogManager.)
-        List<String> initLogs = new ArrayList<>();
-        try {
-            initLogs = LoggerConfigurator.init(confFolder);
-        } catch (Exception e) {
-            System.err.println("Failed to initialize LoggerConfigurator: " + e.getMessage());
-        }
-
         logger = LoggerFactory.getLogger(Launcher.class);
-        // Print bootstrap logs to console AND the System Console (through the
-        // log bridge installed above), so the GUI shows the same lines as the
-        // terminal.
-        initLogs.forEach(msg -> logger.info("[Bootstrap] {}", msg));
 
         // P3.5: configure the GLOBAL Log4j2 context (resolved root level + the
         // SystemConsoleAppender/terminal appenders) from the L0/L1/L2 layers. After the

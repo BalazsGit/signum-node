@@ -62,17 +62,6 @@ public final class ThreadPool {
     private final PropertyService propertyService;
 
     /**
-     * The node profile name that owns this thread pool.
-     * <p>
-     * Set by the owning {@code Signum} instance at startup. When present, every
-     * task executed by this pool runs inside a {@link application.utils.logging.NodeLogContext}
-     * scoped to this profile, so the {@code SystemLoggerJulHandler} can route its
-     * log events to the correct per-node {@code ProfileLogger} (Node Console).
-     * </p>
-     */
-    private volatile String profileName;
-
-    /**
      * Per-node transaction context bound to each thread in this pool.
      * Ensures multi-node isolation: each pool thread sees only its own node's context.
      */
@@ -93,47 +82,21 @@ public final class ThreadPool {
     }
 
     /**
-     * Sets the node profile name that owns this pool.
-     * When set, all tasks executed by this pool run inside a
-     * {@link application.utils.logging.NodeLogContext} scoped to this profile,
-     * so log events are routed to the correct per-node {@code ProfileLogger}.
-     *
-     * @param profileName the node profile name (e.g. "mainnet")
-     */
-    public void setProfileName(String profileName) {
-        this.profileName = profileName;
-    }
-
-    /**
-     * Wraps a Runnable to bind/clear the node's TransactionApplyContext
-     * and (if a profile name is set) to set/clear the {@code NodeLogContext}.
-     * Reads both lazily at execution time to support contexts set after pool start.
+     * Wraps a Runnable to bind/clear the node's TransactionApplyContext.
+     * Reads it lazily at execution time to support contexts set after pool start.
      */
     private Runnable withContext(Runnable task) {
         ThreadPool self = this;
         return () -> {
             TransactionApplyContext ctx = self.transactionApplyContext;
-            String profile = self.profileName;
-            boolean hasTxCtx = (ctx != null);
-            boolean hasLogCtx = (profile != null);
-            if (!hasTxCtx && !hasLogCtx) {
+            if (ctx == null) {
                 task.run();
             } else {
-                if (hasTxCtx) {
-                    TransactionType.bindContext(ctx);
-                }
-                if (hasLogCtx) {
-                    application.utils.logging.NodeLogContext.set(ModuleIds.NODE, profile);
-                }
+                TransactionType.bindContext(ctx);
                 try {
                     task.run();
                 } finally {
-                    if (hasLogCtx) {
-                        application.utils.logging.NodeLogContext.clear();
-                    }
-                    if (hasTxCtx) {
-                        TransactionType.clearContext();
-                    }
+                    TransactionType.clearContext();
                 }
             }
         };
