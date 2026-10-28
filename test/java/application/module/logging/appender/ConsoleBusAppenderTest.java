@@ -117,6 +117,34 @@ class ConsoleBusAppenderTest {
     }
 
     @Test
+    @DisplayName("the context is the sole gate even below the bus default (DEBUG reaches the bus; TRACE is suppressed at the source)")
+    void contextIsSoleGateBelowBusDefault() throws Exception {
+        // Context root = DEBUG. The bus is intentionally left at its DEFAULT
+        // (INFO) minLevel: with the second gate removed from the bridge, the
+        // native context (DEBUG) is the ONLY gate — so DEBUG must reach the bus,
+        // while TRACE is suppressed at the source by the context.
+        NodeLoggingContext nlc = context("ca3.log4j2.properties", "DEBUG");
+        ProfileLogger bus = new ProfileLogger("node", "ca-sole-gate");
+        bus.setForwardToSystem(false);
+        Recorder recorder = new Recorder();
+        bus.addSubscriber(recorder);
+        ProfileConsoleAppender appender = new ProfileConsoleAppender(bus);
+        try {
+            appender.attach(nlc.loggerContext());
+            Logger logger = nlc.loggerContext().getLogger("com.example.SoleGate");
+            logger.debug("debug passes the native gate");   // root=DEBUG → emitted; the bus must not re-filter
+            logger.trace("trace suppressed at the source");  // below the DEBUG root → never emitted by the context
+
+            assertEquals(1, recorder.events.size(),
+                    "DEBUG delivered by the bus, TRACE suppressed by the (native) context — no second gate");
+            assertEquals(LogLevel.DEBUG, recorder.events.get(0).getLevel());
+        } finally {
+            nlc.stop();
+            bus.close();
+        }
+    }
+
+    @Test
     @DisplayName("a throwable in the message is appended to the bus event")
     void throwableForwarding() throws Exception {
         NodeLoggingContext nlc = context("ca3.log4j2.properties", "INFO");

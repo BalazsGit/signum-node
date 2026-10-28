@@ -3,6 +3,7 @@ package application.utils.logging;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -647,6 +648,53 @@ class LoggerImplTest {
             String s = logger.toString();
             assertTrue(s.contains("closed=true"));
             assertTrue(s.contains("subscribers=0"));
+        }
+    }
+
+    @Nested
+    @DisplayName("forward (context-bridge relay — no minLevel gate)")
+    class ForwardTests {
+
+        @Test
+        void forward_bypassesMinLevelGate_logDoesNot() {
+            TestLogger logger = new TestLogger("test");
+            logger.setLogLevel(LogLevel.ERROR); // gate at ERROR
+            AtomicInteger count = new AtomicInteger();
+            AtomicReference<LogEvent> last = new AtomicReference<>();
+            logger.addSubscriber(new CapturingSubscriber(e -> { count.incrementAndGet(); last.set(e); }));
+
+            // log(): DEBUG < ERROR → filtered out by the minLevel gate.
+            logger.log(LogLevel.DEBUG, "filtered");
+            // forward(): DEBUG is relayed despite being below the ERROR gate —
+            // the caller (the node's LoggerContext) is the sole native gate.
+            logger.forward(LogLevel.DEBUG, "relayed");
+
+            assertEquals(1, count.get(), "log() dropped the DEBUG event; forward() relayed it");
+            assertEquals("relayed", last.get().getMessage());
+            assertEquals(LogLevel.DEBUG, last.get().getLevel());
+        }
+
+        @Test
+        void forward_isNoOp_whenClosed() {
+            TestLogger logger = new TestLogger("test");
+            AtomicReference<LogEvent> captured = new AtomicReference<>();
+            logger.addSubscriber(new CapturingSubscriber(captured::set));
+            logger.close();
+
+            logger.forward(LogLevel.TRACE, "after close");
+
+            assertNull(captured.get(), "forward() must be a no-op once closed");
+        }
+
+        @Test
+        void forward_ignoresNullMessage() {
+            TestLogger logger = new TestLogger("test");
+            AtomicReference<LogEvent> captured = new AtomicReference<>();
+            logger.addSubscriber(new CapturingSubscriber(captured::set));
+
+            logger.forward(LogLevel.DEBUG, null);
+
+            assertNull(captured.get(), "forward() must not relay a null message");
         }
     }
 

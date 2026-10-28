@@ -101,7 +101,11 @@ public abstract class ConsoleBusAppender extends AbstractAppender {
         if (!started || event == null) {
             return;
         }
-        target.log(toBusLevel(event.getLevel()), format(event));
+        // The context's configuration is the SOLE (native) level gate: the event
+        // only reached here because the context emitted it at the profile's
+        // configured level, so relay it via forward() — NOT log() — to avoid a
+        // second, non-native minLevel re-filter (plan §7.3/P5.1).
+        target.forward(toBusLevel(event.getLevel()), format(event));
     }
 
     @Override

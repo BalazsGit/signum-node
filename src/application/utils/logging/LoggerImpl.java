@@ -133,6 +133,35 @@ public abstract class LoggerImpl implements ModuleLogger {
         dispatch(event);
     }
 
+    @Override
+    public void forward(LogLevel level, String message) {
+        forward(level, message, null);
+    }
+
+    /**
+     * Relays an event to the subscribers WITHOUT applying the {@link #minLevel}
+     * gate — see {@link ModuleLogger#forward(LogLevel, String, Throwable)}. The
+     * {@link #dispatch(LogEvent)} call preserves replay, subscriber fan-out and
+     * (for subclasses) any forward-to-system behaviour.
+     */
+    @Override
+    public void forward(LogLevel level, String message, Throwable cause) {
+        if (closed || level == null || message == null) {
+            return;
+        }
+        // NO minLevel check: the caller (the node's isolated LoggerContext) is the
+        // sole native level gate; the bus relays whatever the context emitted.
+        LogEvent event = new LogEvent.Builder()
+                .timestamp(System.currentTimeMillis())
+                .loggerName(name)
+                .level(level)
+                .message(message)
+                .threadName(Thread.currentThread().getName())
+                .throwable(cause)
+                .build();
+        dispatch(event);
+    }
+
     // ── Subscriber Management ───────────────────────────────────────────
 
     @Override

@@ -123,6 +123,38 @@ public interface ModuleLogger {
      */
     void log(LogLevel level, String message, Throwable cause);
 
+    /**
+     * Relays an event to the subscribers WITHOUT applying this logger's own
+     * {@code minLevel} gate (contrast with {@link #log}).
+     * <p>
+     * This is the entry point of the node-context &rarr; bus bridge (plan §7.3/P5.1):
+     * the node's isolated Log4j2 {@code LoggerContext} is the SOLE (native) level
+     * gate, so an event only reaches the bridge because the context already emitted
+     * it at the profile's configured level. The bus must therefore relay it as-is
+     * and must NOT re-filter by level — a second application-level gate would
+     * silently drop DEBUG/TRACE events that the context legitimately produced.
+     * </p>
+     * <p>
+     * Replay, subscriber fan-out and (for a {@link ProfileLogger}) the
+     * forward-to-system step are all preserved — only the {@code minLevel} check is
+     * bypassed.
+     * </p>
+     *
+     * @param level   the log level (never null)
+     * @param message the message to relay (never null)
+     */
+    void forward(LogLevel level, String message);
+
+    /**
+     * Relays an event with an optional cause WITHOUT applying this logger's own
+     * {@code minLevel} gate — see {@link #forward(LogLevel, String)}.
+     *
+     * @param level   the log level (never null)
+     * @param message the message to relay (never null)
+     * @param cause   the throwable cause, or null
+     */
+    void forward(LogLevel level, String message, Throwable cause);
+
     // ── Subscriber Management ───────────────────────────────────────────
 
     /**
