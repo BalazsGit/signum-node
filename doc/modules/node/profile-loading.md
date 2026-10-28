@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the complete node profile loading mechanism, including `.properties`-based configuration resolution, NodeProfile + NodeProfileRuntime composition, logging profiles, and how multiple isolated node instances are bootrapped from disk.
+This document describes the complete node profile loading mechanism, including `.properties`-based configuration resolution, NodeProfile + NodeProfileRuntime composition, logging profiles (isolated per-node Log4j2 `LoggerContext`s), and how multiple isolated node instances are bootstrapped from disk.
 
 ### Architecture Summary
 
@@ -185,7 +185,7 @@ Per key, the highest layer wins:
 - Loading SSOTs: node — `EffectiveNodeProps` (runtime: `Signum.loadPropertiesForProfile`;
   GUI baselines: `EffectiveNodeProps.baselineValue`); logging —
   `ConfigurationUtils.loadEffectiveLoggerProfile` (shared `logging` profile),
-  `NodeLoggingApplier.resolveLevel` (per-node `node.level`),
+  `NodeLoggingApplier.applyForNodeProfile` (node → isolated `LoggerContext` via `NodeLoggingContextApplier`; other modules → `ProfileLogger` bus level) + `NodeLoggingConfigResolver` (pure L0/L1/L2 resolution),
   `LoggingProfileManager` + `EffectiveProfileResolver` (preview composition) —
   all resolve L1 to `default.properties`.
 
@@ -198,15 +198,27 @@ Per key, the highest layer wins:
 
 ## Logging Profile Loading
 
-### How `LoggingProfileManager` Works
+### How logging is applied
+
+Logging is driven by a **per-node isolated Log4j2 `LoggerContext`** (one per node
+profile). The stored profiles are plain `.properties` files (L0/L1/L2); at start and
+on every GUI **Apply** they are resolved into a generated Log4j2 config that
+reconfigures the node's own context in place — **no node restart**. The node context
+is the **single level gate** for node events (the GUI bus only displays/forwards).
 
 | Step | Action | Source |
 |------|--------|--------|
-| 1 | Module registers provider via `LoggingModuleRegistry.registerProvider()` | `NodeLoggingProvider`, `DatabaseLoggingProvider` |
-| 2 | Provider creates presets (minimal, standard, verbose, debug) | `ModuleLoggingProfile` instances |
-| 3 | On profile init, `ProfileLoggingApplier.apply()` called | Via node startup |
-| 4 | Preset resolved from node properties or default | `profile.getString("logging.preset")` |
-| 5 | JUL LogManager reconfigured with preset values | `ProfileLoggingApplier.applyToJUL()` |
+| 1 | Each module registers a logging provider carrying its L0 defaults | `NodeLoggingProvider`, `DatabaseLoggingProvider` → `LoggingModuleRegistry.register()` |
+| 2 | The node profile's per-node logging assignment is read (fallback: reserved `logging-default`) | `LoggingAssignmentStore` (`conf/node/profiles.json`) |
+| 3 | The effective profile's L0/L1/L2 layers are merged and resolved to Log4j2 levels | `NodeLoggingConfigResolver` (pure function) |
+| 4 | The resolved config is written to a generated `*.log4j2.properties` (not SSOT) | `NodeLoggingConfigWriter` (atomic) |
+| 5 | The node `LoggerContext` is created / **reconfigured in place** (live Apply) | `NodeLoggingContextApplier` → `NodeLoggingContextManager` / `NodeLoggingContext` |
+| 6 | Node-context events are bridged to the GUI bus | `ProfileConsoleAppender` → `ProfileLogger` (Node Console); `SystemConsoleAppender` → `SystemLogger` (System Console) |
+
+> **Node vs. other modules:** `NodeLoggingApplier.applyForNodeProfile` routes the
+> **node** module through the isolated context (step 5); other modules (e.g.
+> `database`) use the legacy `ProfileLogger` bus level (`<module>.level` →
+> `ProfileLogger.setLogLevel`).
 
 ### Logging Configuration Files
 
@@ -300,7 +312,7 @@ The `profiles.json` file stores only cross-cutting association data:
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `loggingAssociations` | Object | `{"mainnet": "standard", "testnet": "debug"}` maps profile name → logging preset |
+| `loggingAssociations` | Object | `{"mainnet": "standard", "testnet": "debug"}` maps profile name → logging profile |
 | `tabOrder` | String[] \| null | Custom tab ordering for GUI (null = automatic) |
 | `maxConcurrentNodes` | Integer | Maximum nodes that can run simultaneously |
 
@@ -316,18 +328,25 @@ graph TD
     D -->|coreContext.doInitialize()| E[DbContext created LOCALLY]
     D -->|constructor injection| F[Stores + Services created LOCALLY]
 
-    G[SystemLogRouterHandler] -->|JUL events| H[SystemLogger]
-    H -->|dispatch to all subscribers| I[SystemConsoleSubscriber]
+    D -->|NodeLoggingContextApplier| G[Node LoggerContext<br/>reconfigured in place]
+    G -->|ProfileConsoleAppender| H[ProfileLogger bus]
+    H -->|subscribers| I[GUI Node Console]
+
+    J[Global LoggerContext] -->|SystemConsoleAppender| K[SystemLogger]
+    K -->|subscribers| L[GUI System Console]
 
     subgraph "Per-Profile Isolation"
         E
         F
-    end
-
-    subgraph "Global Aggregation"
         G
         H
         I
+    end
+
+    subgraph "Global Aggregation"
+        J
+        K
+        L
     end
 ```
 
@@ -370,10 +389,10 @@ graph TD
 
 ### Logging Not Working?
 
-1. **Check SystemLogRouterHandler installed**: Look for `[Bootstrap]` logs at startup
-2. **Verify subscriber registered**: Check `SystemLogger.getInstance().getSubscriberCount()`
-3. **Check logging preset**: Verify the profile has a valid `logging.preset` value
-4. **Verify default files synced**: Check that `../conf/node/logging/logging-default.properties` exists
+1. **Check the node context applied**: look for `Signum.applyNodeLoggingConfiguration` / `NodeLoggingContextApplier` logs at start; the generated `*.log4j2.properties` file should exist
+2. **Verify the GUI bus appenders are attached**: `ProfileConsoleAppender` (Node Console) / `SystemConsoleAppender` (System Console) are re-attached after every (re)configure
+3. **Check the per-node assignment**: the node's logging profile (or the reserved `logging-default` fallback) in `conf/node/profiles.json`
+4. **Verify the reference template synced**: `../conf/node/logging/logging-default.properties` exists
 
 ### Default File Not Updating?
 
@@ -386,8 +405,9 @@ graph TD
 
 ### L1 (`default.properties`) Changes Have No Effect?
 
-1. **Restart required**: L1 is read at startup (node: per profile load; logging: at
-   `LogManager` reconfiguration / node restart)
+1. **Apply needed (no restart)**: L1 is re-read on the next logging **Apply** — a GUI Apply
+   re-runs the resolver and reconfigures the live node `LoggerContext` (and the global
+   context) without restarting the node
 2. **Key must have an L0 counterpart**: unknown keys cannot override anything
 3. **L2 wins per key**: a key set in the profile's own file (L2) overrides L1
 
