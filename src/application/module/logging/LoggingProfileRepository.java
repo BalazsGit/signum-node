@@ -4,21 +4,14 @@ import application.utils.config.ConfigPaths;
 import application.utils.config.ModuleIds;
 import application.utils.config.PropertiesProfileLoader;
 import application.utils.config.ReservedNames;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+import application.utils.profile.ProfileRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.Reader;
-import java.io.Writer;
 import java.nio.file.DirectoryStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
@@ -57,9 +50,16 @@ import java.util.concurrent.ConcurrentMap;
  * use in headless mode.
  * </p>
  *
+ * <p>
+ * The generic on-disk CRUD, path resolution and applied-profile metadata are delegated to the
+ * module-independent R1 {@link ProfileRepository} (P6.1); this class keeps the logging-specific
+ * applied-baseline cache and effective-profile resolution.
+ * </p>
+ *
  * @see PropertiesProfileLoader
  * @see EffectiveProfileResolver
  * @see LoggingAssignmentStore
+ * @see ProfileRepository
  */
 public final class LoggingProfileRepository {
 
@@ -80,12 +80,19 @@ public final class LoggingProfileRepository {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(LoggingProfileRepository.class);
 
-    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final ConcurrentMap<AppliedProfileKey, Properties> APPLIED_BASELINES =
             new ConcurrentHashMap<>();
 
     private record AppliedProfileKey(String confRoot, String moduleId, String profileName) {
     }
+
+    /**
+     * Per-module R1 {@link ProfileRepository} instances (one per module id), so the generic
+     * on-disk CRUD, path resolution and applied-profile metadata live in the module-independent
+     * R1 layer (P6.1) while this class keeps the logging-specific applied-baseline cache and
+     * effective-profile resolution.
+     */
+    private final ConcurrentMap<String, ProfileRepository> repositories = new ConcurrentHashMap<>();
 
     /** Base configuration root (e.g. {@code ./conf}). Never null. */
     private final String confRoot;
@@ -110,6 +117,20 @@ public final class LoggingProfileRepository {
         this.confRoot = confRoot;
     }
 
+    // ── R1 delegation ──────────────────────────────────────────────────
+
+    /**
+     * The module-independent R1 repository for a module (created on demand, cached per module
+     * id). Bound to {@code {confRoot}/{moduleId}/logging/} with the logging reserved names and
+     * the {@code profile.json} applied-metadata layout — identical to the on-disk contract this
+     * class has always exposed.
+     */
+    private ProfileRepository repo(String moduleId) {
+        return repositories.computeIfAbsent(moduleId, id -> new ProfileRepository(
+                confRoot, id, ModuleIds.CATEGORY_LOGGING, ".properties",
+                ReservedNames.LOGGING_RESERVED_NAMES, APPLIED_PROFILE_KEY, METADATA_FILE_NAME));
+    }
+
     // ── Path resolution ────────────────────────────────────────────────
 
     /**
@@ -119,7 +140,7 @@ public final class LoggingProfileRepository {
      * @return Path to {@code conf/{module}/logging/}
      */
     public Path getLoggingDir(String moduleId) {
-        return PropertiesProfileLoader.resolveProfileDir(confRoot, moduleId, ModuleIds.CATEGORY_LOGGING);
+        return repo(moduleId).getDirectory();
     }
 
     /**
@@ -130,7 +151,7 @@ public final class LoggingProfileRepository {
      * @return Path to {@code conf/{module}/logging/{profileName}.properties}
      */
     public Path getProfileFile(String moduleId, String profileName) {
-        return PropertiesProfileLoader.resolveProfileFile(confRoot, moduleId, ModuleIds.CATEGORY_LOGGING, profileName);
+        return repo(moduleId).getProfileFile(profileName);
     }
 
     /**
@@ -140,7 +161,7 @@ public final class LoggingProfileRepository {
      * @return Path to {@code conf/{module}/logging/profile.json}
      */
     public Path getMetadataPath(String moduleId) {
-        return getLoggingDir(moduleId).resolve(METADATA_FILE_NAME);
+        return repo(moduleId).getMetadataPath();
     }
 
     // ── Discovery ──────────────────────────────────────────────────────
@@ -153,8 +174,7 @@ public final class LoggingProfileRepository {
      * @return Sorted, unmodifiable list of profile names (never null)
      */
     public List<String> listProfiles(String moduleId) {
-        return PropertiesProfileLoader.discoverProfiles(
-                confRoot, moduleId, ModuleIds.CATEGORY_LOGGING, ReservedNames.LOGGING_RESERVED_NAMES);
+        return repo(moduleId).listProfiles();
     }
 
     /**
@@ -181,10 +201,7 @@ public final class LoggingProfileRepository {
      * @return true if the profile name resolves to an on-disk file
      */
     public boolean hasProfile(String moduleId, String profileName) {
-        if (profileName == null || profileName.isBlank()) {
-            return false;
-        }
-        return Files.exists(getProfileFile(moduleId, profileName));
+        return repo(moduleId).isResolvable(profileName);
     }
 
     /**
@@ -217,7 +234,7 @@ public final class LoggingProfileRepository {
      * @return Loaded properties, or an empty instance if the file does not exist
      */
     public Properties loadProps(String moduleId, String profileName) {
-        return PropertiesProfileLoader.loadProfile(confRoot, moduleId, ModuleIds.CATEGORY_LOGGING, profileName);
+        return repo(moduleId).load(profileName);
     }
 
     /**
@@ -276,19 +293,7 @@ public final class LoggingProfileRepository {
      * @return Applied profile name, or null if no metadata is present
      */
     public String getApplied(String moduleId) {
-        Path metadata = getMetadataPath(moduleId);
-        if (!Files.exists(metadata)) {
-            return null;
-        }
-        try (Reader reader = Files.newBufferedReader(metadata, StandardCharsets.UTF_8)) {
-            JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
-            if (json != null && json.has(APPLIED_PROFILE_KEY)) {
-                return json.get(APPLIED_PROFILE_KEY).getAsString();
-            }
-        } catch (Exception e) {
-            LOGGER.warn("Failed to read applied-profile metadata at {}: {}", metadata, e.getMessage());
-        }
-        return null;
+        return repo(moduleId).getApplied();
     }
 
     // ── Write ──────────────────────────────────────────────────────────
@@ -306,20 +311,7 @@ public final class LoggingProfileRepository {
      * @throws IllegalArgumentException if the name is reserved, blank, or already exists
      */
     public Path create(String moduleId, String profileName, Properties seed) throws IOException {
-        validateName(profileName);
-        Path file = getProfileFile(moduleId, profileName);
-        if (Files.exists(file)) {
-            throw new IllegalArgumentException("A profile named '" + profileName + "' already exists for module '"
-                    + moduleId + "'");
-        }
-
-        Properties props = seed != null ? (Properties) seed.clone() : new Properties();
-        Files.createDirectories(file.getParent());
-        try (Writer writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-            props.store(writer, "Created logging profile: " + profileName);
-        }
-        LOGGER.info("Created logging profile '{}' for module '{}' ({} entries)", profileName, moduleId, props.size());
-        return file;
+        return repo(moduleId).create(profileName, seed != null ? copyOf(seed) : null);
     }
 
     /**
@@ -337,29 +329,10 @@ public final class LoggingProfileRepository {
      * @throws IllegalArgumentException if either name is reserved, or the destination exists
      */
     public Path rename(String moduleId, String oldName, String newName) throws IOException {
-        validateName(newName);
-        if (isReserved(oldName)) {
-            throw new IllegalArgumentException("The reserved profile '" + oldName + "' cannot be renamed");
-        }
-
-        Path oldFile = getProfileFile(moduleId, oldName);
-        Path newFile = getProfileFile(moduleId, newName);
-        if (!Files.exists(oldFile)) {
-            throw new IllegalArgumentException("Profile '" + oldName + "' does not exist for module '" + moduleId + "'");
-        }
-        if (Files.exists(newFile)) {
-            throw new IllegalArgumentException("A profile named '" + newName + "' already exists for module '" + moduleId + "'");
-        }
-
-        Files.createDirectories(newFile.getParent());
-        Files.move(oldFile, newFile, StandardCopyOption.REPLACE_EXISTING);
+        Path newFile = repo(moduleId).rename(oldName, newName);
         Properties appliedBaseline = APPLIED_BASELINES.remove(appliedProfileKey(moduleId, oldName));
         if (appliedBaseline != null) {
             APPLIED_BASELINES.put(appliedProfileKey(moduleId, newName), appliedBaseline);
-        }
-
-        if (oldName.equals(getApplied(moduleId))) {
-            setApplied(moduleId, newName);
         }
         LOGGER.info("Renamed logging profile '{}' -> '{}' for module '{}'", oldName, newName, moduleId);
         return newFile;
@@ -374,19 +347,8 @@ public final class LoggingProfileRepository {
      * @throws IllegalArgumentException if the name is reserved or does not exist
      */
     public void delete(String moduleId, String profileName) throws IOException {
-        if (isReserved(profileName)) {
-            throw new IllegalArgumentException("The reserved profile '" + profileName + "' cannot be deleted");
-        }
-        Path file = getProfileFile(moduleId, profileName);
-        if (!Files.exists(file)) {
-            throw new IllegalArgumentException("Profile '" + profileName + "' does not exist for module '" + moduleId + "'");
-        }
-        Files.delete(file);
+        repo(moduleId).delete(profileName);
         APPLIED_BASELINES.remove(appliedProfileKey(moduleId, profileName));
-
-        if (profileName.equals(getApplied(moduleId))) {
-            setApplied(moduleId, null);
-        }
         LOGGER.info("Deleted logging profile '{}' for module '{}'", profileName, moduleId);
     }
 
@@ -400,19 +362,8 @@ public final class LoggingProfileRepository {
      * @throws IllegalArgumentException if the name is reserved or blank
      */
     public void saveProps(String moduleId, String profileName, Properties props) throws IOException {
-        if (profileName == null || profileName.isBlank()) {
-            throw new IllegalArgumentException("profileName must not be null or blank");
-        }
-        if (isReserved(profileName)) {
-            throw new IllegalArgumentException("The reserved profile '" + profileName + "' cannot be overwritten");
-        }
-        Path file = getProfileFile(moduleId, profileName);
-        Files.createDirectories(file.getParent());
-        Properties toWrite = props != null ? props : new Properties();
-        try (Writer writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-            toWrite.store(writer, "Logging profile: " + profileName);
-        }
-        LOGGER.info("Saved logging profile '{}' for module '{}' ({} entries)", profileName, moduleId, toWrite.size());
+        repo(moduleId).save(profileName, props);
+        LOGGER.info("Saved logging profile '{}' for module '{}'", profileName, moduleId);
     }
 
     /**
@@ -423,41 +374,12 @@ public final class LoggingProfileRepository {
      * @throws IOException on write error
      */
     public void setApplied(String moduleId, String profileName) throws IOException {
-        Path metadata = getMetadataPath(moduleId);
-        JsonObject json = new JsonObject();
-        if (Files.exists(metadata)) {
-            try (Reader reader = Files.newBufferedReader(metadata, StandardCharsets.UTF_8)) {
-                JsonObject existing = JsonParser.parseReader(reader).getAsJsonObject();
-                if (existing != null) {
-                    json = existing;
-                }
-            } catch (Exception e) {
-                LOGGER.warn("Corrupt metadata at {} — recreating", metadata, e);
-                json = new JsonObject();
-            }
-        }
-
-        if (profileName == null || profileName.isBlank()) {
-            String previous = json.get(APPLIED_PROFILE_KEY) == null
-                    ? null
-                    : json.get(APPLIED_PROFILE_KEY).getAsString();
-            json.remove(APPLIED_PROFILE_KEY);
-            if (previous != null) {
-                APPLIED_BASELINES.remove(appliedProfileKey(moduleId, previous));
-            }
-        } else {
-            String previous = json.get(APPLIED_PROFILE_KEY) == null
-                    ? null
-                    : json.get(APPLIED_PROFILE_KEY).getAsString();
-            if (previous != null && !previous.equals(profileName)) {
-                APPLIED_BASELINES.remove(appliedProfileKey(moduleId, previous));
-            }
-            json.addProperty(APPLIED_PROFILE_KEY, profileName);
-        }
-
-        Files.createDirectories(metadata.getParent());
-        try (Writer writer = Files.newBufferedWriter(metadata, StandardCharsets.UTF_8)) {
-            GSON.toJson(json, writer);
+        String previous = getApplied(moduleId);
+        repo(moduleId).setApplied(profileName);
+        // Drop the in-memory baseline of the previously-applied profile (logging-only state).
+        if (previous != null
+                && (profileName == null || profileName.isBlank() || !previous.equals(profileName))) {
+            APPLIED_BASELINES.remove(appliedProfileKey(moduleId, previous));
         }
         LOGGER.debug("Set applied profile for module '{}' to '{}'", moduleId, profileName);
     }
@@ -475,13 +397,4 @@ public final class LoggingProfileRepository {
     }
 
     // ── Private helpers ────────────────────────────────────────────────
-
-    private static void validateName(String profileName) {
-        if (profileName == null || profileName.isBlank()) {
-            throw new IllegalArgumentException("profileName must not be null or blank");
-        }
-        if (ReservedNames.isLoggingReservedName(profileName)) {
-            throw new IllegalArgumentException("The name '" + profileName + "' is reserved");
-        }
-    }
 }
