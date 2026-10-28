@@ -10,12 +10,15 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -136,6 +139,90 @@ class ConcurrentApplyTest {
             // the next full Apply restores the file-defined state (fast path keeps no saved state)
             NodeLoggingContextApplier.applyFull(confRoot, manager, name);
             assertEquals("INFO", rootLevel(ctx), "full Apply must override the fast-path change");
+        } finally {
+            manager.remove(name);
+        }
+    }
+
+    /** A minimal valid Log4j2 properties config (root {@code level} + a console appender). */
+    private static String nodeConfig(final String level) {
+        return "status = ERROR\n"
+                + "configWatch = false\n"
+                + "rootLogger.level = " + level + "\n"
+                + "appender.console.type = Console\n"
+                + "appender.console.name = console\n"
+                + "appender.console.layout.type = PatternLayout\n"
+                + "appender.console.layout.pattern = %msg%n\n"
+                + "rootLogger.appenderRef.console.ref = console\n";
+    }
+
+    private Path writeConfigFile(final String fileName, final String level) throws Exception {
+        Path f = confRoot.resolve(fileName);
+        Files.writeString(f, nodeConfig(level));
+        return f;
+    }
+
+    @Test
+    @DisplayName("concurrent reconfigure()/reconfigureFrom() on ONE context: applyLock keeps every observed state coherent (no torn config, T11)")
+    void concurrentReconfigure_noTornState() throws Exception {
+        NodeLoggingContextManager manager = NodeLoggingContextManager.shared();
+        String name = "t11x-" + System.nanoTime();
+        // two coherent target configs: A = INFO, B = DEBUG
+        Path fileA = writeConfigFile(name + "-a.log4j2.properties", "INFO");
+        Path fileB = writeConfigFile(name + "-b.log4j2.properties", "DEBUG");
+        NodeLoggingContext ctx = manager.getOrCreate(name, fileA.toUri());
+        final int threads = 8;
+        final int rounds = 20;
+        // every root level observed mid-churn: must be one of the two coherent configs (INFO/DEBUG)
+        final Set<Level> observed = ConcurrentHashMap.newKeySet();
+        try {
+            ExecutorService pool = Executors.newFixedThreadPool(threads);
+            List<Throwable> errors = new CopyOnWriteArrayList<>();
+            List<Future<?>> futures = new CopyOnWriteArrayList<>();
+            for (int t = 0; t < threads; t++) {
+                final int id = t;
+                futures.add(pool.submit(() -> {
+                    for (int i = 0; i < rounds; i++) {
+                        try {
+                            int op = (i + id) % 3;
+                            if (op == 0) {
+                                ctx.reconfigureFrom(fileA.toUri());
+                            } else if (op == 1) {
+                                ctx.reconfigureFrom(fileB.toUri());
+                            } else {
+                                ctx.reconfigure();
+                            }
+                            Level lvl = ctx.loggerContext().getConfiguration().getRootLogger().getLevel();
+                            if (lvl != null) {
+                                observed.add(lvl);
+                            }
+                        } catch (Throwable th) {
+                            errors.add(th);
+                            return;
+                        }
+                    }
+                }));
+            }
+            try {
+                // join-with-timeout = the deadlock detector (plan T11)
+                for (Future<?> f : futures) {
+                    f.get(60, TimeUnit.SECONDS);
+                }
+            } finally {
+                pool.shutdownNow();
+            }
+            assertTrue(errors.isEmpty(), "concurrent reconfigure()/reconfigureFrom() must not throw: " + errors);
+            for (Level lvl : observed) {
+                assertTrue(lvl == Level.INFO || lvl == Level.DEBUG,
+                        "every observed root level must be a coherent config (INFO/DEBUG), never a torn state: " + lvl);
+            }
+            // settle deterministically: a final switch to config A must leave a coherent, started, logging context
+            assertTrue(ctx.reconfigureFrom(fileA.toUri()), "the final reconfigureFrom must apply");
+            assertEquals(Level.INFO, ctx.loggerContext().getConfiguration().getRootLogger().getLevel(),
+                    "the settled context must be coherent (INFO from config A)");
+            assertTrue(ctx.isStarted(), "the context must still be started after the concurrent churn");
+            assertDoesNotThrow(() -> ctx.loggerContext().getLogger("t11x.coherent").info("still coherent"),
+                    "the node must still be able to log after the concurrent churn");
         } finally {
             manager.remove(name);
         }
