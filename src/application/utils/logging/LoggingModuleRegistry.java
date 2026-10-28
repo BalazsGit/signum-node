@@ -18,8 +18,9 @@ import org.slf4j.LoggerFactory;
  * Singleton registry for module-specific logging providers.
  * <p>
  * Each functional module (node, database, pool, etc.) registers its {@link ModuleLoggingProvider}
- * at startup. The registry maintains a thread-safe map and notifies observers when
- * modules are added or removed.
+ * at startup. Module storage is delegated to the module-independent {@link ProfileRegistry}
+ * (single source of truth); this facade exposes a logging-typed view and bridges
+ * registration notifications to logging-typed listeners.
  * </p>
  *
  * <h3>Design Pattern: Observer + Singleton</h3>
@@ -33,12 +34,13 @@ import org.slf4j.LoggerFactory;
  * LoggingModuleRegistry.getInstance().register(new DatabaseLoggingProvider());
  *
  * // In the logging configuration panel:
- * LoggingModuleRegistry.getInstance().addListener(module -> {
+ * LoggingModuleRegistry.getInstance().addRegisteredListener(module -> {
  *     panel.addModuleCheckbox(module);
  * });
  * }</pre>
  *
  * @see ModuleLoggingProvider
+ * @see ProfileRegistry
  * @see LoggingProfileManager
  */
 public final class LoggingModuleRegistry {
@@ -141,16 +143,6 @@ public final class LoggingModuleRegistry {
      */
     public synchronized Set<String> getModuleIds() {
         return delegate.getModuleIds();
-    }
-
-    /**
-     * Checks whether a provider is registered for the given module ID.
-     *
-     * @param moduleId The module identifier
-     * @return true if registered
-     */
-    public synchronized boolean isRegistered(String moduleId) {
-        return delegate.isRegistered(moduleId);
     }
 
     /**

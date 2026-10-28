@@ -1,6 +1,5 @@
 package application.module.logging;
 
-import application.utils.config.ConfigPaths;
 import application.utils.config.ModuleIds;
 import application.utils.config.PropertiesProfileLoader;
 import application.utils.config.ReservedNames;
@@ -99,7 +98,7 @@ public final class LoggingProfileRepository {
 
     /**
      * Creates a repository bound to the standard runtime conf root
-     * ({@link ConfigPaths#RUNTIME_CONF_ROOT}).
+     * ({@link PropertiesProfileLoader#DEFAULT_CONF_ROOT}).
      */
     public LoggingProfileRepository() {
         this(PropertiesProfileLoader.DEFAULT_CONF_ROOT);
@@ -152,16 +151,6 @@ public final class LoggingProfileRepository {
      */
     public Path getProfileFile(String moduleId, String profileName) {
         return repo(moduleId).getProfileFile(profileName);
-    }
-
-    /**
-     * Returns the resolved path of the applied-profile metadata file.
-     *
-     * @param moduleId Module identifier
-     * @return Path to {@code conf/{module}/logging/profile.json}
-     */
-    public Path getMetadataPath(String moduleId) {
-        return repo(moduleId).getMetadataPath();
     }
 
     // ── Discovery ──────────────────────────────────────────────────────
