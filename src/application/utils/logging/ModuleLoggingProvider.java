@@ -2,10 +2,12 @@ package application.utils.logging;
 
 import application.utils.config.PropertiesProfileLoader;
 import application.utils.config.ReservedNames;
+import application.utils.profile.ProfileModule;
 
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,7 +49,7 @@ import org.slf4j.LoggerFactory;
  * @see LoggingModuleRegistry
  * @see LoggingProfileManager
  */
-public abstract class ModuleLoggingProvider {
+public abstract class ModuleLoggingProvider implements ProfileModule {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ModuleLoggingProvider.class);
 
@@ -70,6 +72,30 @@ public abstract class ModuleLoggingProvider {
      */
     public String getModuleId() {
         return getProfile().getModuleId();
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public String getDisplayName() {
+        return getProfile().getDisplayName();
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public String getDescription() {
+        return getProfile().getDescription();
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public Map<String, String> getDefaultProfile() {
+        return getProfile().getDefaultProfile();
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public String getCategory() {
+        return getProfile().getCategory();
     }
 
     /**

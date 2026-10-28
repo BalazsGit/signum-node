@@ -1,12 +1,15 @@
 package application.utils.logging;
 
+import application.utils.profile.ProfileModule;
+import application.utils.profile.ProfileRegistry;
+
+import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,14 +61,18 @@ public final class LoggingModuleRegistry {
 
     // ── Internal state ────────────────────────────────────────────────
 
-    /** module-id → provider mapping. Thread-safe via synchronized access. */
-    private final Map<String, ModuleLoggingProvider> providers = new java.util.HashMap<>();
+    /** The module-independent registry that owns the module set (R1 single source of truth, P6.1). */
+    private final ProfileRegistry delegate = ProfileRegistry.getInstance();
 
-    /** Observer callbacks fired when a provider is registered. */
-    private final List<Consumer<ModuleLoggingProvider>> addedListeners = new CopyOnWriteArrayList<>();
+    /**
+     * Bridges a logging-typed add-listener to a {@link ProfileModule}-typed one so it can be
+     * registered on the delegate; keyed so {@link #removeRegisteredListener} finds the bridge.
+     */
+    private final Map<Consumer<ModuleLoggingProvider>, Consumer<ProfileModule>> addedBridges =
+            new ConcurrentHashMap<>();
 
-    /** Observer callbacks fired when a provider is unregistered. */
-    private final List<Consumer<String>> removedListeners = new CopyOnWriteArrayList<>();
+    /** Unregistered (String) listeners registered on the delegate, so {@link #clear()} can drop them. */
+    private final Set<Consumer<String>> unregisteredListeners = ConcurrentHashMap.newKeySet();
 
     private LoggingModuleRegistry() {
         // Singleton constructor
@@ -82,19 +89,9 @@ public final class LoggingModuleRegistry {
      */
     public synchronized void register(ModuleLoggingProvider provider) {
         Objects.requireNonNull(provider, "ModuleLoggingProvider must not be null");
-        String id = provider.getProfile().getModuleId();
-
-        ModuleLoggingProvider previous = providers.put(id, provider);
-        if (previous != null) {
-            LOGGER.info("Re-registered logging provider for module '{}' (replacing {})",
-                    id, previous.getClass().getSimpleName());
-            removedListeners.forEach(l -> l.accept(id));
-        } else {
-            LOGGER.info("Registered logging provider for module '{}': {}",
-                    id, provider.getProfile().getDisplayName());
-        }
-
-        addedListeners.forEach(l -> l.accept(provider));
+        LOGGER.info("Registering logging provider for module '{}': {}",
+                provider.getModuleId(), provider.getProfile().getDisplayName());
+        delegate.register(provider); // ModuleLoggingProvider IS-A ProfileModule (R1)
     }
 
     /**
@@ -104,13 +101,11 @@ public final class LoggingModuleRegistry {
      * @return true if a provider was removed, false if none existed
      */
     public synchronized boolean unregister(String moduleId) {
-        ModuleLoggingProvider removed = providers.remove(moduleId);
-        if (removed != null) {
+        boolean removed = delegate.unregister(moduleId);
+        if (removed) {
             LOGGER.info("Unregistered logging provider for module '{}'", moduleId);
-            removedListeners.forEach(l -> l.accept(moduleId));
-            return true;
         }
-        return false;
+        return removed;
     }
 
     /**
@@ -120,7 +115,8 @@ public final class LoggingModuleRegistry {
      * @return The provider, or null if not registered
      */
     public synchronized ModuleLoggingProvider getProvider(String moduleId) {
-        return providers.get(moduleId);
+        ProfileModule module = delegate.getModule(moduleId);
+        return (module instanceof ModuleLoggingProvider provider) ? provider : null;
     }
 
     /**
@@ -129,7 +125,13 @@ public final class LoggingModuleRegistry {
      * @return List of currently registered providers (never null)
      */
     public synchronized List<ModuleLoggingProvider> getAllProviders() {
-        return Collections.unmodifiableList(new java.util.ArrayList<>(providers.values()));
+        List<ModuleLoggingProvider> result = new ArrayList<>();
+        for (ProfileModule module : delegate.getAllModules()) {
+            if (module instanceof ModuleLoggingProvider provider) {
+                result.add(provider);
+            }
+        }
+        return Collections.unmodifiableList(result);
     }
 
     /**
@@ -138,7 +140,7 @@ public final class LoggingModuleRegistry {
      * @return Unmodifiable set of module identifiers (never null)
      */
     public synchronized Set<String> getModuleIds() {
-        return Collections.unmodifiableSet(new HashSet<>(providers.keySet()));
+        return delegate.getModuleIds();
     }
 
     /**
@@ -148,14 +150,14 @@ public final class LoggingModuleRegistry {
      * @return true if registered
      */
     public synchronized boolean isRegistered(String moduleId) {
-        return providers.containsKey(moduleId);
+        return delegate.isRegistered(moduleId);
     }
 
     /**
      * Returns the total number of registered providers.
      */
     public synchronized int size() {
-        return providers.size();
+        return delegate.size();
     }
 
     // ── Observer registration ─────────────────────────────────────────
@@ -167,7 +169,14 @@ public final class LoggingModuleRegistry {
      * @param listener Callback receiving the newly registered provider
      */
     public void addRegisteredListener(Consumer<ModuleLoggingProvider> listener) {
-        addedListeners.add(listener);
+        Objects.requireNonNull(listener, "listener must not be null");
+        Consumer<ProfileModule> bridge = module -> {
+            if (module instanceof ModuleLoggingProvider provider) {
+                listener.accept(provider);
+            }
+        };
+        addedBridges.put(listener, bridge);
+        delegate.addRegisteredListener(bridge);
     }
 
     /**
@@ -176,7 +185,10 @@ public final class LoggingModuleRegistry {
      * @param listener The listener to remove
      */
     public void removeRegisteredListener(Consumer<ModuleLoggingProvider> listener) {
-        addedListeners.remove(listener);
+        Consumer<ProfileModule> bridge = addedBridges.remove(listener);
+        if (bridge != null) {
+            delegate.removeRegisteredListener(bridge);
+        }
     }
 
     /**
@@ -185,7 +197,9 @@ public final class LoggingModuleRegistry {
      * @param listener Callback receiving the module ID that was removed
      */
     public void addUnregisteredListener(Consumer<String> listener) {
-        removedListeners.add(listener);
+        Objects.requireNonNull(listener, "listener must not be null");
+        unregisteredListeners.add(listener);
+        delegate.addUnregisteredListener(listener);
     }
 
     /**
@@ -194,7 +208,8 @@ public final class LoggingModuleRegistry {
      * @param listener The listener to remove
      */
     public void removeUnregisteredListener(Consumer<String> listener) {
-        removedListeners.remove(listener);
+        unregisteredListeners.remove(listener);
+        delegate.removeUnregisteredListener(listener);
     }
 
     // ── Debug / housekeeping ──────────────────────────────────────────
@@ -204,16 +219,16 @@ public final class LoggingModuleRegistry {
      * Intended for testing or application shutdown cleanup.
      */
     public synchronized void clear() {
-        Set<String> ids = new HashSet<>(providers.keySet());
-        providers.clear();
-        for (String id : ids) {
-            removedListeners.forEach(l -> l.accept(id));
-        }
-        LOGGER.info("LoggingModuleRegistry cleared all {} provider(s)", ids.size());
+        addedBridges.values().forEach(delegate::removeRegisteredListener);
+        addedBridges.clear();
+        unregisteredListeners.forEach(delegate::removeUnregisteredListener);
+        unregisteredListeners.clear();
+        delegate.clear();
+        LOGGER.info("LoggingModuleRegistry cleared (delegated to ProfileRegistry)");
     }
 
     @Override
     public String toString() {
-        return "LoggingModuleRegistry{registeredModules=" + providers.keySet() + '}';
+        return "LoggingModuleRegistry{registeredModules=" + getModuleIds() + '}';
     }
 }
