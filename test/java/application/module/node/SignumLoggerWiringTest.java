@@ -10,10 +10,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.reflect.Field;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 /**
@@ -44,6 +47,13 @@ class SignumLoggerWiringTest {
 
     private static org.apache.logging.log4j.core.LoggerContext ctxOf(Logger logger) {
         return ((org.apache.logging.log4j.core.Logger) logger).getContext();
+    }
+
+    /** The private static {@code BOOTSTRAP_LOGGER} field of a Signum (reflection). */
+    private static Logger bootstrapLoggerOf() throws Exception {
+        Field f = Signum.class.getDeclaredField("BOOTSTRAP_LOGGER");
+        f.setAccessible(true);
+        return (Logger) f.get(null);
     }
 
     @Test
@@ -87,6 +97,30 @@ class SignumLoggerWiringTest {
         } finally {
             cleanup(a);
             cleanup(b);
+        }
+    }
+
+    @Test
+    @DisplayName("a logging-config failure at construction falls back to the legacy chain (defensive: the node still boots)")
+    void constructionFailureFallsBackToLegacyChain() throws Exception {
+        String name = "t19-fallback-" + System.nanoTime();
+        // Force applyMinimal to fail: with {confRoot}/node a regular file, the generated
+        // {confRoot}/node/logging/runtime/{profile}.log4j2.properties cannot be created
+        // (Files.createDirectories throws). The Signum constructor must swallow the failure
+        // and keep the node bootable on the legacy (JVM-global) chain — never throw.
+        Files.createFile(confRoot.resolve("node"));
+        Signum signum = assertDoesNotThrow(
+                () -> new Signum(new NodeProfile(name), confRoot),
+                "a logging-config failure must not throw out of node construction (defensive contract)");
+        try {
+            assertNull(NodeLoggingContextManager.shared().get(name),
+                    "on a construction failure NO isolated node context must be registered");
+            assertSame(bootstrapLoggerOf(), loggerOf(signum),
+                    "on a construction failure Signum's logger must BE the static bootstrap logger (legacy chain)");
+            assertSame(LogManager.getContext(false), ctxOf(signum.loggers().forClass(Signum.class)),
+                    "loggers() must fall back to the global facade (NodeLoggers.global) when the node context was not created");
+        } finally {
+            cleanup(name);
         }
     }
 
