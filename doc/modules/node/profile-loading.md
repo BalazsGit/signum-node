@@ -474,9 +474,10 @@ assignment</b> as the applied state — never the module-level applied marker. A
 AND marked as applied: the node really runs with the built-in `logging-default` profile,
 and the module's applied profile (its seed source at creation time) is not painted as
 this node's applied profile. Applying a profile on this tab records the per-node
-assignment (SSOT `LoggingAssignmentStore` → `conf/node/profiles.json`) and restarts the
-node; applying the virtual **Default** entry clears the assignment (the node falls back
-to the built-in `logging-default`).
+assignment (SSOT `LoggingAssignmentStore` → `conf/node/profiles.json`) and applies it **live**
+(P2.4: a running node is reconfigured in place — **no restart**; a stopped node is not started
+and picks up the change on its next start); applying the virtual **Default** entry clears the
+assignment (the node falls back to the built-in `logging-default`).
 
 ### Logging Module — Assignments Table (auto-refresh)
 
