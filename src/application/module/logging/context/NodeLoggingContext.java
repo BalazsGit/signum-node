@@ -1,7 +1,9 @@
 package application.module.logging.context;
 
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.core.LoggerContext;
 import org.apache.logging.log4j.core.config.ConfigurationSource;
+import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.apache.logging.log4j.core.config.properties.PropertiesConfiguration;
 import org.apache.logging.log4j.core.config.properties.PropertiesConfigurationFactory;
 import org.apache.logging.log4j.core.impl.Log4jContextFactory;
@@ -118,9 +120,15 @@ public final class NodeLoggingContext {
                     profileName, this.configUri);
             return false;
         }
+        final PropertiesConfiguration configuration = buildValidatedConfiguration(this.configUri);
+        if (configuration == null) {
+            LOGGER.warn("reconfigure skipped for node '{}': config file {} failed the full Log4j2 parse — keeping the current configuration",
+                    profileName, this.configUri);
+            return false;
+        }
         applyLock.lock();
         try {
-            ctx.reconfigure();
+            ctx.reconfigure(configuration);
             return true;
         } finally {
             applyLock.unlock();
@@ -151,10 +159,14 @@ public final class NodeLoggingContext {
                     profileName, newConfigUri);
             return false;
         }
+        final PropertiesConfiguration configuration = buildValidatedConfiguration(newConfigUri);
+        if (configuration == null) {
+            LOGGER.warn("reconfigureFrom skipped for node '{}': target config file {} failed the full Log4j2 parse — keeping the current configuration",
+                    profileName, newConfigUri);
+            return false;
+        }
         applyLock.lock();
         try {
-            final PropertiesConfiguration configuration = new PropertiesConfigurationFactory()
-                    .getConfiguration(ctx, ConfigurationSource.fromUri(newConfigUri));
             ctx.reconfigure(configuration);
             this.configUri = newConfigUri;
             return true;
@@ -184,6 +196,48 @@ public final class NodeLoggingContext {
             return props.getProperty("rootLogger.level") != null;
         } catch (final Exception e) {
             return false; // unreadable / non-file / missing marker -> treat as corrupt
+        }
+    }
+
+    /**
+     * Builds a Log4j2 {@link PropertiesConfiguration} from {@code uri} with the REAL
+     * Log4j2 properties loader, WITHOUT applying it to the context. This is the audit
+     * P1 "full validation" layer: it runs the same loader {@code ctx.reconfigure}
+     * would use, so a file the loader cannot turn into a well-formed config (unreadable,
+     * truncated, a malformed appender/logger definition, or a missing/invalid root level)
+     * is rejected BEFORE it can degrade a running node to Log4j2's default configuration.
+     *
+     * @return the built configuration when {@code uri} parses to a config whose root
+     *         logger carries a level (the generated writer always emits
+     *         {@code rootLogger.level}); otherwise {@code null}
+     */
+    private PropertiesConfiguration buildValidatedConfiguration(final URI uri) {
+        if (uri == null) {
+            return null;
+        }
+        try {
+            // (1) the real Log4j2 properties loader must turn the file into a config
+            final PropertiesConfiguration configuration = new PropertiesConfigurationFactory()
+                    .getConfiguration(ctx, ConfigurationSource.fromUri(uri));
+            final LoggerConfig root = configuration.getRootLogger();
+            if (root == null || root.getLevel() == null) {
+                return null; // (2) missing / truncated -> no usable root level
+            }
+            // (3) Log4j2's loader is tolerant of an unparseable root level value (it
+            //     keeps a default instead of failing), so a corrupt / hand-broken level
+            //     would otherwise be applied silently. The generated writer always emits
+            //     a real level name, so verify the raw value is one (audit P1).
+            final Properties props = new Properties();
+            try (var in = Files.newInputStream(Paths.get(uri))) {
+                props.load(in);
+            }
+            final String rawLevel = props.getProperty("rootLogger.level");
+            if (rawLevel == null || Level.toLevel(rawLevel, null) == null) {
+                return null;
+            }
+            return configuration;
+        } catch (final Exception e) {
+            return null; // the loader rejected the file -> treat as corrupt
         }
     }
 

@@ -9,6 +9,7 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -42,6 +43,17 @@ class BadConfigRecoveryTest {
             "status = ERROR\n"
                     + "configWatch = false\n"
                     + "rootLogger.level = INFO\n"
+                    + "appender.console.type = Console\n"
+                    + "appender.console.name = console\n"
+                    + "appender.console.layout.type = PatternLayout\n"
+                    + "appender.console.layout.pattern = %msg%n\n"
+                    + "rootLogger.appenderRef.console.ref = console\n";
+
+    /** A valid Log4j2 properties config with a DIFFERENT root level (DEBUG) — happy-path regression guard. */
+    private static final String VALID_DEBUG_CONFIG =
+            "status = ERROR\n"
+                    + "configWatch = false\n"
+                    + "rootLogger.level = DEBUG\n"
                     + "appender.console.type = Console\n"
                     + "appender.console.name = console\n"
                     + "appender.console.layout.type = PatternLayout\n"
@@ -98,6 +110,46 @@ class BadConfigRecoveryTest {
             assertDoesNotThrow(
                     () -> ctx.loggerContext().getLogger("t19.test").warn("still alive after a corrupt Apply"),
                     "the node must still be able to log after a corrupt Apply");
+        } finally {
+            manager.remove(name);
+        }
+    }
+
+    @Test
+    @DisplayName("an Apply reload whose root level VALUE is invalid (key present): the full parse rejects it and the old config stays")
+    void invalidRootLevelValue_keepsOldConfig() throws Exception {
+        final String name = "t19-badlevel-" + System.nanoTime();
+        Path file = config(name, VALID_CONSOLE_CONFIG);
+        NodeLoggingContext ctx = manager.getOrCreate(name, file.toUri());
+        try {
+            assertEquals(org.apache.logging.log4j.Level.INFO,
+                    ctx.loggerContext().getConfiguration().getRootLogger().getLevel(),
+                    "precondition: the valid config resolves the root to INFO");
+            // Has the rootLogger.level KEY (so the old shallow guard passes) but an
+            // unparseable level VALUE — exactly the bad-config class the shallow check missed.
+            Files.writeString(file, "rootLogger.level = NOT_A_REAL_LEVEL\n");
+            assertFalse(ctx.reconfigure(),
+                    "an invalid root level value must be rejected by the full Log4j2 parse");
+            assertEquals(org.apache.logging.log4j.Level.INFO,
+                    ctx.loggerContext().getConfiguration().getRootLogger().getLevel(),
+                    "the OLD (valid) config must stay active — root level must remain INFO");
+        } finally {
+            manager.remove(name);
+        }
+    }
+
+    @Test
+    @DisplayName("a valid regenerated config still applies (the full parse must not over-reject)")
+    void validReconfigureStillApplies() throws Exception {
+        final String name = "t19-valid-" + System.nanoTime();
+        Path file = config(name, VALID_CONSOLE_CONFIG);
+        NodeLoggingContext ctx = manager.getOrCreate(name, file.toUri());
+        try {
+            Files.writeString(file, VALID_DEBUG_CONFIG);
+            assertTrue(ctx.reconfigure(), "a valid regenerated config must still apply");
+            assertEquals(org.apache.logging.log4j.Level.DEBUG,
+                    ctx.loggerContext().getConfiguration().getRootLogger().getLevel(),
+                    "the new valid config's root level must take effect");
         } finally {
             manager.remove(name);
         }
