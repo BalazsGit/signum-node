@@ -1,8 +1,14 @@
 package application.module.node;
 
+import application.module.logging.appender.ProfileConsoleAppender;
 import application.module.logging.context.NodeLoggingContext;
 import application.module.logging.context.NodeLoggingContextManager;
+import application.module.logging.context.NodeLoggers;
 import application.module.node.profile.NodeProfile;
+import application.utils.logging.ProfileLogger;
+import application.utils.logging.event.LogEvent;
+import application.utils.logging.event.LogFilter;
+import application.utils.logging.event.LogSubscriber;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.DisplayName;
@@ -12,12 +18,16 @@ import org.junit.jupiter.api.io.TempDir;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * P3-B6.5b: the {@link Signum} object's OWN logger is split out of the static
@@ -54,6 +64,20 @@ class SignumLoggerWiringTest {
         Field f = Signum.class.getDeclaredField("BOOTSTRAP_LOGGER");
         f.setAccessible(true);
         return (Logger) f.get(null);
+    }
+
+    /** The private {@code nodeLoggingContext} field of a Signum (reflection). */
+    private static NodeLoggingContext nodeLoggingContextOf(Signum signum) throws Exception {
+        Field f = Signum.class.getDeclaredField("nodeLoggingContext");
+        f.setAccessible(true);
+        return (NodeLoggingContext) f.get(signum);
+    }
+
+    /** The private {@code profileConsoleAppender} field of a Signum (reflection). */
+    private static ProfileConsoleAppender profileConsoleAppenderOf(Signum signum) throws Exception {
+        Field f = Signum.class.getDeclaredField("profileConsoleAppender");
+        f.setAccessible(true);
+        return (ProfileConsoleAppender) f.get(signum);
     }
 
     @Test
@@ -124,6 +148,55 @@ class SignumLoggerWiringTest {
         }
     }
 
+    @Test
+    @DisplayName("the Signum constructor wires the full no-DB logging DI graph (A8 scoped: bus, context, NodeLoggers, GUI-bridge, logger)")
+    void constructorWiresLoggingDiGraph() throws Exception {
+        // SCOPE (audit A8, accepted blocker): this pins the CONSTRUCTOR-level (no-DB) DI graph
+        // (Steps 1-2: bus + isolated context + NodeLoggers + GUI-bridge + own logger). The
+        // DB-gated components (DbContext / BlockchainProcessor / WebServerContext / ATProcessingContext /
+        // services — built in doInitialize(), which requires a real database) are OUT of scope here
+        // and remain the documented A8 blocker (needs a DB-backed integration test).
+        String name = "a8-wiring-" + System.nanoTime();
+        Signum signum = new Signum(new NodeProfile(name), confRoot);
+        NodeModule.getInstance().addNode(signum);
+        try {
+            // Step 1: the per-node bus (ProfileLogger)
+            ProfileLogger bus = signum.getProfileLogger();
+            assertNotNull(bus, "the constructor must create the per-node ProfileLogger bus (Step 1)");
+            // Step 2: the isolated node LoggerContext, created + started
+            NodeLoggingContext nlc = nodeLoggingContextOf(signum);
+            assertNotNull(nlc, "the constructor must create the isolated node LoggerContext (Step 2)");
+            assertTrue(nlc.isStarted(), "the node context must be started in the constructor");
+            // NodeLoggers bound to THAT context (the engine's target API)
+            NodeLoggers loggers = signum.loggers();
+            assertSame(nlc.loggerContext(), loggers.context(),
+                    "NodeLoggers must be bound to the node's own LoggerContext");
+            // the GUI-bridge appender: wired to the bus AND attached exactly once to the node root
+            ProfileConsoleAppender bridge = profileConsoleAppenderOf(signum);
+            assertNotNull(bridge, "the constructor must create the GUI-bridge appender");
+            assertSame(bus, bridge.target(), "the GUI-bridge appender must forward to the SAME per-node bus");
+            long attached = nlc.loggerContext().getConfiguration().getRootLogger().getAppenders().keySet().stream()
+                    .filter(ProfileConsoleAppender.NAME::equals).count();
+            assertEquals(1L, attached, "the GUI-bridge appender must be attached to the node root exactly once");
+            // Signum's own logger bound to the node context (not the global)
+            Logger logger = loggerOf(signum);
+            assertSame(nlc.loggerContext(), ctxOf(logger),
+                    "Signum's own logger must be bound to the node context");
+            // end-to-end: Signum's own logger reaches the bus through the bridge (full wiring path).
+            // The bus's replay buffer may have already delivered pre-attach logs (e.g. the ctor's
+            // "created" line), so assert the probe adds EXACTLY one new event (post-attach delta).
+            bus.setForwardToSystem(false);
+            Recorder recorder = new Recorder();
+            bus.addSubscriber(recorder);
+            int before = recorder.events.size();
+            logger.info("wiring-probe");
+            assertEquals(before + 1, recorder.events.size(),
+                    "a log on Signum's logger must reach the bus through the GUI bridge (exactly one new event)");
+        } finally {
+            cleanup(name);
+        }
+    }
+
     /** Unregisters the node from NodeModule and disposes its context from the shared manager. */
     private static void cleanup(String name) {
         Signum s = NodeModule.getInstance().get(name);
@@ -138,5 +211,18 @@ class SignumLoggerWiringTest {
             NodeModule.getInstance().removeNode(name);
         }
         NodeLoggingContextManager.shared().remove(name);
+    }
+
+    /** Captures every bus event for assertions (mirrors NodeLoggingContextApplierTest.Recorder). */
+    private static final class Recorder implements LogSubscriber {
+        final List<LogEvent> events = new CopyOnWriteArrayList<>();
+        @Override
+        public void onLogEvent(final LogEvent event) {
+            events.add(event);
+        }
+        @Override
+        public LogFilter getFilter() {
+            return null;
+        }
     }
 }
