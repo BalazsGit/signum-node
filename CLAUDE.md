@@ -80,15 +80,19 @@ Signum Node is the reference implementation of the Signum blockchain - a cryptoc
 
 ### Configuration System
 - 3-layer node configuration (highest wins): hardcoded defaults (`node.props.Props`)
-  <- `conf/node/profiles/node-default.properties` (reserved L1 template, ships fully
-  commented; active lines override L0 for every profile)
+  <- `conf/node/profiles/default.properties` (user-editable L1, file-only, reserved
+  name `default`; auto-created at first start, never synced; active lines override
+  L0 for every profile)
   <- `conf/node/profiles/<name>.properties` (per-profile L2 overrides)
+- `node-default.properties` / `logging-default.properties` are **reference-only**
+  templates (fully commented L0 documentation, SHA-256 synced from resources, never
+  read at runtime) — see F7 in `implementation_plan/unified_defaults_layers_plan.md`
 - `application.module.node.profile.EffectiveNodeProps` is the single loading path
   (runtime: `Signum.loadPropertiesForProfile`; GUI "Default" baselines:
   `EffectiveNodeProps.baselineValue`)
 - Logging configuration follows the same model: hardcoded logging defaults
-  <- `conf/node/logging/logging-default.properties` <- the logging profile file; the merge
-  lives in `application.utils.gui.ConfigurationUtils.loadEffectiveLoggerProfile`
+  <- `conf/node/logging/default.properties` (L1) <- the logging profile file (L2); the
+  merge lives in `application.utils.gui.ConfigurationUtils.loadEffectiveLoggerProfile`
 
 ### Multi-Network Support
 - `signum.net.NetworkParameters` - Network configuration base
