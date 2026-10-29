@@ -78,3 +78,10 @@ result
 
 # Runtime module-level applied-profile marker (written by the Logging module's Apply)
 /conf/node/logging/profile.json
+
+# Generated node logging runtime configs (per-node / per-test-run, created at runtime; not part of the build),
+# the dummy test module's conf, and the user-owned L1 logging file (auto-created at first start, safe to delete).
+/conf/node/logging/runtime/
+/conf/logging-runtime/
+/conf/test-mod/
+/conf/node/logging/default.properties
