@@ -143,7 +143,13 @@ public final class ConsoleSettings {
      *
      * @param lines a positive integer
      * @throws IllegalArgumentException if lines <= 0
+     * @deprecated F4 / decision D5: the console line buffer is now governed by the
+     *             logging profile SSOT ({@code console.maxLines} for the system console,
+     *             {@code node.console.maxLines} for the node console — see {@link ConsoleLimits}).
+     *             This JSON field is kept only for backward compatibility and no longer
+     *             drives the GUI console.
      */
+    @Deprecated
     public synchronized void setMaxConsoleLines(int lines) {
         if (lines <= 0) {
             throw new IllegalArgumentException("maxConsoleLines must be positive, got: " + lines);
@@ -151,7 +157,12 @@ public final class ConsoleSettings {
         this.maxConsoleLines = lines;
     }
 
-    /** @return the maximum console line count */
+    /**
+     * @return the maximum console line count
+     * @deprecated F4 / decision D5: superseded by the logging profile SSOT
+     *             ({@link ConsoleLimits}); no longer drives the GUI console.
+     */
+    @Deprecated
     public synchronized int getMaxConsoleLines() {
         return maxConsoleLines;
     }

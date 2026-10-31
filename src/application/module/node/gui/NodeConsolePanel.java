@@ -1,4 +1,5 @@
 package application.module.node.gui;
+import application.module.logging.context.NodeLoggingContextApplier;
 import application.utils.config.ModuleIds;
 import application.utils.config.PropertiesProfileLoader;
 
@@ -4278,8 +4279,20 @@ public class NodeConsolePanel extends JPanel {
             return;
         }
 
-        // Create subscriber that renders log events to the console JTextPane
-        consoleSubscriber = new ProfileConsoleSubscriber(profileName, textPane.getStyledDocument());
+        // Create subscriber that renders log events to the console JTextPane.
+        // The line buffer comes from the node logging profile SSOT (node.console.maxLines,
+        // F4 / decision D5) instead of the hard-coded ProfileConsoleSubscriber default.
+        int consoleMaxLines = ProfileConsoleSubscriber.DEFAULT_MAX_LINES;
+        if (ctx != null && ctx.getConfFolder() != null) {
+            try {
+                consoleMaxLines = NodeLoggingContextApplier.resolveConsoleMaxLines(
+                        ctx.getConfFolder(), profileName);
+            } catch (Exception e) {
+                LOGGER.warn("Failed to resolve node console maxLines for '{}' — using default", profileName, e);
+            }
+        }
+        consoleSubscriber = new ProfileConsoleSubscriber(profileName, textPane.getStyledDocument(),
+                consoleMaxLines, null);
         // Enable smart auto-scroll: only scroll when user is near the bottom
         if (scrollPane != null) {
             consoleSubscriber.setScrollPane(scrollPane);

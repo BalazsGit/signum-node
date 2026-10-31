@@ -2,6 +2,7 @@ package application.module.logging.context;
 
 import application.module.logging.LoggingProfileRepository;
 import application.module.logging.appender.ProfileConsoleAppender;
+import application.utils.logging.ConsoleLimits;
 import application.utils.logging.ProfileLogger;
 import application.utils.logging.event.LogEvent;
 import application.utils.logging.event.LogFilter;
@@ -212,6 +213,22 @@ class NodeLoggingContextApplierTest {
             p.setProperty(kv[i], kv[i + 1]);
         }
         return p;
+    }
+
+    @Test
+    @DisplayName("resolveConsoleMaxLines: L0-node default + L1 override (F4 console SSOT)")
+    void resolveConsoleMaxLines_resolvesLayers() throws Exception {
+        // No L1 → the L0-node default (node.console.maxLines = 3000), whether from the
+        // registered provider or the ConsoleLimits fallback.
+        writeL1(new Properties());
+        assertEquals(ConsoleLimits.DEFAULT_NODE_MAX_LINES,
+                NodeLoggingContextApplier.resolveConsoleMaxLines(confRoot, profile),
+                "no L1 → the L0-node default (3000)");
+
+        // The L1 node.console.maxLines must win over the L0 default.
+        writeL1(props("node.console.maxLines", "2500"));
+        assertEquals(2500, NodeLoggingContextApplier.resolveConsoleMaxLines(confRoot, profile),
+                "the L1 node.console.maxLines must win over the L0 default");
     }
 
     @Test

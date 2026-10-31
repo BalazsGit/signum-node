@@ -537,7 +537,7 @@ féli lib-okért megmarad.
    systemhez a **bare** „Logging Profiles" panelt adja (nincs „Assignments" sub-tab). Tesztelve:
    `SystemLoggingProfileTest` + `LoggingPanelTest.systemTab_hasNoAssignmentsSubTab` (zöld).
 
-### F4 – Konzol-egységesítés + fájl-log SSOT + buffer-kulcsok (Q6) · közepes · 🟨 RÉSZBEN KÉSZ
+### F4 – Konzol-egységesítés + fájl-log SSOT + buffer-kulcsok (Q6) · közepes · 🟩 KÉSZ (kernel)
 1. **`console.maxLines`** (system) / **`node.console.maxLines`** (node, L0 default + L1 override)
    → **egy SSOT** a profile-ba; a GUI-konzol onnan olvassa a maxLines-t.
 2. A JSON `ConsoleSettings.maxConsoleLines` **kiszorul** (olvasó-kompat egy lépésig); a kódbeli
@@ -547,12 +547,15 @@ féli lib-okért megmarad.
 5. `logging.buffer.system`/`replay` kulcsok (bootstrap maradjon hardcoded).
    - **Visszavonhatóság:** a `maxLines` forrása visszaváltható (profile ↔ JSON).
 
-   **Státusz (2026-10-31):** **SSOT-definíció + resolver + system-konzol bekötés kész**:
-   `console.maxLines`=1500 (system L0) / `node.console.maxLines`=3000 (node L0) a profile-ban;
-   `ConsoleLimits` tiszta resolver (maxLines + `deriveCharCap`/`deriveReplayCapacity` levezetés,
-   `ConsoleLimitsTest` 6/6 zöld); a `SystemConsoleModule` a `console.maxLines`-t a system profile-ból
-   olvassa (L1, L0 fallback – nem hardkódolt). **Következő:** a node-konzol (`NodeConsolePanel`)
-   bekötése, a JSON `maxConsoleLines` kiszorítása, és a char-cap/replay-buffer tényleges bekötése.
+   **Státusz (2026-10-31):** **KÉSZ (kernel)**: SSOT-definíció (`console.maxLines`=1500 system L0 /
+   `node.console.maxLines`=3000 node L0) + `ConsoleLimits` resolver (maxLines + `deriveCharCap`/
+   `deriveReplayCapacity`, `ConsoleLimitsTest` 6/6); a **system-konzol** (`SystemConsoleModule`) ÉS a
+   **node-konzol** (`NodeConsolePanel` → `ProfileConsoleSubscriber`) a maxLines-t az effectív profile-ból
+   olvassa (system: L1/L0; node: `NodeLoggingContextApplier.resolveConsoleMaxLines` L0-node→L1→L2,
+   `NodeLoggingContextApplierTest` zöld); a JSON `ConsoleSettings.maxConsoleLines` **@Deprecated**
+   (read-compat, már nem uralja a konzolt). **Opcionális follow-up:** a char-cap (`consoleLogSize`) és a
+   replay-buffer `maxLines`-ból való levezetésének tényleges bekötése (a `ConsoleLimits.derive*`
+   helpers már megvannak) + a node-fájl-log SSOT (4.).
 
 ### F5 – `node.gui` hibrid routing (Q7) · közepes/nagy, **opcionális** (EL DÖNTVE, utolsó)
 1. A per-node nézet GUI-komponensei **az adott node `NodeLoggers`-én** logolnak (birtokolt
@@ -587,8 +590,8 @@ féli lib-okért megmarad.
 **Implementációs sorrend:** `F0 → F1 → F2 → F3 → F4 → (F5, opcionális)`. Minden fázis build + teszttel,
 visszavonható.
 
-**Következő lépés:** **F1 / F2 / F3** ✅ KÉSZ (build + teszt), **F0** + **F4** részben. F4-ből kész
-a SSOT (`console.maxLines`/`node.console.maxLines`) + `ConsoleLimits` resolver + a system-konzol
-bekötése; marad a node-konzol, a JSON `maxConsoleLines` kiszorítása és a char-cap/replay-wiring.
+**Következő lépés:** **F1 / F2 / F3** ✅ KÉSZ, **F0** + **F4 (kernel)** ✅ KÉSZ (build + teszt):
+mindkét konzol (system + node) a `console.maxLines`/`node.console.maxLines` SSOT-t olvassa, a JSON
+`maxConsoleLines` deprecated. F4 opcionális follow-up: char-cap/replay levezetés + node-fájl-log SSOT.
 Ezután az opcionális **F5**. Ha valamelyik döntésen (D1–D7) módosítani szeretnél, szólj – a terv
 azonnal igazodzik.

@@ -3,6 +3,7 @@ package application.module.logging.context;
 import application.module.logging.LoggingAssignmentStore;
 import application.module.logging.LoggingProfileRepository;
 import application.utils.config.ModuleIds;
+import application.utils.logging.ConsoleLimits;
 import application.utils.logging.LoggingModuleRegistry;
 import application.utils.logging.ModuleLoggingProvider;
 
@@ -196,6 +197,31 @@ public final class NodeLoggingContextApplier {
         l1.putAll(loadL1(root));
         l1.putAll(loadL1System(root)); // system L1 wins over the node L1 (global scope)
         return new NodeLoggingConfigResolver.Layers(loadL0Node(), loadL0Global(), l1, new Properties());
+    }
+
+    /**
+     * Resolves the effective node GUI console line buffer
+     * ({@code node.console.maxLines}, F4 / decision D5) for a node profile, from the
+     * SAME L0-node → L1 → L2 layers the Apply pipeline uses, so the console buffer and
+     * the node logging configuration share a single source of truth (the JSON
+     * {@code ConsoleSettings.maxConsoleLines} no longer governs the console).
+     * <p>
+     * L2 (the profile's assigned logging profile) wins over L1 (the node default layer),
+     * which wins over L0-node (the built-in default, {@code 3000}).
+     *
+     * @param confRoot    the configuration root (relative roots resolve against the app root)
+     * @param profileName the node profile name (null/blank → no L2, L0-node + L1 only)
+     * @return the console line buffer (always positive; the L0 default when no layer sets it)
+     */
+    public static int resolveConsoleMaxLines(Path confRoot, String profileName) {
+        final Path root = application.utils.io.PathUtils.resolvePath(confRoot.toString());
+        final Properties merged = new Properties();
+        merged.putAll(loadL0Node());
+        merged.putAll(loadL1(root));
+        final Properties l2 = new Properties();
+        loadL2(root, profileName, l2);
+        merged.putAll(l2);
+        return ConsoleLimits.nodeMaxLines(merged);
     }
 
     /** L0-node: the node module's built-in defaults (empty until the provider registers). */
